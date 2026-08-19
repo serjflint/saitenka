@@ -218,15 +218,16 @@ def _entry_text(entry: BacklogEntry, language: str) -> str:
     return entry.jp_text or entry.en_text
 
 
-def _entry_row(reader: Reader, entry: BacklogEntry, active: int) -> SidebarRow:
-    index = reader._sub_index
-    active_cue = index.cues[active] if index is not None and active >= 0 else None
+def _entry_row(entry: BacklogEntry, active_cue, *, language: str) -> SidebarRow:
+    """One backlog row. ``active_cue`` is the cue playing now, or None — the row highlights when the
+    bookmark's span matches it to within 50 ms, which is looser than equality because the entry's
+    times were rounded when it was saved."""
     is_active = bool(
         active_cue
         and abs(active_cue.start - entry.cue_start) < 0.05
         and abs(active_cue.end - entry.cue_end) < 0.05
     )
-    text = _entry_text(entry, reader.subtitle_language)
+    text = _entry_text(entry, language)
     return SidebarRow(
         value=entry.id,
         timestamp=_format_time(entry.cue_start),
@@ -242,7 +243,12 @@ def _matched_entry_rows(reader: Reader, store: BacklogStore, video: str | None) 
     if not video:
         return []
     active = _active_index(reader)
-    return [_entry_row(reader, entry, active) for entry in store.entries_for_path(video)]
+    index = reader._sub_index
+    active_cue = index.cues[active] if index is not None and active >= 0 else None
+    return [
+        _entry_row(entry, active_cue, language=reader.subtitle_language)
+        for entry in store.entries_for_path(video)
+    ]
 
 
 def _summary_rows(reader: Reader) -> list[SidebarRow]:

@@ -438,10 +438,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::_entry_row"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::_matched_entry_rows"
     ],
     [

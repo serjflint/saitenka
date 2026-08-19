@@ -478,3 +478,57 @@ def test_provider_warnings_replace_the_position_readout() -> None:
     state.warnings = ("jimaku timed out",)
 
     assert "jimaku timed out" in _footer(state, "Alt+p", total=20, shown=6)
+
+
+def _state(*, open_=True, generation=3):
+    state = sub_picker.PickerState()
+    state.open = open_
+    state.generation = generation
+    state.loading = True
+    return state
+
+
+def _listing(*, candidates=("a",)):
+    return sub_picker.ListingResult(error=None, candidates=tuple(candidates), warnings=())
+
+
+def test_a_listing_for_the_open_generation_is_installed():
+    state = _state()
+
+    assert sub_picker.adopt_listing(state, 3, _listing()) is True
+    assert state.candidates == ("a",)
+    assert state.loading is False
+
+
+def test_a_listing_for_a_superseded_generation_is_dropped():
+    """Close-then-reopen while a listing is in flight. The result belongs to the closed picker, and
+    installing it would repopulate the one the user has since reopened with the old file's tracks."""
+    state = _state(generation=4)
+
+    assert sub_picker.adopt_listing(state, 3, _listing()) is False
+    assert state.candidates == ()
+    assert state.loading is True  # still waiting on its own listing, not silently marked done
+
+
+def test_a_listing_arriving_after_the_picker_closed_is_dropped():
+    state = _state(open_=False)
+
+    assert sub_picker.adopt_listing(state, 3, _listing()) is False
+    assert state.candidates == ()
+
+
+def test_retiring_the_picker_bumps_the_generation_that_makes_a_listing_stale():
+    state = _state(generation=3)
+
+    assert sub_picker.retire(state) is True
+    assert state.generation == 4
+    assert sub_picker.adopt_listing(state, 3, _listing()) is False
+
+
+def test_retiring_an_already_closed_picker_does_nothing():
+    """Reported so the caller can skip the surface removal — and the generation must not drift, or
+    a second close would invalidate a listing the reopened picker legitimately asked for."""
+    state = _state(open_=False, generation=3)
+
+    assert sub_picker.retire(state) is False
+    assert state.generation == 3

@@ -173,24 +173,45 @@ def open_picker(reader: Reader) -> None:
 
 
 def close_picker(reader: Reader) -> None:
-    if not reader.sub_picker.open:
+    if not retire(reader.sub_picker):
         return
-    reader.sub_picker.open = False
-    reader.sub_picker.generation += 1
     reader.lifecycle_surfaces.remove(PICKER_ID)
-    reader.sub_picker.rect = None
-    reader.sub_picker.hits = ()
 
 
-def apply_listing(reader: Reader, generation: int, result: ListingResult) -> None:
-    state = reader.sub_picker
+def retire(state) -> bool:
+    """Close the picker and bump its generation, reporting whether it was open.
+
+    The bump is what makes an in-flight listing stale: a reopen starts a new generation, so a result
+    for the closed one is dropped by `apply_listing` rather than repopulating a picker the user has
+    since closed and reopened.
+    """
+    if not state.open:
+        return False
+    state.open = False
+    state.generation += 1
+    state.rect = None
+    state.hits = ()
+    return True
+
+
+def adopt_listing(state, generation: int, result: ListingResult) -> bool:
+    """Install ``result`` if it still belongs to the open picker; report whether it did.
+
+    Returns rather than redrawing so the staleness rule is separable from the paint: a listing for a
+    closed or superseded generation must leave the state untouched, not merely skip a redraw.
+    """
     if not state.open or generation != state.generation:
-        return
+        return False
     state.loading = False
     state.error = result.error
     state.candidates = result.candidates
     state.warnings = result.warnings
-    reader.redraw_sub_picker()
+    return True
+
+
+def apply_listing(reader: Reader, generation: int, result: ListingResult) -> None:
+    if adopt_listing(reader.sub_picker, generation, result):
+        reader.redraw_sub_picker()
 
 
 def finish_listing(completion: EffectFinished) -> tuple[int, ListingResult] | None:
