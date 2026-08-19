@@ -82,7 +82,7 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
         def _scroll_tip(self, delta):
             self._tip_scroll += delta
 
-        def poll_once(self):
+        def pump(self):
             return True
 
     reader = Reader()
@@ -100,7 +100,7 @@ def test_scroll_workload_rejects_a_non_scrollable_tooltip():
         def _scroll_tip(self, _delta):
             pass
 
-        def poll_once(self):
+        def pump(self):
             return True
 
     with pytest.raises(RuntimeError, match="did not advance"):

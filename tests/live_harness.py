@@ -68,6 +68,7 @@ def live_reader(*, paused: bool = True):
     lets playback run so mpv's VO advances frames — required for the jank harness to see real
     ``frame-drop-count`` / ``vo-delayed-frame-count`` movement (the smoke tests keep it paused)."""
     from saitenka.app.controller import Reader
+    from saitenka.app.session_routes import install_session_runtime
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
 
@@ -92,9 +93,13 @@ def live_reader(*, paused: bool = True):
             str(clip),
         ]
     )
-    reader = ipc = None
+    reader = ipc = gateway = None
     try:
         ipc = MpvIPC(sock).connect(timeout=15)
+        # Before the Reader, exactly as `run`/`attach` do it: without a runtime ingress the
+        # transport routes no replies, so even the OSD-dimensions seed comes back None and nothing
+        # downstream draws. No breadcrumb — this harness screenshots.
+        gateway = install_session_runtime(ipc, startup_hint=False)
         reader = Reader(ipc, dict_set=MiniDS())
         reader.refresh_osd()
         reader.start_observing()
@@ -112,6 +117,8 @@ def live_reader(*, paused: bool = True):
         try:
             if reader is not None:
                 reader.close()
+            if gateway is not None:
+                gateway.close()
             if ipc is not None:
                 ipc.command("quit")
                 ipc.close()

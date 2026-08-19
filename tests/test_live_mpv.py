@@ -73,7 +73,7 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
         )
 
         # a real keypress must reach the reader (mine key is bound) — drive it and drain
-        reader.poll_once()
+        reader.pump()
 
 
 @pytest.mark.live
@@ -123,7 +123,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         # real cursor onto the tooltip → the lease holds (hover stays on the aimed word, not hijacked)
         ipc.command("mouse", cx, cy)
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         assert reader.hover == i, (
             f"resting on the tooltip must keep its lease; hover={reader.hover} aimed={i} "
@@ -133,7 +133,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         # a real left-click on the tooltip body must be captured (tip stays), not fall through
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         assert reader._tip_rect is not None, (
             "a click on the tooltip must be captured, not tear it down"
@@ -143,7 +143,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         # match the drawn tip: its centre must read over_tip, not the word beneath.
         reader._scroll_tip(round(reader.osd[1] * 0.3))
         for _ in range(3):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         sx, sy, sw, sh = reader._tip_rect
         word2, tip2, _ = _targets_for(reader, int(sx + sw / 2), int(sy + sh / 2))
@@ -170,11 +170,11 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
 
         # baseline: no tooltip → saitenka's section is off → the rival owns the click and toggles pause
         ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC wire value
-        reader.poll_once()  # _sync_mouse_capture: nothing up → section stays disabled
+        reader.pump()  # _sync_mouse_capture: nothing up → section stays disabled
         ipc.command("mouse", 5, 5)  # bare video, no word
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         assert pause_state() is False, "rival forced MBTN_LEFT should toggle pause off the tooltip"
 
@@ -195,7 +195,7 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
         ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         assert pause_state() is True, (
             "saitenka's forced section must capture the click, not the rival"
