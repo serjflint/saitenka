@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import threading
 
+from util import ManualRenderAheadSubmitter
+
 from saitenka import otel_metrics
 from saitenka.app import prefetch, tooltip_raster
 from saitenka.app.config import ReaderOptions
@@ -12,7 +14,7 @@ from saitenka.app.controller import Reader
 from saitenka.app.popups import Panel
 from saitenka.panel import Definition, Entry, panel_rows
 from saitenka.render.banded import WindowedPanel
-from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime import EffectOutcome
 
 WIDTH = 384
 
@@ -45,37 +47,9 @@ class _RecordingPanel:
         return len(self.calls)
 
 
-class _ManualSubmitter:
-    def __init__(self):
-        self.calls = []
-
-    def __call__(self, **kwargs):
-        self.calls.append(kwargs)
-        return True
-
-    def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
-        call = self.calls.pop(0)
-        request = call["request"]
-        result = (
-            tooltip_raster.run_render_ahead(request, threading.Event())
-            if run and outcome is EffectOutcome.SUCCEEDED
-            else None
-        )
-        call["on_finished"](
-            EffectFinished(
-                EffectId(1),
-                call["owner"],
-                call["identity"],
-                outcome,
-                result=result,
-                error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
-            )
-        )
-
-
 def _reader() -> Reader:
     r = Reader(_FakeIPC(), options=ReaderOptions(prefetch=True))
-    r._render_ahead_submit = _ManualSubmitter()
+    r._render_ahead_submit = ManualRenderAheadSubmitter()
     r._tip_view_h = 300
     r._tip_scroll = 120
     r._tip_view.desired_scroll = 120
@@ -263,3 +237,40 @@ def test_close_rejects_new_work_and_quarantines_late_completion() -> None:
 
     assert r._tip_view.scroll == before
     assert not r._request_render_ahead(r._tip_view, -1)
+
+
+def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch):
+    """The interaction tick used to sweep both popups for a soft→crisp upgrade; the render-ahead
+    terminal does it now.
+
+    Warming is keyed by panel and scale, so the job raised for one view can leave the other's
+    viewport warm too. Sweeping only the view the job named would leave that one soft until some
+    later scroll happened to ask again — which is exactly what the tick was covering.
+    """
+    from saitenka.app import tooltip
+
+    r = _reader()
+    r._tip_state = _RecordingPanel()  # type: ignore[assignment]
+    swept: list = []
+    monkeypatch.setattr(tooltip, "apply_pending_crisp", lambda _r, view: swept.append(id(view)))
+
+    r._request_render_ahead(r._tip_view, 1)
+    r._render_ahead_submit.finish()
+
+    assert swept == [id(r._tip_view), id(r._nest)]
+
+
+def test_a_failed_terminal_sweeps_nothing(monkeypatch):
+    """Nothing warmed, so there is nothing to upgrade — and the failed job still has to report its
+    own outcome rather than being swallowed by a sweep."""
+    from saitenka.app import tooltip
+
+    r = _reader()
+    r._tip_state = _RecordingPanel()  # type: ignore[assignment]
+    swept: list = []
+    monkeypatch.setattr(tooltip, "apply_pending_crisp", lambda _r, view: swept.append(id(view)))
+
+    r._request_render_ahead(r._tip_view, 1)
+    r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
+
+    assert swept == []

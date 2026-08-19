@@ -25,10 +25,12 @@ import pytest
 from PIL import Image
 
 from saitenka import otel_metrics
+from saitenka.app import tooltip_raster
 from saitenka.model import Theme
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest
 from saitenka.panel import Definition, Entry, Freq, panel_rows, render_panel
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 from saitenka.runtime.mailbox import SessionMailbox
 
 if TYPE_CHECKING:
@@ -678,3 +680,37 @@ def record_spans(monkeypatch) -> list[dict]:
 
     monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
     return spans
+
+
+class ManualRenderAheadSubmitter:
+    """Hold each render-ahead submission so a test fires its terminal when it chooses.
+
+    Lives here because two files need it: a second copy is how a harness and the thing it stands in
+    for drift, which this migration has now paid for five times.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return True
+
+    def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
+        call = self.calls.pop(0)
+        request = call["request"]
+        result = (
+            tooltip_raster.run_render_ahead(request, threading.Event())
+            if run and outcome is EffectOutcome.SUCCEEDED
+            else None
+        )
+        call["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                call["owner"],
+                call["identity"],
+                outcome,
+                result=result,
+                error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
+            )
+        )

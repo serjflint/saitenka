@@ -2673,8 +2673,6 @@ class Reader:
 
     def _apply_background_results(self) -> None:
         self._apply_capabilities()
-        tooltip.apply_pending_crisp(self, self._tip_view)
-        tooltip.apply_pending_crisp(self, self._nest)
         sidebar.update(self)
 
     def _apply_capabilities(self) -> None:
@@ -2880,11 +2878,18 @@ class Reader:
             ):
                 if succeeded:
                     tooltip.apply_pending_scroll(self, view)
-                    tooltip.apply_pending_crisp(self, view)
                 else:
                     view.desired_scroll = view.scroll
                     self._interaction_jobs.finish("scroll", "failed", job_id=identity.job_id)
-                return
+                break
+        if not succeeded:
+            return
+        # Both views, not just the one this job was for. Warming is per panel-and-scale, so a job
+        # raised for the nested popup can leave the base tooltip's viewport warm — and that upgrade
+        # is exactly what the tick used to notice. `apply_pending_crisp` is a no-op unless a view
+        # is both pending and warm, so asking twice costs a flag check.
+        for view in (self._tip_view, self._nest):
+            tooltip.apply_pending_crisp(self, view)
 
     def _cancel_render_ahead(self) -> None:
         tooltip_raster.cancel(self._render_ahead)
