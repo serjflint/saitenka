@@ -26,6 +26,7 @@ from saitenka.app import (
     cue_annotation,
     geometry_refresh,
     help_overlay,
+    hover_intents,
     hover_metadata,
     hover_snapshot,
     mask_atlas_startup,
@@ -92,6 +93,7 @@ from saitenka.app.bindings import (
     active_bindings,
 )
 from saitenka.app.config import ReaderOptions
+from saitenka.app.intents import Announce
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.media import (
     copy_clipboard,
@@ -1564,10 +1566,10 @@ class Reader:
         self._draw_subtitle()
 
     def speak_hovered(self) -> None:
-        tooltip.speak_hovered(self)
+        self._run_hover_command(hover_intents.HoverCommand.SPEAK)
 
     def copy_hovered(self) -> None:
-        tooltip.copy_hovered(self)
+        self._run_hover_command(hover_intents.HoverCommand.COPY)
 
     def _copy_token(self, t) -> None:
         tooltip.copy_token(self, t)
@@ -2055,7 +2057,7 @@ class Reader:
 
     # --- kanji lookup mode ------------------------------------------------------------------------
     def kanji_current(self) -> None:
-        nested_popup.kanji_current(self)
+        self._run_hover_command(hover_intents.HoverCommand.KANJI)
 
     def _open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
         nested_popup.open_kanji(self, ch, wx, wy, wh)
@@ -2229,6 +2231,47 @@ class Reader:
             cue_revision=self.cue_revision,
         )
 
+    # --- hovered-word commands: pure reducer, executed here (WP5.3) ---------------------------
+    def _hover_inputs(self) -> hover_intents.HoverInputs:
+        """Read every fact the hovered-word commands decide from, once, before deciding."""
+        from saitenka.app.subtitles import box_for_token
+        from saitenka.model import is_ideograph
+
+        if not 0 <= self.hover < len(self.tokens):
+            return hover_intents.HoverInputs()
+        token = self.tokens[self.hover]
+        return hover_intents.HoverInputs(
+            hovered=True,
+            surface=token.surface,
+            reading=self._hover_reading,
+            token_reading=token.reading,
+            kanji=tuple(char for char in token.surface if is_ideograph(char)),
+            kanji_index=self._kanji_index,
+            has_dictionaries=self.dict_set is not None,
+            anchored=box_for_token(self.boxes, self.hover) is not None,
+        )
+
+    def _run_hover_command(self, command: hover_intents.HoverCommand) -> None:
+        for effect in hover_intents.reduce(command, self._hover_inputs()):
+            self._apply_hover_effect(effect)
+
+    def _apply_hover_effect(self, effect: hover_intents.HoverEffect) -> None:
+        from saitenka.app.media import speak
+        from saitenka.app.subtitles import box_for_token
+
+        if isinstance(effect, hover_intents.SpeakText):
+            speak(effect.text)
+        elif isinstance(effect, hover_intents.CopyToken):
+            self._copy_token(self.tokens[self.hover])
+        elif isinstance(effect, hover_intents.OpenKanji):
+            box = box_for_token(self.boxes, self.hover)
+            assert box is not None  # the reducer only opens against an anchored token
+            origin_x, origin_y = self.sub_origin
+            self._kanji_index += 1
+            self._open_kanji(effect.char, origin_x + box.x, origin_y + box.y, box.h)
+        elif isinstance(effect, Announce):
+            self._toast(effect.text, effect.kind)
+
     # --- help-overlay commands: pure reducer, executed here (WP5.3) ---------------------------
     def _run_help_command(self, command) -> None:
         from saitenka.app import help_intents, help_overlay
@@ -2287,7 +2330,7 @@ class Reader:
             copy_clipboard("\n".join(self._sentence_lines()))
         elif isinstance(effect, subtitle_intents.ToggleTranslation):
             translation.toggle_translation(self)
-        elif isinstance(effect, subtitle_intents.Announce):
+        elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
 
     def toggle_subtitle_language(self) -> None:

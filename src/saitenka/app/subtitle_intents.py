@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from saitenka.app.intents import Announce
 from saitenka.app.subnav_policy import anchor_delay
 from saitenka.app.subtitle_selection import toggle_target
 
@@ -124,12 +125,6 @@ class CopyCueText:
 @dataclass(frozen=True, slots=True)
 class ToggleTranslation:
     """Reveal or hide the secondary-language line."""
-
-
-@dataclass(frozen=True, slots=True)
-class Announce:
-    text: str
-    kind: str = "ok"
 
 
 type SubtitleEffect = (
