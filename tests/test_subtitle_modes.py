@@ -1037,3 +1037,37 @@ def test_toggle_from_english_returns_to_japanese(monkeypatch):
 
     assert reader.subtitle_language == "jp"
     assert ("set_property", "sid", 2) in ipc.commands
+
+
+def test_language_id_samples_the_index_when_one_is_loaded():
+    """Content-based classification for an untagged track. The parsed index is preferred over mpv's
+    on-screen cue because one visible line is a coin flip and twenty are not."""
+    index = CueIndex(
+        parse_srt(
+            "1\n00:00:01,000 --> 00:00:02,000\n日本語\n\n2\n00:00:03,000 --> 00:00:04,000\n字幕\n"
+        )
+    )
+
+    assert subtitle_modes._sample_cue_text(index, "on screen") == "日本語 字幕"
+
+
+def test_language_id_falls_back_to_the_on_screen_cue():
+    assert subtitle_modes._sample_cue_text(None, "on screen") == "on screen"
+    assert subtitle_modes._sample_cue_text(CueIndex([]), "on screen") == "on screen"
+
+
+def test_language_id_survives_a_track_with_nothing_to_sample():
+    """mpv reports `sub-text` as None before a track resolves, and `looks_japanese("")` must be the
+    answer rather than an AttributeError on the startup path."""
+    assert subtitle_modes._sample_cue_text(None, "") == ""
+
+
+def test_language_id_bounds_how_many_cues_it_reads():
+    """A feature-length index is thousands of cues; classifying needs a handful."""
+    srt = "".join(
+        f"{n}\n00:00:{n:02d},000 --> 00:00:{n + 1:02d},000\n日{n}\n\n" for n in range(1, 31)
+    )
+
+    sample = subtitle_modes._sample_cue_text(CueIndex(parse_srt(srt)), "", limit=5)
+
+    assert sample.split() == ["日1", "日2", "日3", "日4", "日5"]

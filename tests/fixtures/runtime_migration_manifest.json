@@ -622,10 +622,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_finish_retry"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::_primary_role"
     ],
     [
@@ -635,10 +631,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::_reset_sub_delay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_sample_cue_text"
     ],
     [
       "reader-parameter",
@@ -667,10 +659,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::configure"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::configure_retry"
     ],
     [
       "reader-parameter",

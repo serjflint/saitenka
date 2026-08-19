@@ -2626,7 +2626,7 @@ class Reader:
         subtitle_modes.start_fetch(self, fetch, select_if_unchanged=True)
 
     def configure_subtitle_retry(self, factory) -> None:
-        subtitle_modes.configure_retry(self, factory)
+        subtitle_modes.configure_retry(self.episode.subtitle, factory)
 
     def retry_japanese_subtitles(self) -> None:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.RETRY_ACQUISITION)

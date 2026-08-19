@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from saitenka.app.controller import Reader
+    from saitenka.app.reader_context import SubtitleSource
 
     ProviderFetch = Callable[[], tuple[Path | None, str]]
     ProviderFetchFactory = Callable[[str], ProviderFetch]
@@ -225,16 +226,17 @@ def on_primary_changed(reader: Reader, sid) -> None:
 def _primary_role(reader: Reader, sid) -> Language:
     tracks = SubtitleTracks(reader.jp_sid, reader.en_sid)
     lang = next((t.get("lang") for t in sub_tracks(reader.ipc) if t.get("id") == sid), None)
-    return _primary_role_for(sid, tracks, track_lang=lang, sample=_sample_cue_text(reader))
+    return _primary_role_for(
+        sid, tracks, track_lang=lang, sample=_sample_cue_text(reader._sub_index, reader.sub_text)
+    )
 
 
-def _sample_cue_text(reader: Reader, limit: int = 20) -> str:
+def _sample_cue_text(sub_index, sub_text: str, limit: int = 20) -> str:
     """A few cues of the current track for content-based language ID: the freshly indexed cues if
     present, else mpv's on-screen cue."""
-    idx = reader._sub_index
-    if idx is not None and len(idx) > 0:
-        return " ".join(cue.text for cue in idx.cues[:limit])
-    return reader.sub_text or ""
+    if sub_index is not None and len(sub_index) > 0:
+        return " ".join(cue.text for cue in sub_index.cues[:limit])
+    return sub_text or ""
 
 
 def announce_track(reader: Reader, sid) -> None:
@@ -314,13 +316,13 @@ def start_fetch(
     reader._submit_subtitle_fetch(request, name=name, on_done=on_done)
 
 
-def configure_retry(reader: Reader, factory: ProviderFetchFactory | None) -> None:
-    reader.episode.subtitle.retry_factory = factory
+def configure_retry(source: SubtitleSource, factory: ProviderFetchFactory | None) -> None:
+    source.retry_factory = factory
 
 
-def _finish_retry(reader: Reader) -> None:
-    with reader.episode.subtitle.retry_lock:
-        reader.episode.subtitle.retry_active = False
+def _finish_retry(source: SubtitleSource) -> None:
+    with source.retry_lock:
+        source.retry_active = False
 
 
 def _current_external_sub(ipc) -> Path | None:
@@ -358,26 +360,34 @@ def _start_resync_window(reader: Reader, video_path: str, sub: Path) -> None:
         return out, f"subtitles re-timed from {int(start_s)}s"
 
     start_fetch(
-        reader, do, name="subtitle-resync", replace=True, on_done=lambda: _finish_retry(reader)
+        reader,
+        do,
+        name="subtitle-resync",
+        replace=True,
+        on_done=lambda: _finish_retry(reader.episode.subtitle),
     )
 
 
 def _start_provider_fetch(reader: Reader, video_path: str) -> None:
     factory = reader.episode.subtitle.retry_factory
     if factory is None:
-        _finish_retry(reader)
+        _finish_retry(reader.episode.subtitle)
         reader._toast("No Japanese subtitle providers enabled", "warn")
         return
     try:
         fetch = factory(video_path)
     except Exception as exc:
-        _finish_retry(reader)
+        _finish_retry(reader.episode.subtitle)
         log.warning("subtitle retry setup failed", exc_info=True)
         reader._toast(f"Japanese subtitle search failed: {exc}", "warn")
         return
     reader._toast("Searching Japanese subtitle providers…")
     start_fetch(
-        reader, fetch, name="subtitle-retry", replace=True, on_done=lambda: _finish_retry(reader)
+        reader,
+        fetch,
+        name="subtitle-retry",
+        replace=True,
+        on_done=lambda: _finish_retry(reader.episode.subtitle),
     )
 
 
