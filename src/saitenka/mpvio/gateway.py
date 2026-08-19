@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.mpvio.ipc import IPCRequest, MpvIPC
+    from saitenka.runtime.diagnostics import RuntimeLedger
     from saitenka.runtime.legacy import LegacyRuntimeBridge
     from saitenka.runtime.reactor import SessionReactor
 
@@ -222,6 +223,10 @@ class MpvGateway:
         #: `mpvio` must not import `app`, and only the app-side dispatcher knows what a name
         #: means. An owner hands its resource over at construction and stops closing it itself.
         self.session_resources: dict[str, object] = {}
+        #: The session's runtime census, set by whoever installs a reactor. Here rather than on the
+        #: reactor because the router that counts unrouted events is not the reactor's to expose,
+        #: and the gateway is the one handle every entrypoint already holds.
+        self.session_ledger: RuntimeLedger | None = None
         self._router = router = LegacyEventRouter(mailbox)
         ipc.install_runtime_ingress(
             self._publish_observation,

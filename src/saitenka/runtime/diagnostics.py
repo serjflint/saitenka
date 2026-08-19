@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, Owner
+    from saitenka.runtime.effects import (
+        EffectError,
+        EffectId,
+        EffectOutcome,
+        EmitDiagnostic,
+        Owner,
+    )
 
 
 class DiagnosticKind(StrEnum):
@@ -61,3 +68,45 @@ class DiagnosticRecord:
         ):
             if value is not None and (len(value) > 64 or any(char.isspace() for char in value)):
                 raise ValueError("diagnostic labels must be bounded identifiers")
+
+
+class RuntimeLedger:
+    """What the runtime emitted, controlled and refused to route — as counts, for one session.
+
+    Three namespaces in one census because they answer one question together: `diagnostic:` is what
+    a reducer reported, `control:` is a cancel/expire that reached its port, and `ignored:` is an
+    event no owner claims *yet*. The last is the migration's progress meter, so it has to be
+    readable from a live session rather than inferred from a reducer's silence.
+
+    Bounded, like every other runtime queue: a key set that grows with traffic would make an
+    unmigrated event stream a leak. Past `capacity` distinct keys, new ones are refused and counted
+    as `ledger:overflow` — a saturated ledger says so instead of lying by omission.
+    """
+
+    def __init__(self, *, capacity: int = 256) -> None:
+        self._counts: Counter[str] = Counter()
+        self._capacity = capacity
+        self._overflow = 0
+
+    def diagnostic(self, effect: EmitDiagnostic) -> None:
+        fields = "".join(f",{key}={value}" for key, value in effect.fields)
+        self._bump(f"diagnostic:{effect.owner.value}:{effect.name}{fields}")
+
+    def control(self, key: str) -> None:
+        self._bump(f"control:{key}")
+
+    def ignored(self, key: str) -> None:
+        self._bump(f"ignored:{key}")
+
+    @property
+    def counts(self) -> dict[str, int]:
+        counts = dict(self._counts)
+        if self._overflow:
+            counts["ledger:overflow"] = self._overflow
+        return counts
+
+    def _bump(self, key: str) -> None:
+        if key not in self._counts and len(self._counts) >= self._capacity:
+            self._overflow += 1
+            return
+        self._counts[key] += 1

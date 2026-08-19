@@ -2,8 +2,8 @@
 
 This is the table D3 grows: a route per (event, owner) pair a feature actually owns, and an
 `owner_of` that answers "nobody yet" for everything else. `OwnerRouter` turns that answer into a
-counted fact instead of an error, so the gap is readable at any point in the migration
-(`reactor_router.ignored`).
+counted fact instead of an error, so the gap is readable at any point in the migration —
+`gateway.session_ledger.counts`, alongside what the session's reducers reported and controlled.
 
 It lives in `app/` rather than `mpvio/` because it names app features; `mpvio` must not import
 `app`. The gateway only exposes the seam (`observe`, `mailbox`, `dispatch_effect`).
@@ -11,6 +11,7 @@ It lives in `app/` rather than `mpvio/` because it names app features; `mpvio` m
 
 from __future__ import annotations
 
+import logging
 import shutil
 import time
 from typing import TYPE_CHECKING
@@ -18,10 +19,13 @@ from typing import TYPE_CHECKING
 from saitenka.app import telemetry
 from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
+from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
     CloseSessionOverlay,
     CloseSessionSurfaces,
     DetachDiagnostics,
+    EffectOutcome,
+    ExpireEffect,
     Owner,
     RemoveSessionArtifacts,
 )
@@ -43,9 +47,11 @@ if TYPE_CHECKING:
 
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
-    from saitenka.runtime.effects import Effect
+    from saitenka.runtime.effects import CoreControl, Effect
     from saitenka.runtime.events import RuntimeEvent
     from saitenka.runtime.state import FeatureReducer
+
+log = logging.getLogger(__name__)
 
 #: Events `Owner.SESSION` owns. Everything absent here routes to nobody and is counted.
 _SESSION_EVENTS = (
@@ -93,7 +99,7 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
     return None
 
 
-def _dispatcher(gateway: MpvGateway) -> Callable[[Effect], bool]:
+def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect], bool]:
     """Perform an effect, app-side kinds first and the gateway's own kinds after.
 
     The composition lives here because `mpvio` must not import `app`: the gateway can perform an
@@ -103,6 +109,10 @@ def _dispatcher(gateway: MpvGateway) -> Callable[[Effect], bool]:
     def dispatch(effect: Effect) -> bool:
         if isinstance(effect, DetachDiagnostics):
             telemetry.set_gauge_provider(None)
+            # The session's last chance to say what it routed and what it dropped. Detaching
+            # diagnostics is where the session stops being observable, so the census goes out
+            # here or nowhere.
+            log.debug("runtime census: %s", ledger.counts)
             return True
         if isinstance(effect, CloseSessionSurfaces | CloseSessionOverlay):
             name = (
@@ -121,6 +131,43 @@ def _dispatcher(gateway: MpvGateway) -> Callable[[Effect], bool]:
         return gateway.dispatch_effect(effect)
 
     return dispatch
+
+
+class ControlSink:
+    """Perform a cancel/expire. Without this sink the reactor drops both, silently.
+
+    The two kinds have different owners. `ExpireEffect` is the gateway's: it holds the in-flight
+    request, so only it can turn a passed deadline into a TIMEOUT terminal. `CancelEffect` is the
+    reactor's own — publishing the CANCELLED completion is what lets the issuing reducer see its
+    effect end, and the `owns` guard is the one `_finish` already applies: never retire an effect
+    this reactor did not dispatch.
+
+    A class rather than a closure because the reactor does not exist until after the sink is passed
+    to it. The binding is late either way; this makes it a visible assignment instead of a cell.
+    """
+
+    def __init__(self, gateway: MpvGateway, ledger: RuntimeLedger) -> None:
+        self._gateway = gateway
+        self._ledger = ledger
+        self.reactor: SessionReactor | None = None
+
+    def __call__(self, control: CoreControl) -> None:
+        if isinstance(control, ExpireEffect):
+            self._ledger.control("expire")
+            self._gateway.expire(control)
+            return
+        self._ledger.control(f"cancel:{control.owner.value}")
+        if self.reactor is None or not self.reactor.owns(control.target_effect_id):
+            return
+        self.reactor.complete(
+            EffectFinished(
+                control.target_effect_id,
+                control.owner,
+                control.identity,
+                EffectOutcome.CANCELLED,
+            ),
+            origin=EventOrigin.LIFECYCLE,
+        )
 
 
 def install_session_runtime(ipc: MpvIPC, *, startup_hint: bool = True) -> MpvGateway:
@@ -159,6 +206,9 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
+    ledger = RuntimeLedger()
+    gateway.session_ledger = ledger
+    control = ControlSink(gateway, ledger)
     reactor = SessionReactor(
         SessionState(
             session=session.initial(
@@ -169,10 +219,13 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             interaction=None,
             presentation=None,
         ),
-        OwnerRouter(SessionReducer(routes), owner_of),
+        OwnerRouter(SessionReducer(routes), owner_of, ledger=ledger),
         gateway.mailbox,
-        _dispatcher(gateway),
+        _dispatcher(gateway, ledger),
+        diagnostics=ledger.diagnostic,
+        control=control,
     )
+    control.reactor = reactor
 
     def claims(payload: RuntimeEvent) -> bool:
         # A completion is claimed by *ownership*, not by type: the bridge and the reactor both

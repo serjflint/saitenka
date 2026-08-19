@@ -24,6 +24,7 @@ from saitenka.runtime.state import RoutedEvent, RouteError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.runtime.diagnostics import RuntimeLedger
     from saitenka.runtime.effects import Effect, Owner
     from saitenka.runtime.events import RuntimeEvent
     from saitenka.runtime.state import SessionReducer, SessionState
@@ -36,26 +37,38 @@ type OwnerOf = Callable[[RuntimeEvent], Owner | None]
 class OwnerRouter:
     """The reactor's reducer during the migration: routes what is owned, counts what is not."""
 
-    def __init__(self, reducer: SessionReducer, owner_of: OwnerOf) -> None:
+    def __init__(
+        self,
+        reducer: SessionReducer,
+        owner_of: OwnerOf,
+        *,
+        ledger: RuntimeLedger | None = None,
+    ) -> None:
         self._reducer = reducer
         self._owner_of = owner_of
         self._ignored: Counter[str] = Counter()
+        self._ledger = ledger
 
     @property
     def ignored(self) -> dict[str, int]:
         """Unrouted events by `owner:EventType`, so the gap is observable rather than assumed."""
         return dict(self._ignored)
 
+    def _ignore(self, key: str) -> None:
+        self._ignored[key] += 1
+        if self._ledger is not None:
+            self._ledger.ignored(key)
+
     def __call__(
         self, state: SessionState, event: RuntimeEvent
     ) -> tuple[SessionState, tuple[Effect, ...]]:
         owner = self._owner_of(event)
         if owner is None:
-            self._ignored[f"-:{type(event).__name__}"] += 1
+            self._ignore(f"-:{type(event).__name__}")
             return state, ()
         try:
             result = self._reducer.reduce_turn(state, RoutedEvent(owner, event))
         except RouteError:
-            self._ignored[f"{owner.value}:{type(event).__name__}"] += 1
+            self._ignore(f"{owner.value}:{type(event).__name__}")
             return state, ()
         return result.state, result.effects

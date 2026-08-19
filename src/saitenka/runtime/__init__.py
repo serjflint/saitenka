@@ -1,7 +1,7 @@
 """Pure, testable contracts for Saitenka's future session runtime."""
 
 from saitenka.runtime.deadlines import DeadlinePair, DeadlineRegistry
-from saitenka.runtime.diagnostics import DiagnosticKind, DiagnosticRecord
+from saitenka.runtime.diagnostics import DiagnosticKind, DiagnosticRecord, RuntimeLedger
 from saitenka.runtime.effects import (
     AsyncEffect,
     CancelEffect,
@@ -142,6 +142,7 @@ __all__ = [
     "RouteKey",
     "RoutedEvent",
     "RuntimeEvent",
+    "RuntimeLedger",
     "RuntimeLimits",
     "ScheduleTimer",
     "SendMpvCommand",
