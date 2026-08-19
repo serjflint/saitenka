@@ -2985,7 +2985,6 @@ class Reader:
                 return True
             session_stats.tick(self)
             self._maybe_advance()
-            self._flush_paused_nudge()
             first_tick = not self._interactive_ready
             if first_tick:
                 with otel_metrics.traced("startup.first_tick"):
@@ -2999,9 +2998,12 @@ class Reader:
             return False
 
     def _flush_paused_nudge(self) -> None:
-        """A draw landed while paused last tick — poke the throttled OSD so mpv actually presents it."""
-        if not self._nudge_pending:
-            return
+        """Poke the throttled OSD so mpv actually presents a draw that landed while paused.
+
+        Reached from the nudge deadline, not from the next tick. The deadline's revision fence is
+        what coalesces a burst of draws into one repaint, so nothing here has to track whether one
+        is already owed.
+        """
         self._nudge_pending = False
         self.ov.repaint()
         # No per-nudge log line — the osd_paused_nudge counter below carries the count (this fired
@@ -3166,10 +3168,20 @@ class Reader:
         """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
         presents it (mpv #8172; see Overlay.repaint). Only when paused: playing frames present on
         their own, and re-adding every tick would be wasteful."""
-        if self.ov.ops != ops_before and self._prop("pause"):
-            self._nudge_pending = True
-            if otel_metrics.osd_paused_draw is not None:
-                otel_metrics.osd_paused_draw.add(1)
+        if self.ov.ops == ops_before or not self._prop("pause"):
+            return
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        # Fails open: with no timer port the repaint runs inline. A nudge that never fires is a
+        # frozen overlay the user has to jiggle the mouse to unstick — mpv #8172 in full — which is
+        # far worse than one that fires a moment early.
+        self._nudge_pending = self.lifecycle_timers.schedule(
+            LifecycleTimerKind.PAUSED_REPAINT, 0.0, self._flush_paused_nudge
+        )
+        if not self._nudge_pending:
+            self._flush_paused_nudge()
+        if otel_metrics.osd_paused_draw is not None:
+            otel_metrics.osd_paused_draw.add(1)
 
     def _check_startup_health(self) -> None:
         """One-time startup diagnostic for 'mpv plays but the overlay can't draw'. The RELIABLE failure

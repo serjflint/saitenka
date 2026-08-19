@@ -921,8 +921,11 @@ def _count_adds(ipc):
 
 
 def test_paused_draw_schedules_and_fires_an_osd_nudge():
-    """A subtitle draw while mpv is paused must re-flush the OSD on the NEXT tick — otherwise mpv
-    doesn't present it until an input event (mpv #8172, the 'updates only on mouse move' bug)."""
+    """A subtitle draw while mpv is paused must re-flush the OSD — otherwise mpv doesn't present it
+    until an input event (mpv #8172, the 'updates only on mouse move' bug).
+
+    The re-flush is a named deadline now, so firing it *is* the nudge; waiting for another tick
+    would prove only that ticks still happen."""
     ipc = FakeIPC()
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     ipc.props["pause"] = True
@@ -930,10 +933,34 @@ def test_paused_draw_schedules_and_fires_an_osd_nudge():
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
     r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
-    r.poll_once()  # adopts the cue → draws SUB_ID while paused → schedules the nudge
+    r.poll_once()  # adopts the cue → draws SUB_ID while paused → arms the nudge
     assert r._nudge_pending is True
     before = _count_adds(ipc)
-    r.poll_once()  # nudge fires → repaint re-issues the live overlay(s)
+
+    assert ipc.fire_runtime_timer("lifecycle:paused-repaint")
+
+    assert _count_adds(ipc) > before  # repaint re-issued the live overlay(s)
+    assert r._nudge_pending is False
+
+
+def test_a_burst_of_paused_draws_repaints_once():
+    """The deadline's revision fence is what coalesces, so nothing has to track whether a nudge is
+    already owed. Without it each draw arms its own and mpv is poked once per overlay op."""
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc.props["pause"] = True
+    r = Reader(ipc)
+    r.refresh_osd()
+    ipc.props["sub-text"] = "いち"
+    r._observe_property("sub-text", "いち")
+    r.poll_once()
+    r._observe_property("sub-text", "に")
+    r.poll_once()  # a second paused draw, before the first nudge was ever delivered
+    before = _count_adds(ipc)
+
+    assert ipc.fire_runtime_timer("lifecycle:paused-repaint")
+    assert not ipc.fire_runtime_timer("lifecycle:paused-repaint")  # only one was ever pending
+
     assert _count_adds(ipc) > before
     assert r._nudge_pending is False
 
@@ -985,8 +1012,8 @@ def test_paused_nudge_records_otel_counters():
     try:
         ipc.props["sub-text"] = "いち"
         r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
-        r.poll_once()  # a draw lands while paused → osd.paused_draw, schedules the nudge
-        r.poll_once()  # nudge fires → osd.paused_nudge
+        r.poll_once()  # a draw lands while paused → osd.paused_draw, arms the nudge
+        assert ipc.fire_runtime_timer("lifecycle:paused-repaint")  # → osd.paused_nudge
         snap = otel_metrics.snapshot()
         assert snap["saitenka.osd.paused_draw"]["value"] >= 1
         assert snap["saitenka.osd.paused_nudge"]["value"] >= 1
