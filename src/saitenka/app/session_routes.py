@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.mpvio.gateway import MpvGateway
+    from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.effects import Effect
     from saitenka.runtime.events import RuntimeEvent
     from saitenka.runtime.state import FeatureReducer
@@ -98,6 +99,20 @@ def _dispatcher(gateway: MpvGateway) -> Callable[[Effect], bool]:
         return gateway.dispatch_effect(effect)
 
     return dispatch
+
+
+def install_session_runtime(ipc: MpvIPC, *, startup_hint: bool = True) -> MpvGateway:
+    """Wire one live mpv connection into a full session runtime — gateway *and* reactor.
+
+    Two calls, one decision: a gateway without a reactor is a session whose `Owner.SESSION`
+    duties never run, which is what `attach` silently was. Entrypoints ask for a session runtime,
+    not for the two halves in the right order.
+    """
+    from saitenka.mpvio.gateway import install_legacy_gateway
+
+    gateway = install_legacy_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=startup_hint)
+    return gateway
 
 
 def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -> SessionReactor:

@@ -464,14 +464,12 @@ def _launch_mpv_and_connect(
 
             kill_process_tree(proc)
             return None, None
-    from saitenka.mpvio.gateway import install_legacy_gateway
+    # The hint is immediate feedback for the file-load wait: our overlay isn't built yet and the
+    # next steps block the main thread on mpv, so mpv's own OSD is the only surface that can show
+    # anything here. A screenshot capture must not carry the breadcrumb.
+    from saitenka.app.session_routes import install_session_runtime
 
-    gateway = install_legacy_gateway(ipc)
-    # Immediate feedback for the file-load wait: our overlay isn't built yet and the next steps block
-    # the main thread on mpv, so mpv's own OSD is the only surface that can show anything here.
-    from saitenka.app.session_routes import install_session_reactor
-
-    install_session_reactor(gateway, startup_hint=not opts.screenshot)
+    install_session_runtime(ipc, startup_hint=not opts.screenshot)
     return proc, ipc
 
 

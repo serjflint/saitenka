@@ -218,9 +218,13 @@ def test_the_close_feature_ignores_the_events_it_shares_a_slot_with() -> None:
 
 
 def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() -> None:
-    """The `ARTIFACTS` phase, which runs once nothing can still write. The Reader's own `rmtree` is
-    a fallback for a session with no runtime, so this proves the runtime path really fires — not
-    that the directory merely ended up gone."""
+    """The `ARTIFACTS` phase, which runs once nothing can still write.
+
+    Scope, because the fallback makes it easy to overclaim: this pins that the directory is gone
+    after close with a runtime installed, NOT that the runtime is what removed it — `_retire_artifacts`
+    falls back to its own `rmtree` whenever the announcement goes unclaimed, so both paths look
+    identical from here. What the runtime uniquely does is asserted on the gauge detach below.
+    """
     from util import runtime_gateway
 
     from saitenka.app.session_routes import install_session_reactor
@@ -256,3 +260,35 @@ def test_the_artifacts_phase_is_separate_from_the_participants_phase() -> None:
     assert artifacts.effects == (RemoveSessionArtifacts("/tmp/scratch"),)
     # Latched per phase, not globally: a re-announced phase is a no-op, a new one is not.
     assert reduce_lifecycle_close(artifacts.state, SessionClosing()).effects == ()
+
+
+@pytest.mark.parametrize("startup_hint", [True, False])
+def test_composing_a_session_runtime_leaves_its_close_duties_reachable(
+    monkeypatch, *, startup_hint: bool
+) -> None:
+    """`attach` installed a gateway but no reactor, so `Owner.SESSION`'s close duties had nobody to
+    run them — its gauge provider would have outlived the session it belonged to.
+
+    Driven through the one helper both entrypoints now call, so neither can regain a half-wired
+    session. Parametrised over the breadcrumb because that flag is the only thing they differ on,
+    and it must not gate whether the reactor exists.
+
+    The oracle is the gauge detach, deliberately *not* the scratch dir: `_retire_artifacts` falls
+    back to its own `rmtree` when nothing claims the announcement, so the directory is gone either
+    way and cannot tell a wired session from a half-wired one. Nothing detaches the gauge but the
+    reactor.
+    """
+    from saitenka.app import telemetry
+    from saitenka.app.session_routes import install_session_runtime
+
+    monkeypatch.setattr(telemetry, "_gauge_provider", lambda: {"cache": 1.0})
+    ipc = FakeIPC()
+    gateway = install_session_runtime(ipc, startup_hint=startup_hint)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert telemetry._gauge_provider is None
+    assert ledger.report() is None
