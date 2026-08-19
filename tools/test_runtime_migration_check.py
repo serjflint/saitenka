@@ -364,3 +364,68 @@ def test_the_only_remaining_direct_writes_are_the_driver_switch_set() -> None:
         "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate",
         "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate",
     }
+
+
+def test_a_converted_symbol_is_retired_without_a_hand_bless() -> None:
+    """A row vanishing while its symbol remains IS the migration working. Failing on it made every
+    conversion cost two extra gate runs — the run that reported it and the run after the bless.
+    """
+    checker = _module()
+    manifest = {
+        "debt": [["reader-parameter", "keeps.py::converted"]],
+        "startup": [],
+        "close": [],
+        "entrypoints": [],
+    }
+
+    problems = checker.failures(manifest, set(), {"keeps.py::converted"}, {})
+
+    assert problems.get("retired") == ["reader-parameter:keeps.py::converted"]
+    assert "missing" not in problems  # not a failure
+
+
+def test_a_row_whose_symbol_vanished_still_fails() -> None:
+    """The hole the auto-retire must not open: renaming or moving a debt-carrying function out of
+    the scanned tree would otherwise read as progress. The symbol is gone, so this is not a
+    conversion — it is debt leaving the denominator without being fixed.
+    """
+    checker = _module()
+    manifest = {
+        "debt": [["reader-parameter", "moved.py::gone"]],
+        "startup": [],
+        "close": [],
+        "entrypoints": [],
+    }
+
+    problems = checker.failures(manifest, set(), {"other.py::something"}, {})
+
+    assert problems["missing"] == ["reader-parameter:moved.py::gone"]
+    assert "retired" not in problems
+
+
+def test_a_rename_fails_on_the_added_half_even_though_the_old_row_went() -> None:
+    """A rename is one removal plus one addition. The removal half may look like a conversion, so
+    the addition half is what has to bite — and does."""
+    checker = _module()
+    manifest = {
+        "debt": [["reader-parameter", "m.py::old_name"]],
+        "startup": [],
+        "close": [],
+        "entrypoints": [],
+    }
+    actual = {checker.Debt("reader-parameter", "m.py::new_name")}
+
+    problems = checker.failures(manifest, actual, {"m.py::new_name"}, {})
+
+    assert problems["added"] == ["reader-parameter:m.py::new_name"]
+
+
+def test_growth_is_still_a_failure() -> None:
+    """The property the ratchet exists for, unchanged: debt may shrink on its own, never grow."""
+    checker = _module()
+    manifest = {"debt": [], "startup": [], "close": [], "entrypoints": []}
+    actual = {checker.Debt("direct-mpv-command", "m.py::new_write")}
+
+    assert checker.failures(manifest, actual, {"m.py::new_write"}, {})["added"] == [
+        "direct-mpv-command:m.py::new_write"
+    ]

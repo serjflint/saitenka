@@ -339,8 +339,16 @@ def failures(
     if not isinstance(debt_rows, list):
         return {"schema": ["debt must be a list"]}
     expected = set(starmap(Debt, debt_rows))
-    missing = sorted(item.encode() for item in expected - actual)
     added = sorted(item.encode() for item in actual - expected)
+    # A row that vanished is one of two very different things, and conflating them is what made
+    # every conversion cost a re-bless:
+    #   * its symbol is still here and no longer carries the debt -> a CONVERSION. That is the
+    #     migration working; `check` retires it from the denominator itself.
+    #   * its symbol is gone entirely -> the code was moved, renamed or deleted, which is exactly
+    #     how debt escapes the denominator without being fixed. Still a failure.
+    gone = expected - actual
+    retired = sorted(item.encode() for item in gone if item.source in symbols)
+    missing = sorted(item.encode() for item in gone if item.source not in symbols)
     duty_groups: list[list[dict[str, object]]] = []
     schema: list[str] = []
     ids: set[str] = set()
@@ -388,6 +396,9 @@ def failures(
                 unresolved.append(source)
     unresolved.sort()
     result = {
+        # Reported, never a failure: `check` retires these itself. Kept in the payload so a run
+        # that quietly shrank the denominator still says which rows it retired.
+        "retired": retired,
         "missing": missing,
         "added": added,
         "unresolved": unresolved,
@@ -408,9 +419,21 @@ def check() -> int:
     manifest = _load()
     actual, symbols, evidence = scan()
     problems = failures(manifest, actual, symbols, evidence)
+    retired = problems.pop("retired", [])
     if problems:
+        if retired:  # context for whatever else failed
+            problems["retired"] = retired
         print(json.dumps(problems, indent=2))
         return 1
+    if retired:
+        # The denominator only ever shrinks here, and re-blessing by hand for that was pure
+        # ceremony — every conversion cost two extra gate runs. The rewrite lands in the diff, so
+        # the commit still carries the evidence of what it retired.
+        manifest["debt"] = [[item.kind, item.source] for item in sorted(actual)]
+        MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        print(f"runtime-migration: retired {len(retired)} converted symbol(s)")
+        for row in retired:
+            print(f"  - {row}")
     print(
         "runtime-migration: OK "
         f"({len(actual)} debt symbols; "
