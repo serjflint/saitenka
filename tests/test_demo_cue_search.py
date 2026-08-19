@@ -4,17 +4,24 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import util
+
 from saitenka.app.launch.run import DEMO_LINE, _wait_for_subtitle_text
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
+    """Counts cue hops. Inherits the shared fake so the runtime egress port is present — the hop is
+    a correlated write now, and a double without the port would take a branch production never does.
+    """
+
     def __init__(self) -> None:
+        super().__init__()
         self.seeks = 0
 
     def command(self, *args):
         if args and args[0] == "sub-seek":
             self.seeks += 1
-        return {"error": "success"}
+        return super().command(*args)
 
 
 def reader_for(texts: list[str], ipc: FakeIPC, clock: list[float]):

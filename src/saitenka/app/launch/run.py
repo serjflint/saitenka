@@ -20,10 +20,12 @@ from saitenka.app.config import config_path, load_config, subtitle_geometry_opti
 from saitenka.app.continuity import resolve_sibling
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
 from saitenka.app.jimaku import parse_filename
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
 from saitenka.app.profiles import resolve_launch_identity, resolve_profile
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
+from saitenka.runtime import Owner
 
 log = logging.getLogger(__name__)
 
@@ -656,7 +658,9 @@ def _advance_at_eof(reader) -> bool:
     nxt = resolve_sibling(cur, 1)
     if nxt is None:
         return False  # no unambiguous next sibling → hold the last frame (keep-open)
-    reader.ipc.command("loadfile", str(nxt))  # file-loaded → reslot_hook re-slots the overlay
+    send_correlated(
+        reader.ipc, "advance-loadfile", "loadfile", str(nxt), owner=Owner.PLAYBACK
+    )  # file-loaded → reslot_hook re-slots the overlay
     return True
 
 
@@ -736,7 +740,16 @@ def reslot_to_current(
         jp_lang = next((part.strip() for part in subs.slang.split(",") if part.strip()), "jpn")
         for path, lang in ((sub_path, jp_lang), (en_sub_path, "eng")):
             if path is not None:
-                ipc.command("sub-add", str(path), "auto", "", lang)
+                send_correlated(
+                    ipc,
+                    f"reslot-sub-add:{lang}",
+                    "sub-add",
+                    str(path),
+                    "auto",
+                    "",
+                    lang,
+                    owner=Owner.SUBTITLE,
+                )
         startup = select_initial(ipc, subs.slang)
         span.set(
             "active", startup.active or "none"
@@ -888,7 +901,7 @@ def _wait_for_subtitle_text(reader, ipc, video: str | None, *, clock=time.monoto
         return DEMO_LINE
 
     def hop(timeout: float | None) -> None:
-        ipc.command("sub-seek", 1)
+        send_correlated(ipc, "demo-cue-hop", "sub-seek", 1, owner=Owner.SUBTITLE)
         reader._drive_annotation_once(
             _CUE_HOP_SECONDS if timeout is None else min(timeout, _CUE_HOP_SECONDS)
         )
@@ -931,6 +944,8 @@ def _run_demo_actions(reader, ipc, demo: DemoSpec) -> None:
         time.sleep(0.5)  # Anki round-trip, not a paint — no surface to wait on
     if demo.screenshot:
         settle()
+        # Stays synchronous: the reply is printed as the capture's result, and the file has to
+        # exist by the time this returns for the caller to have anything to look at.
         r = ipc.command("screenshot-to-file", demo.screenshot, "window")
         print("screenshot:", r, "->", demo.screenshot)
     else:
@@ -1230,6 +1245,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     finally:
         try:
             reader.close()
+            # Stays direct: the reactor is stopping, and a correlated quit could never be drained.
             ipc.command("quit")
             ipc.close()
         except Exception:

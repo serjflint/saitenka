@@ -6,19 +6,7 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::_advance_at_eof"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/launch/run.py::_run_demo_actions"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::_wait_for_subtitle_text.hop"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::reslot_to_current"
     ],
     [
       "direct-mpv-command",
