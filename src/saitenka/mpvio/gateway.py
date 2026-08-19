@@ -17,6 +17,7 @@ from saitenka.runtime import (
     EffectError,
     EffectFinished,
     EffectOutcome,
+    EventEnvelope,
     EventOrigin,
     ExpireEffect,
     MailboxFull,
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 
     from saitenka.mpvio.ipc import IPCRequest, MpvIPC
     from saitenka.runtime.legacy import LegacyRuntimeBridge
+    from saitenka.runtime.reactor import SessionReactor
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +72,34 @@ class LegacyEventRouter:
     def __init__(self, mailbox: SessionMailbox) -> None:
         self._mailbox = mailbox
         self._runtime_bridge: LegacyRuntimeBridge | None = None
+        self._reactor: SessionReactor | None = None
 
     def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None:
         if self._runtime_bridge is not None:
             raise RuntimeError("runtime bridge already installed")
         self._runtime_bridge = bridge
+
+    @property
+    def mailbox(self) -> SessionMailbox:
+        """The session's mailbox. Exposed for an observer to be constructed against — a consumer
+        must still go through `observe`, since the router is the only sanctioned one."""
+        return self._mailbox
+
+    def observe(self, reactor: SessionReactor) -> None:
+        """Give the reactor every envelope this consumer sees, except a terminal.
+
+        Fanned out HERE rather than from the Reader's turn because this is the mailbox's declared
+        sole consumer, and `SessionReactor.handle` takes an envelope without reading the mailbox —
+        so a second observer costs no envelope. `run_until_idle` would consume, and must not be used
+        while this router exists.
+
+        Terminals are withheld: `SessionReactor._finish` retires a completion it does not own, which
+        makes the bridge's own `retire_terminal` return False and silently drop the completion.
+        Until an owner's effects are the reactor's (D3), its terminals are the bridge's alone.
+        """
+        if self._reactor is not None:
+            raise RuntimeError("reactor already observing")
+        self._reactor = reactor
 
     def drain_events(
         self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
@@ -94,10 +119,17 @@ class LegacyEventRouter:
         if timeout is None or timeout > 0:
             envelope = self._mailbox.receive(timeout=timeout)
             if envelope is not None:
+                self._observe(envelope)
                 self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
         for envelope in self._mailbox.receive_ready():
+            self._observe(envelope)
             self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
         return events
+
+    def _observe(self, envelope: EventEnvelope) -> None:
+        if self._reactor is None or isinstance(envelope.payload, EffectFinished):
+            return
+        self._reactor.handle(envelope)
 
     def _route(
         self, payload: RuntimeEvent, events: list[object], *, ordered_terminals: bool = False
@@ -151,7 +183,7 @@ class MpvGateway:
         self._reconnect_attempt = 0
         self._closed = False
         self._ready = False
-        router = LegacyEventRouter(mailbox)
+        self._router = router = LegacyEventRouter(mailbox)
         ipc.install_runtime_ingress(
             self._publish_observation,
             self._publish_connection,
@@ -171,6 +203,21 @@ class MpvGateway:
         with self._lock:
             self._ready = True
         self._start_pending_reconnect()
+
+    @property
+    def mailbox(self) -> SessionMailbox:
+        """The session's mailbox. Exposed for an observer to be constructed against — a consumer
+        must still go through `observe`, since the router is the only sanctioned one."""
+        return self._mailbox
+
+    def observe(self, reactor: SessionReactor) -> None:
+        """Let a `SessionReactor` see the session without owning any of it.
+
+        The gateway owns the mailbox's sole consumer, so this is the only place a second observer
+        can be attached without splitting the envelope stream. See `LegacyEventRouter.observe` for
+        why terminals are withheld.
+        """
+        self._router.observe(reactor)
 
     @property
     def connection_epoch(self) -> int:
