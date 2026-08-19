@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka.app import help_intents
 from saitenka.app.bindings import active_bindings
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.render.help import HelpEntry, build_document, render_page
@@ -73,33 +74,21 @@ def _restore_context_keys(reader: Reader) -> None:
 def open_help(reader: Reader) -> None:
     if reader._help_open:
         return
-    reader._help_open = True
-    reader._help_page = 0
-    _bind_help_keys(reader)
-    redraw(reader)
+    reader._apply_help_effect(help_intents.OpenHelp())
 
 
 def close_help(reader: Reader) -> None:
-    if not reader._help_open:
-        return
-    reader._help_open = False
-    reader.lifecycle_surfaces.remove(OverlayId.HELP)
-    _restore_context_keys(reader)
-    reader._help_page = 0
+    reader._run_help_command(help_intents.HelpCommand.CLOSE)
 
 
 def toggle(reader: Reader) -> None:
-    close_help(reader) if reader._help_open else open_help(reader)
+    reader._run_help_command(help_intents.HelpCommand.TOGGLE)
 
 
 def step(reader: Reader, delta: int) -> None:
-    if not reader._help_open:
-        return
-    document = document_for(reader)
-    target = max(0, min(len(document.pages) - 1, reader._help_page + delta))
-    if target != reader._help_page:
-        reader._help_page = target
-        redraw(reader)
+    reader._run_help_command(
+        help_intents.HelpCommand.NEXT if delta > 0 else help_intents.HelpCommand.PREVIOUS
+    )
 
 
 def scroll(reader: Reader, steps: int) -> bool:

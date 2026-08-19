@@ -2229,6 +2229,40 @@ class Reader:
             cue_revision=self.cue_revision,
         )
 
+    # --- help-overlay commands: pure reducer, executed here (WP5.3) ---------------------------
+    def _run_help_command(self, command) -> None:
+        from saitenka.app import help_intents, help_overlay
+
+        if not self._help_open:
+            inputs = help_intents.HelpInputs(open=False)
+        else:
+            # The page count means rendering the document, so only the open case pays for it: a
+            # keypress the closed arm discards should not build a document to be told so.
+            inputs = help_intents.HelpInputs(
+                open=True,
+                page=self._help_page,
+                page_count=len(help_overlay.document_for(self).pages),
+            )
+        for effect in help_intents.reduce(command, inputs):
+            self._apply_help_effect(effect)
+
+    def _apply_help_effect(self, effect) -> None:
+        from saitenka.app import help_intents, help_overlay
+
+        if isinstance(effect, help_intents.OpenHelp):
+            self._help_open = True
+            self._help_page = effect.page
+            help_overlay._bind_help_keys(self)
+            help_overlay.redraw(self)
+        elif isinstance(effect, help_intents.CloseHelp):
+            self._help_open = False
+            self.lifecycle_surfaces.remove(OverlayId.HELP)
+            help_overlay._restore_context_keys(self)
+            self._help_page = 0
+        elif isinstance(effect, help_intents.ShowHelpPage):
+            self._help_page = effect.index
+            help_overlay.redraw(self)
+
     def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
         for effect in subtitle_intents.reduce(command, self._subtitle_inputs()):
             self._apply_subtitle_effect(effect)
