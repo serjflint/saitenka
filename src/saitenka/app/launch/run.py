@@ -902,23 +902,41 @@ def _wait_for_subtitle_text(reader, ipc, video: str | None, *, clock=time.monoto
     return (reader._get("sub-text") or "") or DEMO_LINE
 
 
+#: How long a capture waits for every staged surface to be acknowledged before shooting.
+_PAINT_SETTLE_SECONDS = 2.0
+
+
 def _run_demo_actions(reader, ipc, demo: DemoSpec) -> None:
+    from saitenka.runtime.runner import SessionRunner
+
+    def painted() -> bool:
+        return reader.lifecycle_surfaces.settled() and reader.interaction_surfaces.settled()
+
+    def settle() -> None:
+        """Wait for the pixels to be acknowledged, not for a guessed number of milliseconds.
+
+        A capture taken while a slot is still PENDING photographs whatever was on screen before it,
+        and a sleep long enough to be safe on a slow machine is dead time on every other one.
+        """
+        SessionRunner(reader._drive_annotation_once).run_until(
+            painted, deadline=time.monotonic() + _PAINT_SETTLE_SECONDS
+        )
+
     for _ in range(demo.demo_scroll):
         reader._scroll_tip(round(reader.osd[1] * 0.12))
     if demo.demo_translate:
         reader._setup_secondary()
         reader.toggle_translation()
-        time.sleep(0.3)
+        settle()
     if demo.mine:
         (reader.bulk_mine if demo.bulk else reader.mine_current)()
-        time.sleep(0.5)
+        time.sleep(0.5)  # Anki round-trip, not a paint — no surface to wait on
     if demo.screenshot:
-        time.sleep(0.4)
+        settle()
         r = ipc.command("screenshot-to-file", demo.screenshot, "window")
         print("screenshot:", r, "->", demo.screenshot)
-        time.sleep(0.3)
     else:
-        time.sleep(demo.seconds)
+        time.sleep(demo.seconds)  # hold the demo open; wall time is the point here
 
 
 def _execute_reader_session(

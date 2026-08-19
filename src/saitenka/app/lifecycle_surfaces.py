@@ -95,6 +95,9 @@ class LifecycleSurfaces:
     def snapshot(self, oid: int):
         return self._runtime.snapshot(str(oid))
 
+    def settled(self) -> bool:
+        return self._runtime.settled()
+
     def _submit(
         self,
         transaction: SurfaceTransaction,

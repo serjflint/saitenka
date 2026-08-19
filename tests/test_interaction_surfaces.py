@@ -99,3 +99,43 @@ def test_a_deferred_reply_is_not_a_failure() -> None:
     overlay.pending[0]({"error": "deferred"})
 
     assert settled == [True]
+
+
+def test_a_slot_is_unsettled_until_its_paint_is_acknowledged() -> None:
+    """WP5.5's deterministic capture: "staged" and "on screen" are different states, and a
+    screenshot taken between them photographs whatever was there before."""
+    overlay = FakeOverlay()
+    surfaces = InteractionSurfaces(overlay)
+    assert surfaces.settled()  # nothing requested yet
+
+    surfaces.present_bgra(view(), 0, 0, oid=OID)
+    assert not surfaces.settled()
+
+    overlay.pending[0]({"error": "success"})
+    assert surfaces.settled()
+
+
+def test_a_refused_paint_settles_too() -> None:
+    """Settled means answered, not succeeded. A capture waiting for success would hang forever on
+    a slot mpv refused, which is the failure mode the deadline exists to bound — not to hide."""
+    overlay = FakeOverlay()
+    surfaces = InteractionSurfaces(overlay)
+    surfaces.present_bgra(view(), 0, 0, oid=OID)
+
+    overlay.pending[0]({"error": "unsupported format"})
+
+    assert surfaces.settled()
+
+
+def test_one_unsettled_slot_holds_the_whole_surface_back() -> None:
+    """A capture is a photograph of everything, so any pending slot means the frame is not ready."""
+    overlay = FakeOverlay()
+    surfaces = InteractionSurfaces(overlay)
+    surfaces.present_bgra(view(), 0, 0, oid=OID)
+    surfaces.present_bgra(view(), 0, 0, oid=OID + 1)
+
+    overlay.pending[0]({"error": "success"})
+
+    assert not surfaces.settled()
+    overlay.pending[1]({"error": "success"})
+    assert surfaces.settled()

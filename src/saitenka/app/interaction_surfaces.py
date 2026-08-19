@@ -64,6 +64,9 @@ class InteractionSurfaces:
     def snapshot(self, oid: int):
         return self._runtime.snapshot(str(oid))
 
+    def settled(self) -> bool:
+        return self._runtime.settled()
+
     def _finish(
         self,
         transaction: SurfaceTransaction,
