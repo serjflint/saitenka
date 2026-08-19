@@ -2896,6 +2896,23 @@ class Reader:
         if publish is not None:
             publish(event)
 
+    def hold_sidebar_scroll(self, seconds: float) -> bool:
+        """Arm the deadline that releases the sidebar's manual-scroll hold, resuming auto-follow.
+
+        The due event runs `sidebar.update` rather than only clearing the flag: a hold that expires
+        while the cue has not moved would otherwise leave the sidebar off-target until the next cue
+        happened to arrive.
+        """
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        def released() -> None:
+            self.sidebar.manual_hold = False
+            sidebar.update(self)
+
+        return self.lifecycle_timers.schedule(
+            LifecycleTimerKind.SIDEBAR_MANUAL_HOLD, seconds, released
+        )
+
     def schedule_flash_expiry(self) -> bool:
         """Arm the deadline that ends a copy-flash pulse. A second flash supersedes the first,
         which `LifecycleTimers` fences by revision so only the latest due event lands."""

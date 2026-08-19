@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -33,7 +32,9 @@ class SidebarState:
     open: bool = False
     view: str = "track"
     scroll: int = 0
-    manual_until: float = 0.0  # while >now, honour the user's manual scroll over auto-follow
+    #: Honour the user's manual scroll over auto-follow until its deadline lands. A flag, not
+    #: a timestamp: the deadline owns when the hold ends, so nothing here reads a clock.
+    manual_hold: bool = False
     last_active: int = -1
     total: int = 0
     rect: tuple[int, int, int, int] | None = None
@@ -393,7 +394,9 @@ def scroll(reader: Reader, steps: int) -> bool:
     reader.sidebar.scroll = max(
         0, min(maximum, reader.sidebar.scroll + steps * ROWS_PER_WHEEL_STEP)
     )
-    reader.sidebar.manual_until = time.monotonic() + MANUAL_SCROLL_HOLD
+    # Fails closed: a hold that cannot be released would suppress auto-follow for the rest of
+    # the session, which is worse than a manual scroll the next cue scrolls away from.
+    reader.sidebar.manual_hold = reader.hold_sidebar_scroll(MANUAL_SCROLL_HOLD)
     redraw(reader)
     return True
 
@@ -406,14 +409,14 @@ def update(reader: Reader) -> None:
     active = _active_index(reader)
     geometry = (reader.osd, id(reader._sub_index), reader.subtitle_language, id(reader.scorer))
     changed = active != reader.sidebar.last_active or geometry != reader.sidebar.geometry
-    if not changed and time.monotonic() < reader.sidebar.manual_until:
+    if not changed and reader.sidebar.manual_hold:
         return
     capacity = _capacity(reader)
     old_scroll = reader.sidebar.scroll
     visible = reader.sidebar.scroll <= active < reader.sidebar.scroll + capacity
-    if active >= 0 and (time.monotonic() >= reader.sidebar.manual_until or visible):
+    if active >= 0 and (not reader.sidebar.manual_hold or visible):
         reader.sidebar.scroll = max(0, active - capacity // 2)
-        reader.sidebar.manual_until = 0.0
+        reader.sidebar.manual_hold = False
     reader.sidebar.last_active = active
     reader.sidebar.geometry = geometry
     if changed or old_scroll != reader.sidebar.scroll:

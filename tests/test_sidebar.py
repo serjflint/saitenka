@@ -23,12 +23,33 @@ class FakeIPC:
     def __init__(self, props=None):
         self.props = props or {}
         self.commands = []
+        #: The runtime timer port, wired for this file only. The sidebar's manual-scroll hold is a
+        #: named deadline now, and it fails closed — a fake without the port would exercise the
+        #: no-hold arm and quietly stop testing the hold at all.
+        self.timers: dict[str, tuple] = {}
 
     def command(self, *args):
         self.commands.append(args)
         if args[0] == "get_property":
             return {"data": self.props.get(args[1])}
         return {"data": None}
+
+    def schedule_runtime_timer(self, *, timer, identity, on_finished, **_kwargs) -> bool:
+        self.timers[timer] = (identity, on_finished)
+        return True
+
+    def cancel_runtime_timer(self, timer: str) -> bool:
+        return self.timers.pop(timer, None) is not None
+
+    def fire_runtime_timer(self, timer: str) -> bool:
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        entry = self.timers.pop(timer, None)
+        if entry is None:
+            return False
+        identity, on_finished = entry
+        on_finished(EffectFinished(EffectId(0), Owner.SESSION, identity, EffectOutcome.SUCCEEDED))
+        return True
 
 
 class FakeOverlay:
@@ -84,10 +105,10 @@ def test_active_row_uses_timing_to_disambiguate_repeated_text():
 
 
 def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
-    reader, _ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
+    """The hold ends on its own deadline, and that deadline re-runs the follow itself. Waiting for
+    the next `update` would leave the sidebar off-target for as long as the cue happened to last."""
+    reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
     calls = _capture_render(monkeypatch)
-    now = [10.0]
-    monkeypatch.setattr(sidebar.time, "monotonic", lambda: now[0])
     sidebar.toggle(reader)
     reader.sidebar.rect = (900, 50, 360, 600)
 
@@ -98,8 +119,8 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     assert reader.sidebar.scroll == held_scroll
 
     before_expiry = len(calls)
-    now[0] = 12.0
-    sidebar.update(reader)
+    assert ipc.fire_runtime_timer("lifecycle:sidebar-manual-hold")
+
     assert reader.sidebar.scroll == 14
     assert len(calls) == before_expiry + 1
 

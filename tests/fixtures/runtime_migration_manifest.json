@@ -222,14 +222,6 @@
     ],
     [
       "polled-deadline",
-      "src/saitenka/app/sidebar.py::scroll"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/sidebar.py::update"
-    ],
-    [
-      "polled-deadline",
       "src/saitenka/app/tooltip.py::_linger_nested"
     ],
     [

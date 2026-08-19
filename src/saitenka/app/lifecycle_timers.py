@@ -21,6 +21,7 @@ class LifecycleTimerKind(StrEnum):
     LOADING_FRAME = "loading-frame"
     TOAST_EXPIRY = "toast-expiry"
     FLASH_EXPIRY = "flash-expiry"
+    SIDEBAR_MANUAL_HOLD = "sidebar-manual-hold"
 
 
 @dataclass(frozen=True, slots=True)
