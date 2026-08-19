@@ -3207,3 +3207,35 @@ def test_a_sub_rendering_option_does_not_resize_anything():
 
     assert redraws == []
     r.close()
+
+
+def test_capability_probes_refresh_on_their_own_deadline(monkeypatch):
+    """The tick asked TTL-gated probes 40x a second, almost always to be told "not yet". A deadline
+    asks far less often and, unlike a tick, keeps asking in a runtime that has none."""
+    ipc = RuntimeFakeIPC()
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    applied = []
+    monkeypatch.setattr(r, "_apply_capabilities", lambda: applied.append(1))
+
+    r.arm_capability_refresh(0.5)
+
+    assert applied == []  # arming is not asking
+    assert ipc.fire_runtime_timer("lifecycle:capability-refresh")
+    assert len(applied) == 1
+    assert ipc.fire_runtime_timer("lifecycle:capability-refresh")  # re-armed itself
+    assert len(applied) == 2
+    r.close()
+
+
+def test_the_sidebar_follows_the_cue_where_the_cue_settles(monkeypatch):
+    """The active row tracks the cue, so it re-follows at the settle boundary rather than being
+    asked every tick whether the cue moved."""
+    ipc = RuntimeFakeIPC()
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    follows = []
+    monkeypatch.setattr(C.sidebar, "update", follows.append)
+
+    r._settle_cue_observation()
+
+    assert follows == [r]
+    r.close()

@@ -2651,12 +2651,7 @@ class Reader:
             log.error("script-message failed (%s): %s", result.error_type, command.name)
 
     def _build_tick_pipeline(self) -> TickPipeline:
-        return TickPipeline(
-            (
-                TickStage("apply-background-results", self._apply_background_results),
-                TickStage("update-interaction", self._update_interaction),
-            )
-        )
+        return TickPipeline((TickStage("update-interaction", self._update_interaction),))
 
     def _redraw_after_resize(self) -> None:
         """Re-lay everything the window size decides, after an `osd-dimensions` change.
@@ -2670,10 +2665,7 @@ class Reader:
                 self._draw_subtitle()
             help_overlay.redraw(self)
             analysis_overlay.redraw(self)
-
-    def _apply_background_results(self) -> None:
-        self._apply_capabilities()
-        sidebar.update(self)
+            sidebar.update(self)  # row capacity changed, so the active row may need re-centring
 
     def _apply_capabilities(self) -> None:
         if self._tts_capability is not None:
@@ -3037,6 +3029,11 @@ class Reader:
         sub-start and sub-end observations; the projection publishes each (it sees one observation
         at a time and has no batch), so reconciling per delta would build the cue three times, twice
         against a half-updated identity. The drain is where the batch exists, so it coalesces."""
+        # The sidebar's active row follows the cue, so it re-follows at the drain boundary rather
+        # than being asked 40x a second whether the cue moved. Unconditional, and outside the
+        # early return below: it also tracks the loaded index, language and scorer, and those
+        # change without a cue settling. It costs a flag check while the sidebar is shut.
+        sidebar.update(self)
         cue, self._pending_cue = self._pending_cue, None
         # A reconcile that decides to do nothing used to be as silent as a geometry schedule that
         # never started; the two together are what make a dropped cue traceable.
@@ -3110,6 +3107,25 @@ class Reader:
         publish = getattr(self.ipc, "publish_legacy_command_outcome", None)
         if publish is not None:
             publish(event)
+
+    def arm_capability_refresh(self, seconds: float = 0.5) -> None:
+        """Keep asking whether the optional services have come up, on a deadline of its own.
+
+        The probes are TTL-gated, so the tick's 25 ms cadence was almost entirely no-op calls into
+        a lock. Half a second is far below any TTL and costs nothing; what matters is that a
+        service appearing mid-session is still noticed without a tick to notice it.
+
+        The read stays on the session turn rather than being pushed from the probe's terminal: a
+        probe without the runtime lane falls back to its own thread, and letting that thread run
+        `_request_mined_seed` would mutate reader state from off the turn.
+        """
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        def due() -> None:
+            self._apply_capabilities()
+            self.arm_capability_refresh(seconds)
+
+        self.lifecycle_timers.schedule(LifecycleTimerKind.CAPABILITY_REFRESH, seconds, due)
 
     def arm_deps_ready(self) -> bool:
         """Hand a finished background dep build to the session turn.
@@ -3345,6 +3361,7 @@ class Reader:
                 self._register_keybinds()
             self._seed_mined()
             session_stats.start(self)
+            self.arm_capability_refresh()
             telemetry.set_gauge_provider(
                 self._telemetry_gauges
             )  # no-op unless telemetry is configured

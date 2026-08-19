@@ -1354,10 +1354,6 @@
     ],
     [
       "tick-stage",
-      "src/saitenka/app/controller.py::Reader._apply_background_results"
-    ],
-    [
-      "tick-stage",
       "src/saitenka/app/controller.py::Reader._update_interaction"
     ],
     [
