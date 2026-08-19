@@ -238,3 +238,24 @@ def test_manifest_rejects_deleted_added_and_moved_lifecycle_duties() -> None:
     moved["entrypoints"][0]["source"] = "src/saitenka/app/controller.py::Reader.run"
     problems = checker.failures(moved, actual, symbols, evidence)
     assert any(item.startswith("run-owned-player:") for item in problems["missing_evidence"])
+
+
+def test_scanner_separates_a_deadline_field_from_a_call_that_ends_in_until() -> None:
+    """`SessionRunner.run_until` is the shape WP5.5 mandates, and the `*_until` heuristic — written
+    for deadline fields like `manual_until` — read its name as the thing it replaces."""
+    checker = _module()
+    scanner = checker.Scanner("src/saitenka/app/planted.py")
+    scanner.visit(
+        ast.parse(
+            """
+def waits(self, runner):
+    return runner.run_until(lambda: True, deadline=None)
+
+def polls(self):
+    return self.manual_until
+"""
+        )
+    )
+
+    assert checker.Debt("polled-deadline", "src/saitenka/app/planted.py::waits") not in scanner.debt
+    assert checker.Debt("polled-deadline", "src/saitenka/app/planted.py::polls") in scanner.debt

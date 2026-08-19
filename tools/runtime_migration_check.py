@@ -102,6 +102,9 @@ class Scanner(ast.NodeVisitor):
         self.evidence: dict[str, set[str]] = {}
         self.call_order: dict[str, list[str]] = {}
         self.monotonic_locals: list[set[str]] = []
+        #: Attribute nodes that are a call's target. Keyed by identity because the AST has
+        #: no parent links and `visit_Call` runs before the walk reaches its own `func`.
+        self.called_attributes: set[int] = set()
 
     def _symbol(self) -> str:
         return ".".join(self.stack) or "<module>"
@@ -147,6 +150,11 @@ class Scanner(ast.NodeVisitor):
         self.stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute):
+            # A called `*_until` is a method, not a stored deadline. `SessionRunner.run_until` is
+            # the shape WP5.5 mandates, so the name heuristic below must not read it as the thing
+            # it replaces.
+            self.called_attributes.add(id(node.func))
         called = _dotted(node.func)
         if called:
             facts = self.evidence.setdefault(self._source(), set())
@@ -173,7 +181,11 @@ class Scanner(ast.NodeVisitor):
         dotted = _dotted(node)
         if dotted:
             self.evidence.setdefault(self._source(), set()).add(f"ref:{dotted}")
-        if node.attr.endswith("_until") and self._source() not in _AUTONOMOUS_DEADLINES:
+        if (
+            node.attr.endswith("_until")
+            and id(node) not in self.called_attributes
+            and self._source() not in _AUTONOMOUS_DEADLINES
+        ):
             self.debt.add(Debt("polled-deadline", self._source()))
         self.generic_visit(node)
 

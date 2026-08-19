@@ -372,20 +372,30 @@ class CueAnnotationCoordinator:
         deadline: float | None,
         drive: Callable[[float | None], None] | None,
     ) -> TokenizedCue:
-        while True:
+        from saitenka.runtime.runner import SessionRunner
+
+        def settled() -> bool:
             with self._condition:
-                if key not in self._jobs or self._closed:
-                    cached = self._cache.get(key)
-                    if cached is None:
-                        raise RuntimeError("cue annotation failed")
-                    return cached
-                remaining = None if deadline is None else deadline - time.monotonic()
-                if remaining is not None and remaining <= 0:
-                    raise TimeoutError("cue annotation did not complete")
-                if drive is None:
-                    self._condition.wait(remaining)
-                    continue
-            drive(remaining)
+                return key not in self._jobs or self._closed
+
+        def sleep(timeout: float | None) -> None:
+            """The step when nobody is driving a session: wait to be notified by the worker."""
+            with self._condition:
+                if key in self._jobs and not self._closed:
+                    self._condition.wait(timeout)
+
+        # One loop for both modes; only the step differs — pump the caller's session, or wait on
+        # the worker. Keeping a second hand-rolled wait here is how the two drift, and it put the
+        # deadline arithmetic back in a feature after the migration had finished removing it.
+        if not SessionRunner(drive or sleep).run_until(settled, deadline=deadline):
+            raise TimeoutError("cue annotation did not complete")
+        return self._settled_result(key)
+
+    def _settled_result(self, key: AnnotationWorkKey) -> TokenizedCue:
+        cached = self._cache.get(key)
+        if cached is None:
+            raise RuntimeError("cue annotation failed")
+        return cached
 
     def close(self, timeout: float = 1.0) -> None:
         del timeout
