@@ -1509,7 +1509,7 @@ class Reader:
     def _draw_subtitle(self) -> None:
         self.subtitle_pipeline.draw_current(self)
         if self.native_geometry is not None:
-            self.native_geometry.sync_pixel_owner(self)
+            self.native_geometry.sync_pixel_owner(self.subtitle_pipeline.renderer)
 
     def _clear_native_interaction(self) -> None:
         self._teardown_tip()

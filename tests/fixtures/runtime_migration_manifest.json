@@ -246,10 +246,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._install_snapshot"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._observation_key"
     ],
     [
@@ -274,10 +270,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._snapshot_identities_are_valid"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.apply"
     ],
     [
@@ -299,10 +291,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.set_source"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.sync_pixel_owner"
     ],
     [
       "reader-parameter",

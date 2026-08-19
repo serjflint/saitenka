@@ -280,8 +280,7 @@ class NativeSubtitleGeometry:
             + self._last_selection.skipped_unpaintable
         )
 
-    def sync_pixel_owner(self, reader: Reader) -> None:
-        renderer = reader.subtitle_pipeline.renderer
+    def sync_pixel_owner(self, renderer) -> None:
         ownership = getattr(renderer, "ownership_state", None)
         owner = getattr(getattr(ownership, "owner", None), "value", self._owner)
         if owner != self._owner:
@@ -1102,19 +1101,37 @@ class NativeSubtitleGeometry:
         )
 
     @staticmethod
-    def _snapshot_identities_are_valid(reader: Reader, snapshot: GeometrySnapshot) -> bool:
+    def _snapshot_identities_are_valid(snapshot: GeometrySnapshot, token_count: int) -> bool:
+        """Whether a worker's geometry can be painted against the cue currently tokenized.
+
+        Each guard rejects a different way the snapshot and the cue can disagree: a repeated token
+        index would paint one box twice; an event the frame no longer lists is geometry for a cue
+        that has gone; and an index past ``token_count`` is a box for a token this cue does not
+        have. Any of them paints a hit region over the wrong word.
+
+        There was a fourth, rejecting a repeated ``(event, token)`` pair. It could never fire:
+        equal pairs have equal indices, so the index guard already rejected them.
+        """
         identities = [(item.event_id, item.token_index) for item in snapshot.tokens]
         indices = [token_index for _event_id, token_index in identities]
         active_events = set(snapshot.frame_id.active_event_ids)
         return bool(
-            len(identities) == len(set(identities))
-            and len(indices) == len(set(indices))
+            len(indices) == len(set(indices))
             and all(event_id in active_events for event_id, _token_index in identities)
-            and all(0 <= index < len(reader.tokens) for index in indices)
+            and all(0 <= index < token_count for index in indices)
         )
 
-    def _install_snapshot(self, reader: Reader, snapshot: GeometrySnapshot) -> None:
-        reader.boxes = [
+    def _install_snapshot(self, snapshot: GeometrySnapshot) -> list[WordBox]:
+        """Retain ``snapshot`` and return its boxes; the caller owns writing them onto the host.
+
+        The origin is the caller's to set to (0, 0) alongside: these boxes are already in frame
+        coordinates, so a leftover subtitle origin would offset every hit region by it.
+        """
+        self._last_snapshot = snapshot
+        if self._pending_key is not None and self._pending_key[0] == snapshot.generation:
+            self._published_key = self._pending_key[1]
+        self._pending_key = None
+        return [
             WordBox(
                 item.token_index,
                 item.bounds.x,
@@ -1124,11 +1141,6 @@ class NativeSubtitleGeometry:
             )
             for item in snapshot.tokens
         ]
-        reader.sub_origin = (0, 0)
-        self._last_snapshot = snapshot
-        if self._pending_key is not None and self._pending_key[0] == snapshot.generation:
-            self._published_key = self._pending_key[1]
-        self._pending_key = None
 
     def _record_ready_latency(self, generation: int) -> None:
         if (
@@ -1148,10 +1160,11 @@ class NativeSubtitleGeometry:
             return False
         if snapshot is self._last_snapshot:
             return False
-        if not self._snapshot_identities_are_valid(reader, snapshot):
+        if not self._snapshot_identities_are_valid(snapshot, len(reader.tokens)):
             self._degrade_geometry(reader, "geometry-token-identity-invalid")
             return False
-        self._install_snapshot(reader, snapshot)
+        reader.boxes = self._install_snapshot(snapshot)
+        reader.sub_origin = (0, 0)
         self._record_ready_latency(snapshot.generation)
         if not reader._use_native_subtitle_renderer():
             if reader._native_ownership_undecided():

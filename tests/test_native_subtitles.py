@@ -2334,3 +2334,78 @@ def test_a_delay_that_runs_the_clock_before_the_file_starts_is_rejected():
         _subtitle_clock(1.0, 5.0, None)
 
     assert _subtitle_clock(5.0, 5.0, None)[2] == 0.0  # exactly zero is fine
+
+
+def _snapshot(pairs, active=None):
+    """A geometry snapshot carrying exactly `pairs` of (event_id, token_index)."""
+    from saitenka.subtitles.document import (
+        SubtitleEventId,
+        SubtitleFrameId,
+        SubtitleTrackId,
+    )
+
+    track = SubtitleTrackId("track")
+    listed = pairs if active is None else active
+    numbers = {p[0] for p in pairs} | {p[0] for p in listed}
+    events = {n: SubtitleEventId(track, n * 1000, n * 1000 + 900, 0, n) for n in numbers}
+    frame = SubtitleFrameId(track, tuple(events[n] for n in sorted({p[0] for p in listed})))
+    return GeometrySnapshot(
+        1,
+        track,
+        frame,
+        0,
+        "full",
+        tuple(
+            TokenGeometry(events[event], index, Rect(index * 60, 600, 50, 40))
+            for event, index in pairs
+        ),
+    )
+
+
+def _valid(snapshot, token_count: int) -> bool:
+    from saitenka.app.native_subtitles import NativeSubtitleGeometry
+
+    return NativeSubtitleGeometry._snapshot_identities_are_valid(snapshot, token_count)
+
+
+def test_geometry_matching_the_tokenized_cue_is_installable():
+    assert _valid(_snapshot([(0, 0), (0, 1), (1, 2)]), token_count=3)
+
+
+def test_a_live_cue_with_no_paintable_tokens_is_installable():
+    """A cue that is on screen but tokenized to nothing paintable (punctuation only) is a real
+    state, not a malformed snapshot — every guard vacuously holds. It cannot be expressed as a frame
+    with no events: `SubtitleFrameId` rejects that, so an on-screen cue always lists one."""
+    assert _valid(_snapshot([], active=[(0, 0)]), token_count=0)
+
+
+def test_a_repeated_token_index_is_rejected():
+    """Two boxes for one token: whichever lands second wins the hit test, so a click on that word
+    can resolve to geometry the other box drew."""
+    assert not _valid(_snapshot([(0, 0), (1, 0)]), token_count=2)
+
+
+def test_a_repeated_event_and_token_pair_is_rejected():
+    assert not _valid(_snapshot([(0, 0), (0, 0)]), token_count=2)
+
+
+def test_geometry_for_an_event_the_frame_no_longer_lists_is_rejected():
+    """The overlapping-cue case: the snapshot carries boxes for a cue that has since ended, and
+    painting them puts hit regions over words that are no longer on screen."""
+    stale = _snapshot([(0, 0), (1, 1)], active=[(0, 0)])
+
+    assert not _valid(stale, token_count=2)
+
+
+@pytest.mark.parametrize("index", [-1, 2, 99])
+def test_a_token_index_outside_the_cue_is_rejected(index: int):
+    """The snapshot and the tokenizer disagree about how many tokens this cue has — the exact shape
+    a mid-flight cue change produces, and the one that would index past `reader.tokens`."""
+    assert not _valid(_snapshot([(0, index)]), token_count=2)
+
+
+def test_the_bound_is_the_token_count_not_the_box_count():
+    """Two boxes against a one-token cue is out of range, even though the indices are unique and the
+    events are live — the count that matters is the cue's, not the snapshot's."""
+    assert _valid(_snapshot([(0, 0), (0, 1)]), token_count=2)
+    assert not _valid(_snapshot([(0, 0), (0, 1)]), token_count=1)
