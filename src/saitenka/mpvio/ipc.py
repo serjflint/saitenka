@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 
         def publish_legacy_outcome(self, outcome: CommandHandled) -> None: ...
 
+        def publish_session_event(self, event) -> bool: ...
+
         def submit_mpv(self, **kwargs) -> bool: ...
 
         def schedule_timer(self, **kwargs) -> bool: ...
@@ -568,6 +570,13 @@ class MpvIPC:
         gateway = self._runtime_gateway
         if gateway is not None:
             gateway.dispatch_terminal(completion)
+
+    def publish_runtime_event(self, event) -> bool:
+        """Announce a session fact to the runtime. False when no gateway owns this session."""
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.publish_session_event(event)
 
     def submit_runtime_mpv(self, **kwargs) -> bool:
         gateway = self._runtime_gateway

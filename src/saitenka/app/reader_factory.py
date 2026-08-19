@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
     from saitenka.app.controller import Reader
-    from saitenka.app.loading import StartupHintLease
     from saitenka.app.profiles import Profile
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
     from saitenka.mpvio.ipc import MpvIPC
@@ -33,7 +32,6 @@ def create_reader(
     options: ReaderOptions | None = None,
     renderer: SubtitleRenderer | NullRenderer | None = None,
     profile: Profile | None = None,
-    startup_hint_lease: StartupHintLease | None = None,
     tokenizer_warm: Future[None] | None = None,
 ) -> Reader:
     from saitenka.app.config import ReaderOptions
@@ -50,7 +48,6 @@ def create_reader(
         options=options,
         renderer=renderer,
         profile=profile,
-        startup_hint_lease=startup_hint_lease,
         tokenizer_warm=tokenizer_warm,
         # This factory is the composition layer, so it is where the correlated-command port is
         # resolved. A session assembled here uses gateway egress; a Reader built directly (tests,

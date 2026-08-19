@@ -876,7 +876,8 @@
       "target": "session-lifecycle",
       "work_package": "2",
       "replacement": "SessionStarted -> ValidateRenderContext",
-      "test": "startup rejects unsupported render threads before readiness"
+      "test": "startup rejects unsupported render threads before readiness",
+      "migrated": false
     },
     {
       "id": "initial-render-space",
@@ -887,7 +888,8 @@
       "target": "mpv-gateway/playback-projection",
       "work_package": "1,4",
       "replacement": "RawMpvEvent -> PlaybackProjection",
-      "test": "initial replay publishes one coherent render-space revision"
+      "test": "initial replay publishes one coherent render-space revision",
+      "migrated": false
     },
     {
       "id": "observers-and-replay",
@@ -898,7 +900,8 @@
       "target": "mpv-gateway",
       "work_package": "1,2",
       "replacement": "RegisterObservers -> ObserverReplayCompleted",
-      "test": "reconnect replays every observer once before feature events"
+      "test": "reconnect replays every observer once before feature events",
+      "migrated": false
     },
     {
       "id": "bindings-and-input-sections",
@@ -909,7 +912,8 @@
       "target": "command-and-interaction-reducers",
       "work_package": "2,5",
       "replacement": "BindingIntent -> MpvCommand",
-      "test": "first client message is accepted before readiness clears"
+      "test": "first client message is accepted before readiness clears",
+      "migrated": false
     },
     {
       "id": "mined-seed-and-capabilities",
@@ -923,7 +927,8 @@
       "target": "external-io-lanes",
       "work_package": "3,5",
       "replacement": "StartCapabilityJobs -> JobOutcome",
-      "test": "late capability results cannot mutate a retired episode"
+      "test": "late capability results cannot mutate a retired episode",
+      "migrated": false
     },
     {
       "id": "session-history",
@@ -934,7 +939,8 @@
       "target": "session-reducer",
       "work_package": "5",
       "replacement": "SessionStarted -> SessionPersistDue",
-      "test": "playback transitions accrue once and close persists the remainder"
+      "test": "playback transitions accrue once and close persists the remainder",
+      "migrated": false
     },
     {
       "id": "telemetry-and-startup-health",
@@ -947,19 +953,21 @@
       "target": "lifecycle-diagnostics",
       "work_package": "2",
       "replacement": "RuntimeTurn -> DiagnosticEffect",
-      "test": "telemetry sampling cannot wake or mutate an idle runtime"
+      "test": "telemetry sampling cannot wake or mutate an idle runtime",
+      "migrated": false
     },
     {
       "id": "runtime-ready",
       "source": "src/saitenka/app/controller.py::Reader._mark_interactive_ready",
       "evidence": [
-        "call:self._startup_hint_lease.mark_ready",
+        "call:self.ipc.publish_runtime_event",
         "src/saitenka/app/controller.py::Reader.pump|call:self._mark_interactive_ready"
       ],
       "target": "lifecycle-readiness",
       "work_package": "5",
       "replacement": "StartupReady -> ClearStartupHint",
-      "test": "late hint acceptance clears exactly once after readiness"
+      "test": "late hint acceptance clears exactly once after readiness",
+      "migrated": true
     },
     {
       "id": "session-loop",
@@ -972,7 +980,8 @@
       "target": "session-runner",
       "work_package": "6",
       "replacement": "SessionMailbox.receive -> SessionReactor.handle",
-      "test": "idle runtime blocks with zero domain turns"
+      "test": "idle runtime blocks with zero domain turns",
+      "migrated": false
     }
   ],
   "close": [
@@ -1011,7 +1020,8 @@
       "target": "job-broker-lanes",
       "work_package": "3,5",
       "replacement": "CloseParticipantRequested -> CloseParticipantOutcome",
-      "test": "each admitted job retires or is quarantined before closed"
+      "test": "each admitted job retires or is quarantined before closed",
+      "migrated": false
     },
     {
       "id": "input-capture",
@@ -1022,7 +1032,8 @@
       "target": "interaction-close",
       "work_package": "5,6",
       "replacement": "ReleaseInputCapture -> MpvCommandOutcome",
-      "test": "close releases keys and mouse before gateway shutdown"
+      "test": "close releases keys and mouse before gateway shutdown",
+      "migrated": false
     },
     {
       "id": "subtitle-and-ownership",
@@ -1036,7 +1047,8 @@
       "target": "subtitle-close",
       "work_package": "4,6",
       "replacement": "CloseSubtitleRuntime -> SubtitleCloseOutcome",
-      "test": "close restores pixel ownership before presentation removal"
+      "test": "close restores pixel ownership before presentation removal",
+      "migrated": false
     },
     {
       "id": "session-and-stores",
@@ -1049,7 +1061,8 @@
       "target": "session-data-close",
       "work_package": "5,6",
       "replacement": "PersistSession -> DataCloseOutcome",
-      "test": "final accrual and stores close exactly once"
+      "test": "final accrual and stores close exactly once",
+      "migrated": false
     },
     {
       "id": "surfaces",
@@ -1060,7 +1073,8 @@
       "target": "surface-runtime-close",
       "work_package": "2,4,5,6",
       "replacement": "RemoveSurface -> SurfaceTransactionOutcome",
-      "test": "all stable surface slots are absent before gateway close"
+      "test": "all stable surface slots are absent before gateway close",
+      "migrated": false
     },
     {
       "id": "telemetry",
@@ -1071,7 +1085,8 @@
       "target": "lifecycle-close",
       "work_package": "2,6",
       "replacement": "DetachDiagnostics -> CloseStepOutcome",
-      "test": "diagnostic gauges detach without a post-close callback"
+      "test": "diagnostic gauges detach without a post-close callback",
+      "migrated": false
     },
     {
       "id": "temporary-artifacts",
@@ -1082,7 +1097,8 @@
       "target": "artifact-close",
       "work_package": "3,4,6",
       "replacement": "RemoveSessionArtifacts -> CloseStepOutcome",
-      "test": "temporary artifacts are removed after their providers stop or are quarantined"
+      "test": "temporary artifacts are removed after their providers stop or are quarantined",
+      "migrated": false
     },
     {
       "id": "transport",
@@ -1093,7 +1109,8 @@
       "target": "mpv-gateway-close",
       "work_package": "6",
       "replacement": "CloseGateway -> GatewayClosed",
-      "test": "transport is the final in-runtime close participant"
+      "test": "transport is the final in-runtime close participant",
+      "migrated": false
     }
   ],
   "entrypoints": [
@@ -1117,7 +1134,8 @@
       "target": "owned-session-composition",
       "work_package": "6",
       "replacement": "Closed -> OwnedProcessSupervisor.finalize",
-      "test": "owned run quits and kills before arming the watchdog"
+      "test": "owned run quits and kills before arming the watchdog",
+      "migrated": false
     },
     {
       "id": "attach-external-player",
@@ -1129,7 +1147,8 @@
       "target": "attached-session-composition",
       "work_package": "6",
       "replacement": "Closed -> detach transport only",
-      "test": "attach has no process-control capability"
+      "test": "attach has no process-control capability",
+      "migrated": false
     },
     {
       "id": "demo-owned-player",
@@ -1141,7 +1160,8 @@
       "target": "owned-session-composition",
       "work_package": "7",
       "replacement": "run_until DemoReady -> owned close",
-      "test": "demo waits for readiness and uses the owned terminal sequence"
+      "test": "demo waits for readiness and uses the owned terminal sequence",
+      "migrated": false
     },
     {
       "id": "screenshot-owned-player",
@@ -1154,7 +1174,8 @@
       "target": "owned-session-composition",
       "work_package": "7",
       "replacement": "run_until CaptureComplete -> owned close",
-      "test": "screenshot captures after readiness and uses the owned terminal sequence"
+      "test": "screenshot captures after readiness and uses the owned terminal sequence",
+      "migrated": false
     }
   ]
 }

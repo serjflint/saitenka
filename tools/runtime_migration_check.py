@@ -426,6 +426,7 @@ def failures(
                 "replacement",
                 "test",
                 "evidence",
+                "migrated",
             }:
                 schema.append(f"{group} duty has invalid fields: {duty.get('id', '<missing>')}")
             duty_id = duty.get("id")
@@ -546,7 +547,9 @@ def status() -> int:
         now = sum(1 for k, _ in live if k == kind)
         drift = "" if was == now else f"  ({now - was:+d} unblessed)"
         print(f"{kind:<{width}}  {now:>4}{drift}")
-    duties = sum(len(group) for group in duty_groups(manifest))
+    all_duties = [duty for group in duty_groups(manifest) for duty in group]
+    duties = len(all_duties)
+    migrated = sum(1 for duty in all_duties if duty.get("migrated") is True)
     print(f"{'':<{width}}  {'-' * 4}")
     print(f"{'total':<{width}}  {len(live):>4}   {duties} duties")
     terminal = {row for group in _TERMINAL_DEBT.values() for row in group}
@@ -555,6 +558,10 @@ def status() -> int:
         print(f"{'terminal/' + name:<{width}}  {len(group):>4}")
     print(f"{'WP5 converts':<{width}}  {len(live - terminal):>4}")
     print(f"{'WP5 exit':<{width}}  total == {TERMINAL_TOTAL}")
+    # The row census and the duty census measure different things, and only reporting the first is
+    # how "the migration is nearly done" gets said while nothing has moved onto the runtime.
+    print()
+    print(f"{'duties migrated':<{width}}  {migrated:>4} / {duties}")
     return 0
 
 

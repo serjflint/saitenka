@@ -159,6 +159,7 @@ from saitenka.runtime import (
     EffectFinished,
     EffectOutcome,
     Owner,
+    StartupReady,
     UserCommand,
     playback,
 )
@@ -171,7 +172,6 @@ if TYPE_CHECKING:
 
     from saitenka.app.card_preview import PreviewData
     from saitenka.app.dictionary import DictionarySet
-    from saitenka.app.loading import StartupHintLease
     from saitenka.app.render_cache import RenderCache
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.panel import Freq
@@ -339,7 +339,6 @@ class Reader:
         renderer: SubtitleRenderer | NullRenderer | None = None,
         geometry_backend: GeometryBackend | None = None,
         profile: Profile | None = None,
-        startup_hint_lease: StartupHintLease | None = None,
         tokenizer_warm: Future[None] | None = None,
         tts_ok: bool | None = None,  # noqa: FBT001 -- tri-state capability snapshot
         runtime_submit=None,
@@ -359,7 +358,6 @@ class Reader:
         self.interaction = InteractionContext()  # hover/tooltip/reveal-scoped state
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
-        self._startup_hint_lease = startup_hint_lease
         self._interactive_ready = False
         self._connection_ready = True
         # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
@@ -3279,7 +3277,12 @@ class Reader:
             if not self._connection_ready:
                 return True
             self._schedule_paused_nudge(ops_before)
-            self._mark_interactive_ready()
+            if self._mark_interactive_ready():
+                # A settlement published a session fact *after* this turn's drain, so the runtime
+                # would not see it until the next one — and "the first completed turn clears the
+                # startup hint" would quietly become "the second one does". Readiness latches, so
+                # this second drain happens exactly once per session, not once per turn.
+                self._drain_events(0.0)
             return True
         except (OSError, ValueError):
             return False
@@ -3500,23 +3503,23 @@ class Reader:
         elif oid == TIP_ID:
             self._render_tip_view()
 
-    def _mark_interactive_ready(self) -> None:
+    def _mark_interactive_ready(self) -> bool:
+        """Announce interactive readiness once. True when this call published the fact."""
         if self._interactive_ready:
-            return
+            return False
         if self._observing and self._playback.value("osd-dimensions") in (None, {}):
-            return
+            return False
         self._interactive_ready = True
         connected_at = getattr(self.ipc, "connected_at", None)
         with otel_metrics.traced(
             "startup.interactive_ready",
             cue_pending=str(self._sub_pending is not None).lower(),
             deps_pending=str(not self._dependencies_settled).lower(),
-            hint_owned=str(self._startup_hint_lease is not None).lower(),
         ) as span:
             if connected_at is not None:
                 span.set("since_ipc_ms", round((time.monotonic() - connected_at) * 1_000, 3))
-            if self._startup_hint_lease is not None:
-                self._startup_hint_lease.mark_ready()
+            self.ipc.publish_runtime_event(StartupReady())
+        return True
 
     def _apply_pending_deps(self) -> None:
         """Inject a finished background dep build, once, on the session turn."""
@@ -3698,8 +3701,6 @@ class Reader:
 
     def _on_ipc_reconnect(self) -> None:
         self.subtitle_pipeline.connection_replaced(self)
-        if self._startup_hint_lease is not None:
-            self._startup_hint_lease.connection_replaced()
 
     def close(self) -> CloseLedger:
         """Tear the session down. Every participant runs even if an earlier one raises.

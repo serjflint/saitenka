@@ -216,11 +216,11 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
 
 
 def test_owned_startup_hint_clears_after_the_first_completed_poll():
-    from saitenka.app.loading import show_startup_hint
+    from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
-    r = Reader(ipc, startup_hint_lease=lease)
+    install_session_reactor(runtime_gateway(ipc))
+    r = Reader(ipc)
     assert ("show-text", "", 1) not in ipc.commands
 
     assert r.pump() is True
@@ -233,10 +233,11 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll():
 
 
 def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch):
-    from saitenka.app.loading import show_startup_hint
+    from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
-    reader = Reader(ipc, startup_hint_lease=show_startup_hint(runtime_gateway(ipc)))
+    install_session_reactor(runtime_gateway(ipc))
+    reader = Reader(ipc)
     clear = ("show-text", "", 1)
     observed = []
     monkeypatch.setattr(
@@ -252,7 +253,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
 
 
 def test_unanswered_async_clear_does_not_delay_the_next_poll():
-    from saitenka.app.loading import show_startup_hint
+    from saitenka.app.session_routes import install_session_reactor
 
     class _AsyncFakeIPC(FakeIPC):
         def __init__(self):
@@ -267,10 +268,9 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll():
             return request
 
     ipc = _AsyncFakeIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
-    assert lease is not None
+    install_session_reactor(runtime_gateway(ipc))
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = Reader(ipc, startup_hint_lease=lease)
+    reader = Reader(ipc)
 
     assert reader.pump() is True
     assert ("show-text", "", 1) in ipc.commands

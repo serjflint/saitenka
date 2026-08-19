@@ -33,6 +33,8 @@ from saitenka.runtime.events import (
     EventOrigin,
     RawMpvEvent,
     RuntimeEvent,
+    StartupHintRequested,
+    StartupReady,
     UserCommand,
 )
 from saitenka.runtime.jobs import JobBroker, JobLanePolicy
@@ -138,6 +140,8 @@ __all__ = [
     "SessionReducer",
     "SessionState",
     "SourceChanged",
+    "StartupHintRequested",
+    "StartupReady",
     "StopSession",
     "SubmitJob",
     "SubtitleSelectionChanged",

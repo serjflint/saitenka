@@ -463,16 +463,16 @@ def _launch_mpv_and_connect(
             from saitenka.app.procutil import kill_process_tree
 
             kill_process_tree(proc)
-            return None, None, None
+            return None, None
     from saitenka.mpvio.gateway import install_legacy_gateway
 
     gateway = install_legacy_gateway(ipc)
     # Immediate feedback for the file-load wait: our overlay isn't built yet and the next steps block
     # the main thread on mpv, so mpv's own OSD is the only surface that can show anything here.
-    from saitenka.app.loading import show_startup_hint
+    from saitenka.app.session_routes import install_session_reactor
 
-    startup_hint_lease = show_startup_hint(gateway, screenshot=opts.screenshot)
-    return proc, ipc, startup_hint_lease
+    install_session_reactor(gateway, startup_hint=not opts.screenshot)
+    return proc, ipc
 
 
 def _build_run_options(cfg: dict, flags: RunFlags):
@@ -1076,7 +1076,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
     )
 
-    proc, ipc, startup_hint_lease = _launch_mpv_and_connect(
+    proc, ipc = _launch_mpv_and_connect(
         cfg,
         tmp,
         video_path,
@@ -1134,7 +1134,6 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 services=ReaderServices(scorer, anki, mine_conf, dict_set, tts_available()),
                 options=opts,
                 profile=active_profile,
-                startup_hint_lease=startup_hint_lease,
                 tokenizer_warm=tokenizer_warm,
             )
         else:
@@ -1144,7 +1143,6 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 ipc,
                 options=opts,
                 profile=active_profile,
-                startup_hint_lease=startup_hint_lease,
                 tokenizer_warm=tokenizer_warm,
             )
         reader.set_profile_cycle(

@@ -335,6 +335,11 @@ class FakeIPC:
         if self._runtime_gateway is not None:
             self._runtime_gateway.dispatch_terminal(completion)
 
+    def publish_runtime_event(self, event) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.publish_session_event(event)
+
     def submit_runtime_mpv(self, **kwargs) -> bool:
         if self._runtime_gateway is not None:
             return self._runtime_gateway.submit_mpv(**kwargs)

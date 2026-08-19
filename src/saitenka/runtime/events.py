@@ -40,6 +40,16 @@ class CloseRequested:
 
 
 @dataclass(frozen=True, slots=True)
+class StartupHintRequested:
+    """IPC is up: post the one thing that can be seen before any overlay exists."""
+
+
+@dataclass(frozen=True, slots=True)
+class StartupReady:
+    """The session completed a turn that leaves it interactive — the hint has done its job."""
+
+
+@dataclass(frozen=True, slots=True)
 class RawMpvEvent:
     name: str
     data: object = None
@@ -147,6 +157,8 @@ type RuntimeEvent = (
     | ConnectionReplaced
     | CloseRequested
     | RawMpvEvent
+    | StartupHintRequested
+    | StartupReady
     | UserCommand
     | CommandHandled
     | EffectFinished

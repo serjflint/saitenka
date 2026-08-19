@@ -217,6 +217,32 @@ class MpvGateway:
         """
         self._router.observe(reactor)
 
+    def publish_session_event(self, event: RuntimeEvent) -> bool:
+        """Put a session-lifecycle fact on the mailbox for the reactor to route.
+
+        Lifecycle traffic, not normal: these are session-shaped announcements ("we are ready"),
+        and the normal lane is sized for the mpv event stream that can flood it.
+        """
+        with self._lock:
+            if self._closed:
+                return False
+        try:
+            self._mailbox.publish(
+                event,
+                origin=EventOrigin.LIFECYCLE,
+                traffic=TrafficClass.LIFECYCLE,
+                connection_epoch=self.connection_epoch,
+            )
+        except MailboxFull:
+            return False
+        return True
+
+    def dispatch_effect(self, effect) -> bool:
+        """Perform one reactor-issued effect. Only the kinds an owner has actually migrated."""
+        if isinstance(effect, SendMpvCommand):
+            return self.dispatch(effect)
+        return False
+
     @property
     def connection_epoch(self) -> int:
         with self._lock:

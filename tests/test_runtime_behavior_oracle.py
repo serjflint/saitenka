@@ -10,7 +10,7 @@ from util import FakeIPC, runtime_gateway
 
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
-from saitenka.app.loading import show_startup_hint
+from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.mpvio.ipc import IPCRequest
@@ -38,10 +38,9 @@ class _AsyncHintIPC(FakeIPC):
 
 def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch) -> None:
     ipc = _AsyncHintIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
-    assert lease is not None
+    install_session_reactor(runtime_gateway(ipc))
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = Reader(ipc, startup_hint_lease=lease, renderer=NullRenderer())
+    reader = Reader(ipc, renderer=NullRenderer())
     dispatched: list[bool] = []
     monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
