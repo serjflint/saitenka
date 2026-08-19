@@ -2237,8 +2237,14 @@ class Reader:
         from saitenka.app.subtitles import box_for_token
         from saitenka.model import is_ideograph
 
+        # The pause policy is read whether or not a word is hovered: toggling it is what a user
+        # does before hovering anything, so an early return on "nothing hovered" would silently
+        # hand the reducer a default of False and flip the setting the wrong way.
         if not 0 <= self.hover < len(self.tokens):
-            return hover_intents.HoverInputs()
+            return hover_intents.HoverInputs(
+                pause_on_tooltip=self.pause_on_tooltip,
+                paused_by_tooltip=self._paused_by_tip,
+            )
         token = self.tokens[self.hover]
         return hover_intents.HoverInputs(
             hovered=True,
@@ -2249,6 +2255,8 @@ class Reader:
             kanji_index=self._kanji_index,
             has_dictionaries=self.dict_set is not None,
             anchored=box_for_token(self.boxes, self.hover) is not None,
+            pause_on_tooltip=self.pause_on_tooltip,
+            paused_by_tooltip=self._paused_by_tip,
         )
 
     def _run_hover_command(self, command: hover_intents.HoverCommand) -> None:
@@ -2269,6 +2277,11 @@ class Reader:
             origin_x, origin_y = self.sub_origin
             self._kanji_index += 1
             self._open_kanji(effect.char, origin_x + box.x, origin_y + box.y, box.h)
+        elif isinstance(effect, hover_intents.SetHoverPause):
+            self.pause_on_tooltip = effect.enabled
+        elif isinstance(effect, hover_intents.ResumePlayback):
+            self.ipc.command("set_property", "pause", False)  # noqa: FBT003  # mpv wire value
+            self._paused_by_tip = False
         elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
 
@@ -2370,12 +2383,7 @@ class Reader:
             self.lifecycle_surfaces.remove(TOAST_ID)
 
     def toggle_hover_pause(self) -> None:
-        self.pause_on_tooltip = not self.pause_on_tooltip
-        if not self.pause_on_tooltip and self._paused_by_tip:
-            self.ipc.command("set_property", "pause", False)  # noqa: FBT003  # mpv IPC wire value
-            self._paused_by_tip = False
-        state = "on" if self.pause_on_tooltip else "off"
-        self._toast(f"hover auto-pause: {state}")
+        self._run_hover_command(hover_intents.HoverCommand.TOGGLE_PAUSE)
 
     def toggle_bookmark(self) -> None:
         backlog.capture_current(self)
@@ -2468,7 +2476,6 @@ class Reader:
             MINE_ALL_MSG: action("bulk_mine"),
             OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
             PROFILE_CYCLE_MSG: action("cycle_profile"),
-            HOVER_PAUSE_MSG: action("toggle_hover_pause"),
             BOOKMARK_MSG: action("toggle_bookmark"),
             SIDEBAR_MSG: action("toggle_sidebar"),
             SUB_PICKER_MSG: action("toggle_sub_picker"),
@@ -2503,6 +2510,7 @@ class Reader:
             SPEAK_MSG: action("speak_hovered"),
             COPY_MSG: action("copy_hovered"),
             KANJI_MSG: action("kanji_current"),
+            HOVER_PAUSE_MSG: action("toggle_hover_pause"),
         }
         return LegacyCommandExecutor(
             {

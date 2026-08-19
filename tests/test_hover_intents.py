@@ -9,6 +9,8 @@ from saitenka.app.hover_intents import (
     HoverCommand,
     HoverInputs,
     OpenKanji,
+    ResumePlayback,
+    SetHoverPause,
     SpeakText,
     reduce,
 )
@@ -28,11 +30,39 @@ def hovered(**overrides) -> HoverInputs:
     return HoverInputs(**(base | overrides))
 
 
-@pytest.mark.parametrize("command", list(HoverCommand))
+#: Everything except the pause policy, which is deliberately answerable with nothing hovered.
+_WORD_COMMANDS = [c for c in HoverCommand if c is not HoverCommand.TOGGLE_PAUSE]
+
+
+@pytest.mark.parametrize("command", _WORD_COMMANDS)
 def test_nothing_hovered_decides_nothing(command: HoverCommand) -> None:
     """These keys stay eligible with no word under the cursor — they are not cue-gated — so the
     reducer is what makes pressing one harmless rather than the key routing."""
     assert reduce(command, HoverInputs()) == ()
+
+
+def test_the_pause_policy_toggles_with_nothing_hovered() -> None:
+    """The exception, and the trap it guards: toggling auto-pause is what a user does *before*
+    hovering anything, so a host that only fills the hover facts when a word is under the cursor
+    hands this a default of False and flips the setting the wrong way."""
+    assert reduce(HoverCommand.TOGGLE_PAUSE, HoverInputs(pause_on_tooltip=True)) == (
+        SetHoverPause(enabled=False),
+        Announce("hover auto-pause: off"),
+    )
+
+
+def test_disabling_the_policy_while_it_holds_playback_hands_it_back() -> None:
+    """Setting the flag alone would leave the user paused with nothing left that would resume."""
+    assert reduce(
+        HoverCommand.TOGGLE_PAUSE, HoverInputs(pause_on_tooltip=True, paused_by_tooltip=True)
+    ) == (SetHoverPause(enabled=False), ResumePlayback(), Announce("hover auto-pause: off"))
+
+
+def test_enabling_the_policy_never_touches_playback() -> None:
+    assert reduce(HoverCommand.TOGGLE_PAUSE, HoverInputs(paused_by_tooltip=True)) == (
+        SetHoverPause(enabled=True),
+        Announce("hover auto-pause: on"),
+    )
 
 
 def test_speaking_prefers_the_dictionary_form_reading() -> None:

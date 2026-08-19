@@ -1263,7 +1263,7 @@ def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
 def test_hover_pause_toggle_changes_state_and_reports_it(monkeypatch):
     r = _reader_with_word(FakeIPC())
     messages = []
-    monkeypatch.setattr(r, "_toast", messages.append)
+    monkeypatch.setattr(r, "_toast", lambda text, _kind="ok": messages.append(text))
     r.toggle_hover_pause()
     assert (r.pause_on_tooltip, messages) == (False, ["hover auto-pause: off"])
     r.toggle_hover_pause()

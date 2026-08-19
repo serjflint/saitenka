@@ -10,6 +10,10 @@
     ],
     [
       "direct-mpv-command",
+      "src/saitenka/app/controller.py::Reader._apply_hover_effect"
+    ],
+    [
+      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._apply_subtitle_effect"
     ],
     [
@@ -43,10 +47,6 @@
     [
       "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._seek_cue"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader.toggle_hover_pause"
     ],
     [
       "direct-mpv-command",
