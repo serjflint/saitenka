@@ -142,27 +142,11 @@
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/analysis_overlay.py::_show"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/analysis_overlay.py::toggle"
-    ],
-    [
-      "direct-overlay-mutation",
       "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
     ],
     [
       "direct-overlay-mutation",
       "src/saitenka/app/controller.py::Reader.toggle_overlay"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/help_overlay.py::close_help"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/help_overlay.py::redraw"
     ],
     [
       "direct-overlay-mutation",
@@ -175,22 +159,6 @@
     [
       "direct-overlay-mutation",
       "src/saitenka/app/nested_popup.py::hide_nested"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sidebar.py::redraw"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sidebar.py::toggle"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sub_picker.py::close_picker"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sub_picker.py::redraw"
     ],
     [
       "direct-overlay-mutation",

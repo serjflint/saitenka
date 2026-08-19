@@ -177,7 +177,7 @@ def close_picker(reader: Reader) -> None:
         return
     reader.sub_picker.open = False
     reader.sub_picker.generation += 1
-    reader.ov.hide(PICKER_ID)
+    reader.lifecycle_surfaces.remove(PICKER_ID)
     reader.sub_picker.rect = None
     reader.sub_picker.hits = ()
 
@@ -274,7 +274,7 @@ def redraw(reader: Reader) -> None:
     )
     state.rect = (x, y, width, height)
     state.hits = rendered.hitboxes
-    reader.ov.show(rendered.image, x, y, oid=PICKER_ID)
+    reader.lifecycle_surfaces.present(rendered.image, x, y, oid=PICKER_ID)
 
 
 def contains(reader: Reader, x: float, y: float) -> bool:

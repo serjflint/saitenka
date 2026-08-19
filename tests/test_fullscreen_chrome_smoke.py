@@ -9,11 +9,14 @@ was that it did not). Real renderers, no subprocess/socket → default tier.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from saitenka.app import analysis_overlay, help_overlay, sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
+from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
 from saitenka.subtitles import Cue, CueIndex
 
 BASELINE_1080 = (1920, 1080)
@@ -31,10 +34,41 @@ class FakeIPC:
 
 
 class FakeOverlay:
-    """Captures the composited image handed to ``show`` so a test can read its uploaded geometry."""
+    """Captures the composited image and its placement so a test can read the uploaded geometry.
+
+    Records at ``prepare``, which is where chrome presentation actually crosses into the overlay
+    now that it goes through the fenced surface path. A fake that only implements ``show`` would
+    quietly record nothing and every size assertion below would read an empty list.
+    """
 
     def __init__(self):
         self.shown: list = []
+        self.lifecycle_oids: set[int] = set()
+
+    def prepare(self, image, x=0, y=0, *, oid=0, revision=0):  # noqa: ARG002
+        self.shown.append((image, x, y, oid))
+        self.lifecycle_oids.add(oid)
+        return SimpleNamespace(oid=oid, path=None, tail=(), command=("overlay-add", oid))
+
+    def commit_prepared(self, prepared):
+        pass
+
+    def discard_prepared(self, prepared):
+        pass
+
+    def physical_oid(self, oid):
+        return oid
+
+    def commit_remove(self, oid):
+        self.lifecycle_oids.discard(oid)
+
+    def remove_lifecycle_now(self, oid):  # noqa: ARG002
+        return {"error": "success"}
+
+    def submit_surface_transaction(self, *, owner, identity, command, on_finished):  # noqa: ARG002
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+
+        on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
 
     def show(self, image, x=0, y=0, oid=0):
         self.shown.append((image, x, y, oid))
@@ -46,6 +80,7 @@ class FakeOverlay:
 def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> Reader:
     r = Reader(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=ui_scale)))
     r.ov = FakeOverlay()
+    r.lifecycle_surfaces = LifecycleSurfaces(r.ov)  # the fenced path the chrome presents through
     r.osd = osd
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(12)]
     r._sub_index = CueIndex(cues)
@@ -109,3 +144,17 @@ def test_hidpi_chrome_matches_a_manual_ui_scale_bump_at_1080p():
     hw = hidpi.ov.shown[-1][0].size[0]
     fw = faked.ov.shown[-1][0].size[0]
     assert abs(hw - fw) <= 2  # same font/layout scale → same panel width (± rounding)
+
+
+@pytest.mark.parametrize(("name", "draw"), CHROME)
+def test_chrome_left_open_is_swept_by_close(name, draw):
+    """What the fenced path buys beyond ordering. `Overlay.prepare` registers each oid it stages,
+    so a panel still up at teardown is now removed by the close sweep — a direct `ov.show` left it
+    on a detached mpv's screen, since nothing knew it was there."""
+    r = _reader(FULLSCREEN_HIDPI)
+    draw(r)
+    assert r.ov.lifecycle_oids, f"{name} staged nothing the close sweep could find"
+
+    r.lifecycle_surfaces.close()
+
+    assert not r.ov.lifecycle_oids

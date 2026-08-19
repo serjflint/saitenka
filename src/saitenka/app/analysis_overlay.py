@@ -93,7 +93,7 @@ def _show(reader: Reader) -> None:
     )
     x = (reader.osd[0] - image.width) // 2
     y = (reader.osd[1] - image.height) // 2
-    reader.ov.show(image, x, y, oid=OverlayId.ANALYSIS)
+    reader.lifecycle_surfaces.present(image, x, y, oid=OverlayId.ANALYSIS)
 
 
 def _unavailable(reader: Reader) -> bool:
@@ -203,7 +203,7 @@ def finish(state: AnalysisState, completion: EffectFinished) -> bool:
 def toggle(reader: Reader) -> None:
     reader.analysis.open = not reader.analysis.open
     if not reader.analysis.open:
-        reader.ov.hide(OverlayId.ANALYSIS)
+        reader.lifecycle_surfaces.remove(OverlayId.ANALYSIS)
         return
     request(reader)
 

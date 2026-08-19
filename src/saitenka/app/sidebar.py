@@ -343,7 +343,7 @@ def redraw(reader: Reader) -> None:
     reader.sidebar.rect = (x, y, width, height)
     reader.sidebar.hits = rendered.hitboxes
     reader.sidebar.total = total
-    reader.ov.show(rendered.image, x, y, oid=SIDEBAR_ID)
+    reader.lifecycle_surfaces.present(rendered.image, x, y, oid=SIDEBAR_ID)
 
 
 def toggle(reader: Reader) -> None:
@@ -355,7 +355,7 @@ def toggle(reader: Reader) -> None:
         reader.sidebar.last_active = active
         redraw(reader)
     else:
-        reader.ov.hide(SIDEBAR_ID)
+        reader.lifecycle_surfaces.remove(SIDEBAR_ID)
         reader.sidebar.rect = None
         reader.sidebar.hits = ()
 

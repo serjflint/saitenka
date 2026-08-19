@@ -50,7 +50,7 @@ def redraw(reader: Reader) -> None:
     )
     x = (reader.osd[0] - document.width) // 2
     y = (reader.osd[1] - document.height) // 2
-    reader.ov.show(image, x, y, oid=OverlayId.HELP)
+    reader.lifecycle_surfaces.present(image, x, y, oid=OverlayId.HELP)
 
 
 def _bind_help_keys(reader: Reader) -> None:
@@ -83,7 +83,7 @@ def close_help(reader: Reader) -> None:
     if not reader._help_open:
         return
     reader._help_open = False
-    reader.ov.hide(OverlayId.HELP)
+    reader.lifecycle_surfaces.remove(OverlayId.HELP)
     _restore_context_keys(reader)
     reader._help_page = 0
 
