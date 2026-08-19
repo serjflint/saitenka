@@ -114,6 +114,10 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/mined_feedback.py::mark_mined"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/miner.py::Miner.__init__"
     ],
     [
@@ -123,10 +127,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/miner_ui.py::hide_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::mark_mined"
     ],
     [
       "reader-parameter",
@@ -143,10 +143,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/miner_ui.py::replay_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::rerender_nested"
     ],
     [
       "reader-parameter",
@@ -259,6 +255,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/nested_popup.py::place_nested"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/nested_popup.py::rerender_with_mined_state"
     ],
     [
       "reader-parameter",

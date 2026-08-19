@@ -209,6 +209,22 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
     reader._request_render_ahead(reader._nest, 1)
 
 
+def rerender_with_mined_state(reader: Reader) -> None:
+    """Rebuild the nested popup in place with the current mined-state, keeping its position.
+
+    Lived in `miner_ui` because mining is what triggers it, but every line here is nested-popup
+    state and its one remaining caller is the mined-state feedback, which is not the preview panel.
+    """
+    tok = reader._nest.token
+    if tok is None:
+        return
+    mined = reader._is_mined(tok)
+    st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
+    reader._nest.state = st
+    reader._nest.key = reader._panel_key(tok, tok.surface, mined=mined)
+    reader._render_nested_view()
+
+
 def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
     """The :class:`~saitenka.model.LinkBox` of ``state`` under (mx, my), via the windowed hit-test.
     ``scale`` is the reference→display factor (``_tip_display_scale``): the panel is composited at the

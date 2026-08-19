@@ -32,6 +32,7 @@ from saitenka.app import (
     interaction_intents,
     mask_atlas_startup,
     mine_intents,
+    mined_feedback,
     mined_seed,
     mined_store,
     miner_ui,
@@ -2306,10 +2307,7 @@ class Reader:
             self._miner.mine_token(tok, card=card)
 
     def _mark_mined(self, expression: str) -> None:
-        miner_ui.mark_mined(self, expression)
-
-    def _rerender_nested(self) -> None:
-        miner_ui.rerender_nested(self)
+        mined_feedback.mark_mined(self, expression)
 
     # --- card preview (verify correctness / image / sound, one surface) — logic in app/miner_ui.py
     def _sentence_lines(self) -> list[str]:

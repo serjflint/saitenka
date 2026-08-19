@@ -1,10 +1,12 @@
 """Card preview UI: verify a mined (or already-in-deck) card's expression/reading/image/audio/glosses
-before or after mining, plus the mined-state feedback that flips a tooltip's ⊕ to ✓.
+before or after mining.
 
 Mining itself (Anki note creation, media capture, provenance/tags) lives in :class:`~saitenka.app.miner.Miner`
-— this module is the Reader-side glue: rendering the preview panel, handling clicks on it (dismiss /
-zoom / play), and re-rendering an already-open tooltip or nested popup once a word gets mined. Takes
-``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating methods on Reader itself.
+— this module is the Reader-side glue for one INTERACTION surface: rendering the preview panel and
+handling clicks on it (dismiss / zoom / play). The ⊕→✓ feedback is
+:mod:`~saitenka.app.mined_feedback`; it writes a session fact and redraws the popups, which this
+surface is not one of. Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating
+methods on Reader itself.
 """
 
 from __future__ import annotations
@@ -12,7 +14,6 @@ from __future__ import annotations
 import io
 import json
 import re
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -48,37 +49,6 @@ def _html_items(html: str) -> list[str]:
 def _media_name(field_html: str, pattern: str) -> str:
     m = re.search(pattern, field_html or "")
     return m.group(1) if m else ""
-
-
-def mark_mined(reader: Reader, expression: str) -> None:
-    """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately.
-
-    The refresh is unconditional but the generation bump is not: re-mining a word already in the
-    deck (the duplicate path) leaves membership where it was, so every panel cached against it is
-    still correct. What the user asked for is the *visible* rebuild below, which happens either way.
-    """
-    if not expression:
-        return
-    reader._mined.add(expression)
-    if reader.hover >= 0 and reader._tip_state is not None:
-        token = reader.tokens[reader.hover]
-        if expression in {token.lemma, token.surface}:
-            reader._hover_meta = replace(reader._hover_meta, mined=True)
-        reader._show_tooltip(reader.hover)  # rebuild the base tooltip (✓ if it's this word)
-    if reader._nest.state is not None and reader._nest.token is not None:
-        rerender_nested(reader)  # and the nested popup
-
-
-def rerender_nested(reader: Reader) -> None:
-    """Rebuild the nested popup in place with the current mined-state, keeping its position."""
-    tok = reader._nest.token
-    if tok is None:
-        return
-    mined = reader._is_mined(tok)
-    st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
-    reader._nest.state = st
-    reader._nest.key = reader._panel_key(tok, tok.surface, mined=mined)
-    reader._render_nested_view()
 
 
 def sentence_lines(lines) -> list[str]:
