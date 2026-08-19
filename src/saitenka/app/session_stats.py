@@ -344,10 +344,12 @@ def accrue(recorder: SessionRecorder | None, *, paused: bool, language: str) -> 
         recorder.accrue(paused=paused, language=language)
 
 
-def finish(reader: Reader) -> str | None:
-    recorder = reader._session_recorder
+def finish(recorder: SessionRecorder | None, analysis: EpisodeAnalysis | None = None) -> str | None:
+    """Close a recorder's row and render its summary, or None when nothing was recording.
+
+    Takes the recorder rather than the host: retiring the host's field is the host's business, and
+    a close participant that reaches into a `Reader` cannot be driven by the session runtime.
+    """
     if recorder is None:
         return None
-    reader._session_recorder = None
-    snapshot = recorder.finish(analysis=reader.analysis.current)
-    return summary(snapshot)
+    return summary(recorder.finish(analysis=analysis))

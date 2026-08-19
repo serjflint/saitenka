@@ -13,7 +13,7 @@
   "saitenka.app.prefetch": 6,
   "saitenka.app.reader_deps": 2,
   "saitenka.app.session_runtime": 1,
-  "saitenka.app.session_stats": 2,
+  "saitenka.app.session_stats": 1,
   "saitenka.app.sidebar": 17,
   "saitenka.app.sub_picker": 7,
   "saitenka.app.subnav": 4,

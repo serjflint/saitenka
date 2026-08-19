@@ -314,10 +314,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/session_stats.py::finish"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/session_stats.py::start"
     ],
     [
@@ -1054,7 +1050,7 @@
       "id": "session-and-stores",
       "source": "src/saitenka/app/controller.py::Reader.close",
       "evidence": [
-        "call:session_stats.finish",
+        "call:self.finish_session_stats",
         "call:self._backlog_store.close",
         "call:self._mined_store.close"
       ],

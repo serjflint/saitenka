@@ -121,7 +121,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     episode_before = reader.episode
 
     started: list[str] = []
-    monkeypatch.setattr(session_stats, "finish", lambda _r: None)
+    monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
     monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
     monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _r: None)
     monkeypatch.setattr(reader, "start_prefetch", lambda: None)

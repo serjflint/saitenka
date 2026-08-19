@@ -142,7 +142,7 @@ def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
     fetch_background: tuple[str, ...] = ()
     with otel_metrics.traced("subtitle.reslot") as span:
         span.set("mode", "attach")
-        session_stats.finish(reader)  # close the finished episode's row before the recorder resets
+        reader.finish_session_stats()  # close the finished episode's row before the recorder resets
         reader.rebind_episode()
         span.set("externals_dropped", remove_external_sub_tracks(ipc))
         try:

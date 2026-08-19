@@ -96,7 +96,7 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
     ipc.props["path"] = str(cur)
 
     started: list[str] = []
-    monkeypatch.setattr(session_stats, "finish", lambda _reader: None)
+    monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
     monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
 
     cli_run.reslot_to_current(reader, {}, cur, tmp_path, 0, cli_run.RunSubtitleOptions(slang="ja"))
@@ -132,7 +132,7 @@ def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
             "selected": True,
         },
     ]
-    monkeypatch.setattr(session_stats, "finish", lambda _reader: None)
+    monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
     monkeypatch.setattr(session_stats, "start", lambda _reader: None)
 
     cli_run.reslot_to_current(

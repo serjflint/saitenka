@@ -726,9 +726,8 @@ def reslot_to_current(
             jimaku_title=title,
             episode=parsed_episode,
         )
-        session_stats.finish(
-            reader
-        )  # write the just-finished episode complete BEFORE the recorder resets
+        # write the just-finished episode complete BEFORE the recorder resets
+        reader.finish_session_stats()
         reader.rebind_episode()
         # drop the carried-over launch --sub-file (a prior episode's srt); a nonzero count each advance
         # is the carried-over-sub signature

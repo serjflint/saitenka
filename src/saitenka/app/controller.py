@@ -3830,7 +3830,7 @@ class Reader:
                 ),
                 CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
                 CloseStep(
-                    "session-stats", lambda: self._report_session(session_stats.finish(self))
+                    "session-stats", lambda: self._report_session(self.finish_session_stats())
                 ),
                 CloseStep(
                     "backlog-store",
@@ -3900,6 +3900,11 @@ class Reader:
 
         if not self._announce_close(ClosePhase.ARTIFACTS, str(self._tmp)):
             shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def finish_session_stats(self) -> str | None:
+        """Close the current episode's row and retire the recorder. Idempotent."""
+        recorder, self._session_recorder = self._session_recorder, None
+        return session_stats.finish(recorder, self.analysis.current)
 
     def _report_session(self, summary: str | None) -> None:
         if summary and self.options.stats.summary:
