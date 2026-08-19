@@ -33,6 +33,20 @@ def _screenshot(ipc, path: Path) -> Image.Image:
     return Image.open(path).convert("RGB")
 
 
+def _targets_for(reader, x, y):
+    """The live check's view of `_hover_targets`, wired from the reader it is probing."""
+    from saitenka.app.tooltip import _hover_targets
+
+    return _hover_targets(
+        x,
+        y,
+        inside=True,
+        tip_rect=reader._tip_rect,
+        nest_rect=reader._nest.rect,
+        hit=lambda hx, hy: reader._hit(hx, hy) if reader.tokens else -1,
+    )
+
+
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
@@ -69,7 +83,6 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
     shown tooltip, the base hit-test must report over_tip (keep the lease, don't hijack to a word
     under it), and a real left-click on the tooltip body must be captured (pause lease retained), not
     fall through to mpv. Regression guard for the windowed-renderer _tip_rect calc."""
-    from saitenka.app.tooltip import _hover_targets
     from saitenka.panel import Definition, Entry
 
     class _TallDS:
@@ -101,7 +114,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         # coordinate space mpv reports mouse-pos in — the alignment the headless fakes can't see.
         tx, ty, tw, th = reader._tip_rect
         cx, cy = int(tx + tw / 2), int(ty + th / 2)
-        over_word, over_tip, _nest = _hover_targets(reader, cx, cy, inside=True)
+        over_word, over_tip, _nest = _targets_for(reader, cx, cy)
         assert over_tip and over_word == -1, (
             f"cursor over the tooltip must read over_tip (occlusion); got over_tip={over_tip} "
             f"over_word={over_word} — _tip_rect={reader._tip_rect} (windowed-renderer rect calc?)"
@@ -133,7 +146,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
             reader.poll_once()
             time.sleep(0.02)
         sx, sy, sw, sh = reader._tip_rect
-        word2, tip2, _ = _hover_targets(reader, int(sx + sw / 2), int(sy + sh / 2), inside=True)
+        word2, tip2, _ = _targets_for(reader, int(sx + sw / 2), int(sy + sh / 2))
         assert tip2 and word2 == -1, (
             f"after scroll, tooltip centre must still read over_tip; got over_tip={tip2} "
             f"over_word={word2} — _tip_rect={reader._tip_rect} (post-scroll windowed rect calc?)"

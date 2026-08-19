@@ -83,17 +83,19 @@ def update_hover(reader: Reader) -> None:
             update_hover_impl(reader)
 
 
-def _hover_targets(reader: Reader, mx: float, my: float, *, inside: bool):
-    """Which of (subtitle word, base tooltip, nested popup) the cursor is currently over."""
-    over_tip = inside and reader._tip_rect is not None and in_rect(reader._tip_rect, mx, my)
-    over_nest = inside and reader._nest.rect is not None and in_rect(reader._nest.rect, mx, my)
+def _hover_targets(mx: float, my: float, *, inside: bool, tip_rect, nest_rect, hit):
+    """Which of (subtitle word, base tooltip, nested popup) the cursor is currently over.
+
+    ``hit`` is the subtitle hit-test, called only when no popup claims the point — the occlusion
+    rule below is the reason it is a callable rather than a precomputed index.
+    """
+    over_tip = inside and tip_rect is not None and in_rect(tip_rect, mx, my)
+    over_nest = inside and nest_rect is not None and in_rect(nest_rect, mx, my)
     # The popups are drawn ON TOP of the subtitle, so a hit on a popup occludes the word beneath it:
     # keep the lease on the open tooltip instead of switching to the word it happens to cover (e.g. the
     # tooltip for the lower line, drawn up over the upper line of a two-line cue). Without this the base
     # hit-test still sees that covered word and `hover_switch_delay` only *delays* the hijack.
-    over_word = (
-        reader._hit(mx, my) if (inside and reader.tokens and not (over_tip or over_nest)) else -1
-    )
+    over_word = hit(mx, my) if (inside and not (over_tip or over_nest)) else -1
     return over_word, over_tip, over_nest
 
 
@@ -231,7 +233,14 @@ def update_hover_impl(reader: Reader) -> None:
     reader._mouse_in = inside  # engagement signal for prefetch
     mx, my = mp.get("x", -1), mp.get("y", -1)
     reader._last_mouse = (mx, my)
-    over_word, over_tip, over_nest = _hover_targets(reader, mx, my, inside=inside)
+    over_word, over_tip, over_nest = _hover_targets(
+        mx,
+        my,
+        inside=inside,
+        tip_rect=reader._tip_rect,
+        nest_rect=reader._nest.rect,
+        hit=lambda x, y: reader._hit(x, y) if reader.tokens else -1,
+    )
     reader.set_annotation_hover(revealed=over_word >= 0)
     _update_nested_hover(reader, mx, my, over_tip=over_tip, over_nest=over_nest)
     _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
@@ -245,7 +254,14 @@ def update_hover_instrumented(reader: Reader) -> None:
     mx, my = mp.get("x", -1), mp.get("y", -1)
     reader._last_mouse = (mx, my)
     with otel_metrics.traced("hover_target_lookup") as lookup:
-        over_word, over_tip, over_nest = _hover_targets(reader, mx, my, inside=inside)
+        over_word, over_tip, over_nest = _hover_targets(
+            mx,
+            my,
+            inside=inside,
+            tip_rect=reader._tip_rect,
+            nest_rect=reader._nest.rect,
+            hit=lambda x, y: reader._hit(x, y) if reader.tokens else -1,
+        )
         lookup.set(
             "region",
             "nested"
@@ -394,12 +410,16 @@ def set_hover(reader: Reader, index: int) -> None:
     reader._sync_auto_translation()  # hovering a word → auto-reveal the translation
 
 
+def spoken_form(token, hover_reading: str) -> str:
+    """What TTS should say for a hovered word: the DICTIONARY-form reading (習う → ならう), not the
+    kanji surface (say reads 習 as しゅう → "shuuwa") nor the bare stem reading ならわ. Falls back to
+    the token's own reading, then its surface."""
+    return hover_reading or token.reading or token.surface
+
+
 def speak_hovered(reader: Reader) -> None:
-    # speak the DICTIONARY-form reading (習う → ならう), not the kanji surface (say reads 習 as
-    # しゅう → "shuuwa") nor the bare stem reading ならわ. Falls back to the token reading/surface.
     if 0 <= reader.hover < len(reader.tokens):
-        t = reader.tokens[reader.hover]
-        speak(reader._hover_reading or t.reading or t.surface)
+        speak(spoken_form(reader.tokens[reader.hover], reader._hover_reading))
 
 
 def copy_hovered(reader: Reader) -> None:

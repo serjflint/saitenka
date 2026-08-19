@@ -854,10 +854,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_hover_targets"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_install_navigated"
     ],
     [

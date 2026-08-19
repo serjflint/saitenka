@@ -423,3 +423,37 @@ def test_esc_steps_back_through_navigation_then_closes():
     assert r._tip_nav == [] and ui.tip_shown
     r._tip_close_or_back()  # at the root → close
     assert not ui.tip_shown
+
+
+def _targets(mx, my, *, inside=True, tip=None, nest=None, word=7):
+    from saitenka.app.tooltip import _hover_targets
+
+    return _hover_targets(
+        mx, my, inside=inside, tip_rect=tip, nest_rect=nest, hit=lambda _x, _y: word
+    )
+
+
+def test_a_popup_occludes_the_word_drawn_underneath_it():
+    """The popups are drawn ON TOP of the subtitle, so a point inside one is not also a hit on the
+    word beneath. The regression: a tooltip for the lower line of a two-line cue is placed up over
+    the upper line, and without this the base hit-test still saw that covered word —
+    `hover_switch_delay` only *delayed* the hijack rather than preventing it.
+    """
+    assert _targets(50, 50, tip=(0, 0, 100, 100)) == (-1, True, False)
+    assert _targets(50, 50, nest=(0, 0, 100, 100)) == (-1, False, True)
+
+
+def test_a_point_outside_every_popup_falls_through_to_the_word():
+    assert _targets(500, 500, tip=(0, 0, 100, 100)) == (7, False, False)
+
+
+def test_a_cursor_outside_the_video_is_over_nothing():
+    """`inside` is False when mpv reports the pointer off the video surface. Nothing is hovered
+    there — not even a popup whose rectangle the coordinates happen to fall inside."""
+    assert _targets(50, 50, inside=False, tip=(0, 0, 100, 100)) == (-1, False, False)
+
+
+def test_the_nested_popup_and_the_tooltip_can_both_claim_a_shared_point():
+    """The nested popup is anchored over the base tooltip, so their rectangles overlap by design.
+    Both read as hovered; which one acts is the caller's topmost-first decision, not this one's."""
+    assert _targets(50, 50, tip=(0, 0, 100, 100), nest=(40, 40, 100, 100)) == (-1, True, True)
