@@ -149,7 +149,7 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
         "provider", "name", 1, match=False, download=lambda: ("path", "ok")
     )
     reader.sub_picker.candidates = (candidate,) * 20
-    monkeypatch.setattr(sub_picker, "redraw", lambda _reader: None)
+    monkeypatch.setattr(reader, "redraw_sub_picker", lambda: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 

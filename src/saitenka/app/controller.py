@@ -2438,6 +2438,20 @@ class Reader:
         elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
 
+    def redraw_sub_picker(self) -> None:
+        """Lay the picker out for this screen and present it, storing the geometry hit-testing uses."""
+        from saitenka.app import sub_picker
+
+        state = self.sub_picker
+        if not state.open:
+            return
+        rendered, x, y, width, height = sub_picker.picker_panel(
+            state, osd=self.osd, scale=self.chrome_scale, close_key=self.sub_picker_key
+        )
+        state.rect = (x, y, width, height)
+        state.hits = rendered.hitboxes
+        self.lifecycle_surfaces.present(rendered.image, x, y, oid=OverlayId.PICKER)
+
     # --- episode analysis: state module, executed here ------------------------------------------
     def _draw_analysis(self) -> None:
         if not self.analysis.open:

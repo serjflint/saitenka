@@ -168,7 +168,7 @@ def open_picker(reader: Reader) -> None:
     state.scroll = 0
     state.generation += 1
     reader.set_hover(-1)
-    redraw(reader)
+    reader.redraw_sub_picker()
     _start_listing(reader, str(video))
 
 
@@ -190,7 +190,7 @@ def apply_listing(reader: Reader, generation: int, result: ListingResult) -> Non
     state.error = result.error
     state.candidates = result.candidates
     state.warnings = result.warnings
-    redraw(reader)
+    reader.redraw_sub_picker()
 
 
 def finish_listing(completion: EffectFinished) -> tuple[int, ListingResult] | None:
@@ -202,9 +202,9 @@ def finish_listing(completion: EffectFinished) -> tuple[int, ListingResult] | No
     return None
 
 
-def _rows(reader: Reader) -> list[SidebarRow]:
+def _rows(state: PickerState) -> list[SidebarRow]:
     rows: list[SidebarRow] = []
-    for index, candidate in enumerate(reader.sub_picker.candidates):
+    for index, candidate in enumerate(state.candidates):
         # provider · format · match — same dot-tag idiom as the provider pill; `match` = the release
         # RESOLUTION matches this encode (a picker-fetch is never pre-downloaded), `srt`/`ass` the format.
         ext = Path(candidate.name).suffix.lstrip(".").lower()
@@ -235,54 +235,53 @@ def _message(state: PickerState) -> str | None:
     return None
 
 
-def _footer(reader: Reader, total: int, shown: int) -> str:
-    if reader.sub_picker.warnings:
-        return f"{'  ·  '.join(reader.sub_picker.warnings)}  ·  {reader.sub_picker_key} closes"
+def _footer(state: PickerState, close_key: str, total: int, shown: int) -> str:
+    if state.warnings:
+        return f"{'  ·  '.join(state.warnings)}  ·  {close_key} closes"
     if not total:
-        return f"{reader.sub_picker_key} closes"
-    scroll = reader.sub_picker.scroll
+        return f"{close_key} closes"
     return (
-        f"{scroll + 1}–{scroll + shown} / {total}  ·  click to download  ·  "
-        f"{reader.sub_picker_key} closes"
+        f"{state.scroll + 1}–{state.scroll + shown} / {total}  ·  click to download  ·  "
+        f"{close_key} closes"
     )
 
 
-def redraw(reader: Reader) -> None:
-    state = reader.sub_picker
-    if not state.open:
-        return
-    scale = reader.chrome_scale
-    width = max(round(480 * scale), min(round(960 * scale), round(reader.osd[0] * 0.62)))
-    width = min(width, reader.osd[0] - round(36 * scale))
-    height = max(round(220 * scale), round(reader.osd[1] * 0.7))
-    x = (reader.osd[0] - width) // 2
-    y = (reader.osd[1] - height) // 2
-    rows = _rows(reader)
-    total = len(rows)
+def picker_panel(state: PickerState, *, osd: tuple[int, int], scale: float, close_key: str):
+    """Render the picker for a screen, returning ``(rendered, x, y, width, height)``.
+
+    Pure apart from reading ``state``: every dimension is bounded by the OSD, which is exactly the
+    arithmetic that stops tracking a resize unnoticed. The caller stores the geometry and presents.
+    """
+    width = max(round(480 * scale), min(round(960 * scale), round(osd[0] * 0.62)))
+    width = min(width, osd[0] - round(36 * scale))
+    height = max(round(220 * scale), round(osd[1] * 0.7))
+    rows = _rows(state)
     visible = rows[state.scroll :]  # render_picker clips to its own row capacity
     rendered = render_picker(
         visible,
         width=width,
         height=height,
         message=_message(state),
-        footer=_footer(reader, total, len(visible)),
+        footer=_footer(state, close_key, len(rows), len(visible)),
         scale=scale,
     )
-    state.rect = (x, y, width, height)
-    state.hits = rendered.hitboxes
-    reader.lifecycle_surfaces.present(rendered.image, x, y, oid=PICKER_ID)
+    return rendered, (osd[0] - width) // 2, (osd[1] - height) // 2, width, height
 
 
-def contains(reader: Reader, x: float, y: float) -> bool:
-    state = reader.sub_picker
-    return bool(state.open and state.rect and reader._in_rect(state.rect, x, y))
+def contains(state: PickerState, x: float, y: float) -> bool:
+    """Whether ``(x, y)`` is inside the shown picker."""
+    if not (state.open and state.rect):
+        return False
+    left, top, width, height = state.rect
+    return left <= x < left + width and top <= y < top + height
 
 
 def suppress_hover(reader: Reader) -> bool:
-    if not reader.sub_picker.open:
+    state = reader.sub_picker
+    if not state.open:
         return False
     mp = reader._prop("mouse-pos") or {}
-    if not contains(reader, mp.get("x", -1), mp.get("y", -1)):
+    if not contains(state, mp.get("x", -1), mp.get("y", -1)):
         return False
     reader.set_hover(-1)
     return True
@@ -293,11 +292,11 @@ def scroll(reader: Reader, steps: int) -> bool:
     if not state.open:
         return False
     mp = reader._prop("mouse-pos") or {}
-    if not contains(reader, mp.get("x", -1), mp.get("y", -1)):
+    if not contains(state, mp.get("x", -1), mp.get("y", -1)):
         return False
     maximum = max(0, len(state.candidates) - 1)
     state.scroll = max(0, min(maximum, state.scroll + steps * ROWS_PER_WHEEL_STEP))
-    redraw(reader)
+    reader.redraw_sub_picker()
     return True
 
 
@@ -324,7 +323,7 @@ def _download(reader: Reader, index: int) -> None:
 
 def on_click(reader: Reader, x: float, y: float) -> bool:
     state = reader.sub_picker
-    if not contains(reader, x, y) or state.rect is None:
+    if not contains(state, x, y) or state.rect is None:
         return False
     local_x, local_y = x - state.rect[0], y - state.rect[1]
     hit = next((box for box in state.hits if box.contains(local_x, local_y)), None)

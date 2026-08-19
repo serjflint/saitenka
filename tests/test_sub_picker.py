@@ -225,7 +225,7 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
 
     assert reader.sub_picker.loading is False
     assert reader.sub_picker.candidates == tuple(candidates)
-    rows = sub_picker._rows(reader)
+    rows = sub_picker._rows(reader.sub_picker)
     assert [row.text for row in rows] == [c.name for c in candidates]
     assert rows[0].status == "jimaku · srt · match"  # provider · format · resolution-match
     assert rows[1].status == "tsukihime · ass"
@@ -245,7 +245,7 @@ def test_provider_warnings_are_shown_in_the_footer():
     )
 
     assert reader.sub_picker.warnings == ("tsukihime: search truncated",)
-    footer = sub_picker._footer(reader, total=1, shown=1)
+    footer = sub_picker._footer(reader.sub_picker, reader.sub_picker_key, 1, 1)
     assert "tsukihime: search truncated" in footer
 
 
@@ -276,7 +276,7 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     )
     reader.sub_picker.candidates = (_candidate("other.ass"), chosen)
     reader.sub_picker.open = True
-    sub_picker.redraw(reader)  # populates rect + per-row hitboxes
+    reader.redraw_sub_picker()  # populates rect + per-row hitboxes
 
     fetches: list[tuple] = []
     monkeypatch.setattr(
@@ -305,7 +305,7 @@ def test_click_outside_the_panel_is_not_captured():
     reader.configure_sub_picker(_lister([]))
     reader.sub_picker.candidates = (_candidate("a.srt"),)
     reader.sub_picker.open = True
-    sub_picker.redraw(reader)
+    reader.redraw_sub_picker()
 
     assert sub_picker.on_click(reader, 0, 0) is False
 
@@ -315,7 +315,7 @@ def test_scroll_only_fires_with_the_pointer_over_the_panel():
     reader.configure_sub_picker(_lister([]))
     reader.sub_picker.open = True
     reader.sub_picker.candidates = tuple(_candidate(f"{i}.srt") for i in range(20))
-    sub_picker.redraw(reader)
+    reader.redraw_sub_picker()
     rect = reader.sub_picker.rect
     assert rect is not None
 
@@ -333,7 +333,7 @@ def test_suppress_hover_only_over_the_panel():
     reader.configure_sub_picker(_lister([]))
     reader.sub_picker.open = True
     reader.sub_picker.candidates = (_candidate("a.srt"),)
-    sub_picker.redraw(reader)
+    reader.redraw_sub_picker()
     rect = reader.sub_picker.rect
     assert rect is not None
 
@@ -441,3 +441,40 @@ def test_property_change_does_not_split_startup_picker_presses(monkeypatch):
 )
 def test_human_size(size, expected):
     assert sub_picker._human_size(size) == expected
+
+
+def test_the_panel_is_bounded_by_the_screen_it_is_drawn_on() -> None:
+    """Every dimension is derived from the OSD, which is exactly the arithmetic that stops tracking
+    a resize unnoticed. Checkable at any size now that it takes no session."""
+    from saitenka.app.sub_picker import PickerState, picker_panel
+
+    state = PickerState()
+    state.open = True
+    state.candidates = (_candidate("a.srt"),)
+
+    for osd in ((1280, 720), (1920, 1080), (3024, 1898)):
+        _rendered, x, y, width, height = picker_panel(state, osd=osd, scale=1.0, close_key="Alt+p")
+
+        assert x >= 0 and x + width <= osd[0], f"{osd}: runs off horizontally"
+        assert y >= 0 and y + height <= osd[1], f"{osd}: runs off vertically"
+
+
+def test_the_footer_reports_the_visible_slice_of_a_scrolled_list() -> None:
+    """The user's only cue that the list continues past the panel."""
+    from saitenka.app.sub_picker import PickerState, _footer
+
+    state = PickerState()
+    state.scroll = 4
+
+    assert _footer(state, "Alt+p", total=20, shown=6).startswith("5–10 / 20")
+
+
+def test_provider_warnings_replace_the_position_readout() -> None:
+    """A warning is the more useful thing to say in the same space, and losing it to a row count
+    would leave a partial listing looking complete."""
+    from saitenka.app.sub_picker import PickerState, _footer
+
+    state = PickerState()
+    state.warnings = ("jimaku timed out",)
+
+    assert "jimaku timed out" in _footer(state, "Alt+p", total=20, shown=6)

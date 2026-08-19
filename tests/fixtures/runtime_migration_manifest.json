@@ -614,14 +614,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_footer"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_rows"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sub_picker.py::_start_listing"
     ],
     [
@@ -638,19 +630,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sub_picker.py::contains"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sub_picker.py::on_click"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/sub_picker.py::open_picker"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::redraw"
     ],
     [
       "reader-parameter",
