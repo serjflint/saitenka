@@ -150,7 +150,7 @@ class TooltipSession(RuleBasedStateMachine):
     @rule(scale=st.sampled_from(_SCALES))
     def resize(self, scale: int) -> None:
         self.r.osd = (round(1920 * scale), round(1080 * scale))  # live → changes _raster_scale
-        tooltip.render_tip_view(self.r)  # re-blit at the new scale
+        tooltip.render_view(self.r, self.r.tip.view)  # re-blit at the new scale
         self._check("resize")
 
     @invariant()

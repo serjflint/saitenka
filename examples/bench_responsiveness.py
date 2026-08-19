@@ -495,7 +495,7 @@ def run_render_cache(
             return None  # below the cost gate — not persisted
 
         def paint() -> None:
-            _tt._paint_from_cache(reader, key, cap, 0, 400, 60)
+            _tt._paint_from_cache(reader, key, cap, (0, 400, 60))
 
         return measure(paint, reps, warmup=1)["p50"]
 

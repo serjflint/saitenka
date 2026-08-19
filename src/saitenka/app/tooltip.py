@@ -441,7 +441,9 @@ def flash(reader: Reader, oid: int) -> None:
     if not reader.schedule_flash_expiry():
         return
     reader._flash_oid = oid
-    reader._render_nested_view() if oid == OverlayId.NESTED else render_tip_view(reader)
+    reader._render_nested_view() if oid == OverlayId.NESTED else render_view(
+        reader, reader.tip.view
+    )
 
 
 def copy_click(reader: Reader) -> None:
@@ -1006,19 +1008,25 @@ def _freeze_frame(ipc, prop, *, enabled: bool, already_paused: bool) -> bool:
     return True
 
 
-def _place_tip(view, panel, cap: int, anchor: tuple[int, int, int], *, scale: float, osd) -> None:
-    """Put a freshly built panel on screen: reset the scroll, cap the height, choose the position.
+def _place_tip(
+    view, width: int, full_height: int, cap: int, anchor, *, scale: float, osd
+) -> tuple[int, int]:
+    """Put a panel on screen: reset the scroll, cap the height, choose the position.
 
-    Takes the view rather than the host because every value it touches already lives on it. Safe
-    area: the cap keeps the tooltip clear of the OSC header and the controls at the bottom, so it
-    never spills under the window chrome. It scrolls, so capping beats trying to fit a tall entry —
-    `full_height` is the windowed engine's estimate, exact once the head measured a short panel.
+    Takes the view rather than the host because every value it touches already lives on it. Width
+    and height rather than a panel, because the direct-paint path (#149) places a cached ARRAY that
+    has no panel yet, and it was repeating this arithmetic — including the safe area — verbatim.
+
+    Safe area: the cap keeps the tooltip clear of the OSC header and the controls at the bottom, so
+    it never spills under the window chrome. It scrolls, so capping beats trying to fit a tall entry
+    — `full_height` is the windowed engine's estimate, exact once the head measured a short panel.
     """
     wx, wy, box_h = anchor
     view.scroll = 0
     view.desired_scroll = 0
-    view.view_h = min(panel.full_height, cap)
-    view.xy = place_panel(panel.width, wx, wy, box_h, view.view_h, scale=scale, osd=osd)
+    view.view_h = min(full_height, cap)
+    view.xy = place_panel(width, wx, wy, box_h, view.view_h, scale=scale, osd=osd)
+    return view.xy
 
 
 def show_tooltip_impl(reader: Reader, index: int) -> bool:
@@ -1067,11 +1075,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # full_h + decorate + upload the cached pixels NOW, skipping the whole build+measure+raster pipeline
     # so the user sees the tooltip in ~upload-time. The real interactive Panel is built right after (its
     # pixels are identical), off this paint's critical path — the reaction-latency window covers it.
-    painted = (
-        _paint_from_cache(reader, key, cap, anchor[0], anchor[1], b.h)
-        if tip.tip_show_cold
-        else False
-    )
+    painted = _paint_from_cache(reader, key, cap, anchor) if tip.tip_show_cold else False
 
     # Cold miss (nothing in the panel cache AND tier-2 direct-paint missed): do NOT build/raster on the
     # main thread — that synchronous build is what balloons tooltip_show p95+. Enqueue a TOP-priority
@@ -1115,8 +1119,16 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     )
 
     if not painted:
-        _place_tip(view, st, cap, anchor, scale=reader._tip_display_scale, osd=reader.osd)
-        render_tip_view(reader)
+        _place_tip(
+            view,
+            st.width,
+            st.full_height,
+            cap,
+            anchor,
+            scale=reader._tip_display_scale,
+            osd=reader.osd,
+        )
+        render_view(reader, reader.tip.view)
     reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
     # One panel: the blit above painted soft (instant) if the native viewport wasn't warm yet — the
     # direct-paint (#149) path is soft too. Ask the raster lane to warm the native bands; its completion
@@ -1159,11 +1171,11 @@ def _compose_kind(oid: int, *, navigated: bool) -> str:
     return "clicked" if navigated else "base"
 
 
-def _paint_from_cache(reader: Reader, key, cap: int, wx: float, wy: float, wh: float) -> bool:
+def _paint_from_cache(reader: Reader, key, cap: int, anchor) -> bool:
     """Paint a cold hover DIRECTLY from the persistent render cache (#149): place by the cached ``full_h``
     and decorate + upload the cached premul-BGRA first viewport, skipping the entire build+measure+raster
     pipeline. Sets ``_tip_xy``/``_tip_view_h``/``_tip_scroll``/``_tip_rect`` so the real Panel built right
-    after slots in without a re-blit. ``True`` when it painted (the caller then skips ``render_tip_view``).
+    after slots in without a re-blit. ``True`` when it painted (the caller then skips the re-render).
 
     The array is copied because ``decorate_and_upload`` mutates it in place (scrollbar/flash) and the
     disk-backed buffer is read-only. Same content ⇒ the real panel's geometry matches this placement."""
@@ -1176,27 +1188,24 @@ def _paint_from_cache(reader: Reader, key, cap: int, wx: float, wy: float, wh: f
         return False
     if otel_metrics.render_cache_hits is not None:
         otel_metrics.render_cache_hits.add(1)  # cold hover served straight from disk (the #149 win)
+    tip = reader.tip
     full_h = loaded.full_h
-    reader._tip_scroll = 0
-    reader._tip_view.desired_scroll = 0
-    reader._tip_view_h = min(full_h, cap)
-    xy = place_panel(
+    xy = _place_tip(
+        tip.view,
         loaded.array.shape[1],
-        wx,
-        wy,
-        wh,
-        reader._tip_view_h,
+        full_h,
+        cap,
+        anchor,
         scale=reader._tip_display_scale,
         osd=reader.osd,
     )
-    reader._tip_xy = xy
     with otel_metrics.traced(
         "tip_compose",
         cached="1",
-        kind=_compose_kind(OverlayId.TIP, navigated=bool(reader._tip_nav)),
+        kind=_compose_kind(OverlayId.TIP, navigated=bool(tip.tip_nav)),
     ):
-        view = loaded.array.copy()
-    reader._tip_rect = decorate_and_upload(reader, view, 0, full_h, xy, OverlayId.TIP)
+        pixels = loaded.array.copy()
+    tip.view.rect = decorate_and_upload(reader, pixels, 0, full_h, xy, OverlayId.TIP)
     return True
 
 
@@ -1298,11 +1307,6 @@ def render_view(reader: Reader, view: PopupView) -> None:
     if st is None:
         return
     view.rect = _blit_crisp_or_soft(reader, view, st)
-
-
-def render_tip_view(reader: Reader) -> None:
-    """Base-tooltip entry point (the historical name most call sites use)."""
-    render_view(reader, reader._tip_view)
 
 
 def apply_engaged_open(reader: Reader, result: tooltip_engaged.OpenReady) -> None:
@@ -1562,7 +1566,7 @@ def _install_navigated(reader: Reader, st: Panel) -> None:
     reader._tip_scroll = 0
     reader._tip_view.desired_scroll = 0
     reader._tip_view_h = min(st.full_height, reader._tip_cap())
-    render_tip_view(reader)
+    render_view(reader, reader.tip.view)
 
 
 def tip_back(reader: Reader) -> bool:
@@ -1574,7 +1578,7 @@ def tip_back(reader: Reader) -> bool:
     if not reader._tip_nav:
         return False
     _restore_tip_view(reader, reader._tip_nav.pop())
-    render_tip_view(reader)
+    render_view(reader, reader.tip.view)
     return True
 
 

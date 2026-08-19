@@ -818,10 +818,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::render_tip_view"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::render_view"
     ],
     [

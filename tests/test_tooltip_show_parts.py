@@ -27,12 +27,6 @@ class _View:
         self.xy = None
 
 
-class _Panel:
-    def __init__(self, width: int, full_height: int) -> None:
-        self.width = width
-        self.full_height = full_height
-
-
 def test_a_hover_pauses_a_playing_video() -> None:
     ipc = FakeIPC()
     assert _freeze_frame(ipc, lambda _p: False, enabled=True, already_paused=False) is True
@@ -65,28 +59,28 @@ def test_pause_on_tooltip_off_means_no_pause_at_all() -> None:
 def test_placing_a_panel_resets_the_scroll_of_the_previous_word() -> None:
     """A new word starts at the top: carrying the last word's scroll shows its middle."""
     view = _View()
-    _place_tip(view, _Panel(300, 900), 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
+    _place_tip(view, 300, 900, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
     assert (view.scroll, view.desired_scroll) == (0, 0)
 
 
 def test_a_tall_entry_is_capped_rather_than_fitted() -> None:
     """It scrolls, so the cap wins — fitting a 900px entry would spill under the window chrome."""
     view = _View()
-    _place_tip(view, _Panel(300, 900), 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
+    _place_tip(view, 300, 900, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
     assert view.view_h == 400
 
 
 def test_a_short_entry_uses_its_own_height() -> None:
     """The negative control for the cap: it must not pad a short panel out to the ceiling."""
     view = _View()
-    _place_tip(view, _Panel(300, 120), 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
+    _place_tip(view, 300, 120, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
     assert view.view_h == 120
 
 
 def test_placement_lands_inside_the_screen() -> None:
     """Anchored at the far corner — the safe area is the whole reason placement is not just (wx, wy)."""
     view = _View()
-    _place_tip(view, _Panel(300, 200), 400, (1900, 1060, 30), scale=1.0, osd=(1920, 1080))
+    _place_tip(view, 300, 200, 400, (1900, 1060, 30), scale=1.0, osd=(1920, 1080))
     assert view.xy is not None
     x, y = view.xy
     assert 0 <= x <= 1920 - 300

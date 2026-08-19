@@ -2049,7 +2049,7 @@ class Reader:
         self._mouse_captured = False
 
     def _render_tip_view(self) -> None:
-        tooltip.render_tip_view(self)
+        tooltip.render_view(self, self.tip.view)
 
     def _render_nested_view(self) -> None:
         tooltip.render_view(self, self._nest)

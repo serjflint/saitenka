@@ -86,7 +86,7 @@ def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
     vh = min(r._tip_view_h, st.full_height)
     y0 = max(0, min(r._tip_scroll, max(0, st.full_height - vh)))
     st.viewport(y0, vh, scale=r._raster_scale)  # warm the native viewport
-    tooltip.render_tip_view(r)  # re-blit with warm bands
+    tooltip.render_view(r, r.tip.view)  # re-blit with warm bands
     assert r._crisp_miss == "" and not r._crisp_pending
 
 
