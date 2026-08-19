@@ -20,6 +20,7 @@ class LifecycleTimerKind(StrEnum):
     STARTUP_HEALTH = "startup-health"
     LOADING_FRAME = "loading-frame"
     TOAST_EXPIRY = "toast-expiry"
+    FLASH_EXPIRY = "flash-expiry"
 
 
 @dataclass(frozen=True, slots=True)

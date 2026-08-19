@@ -1959,7 +1959,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     }  # header, not a scan cell
     r.copy_click()
     assert got and "本命" in got[0]  # copied the hovered word
-    assert r._flash_oid == C.TIP_ID and r._flash_until > 0
+    assert r._flash_oid == C.TIP_ID
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
@@ -1979,13 +1979,13 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
 
 
 def test_flash_border_drawn_then_cleared(monkeypatch):
+    """The pulse is retired by its own named deadline, not by a tick noticing a wall clock passed.
+    Firing the timer is the whole act — nothing polls, so a poll loop would prove nothing."""
     import numpy as np
 
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    clock = [1000.0]
-    monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     r.set_hover(0)
     shots = []
@@ -1998,10 +1998,47 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     oid, view = shots[-1]
     hl = np.array(tooltip.FLASH_BGRA, np.uint8)
     assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
-    clock[0] += r.flash_secs + 0.01
-    r.poll_once()  # flash expires → redraw without the border
+
+    assert ipc.fire_runtime_timer("lifecycle:flash-expiry")  # redraw without the border
+
     _, view2 = shots[-1]
     assert not (view2[0] == hl).all()
+
+
+def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
+    """Two copies in quick succession arm the pulse twice, and the first deadline is still out
+    there. Without the revision fence it lands during the second pulse and cuts it short."""
+    ipc = FakeIPC()
+    r = _scan_reader(ipc)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
+    r.set_hover(0)
+    tx, ty, tw, _th = r._tip_rect
+    ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
+    r.copy_click()
+    stale = ipc.timers["lifecycle:flash-expiry"]
+
+    r.copy_click()  # arms a second pulse; the first deadline is now stale
+
+    assert ipc.timers["lifecycle:flash-expiry"] != stale
+    assert ipc.fire_runtime_timer("lifecycle:flash-expiry")
+    assert r._flash_oid is None  # the latest due event, and only it, retired the pulse
+
+
+def test_closing_retires_a_pending_copy_flash(monkeypatch):
+    """A deadline that outlives its session redraws a popup onto a torn-down surface."""
+    ipc = FakeIPC()
+    r = _scan_reader(ipc)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
+    r.set_hover(0)
+    tx, ty, tw, _th = r._tip_rect
+    ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
+    r.copy_click()
+
+    r.close()
+
+    assert not r.schedule_flash_expiry()  # and nothing can arm a new one behind the close
 
 
 # --- card preview: click-to-play audio, image zoom toggle, ✕ close, and the ⊕→✓ mined state --------

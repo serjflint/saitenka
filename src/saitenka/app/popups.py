@@ -272,7 +272,6 @@ class TooltipState:
         self.word_since = 0.0
         self.last_mouse = (-1.0, -1.0)  # latest cursor pos — routes the wheel to the popup under it
         self.flash_oid: int | None = None  # a popup pulsing a "copied" highlight border
-        self.flash_until = 0.0
         self.hover_reading = ""  # dict-form reading of the hovered word, for TTS
         self.hover_terms: tuple[str, ...] = ()  # multi-token terms starting at the hovered word
         self.hover_span: tuple[int, int] | None = None  # token span the longest term covers

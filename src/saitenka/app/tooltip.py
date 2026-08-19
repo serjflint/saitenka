@@ -364,10 +364,15 @@ def copy_token(reader: Reader, t) -> None:
 
 
 def flash(reader: Reader, oid: int) -> None:
-    """Pulse a "copied" highlight border on a popup as copy feedback, then let the poll loop
-    restore it after ``flash_secs``."""
+    """Pulse a "copied" highlight border on a popup as copy feedback, retired by a named deadline.
+
+    Fails closed: a pulse that cannot be retired is a border stuck on the popup until the next
+    redraw happens to clear it, which reads as a rendering bug rather than as missing feedback. So
+    the highlight is only drawn once its own expiry is armed.
+    """
+    if not reader.schedule_flash_expiry():
+        return
     reader._flash_oid = oid
-    reader._flash_until = time.monotonic() + reader.flash_secs
     reader._render_nested_view() if oid == OverlayId.NESTED else render_tip_view(reader)
 
 
@@ -1115,7 +1120,7 @@ def decorate_and_upload(
         th = max(28, int(track * vh / full_h))
         tyb = 4 + int((track - th) * (y0 / max(1, full_h - vh)))
         view[tyb : tyb + th, full_w - 7 : full_w - 3] = (99, 99, 99, 210)
-    if reader._flash_oid == oid and time.monotonic() < reader._flash_until:
+    if reader._flash_oid == oid:  # the deadline owns when this stops being true
         b = 4  # "copied" highlight border (a brief visual pulse)
         view[:b, :] = view[-b:, :] = FLASH_BGRA
         view[:, :b] = view[:, -b:] = FLASH_BGRA

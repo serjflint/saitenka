@@ -214,19 +214,11 @@
     ],
     [
       "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._expire_flash"
-    ],
-    [
-      "polled-deadline",
       "src/saitenka/app/controller.py::Reader._request_mined_seed"
     ],
     [
       "polled-deadline",
       "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/popups.py::TooltipState.__init__"
     ],
     [
       "polled-deadline",
@@ -251,14 +243,6 @@
     [
       "polled-deadline",
       "src/saitenka/app/tooltip.py::_switch_word_hover"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::decorate_and_upload"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::flash"
     ],
     [
       "reader-parameter",
@@ -1459,10 +1443,6 @@
     [
       "tick-stage",
       "src/saitenka/app/controller.py::Reader._apply_background_results"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader._expire_surfaces"
     ],
     [
       "tick-stage",

@@ -298,7 +298,6 @@ class Reader:
     _word_since = Delegated[float]("tip", "word_since")
     _last_mouse = Delegated[tuple[float, float]]("tip", "last_mouse")
     _flash_oid = Delegated[int | None]("tip", "flash_oid")
-    _flash_until = Delegated[float]("tip", "flash_until")
     _hover_reading = Delegated[str]("tip", "hover_reading")
     _hover_terms = Delegated[tuple[str, ...]]("tip", "hover_terms")
     _hover_span = Delegated[tuple[int, int] | None]("tip", "hover_span")
@@ -2446,15 +2445,11 @@ class Reader:
     def _build_tick_pipeline(self) -> TickPipeline:
         return TickPipeline(
             (
-                TickStage("expire-surfaces", self._expire_surfaces),
                 TickStage("refresh-osd", self._refresh_surfaces),
                 TickStage("apply-background-results", self._apply_background_results),
                 TickStage("update-interaction", self._update_interaction),
             )
         )
-
-    def _expire_surfaces(self) -> None:
-        self._expire_flash()
 
     def _refresh_surfaces(self) -> None:
         if self.refresh_osd():
@@ -2901,10 +2896,17 @@ class Reader:
         if publish is not None:
             publish(event)
 
-    def _expire_flash(self) -> None:
-        if not (self._flash_until and time.monotonic() >= self._flash_until):
-            return
-        oid, self._flash_oid, self._flash_until = self._flash_oid, None, 0.0
+    def schedule_flash_expiry(self) -> bool:
+        """Arm the deadline that ends a copy-flash pulse. A second flash supersedes the first,
+        which `LifecycleTimers` fences by revision so only the latest due event lands."""
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        return self.lifecycle_timers.schedule(
+            LifecycleTimerKind.FLASH_EXPIRY, self.flash_secs, self._flash_expired
+        )
+
+    def _flash_expired(self) -> None:
+        oid, self._flash_oid = self._flash_oid, None
         if oid == NESTED_ID:
             self._render_nested_view()  # redraw without the highlight border
         elif oid == TIP_ID:
