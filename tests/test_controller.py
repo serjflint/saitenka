@@ -460,6 +460,7 @@ def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
 
 
 def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
+    from saitenka.app.subtitle_render import NullRenderer as _Inert
     from saitenka.subtitles import (
         GeometryRequest,
         GeometrySnapshot,
@@ -468,17 +469,14 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
         SubtitleTrackId,
     )
 
-    class PublishingRenderer:
+    class PublishingRenderer(_Inert):
         """Publishes geometry at draw. Uses `activate`, which still receives the host, because the
         cue identity it fabricates is host state rather than anything in a draw request."""
 
-        def clear(self, _surfaces=None, _ipc=None) -> None:
-            pass
-
-        def draw(self, _request=None, _surfaces=None, _ipc=None, *, _on_settled=None) -> None:
+        def draw(self, _request=None, _surfaces=None, _ipc=None, /, **_ports) -> None:
             return None
 
-        def activate(self, reader: Reader) -> None:
+        def activate(self, reader: Reader) -> bool:
             track_id = SubtitleTrackId("track-1")
             source_order = {"いち": 1, "に": 2}[reader.sub_text]
             event_id = SubtitleEventId(
@@ -506,6 +504,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
                     (),
                 ),
             )
+            return True
 
     r, ipc = _reader_with_index(monkeypatch)
     r.renderer = PublishingRenderer()

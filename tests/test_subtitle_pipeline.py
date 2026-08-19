@@ -11,6 +11,7 @@ from saitenka.app.subtitle_pipeline import (
     SubtitleGeometryWorker,
     SubtitleModeCoordinator,
 )
+from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.subtitles import (
     GeometryRequest,
@@ -24,16 +25,15 @@ from saitenka.subtitles import (
 )
 
 
-class FakeCurrentRenderer:
+class FakeCurrentRenderer(NullRenderer):
+    """Inherits the inert renderer so it answers the whole protocol; records what crosses the seam."""
+
     def __init__(self) -> None:
         self.drawn: object | None = None
         self.closed = False
 
-    def draw(self, request: object, _surfaces=None, _ipc=None, *, _on_settled=None) -> None:
+    def draw(self, request: object, _surfaces=None, _ipc=None, /, **_ports) -> None:
         self.drawn = request
-
-    def clear(self, _surfaces=None, _ipc=None) -> None:
-        pass
 
     def close(self) -> None:
         self.closed = True

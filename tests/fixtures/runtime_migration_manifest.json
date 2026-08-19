@@ -466,6 +466,38 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.activate"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.connection_replaced"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.cue_changed"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.deactivate"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.degrade_geometry"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.resume_after_overlay"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.suspend_for_overlay"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.use_native"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.activate"
     ],
     [
@@ -526,6 +558,10 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._verify_native"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.activate"
     ],
     [
@@ -546,10 +582,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.reassert"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.resume_after_overlay"
     ],
     [
@@ -559,6 +591,38 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.use_native"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NoPixelOwnership.connection_replaced"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NoPixelOwnership.cue_changed"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NoPixelOwnership.degrade_geometry"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NoPixelOwnership.use_native"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NullRenderer.activate"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NullRenderer.deactivate"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NullRenderer.resume_after_overlay"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NullRenderer.suspend_for_overlay"
     ],
     [
       "reader-parameter",

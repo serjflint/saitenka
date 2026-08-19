@@ -40,8 +40,15 @@ class JobSubmitter(Protocol):
 class CurrentSubtitleRenderer(Protocol):
     """One member per renderer, so the widest of them sets the signature for all.
 
-    That is precisely why these take a request rather than a host: while `draw` took a `Reader`,
-    the native renderer could never be narrower than the legacy one it shares this protocol with.
+    That is precisely why the draw members take a request rather than a host: while `draw` took a
+    `Reader`, the native renderer could never be narrower than the legacy one it shares this
+    protocol with.
+
+    **Total, deliberately.** The coordinator used to probe every lifecycle member with `getattr`
+    and skip it when absent, which no type checker can see: a renamed method, or a renderer that
+    never grew one, read as "this renderer does not do that" — a silent no-op indistinguishable
+    from a deliberate one. Every renderer answers every member now, and a renderer with no pixel
+    ownership to defend answers by doing nothing *on purpose*.
     """
 
     def draw(
@@ -51,6 +58,40 @@ class CurrentSubtitleRenderer(Protocol):
     def clear(self, surfaces=None, ipc=None, /) -> None: ...
 
     def close(self) -> None: ...
+
+    @property
+    def logged_first(self) -> bool:
+        """Whether a first-subtitle line has already been logged, for the caller to carry back."""
+        ...
+
+    def activate(self, reader: Reader, /) -> bool:
+        """Take the pixels, idempotently. `False` means the caller must draw them itself.
+
+        Idempotent by contract: safe to call on any event without tracking whether it already
+        did. It absorbed the old `reassert` — the precondition separating them ("has the ground
+        moved under the established flag?") is state the renderer owns, not something a caller
+        can know.
+        """
+        ...
+
+    def deactivate(self, reader: Reader, /) -> None:
+        """Give the pixels back, at close."""
+        ...
+
+    def suspend_for_overlay(self, reader: Reader, /) -> None: ...
+
+    def resume_after_overlay(self, reader: Reader, /) -> None: ...
+
+    def cue_changed(self, reader: Reader, /, *, nonempty: bool) -> None: ...
+
+    def connection_replaced(self, reader: Reader, /) -> None: ...
+
+    def degrade_geometry(self, reader: Reader, /) -> None: ...
+
+    def use_native(self, reader: Reader, /) -> bool:
+        """Whether native geometry may be used. A renderer with no native pixel path answers
+        `True`: it has no ownership to prove, so it never withholds geometry."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,9 +168,7 @@ class SubtitleModeCoordinator:
         """
         from saitenka.app.subtitle_render import build_draw_request
 
-        activate = getattr(self._renderer, "activate", None)
-        if activate is not None:
-            activate(reader)
+        self._renderer.activate(reader)
         result = self._renderer.draw(
             build_draw_request(reader), reader.lifecycle_surfaces, reader.ipc
         )
@@ -139,47 +178,32 @@ class SubtitleModeCoordinator:
         # produced them, and writing them onto a host mid-render outlives a superseded cue.
         reader.boxes = result.boxes
         reader.sub_origin = result.origin
-        reader._first_sub_logged = getattr(self._renderer, "logged_first", reader._first_sub_logged)
+        reader._first_sub_logged = self._renderer.logged_first
 
     def clear(self, reader: Reader) -> None:
         self._renderer.clear(reader.lifecycle_surfaces, reader.ipc)
 
     def activate(self, reader: Reader) -> None:
-        activate = getattr(self._renderer, "reassert", None) or getattr(
-            self._renderer, "activate", None
-        )
-        if activate is not None and activate(reader) is False:
+        if self._renderer.activate(reader) is False:
             self.draw_current(reader)
 
     def geometry_degraded(self, reader: Reader) -> None:
-        degrade = getattr(self._renderer, "degrade_geometry", None)
-        if degrade is not None:
-            degrade(reader)
+        self._renderer.degrade_geometry(reader)
 
     def cue_changed(self, reader: Reader, *, nonempty: bool) -> None:
-        changed = getattr(self._renderer, "cue_changed", None)
-        if changed is not None:
-            changed(reader, nonempty=nonempty)
+        self._renderer.cue_changed(reader, nonempty=nonempty)
 
     def deactivate(self, reader: Reader) -> None:
-        deactivate = getattr(self._renderer, "deactivate", None)
-        if deactivate is not None:
-            deactivate(reader)
+        self._renderer.deactivate(reader)
 
     def suspend_for_overlay(self, reader: Reader) -> None:
-        suspend = getattr(self._renderer, "suspend_for_overlay", None)
-        if suspend is not None:
-            suspend(reader)
+        self._renderer.suspend_for_overlay(reader)
 
     def resume_after_overlay(self, reader: Reader) -> None:
-        resume = getattr(self._renderer, "resume_after_overlay", None)
-        if resume is not None:
-            resume(reader)
+        self._renderer.resume_after_overlay(reader)
 
     def connection_replaced(self, reader: Reader) -> None:
-        replaced = getattr(self._renderer, "connection_replaced", None)
-        if replaced is not None:
-            replaced(reader)
+        self._renderer.connection_replaced(reader)
 
     @property
     def generation(self) -> int:

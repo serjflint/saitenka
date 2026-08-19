@@ -135,10 +135,38 @@ def enforce_reader_host_contract(root: Path, allowlist: Path) -> set[str]:
     }
     if grew:
         return grew
-    tightened = {module: count for module, count in sorted(counts.items()) if count}
-    if tightened != limits:
+    _write_allowlist(allowlist, counts, limits)
+    return set()
+
+
+def _write_allowlist(allowlist: Path, counts, limits: dict[str, int]) -> dict[str, int]:
+    current = {module: count for module, count in sorted(counts.items()) if count}
+    if current != limits:
         allowlist.write_text(
-            json.dumps(tightened, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            json.dumps(current, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-    return set()
+    return current
+
+
+def bless(root: Path, allowlist: Path) -> dict[str, int]:
+    """Accept the current counts, growth included — for a deliberate design decision.
+
+    The gate refuses growth because the usual cause is a new feature function reaching for the
+    host. The other cause is a trade: a total `Protocol` replacing `getattr` probes buys away a
+    class of silent no-op and pays in mechanical rows. Hand-editing this fixture is how that used
+    to be said, which is not saying it at all — this is, and the commit message carries the reason.
+    """
+    return _write_allowlist(allowlist, reader_parameter_counts(root), load_allowlist(allowlist))
+
+
+if __name__ == "__main__":  # pragma: no cover - operator entry point
+    import sys
+    from pathlib import Path
+
+    _root = Path(__file__).resolve().parent.parent
+    _allowlist = _root / "tests/fixtures/reader_host_allowlist.json"
+    if sys.argv[1:2] != ["bless"]:
+        print("usage: python tests/reader_host_contract.py bless")  # noqa: T201
+        raise SystemExit(2)
+    print(f"reader-host: blessed ({sum(bless(_root, _allowlist).values())} rows)")  # noqa: T201

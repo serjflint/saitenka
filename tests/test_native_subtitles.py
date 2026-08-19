@@ -484,7 +484,16 @@ def test_missing_ass_full_property_disables_only_native_geometry(tmp_path: Path)
     result.close()
 
 
+def _visibility_asserts(ipc) -> int:
+    return sum(1 for command in ipc.commands if command == ("set_property", "sub-visibility", True))
+
+
 def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path) -> None:
+    """A new track means the established flag is about pixels from the old one, so it is re-proved.
+
+    The trigger is the selection moving, not the call: `activate` is idempotent by contract, and a
+    caller cannot know whether the ground moved under it.
+    """
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
@@ -492,13 +501,28 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.commands.clear()
 
+    ipc.props["sid"] = 5
     result.subtitle_pipeline.activate(result)
+    ipc.props["sid"] = 6
     result.subtitle_pipeline.activate(result)
 
-    commands = [
-        command for command in ipc.commands if command == ("set_property", "sub-visibility", True)
-    ]
-    assert len(commands) == 2
+    assert _visibility_asserts(ipc) == 2
+    result.close()
+
+
+def test_reconfiguring_the_same_track_does_not_reassert(tmp_path: Path) -> None:
+    """The negative control, and the reason the renderer decides rather than the caller: a repeat
+    with nothing changed must not spend an mpv round-trip proving what it already proved."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    ipc.props["sid"] = 5
+    result.subtitle_pipeline.activate(result)
+    ipc.commands.clear()
+
+    result.subtitle_pipeline.activate(result)
+
+    assert _visibility_asserts(ipc) == 0
     result.close()
 
 
@@ -1665,7 +1689,9 @@ def test_only_one_assertion_is_in_flight_across_a_reassert(tmp_path: Path) -> No
     visibility = [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c]
     assert len(visibility) == 1
 
-    result.subtitle_pipeline.renderer.reassert(result)
+    # Through the fact, not a verb: an overlay release is the production trigger for a
+    # re-verification with the selection unchanged.
+    result.subtitle_pipeline.renderer.resume_after_overlay(result)
 
     # A second assertion would orphan the first's effect id and leave a terminal nobody retires.
     assert [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c] == visibility
@@ -2085,6 +2111,7 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     ipc.commands.clear()
     ipc.set_property_error = "disconnected"
 
+    ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
     result.subtitle_pipeline.activate(result)
 
     assert ("set_property", "sub-visibility", True) in ipc.commands
@@ -2171,7 +2198,7 @@ def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: 
     ipc.commands.clear()
 
     ipc.correlate_commands = True
-    renderer.reassert(result)
+    renderer.resume_after_overlay(result)
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the visibility write
     ipc.props["sub-visibility"] = False  # mpv refuses to keep its subtitles visible
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # readback FALSE: hand to legacy
@@ -2203,6 +2230,7 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     ipc.set_property_error = "disconnected"
     ipc.overlay_add_error = "unsupported format"
 
+    ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
     result.subtitle_pipeline.activate(result)
 
     assert renderer.ownership_state.owner.value == "unknown"

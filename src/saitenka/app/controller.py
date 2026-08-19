@@ -1568,8 +1568,7 @@ class Reader:
         self.subtitle_pipeline.geometry_degraded(self)
 
     def _use_native_subtitle_renderer(self) -> bool:
-        renderer = self.subtitle_pipeline.renderer
-        return not isinstance(renderer, NativeVisibleRenderer) or renderer.use_native(self)
+        return self.subtitle_pipeline.renderer.use_native(self)
 
     def _native_ownership_undecided(self) -> bool:
         """True while a visibility assertion is in flight, so `_use_native_subtitle_renderer` said

@@ -17,21 +17,19 @@ class FakeIPC(util.FakeIPC):
         self.props.update(props or {})
 
 
-class _SpyRenderer:
+class _SpyRenderer(NullRenderer):
     """A draw strategy that records each draw request instead of rasterizing.
 
     The callback receives the `DrawRequest`, which is what the renderer actually sees — asserting
     against host attributes would be reaching back across the seam the request exists to close.
+    Inherits the inert renderer so it answers the whole protocol; only `draw` is interesting here.
     """
 
     def __init__(self, on_draw):
         self._on_draw = on_draw
 
-    def draw(self, request, _surfaces=None, _ipc=None, *, _on_settled=None):
+    def draw(self, request, _surfaces=None, _ipc=None, /, **_ports):
         self._on_draw(request)
-
-    def clear(self, _surfaces=None, _ipc=None):
-        pass
 
 
 def test_full_annotations_remain_the_default():

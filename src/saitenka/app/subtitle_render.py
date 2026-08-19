@@ -204,7 +204,26 @@ def focus_drawing(rect: tuple[int, int, int, int]) -> str:
     )
 
 
-class SubtitleRenderer:
+class NoPixelOwnership:
+    """For a renderer that owns no mpv-side pixels: the ownership members are no-ops, on purpose.
+
+    Shared rather than repeated, because "does nothing, deliberately" is one decision and two
+    copies of it drift. It is what the coordinator's `getattr` probes used to mean — with the
+    difference that a renderer now has to inherit this to mean it, instead of meaning it by
+    accident of not having the method.
+    """
+
+    def cue_changed(self, _reader: Reader, /, *, nonempty: bool) -> None: ...
+
+    def connection_replaced(self, _reader: Reader, /) -> None: ...
+
+    def degrade_geometry(self, _reader: Reader, /) -> None: ...
+
+    def use_native(self, _reader: Reader, /) -> bool:
+        return True  # nothing to prove, so geometry is never withheld on ownership grounds
+
+
+class SubtitleRenderer(NoPixelOwnership):
     """Rasterize the current cue and blit it as the SUB overlay — the real draw path."""
 
     def activate(self, reader: Reader) -> bool:
@@ -335,7 +354,7 @@ class SubtitleRenderer:
         surfaces.remove(SUB_ID, owner=Owner.SUBTITLE)
 
 
-class NullRenderer:
+class NullRenderer(NoPixelOwnership):
     """No-op draw strategy: run the reader's hover/nav/prefetch logic without rasterizing."""
 
     def draw(self, _request: DrawRequest, _surfaces=None, _ipc=None, /, **_ports) -> None:
@@ -351,6 +370,23 @@ class NullRenderer:
 
     def close(self) -> None:
         pass
+
+    # --- nothing is drawn, so nothing is owned ------------------------------------------------
+    # `activate` returning True is what keeps the coordinator from falling back to a draw this
+    # renderer would discard anyway.
+
+    @property
+    def logged_first(self) -> bool:
+        return False
+
+    def activate(self, _reader: Reader, /) -> bool:
+        return True
+
+    def deactivate(self, _reader: Reader, /) -> None: ...
+
+    def suspend_for_overlay(self, _reader: Reader, /) -> None: ...
+
+    def resume_after_overlay(self, _reader: Reader, /) -> None: ...
 
 
 class NativeVisibleRenderer:
@@ -740,6 +776,11 @@ class NativeVisibleRenderer:
         return actions
 
     def _ensure_selection(self, reader: Reader) -> None:
+        """Publish a selection change if one happened.
+
+        The change is enough on its own: `_change_context` re-runs `_start_mode`, which re-shows
+        mpv's pixels. Chaining a verify onto it would assert twice for one fact.
+        """
         selection = repr(
             (
                 reader._prop("sid"),
@@ -762,6 +803,14 @@ class NativeVisibleRenderer:
         self._execute(reader, actions)
 
     def activate(self, reader: Reader) -> bool:
+        """Own the pixels, idempotently. `False` means the caller must draw them itself.
+
+        One member for what used to be `activate` + `reassert`. Both of `reassert`'s callers were
+        facts with their own names — a track reconfigure and an overlay releasing the pixels — so
+        neither needed a verb: the reconfigure arrives here as a selection change, and the overlay
+        release is `resume_after_overlay`. What is left is idempotent, which is what lets any
+        event call it without tracking whether it already did.
+        """
         self._ensure_selection(reader)
         if (
             not self._state.native_pixels_established
@@ -775,8 +824,8 @@ class NativeVisibleRenderer:
             self._execute(reader, actions)
         return self._state.owner == PixelOwner.NATIVE
 
-    def reassert(self, reader: Reader) -> bool:
-        self._ensure_selection(reader)
+    def _verify_native(self, reader: Reader) -> bool:
+        """Re-prove ownership against mpv rather than trusting the established flag."""
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.VERIFY_NATIVE)
         )
@@ -858,6 +907,11 @@ class NativeVisibleRenderer:
     def close(self) -> None:
         self._fallback.close()
 
+    @property
+    def logged_first(self) -> bool:
+        """The fallback's, since it is the one that rasters — and logs — when mpv is not the owner."""
+        return self._fallback.logged_first
+
     def deactivate(self, reader: Reader) -> None:
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CLOSE_REQUESTED)
@@ -880,7 +934,9 @@ class NativeVisibleRenderer:
             )
             self._execute(reader, actions)
             return
-        self.reassert(reader)
+        # Verify, not activate: `suspend_for_overlay` set sub-visibility behind the FSM's back, so
+        # the established flag is stale by construction and only mpv can settle it.
+        self._verify_native(reader)
 
     def _hide_focus(self, ipc) -> None:
         self._submit_focus(ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))
