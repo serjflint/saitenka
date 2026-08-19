@@ -2294,10 +2294,13 @@ class Reader:
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def _setup_secondary(self) -> int | None:
-        return translation.setup_secondary(self)
+        return subtitle_modes.setup_secondary(self)
 
     def _translation_visible(self) -> bool:
-        return translation.translation_visible(self)
+        # Two conditions, and not interchangeable: whether the user wants it, and whether
+        # saitenka is drawing anything at all. Code deciding what to do once the surfaces come
+        # back needs the first without the second — see `_translation_wanted`.
+        return self.ov.visible and self._translation_wanted()
 
     def _translation_wanted(self) -> bool:
         """Whether the user wants the secondary line, independent of whether anything is drawn.
@@ -2308,7 +2311,11 @@ class Reader:
         return self._translate_on or (self.auto_translate and self.hover >= 0)
 
     def _sync_auto_translation(self) -> None:
-        translation.sync_auto_translation(self)
+        if not self.auto_translate:
+            return
+        self._reveal_translation() if self._translation_visible() else self._hide_translation(
+            release=not self._translate_on
+        )
 
     def toggle_translation(self) -> None:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION)
@@ -2494,7 +2501,10 @@ class Reader:
         elif isinstance(effect, subtitle_intents.CopyCueText):
             copy_clipboard("\n".join(self._sentence_lines()))
         elif isinstance(effect, subtitle_intents.ToggleTranslation):
-            translation.toggle_translation(self)
+            self._translate_on = not self._translate_on
+            self._reveal_translation() if self._translation_visible() else self._hide_translation(
+                release=True
+            )
         elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
 
@@ -2514,10 +2524,29 @@ class Reader:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.RETRY_ACQUISITION)
 
     def _secondary_text(self) -> str:
-        return translation.secondary_text(self)
+        return translation.clean_secondary(self._prop("secondary-sub-text"))
 
     def _draw_translation(self) -> None:
-        translation.draw_translation(self)
+        text = self._secondary_text()
+        self._trans_text = text
+        if not text:
+            self.lifecycle_surfaces.remove(OverlayId.TRANS)
+            return
+        image, x, y = translation.render_translation(text, self.osd)
+        self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.TRANS)
+
+    def _reveal_translation(self) -> None:
+        self._setup_secondary()
+        self._draw_translation()
+
+    def _hide_translation(self, *, release: bool) -> None:
+        """Take the overlay down. `release` hands the secondary track back to mpv, which only the
+        paths that own the reveal may do — an auto-reveal ending must not release a track the
+        manual toggle is still holding."""
+        self.lifecycle_surfaces.remove(OverlayId.TRANS)
+        self._trans_text = None
+        if release:
+            subtitle_modes.release_secondary(self)
 
     def _toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
         img = render_toast(text, kind)

@@ -1313,30 +1313,6 @@
       "src/saitenka/app/tooltip.py::update_hover_instrumented"
     ],
     [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::draw_translation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::secondary_text"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::setup_secondary"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::sync_auto_translation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::toggle_translation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::translation_visible"
-    ],
-    [
       "tick-stage",
       "src/saitenka/app/controller.py::Reader.poll_once"
     ],
