@@ -4,8 +4,8 @@ The projection is the sole interpreter of raw mpv property observations. Callers
 observation at a time and receive replaced state plus typed deltas; nothing downstream parses mpv
 dictionaries or compares raw property values.
 
-Pointer and pause facts are represented so composition tests can drive a whole snapshot, but their
-deltas stay unpublished while the legacy route still owns them (`LEGACY_OWNED`).
+Pause facts are represented so composition tests can drive a whole snapshot, but their deltas stay
+unpublished while the legacy route still owns them (`LEGACY_OWNED`).
 """
 
 from __future__ import annotations
@@ -46,8 +46,9 @@ class FactDomain(StrEnum):
     PAUSE = "pause"
 
 
-#: Domains whose deltas the legacy route still owns (pointer until WP5.1, pause until WP5.4).
-LEGACY_OWNED = frozenset({FactDomain.POINTER, FactDomain.PAUSE})
+#: Domains whose deltas the legacy driver still owns, so publishing one would give a fact two
+#: consumers. `POINTER` left this set in WP5.1, when hover moved off the interaction tick.
+LEGACY_OWNED = frozenset({FactDomain.PAUSE})
 
 
 class RetireReason(StrEnum):

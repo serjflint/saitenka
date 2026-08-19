@@ -422,19 +422,28 @@ def test_identical_text_under_a_new_track_changes_identity_without_a_cue_delta()
     assert SubtitleSelectionChanged in kinds(projection.observe(state, "sid", 3).deltas)
 
 
-# --- gate: pointer and pause stay legacy-owned in production -----------------------------------
+# --- gate: what the legacy route still owns, and what it has handed back ------------------------
 
 
-def test_pointer_and_pause_deltas_are_not_published_while_legacy_owns_them() -> None:
+def test_a_pointer_move_publishes_now_that_hover_consumes_it() -> None:
+    """`POINTER` left `LEGACY_OWNED` when hover moved off the interaction tick. Publishing a delta
+    nobody consumed would have been harmless; publishing one *two* routes consume is the double
+    handling `LEGACY_OWNED` exists to prevent, so the two changes are one."""
     projection = PlaybackProjection()
 
     pointer = projection.observe(PlaybackState(), "mouse-pos", {"x": 1, "y": 2})
+
+    assert kinds(pointer.deltas) == [PointerMoved]
+    assert pointer.state.pointer.position == {"x": 1, "y": 2}
+
+
+def test_pause_deltas_are_not_published_while_legacy_owns_them() -> None:
+    projection = PlaybackProjection()
+
     pause = projection.observe(PlaybackState(), "pause", data=True)
 
-    assert pointer.deltas == ()
     assert pause.deltas == ()
-    # The facts are still projected, so composition can read them.
-    assert pointer.state.pointer.position == {"x": 1, "y": 2}
+    # The fact is still projected, so composition can read it.
     assert pause.state.paused is True
 
 

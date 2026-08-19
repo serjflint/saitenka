@@ -123,6 +123,30 @@ def test_mouse_controls_live_in_a_forced_section():
     assert ipc.commands[-1] == ("disable-section", name)
 
 
+def test_hover_reacts_to_the_pointer_observation_not_to_a_tick():
+    """WP5.1's ingress half, asserted where it is observable: a pointer observation alone has to
+    move the hover, with no tick anywhere in the trace. The negative control is the same trace
+    without the observation — a tick that still drove hover would pass both halves.
+    """
+    ipc = RuntimeFakeIPC()
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    from saitenka.app.subtitles import WordBox
+    from saitenka.app.tokenize import Token
+
+    r.tokens = [Token("猫", "猫", "ねこ", "名詞", 0, 1)]
+    r.boxes = [WordBox(0, 0, 0, 40, 40)]
+    r.start_observing()
+    assert r.hover == -1
+
+    ipc.emit(
+        {"event": "property-change", "name": "mouse-pos", "data": {"hover": True, "x": 20, "y": 20}}
+    )
+    r._drain_events()
+
+    assert r.hover == 0  # the observation alone moved it
+    r.close()
+
+
 def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
     """A rival script can re-force its own section at any time, so ours is re-asserted on a repeating
     deadline. The due event re-checks rather than trusting the arm: re-forcing after the surface

@@ -826,6 +826,11 @@ class Reader:
                 self.native_geometry.record_clock_change(self)
         elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
             self._arm_geometry_refresh()
+        elif isinstance(delta, playback.PointerMoved):
+            # Hover reacts to the pointer moving, not to a tick noticing that it did. The dwells it
+            # arms are deadlines, so a cursor that stops still gets its linger — which is why this
+            # could not move until they were.
+            self._update_hover()
 
     def _install_cue_identity(self, identity: cue_annotation.CueIdentity) -> None:
         """Bind the cue identity in both owners: the annotation state and the projection, which
@@ -2747,7 +2752,6 @@ class Reader:
 
     def _update_interaction(self) -> None:
         self._feed_episode_annotation()
-        self._update_hover()
         self._sync_mouse_capture()
         self._update_prefetch()
         if self._translation_visible() and self._secondary_text() != self._trans_text:
