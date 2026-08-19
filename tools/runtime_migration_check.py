@@ -39,6 +39,15 @@ _AUTONOMOUS_DEADLINES = {
     "src/saitenka/app/anki.py::wait_until_anki_up",
     "src/saitenka/app/otel_export.py::CTFSpanProcessor._flush",
 }
+#: The presentation adapters. `direct-overlay-mutation` means "a *feature* reaches past its layer
+#: and paints" — these two ARE the layer, and mutating the overlay is their whole job.
+#: `LifecycleSurfaces` is absent only because it happens to stage through `prepare`, which is not in
+#: `_OVERLAY_METHODS`; that is an accident of naming, not a different status. Anything added here
+#: must be the sole owner of a presentation slot's transactions, not merely a frequent painter.
+_PRESENTATION_ADAPTERS = {
+    "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra",
+    "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove",
+}
 _NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
 _DRIVER_SWITCH_SYMBOLS = {
     "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard",
@@ -171,8 +180,10 @@ class Scanner(ast.NodeVisitor):
             if node.func.attr == "get_nowait" and self._source() not in _AUTONOMOUS_DRAINS:
                 self.debt.add(Debt("passive-result-drain", self._source()))
             receiver_tail = receiver.rsplit(".", 1)[-1]
-            if node.func.attr in _OVERLAY_METHODS and (
-                receiver_tail == "ov" or "overlay" in receiver_tail
+            if (
+                node.func.attr in _OVERLAY_METHODS
+                and (receiver_tail == "ov" or "overlay" in receiver_tail)
+                and self._source() not in _PRESENTATION_ADAPTERS
             ):
                 self.debt.add(Debt("direct-overlay-mutation", self._source()))
         self.generic_visit(node)

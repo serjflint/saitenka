@@ -257,3 +257,25 @@ def polls(self):
 
     assert checker.Debt("polled-deadline", "src/saitenka/app/planted.py::waits") not in scanner.debt
     assert checker.Debt("polled-deadline", "src/saitenka/app/planted.py::polls") in scanner.debt
+
+
+def test_scanner_exempts_the_presentation_adapters_but_not_their_callers() -> None:
+    """`direct-overlay-mutation` means a *feature* reached past its layer. The surface adapters are
+    that layer, so painting is their job — and the exemption is by symbol, so a feature that calls
+    them is untouched by it."""
+    checker = _module()
+    actual, _, _ = checker.scan()
+
+    assert (
+        checker.Debt(
+            "direct-overlay-mutation",
+            "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra",
+        )
+        not in actual
+    )
+    assert (
+        checker.Debt(
+            "direct-overlay-mutation", "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
+        )
+        in actual
+    )

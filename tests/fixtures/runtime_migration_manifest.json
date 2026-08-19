@@ -149,14 +149,6 @@
       "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
     ],
     [
-      "direct-overlay-mutation",
-      "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove"
-    ],
-    [
       "driver-switch",
       "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"
     ],
