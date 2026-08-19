@@ -22,12 +22,14 @@ from saitenka.app import nested_popup, tooltip_engaged
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.media import copy_clipboard, speak
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.nested_popup import TIP_GAP
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import timed
 from saitenka.app.popups import Panel, PopupView
 from saitenka.app.subtitles import box_for_token
 from saitenka.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
+from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
@@ -972,8 +974,14 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # cost stays attributable; the round-trips are ~5ms, negligible vs the build/compose it now precedes.
     with otel_metrics.traced("pause_ipc"):
         if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
-            submit = getattr(reader.ipc, "command_async", reader.ipc.command)
-            submit("set_property", "pause", True)  # noqa: FBT003
+            send_correlated(
+                reader.ipc,
+                "hover-pause",
+                "set_property",
+                "pause",
+                True,  # noqa: FBT003  # mpv IPC wire value
+                owner=Owner.PLAYBACK,
+            )
             reader._paused_by_tip = True
     # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
     # windowed engine composites the rest on scroll with overscan look-ahead.

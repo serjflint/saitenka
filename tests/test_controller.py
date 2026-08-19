@@ -3339,3 +3339,29 @@ def test_a_refused_interaction_command_is_reported_rather_than_lost(caplog):
 
     assert "enable-mouse-section" in caplog.text
     assert "not admitted" in caplog.text
+
+
+def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
+    """There were three writes for this one fact, and two reached mpv through a
+    `getattr(ipc, "command_async", ipc.command)` probe — invisible to the direct-write gate, and a
+    fake missing the port silently took the other branch. Both triggers must now be indistinguishable
+    at the wire.
+    """
+    from saitenka.app import hover_intents
+
+    def resume_via(act) -> list[tuple]:
+        ipc = FakeIPC()
+        ipc.props["pause"] = False
+        reader = _reader_with_word(ipc)
+        monkeypatch.setattr(reader, "renderer", NullRenderer())
+        reader._show_tooltip(0)
+        assert reader.hover_view().paused
+        before = len(ipc.commands)
+        act(reader)
+        assert not reader.hover_view().paused
+        return [c for c in ipc.commands[before:] if c[:2] == ("set_property", "pause")]
+
+    by_cue = resume_via(lambda r: r.set_subtitle("別の字幕"))
+    by_reducer = resume_via(lambda r: r._apply_hover_effect(hover_intents.ResumePlayback()))
+
+    assert by_cue == by_reducer == [("set_property", "pause", False)]

@@ -2,10 +2,6 @@
   "debt": [
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._apply_hover_effect"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._register_keybinds.bind"
     ],
     [

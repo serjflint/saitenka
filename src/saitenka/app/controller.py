@@ -1050,9 +1050,7 @@ class Reader:
         self._kanji_index = 0
         self._unbind_tip_keys()
         if self._paused_by_tip:
-            submit = getattr(self.ipc, "command_async", self.ipc.command)
-            submit("set_property", "pause", False)  # noqa: FBT003
-            self._paused_by_tip = False
+            self._resume_after_hover_pause()
         self._sync_auto_translation()
 
     def set_subtitle(
@@ -2434,6 +2432,20 @@ class Reader:
         for effect in hover_intents.reduce(command, self._hover_inputs()):
             self._apply_hover_effect(effect)
 
+    def _resume_after_hover_pause(self) -> None:
+        """Give playback back after a hover auto-pause. One path, because there were three: two
+        reached mpv through a `getattr(ipc, "command_async", ipc.command)` duck-probe — invisible to
+        the direct-write gate, and a fake missing the port silently took the other branch."""
+        send_correlated(
+            self.ipc,
+            "hover-pause-resume",
+            "set_property",
+            "pause",
+            False,  # noqa: FBT003  # mpv IPC wire value
+            owner=Owner.PLAYBACK,
+        )
+        self._paused_by_tip = False
+
     def _apply_hover_effect(self, effect: hover_intents.HoverEffect) -> None:
         from saitenka.app.media import speak
         from saitenka.app.subtitles import box_for_token
@@ -2451,8 +2463,7 @@ class Reader:
         elif isinstance(effect, hover_intents.SetHoverPause):
             self.pause_on_tooltip = effect.enabled
         elif isinstance(effect, hover_intents.ResumePlayback):
-            self.ipc.command("set_property", "pause", False)  # noqa: FBT003  # mpv wire value
-            self._paused_by_tip = False
+            self._resume_after_hover_pause()
         elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
 
