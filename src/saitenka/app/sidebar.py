@@ -346,10 +346,10 @@ def redraw(reader: Reader) -> None:
     reader.lifecycle_surfaces.present(rendered.image, x, y, oid=SIDEBAR_ID)
 
 
-def toggle(reader: Reader) -> None:
-    reader.sidebar.open = not reader.sidebar.open
+def set_open(reader: Reader, *, open: bool) -> None:  # noqa: A002
+    """Show or hide the sidebar. The caller decides which — `panel_intents` owns the toggle."""
+    reader.sidebar.open = open
     if reader.sidebar.open:
-        reader.set_hover(-1)
         active = _active_index(reader)
         reader.sidebar.scroll = max(0, active - _capacity(reader) // 2)
         reader.sidebar.last_active = active

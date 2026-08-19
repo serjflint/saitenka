@@ -36,6 +36,7 @@ from saitenka.app import (
     miner_ui,
     native_subtitles,
     nested_popup,
+    panel_intents,
     popups,
     prefetch,
     reader_deps,
@@ -2089,6 +2090,41 @@ class Reader:
     def _mine_tags(self, video) -> list[str]:
         return self._miner.mine_tags(video)
 
+    # --- panel commands: pure reducer, executed here (WP5.3) ----------------------------------
+    def _panel_inputs(self) -> panel_intents.PanelInputs:
+        states = {
+            panel_intents.Panel.SIDEBAR: self.sidebar.open,
+            panel_intents.Panel.ANALYSIS: self.analysis.open,
+            panel_intents.Panel.SUBTITLE_PICKER: self.sub_picker.open,
+        }
+        return panel_intents.PanelInputs(
+            open_panels=frozenset(panel for panel, is_open in states.items() if is_open)
+        )
+
+    def _run_panel_command(self, command: panel_intents.PanelCommand) -> None:
+        for effect in panel_intents.reduce(command, self._panel_inputs()):
+            self._apply_panel_effect(effect)
+
+    def _set_panel_open(self, panel: panel_intents.Panel, *, opening: bool) -> None:
+        if panel is panel_intents.Panel.SIDEBAR:
+            sidebar.set_open(self, open=opening)
+        elif panel is panel_intents.Panel.ANALYSIS:
+            analysis_overlay.set_open(self, open=opening)
+        elif panel is panel_intents.Panel.SUBTITLE_PICKER:
+            sub_picker.open_picker(self) if opening else sub_picker.close_picker(self)
+        elif panel is panel_intents.Panel.CARD_PREVIEW:
+            miner_ui.hide_preview(self)
+
+    def _apply_panel_effect(self, effect: panel_intents.PanelEffect) -> None:
+        if isinstance(effect, panel_intents.DismissHover):
+            self.set_hover(-1)
+        elif isinstance(effect, panel_intents.ReplayCardPreview):
+            miner_ui.replay_preview(self)
+        elif isinstance(effect, panel_intents.OpenPanel):
+            self._set_panel_open(effect.panel, opening=True)
+        elif isinstance(effect, panel_intents.ClosePanel):
+            self._set_panel_open(effect.panel, opening=False)
+
     # --- mining commands: pure reducer, executed here (WP5.3) ---------------------------------
     def _mine_inputs(self) -> mine_intents.MineInputs:
         """Read the facts the mining commands decide from, once, before deciding."""
@@ -2182,13 +2218,13 @@ class Reader:
         miner_ui.render_preview(self)
 
     def _hide_preview(self) -> None:
-        miner_ui.hide_preview(self)
+        self._run_panel_command(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)
 
     def _click_preview(self, x: float, y: float) -> bool:
         return miner_ui.click_preview(self, x, y)
 
     def replay_preview(self) -> None:
-        miner_ui.replay_preview(self)
+        self._run_panel_command(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
 
     def _frequency(self, tok) -> tuple[str, str]:
         return self._miner.frequency(tok)
@@ -2412,16 +2448,16 @@ class Reader:
         backlog.capture_current(self)
 
     def toggle_sidebar(self) -> None:
-        sidebar.toggle(self)
+        self._run_panel_command(panel_intents.PanelCommand.TOGGLE_SIDEBAR)
 
     def toggle_sub_picker(self) -> None:
-        sub_picker.toggle(self)
+        self._run_panel_command(panel_intents.PanelCommand.TOGGLE_SUBTITLE_PICKER)
 
     def configure_sub_picker(self, lister: Callable[[str], tuple]) -> None:
         sub_picker.configure(self, lister)
 
     def toggle_analysis(self) -> None:
-        analysis_overlay.toggle(self)
+        self._run_panel_command(panel_intents.PanelCommand.TOGGLE_ANALYSIS)
 
     def toggle_annotation_mode(self) -> None:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
@@ -2497,11 +2533,6 @@ class Reader:
             OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
             PROFILE_CYCLE_MSG: action("cycle_profile"),
             BOOKMARK_MSG: action("toggle_bookmark"),
-            SIDEBAR_MSG: action("toggle_sidebar"),
-            SUB_PICKER_MSG: action("toggle_sub_picker"),
-            ANALYSIS_MSG: action("toggle_analysis"),
-            PREVIEW_MSG: action("replay_preview"),
-            PREVIEW_CLOSE_MSG: action("_hide_preview"),
             SCROLL_UP_MSG: wheel(-1),
             SCROLL_DOWN_MSG: wheel(1),
             COPY_CLICK_MSG: action("copy_click"),
@@ -2534,6 +2565,11 @@ class Reader:
             MINE_MSG: action("mine_current"),
             MINE_VIDEO_MSG: action("mine_current_video"),
             MINE_ALL_MSG: action("bulk_mine"),
+            SIDEBAR_MSG: action("toggle_sidebar"),
+            SUB_PICKER_MSG: action("toggle_sub_picker"),
+            ANALYSIS_MSG: action("toggle_analysis"),
+            PREVIEW_MSG: action("replay_preview"),
+            PREVIEW_CLOSE_MSG: action("_hide_preview"),
         }
         return LegacyCommandExecutor(
             {

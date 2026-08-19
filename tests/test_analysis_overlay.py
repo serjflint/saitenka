@@ -16,6 +16,15 @@ from saitenka.render.analysis import render_analysis
 from saitenka.subtitles import Cue, CueIndex
 
 
+def _toggle_analysis(reader) -> None:
+    """Flip the panel the way the panel reducer would.
+
+    `analysis_overlay.set_open` replaced `toggle` when the open/close decision moved to
+    `panel_intents`; these tests are about what opening and closing *do*, so they keep flipping.
+    """
+    analysis_overlay.set_open(reader, open=not reader.analysis.open)
+
+
 @pytest.fixture
 def reader():
     ipc = FakeIPC()
@@ -75,12 +84,12 @@ def test_no_index_reports_unavailable(reader):
 
 
 def test_cache_hit_does_not_start_another_worker(reader):
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
     _finish(reader)
     generation = reader.analysis.generation
 
-    analysis_overlay.toggle(reader)
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
+    _toggle_analysis(reader)
 
     assert reader.analysis.generation == generation
     assert reader.analysis.current is not None
@@ -108,7 +117,7 @@ def test_dependency_loading_defers_analysis_until_vocabulary_arrives(reader):
 
 
 def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
     _finish(reader)
 
     analysis_overlay.on_vocabulary_changed(reader)
@@ -140,7 +149,7 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
 
     monkeypatch.setattr(analysis_overlay, "analyze_cues", analyze)
     reader._sub_index = CueIndex([Cue(0, 1, "古い一")])
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
     assert old_started[0].wait(1)
 
     reader._sub_index = CueIndex([Cue(0, 1, "古い二")])
@@ -165,7 +174,7 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
 
 def test_malformed_success_has_a_terminal_unavailable_state(reader, monkeypatch):
     monkeypatch.setattr(analysis_overlay, "analyze_cues", lambda *_args: object())
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
     _finish(reader)
 
     assert reader.analysis.current is None
@@ -178,7 +187,7 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
 
     monkeypatch.setattr(analysis_overlay, "analyze_cues", fail)
     with caplog.at_level("WARNING"):
-        analysis_overlay.toggle(reader)
+        _toggle_analysis(reader)
         _finish(reader)
 
     assert reader.analysis.current is None
@@ -189,7 +198,7 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
 def test_english_or_missing_japanese_track_is_unavailable(reader):
     reader.subtitle_language = "en"
 
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
 
     assert reader.analysis.status == "Japanese track unavailable"
     assert reader.analysis.current is None

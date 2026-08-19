@@ -89,7 +89,7 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
     reader, ipc = _reader(active=12)
     calls = _capture_render(monkeypatch)
 
-    sidebar.toggle(reader)
+    sidebar.set_open(reader, open=not reader.sidebar.open)
 
     assert reader.sidebar.open is True
     assert [row.value for row in calls[-1][0]] == list(range(8, 17))
@@ -109,7 +109,7 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     the next `update` would leave the sidebar off-target for as long as the cue happened to last."""
     reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
     calls = _capture_render(monkeypatch)
-    sidebar.toggle(reader)
+    sidebar.set_open(reader, open=not reader.sidebar.open)
     reader.sidebar.rect = (900, 50, 360, 600)
 
     assert sidebar.scroll(reader, -3) is True

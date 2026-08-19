@@ -119,10 +119,10 @@ saitenka-mine|interaction|cue|modal|migrated
 saitenka-mine-video|interaction|cue|modal|migrated
 saitenka-mine-all|interaction|cue|modal|migrated
 saitenka-toggle-bookmark|interaction|cue|modal|work-package-5
-saitenka-toggle-sidebar|interaction|global|modal|work-package-5
-saitenka-toggle-analysis|interaction|global|modal|work-package-5
-saitenka-preview|interaction|cue|modal|work-package-5
-saitenka-preview-close|interaction|global|modal|work-package-5
+saitenka-toggle-sidebar|interaction|global|modal|migrated
+saitenka-toggle-analysis|interaction|global|modal|migrated
+saitenka-preview|interaction|cue|modal|migrated
+saitenka-preview-close|interaction|global|modal|migrated
 saitenka-scroll-up|interaction|global|help|work-package-5
 saitenka-scroll-down|interaction|global|help|work-package-5
 saitenka-speak|interaction|cue|modal|migrated
@@ -133,7 +133,7 @@ saitenka-kanji|interaction|cue|modal|migrated
 saitenka-tip-up|interaction|global|modal|work-package-5
 saitenka-tip-down|interaction|global|modal|work-package-5
 saitenka-tip-close|interaction|global|modal|work-package-5
-saitenka-sub-picker|interaction|global|modal|work-package-5"""
+saitenka-sub-picker|interaction|global|modal|migrated"""
 
 
 # --- firing: a press actually runs the bound action -----------------------------------------------

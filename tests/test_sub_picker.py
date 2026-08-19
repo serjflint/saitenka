@@ -359,7 +359,7 @@ def test_toggle_closes_an_open_picker():
     reader.configure_sub_picker(_lister([]))
     reader.sub_picker.open = True
 
-    sub_picker.toggle(reader)
+    sub_picker.close_picker(reader) if reader.sub_picker.open else sub_picker.open_picker(reader)
 
     assert reader.sub_picker.open is False
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands

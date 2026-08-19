@@ -200,8 +200,9 @@ def finish(state: AnalysisState, completion: EffectFinished) -> bool:
     return True
 
 
-def toggle(reader: Reader) -> None:
-    reader.analysis.open = not reader.analysis.open
+def set_open(reader: Reader, *, open: bool) -> None:  # noqa: A002
+    """Show or hide the analysis panel. The caller decides which — `panel_intents` owns the toggle."""
+    reader.analysis.open = open
     if not reader.analysis.open:
         reader.lifecycle_surfaces.remove(OverlayId.ANALYSIS)
         return

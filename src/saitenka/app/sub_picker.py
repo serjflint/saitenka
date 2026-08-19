@@ -182,10 +182,6 @@ def close_picker(reader: Reader) -> None:
     reader.sub_picker.hits = ()
 
 
-def toggle(reader: Reader) -> None:
-    close_picker(reader) if reader.sub_picker.open else open_picker(reader)
-
-
 def apply_listing(reader: Reader, generation: int, result: ListingResult) -> None:
     state = reader.sub_picker
     if not state.open or generation != state.generation:
