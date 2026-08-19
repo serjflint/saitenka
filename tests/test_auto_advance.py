@@ -75,30 +75,32 @@ class FakeIPC:
         return evs
 
 
-def test_maybe_advance_fires_once_per_eof_edge():
-    ipc = FakeIPC()
-    reader = Reader(ipc)
+def _observe_eof(reader, *, reached: bool) -> None:
+    """Drive EOF the way mpv does. The advance is delta-driven now, so a test that poked a method
+    and a clock would be exercising a path production no longer has."""
+    reader._observe_property("eof-reached", reached)
+
+
+def test_advance_fires_once_per_eof_edge():
+    """One-shot per file with no latch to maintain: a delta exists only when the value changed, so
+    mpv sitting paused at EOF republishing True is silence rather than a repeat advance."""
+    reader = Reader(FakeIPC())
     calls: list[int] = []
     reader.advance_hook = lambda: bool(calls.append(1))
 
-    ipc.props["eof-reached"] = True
-    reader._maybe_advance()
-    reader._maybe_advance()  # still at EOF → must NOT re-fire
+    _observe_eof(reader, reached=True)
+    _observe_eof(reader, reached=True)  # still at EOF → must NOT re-fire
     assert calls == [1]
 
-    ipc.props["eof-reached"] = False  # a fresh file cleared eof → re-arm
-    reader._maybe_advance()
-    ipc.props["eof-reached"] = True
-    reader._maybe_advance()
+    _observe_eof(reader, reached=False)  # a fresh file cleared eof → re-arm
+    _observe_eof(reader, reached=True)
     assert calls == [1, 1]
 
 
-def test_maybe_advance_is_a_noop_without_a_hook():
-    ipc = FakeIPC()
-    reader = Reader(ipc)
-    ipc.props["eof-reached"] = True
+def test_advance_is_a_noop_without_a_hook():
+    reader = Reader(FakeIPC())
 
-    reader._maybe_advance()  # attach/SyncPlay never installs a hook → nothing happens, no crash
+    _observe_eof(reader, reached=True)  # attach/SyncPlay installs no hook → nothing, no crash
 
 
 def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monkeypatch):

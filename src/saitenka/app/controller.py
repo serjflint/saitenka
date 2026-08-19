@@ -619,10 +619,9 @@ class Reader:
         self._pending_cue: playback.ObservedCue | None = None
         self._ass_full_probe_dirty = True
         # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
-        # opt-in (never set under attach, so SyncPlay-managed playback never advances). `_eof_handled`
-        # makes the eof-reached edge one-shot per file (re-armed when a new file clears eof-reached).
+        # opt-in (never set under attach, so SyncPlay-managed playback never advances). The
+        # eof-reached edge is one-shot per file because a delta only exists when the value changed.
         self.advance_hook: Callable[[], bool] | None = None
-        self._eof_handled = False
         # #100 reactive re-slot: `reslot_hook` fires on EVERY mpv `file-loaded` (our own eof loadfile,
         # a native autoload/playlist advance, a manual next/prev) so the overlay follows whatever mpv
         # plays — installed for any interactive run, independent of auto-advance. `_slotted_path` dedups
@@ -833,6 +832,19 @@ class Reader:
                 self.native_geometry.record_clock_change(self)
         elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
             self._arm_geometry_refresh()
+        else:
+            self._apply_session_delta(delta)
+
+    def _apply_session_delta(self, delta: playback.PlaybackDelta) -> None:
+        """The deltas nothing about the cue consumes — split off its sibling for the complexity
+        ratchet, and they do read as a group: each one is a session-wide fact with one owner."""
+        if isinstance(delta, playback.EndOfFileChanged):
+            # #100: on the rising edge, ask the installed hook to re-slot to the next episode. No
+            # seen-it-already latch — mpv sits paused at EOF republishing the same value, and the
+            # projection's unchanged-value guard already turns that into silence. A hook that
+            # returns False (no sibling, ambiguous) is a no-op; mpv holds the last frame.
+            if delta.reached and self.advance_hook is not None:
+                self.advance_hook()
         elif isinstance(delta, playback.PauseChanged):
             # Watch time is accrued at the transition, not sampled by a tick: the segment that
             # just ended is exactly what the change delimits, and an idle runtime does no work.
@@ -2928,21 +2940,6 @@ class Reader:
             self._draw_translation()
 
     # --- run loop -----------------------------------------------------------------------------
-    def _maybe_advance(self) -> None:
-        """On the eof-reached rising edge, ask the installed hook to re-slot to the next episode (#100).
-
-        One-shot per file: `_eof_handled` blocks a repeat call while mpv sits paused at EOF, and re-arms
-        once a fresh file clears eof-reached. A hook that returns False (SyncPlay/attach never installs
-        one, no sibling, ambiguous) is a no-op — mpv just holds the last frame until the user quits."""
-        if self.advance_hook is None:
-            return
-        if self._prop("eof-reached"):
-            if not self._eof_handled:
-                self._eof_handled = True
-                self.advance_hook()
-        else:
-            self._eof_handled = False
-
     def current_media_path(self) -> Path | None:
         """mpv's current file as an absolute path (``path`` is verbatim what was loaded, so resolve a
         relative one against ``working-directory``). None when nothing is loaded. Used by the reactive
@@ -2987,7 +2984,6 @@ class Reader:
             self._drain_events()
             if not self._connection_ready:
                 return True
-            self._maybe_advance()
             first_tick = not self._interactive_ready
             if first_tick:
                 with otel_metrics.traced("startup.first_tick"):

@@ -42,6 +42,7 @@ class FactDomain(StrEnum):
     TIMING = "timing"
     POINTER = "pointer"
     PAUSE = "pause"
+    EOF = "eof"
 
 
 #: Domains whose deltas the legacy driver still owns, so publishing one would give a fact two
@@ -68,6 +69,7 @@ TRACK_PROPERTIES = frozenset({"sid"})
 TIMING_PROPERTIES = frozenset({"sub-delay", "time-pos"})
 POINTER_PROPERTIES = frozenset({"mouse-pos"})
 PAUSE_PROPERTIES = frozenset({"pause"})
+EOF_PROPERTIES = frozenset({"eof-reached"})
 RENDER_SPACE_PROPERTIES = frozenset(
     {
         "osd-dimensions",
@@ -230,6 +232,17 @@ class PauseChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class EndOfFileChanged:
+    """Playback reached, or left, the end of the file.
+
+    A delta *is* the edge — it exists only when the value changed — so a consumer needs no
+    seen-it-already flag to keep mpv sitting paused at EOF from re-triggering it.
+    """
+
+    reached: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectionChanged:
     epoch: int
     ready: bool
@@ -246,6 +259,7 @@ type PlaybackDelta = (
     | SubtitleTimingChanged
     | PointerMoved
     | PauseChanged
+    | EndOfFileChanged
     | ConnectionChanged
 )
 
@@ -260,6 +274,7 @@ _DELTA_DOMAIN: dict[type, FactDomain] = {
     SubtitleTimingChanged: FactDomain.TIMING,
     PointerMoved: FactDomain.POINTER,
     PauseChanged: FactDomain.PAUSE,
+    EndOfFileChanged: FactDomain.EOF,
     ConnectionChanged: FactDomain.CONNECTION,
 }
 
@@ -402,6 +417,8 @@ class PlaybackProjection:
             paused = bool(data)
             state = replace(state, paused=paused)
             return state, (PauseChanged(paused),)
+        if name in EOF_PROPERTIES:
+            return state, (EndOfFileChanged(bool(data)),)
         return state, ()
 
     def _apply_cue(self, state: PlaybackState, name: str, data: object) -> PlaybackState:
