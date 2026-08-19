@@ -359,5 +359,5 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
 
 def hide_nested(reader: Reader) -> None:
     if reader._nest.state is not None or reader._nest.rect is not None:
-        reader.ov.hide_interactive(OverlayId.NESTED)
+        reader.interaction_surfaces.remove(OverlayId.NESTED)
     reader._nest = PopupView(OverlayId.NESTED)

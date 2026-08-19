@@ -1184,13 +1184,14 @@ def decorate_and_upload(
     kind = popup.job_kind
     job_id = popup.job_id
 
-    def presented(result: dict) -> None:
+    def settled(*, painted: bool) -> None:
         if job_id is None:
             return
-        outcome = "painted" if result.get("error") in {None, "success"} else "failed"
-        reader._interaction_jobs.finish(kind, outcome, job_id=job_id)
+        reader._interaction_jobs.finish(kind, "painted" if painted else "failed", job_id=job_id)
 
-    reader.ov.show_bgra_interactive(view, tx, ty, oid=oid, on_presented=presented)
+    # Fenced: a paint acknowledged after a newer paint or a hide settles nobody, so the intent's
+    # latency is never closed out against pixels something else has already replaced.
+    reader.interaction_surfaces.present_bgra(view, tx, ty, oid=oid, on_settled=settled)
     return (tx, ty, view.shape[1], view.shape[0])
 
 

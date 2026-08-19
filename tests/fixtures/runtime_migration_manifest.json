@@ -150,11 +150,11 @@
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/nested_popup.py::hide_nested"
+      "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra"
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/tooltip.py::decorate_and_upload"
+      "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove"
     ],
     [
       "driver-switch",

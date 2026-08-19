@@ -345,10 +345,12 @@ class Reader:
         # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
         # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
         self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
+        from saitenka.app.interaction_surfaces import InteractionSurfaces
         from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
         from saitenka.app.lifecycle_timers import LifecycleTimers
 
         self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
+        self.interaction_surfaces = InteractionSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
         self._analysis_submit = analysis_overlay.configure_runtime_job(ipc)
         self._subtitle_fetch_submit = subtitle_modes.configure_runtime_job(ipc)
