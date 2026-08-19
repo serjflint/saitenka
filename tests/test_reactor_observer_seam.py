@@ -1,11 +1,14 @@
-"""D1: a reactor observes the session without owning any of it.
+"""The seam two reactor implementations share while one migrates into the other.
 
-Two implementations of the reactor role exist — `SessionReactor` (typed, previously tests-only) and
-`LegacyRuntimeBridge` (callback-shaped, load-bearing). This is the seam that lets the typed one start
-seeing the session before it owns any of it, so features can move one `Owner` at a time instead of in
-one unbisectable step.
+`SessionReactor` (typed) now owns a slice of the session; `LegacyRuntimeBridge` (callback-shaped)
+still owns the rest. The seam has two halves, and the tests here pin both:
 
-Both hazards asserted here were found by executing the code, not by reading it.
+* **observe** — the reactor sees every envelope, so it can track epochs and its own completions.
+* **claim** — a payload it owns is withheld from the legacy Reader, so a migrated duty runs once
+  instead of twice. Claiming is *declared*, never derived from the route table: the two answer
+  different questions, and conflating them is silent.
+
+Every hazard asserted here was found by executing the code, not by reading it.
 
 **Most of this file is scaffolding with a known demolition date.** Everything marked `TRANSITIONAL`
 exists only while two reactor implementations coexist, and D4 — which deletes `LegacyRuntimeBridge`
@@ -62,6 +65,64 @@ def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
     assert result_state is state
     assert effects == ()
     assert router.ignored == {"playback:RawMpvEvent": 1}
+
+
+def test_a_claimed_event_is_withheld_from_the_reader() -> None:
+    """The fallthrough seam: a migrated duty runs in the reactor *instead of* the Reader.
+
+    Without the claim both act on the same envelope and the duty runs twice.
+    """
+    from saitenka.mpvio.gateway import LegacyEventRouter
+
+    mailbox = SessionMailbox()
+    consumer = LegacyEventRouter(mailbox)
+    consumer.observe(
+        _reactor(mailbox, OwnerRouter(SessionReducer({}), lambda _e: None)),
+        lambda payload: isinstance(payload, RawMpvEvent) and payload.name == "claimed",
+    )
+    for name in ("claimed", "unclaimed"):
+        mailbox.publish(
+            RawMpvEvent(name, {"event": name}),
+            origin=EventOrigin.MPV,
+            traffic=TrafficClass.NORMAL,
+        )
+
+    assert consumer.drain_events() == [{"event": "unclaimed"}]
+
+
+def test_a_routed_event_the_reader_still_needs_is_not_claimed() -> None:
+    """`ConnectionReplaced` is routed to the startup-hint reducer AND drives
+    `subtitle_pipeline.connection_replaced`.
+
+    Deriving the claim set from the route table would swallow it, and nothing fails at the seam —
+    reconnects just stop reaching the pipeline. This pins the two apart.
+    """
+    from saitenka.app.session_routes import _CLAIMED, _SESSION_EVENTS, owner_of
+    from saitenka.runtime.events import ConnectionReplaced
+
+    assert ConnectionReplaced in _SESSION_EVENTS  # routed
+    assert ConnectionReplaced not in _CLAIMED  # but never claimed
+    assert owner_of(ConnectionReplaced(1)) is Owner.SESSION
+
+
+def test_a_bridge_owned_completion_is_never_claimed_by_the_reactor() -> None:
+    """Claiming a completion is an ownership question, not a type question.
+
+    The bridge and the reactor both issue effects. Claiming by type would strand every correlated
+    command the bridge owns — its terminal would be withheld and its callback never run.
+    """
+    from util import runtime_gateway
+
+    from saitenka.app.session_routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    reactor = install_session_reactor(gateway)
+    try:
+        bridge_effect = gateway.mailbox.allocate_effect()
+        assert reactor.owns(bridge_effect) is False
+    finally:
+        gateway.close()
 
 
 def test_effect_ids_from_one_mailbox_never_collide_across_allocators() -> None:

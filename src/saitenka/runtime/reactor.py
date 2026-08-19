@@ -110,6 +110,14 @@ class SessionReactor[StateT]:
             payload = completion
         self._reduce(payload)
 
+    def owns(self, effect_id: EffectId) -> bool:
+        """Did this reactor dispatch that effect and is it still awaiting its completion?
+
+        The ownership question a *caller* needs, distinct from `_finish`'s: the answer decides
+        whether a completion is also somebody else's to run.
+        """
+        return effect_id in self._pending
+
     def run_until_idle(self) -> int:
         turns = 0
         while envelope := self._mailbox.receive(timeout=0):

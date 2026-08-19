@@ -73,6 +73,7 @@ class LegacyEventRouter:
         self._mailbox = mailbox
         self._runtime_bridge: LegacyRuntimeBridge | None = None
         self._reactor: SessionReactor | None = None
+        self._claims: Callable[[RuntimeEvent], bool] = lambda _payload: False
 
     def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None:
         if self._runtime_bridge is not None:
@@ -85,7 +86,9 @@ class LegacyEventRouter:
         must still go through `observe`, since the router is the only sanctioned one."""
         return self._mailbox
 
-    def observe(self, reactor: SessionReactor) -> None:
+    def observe(
+        self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
+    ) -> None:
         """Give the reactor every envelope this consumer sees, terminals included.
 
         Fanned out HERE rather than from the Reader's turn because this is the mailbox's declared
@@ -95,10 +98,19 @@ class LegacyEventRouter:
 
         Terminals are safe to fan out because the reactor retires only what it dispatched; an
         effect it never issued is not its to complete.
+
+        `claims` is the migration's fallthrough seam: a payload it accepts is the reactor's alone
+        and is withheld from the legacy Reader, so a migrated duty runs once rather than twice.
+        Everything else falls through untouched. **It is a declared set, never derived from the
+        route table** — the two are not the same question. `ConnectionReplaced` is routed to the
+        startup-hint reducer *and* still needed by `subtitle_pipeline.connection_replaced`;
+        inferring "routed implies claimed" would silently stop reconnects reaching the pipeline.
         """
         if self._reactor is not None:
             raise RuntimeError("reactor already observing")
         self._reactor = reactor
+        if claims is not None:
+            self._claims = claims
 
     def drain_events(
         self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
@@ -118,12 +130,26 @@ class LegacyEventRouter:
         if timeout is None or timeout > 0:
             envelope = self._mailbox.receive(timeout=timeout)
             if envelope is not None:
-                self._observe(envelope)
-                self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
+                self._turn(envelope, events, ordered_terminals=ordered_terminals)
         for envelope in self._mailbox.receive_ready():
-            self._observe(envelope)
-            self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
+            self._turn(envelope, events, ordered_terminals=ordered_terminals)
         return events
+
+    def _turn(
+        self, envelope: EventEnvelope, events: list[object], *, ordered_terminals: bool
+    ) -> None:
+        """One envelope: the reactor always sees it; the Reader sees it unless the reactor owns it.
+
+        The order matters — the reactor's dispatch has always preceded the Reader's handling of the
+        same envelope, and keeping it means a claim changes *who* acts, never *when*.
+        """
+        # Asked BEFORE the reactor runs: handling a completion retires it from `_pending`, so an
+        # ownership question asked afterwards always answers "no" and every claimed terminal would
+        # fall through to the bridge as well.
+        claimed = self._claims(envelope.payload)
+        self._observe(envelope)
+        if not claimed:
+            self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
 
     def _observe(self, envelope: EventEnvelope) -> None:
         if self._reactor is not None:
@@ -208,14 +234,16 @@ class MpvGateway:
         must still go through `observe`, since the router is the only sanctioned one."""
         return self._mailbox
 
-    def observe(self, reactor: SessionReactor) -> None:
-        """Let a `SessionReactor` see the session without owning any of it.
+    def observe(
+        self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
+    ) -> None:
+        """Let a `SessionReactor` see the session, and own the part of it `claims` accepts.
 
-        The gateway owns the mailbox's sole consumer, so this is the only place a second observer
-        can be attached without splitting the envelope stream. See `LegacyEventRouter.observe` for
-        why terminals are withheld.
+        The gateway owns the mailbox's sole consumer, so this is the only place an observer can be
+        attached without splitting the envelope stream. See `LegacyEventRouter.observe` for what
+        claiming means and why it is declared rather than derived.
         """
-        self._router.observe(reactor)
+        self._router.observe(reactor, claims)
 
     def publish_session_event(self, event: RuntimeEvent) -> bool:
         """Put a session-lifecycle fact on the mailbox for the reactor to route.

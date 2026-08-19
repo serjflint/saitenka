@@ -36,6 +36,18 @@ if TYPE_CHECKING:
 #: Events `Owner.SESSION` owns. Everything absent here routes to nobody and is counted.
 _SESSION_EVENTS = (StartupHintRequested, StartupReady, ConnectionReplaced, EffectFinished)
 
+#: Payload types the reactor handles *instead of* the legacy Reader, not merely as well as it.
+#:
+#: Declared, never derived from `_SESSION_EVENTS` — routing and claiming answer different
+#: questions. `ConnectionReplaced` is routed here (the hint FSM resolves a lost acknowledgement on
+#: it) yet must NOT be claimed: `Reader._on_ipc_reconnect` still drives
+#: `subtitle_pipeline.connection_replaced`. Claim it and reconnects stop reaching the pipeline,
+#: with nothing failing at the seam.
+#:
+#: A duty joins this tuple only when the Reader has no remaining part in it. That is the whole
+#: migration protocol: add the route, move the state, then claim.
+_CLAIMED = (StartupHintRequested, StartupReady)
+
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
     """Which owner an event belongs to, or None while nothing owns it.
@@ -82,7 +94,16 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
         gateway.mailbox,
         gateway.dispatch_effect,
     )
-    gateway.observe(reactor)
+
+    def claims(payload: RuntimeEvent) -> bool:
+        # A completion is claimed by *ownership*, not by type: the bridge and the reactor both
+        # issue effects, and the bridge's terminals must keep reaching it or every correlated
+        # command it owns hangs.
+        if isinstance(payload, EffectFinished):
+            return reactor.owns(payload.effect_id)
+        return isinstance(payload, _CLAIMED)
+
+    gateway.observe(reactor, claims)
     if startup_hint:
         reactor.handle(
             EventEnvelope(
