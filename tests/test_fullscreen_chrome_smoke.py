@@ -12,6 +12,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+import util
 
 from saitenka.app import sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
@@ -23,14 +24,8 @@ BASELINE_1080 = (1920, 1080)
 FULLSCREEN_HIDPI = (3024, 1898)  # 16" MacBook Pro Retina, fullscreen (hidpi_scale 2.0)
 
 
-class FakeIPC:
-    def __init__(self):
-        self.props: dict = {}
-
-    def command(self, *args):
-        if args and args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None, "error": "success"}
+class FakeIPC(util.FakeIPC):
+    pass
 
 
 class FakeOverlay:

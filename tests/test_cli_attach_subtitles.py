@@ -7,15 +7,10 @@ from saitenka.app.commands import attach as attach_commands
 from saitenka.app.subtitle_modes import SubtitleStartup, SubtitleTracks
 
 
-class IPC:
+class IPC(util.FakeIPC):
     def __init__(self):
-        self.commands: list[tuple] = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[:2] == ("get_property", "path"):
-            return {"data": "/videos/Show - 01.mkv"}
-        return {"data": None}
+        super().__init__()
+        self.props["path"] = "/videos/Show - 01.mkv"
 
 
 class Reader:

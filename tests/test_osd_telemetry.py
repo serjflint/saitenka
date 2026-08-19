@@ -14,6 +14,7 @@ import threading
 
 import numpy as np
 import pytest
+import util
 from PIL import Image
 from util import record_spans
 
@@ -22,9 +23,8 @@ from saitenka.mpvio.ipc import MpvIPC
 from saitenka.mpvio.osd import Overlay
 
 
-class _FakeIPC:
-    def command(self, *_args):
-        return {"error": "success"}
+class _FakeIPC(util.FakeIPC):
+    pass
 
 
 def _uploads(spans: list[dict]) -> list[dict]:

@@ -9,6 +9,7 @@ that forgets to declare shown-ness is exactly the #100 picker click-through bug)
 from __future__ import annotations
 
 import pytest
+import util
 
 from saitenka.app import sidebar, sub_picker, surfaces
 from saitenka.app.bindings import SCROLL_DOWN_MSG
@@ -23,14 +24,10 @@ class _FakeState:
         self.open = open
 
 
-class _FakeIPC:
+class _FakeIPC(util.FakeIPC):
     def __init__(self, **props):
-        self.props = {"osd-dimensions": {"w": 1920, "h": 1080}, **props}
-
-    def command(self, *args):
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"error": "success"}
+        super().__init__()
+        self.props.update({"osd-dimensions": {"w": 1920, "h": 1080}, **props})
 
 
 def _spec(name: str, *, claims: set[str], calls: list[str], open: bool = False) -> SurfaceSpec:  # noqa: A002

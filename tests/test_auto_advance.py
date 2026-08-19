@@ -4,30 +4,27 @@ AND our own eof loadfile through one setup path; auto-advance only decides wheth
 
 from __future__ import annotations
 
+import util
+
 from saitenka.app import session_stats, subselect
 from saitenka.app.controller import Reader
 from saitenka.app.launch import run as cli_run
 from saitenka.app.subtitle_render import NullRenderer
 
 
-class FakeIPC:
-    """Minimal mpv IPC stand-in; `props` feeds get_property, `pending_events` feeds drain_events,
-    records all commands. Models just enough of mpv's subtitle track model for the re-slot: `sub-add`
-    appends an external track (deselected under the "auto" flag — selection stays with `sid`),
-    `sub-remove` drops one, and `set_property sid` reselects — so a test can observe which srt the
-    re-slot ends up selecting."""
+class FakeIPC(util.FakeIPC):
+    """Models just enough of mpv's subtitle track model for the re-slot: `sub-add` appends an
+    external track (deselected under the "auto" flag — selection stays with `sid`), `sub-remove`
+    drops one, and `set_property sid` reselects, so a test can observe which srt the re-slot ends up
+    selecting. Everything else, including the correlated-egress port, comes from the shared fake."""
 
     def __init__(self):
-        self.events = []
+        super().__init__()
         self.pending_events: list[dict] = []
-        self.props: dict = {}
-        self.commands: list[tuple] = []
 
     def command(self, *args):
-        self.commands.append(args)
+        reply = super().command(*args)
         op = args[0] if args else None
-        if op == "get_property":
-            return {"data": self.props.get(args[1])}
         if op == "sub-add":
             tl = self.props.setdefault("track-list", [])
             select = (args[2] if len(args) > 2 else "select") == "select"
@@ -53,22 +50,7 @@ class FakeIPC:
                 if t.get("type") == "sub":
                     t["selected"] = t.get("id") == args[2]
             self.props["sid"] = args[2]
-        return {"data": None}
-
-    def submit_runtime_mpv(self, *, identity, command, on_finished=None, **_kwargs) -> bool:
-        """Apply the command and report the correlated success, without a full gateway: this fake
-        owns its own event queue, which mailbox ingress would take over."""
-        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
-
-        self.command(*command)
-        if on_finished is not None:
-            on_finished(
-                EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED)
-            )
-        return True
-
-    def pump(self):
-        pass
+        return reply
 
     def drain_events(self, *_args, **_kwargs):
         evs, self.pending_events = self.pending_events, []

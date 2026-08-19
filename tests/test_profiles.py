@@ -3,6 +3,7 @@ the ``Profile``/``resolve_profile`` seam, and that the reader/provider gating ke
 active profile. Japanese stays the byte-identical default when nothing is configured."""
 
 import pytest
+import util
 
 from saitenka.app.controller import Reader
 from saitenka.app.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, ReaderLanguages
@@ -19,14 +20,10 @@ from saitenka.app.subtitle_providers import enabled_providers_for, register_prov
 from saitenka.app.tokenizer import register_tokenizer
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-
-    def command(self, *args):
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props or {})
 
 
 class _FakeLatinTokenizer:

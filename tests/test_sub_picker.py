@@ -13,6 +13,7 @@ import threading
 import time
 
 import pytest
+import util
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
@@ -30,27 +31,16 @@ from saitenka.runtime import (
 )
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, **props):
-        self.commands: list[tuple] = []
-        self.events: list[dict] = []
-        self.runtime_outcomes: list[CommandHandled] = []
-        self.props: dict = {"osd-dimensions": {"w": 1920, "h": 1080}, **props}
+        super().__init__()
+        self.props.update({"osd-dimensions": {"w": 1920, "h": 1080}, **props})
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        if args[0] == "set_property":
+        # mpv reflects a set back on the next read; the picker's own tests depend on it.
+        if args and args[0] == "set_property":
             self.props[args[1]] = args[2]
-        return {"error": "success"}
-
-    def drain_events(self, *_args, **_kwargs) -> list[dict]:
-        events, self.events = self.events, []
-        return events
-
-    def publish_legacy_command_outcome(self, outcome: CommandHandled) -> None:
-        self.runtime_outcomes.append(outcome)
+        return super().command(*args)
 
 
 def _reader(**props) -> tuple[Reader, FakeIPC]:

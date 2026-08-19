@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import threading
 
+import util
 from util import ManualRenderAheadSubmitter
 
 from saitenka import otel_metrics
@@ -19,18 +20,8 @@ from saitenka.runtime import EffectOutcome
 WIDTH = 384
 
 
-class _FakeIPC:
-    def __init__(self):
-        self.props = {}
-
-    def command(self, *_args):
-        return {"data": None}
-
-    def pump(self):
-        pass
-
-    def drain_events(self, *_args, **_kwargs):
-        return []
+class _FakeIPC(util.FakeIPC):
+    pass
 
 
 class _RecordingPanel:

@@ -2,6 +2,7 @@
 Reader-owned swappable seam a profile switch (#254) flips."""
 
 import pytest
+import util
 
 from saitenka.app.controller import Reader
 from saitenka.app.token_cache import TokenizedCue
@@ -21,16 +22,10 @@ from saitenka.app.tokenizer import (
 )
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props or {})
 
 
 class _FakeTokenizer:

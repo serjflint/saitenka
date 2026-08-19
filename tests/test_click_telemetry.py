@@ -7,6 +7,7 @@ assert the span fires with its low-cardinality attribute, via the sanctioned tra
 
 from __future__ import annotations
 
+import util
 from util import record_spans
 
 from saitenka.app import backlog, sidebar
@@ -14,14 +15,10 @@ from saitenka.app.controller import Reader
 from saitenka.app.subtitles import SidebarHitBox
 
 
-class _FakeIPC:
+class _FakeIPC(util.FakeIPC):
     def __init__(self, props):
-        self.props = props
-
-    def command(self, *args):
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props)
 
 
 def _named(spans: list[dict], name: str) -> list[dict]:

@@ -20,63 +20,16 @@ from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tooltip import PanelKey
 
 
-class FakeIPC:
-    """Minimal mpv IPC stand-in; `props` feeds get_property, records all commands."""
+class FakeIPC(RuntimeFakeIPC):
+    """The shared fake, with event draining disabled.
 
-    def __init__(self):
-        self.events = []
-        self.props = {}
-        self.commands = []
-        #: Named timers scheduled through the runtime port; nothing fires on a wall clock.
-        self.timers = {}
+    Everything this used to define — the timer port, the inline correlated submit, the recording
+    `command` — was a line-for-line copy of the shared fake. The copy is the hazard: it drifts, and
+    a port it forgets sends production down a fallback branch production itself never takes.
 
-    def command(self, *args):
-        self.commands.append(args)
-        if args and args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
-
-    def schedule_runtime_timer(self, *, timer, identity, on_finished, **_kwargs):
-        self.timers[timer] = (identity, on_finished)
-        return True
-
-    def cancel_runtime_timer(self, timer):
-        return self.timers.pop(timer, None) is not None
-
-    def fire_runtime_timer(self, timer):
-        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
-
-        entry = self.timers.pop(timer, None)
-        if entry is None:
-            return False
-        identity, on_finished = entry
-        on_finished(EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED))
-        return True
-
-    def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
-        """Complete a correlated command inline, delivering through `command`.
-
-        Wired for this file (S-T's rule) so its Readers exercise the egress production takes. A
-        fake that refuses the submit leaves every caller on a synchronous fallback nobody runs,
-        and one that skips `command` stops its own recording seeing the write.
-        """
-        from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
-
-        outcome, error, result = EffectOutcome.SUCCEEDED, None, None
-        reply = self.command(*command)
-        if isinstance(reply, dict):
-            result = reply.get("data")
-            if reply.get("error") not in {None, "success"}:
-                outcome, error = EffectOutcome.FAILED, EffectError.INVALID_RESULT
-        on_finished(
-            EffectFinished(
-                EffectId(0), Owner.SUBTITLE, identity, outcome, result=result, error=error
-            )
-        )
-        return True
-
-    def pump(self):
-        pass
+    The one real difference is kept: these tests drive `poll_once` directly and assert against
+    `commands`, so draining queued events here would fire observations they never asked for.
+    """
 
     def drain_events(self, *_args, **_kwargs):
         return []
@@ -2798,6 +2751,11 @@ def test_start_observing_registers_and_seeds_initial_state():
     from util import FakeIPC as EventIPC
 
     ipc = EventIPC()
+    # Observer registration goes through the gateway, and run/attach install one immediately after
+    # connecting — so a session without it is a configuration production never has. The fake used to
+    # lack the port entirely, which sent `register_observer_set` down its no-gateway fallback and
+    # made this pass against a path production never takes.
+    runtime_gateway(ipc)
     ipc.props["pause"] = True
     ipc.props["sub-text"] = "字幕"
     r = Reader(ipc)

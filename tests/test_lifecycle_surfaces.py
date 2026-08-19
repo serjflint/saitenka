@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
+import util
 from PIL import Image
 
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
@@ -12,9 +13,16 @@ from saitenka.mpvio.osd import Overlay, PreparedOverlay
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner, SurfaceStatus
 
 
-class _DeferredIPC:
+class _DeferredIPC(util.FakeIPC):
+    """Holds correlated terminals until the test settles them by hand.
+
+    The one thing the shared fake deliberately cannot do — it completes inline — so this overrides
+    just that, and inherits every other port. A double defining the whole surface itself is how a
+    missing port silently sends production down a fallback branch.
+    """
+
     def __init__(self, *, accepted: bool = True) -> None:
-        self.commands: list[tuple[object, ...]] = []
+        super().__init__()
         self.pending: list[tuple[object, object]] = []
         self.accepted = accepted
         self.visible: set[int] = set()
@@ -27,10 +35,10 @@ class _DeferredIPC:
         self.pending.append((identity, on_finished))
         return True
 
-    def command(self, *_args):
-        self.commands.append(_args)
-        if _args[0] == "overlay-remove":
-            self.visible.discard(_args[1])
+    def command(self, *args):
+        if args and args[0] == "overlay-remove":
+            self.visible.discard(args[1])
+        super().command(*args)
         return {"error": "success"}
 
     def execute(self, index: int) -> None:

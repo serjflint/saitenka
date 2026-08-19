@@ -8,18 +8,16 @@ only ever grows (an OSD at/under 1080p is unchanged — the goldens stay valid).
 
 from __future__ import annotations
 
+import util
+
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
 
 REF_H = 1080
 
 
-class FakeIPC:
-    def command(self, *_args):
-        return {"data": None, "error": "success"}
-
-    def drain_events(self, *_args, **_kwargs):
-        return []
+class FakeIPC(util.FakeIPC):
+    pass
 
 
 def _reader(scale: float) -> Reader:

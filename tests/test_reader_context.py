@@ -7,30 +7,15 @@ exactly what the future file-change re-slot relies on, so it is asserted here di
 
 from __future__ import annotations
 
+import util
+
 from saitenka.app.controller import Reader
 from saitenka.app.popups import PopupView, TooltipState
 from saitenka.app.reader_context import EpisodeContext
 
 
-class FakeIPC:
-    """Minimal mpv IPC stand-in (matches tests/test_controller.py) — enough to build a Reader."""
-
-    def __init__(self):
-        self.events = []
-        self.props = {}
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args and args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
-
-    def pump(self):
-        pass
-
-    def drain_events(self, *_args, **_kwargs):
-        return []
+class FakeIPC(util.FakeIPC):
+    """Minimal mpv IPC stand-in — enough to build a Reader."""
 
 
 def test_episode_context_defaults_are_the_no_episode_state():

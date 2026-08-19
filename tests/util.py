@@ -304,6 +304,18 @@ class FakeIPC:
             event_sink(event, 0)
         self.events = []
 
+    def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
+        """Register observers the way production does — through the gateway when one is wired.
+
+        Without this the fake forces `register_observer_set` down its no-gateway fallback, which
+        issues the same commands but never tells the gateway which observers exist, so reconnect
+        replay is silently not exercised.
+        """
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return {}
+        return gateway.register_observers(names)
+
     def dispatch_runtime_terminal(self, completion) -> None:
         if self._runtime_gateway is not None:
             self._runtime_gateway.dispatch_terminal(completion)

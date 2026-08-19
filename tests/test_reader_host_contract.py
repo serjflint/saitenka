@@ -111,3 +111,80 @@ def test_a_function_moved_between_modules_fails_on_the_destination(tmp_path: Pat
     assert enforce_reader_host_contract(tmp_path, allowlist) == {
         "saitenka.app.destination: current=1 baseline=0"
     }
+
+
+def _public_methods(path: Path, name: str) -> set[str]:
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == name)
+    return {
+        m.name for m in cls.body if isinstance(m, ast.FunctionDef) and not m.name.startswith("_")
+    }
+
+
+#: Production surface the shared fake deliberately does not model. Connection lifecycle only —
+#: nothing here is probed with a `getattr(..., None)` fallback, so a fake lacking it cannot silently
+#: divert production down a different branch.
+_UNMODELLED = {"close", "connect", "disconnected", "reconnect_once", "reconnects_left"}
+
+
+def test_the_shared_fake_offers_every_runtime_port_production_does() -> None:
+    """The divergence this catches is one-sided and invisible: production probes each runtime port
+    with `getattr(ipc, name, None)` and falls back when it is absent. Production always has them, so
+    that fallback is dead code there — but a fake missing one silently drives the whole suite down a
+    path production never takes. `register_runtime_observers` was exactly that: its absence sent
+    `register_observer_set` down a branch that issues the same commands but never registers them
+    with the gateway, so reconnect replay went unexercised.
+    """
+    production = _public_methods(ROOT / "src/saitenka/mpvio/ipc.py", "MpvIPC")
+    fake = _public_methods(ROOT / "tests/util.py", "FakeIPC")
+
+    assert (production - fake) <= _UNMODELLED
+
+
+#: Doubles that legitimately do NOT inherit the shared fake, each with the reason it cannot.
+_STANDALONE_IPC_DOUBLES = {
+    # The shared fake is gateway-wired; these test the gateway itself, so inheriting it would mean
+    # testing a gateway through a gateway.
+    ("test_mpv_gateway.py", "FakeIPC"),
+    ("test_legacy_runtime.py", "FakeIPC"),
+    ("test_loading.py", "FakeIPC"),
+}
+
+
+def _ipc_doubles() -> list[tuple[str, str, bool]]:
+    import ast
+
+    found = []
+    for path in sorted((ROOT / "tests").rglob("*.py")):
+        if path.name == "util.py":
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a broken test file fails elsewhere
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if "command" not in {m.name for m in node.body if isinstance(m, ast.FunctionDef)}:
+                continue
+            inherits = any("FakeIPC" in ast.unparse(base) for base in node.bases)
+            found.append((path.name, node.name, inherits))
+    return found
+
+
+def test_ipc_doubles_inherit_the_shared_fake() -> None:
+    """A hand-rolled double implements whichever ports its author happened to need, and production
+    falls back on the rest — so each one runs the suite down a different set of branches production
+    never takes. Seven of these were found taking `submit_runtime_mpv`'s absent-port path while
+    production always has it.
+
+    Inheriting is the fix, not documenting: the shared fake is checked against production's surface
+    by the test above, so inheritance is what transitively keeps a double honest.
+    """
+    handrolled = {
+        (module, name) for module, name, inherits in _ipc_doubles() if not inherits
+    } - _STANDALONE_IPC_DOUBLES
+
+    assert handrolled == set()

@@ -1,6 +1,7 @@
 """Acceptance coverage for FSRS maturity colors and their presentation boundary."""
 
 import pytest
+import util
 from util import RecordingRasterProvider
 
 from saitenka.app import reader_deps
@@ -86,9 +87,8 @@ def test_config_loads_fsrs_copy_and_controls_maturity_colors(tmp_path, monkeypat
     )
 
 
-class _IPC:
-    def command(self, *_args):
-        return {"data": None}
+class _IPC(util.FakeIPC):
+    pass
 
 
 def test_hover_visibility_reuses_the_learning_style(monkeypatch):

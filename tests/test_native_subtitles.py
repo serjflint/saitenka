@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
+import util
 from dirty_equals import IsPartialDict
 from util import record_spans
 
@@ -56,12 +57,15 @@ ASS_TWO = (
 )
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
+    """Defers job and command delivery so a test controls when each completes, and injects mpv
+    errors. Those overrides are deliberate; inheriting is what supplies the ports it does NOT
+    specialise — a double defining only what its author needed is how production ends up on a
+    fallback branch it never takes in a real session."""
+
     def __init__(self) -> None:
-        self.commands: list[tuple] = []
-        #: Named timers armed through the runtime port; nothing fires on a wall clock.
-        self.timers: dict[str, tuple] = {}
-        self.props = {
+        super().__init__()
+        self.props |= {
             "sid": 2,
             "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
             "sub-start": 1.0,
@@ -2414,7 +2418,7 @@ def test_the_bound_is_the_token_count_not_the_box_count():
 def _visibility(reply):
     """What the ownership FSM concludes from one `sub-visibility` read."""
 
-    class _Ipc:
+    class _Ipc(util.FakeIPC):
         def command(self, *_args):
             if isinstance(reply, Exception):
                 raise reply
