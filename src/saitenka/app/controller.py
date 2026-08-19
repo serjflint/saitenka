@@ -99,6 +99,7 @@ from saitenka.app.bindings import (
     active_bindings,
     section_contents,
 )
+from saitenka.app.close_ledger import CloseLedger
 from saitenka.app.config import ReaderOptions
 from saitenka.app.intents import Announce, DismissHover
 from saitenka.app.interaction_intents import InteractionCommand
@@ -248,6 +249,11 @@ _DISPLAY_PROBE_PROPS = (
 # Popup view/panel classes live in app/popups.py; the _Nested alias is kept because the controller
 # internals and the test-suite reference the old private name.
 _Nested = PopupView
+
+
+def _no_lane(_name: str, _timeout: float) -> bool:
+    """Stand-in for a transport with no job lanes, so `close` needs no per-site guard."""
+    return True
 
 
 class Reader:
@@ -3691,63 +3697,96 @@ class Reader:
         if self._startup_hint_lease is not None:
             self._startup_hint_lease.connection_replaced()
 
-    def close(self) -> None:
+    def close(self) -> CloseLedger:
+        """Tear the session down. Every participant runs even if an earlier one raises.
+
+        Each participant is written out rather than looped over: its call site is duty evidence the
+        migration checker matches by name AND pairwise order, and a loop erases that.
+        """
         import shutil
 
-        if self._tts_capability is not None:
-            self._tts_capability.close()
-        if self._anki_capability is not None:
-            self._anki_capability.close()
+        ledger = CloseLedger()
+        with ledger.participant("tts-capability"):
+            if self._tts_capability is not None:
+                self._tts_capability.close()
+        with ledger.participant("anki-capability"):
+            if self._anki_capability is not None:
+                self._anki_capability.close()
         self._mined_seed_generation += 1
-        self._interaction_jobs.cancel_all()
-        hover_metadata.close(self._interaction_metadata)
-        self._release_mouse_capture()  # hand the mouse back before a detached mpv outlives us
+        with ledger.participant("interaction-jobs"):
+            self._interaction_jobs.cancel_all()
+        with ledger.participant("hover-metadata"):
+            hover_metadata.close(self._interaction_metadata)
+        with ledger.participant("mouse-capture"):
+            self._release_mouse_capture()  # hand the mouse back before a detached mpv outlives us
         telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
-        close_lane = getattr(self.ipc, "close_runtime_job_lane", None)
+        # Resolved once with a no-op fallback rather than guarded at each of the six call sites:
+        # the transport may predate lane support, and six `is not None` branches for one fact is
+        # what pushed this past the complexity ratchet.
+        close_lane = getattr(self.ipc, "close_runtime_job_lane", None) or _no_lane
         deadline = time.monotonic() + 2.0
-        # Each `close_lane` call site is duty evidence the migration checker matches by name and
-        # order, so these stay literal — routing them through one helper reads as a lost close.
-        if close_lane is not None:
+        with ledger.participant("lane:subtitle-fetch"):
             close_lane("subtitle-fetch", max(0.0, deadline - time.monotonic()))
+        with ledger.participant("lane:subtitle-picker"):
             close_lane("subtitle-picker", max(0.0, deadline - time.monotonic()))
-            # Stop the executor before the state it renders against is torn down: a job admitted
-            # after this cannot outlive `native_geometry.close()` below.
+        # Stop the executor before the state it renders against is torn down: a job admitted
+        # after this cannot outlive `native_geometry.close()` below.
+        with ledger.participant("lane:geometry"):
             close_lane(GEOMETRY_LANE, max(0.0, deadline - time.monotonic()))
-        if self._annotation is not None:
-            self._annotation.close()
-        if close_lane is not None:
+        with ledger.participant("annotation"):
+            if self._annotation is not None:
+                self._annotation.close()
+        with ledger.participant("lane:cue-annotation"):
             close_lane("cue-annotation", max(0.0, deadline - time.monotonic()))
-        tooltip_raster.close(self._render_ahead)
-        if close_lane is not None:
+        with ledger.participant("tooltip-raster"):
+            tooltip_raster.close(self._render_ahead)
+        with ledger.participant("lane:tooltip-render-ahead"):
             close_lane("tooltip-render-ahead", max(0.0, deadline - time.monotonic()))
-        tooltip_engaged.close(self._engaged_tooltip)
-        if close_lane is not None:
+        with ledger.participant("tooltip-engaged"):
+            tooltip_engaged.close(self._engaged_tooltip)
+        with ledger.participant("lane:tooltip-engaged"):
             close_lane("tooltip-engaged", max(0.0, deadline - time.monotonic()))
-        prefetch.close(self.prefetch_state)
-        if close_lane is not None:
+        with ledger.participant("prefetch"):
+            prefetch.close(self.prefetch_state)
+        with ledger.participant("lane:speculative-prefetch"):
             close_lane("speculative-prefetch", max(0.0, deadline - time.monotonic()))
-        mask_atlas_startup.close(self._mask_atlas_startup)
-        if close_lane is not None:
+        with ledger.participant("mask-atlas-startup"):
+            mask_atlas_startup.close(self._mask_atlas_startup)
+        with ledger.participant("lane:mask-atlas-startup"):
             close_lane("mask-atlas-startup", max(0.0, deadline - time.monotonic()))
-        mask_atlas_startup.uninstall(self.session.render_cache)
-        self.retire_geometry_refresh()  # no refresh may land after the provider closes
-        self.retire_settle_window()  # nor may a settle deadline outlive the session
-        if self.native_geometry is not None:
-            self.subtitle_pipeline.deactivate(self)
-            self.subtitle_pipeline.clear(self)
-            self.native_geometry.close()
-        else:
-            self.subtitle_pipeline.deactivate(self)
-            self.subtitle_pipeline.close()
-        stats_summary = session_stats.finish(self)
-        if stats_summary and self.options.stats.summary:
-            print(f"[saitenka] session: {stats_summary}")  # noqa: T201  # requested close summary
-        if self._backlog_store is not None:
-            self._backlog_store.close()
-        if self._mined_store is not None:
-            self._mined_store.close()
-        self.lifecycle_timers.close()
-        self.lifecycle_surfaces.close()
-        self.ov.close()
-        shutil.rmtree(self._tmp, ignore_errors=True)  # clean up the per-session scratch dir
+        with ledger.participant("mask-atlas-uninstall"):
+            mask_atlas_startup.uninstall(self.session.render_cache)
+        with ledger.participant("geometry-deadlines"):
+            self.retire_geometry_refresh()  # no refresh may land after the provider closes
+            self.retire_settle_window()  # nor may a settle deadline outlive the session
+        with ledger.participant("subtitle-pipeline"):
+            if self.native_geometry is not None:
+                self.subtitle_pipeline.deactivate(self)
+                self.subtitle_pipeline.clear(self)
+                self.native_geometry.close()
+            else:
+                self.subtitle_pipeline.deactivate(self)
+                self.subtitle_pipeline.close()
+        with ledger.participant("session-stats"):
+            stats_summary = session_stats.finish(self)
+            if stats_summary and self.options.stats.summary:
+                print(f"[saitenka] session: {stats_summary}")  # noqa: T201  # close summary
+        with ledger.participant("backlog-store"):
+            if self._backlog_store is not None:
+                self._backlog_store.close()
+        with ledger.participant("mined-store"):
+            if self._mined_store is not None:
+                self._mined_store.close()
+        with ledger.participant("lifecycle-timers"):
+            self.lifecycle_timers.close()
+        with ledger.participant("lifecycle-surfaces"):
+            self.lifecycle_surfaces.close()
+        with ledger.participant("transport"):
+            self.ov.close()
+        with ledger.participant("temporary-artifacts"):
+            shutil.rmtree(self._tmp, ignore_errors=True)  # per-session scratch dir
+        report = ledger.report()
+        if report is not None:
+            log.warning("%s", report)
+        return ledger
