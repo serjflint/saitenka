@@ -985,72 +985,106 @@ def _record_show_metrics(elapsed_ms: float, *, cold: bool) -> None:
         otel_metrics.cold_first_paint_overshoot.add(1)
 
 
+def _freeze_frame(ipc, prop, *, enabled: bool, already_paused: bool) -> bool:
+    """Pause playback for a hover. Returns whether THIS call paused, so the caller records it.
+
+    Host-free and separated because it must run before the panel build: a hover has to pause
+    instantly, and the cue cannot be allowed to advance while the tooltip is still rendering. Its
+    own span keeps the IPC cost attributable — ~5ms of round-trips against a build it now precedes.
+    """
+    if not enabled or already_paused or prop("pause"):
+        return False
+    send_correlated(
+        ipc,
+        "hover-pause",
+        "set_property",
+        "pause",
+        True,  # noqa: FBT003  # mpv IPC wire value
+        owner=Owner.PLAYBACK,
+    )
+    return True
+
+
+def _place_tip(view, panel, cap: int, anchor: tuple[int, int, int], *, scale: float, osd) -> None:
+    """Put a freshly built panel on screen: reset the scroll, cap the height, choose the position.
+
+    Takes the view rather than the host because every value it touches already lives on it. Safe
+    area: the cap keeps the tooltip clear of the OSC header and the controls at the bottom, so it
+    never spills under the window chrome. It scrolls, so capping beats trying to fit a tall entry —
+    `full_height` is the windowed engine's estimate, exact once the head measured a short panel.
+    """
+    wx, wy, box_h = anchor
+    view.scroll = 0
+    view.desired_scroll = 0
+    view.view_h = min(panel.full_height, cap)
+    view.xy = place_panel(panel.width, wx, wy, box_h, view.view_h, scale=scale, osd=osd)
+
+
 def show_tooltip_impl(reader: Reader, index: int) -> bool:
+    tip = reader.tip
+    view = tip.view
     reader._hide_nested()  # switching the base word drops any stale scan popup
-    reader._tip_nav = []  # a newly hovered word abandons any link-navigation back-history
-    reader._kanji_index = 0  # a new word restarts the `k` kanji cycle
+    tip.tip_nav = []  # a newly hovered word abandons any link-navigation back-history
+    tip.kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = reader.tokens[index]
     b = box_for_token(reader.boxes, index)
     if b is None:
         log.debug("tooltip anchor disappeared for token index %d", index)
         reader.hover = -1
-        reader._hover_meta = NO_HOVER_METADATA
+        tip.hover = NO_HOVER_METADATA
         reader._interaction_jobs.finish("tooltip", "failed")
         reader._teardown_tip()
         return False
     inflected = reader._inflected_surface(index)
     cap = reader._tip_cap()
-    # Freeze the frame FIRST — before the (main-thread) panel build + compose — so a hover pauses
-    # instantly and the cue can't advance while the tooltip is still rendering. Its own span so the IPC
-    # cost stays attributable; the round-trips are ~5ms, negligible vs the build/compose it now precedes.
     with otel_metrics.traced("pause_ipc"):
-        if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
-            send_correlated(
-                reader.ipc,
-                "hover-pause",
-                "set_property",
-                "pause",
-                True,  # noqa: FBT003  # mpv IPC wire value
-                owner=Owner.PLAYBACK,
-            )
-            reader._paused_by_tip = True
+        if _freeze_frame(
+            reader.ipc,
+            reader._prop,
+            enabled=reader.pause_on_tooltip,
+            already_paused=tip.paused_by_tip,
+        ):
+            tip.paused_by_tip = True
     # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
     # windowed engine composites the rest on scroll with overscan look-ahead.
     # jamdict card_for on the main thread (not worker-safe) — untraced until now; a suspect for the
     # tooltip_show self-time under --mine, where reader._mined is populated so this actually looks up.
-    mined = reader._hover_meta.mined
-    phrase = reader._hover_meta.terms
+    meta = tip.hover
     key = panel_key(
         reader,
         tok,
         inflected,
-        mined=mined,
-        phrase=phrase,
-        group_mined=reader._hover_meta.group_mined,
+        mined=meta.mined,
+        phrase=meta.terms,
+        group_mined=meta.group_mined,
     )
-    reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
+    tip.tip_show_cold = key not in tip.panel_cache  # cold = a panel build, not a cache hit
     ox, oy = reader.sub_origin
-    wx, wy = ox + b.x, oy + b.y
+    anchor = (ox + b.x, oy + b.y, b.h)
 
     # Direct paint (#149): a COLD pathological hover the persistent cache has → place by the cached
     # full_h + decorate + upload the cached pixels NOW, skipping the whole build+measure+raster pipeline
     # so the user sees the tooltip in ~upload-time. The real interactive Panel is built right after (its
     # pixels are identical), off this paint's critical path — the reaction-latency window covers it.
-    painted = _paint_from_cache(reader, key, cap, wx, wy, b.h) if reader._tip_show_cold else False
+    painted = (
+        _paint_from_cache(reader, key, cap, anchor[0], anchor[1], b.h)
+        if tip.tip_show_cold
+        else False
+    )
 
     # Cold miss (nothing in the panel cache AND tier-2 direct-paint missed): do NOT build/raster on the
     # main thread — that synchronous build is what balloons tooltip_show p95+. Enqueue a TOP-priority
     # bounded compose and show NOTHING; the typed completion re-invokes this once the panel is warm,
     # when it becomes an ordinary cache-hit show. If admission is unavailable, build synchronously.
-    if reader._tip_show_cold and not painted:
+    if tip.tip_show_cold and not painted:
         request = tooltip_engaged.HoverRequest(
             tok,
             inflected,
-            mined,
+            meta.mined,
             tuple(key),
             cap,
-            tuple(phrase),
-            job_id=reader._tip_view.job_id,
+            tuple(meta.terms),
+            job_id=view.job_id,
         )
         if reader._request_engaged_tooltip(request):
             return True
@@ -1060,51 +1094,36 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         tok,
         inflected,
         min_h=cap,
-        mined=mined,
-        extra_terms=phrase,
-        group_mined=reader._hover_meta.group_mined,
+        mined=meta.mined,
+        extra_terms=meta.terms,
+        group_mined=meta.group_mined,
     )
     # Direct-paint hit built a fresh interactive panel — seed its first viewport from tier-2 (RAM inflate,
     # no disk on the main thread) so scrolling back to 0 later re-blits warm.
-    if reader._tip_show_cold and st.windowed.first_view is None:
+    if tip.tip_show_cold and st.windowed.first_view is None:
         reader._seed_precomposed(st, key, cap)
-    reader._tip_state, reader._tip_key = st, key
-    reader._hover_reading = st.reading
+    view.state, view.key = st, key
+    tip.hover_reading = st.reading
     log.debug(
         "tooltip shown: word=%r phrases=%r reading=%r mined=%s painted_from_cache=%s",
         tok.surface,
-        list(phrase),
+        list(meta.terms),
         st.reading,
-        mined,
+        meta.mined,
         painted,
     )
 
     if not painted:
-        reader._tip_scroll = 0
-        reader._tip_view.desired_scroll = 0
-        # Safe area: keep clear of the OSC/window header at the top and the controls/edge at the bottom,
-        # so the tooltip never spills under the window chrome. It scrolls, so we cap the height rather
-        # than trying to fit the whole (very tall) entry. full_height is the windowed engine's estimate,
-        # exact once the head measured the whole panel (short entry), converging otherwise.
-        reader._tip_view_h = min(st.full_height, cap)
-        reader._tip_xy = place_panel(
-            st.width,
-            wx,
-            wy,
-            b.h,
-            reader._tip_view_h,
-            scale=reader._tip_display_scale,
-            osd=reader.osd,
-        )
+        _place_tip(view, st, cap, anchor, scale=reader._tip_display_scale, osd=reader.osd)
         render_tip_view(reader)
     reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
     # One panel: the blit above painted soft (instant) if the native viewport wasn't warm yet — the
     # direct-paint (#149) path is soft too. Ask the raster lane to warm the native bands; its completion
     # upgrades soft→crisp. Keep the source token for scroll warms.
-    reader._tip_tok, reader._tip_inflected = tok, inflected
+    tip.tip_tok, tip.tip_inflected = tok, inflected
     if painted:
-        reader._crisp_pending = True  # direct-paint is soft → poll upgrades once bands warm
-    reader._request_render_ahead(reader._tip_view, 1)
+        view.crisp_pending = True  # direct-paint is soft → poll upgrades once bands warm
+    reader._request_render_ahead(view, 1)
     return True
 
 
