@@ -6,8 +6,8 @@ whether a row can be converted mechanically: how many parameters it would end up
 
 The number that matters is TRANSITIVE. A function that forwards the host must receive the union of
 everything downstream, so a leaf with three reads can still be unconvertible because its caller's
-caller needs sixty-eight. Measured locally, 42 functions breach ruff's `max-args`; measured
-transitively, 116 do. Read the live numbers from `over`, never from this paragraph.
+caller needs sixty-eight. It is also transitive through a shared *signature*: functions bound into one
+`Callable[[Reader], ...]` field cannot diverge from each other. Read every number from `over`.
 
   uv run python tools/host_arity.py            # gate the census against the manifest
   uv run python tools/host_arity.py show        # the full classification, as JSON
@@ -78,6 +78,9 @@ class _Visitor(ast.NodeVisitor):
         #: module that defines it. Basename matching alone conflated `subtitle_modes::configure`
         #: with three unrelated `configure`s and inflated the unconvertible tier by an artifact.
         self.imports: dict[str, str] = {}
+        #: Callable-field name -> the functions bound into it. `SurfaceSpec(scroll=...)` and the
+        #: field's own default are one signature, so its members convert together or not at all.
+        self.bindings: dict[str, set[str]] = {}
         self._stack: list[str] = []
         #: The innermost enclosing host-taking function, and the local name its host is bound to.
         self._host: list[tuple[Function, str]] = []
@@ -86,15 +89,36 @@ class _Visitor(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module and node.module.startswith("saitenka.app"):
-            module = node.module.removeprefix("saitenka.app.").replace(".", "/") + ".py"
+            package = node.module.removeprefix("saitenka.app").removeprefix(".").replace(".", "/")
             for alias in node.names:
-                self.imports[alias.asname or alias.name] = module
+                name = alias.asname or alias.name
+                # `from saitenka.app import tooltip` binds a MODULE, and its members live in
+                # `tooltip.py` — not in the package the import names.
+                submodule = f"{package}/{alias.name}".lstrip("/") + ".py"
+                self.imports[name] = submodule if (APP / submodule).exists() else f"{package}.py"
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._stack.append(node.name)
         self.generic_visit(node)
         self._stack.pop()
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        # A callable field's default is the first member of its family: `scroll: ... = _no_scroll`.
+        if isinstance(node.target, ast.Name) and node.value is not None:
+            self._bind(node.target.id, node.value)
+        self.generic_visit(node)
+
+    def _bind(self, name: str, value: ast.expr) -> None:
+        """Record `name=<a function, not called>`, resolved the same way a forward target is."""
+        if isinstance(value, ast.Name):
+            self.bindings.setdefault(name, set()).add(
+                f"{self.imports.get(value.id, self.module)}::{value.id}"
+            )
+        elif isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+            module = self.imports.get(value.value.id)
+            if module:
+                self.bindings.setdefault(name, set()).add(f"{module}::{value.attr}")
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._function(node)
@@ -143,6 +167,11 @@ class _Visitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
+        for keyword in node.keywords:
+            # `SurfaceSpec(scroll=sub_picker.scroll)` — a function passed, not called. Every
+            # function bound into one field shares that field's signature.
+            if keyword.arg and not isinstance(keyword.value, ast.Call):
+                self._bind(keyword.arg, keyword.value)
         if self._host:
             function, host = self._host[-1]
             called = node.func
@@ -204,21 +233,53 @@ def _candidates(target: str, keys: set[str], by_name: dict[str, set[str]]) -> se
     return by_name.get(symbol, set()) if module == "?" else set()
 
 
-def collect() -> list[Function]:
+def _families(
+    functions: list[Function],
+    by_name: dict[str, set[str]],
+    bindings: dict[str, set[str]],
+) -> list[set[str]]:
+    """Groups that must convert to the same signature, from the two ways this tree shares one.
+
+    A callable *field* is exact: everything assigned to `SurfaceSpec.scroll`, including the field's
+    own default, is that one signature. A `?::name` dispatch is the inexact fallback for a receiver
+    no AST pass can resolve, and it groups by basename.
+    """
+    keys = {function.key for function in functions}
+    dispatched = {
+        target.removeprefix("?::")
+        for function in functions
+        for target in function.forwards
+        if target.startswith("?::")
+    } - {"<dynamic>"}
+    groups = [by_name.get(name, set()) for name in dispatched]
+    groups.extend(targets & keys for targets in bindings.values())
+    return [group for group in groups if len(group) > 1]
+
+
+def collect() -> tuple[list[Function], dict[str, set[str]]]:
     found: list[Function] = []
+    bindings: dict[str, set[str]] = {}
     for path in sorted(APP.glob("**/*.py")):
         visitor = _Visitor(path.relative_to(APP).as_posix())
         visitor.visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
         found.extend(visitor.found)
-    return found
+        for name, targets in visitor.bindings.items():
+            bindings.setdefault(name, set()).update(targets)
+    return found, bindings
 
 
-def resolve(functions: list[Function]) -> dict[str, set[str]]:
+def resolve(functions: list[Function], bindings: dict[str, set[str]]) -> dict[str, set[str]]:
     """Transitive host members per function, by fixpoint over the forwarding graph.
 
     An unresolvable forward (`?::name`, a call through a value) matches every function with that
     basename. That over-approximates, which is the safe direction: it can only move a function OUT
     of the mechanical tier, never into it.
+
+    Such a call is dispatch through a value, and every candidate it might land on therefore shares
+    ONE signature — `SurfaceSpec` holds its hooks as `Callable[[Reader], bool]` fields, so
+    `help_overlay.scroll` cannot take different parameters from `sub_picker.scroll`. So the family
+    members are joined to each other, not merely to the caller. Without that, a two-read hook reads
+    as trivially convertible while its sibling in the same field needs forty.
     """
     keys = {function.key for function in functions}
     by_name: dict[str, set[str]] = {}
@@ -232,6 +293,9 @@ def resolve(functions: list[Function]) -> dict[str, set[str]]:
         - {function.key}
         for function in functions
     }
+    for family in _families(functions, by_name, bindings):
+        for member in family:
+            edges[member] |= family - {member}
     changed = True
     while changed:
         changed = False
@@ -255,14 +319,14 @@ class Row:
     forwards: tuple[str, ...]
 
 
-def classify(functions: list[Function]) -> dict[str, list[Row]]:
+def classify(functions: list[Function], bindings: dict[str, set[str]]) -> dict[str, list[Row]]:
     """Split the corpus by what a conversion would actually cost.
 
     Tier B is not "harder Tier A". A write-back has no parameter to become, and `getattr` on the
     host cannot be enumerated statically — those are design changes, and batching them with the
     mechanical rows is what made both earlier plans wrong.
     """
-    closure = resolve(functions)
+    closure = resolve(functions, bindings)
     tiers: dict[str, list[Row]] = {"exempt": [], "tierA": [], "tierB": []}
     for function in functions:
         members = closure[function.key]
@@ -289,7 +353,7 @@ def classify(functions: list[Function]) -> dict[str, list[Row]]:
 
 
 def census() -> dict[str, int]:
-    tiers = classify(collect())
+    tiers = classify(*collect())
     return {name: len(rows) for name, rows in sorted(tiers.items())}
 
 
@@ -325,14 +389,14 @@ def check() -> int:
 
 
 def show() -> int:
-    tiers = {name: [asdict(row) for row in rows] for name, rows in classify(collect()).items()}
+    tiers = {name: [asdict(row) for row in rows] for name, rows in classify(*collect()).items()}
     print(json.dumps(tiers, indent=2))
     return 0
 
 
 def over() -> int:
     """The ceiling breaches, worst first — the queue Tier B works through."""
-    tiers = classify(collect())
+    tiers = classify(*collect())
     rows = [row for row in tiers["tierB"] if row.arity > MAX_ARGS]
     print(
         f"{len(rows)} of {sum(len(group) for group in tiers.values())} breach max-args={MAX_ARGS}"

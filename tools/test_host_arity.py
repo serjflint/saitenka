@@ -46,14 +46,14 @@ def bottom(reader):
     return reader.f, reader.g, reader.h, reader.i
 """,
     )
-    closure = tool.resolve(list(functions.values()))
+    closure = tool.resolve(list(functions.values()), {})
     assert len(functions["chain.py::top"].members) == 2
     assert len(closure["chain.py::top"]) == 9
     assert len(closure["chain.py::bottom"]) == 4
 
 
 def test_a_forwarding_cycle_terminates_on_the_union() -> None:
-    """`NativeVisibleRenderer` is 15 mutually-forwarding methods; a naive walk never returns."""
+    """`NativeVisibleRenderer` has a mutually-forwarding core; a naive walk never returns."""
     tool = _module()
     functions = _collect(
         tool,
@@ -69,7 +69,7 @@ class R:
         return reader.b
 """,
     )
-    closure = tool.resolve(list(functions.values()))
+    closure = tool.resolve(list(functions.values()), {})
     assert closure["cycle.py::R.one"] == closure["cycle.py::R.two"] == {"a", "b"}
 
 
@@ -87,7 +87,7 @@ def peek(reader):
     return reader._store
 """,
     )
-    tiers = tool.classify(list(functions.values()))
+    tiers = tool.classify(list(functions.values()), {})
     assert [row.key for row in tiers["tierB"]] == ["writer.py::stash"]
     assert [row.key for row in tiers["tierA"]] == ["writer.py::peek"]
 
@@ -107,7 +107,7 @@ def entry(reader):
     )
     real = _collect(tool, "real.py", "def configure(reader):\n    return reader.wanted\n")
     decoy = _collect(tool, "decoy.py", "def configure(reader):\n    return reader.unrelated\n")
-    closure = tool.resolve([*caller.values(), *real.values(), *decoy.values()])
+    closure = tool.resolve([*caller.values(), *real.values(), *decoy.values()], {})
     assert closure["caller.py::entry"] == {"wanted"}
 
 
@@ -117,14 +117,39 @@ def test_a_call_through_a_value_over_approximates_rather_than_missing() -> None:
     caller = _collect(tool, "caller.py", "def entry(reader):\n    reader.mode.activate(reader)\n")
     one = _collect(tool, "one.py", "def activate(reader):\n    return reader.first\n")
     two = _collect(tool, "two.py", "def activate(reader):\n    return reader.second\n")
-    closure = tool.resolve([*caller.values(), *one.values(), *two.values()])
+    closure = tool.resolve([*caller.values(), *one.values(), *two.values()], {})
     assert closure["caller.py::entry"] == {"mode", "first", "second"}
+
+
+def test_functions_bound_into_one_callable_field_share_its_arity() -> None:
+    """`SurfaceSpec` holds its hooks as `Callable[[Reader], bool]` fields.
+
+    So `help_overlay.scroll` cannot take different parameters from `sub_picker.scroll`, however
+    little it reads itself. Without this the small hook reads as trivially convertible while its
+    sibling in the same field needs forty — and a codemod would convert one and break the other.
+    """
+    tool = _module()
+    functions, bindings = {}, {}
+    for module, source in (
+        ("registry.py", "SPECS = (Spec(scroll=small.scroll), Spec(scroll=large.scroll))"),
+        ("small.py", "def scroll(reader):\n    return reader.a\n"),
+        ("large.py", "def scroll(reader):\n    return reader.b, reader.c, reader.d\n"),
+    ):
+        visitor = tool._Visitor(module)
+        visitor.imports.update({"small": "small.py", "large": "large.py"})
+        visitor.visit(ast.parse(source))
+        functions.update({function.key: function for function in visitor.found})
+        for name, targets in visitor.bindings.items():
+            bindings.setdefault(name, set()).update(targets)
+    assert bindings["scroll"] == {"small.py::scroll", "large.py::scroll"}
+    closure = tool.resolve(list(functions.values()), bindings)
+    assert closure["small.py::scroll"] == closure["large.py::scroll"] == {"a", "b", "c", "d"}
 
 
 def test_the_census_matches_production() -> None:
     tool = _module()
     assert tool.check() == 0
-    tiers = tool.classify(tool.collect())
+    tiers = tool.classify(*tool.collect())
     # The exempt tier is the runtime manifest's `host-composition` set, and the two tools disagreeing
     # about it would make WP5's exit unanswerable from either.
     assert {row.key for row in tiers["exempt"]} == set(tool.EXEMPT)
