@@ -2473,25 +2473,18 @@ class Reader:
             SIDEBAR_MSG: action("toggle_sidebar"),
             SUB_PICKER_MSG: action("toggle_sub_picker"),
             ANALYSIS_MSG: action("toggle_analysis"),
-            HELP_TOGGLE_MSG: action("toggle_help"),
-            HELP_PREV_MSG: lambda: help_overlay.step(self, -1),
-            HELP_NEXT_MSG: lambda: help_overlay.step(self, 1),
-            HELP_CLOSE_MSG: lambda: help_overlay.close_help(self),
             PREVIEW_MSG: action("replay_preview"),
             PREVIEW_CLOSE_MSG: action("_hide_preview"),
             SCROLL_UP_MSG: wheel(-1),
             SCROLL_DOWN_MSG: wheel(1),
-            SPEAK_MSG: action("speak_hovered"),
-            COPY_MSG: action("copy_hovered"),
             COPY_CLICK_MSG: action("copy_click"),
             CLICK_MSG: action("on_click"),
-            KANJI_MSG: action("kanji_current"),
             TIP_UP_MSG: scroll(-1),
             TIP_DOWN_MSG: scroll(1),
             TIP_CLOSE_MSG: action("_tip_close_or_back"),
         }
-        # Migrated (WP4.2 / WP4.5): the decision is `subtitle_intents.reduce`, so these carry
-        # no compatibility binding at all.
+        # Migrated (WP4.2 / WP4.5 / WP5.3): the decision is a pure reducer — `subtitle_intents`,
+        # `help_intents` or `hover_intents` — so these carry no compatibility binding at all.
         reducers = {
             SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
             SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
@@ -2503,6 +2496,13 @@ class Reader:
             SUB_NEXT_MSG: action("_navigate_next"),
             SUB_REPLAY_MSG: action("_replay_cue"),
             SUB_ANCHOR_MSG: action("_anchor_subtitles"),
+            HELP_TOGGLE_MSG: action("toggle_help"),
+            HELP_PREV_MSG: lambda: help_overlay.step(self, -1),
+            HELP_NEXT_MSG: lambda: help_overlay.step(self, 1),
+            HELP_CLOSE_MSG: lambda: help_overlay.close_help(self),
+            SPEAK_MSG: action("speak_hovered"),
+            COPY_MSG: action("copy_hovered"),
+            KANJI_MSG: action("kanji_current"),
         }
         return LegacyCommandExecutor(
             {
