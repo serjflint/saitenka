@@ -836,9 +836,14 @@ class Reader:
             self._apply_session_delta(delta)
 
     def _apply_session_delta(self, delta: playback.PlaybackDelta) -> None:
-        """The deltas nothing about the cue consumes — split off its sibling for the complexity
-        ratchet, and they do read as a group: each one is a session-wide fact with one owner."""
-        if isinstance(delta, playback.EndOfFileChanged):
+        """Deltas whose consumer is the session rather than the cue pipeline — split off its
+        sibling for the complexity ratchet, and they do read as a group."""
+        if isinstance(delta, playback.RenderSpaceChanged):
+            # Only the window size: the rest of the render space is sub-rendering options, which
+            # change the geometry a cue is laid out in without resizing anything to redraw.
+            if delta.property_name == "osd-dimensions":
+                self._redraw_after_resize()
+        elif isinstance(delta, playback.EndOfFileChanged):
             # #100: on the rising edge, ask the installed hook to re-slot to the next episode. No
             # seen-it-already latch — mpv sits paused at EOF republishing the same value, and the
             # projection's unchanged-value guard already turns that into silence. A hook that
@@ -2648,13 +2653,18 @@ class Reader:
     def _build_tick_pipeline(self) -> TickPipeline:
         return TickPipeline(
             (
-                TickStage("refresh-osd", self._refresh_surfaces),
                 TickStage("apply-background-results", self._apply_background_results),
                 TickStage("update-interaction", self._update_interaction),
             )
         )
 
-    def _refresh_surfaces(self) -> None:
+    def _redraw_after_resize(self) -> None:
+        """Re-lay everything the window size decides, after an `osd-dimensions` change.
+
+        Was `_refresh_surfaces`, a tick stage that re-detected per tick the change the projection
+        already publishes. The name went with the mechanism: this runs because a resize was
+        observed, not because a tick came round.
+        """
         if self.refresh_osd():
             if self.sub_text.strip():
                 self._draw_subtitle()

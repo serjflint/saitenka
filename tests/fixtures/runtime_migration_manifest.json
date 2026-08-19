@@ -1358,10 +1358,6 @@
     ],
     [
       "tick-stage",
-      "src/saitenka/app/controller.py::Reader._refresh_surfaces"
-    ],
-    [
-      "tick-stage",
       "src/saitenka/app/controller.py::Reader._update_interaction"
     ],
     [

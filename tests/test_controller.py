@@ -3174,3 +3174,36 @@ def test_an_uninterrupted_session_still_persists_on_its_own_deadline(monkeypatch
 
     assert len(accrued) == 2
     r.close()
+
+
+def test_an_osd_resize_redraws_from_the_observation_alone():
+    """WP5.4: `refresh_osd` re-detected, per tick, a change the projection already publishes. The
+    resize is a `RenderSpaceChanged` now, with no tick anywhere in the trace."""
+    ipc = RuntimeFakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    r.start_observing()
+    assert r.osd == (1280, 720)
+
+    ipc.emit({"event": "property-change", "name": "osd-dimensions", "data": {"w": 1920, "h": 1080}})
+    r._drain_events()
+
+    assert r.osd == (1920, 1080)
+    r.close()
+
+
+def test_a_sub_rendering_option_does_not_resize_anything():
+    """The negative control. Every `options/sub-*` property is render space too, and treating one
+    as a resize would redraw the whole chrome on a styling change that moved no window."""
+    ipc = RuntimeFakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    r.start_observing()
+    redraws = []
+    r._redraw_after_resize = lambda: redraws.append(1)  # type: ignore[method-assign]
+
+    ipc.emit({"event": "property-change", "name": "options/sub-scale", "data": 1.4})
+    r._drain_events()
+
+    assert redraws == []
+    r.close()
