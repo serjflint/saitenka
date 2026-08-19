@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses as _dc
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 from saitenka import otel_metrics
@@ -34,6 +35,7 @@ from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
+    from saitenka.render.layout_backend import LayoutBackend
 
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed,
 # which is an unconditional deque append and stays on every tick)
@@ -789,8 +791,43 @@ def entry_for_tok(tok, inflected, *, dict_set, scorer, extra_terms: tuple[str, .
     return entry
 
 
+@dataclass(frozen=True, slots=True)
+class PanelStyle:
+    """Everything a panel build needs that does not change between hovers.
+
+    Deliberately NOT "the panel context": the union across the whole build chain is sixteen fields
+    including a live mined set and a per-turn flag, and a value object holding those is `Reader`
+    under another name. This is the session-lifetime half; per-turn facts stay parameters.
+    """
+
+    width: int
+    band_cache_max: int
+    raw_band_ceiling: int
+    layout_backend: LayoutBackend | None
+    layout_engine: str
+    add_button: bool
+    speak_button: bool
+    dict_set: object = None
+    scorer: object = None
+
+
+def panel_style(reader: Reader) -> PanelStyle:
+    """Snapshot the build configuration off the host. The one host read in the build chain."""
+    return PanelStyle(
+        width=reader.tip_width,
+        band_cache_max=reader.band_cache_max,
+        raw_band_ceiling=reader.raw_band_ceiling,
+        layout_backend=reader.layout_backend,
+        layout_engine=reader.layout_engine,
+        add_button=anki_ok(reader.anki, reader._anki_capability),
+        speak_button=reader._tts_ok,
+        dict_set=reader.dict_set,
+        scorer=reader.scorer,
+    )
+
+
 def _build_panel(
-    reader: Reader,
+    style: PanelStyle,
     _key: PanelKey,
     tok,
     inflected,
@@ -798,67 +835,44 @@ def _build_panel(
     mined: bool,
     nested: bool = False,
     extra_terms: tuple[str, ...] = (),
+    during_scroll: bool = False,
 ) -> Panel:
     if otel_metrics.panel_cache_misses is not None:
         otel_metrics.panel_cache_misses.add(1)
     # kind is the base/nested IDENTITY. during_scroll flags a render triggered by the scan-hit-test
     # recomputing which cell is under a STATIONARY cursor after content moved under it (a nested popup
-    # opening as a side effect of scrolling the base tooltip in the same poll tick), not a mouse move.
+    # opening as a side effect of scrolling the base tooltip in the same turn), not a mouse move.
     with otel_metrics.instrumented(
         otel_metrics.render_duration_ms,
         "render",
         kind="nested" if nested else "base",
-        during_scroll="1" if reader._scrolled_this_tick else "0",
-        layout_backend=reader.layout_engine,
+        during_scroll="1" if during_scroll else "0",
+        layout_backend=style.layout_engine,
     ):
         # The base tooltip stacks the hovered word's longer phrase terms (passed in); nested popups
         # (inner scanned words) and prefetch pass none and look up the bare word only.
         entry = entry_for_tok(
             tok,
             inflected,
-            dict_set=reader.dict_set,
-            scorer=reader.scorer,
+            dict_set=style.dict_set,
+            scorer=style.scorer,
             extra_terms=extra_terms,
         )
         return Panel.from_rows(
             panel_rows(
                 entry,
-                reader.tip_width,
-                add_button=anki_ok(reader.anki, reader._anki_capability),
+                style.width,
+                add_button=style.add_button,
                 mined=mined,
-                speak_button=reader._tts_ok,
+                speak_button=style.speak_button,
                 group_mined=_key.group_mined,
             ),
-            reader.tip_width,
+            style.width,
             getattr(entry, "reading", "") or tok.reading,
-            band_cache_max=reader.band_cache_max,
-            raw_band_ceiling=reader.raw_band_ceiling,
-            layout_backend=reader.layout_backend,
+            band_cache_max=style.band_cache_max,
+            raw_band_ceiling=style.raw_band_ceiling,
+            layout_backend=style.layout_backend,
         )
-
-
-def _panel_cache_get(
-    reader: Reader,
-    key: PanelKey,
-    tok,
-    inflected,
-    *,
-    mined: bool,
-    nested: bool = False,
-    extra_terms: tuple[str, ...] = (),
-) -> Panel:
-    return reader._panel_cache.get_or_build(
-        key,
-        lambda: _build_panel(
-            reader,
-            key,
-            tok,
-            inflected,
-            mined=mined,
-            nested=nested,
-            extra_terms=extra_terms,
-        ),
-    )
 
 
 def panel_for(
@@ -892,8 +906,22 @@ def panel_for(
         phrase=extra_terms,
         group_mined=group_mined,
     )
-    st = _panel_cache_get(
-        reader, key, tok, inflected, mined=mined, nested=nested, extra_terms=extra_terms
+    # No `_panel_cache_get` wrapper any more: it existed to hold the fetch-or-build-then-LRU-touch
+    # protocol, and `PanelCache` owns that now.
+    style = panel_style(reader)
+    during_scroll = reader._scrolled_this_tick
+    st = reader._panel_cache.get_or_build(
+        key,
+        lambda: _build_panel(
+            style,
+            key,
+            tok,
+            inflected,
+            mined=mined,
+            nested=nested,
+            extra_terms=extra_terms,
+            during_scroll=during_scroll,
+        ),
     )
     # The head walk+wrap (offset measure for placement) — runs on every hover, cold or warm, and was
     # the untraced bulk of tooltip_show's self-time (#158 territory). Cheap on a re-measured cached

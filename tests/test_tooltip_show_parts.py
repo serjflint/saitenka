@@ -8,6 +8,7 @@ testing directly because the bugs they can carry are arithmetic, not integration
 
 from __future__ import annotations
 
+import pytest
 from util import FakeIPC
 
 from saitenka.app.tooltip import _freeze_frame, _place_tip
@@ -90,3 +91,65 @@ def test_placement_lands_inside_the_screen() -> None:
     x, y = view.xy
     assert 0 <= x <= 1920 - 300
     assert 0 <= y <= 1080
+
+
+def test_a_panel_build_needs_no_host() -> None:
+    """`_build_panel` used to read eleven Reader attributes mid-render.
+
+    It now takes a `PanelStyle` snapshotted at the boundary, so a build cannot observe the config
+    changing underneath it — the same reason `DrawRequest` is frozen. That it constructs at all with
+    no Reader in scope is the assertion.
+    """
+    from saitenka.app.tokenize import Token
+    from saitenka.app.tooltip import PanelKey, PanelStyle, _build_panel
+    from saitenka.panel import Definition, Entry
+
+    class _DictSet:
+        def entry_for(self, tok, _inflected=None):
+            return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+    style = PanelStyle(
+        width=420,
+        band_cache_max=4,
+        raw_band_ceiling=8,
+        layout_backend=None,
+        layout_engine="taffy",
+        add_button=False,
+        speak_button=False,
+        dict_set=_DictSet(),
+    )
+    token = Token(surface="猫", lemma="猫", reading="ねこ", pos="名詞", start=0, end=1)
+    key = PanelKey(
+        lemma="猫",
+        surface="猫",
+        reading="ねこ",
+        inflected="猫",
+        width=420,
+        anki_ok=False,
+        mined=False,
+        tts_ok=False,
+        group_mined=(),
+        phrase_terms=(),
+    )
+
+    panel = _build_panel(style, key, token, "猫", mined=False)
+
+    assert panel.width == 420  # the style's width, not a host's
+
+
+def test_the_style_is_frozen_so_a_build_cannot_see_it_change() -> None:
+    from dataclasses import FrozenInstanceError
+
+    from saitenka.app.tooltip import PanelStyle
+
+    style = PanelStyle(
+        width=420,
+        band_cache_max=4,
+        raw_band_ceiling=8,
+        layout_backend=None,
+        layout_engine="taffy",
+        add_button=False,
+        speak_button=False,
+    )
+    with pytest.raises(FrozenInstanceError):
+        style.width = 900  # type: ignore[misc]

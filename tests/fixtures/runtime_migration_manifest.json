@@ -674,10 +674,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_build_panel"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_capture_tip_view"
     ],
     [
@@ -715,10 +711,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::_paint_from_cache"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_panel_cache_get"
     ],
     [
       "reader-parameter",
@@ -819,6 +811,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::panel_key"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::panel_style"
     ],
     [
       "reader-parameter",
