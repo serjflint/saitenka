@@ -940,6 +940,7 @@ def show_tooltip(reader: Reader, index: int) -> bool:
     # "tooltip_show" is the end-to-end hover→drawn span (symmetric with scroll_frame/sub_seek); the
     # perf ring buffer stays for doctor/crashlog. Metrics recorded outside the spans so the kind
     # label (cold vs warm) — only known after impl builds/hits the panel — can split the histogram.
+    tip = reader.tip
     start = time.perf_counter()
     with (
         otel_metrics.traced("tooltip_show", layout_backend=reader.layout_engine) as span,
@@ -955,20 +956,20 @@ def show_tooltip(reader: Reader, index: int) -> bool:
             "unanchored"
             if not shown
             else "deferred-worker"
-            if reader._tip_state is None
+            if tip.view.state is None
             else "painted-precomposed"
-            if reader._tip_show_cold
+            if tip.tip_show_cold
             else "painted-cache",
         )
         if shown:
-            st = reader._tip_state
-            span.set("cold", reader._tip_show_cold)
+            st = tip.view.state
+            span.set("cold", tip.tip_show_cold)
             span.set("chars", len(reader.tokens[index].surface))
             if st is not None:
                 span.set("full_h", st.full_height)
                 span.set("bands", st.last_frame_rasters)
     if shown:
-        _record_show_metrics((time.perf_counter() - start) * 1000.0, cold=reader._tip_show_cold)
+        _record_show_metrics((time.perf_counter() - start) * 1000.0, cold=tip.tip_show_cold)
     return shown
 
 
@@ -1258,7 +1259,8 @@ def decorate_and_upload(
         th = max(28, int(track * vh / full_h))
         tyb = 4 + int((track - th) * (y0 / max(1, full_h - vh)))
         view[tyb : tyb + th, full_w - 7 : full_w - 3] = (99, 99, 99, 210)
-    if reader._flash_oid == oid:  # the deadline owns when this stops being true
+    tip = reader.tip
+    if tip.flash_oid == oid:  # the deadline owns when this stops being true
         b = 4  # "copied" highlight border (a brief visual pulse)
         view[:b, :] = view[-b:, :] = FLASH_BGRA
         view[:, :b] = view[:, -b:] = FLASH_BGRA
@@ -1268,7 +1270,7 @@ def decorate_and_upload(
 
         view = scale_bgra(view, s)
     tx, ty = xy
-    popup = reader._nest if oid == OverlayId.NESTED else reader._tip_view
+    popup = tip.nest if oid == OverlayId.NESTED else tip.view
     kind = popup.job_kind
     job_id = popup.job_id
 

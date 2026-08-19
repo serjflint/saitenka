@@ -413,8 +413,17 @@ def check() -> int:
         return 0
     expected = json.loads(CENSUS.read_text(encoding="utf-8"))
     actual = census()
-    grew = {name: (expected.get(name, 0), count) for name, count in actual.items()}
-    grew = {name: pair for name, pair in grew.items() if pair[1] > pair[0]}
+    # Gate on the ARCHITECTURAL tier and the total, never on the mechanical one. Tier A grows for
+    # two opposite reasons — a new host-taking function (bad) and a Tier B function dropping under
+    # the ceiling (the migration working) — and a gate that fails on both reports progress as a
+    # regression. Tier B growing, or the corpus growing at all, is unambiguous.
+    watched = {
+        name: (expected.get(name, 0), actual[name])
+        for name in ("tierB", "exempt")
+        if name in actual
+    }
+    watched["total"] = (sum(expected.values()), sum(actual.values()))
+    grew = {name: pair for name, pair in watched.items() if pair[1] > pair[0]}
     if grew:
         for name, (was, now) in sorted(grew.items()):
             print(f"host-arity: {name} grew {was} -> {now}", file=sys.stderr)

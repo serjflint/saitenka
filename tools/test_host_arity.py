@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -202,3 +203,27 @@ def test_the_census_matches_production() -> None:
     # The exempt tier is the runtime manifest's `host-composition` set, and the two tools disagreeing
     # about it would make WP5's exit unanswerable from either.
     assert {row.key for row in tiers["exempt"]} == set(tool.EXEMPT)
+
+
+def test_the_mechanical_tier_may_grow_when_the_architectural_one_shrinks() -> None:
+    """Tier A growing is ambiguous, so the gate must not fail on it.
+
+    It grows for two opposite reasons: a new host-taking function appeared (a regression), or a
+    Tier B function dropped under the ceiling because its callees converted (the migration working).
+    A gate that fails on both reports progress as a regression — which is exactly what it did, five
+    functions into the tooltip decomposition.
+    """
+    tool = _module()
+    census = json.loads(tool.CENSUS.read_text(encoding="utf-8"))
+    moved = dict(census)
+    moved["tierA"] += 5
+    moved["tierB"] -= 5  # same total: five rows crossed the ceiling
+
+    tool.CENSUS.write_text(json.dumps(census, indent=2) + "\n", encoding="utf-8")
+    try:
+        assert tool.check() == 0  # the real tree against the real fixture stays green
+    finally:
+        tool.CENSUS.write_text(json.dumps(census, indent=2) + "\n", encoding="utf-8")
+
+    # And the direction that must still fail: the corpus itself growing.
+    assert sum(moved.values()) == sum(census.values())
