@@ -457,13 +457,12 @@ class BacklogStore:
 
 
 def capture_current(reader) -> BacklogEntry | None:
-    """Hot-key adapter: sample current cue metadata, then perform one local transaction."""
+    """Sample current cue metadata, then perform one local transaction."""
     video = reader._get("path")
     start = reader._get("sub-start")
     end = reader._get("sub-end")
     if not video or start is None or end is None or not reader.sub_text.strip():
-        reader._toast("no active cue to bookmark", "warn")
-        return None
+        return None  # `mine_intents` owns the eligibility decision and its announcement
 
     jp_text, en_text = _cue_languages(reader)
     hovered = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None

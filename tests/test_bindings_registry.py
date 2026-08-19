@@ -99,7 +99,7 @@ def test_every_temporary_command_binding_has_one_deletion_owner():
 
 _COMMAND_ROUTE_CONTRACT = """\
 saitenka-toggle-overlay|session|global|modal|migrated
-saitenka-cycle-profile|session|global|modal|work-package-5
+saitenka-cycle-profile|session|global|modal|migrated
 saitenka-toggle-hover-pause|session|global|modal|migrated
 saitenka-toggle-help|session|global|help|migrated
 saitenka-help-prev|session|global|help|migrated
@@ -118,7 +118,7 @@ saitenka-sub-anchor|subtitle|global|modal|migrated
 saitenka-mine|interaction|cue|modal|migrated
 saitenka-mine-video|interaction|cue|modal|migrated
 saitenka-mine-all|interaction|cue|modal|migrated
-saitenka-toggle-bookmark|interaction|cue|modal|work-package-5
+saitenka-toggle-bookmark|interaction|cue|modal|migrated
 saitenka-toggle-sidebar|interaction|global|modal|migrated
 saitenka-toggle-analysis|interaction|global|modal|migrated
 saitenka-preview|interaction|cue|modal|migrated

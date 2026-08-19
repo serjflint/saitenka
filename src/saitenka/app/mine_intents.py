@@ -1,8 +1,10 @@
-"""Pure reducer for the mining commands (WP5.3 of the runtime migration).
+"""Pure reducer for the capture commands (WP5.3 of the runtime migration).
 
-Mining is the runtime's one command family that reaches an external service, so its eligibility is
-worth stating separately from the request it produces: whether Anki is configured at all, and
-whether there is anything under the cursor to mine, are different answers with different remedies.
+Mining and bookmarking both answer "keep what is on screen for later", and both are gated on
+something being there to keep — so they share a reducer. Mining is also the runtime's one command
+family reaching an external service, which is why its eligibility is stated separately from the
+request it produces: whether Anki is configured at all, and whether there is anything under the
+cursor to mine, are different answers with different remedies.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ class MineCommand(StrEnum):
     #: The same target with a motion screenshot, whatever `[mine].animated_screenshot` says.
     WORD_VIDEO = "word-video"
     EPISODE = "episode"
+    #: Bookmark the cue on screen into the local backlog. Not an Anki path — no `configured` gate.
+    BOOKMARK_CUE = "bookmark-cue"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +37,8 @@ class MineInputs:
     configured: bool = False
     #: The token index the miner would mine, or None when nothing is under the cursor.
     target: int | None = None
+    #: A cue with text and timings is on screen — what a bookmark captures.
+    has_active_cue: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +53,12 @@ class MineEpisode:
     """Mine every eligible word in the loaded episode."""
 
 
-type MineEffect = MineToken | MineEpisode | Announce
+@dataclass(frozen=True, slots=True)
+class BookmarkCue:
+    """Toggle the on-screen cue in the local backlog."""
+
+
+type MineEffect = MineToken | MineEpisode | BookmarkCue | Announce
 
 
 def _token(inputs: MineInputs, *, animated: bool | None) -> tuple[MineEffect, ...]:
@@ -67,6 +78,11 @@ _REDUCERS = {
     # No eligibility of its own: the bulk miner reads the episode index, not the cursor, and
     # answers for itself when there is nothing to do.
     MineCommand.EPISODE: lambda _inputs: (MineEpisode(),),
+    MineCommand.BOOKMARK_CUE: lambda inputs: (
+        (BookmarkCue(),)
+        if inputs.has_active_cue
+        else (Announce("no active cue to bookmark", "warn"),)
+    ),
 }
 
 

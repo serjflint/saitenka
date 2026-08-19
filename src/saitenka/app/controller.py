@@ -1420,8 +1420,8 @@ class Reader:
 
         fonts.set_primary_font(primary_font_for(self.profile.langs.main))
 
-    def cycle_profile(self) -> None:
-        """Cycle the active reading profile among the configured ``[profiles.*]`` at runtime (#254 D8).
+    def _switch_to_profile(self, idx: int) -> None:
+        """Make profile ``idx`` live among the configured ``[profiles.*]`` at runtime (#254 D8).
         A no-op with a single configured profile (the default path). Resolves the new tokenizer FULLY
         before touching any live state, so an unresolvable profile leaves the old one intact (atomic
         revert). On success re-resolves the reader's identity — tokenizer, ``langs`` (which gates
@@ -1430,9 +1430,6 @@ class Reader:
         flashes the new profile. Re-selecting the track is what makes the cycle a FULL switch: the new
         language's track lands in the target slot (colored + scanned), instead of the engine reading the
         old language's track — or the profile-blind role machine filing a manual pick as the secondary."""
-        if len(self.profiles) <= 1:
-            return  # nothing to switch to — inert on the default single-profile path
-        idx = (self._profile_idx + 1) % len(self.profiles)
         new = self.profiles[idx]
         # Resolve BOTH the tokenizer and the re-scoped dict set FULLY before mutating any live state, so
         # an unresolvable profile (bad tokenizer / DB error) leaves the old one intact (atomic revert).
@@ -2173,10 +2170,20 @@ class Reader:
             self._set_panel_open(effect.panel, opening=False)
 
     # --- mining commands: pure reducer, executed here (WP5.3) ---------------------------------
+    def _has_active_cue(self) -> bool:
+        """A cue with a path and timings is on screen — what a bookmark would capture."""
+        return bool(
+            self._get("path")
+            and self._get("sub-start") is not None
+            and self._get("sub-end") is not None
+            and self.sub_text.strip()
+        )
+
     def _mine_inputs(self) -> mine_intents.MineInputs:
         """Read the facts the mining commands decide from, once, before deciding."""
         configured = bool(self.anki and self.mine_cfg)
         return mine_intents.MineInputs(
+            has_active_cue=self._has_active_cue(),
             configured=configured,
             # The target is only asked for once mining is possible: `mine_target` inspects hover
             # and cue state, which an unconfigured session has no reason to walk.
@@ -2203,6 +2210,8 @@ class Reader:
                 self._miner.mine_token(self.tokens[effect.index], animated=effect.animated)
         elif isinstance(effect, mine_intents.MineEpisode):
             self._miner.bulk_mine()
+        elif isinstance(effect, mine_intents.BookmarkCue):
+            backlog.capture_current(self)
         elif isinstance(effect, Announce):
             log.info("mine: no target word")
             self._toast(effect.text, effect.kind)
@@ -2305,11 +2314,19 @@ class Reader:
 
     # --- session commands: pure reducer, executed here (WP5.3) --------------------------------
     def toggle_overlay(self) -> None:
+        self._run_session_command(session_intents.SessionCommand.TOGGLE_OVERLAY)
+
+    def cycle_profile(self) -> None:
+        self._run_session_command(session_intents.SessionCommand.CYCLE_PROFILE)
+
+    def _run_session_command(self, command: session_intents.SessionCommand) -> None:
         inputs = session_intents.SessionInputs(
             overlay_visible=self.ov.visible,
             translation_wanted=self._translation_wanted(),
+            profile_count=len(self.profiles),
+            profile_index=self._profile_idx,
         )
-        for effect in session_intents.reduce(session_intents.SessionCommand.TOGGLE_OVERLAY, inputs):
+        for effect in session_intents.reduce(command, inputs):
             self._apply_session_effect(effect)
 
     def _apply_session_effect(self, effect: session_intents.SessionEffect) -> None:
@@ -2327,6 +2344,8 @@ class Reader:
         elif isinstance(effect, session_intents.ShowTranslation):
             self._setup_secondary()
             self._draw_translation()
+        elif isinstance(effect, session_intents.SwitchProfile):
+            self._switch_to_profile(effect.index)
 
     def configure_subtitle_mode(
         self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
@@ -2511,7 +2530,7 @@ class Reader:
         self._run_hover_command(hover_intents.HoverCommand.TOGGLE_PAUSE)
 
     def toggle_bookmark(self) -> None:
-        backlog.capture_current(self)
+        self._run_mine_command(mine_intents.MineCommand.BOOKMARK_CUE)
 
     def toggle_sidebar(self) -> None:
         self._run_panel_command(panel_intents.PanelCommand.TOGGLE_SIDEBAR)
@@ -2589,12 +2608,13 @@ class Reader:
         def interaction(command) -> Callable[[], None]:
             return lambda: self._run_interaction_command(command)
 
-        handlers = {
-            PROFILE_CYCLE_MSG: action("cycle_profile"),
-            BOOKMARK_MSG: action("toggle_bookmark"),
-        }
+        # Empty, and that is WP5's exit criterion: every command's decision lives in a pure
+        # reducer, so none carries a temporary compatibility binding. Kept rather than deleted
+        # because `LegacyCommandExecutor` goes with the driver in WP6, not before it.
+        handlers: dict[str, Callable[[], None]] = {}
         # Migrated (WP4.2 / WP4.5 / WP5.3): the decision is a pure reducer — `subtitle_intents`,
-        # `help_intents` or `hover_intents` — so these carry no compatibility binding at all.
+        # `help_intents`, `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
+        # `interaction_intents`.
         reducers = {
             SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
             SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
@@ -2617,6 +2637,8 @@ class Reader:
             MINE_MSG: action("mine_current"),
             MINE_VIDEO_MSG: action("mine_current_video"),
             MINE_ALL_MSG: action("bulk_mine"),
+            BOOKMARK_MSG: action("toggle_bookmark"),
+            PROFILE_CYCLE_MSG: action("cycle_profile"),
             SIDEBAR_MSG: action("toggle_sidebar"),
             SUB_PICKER_MSG: action("toggle_sub_picker"),
             ANALYSIS_MSG: action("toggle_analysis"),

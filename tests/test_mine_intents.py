@@ -60,3 +60,25 @@ def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
         reduce(command, given)
 
     assert given == MineInputs(configured=True, target=3)
+
+
+def test_bookmarking_needs_a_cue_on_screen() -> None:
+    from saitenka.app.mine_intents import BookmarkCue
+
+    assert reduce(MineCommand.BOOKMARK_CUE, MineInputs(has_active_cue=True)) == (BookmarkCue(),)
+
+
+def test_bookmarking_without_a_cue_says_so() -> None:
+    assert reduce(MineCommand.BOOKMARK_CUE, MineInputs()) == (
+        Announce("no active cue to bookmark", "warn"),
+    )
+
+
+def test_bookmarking_does_not_need_anki() -> None:
+    """It writes to the local backlog. Gating it on the mining configuration would refuse a request
+    that has nothing to do with Anki."""
+    from saitenka.app.mine_intents import BookmarkCue
+
+    assert reduce(MineCommand.BOOKMARK_CUE, MineInputs(configured=False, has_active_cue=True)) == (
+        BookmarkCue(),
+    )

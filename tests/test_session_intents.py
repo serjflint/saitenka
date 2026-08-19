@@ -68,3 +68,37 @@ def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
     reduce(TOGGLE, given)
 
     assert given == SessionInputs(overlay_visible=True, translation_wanted=True)
+
+
+def test_cycling_moves_to_the_next_configured_profile() -> None:
+    from saitenka.app.session_intents import SwitchProfile
+
+    assert reduce(
+        SessionCommand.CYCLE_PROFILE, SessionInputs(profile_count=3, profile_index=1)
+    ) == (SwitchProfile(2),)
+
+
+def test_cycling_wraps_at_the_end() -> None:
+    from saitenka.app.session_intents import SwitchProfile
+
+    assert reduce(
+        SessionCommand.CYCLE_PROFILE, SessionInputs(profile_count=3, profile_index=2)
+    ) == (SwitchProfile(0),)
+
+
+def test_a_single_profile_session_is_inert() -> None:
+    """Almost every session. There is nothing to cycle to, and saying so on each keypress would be
+    noise rather than information."""
+    assert reduce(SessionCommand.CYCLE_PROFILE, SessionInputs(profile_count=1)) == ()
+
+
+def test_the_decision_is_which_profile_not_whether_it_resolves() -> None:
+    """Resolving a tokenizer and re-scoping dictionaries is I/O that can fail and revert; the
+    reducer says which one to try, which is the part that is a decision."""
+    from saitenka.app.session_intents import SwitchProfile
+
+    (effect,) = reduce(
+        SessionCommand.CYCLE_PROFILE, SessionInputs(profile_count=2, profile_index=0)
+    )
+
+    assert effect == SwitchProfile(1)

@@ -18,6 +18,7 @@ class SessionCommand(StrEnum):
     """The wire names this reducer owns."""
 
     TOGGLE_OVERLAY = "toggle-overlay"
+    CYCLE_PROFILE = "cycle-profile"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,9 @@ class SessionInputs:
     #: overlay is hidden at the moment this is read, so that question answers False for the wrong
     #: reason and the line never comes back.
     translation_wanted: bool = False
+    #: Configured reading profiles, and which one is live.
+    profile_count: int = 1
+    profile_index: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,12 +60,25 @@ class ShowTranslation:
     """Re-acquire the secondary track and draw it."""
 
 
+@dataclass(frozen=True, slots=True)
+class SwitchProfile:
+    """Make profile ``index`` live.
+
+    Whether it *can* be made live is the executor's to find out — resolving a tokenizer and
+    re-scoping dictionaries is I/O, and a failure there reverts atomically. This says which one to
+    try, which is the part that is a decision.
+    """
+
+    index: int
+
+
 type SessionEffect = (
     SetSurfacesVisible
     | ReleaseSecondarySubtitles
     | SuspendSubtitles
     | ResumeSubtitles
     | ShowTranslation
+    | SwitchProfile
     | DismissHover
 )
 
@@ -88,7 +105,18 @@ def _toggle_overlay(inputs: SessionInputs) -> tuple[SessionEffect, ...]:
     return (*shown, ShowTranslation()) if inputs.translation_wanted else shown
 
 
-_REDUCERS = {SessionCommand.TOGGLE_OVERLAY: _toggle_overlay}
+def _cycle_profile(inputs: SessionInputs) -> tuple[SessionEffect, ...]:
+    # Inert on the single-profile path, which is almost every session: there is nothing to cycle
+    # to, and announcing that on every keypress would be noise rather than information.
+    if inputs.profile_count <= 1:
+        return ()
+    return (SwitchProfile((inputs.profile_index + 1) % inputs.profile_count),)
+
+
+_REDUCERS = {
+    SessionCommand.TOGGLE_OVERLAY: _toggle_overlay,
+    SessionCommand.CYCLE_PROFILE: _cycle_profile,
+}
 
 
 def reduce(command: SessionCommand, inputs: SessionInputs) -> tuple[SessionEffect, ...]:
