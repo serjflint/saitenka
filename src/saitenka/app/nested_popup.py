@@ -60,7 +60,7 @@ def show_nested(reader: Reader, sb) -> None:
                 NestedMetadataKey(
                     reader._prefetch_gen,
                     reader._dependency_generation,
-                    reader._mined_generation,
+                    reader._mined.generation,
                     id(reader._tip_state),
                     sb.text,
                 ),
@@ -96,7 +96,7 @@ def apply_nested_metadata(reader: Reader, result) -> None:
         or result.token is None
         or key.generation != reader._prefetch_gen
         or key.dependency_generation != reader._dependency_generation
-        or key.mined_generation != reader._mined_generation
+        or key.mined_generation != reader._mined.generation
         or key.tooltip_origin != id(reader._tip_state)
     ):
         return

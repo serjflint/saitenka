@@ -51,11 +51,15 @@ def _media_name(field_html: str, pattern: str) -> str:
 
 
 def mark_mined(reader: Reader, expression: str) -> None:
-    """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately."""
+    """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately.
+
+    The refresh is unconditional but the generation bump is not: re-mining a word already in the
+    deck (the duplicate path) leaves membership where it was, so every panel cached against it is
+    still correct. What the user asked for is the *visible* rebuild below, which happens either way.
+    """
     if not expression:
         return
     reader._mined.add(expression)
-    reader._mined_generation += 1
     if reader.hover >= 0 and reader._tip_state is not None:
         token = reader.tokens[reader.hover]
         if expression in {token.lemma, token.surface}:

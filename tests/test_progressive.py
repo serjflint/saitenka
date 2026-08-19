@@ -69,7 +69,7 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
             time.sleep(0.001)
 
         assert r._mined == {"猫"}
-        assert r._mined_generation == 1
+        assert r._mined.generation == 1
         assert r._mined_seed_inflight is False
     finally:
         r.close()
@@ -109,14 +109,14 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
             time.sleep(0.001)
 
         assert r._mined == {"新しい"}
-        assert r._mined_generation == 1
+        assert r._mined.generation == 1
         release.set()
         for _ in range(200):
             r._drain_events()
             time.sleep(0.001)
 
         assert r._mined == {"新しい"}
-        assert r._mined_generation == 1
+        assert r._mined.generation == 1
     finally:
         r.close()
         gateway.close()

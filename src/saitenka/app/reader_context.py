@@ -14,6 +14,7 @@ import threading
 from typing import TYPE_CHECKING, overload
 
 from saitenka.app.languages import MAIN_LANG
+from saitenka.app.mined_set import MinedSet
 from saitenka.app.subnav_settle import SettleWindow
 
 # In-RAM ceiling for the tier-2 compressed-head cache. Independent of the disk ceiling
@@ -150,7 +151,7 @@ class SessionContext:
 
     def __init__(self, render_cache: RenderCacheState) -> None:
         self.render_cache = render_cache
-        self.mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
+        self.mined = MinedSet()  # card expressions already in the deck → header ⊕ becomes ✓
         self.anki_cache: tuple[float, bool] = (0.0, False)  # (checked_at, reachable) — see _anki_ok
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle
         self.mined_store: MinedCardStore | None = None  # lazy mined-card DB handle (#253)

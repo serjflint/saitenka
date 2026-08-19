@@ -107,6 +107,7 @@ from saitenka.app.media import (
     copy_clipboard,
     tts_available,
 )
+from saitenka.app.mined_set import MinedSet
 from saitenka.app.miner import Miner, tag_slug
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
@@ -292,7 +293,7 @@ class Reader:
     _prefetch_key = Delegated[tuple[str, bool] | None]("prefetch_state", "key")
     # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
     # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
-    _mined = Delegated[set[str]]("session", "mined")
+    _mined = Delegated[MinedSet]("session", "mined")
     _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
     _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
     _mined_store = Delegated[mined_store.MinedCardStore | None]("session", "mined_store")
@@ -424,7 +425,6 @@ class Reader:
         self._mined_seed_done = False
         self._mined_seed_failures = 0
         self._mined_seed_retry_pending = False
-        self._mined_generation = 0
         from saitenka.app.interaction_jobs import InteractionJobs
 
         self._interaction_jobs = InteractionJobs()
@@ -3028,9 +3028,7 @@ class Reader:
             return
         self._mined_seed_done = True
         self._mined_seed_failures = 0
-        before = len(self._mined)
         self._mined.update(values)
-        self._mined_generation += int(len(self._mined) != before)
 
     def _finish_analysis(self, completion: EffectFinished) -> None:
         changed = analysis_overlay.finish(self.analysis, completion)
@@ -3586,9 +3584,7 @@ class Reader:
             )
 
     def _seed_mined(self) -> None:
-        before = len(self._mined)
         self._miner.seed_mined()
-        self._mined_generation += int(len(self._mined) != before)
 
     # --- subtitle navigation (instant render, then seek) --------------------------------------
     def load_sub_index(self, path) -> None:

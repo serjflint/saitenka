@@ -34,7 +34,7 @@ from saitenka.panel import Freq, header_add_rect, header_speaker_rect, panel_row
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
 
     from saitenka.app.controller import Reader
     from saitenka.render.layout_backend import LayoutBackend
@@ -329,7 +329,7 @@ def _request_hover_metadata(reader: Reader, index: int) -> None:
             HoverMetadataKey(
                 reader._prefetch_gen,
                 reader._dependency_generation,
-                reader._mined_generation,
+                reader._mined.generation,
                 reader._current_cue_identity,
                 index,
                 reader._tip_view.job_id,
@@ -347,7 +347,7 @@ def apply_hover_metadata(reader: Reader, result) -> None:
     current = (
         reader._prefetch_gen,
         reader._dependency_generation,
-        reader._mined_generation,
+        reader._mined.generation,
         reader._current_cue_identity,
         reader.hover,
         reader._tip_view.job_id,
@@ -688,7 +688,7 @@ def panel_key(
     )
 
 
-def is_mined(tok, mined: frozenset[str] | set[str]) -> bool:
+def is_mined(tok, mined: Collection[str]) -> bool:
     """Is this token's word already in the deck? (its ⊕ shows ✓ instead). Cheap short-circuit
     while nothing has been mined; else a card_for lookup (lru-cached)."""
     if not mined:
