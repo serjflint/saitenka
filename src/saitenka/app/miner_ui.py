@@ -21,8 +21,10 @@ from saitenka.app.anki import AnkiError
 from saitenka.app.bindings import TIP_CLOSE_MSG, active_bindings
 from saitenka.app.card_preview import PreviewData, render_card_preview
 from saitenka.app.media import audio_duration, play_audio
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.procutil import kill_process_tree
+from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
@@ -170,7 +172,14 @@ def media_tempfile(anki, name, tmp_dir):
 def _grab_preview_keys(reader: Reader) -> None:
     """Route the preview-scoped keys (Esc → close) to the preview while it's on screen."""
     for b in active_bindings(reader, "preview"):
-        reader.ipc.command("keybind", b.key, f"script-message {b.spec.message}")
+        send_correlated(
+            reader.ipc,
+            f"preview-keybind:{b.key}",
+            "keybind",
+            b.key,
+            f"script-message {b.spec.message}",
+            owner=Owner.INTERACTION,
+        )
 
 
 def _release_preview_keys(reader: Reader) -> None:
@@ -179,10 +188,19 @@ def _release_preview_keys(reader: Reader) -> None:
     if reader._help_open:
         return
     for b in active_bindings(reader, "preview"):
-        if b.key == "ESC" and reader._tip_keys_bound:
-            reader.ipc.command("keybind", b.key, f"script-message {TIP_CLOSE_MSG}")
-        else:
-            reader.ipc.command("keybind", b.key, "ignore")
+        command = (
+            f"script-message {TIP_CLOSE_MSG}"
+            if b.key == "ESC" and reader._tip_keys_bound
+            else "ignore"
+        )
+        send_correlated(
+            reader.ipc,
+            f"preview-keybind-release:{b.key}",
+            "keybind",
+            b.key,
+            command,
+            owner=Owner.INTERACTION,
+        )
 
 
 def _stop_preview_audio(reader: Reader) -> None:

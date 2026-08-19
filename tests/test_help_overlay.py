@@ -1,5 +1,7 @@
 """In-player help uses effective bindings and remains playback-neutral."""
 
+from util import FakeIPC
+
 from saitenka.app import tooltip
 from saitenka.app.bindings import (
     BOOKMARK_MSG,
@@ -14,18 +16,6 @@ from saitenka.app.config import KeyOptions, PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.render.help import render_page
-
-
-class FakeIPC:
-    def __init__(self):
-        self.commands: list[tuple] = []
-        self.props: dict[str, object] = {}
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args and args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
 
 
 def _entries(reader: Reader):

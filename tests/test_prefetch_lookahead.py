@@ -1,6 +1,8 @@
 """Prefetch lookahead: WARM the next cues' words while the current line plays, and the cache-size /
 RSS gauges the telemetry interval sampler reports."""
 
+import util
+
 from saitenka.app import prefetch
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.controller import Reader
@@ -16,22 +18,10 @@ _SRT = (
 )
 
 
-class _FakeIPC:
+class _FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args and args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
-
-    def pump(self):
-        pass
-
-    def drain_events(self, *_args, **_kwargs):
-        return []
+        super().__init__()
+        self.props.update(props or {})
 
 
 class _FakeDS:

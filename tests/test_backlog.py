@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import util
+
 from saitenka.app.backlog import BacklogStore, Capture, normalize_match_name
 from saitenka.app.controller import Reader
 
@@ -152,16 +154,10 @@ def test_global_summary_does_not_expose_cue_content(tmp_path):
     assert "jp_text" not in summary[0]
 
 
-class _IPC:
+class _IPC(util.FakeIPC):
     def __init__(self, props):
-        self.props = props
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props)
 
 
 def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, monkeypatch):

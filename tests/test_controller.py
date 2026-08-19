@@ -1,6 +1,7 @@
 """Controller: live-run startup + hover hysteresis (Yomitan-style linger)."""
 
 import functools
+import logging
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -3316,3 +3317,25 @@ def test_sentence_lines_rejoins_each_tokenized_line() -> None:
         "猫を見る",
         "犬",
     ]
+
+
+def test_a_refused_interaction_command_is_reported_rather_than_lost(caplog):
+    """What correlating these keybinds buys. A `keybind` that mpv rejects, or that the runtime
+    refuses to admit, used to vanish into a discarded reply and read on screen as a dead shortcut
+    with nothing in the log to find. The startup batch is deliberately still uncorrelated for a
+    capacity reason `_register_keybinds` records — this covers the paths that are.
+    """
+    from saitenka.app.mpv_egress import send_correlated
+    from saitenka.runtime import Owner
+
+    class Refusing(FakeIPC):
+        def submit_runtime_mpv(self, **_kwargs) -> bool:
+            return False
+
+    with caplog.at_level(logging.WARNING, logger="saitenka.app.mpv_egress"):
+        send_correlated(
+            Refusing(), "enable-mouse-section", "enable-section", "x", owner=Owner.INTERACTION
+        )
+
+    assert "enable-mouse-section" in caplog.text
+    assert "not admitted" in caplog.text

@@ -14,19 +14,7 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._assert_mouse_capture"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._bind_help_keys"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._build_command_router.seek"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._define_mouse_section"
     ],
     [
       "direct-mpv-command",
@@ -43,10 +31,6 @@
     [
       "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._release_mouse_capture"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._restore_help_context_keys"
     ],
     [
       "direct-mpv-command",
@@ -79,14 +63,6 @@
     [
       "direct-mpv-command",
       "src/saitenka/app/media.py::screenshot"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/miner_ui.py::_grab_preview_keys"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/miner_ui.py::_release_preview_keys"
     ],
     [
       "direct-mpv-command",

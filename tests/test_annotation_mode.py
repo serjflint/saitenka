@@ -1,6 +1,7 @@
 """Learning-annotation visibility remains independent of tooltip and playback state."""
 
 import pytest
+import util
 from util import RecordingRasterProvider
 
 from saitenka.app.bindings import ANNOTATION_MSG
@@ -10,26 +11,10 @@ from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.tooltip import update_hover_impl
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-        #: The runtime timer port. The hover-switch dwell is a named deadline, and it fails *open*
-        #: — a fake without the port would switch instantly and stop testing the dwell entirely.
-        self.timers: dict[str, tuple] = {}
-
-    def schedule_runtime_timer(self, *, timer, identity, on_finished, **_kwargs) -> bool:
-        self.timers[timer] = (identity, on_finished)
-        return True
-
-    def cancel_runtime_timer(self, timer: str) -> bool:
-        return self.timers.pop(timer, None) is not None
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props or {})
 
 
 class _SpyRenderer:

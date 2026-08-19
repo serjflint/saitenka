@@ -1938,7 +1938,15 @@ class Reader:
         lines = [f"{b.key} script-message {b.spec.message}" for b in active_bindings(self, "mouse")]
         self._mouse_section_defined = bool(lines)
         if lines:
-            self.ipc.command("define-section", MOUSE_SECTION, "\n".join(lines) + "\n", "force")
+            send_correlated(
+                self.ipc,
+                "define-mouse-section",
+                "define-section",
+                MOUSE_SECTION,
+                "\n".join(lines) + "\n",
+                "force",
+                owner=Owner.INTERACTION,
+            )
 
     def _wants_mouse_capture(self) -> bool:
         return surfaces.wants_mouse_capture(self)
@@ -1968,7 +1976,14 @@ class Reader:
         """
         from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
-        self.ipc.command("enable-section", MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
+        send_correlated(
+            self.ipc,
+            "enable-mouse-section",
+            "enable-section",
+            MOUSE_SECTION,
+            "allow-hide-cursor+allow-vo-dragging",
+            owner=Owner.INTERACTION,
+        )
         self._mouse_captured = True
 
         def due() -> None:
@@ -1986,6 +2001,9 @@ class Reader:
         if not self._mouse_captured:
             return
         self.lifecycle_timers.cancel(LifecycleTimerKind.MOUSE_CAPTURE_REASSERT)
+        # Stays a direct write: this also runs from `close`, where the reactor is stopping — a
+        # correlated command queued there may never be drained, and the forced section would outlive
+        # us still holding the mouse. Tolerates a dead socket for the same reason.
         try:
             self.ipc.command("disable-section", MOUSE_SECTION)
         except (OSError, ValueError):
@@ -2528,7 +2546,14 @@ class Reader:
         for binding in active_bindings(self, "help"):
             message = binding.spec.message
             if message is not None:
-                self.ipc.command("keybind", binding.key, f"script-message {message}")
+                send_correlated(
+                    self.ipc,
+                    f"help-keybind:{binding.key}",
+                    "keybind",
+                    binding.key,
+                    f"script-message {message}",
+                    owner=Owner.INTERACTION,
+                )
 
     def _restore_help_context_keys(self) -> None:
         """Give the help keys back to whatever owned them, or unbind them.
@@ -2544,7 +2569,14 @@ class Reader:
         for binding in active_bindings(self, "help"):
             message = tooltip_by_key.get(binding.key) if self._tip_keys_bound else None
             command = f"script-message {message}" if message else "ignore"
-            self.ipc.command("keybind", binding.key, command)
+            send_correlated(
+                self.ipc,
+                f"help-keybind-restore:{binding.key}",
+                "keybind",
+                binding.key,
+                command,
+                owner=Owner.INTERACTION,
+            )
 
     def _run_help_command(self, command) -> None:
         from saitenka.app import help_intents
@@ -2698,6 +2730,13 @@ class Reader:
     def _register_keybinds(self) -> None:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
         # CRITICAL: passing the command as split args silently kills the key — always one string.
+        #
+        # Deliberately NOT correlated, unlike the help/preview/mouse keybinds. This runs before the
+        # drain loop starts, and each correlated command reserves two terminal slots (command +
+        # deadline) against a 64-slot mailbox, so ~24 global binds sit at 48 with nothing draining
+        # them — and over the bound a bind is dropped with only a log line, i.e. a dead shortcut.
+        # The fake completes inline, so no test here can reproduce that. Converting this batch means
+        # one `define-section` for the lot (as the mouse scope already does), not a loop.
         def bind(key: str, msg: str) -> None:
             reply = self.ipc.command("keybind", key, f"script-message {msg}")
             # Surface a REJECTED binding (bad key name, or mpv refusing it) — silently dropping mpv's
