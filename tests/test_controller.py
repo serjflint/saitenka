@@ -3151,7 +3151,9 @@ def _accrual_reader(ipc, monkeypatch) -> tuple[Reader, list]:
     ipc.props.update({"osd-dimensions": {"w": 1280, "h": 720}, "pause": False, "path": "/a.mkv"})
     reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
     accrued: list = []
-    monkeypatch.setattr(C.session_stats, "accrue", accrued.append)
+    monkeypatch.setattr(
+        C.session_stats, "accrue", lambda recorder, **kw: accrued.append((recorder, kw))
+    )
     return reader, accrued
 
 

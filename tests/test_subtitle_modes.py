@@ -108,7 +108,7 @@ def test_subtitle_fetch_runs_off_the_event_thread_and_publishes_directly(monkeyp
 
     monkeypatch.setattr(reader, "_toast", lambda message, level: messages.append((message, level)))
     try:
-        subtitle_modes.start_fetch(reader, fetch)
+        subtitle_modes.start_fetch(reader._submit_subtitle_fetch, reader._get, fetch)
         _drain_until(reader, lambda: bool(messages))
         assert worker_thread is not None and worker_thread != event_thread
         assert messages == [("provider: no match", "warn")]
@@ -177,13 +177,15 @@ def test_newer_explicit_subtitle_choice_supersedes_older_completion(tmp_path, mo
     newer.write_text("newer", encoding="utf-8")
 
     subtitle_modes.start_fetch(
-        reader,
+        reader._submit_subtitle_fetch,
+        reader._get,
         lambda: (older, "older"),
         force_select=True,
         name="picker-download",
     )
     subtitle_modes.start_fetch(
-        reader,
+        reader._submit_subtitle_fetch,
+        reader._get,
         lambda: (newer, "newer"),
         force_select=True,
         name="picker-download",
@@ -210,7 +212,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
 
     monkeypatch.setattr(reader, "_toast", lambda message, level: messages.append((message, level)))
     try:
-        subtitle_modes.start_fetch(reader, fetch)
+        subtitle_modes.start_fetch(reader._submit_subtitle_fetch, reader._get, fetch)
         assert started.wait(1)
         reader._stop.set()
         ipc.close_runtime_job_lane("subtitle-fetch", timeout=0)

@@ -99,7 +99,7 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
     try:
         sub_picker.open_picker(reader)
         assert old_started.wait(1)
-        sub_picker.close_picker(reader)
+        sub_picker.close_picker(reader.sub_picker, reader.lifecycle_surfaces)
         sub_picker.open_picker(reader)
         _drain_until(reader, lambda: bool(reader.sub_picker.candidates))
         assert reader.sub_picker.candidates[0].name == "current.ass"
@@ -210,7 +210,10 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
     assert reader.sub_picker.open and reader.sub_picker.loading
 
     sub_picker.apply_listing(
-        reader, reader.sub_picker.generation, sub_picker.ListingResult(tuple(candidates), ())
+        reader.sub_picker,
+        reader.redraw_sub_picker,
+        reader.sub_picker.generation,
+        sub_picker.ListingResult(tuple(candidates), ()),
     )
 
     assert reader.sub_picker.loading is False
@@ -229,7 +232,8 @@ def test_provider_warnings_are_shown_in_the_footer():
     reader.sub_picker.open = True
 
     sub_picker.apply_listing(
-        reader,
+        reader.sub_picker,
+        reader.redraw_sub_picker,
         reader.sub_picker.generation,
         sub_picker.ListingResult((_candidate("a.srt"),), ("tsukihime: search truncated",)),
     )
@@ -246,7 +250,8 @@ def test_listing_error_is_shown_and_leaves_no_candidates():
     reader.sub_picker.loading = True
 
     sub_picker.apply_listing(
-        reader,
+        reader.sub_picker,
+        reader.redraw_sub_picker,
         reader.sub_picker.generation,
         sub_picker.ListingResult((), (), "subtitle search failed: boom"),
     )
@@ -270,7 +275,7 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
 
     fetches: list[tuple] = []
     monkeypatch.setattr(
-        subtitle_modes, "start_fetch", lambda _r, do, **kw: fetches.append((do, kw))
+        subtitle_modes, "start_fetch", lambda _submit, _get, do, **kw: fetches.append((do, kw))
     )
 
     rect = reader.sub_picker.rect
@@ -349,7 +354,9 @@ def test_toggle_closes_an_open_picker():
     reader.configure_sub_picker(_lister([]))
     reader.sub_picker.open = True
 
-    sub_picker.close_picker(reader) if reader.sub_picker.open else sub_picker.open_picker(reader)
+    sub_picker.close_picker(
+        reader.sub_picker, reader.lifecycle_surfaces
+    ) if reader.sub_picker.open else sub_picker.open_picker(reader)
 
     assert reader.sub_picker.open is False
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands

@@ -858,7 +858,11 @@ class Reader:
         elif isinstance(delta, playback.PauseChanged):
             # Watch time is accrued at the transition, not sampled by a tick: the segment that
             # just ended is exactly what the change delimits, and an idle runtime does no work.
-            session_stats.accrue(self)
+            session_stats.accrue(
+                self._session_recorder,
+                paused=bool(self._prop("pause")),
+                language=self.subtitle_language,
+            )
         elif isinstance(delta, playback.PointerMoved):
             # Hover reacts to the pointer moving, not to a tick noticing that it did. The dwells it
             # arms are deadlines, so a cursor that stops still gets its linger — which is why this
@@ -2183,7 +2187,11 @@ class Reader:
         elif panel is panel_intents.Panel.ANALYSIS:
             self.set_analysis_open(open=opening)
         elif panel is panel_intents.Panel.SUBTITLE_PICKER:
-            sub_picker.open_picker(self) if opening else sub_picker.close_picker(self)
+            (
+                sub_picker.open_picker(self)
+                if opening
+                else sub_picker.close_picker(self.sub_picker, self.lifecycle_surfaces)
+            )
         elif panel is panel_intents.Panel.CARD_PREVIEW:
             miner_ui.hide_preview(self)
 
@@ -2642,7 +2650,15 @@ class Reader:
         elif isinstance(effect, subtitle_intents.AdoptCurrentAsTarget):
             subtitle_modes.adopt_current_as_target(self, effect.sid)
         elif isinstance(effect, subtitle_intents.AcquireSubtitles):
-            subtitle_modes.begin_acquisition(self, effect.media_path, effect.source)
+            subtitle_modes.begin_acquisition(
+                self._submit_subtitle_fetch,
+                self._get,
+                self._toast,
+                lambda: self.episode.subtitle,
+                self.ipc,
+                effect.media_path,
+                effect.source,
+            )
         elif isinstance(effect, subtitle_intents.SetAnnotationMode):
             self.annotation_mode = effect.mode
             self._annotation_hover = False
@@ -2676,7 +2692,9 @@ class Reader:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.MARK_CURRENT_JAPANESE)
 
     def fetch_japanese_subs_async(self, fetch) -> None:
-        subtitle_modes.start_fetch(self, fetch, select_if_unchanged=True)
+        subtitle_modes.start_fetch(
+            self._submit_subtitle_fetch, self._get, fetch, select_if_unchanged=True
+        )
 
     def configure_subtitle_retry(self, factory) -> None:
         subtitle_modes.configure_retry(self.episode.subtitle, factory)
@@ -3181,7 +3199,7 @@ class Reader:
         )
 
     def rebind_episode(self) -> None:
-        sub_picker.close_picker(self)
+        sub_picker.close_picker(self.sub_picker, self.lifecycle_surfaces)
         self._subtitle_force_select_revision += 1
         self.episode = EpisodeContext()
 
@@ -3407,7 +3425,11 @@ class Reader:
         from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         def due() -> None:
-            session_stats.accrue(self)
+            session_stats.accrue(
+                self._session_recorder,
+                paused=bool(self._prop("pause")),
+                language=self.subtitle_language,
+            )
             self.arm_session_persist(seconds)
 
         self.lifecycle_timers.schedule(LifecycleTimerKind.SESSION_PERSIST, seconds, due)

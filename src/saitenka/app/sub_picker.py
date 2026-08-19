@@ -131,7 +131,8 @@ def _start_listing(reader: Reader, video: str) -> None:
     submitter = reader._sub_picker_submit
     if submitter is None:
         apply_listing(
-            reader,
+            reader.sub_picker,
+            reader.redraw_sub_picker,
             generation,
             ListingResult((), (), "subtitle search unavailable"),
         )
@@ -141,7 +142,7 @@ def _start_listing(reader: Reader, video: str) -> None:
         finished_listing = finish_listing(completion)
         if finished_listing is not None and episode is reader.episode and not reader._stop.is_set():
             finished_generation, result = finished_listing
-            apply_listing(reader, finished_generation, result)
+            apply_listing(reader.sub_picker, reader.redraw_sub_picker, finished_generation, result)
 
     submitter(
         owner=Owner.SUBTITLE,
@@ -173,10 +174,10 @@ def open_picker(reader: Reader) -> None:
     _start_listing(reader, str(video))
 
 
-def close_picker(reader: Reader) -> None:
-    if not retire(reader.sub_picker):
+def close_picker(state, lifecycle_surfaces) -> None:
+    if not retire(state):
         return
-    reader.lifecycle_surfaces.remove(PICKER_ID)
+    lifecycle_surfaces.remove(PICKER_ID)
 
 
 def retire(state) -> bool:
@@ -210,9 +211,9 @@ def adopt_listing(state, generation: int, result: ListingResult) -> bool:
     return True
 
 
-def apply_listing(reader: Reader, generation: int, result: ListingResult) -> None:
-    if adopt_listing(reader.sub_picker, generation, result):
-        reader.redraw_sub_picker()
+def apply_listing(state, redraw, generation: int, result: ListingResult) -> None:
+    if adopt_listing(state, generation, result):
+        redraw()
 
 
 def finish_listing(completion: EffectFinished) -> tuple[int, ListingResult] | None:
@@ -335,14 +336,14 @@ def _download(reader: Reader, index: int) -> None:
     # force_select: the user explicitly chose this source in the picker, so select it NOW even if the
     # current track is English (the keep-current background contract is for unattended fetches, not this).
     start_fetch(
-        reader,
+        reader._submit_subtitle_fetch,
+        reader._get,
         candidate.download,
         name="sub-picker-download",
         force_select=True,
     )
-    close_picker(
-        reader
-    )  # panel closes; the swap lands from the broker completion when the file arrives
+    # panel closes; the swap lands from the broker completion when the file arrives
+    close_picker(reader.sub_picker, reader.lifecycle_surfaces)
 
 
 def on_click(reader: Reader, x: float, y: float) -> bool:

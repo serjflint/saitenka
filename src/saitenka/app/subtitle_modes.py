@@ -71,6 +71,25 @@ class SubtitleFetchRequest:
     force_select: bool
 
 
+#: What the acquisition path needs from the host, named rather than reached for. `episode_subtitle`
+#: is a callable, not a value: the completion lambda re-reads the CURRENT episode when it fires, and
+#: binding the source eagerly would finish a retry against the episode we just left.
+if TYPE_CHECKING:
+    PropertyGet = Callable[[str], "int | str | None"]
+    Toast = Callable[..., None]
+    EpisodeSubtitle = Callable[[], SubtitleSource]
+
+
+class FetchSubmitter(Protocol):
+    def __call__(
+        self,
+        request: SubtitleFetchRequest,
+        *,
+        name: str,
+        on_done: Callable[[], None] | None = None,
+    ) -> None: ...
+
+
 class JobSubmitter(Protocol):
     def __call__(
         self,
@@ -301,7 +320,8 @@ def adopt_current_as_target(reader: Reader, sid) -> None:
 
 
 def start_fetch(
-    reader: Reader,
+    submit: FetchSubmitter,
+    get: PropertyGet,
     fetch: ProviderFetch,
     *,
     name: str = "sub-provider",
@@ -315,10 +335,10 @@ def start_fetch(
     leaves ``replace`` false so it never disrupts what you're watching. ``force_select`` (the picker's
     explicit choice) selects the fetched track NOW even from English, overriding the keep-current
     background contract."""
-    initial_sid = reader._get("sid") if select_if_unchanged else None
+    initial_sid = get("sid") if select_if_unchanged else None
 
     request = SubtitleFetchRequest(fetch, select_if_unchanged, initial_sid, replace, force_select)
-    reader._submit_subtitle_fetch(request, name=name, on_done=on_done)
+    submit(request, name=name, on_done=on_done)
 
 
 def configure_retry(source: SubtitleSource, factory: ProviderFetchFactory | None) -> None:
@@ -341,7 +361,14 @@ def _current_external_sub(ipc) -> Path | None:
     return Path(ext) if ext else None
 
 
-def _start_resync_window(reader: Reader, video_path: str, sub: Path) -> None:
+def _start_resync_window(
+    submit: FetchSubmitter,
+    get: PropertyGet,
+    toast: Toast,
+    episode_subtitle: EpisodeSubtitle,
+    video_path: str,
+    sub: Path,
+) -> None:
     """Re-time the subs you already have from the CURRENT playhead onward (no provider query) — the
     user's "sync from here" shortcut. A drifting source (right after the OP, early before it) can't be
     fixed by one whole-file offset, so this derives the offset from a local slice around the playhead and
@@ -351,9 +378,9 @@ def _start_resync_window(reader: Reader, video_path: str, sub: Path) -> None:
 
     from saitenka.app.resync import resync_current, resync_window
 
-    playhead = reader._get("time-pos")
+    playhead = get("time-pos")
     start_s = float(playhead) if playhead is not None else 0.0
-    reader._toast("Re-timing subtitles from here…")
+    toast("Re-timing subtitles from here…")
 
     def do() -> tuple[Path | None, str]:
         out = resync_window(Path(video_path), sub, start_s=start_s)
@@ -365,34 +392,42 @@ def _start_resync_window(reader: Reader, video_path: str, sub: Path) -> None:
         return out, f"subtitles re-timed from {int(start_s)}s"
 
     start_fetch(
-        reader,
+        submit,
+        get,
         do,
         name="subtitle-resync",
         replace=True,
-        on_done=lambda: _finish_retry(reader.episode.subtitle),
+        on_done=lambda: _finish_retry(episode_subtitle()),
     )
 
 
-def _start_provider_fetch(reader: Reader, video_path: str) -> None:
-    factory = reader.episode.subtitle.retry_factory
+def _start_provider_fetch(
+    submit: FetchSubmitter,
+    get: PropertyGet,
+    toast: Toast,
+    episode_subtitle: EpisodeSubtitle,
+    video_path: str,
+) -> None:
+    factory = episode_subtitle().retry_factory
     if factory is None:
-        _finish_retry(reader.episode.subtitle)
-        reader._toast("No Japanese subtitle providers enabled", "warn")
+        _finish_retry(episode_subtitle())
+        toast("No Japanese subtitle providers enabled", "warn")
         return
     try:
         fetch = factory(video_path)
     except Exception as exc:
-        _finish_retry(reader.episode.subtitle)
+        _finish_retry(episode_subtitle())
         log.warning("subtitle retry setup failed", exc_info=True)
-        reader._toast(f"Japanese subtitle search failed: {exc}", "warn")
+        toast(f"Japanese subtitle search failed: {exc}", "warn")
         return
-    reader._toast("Searching Japanese subtitle providers…")
+    toast("Searching Japanese subtitle providers…")
     start_fetch(
-        reader,
+        submit,
+        get,
         fetch,
         name="subtitle-retry",
         replace=True,
-        on_done=lambda: _finish_retry(reader.episode.subtitle),
+        on_done=lambda: _finish_retry(episode_subtitle()),
     )
 
 
@@ -406,21 +441,27 @@ def _claim_retry(state) -> bool:
     return True
 
 
-def begin_acquisition(reader: Reader, video_path: str, source) -> None:
+def begin_acquisition(
+    submit: FetchSubmitter,
+    get: PropertyGet,
+    toast: Toast,
+    episode_subtitle: EpisodeSubtitle,
+    ipc,
+    video_path: str,
+    source,
+) -> None:
     """Carry out a decided subtitle acquisition. Re-timing needs the external file that was on
     screen when the decision was made; if it went away, fall back to querying providers."""
     from saitenka.app.subtitle_intents import AcquisitionSource
 
-    current = (
-        _current_external_sub(reader.ipc) if source is AcquisitionSource.RESYNC_CURRENT else None
-    )
-    if not _claim_retry(reader.episode.subtitle):
-        reader._toast("Subtitle sync already running", "warn")
+    current = _current_external_sub(ipc) if source is AcquisitionSource.RESYNC_CURRENT else None
+    if not _claim_retry(episode_subtitle()):
+        toast("Subtitle sync already running", "warn")
         return
     if current is not None:
-        _start_resync_window(reader, video_path, current)
+        _start_resync_window(submit, get, toast, episode_subtitle, video_path, current)
     else:
-        _start_provider_fetch(reader, video_path)
+        _start_provider_fetch(submit, get, toast, episode_subtitle, video_path)
 
 
 def _reset_sub_delay(ipc) -> None:

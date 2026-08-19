@@ -338,11 +338,10 @@ def start(reader: Reader) -> None:
     reader.arm_session_persist(PERSIST_INTERVAL)
 
 
-def accrue(reader: Reader) -> None:
+def accrue(recorder: SessionRecorder | None, *, paused: bool, language: str) -> None:
     """Accrue the watch-time segment that just ended, at a transition."""
-    recorder = reader._session_recorder
     if recorder is not None:
-        recorder.accrue(paused=bool(reader._prop("pause")), language=reader.subtitle_language)
+        recorder.accrue(paused=paused, language=language)
 
 
 def finish(reader: Reader) -> str | None:

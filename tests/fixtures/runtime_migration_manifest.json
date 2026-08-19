@@ -334,10 +334,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/session_stats.py::accrue"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/session_stats.py::finish"
     ],
     [
@@ -426,14 +422,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sub_picker.py::apply_listing"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::close_picker"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sub_picker.py::configure"
     ],
     [
@@ -486,14 +474,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_start_provider_fetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_start_resync_window"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::adopt_current_as_target"
     ],
     [
@@ -503,10 +483,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::apply_fetch_result"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::begin_acquisition"
     ],
     [
       "reader-parameter",
@@ -527,10 +503,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::setup_secondary"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::start_fetch"
     ],
     [
       "reader-parameter",
