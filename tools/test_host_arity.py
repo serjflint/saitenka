@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import ast
+import importlib.util
+import sys
+from pathlib import Path
+
+_TOOL = Path(__file__).with_name("host_arity.py")
+
+
+def _module():
+    spec = importlib.util.spec_from_file_location("_host_arity", _TOOL)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _collect(tool, module: str, source: str):
+    visitor = tool._Visitor(module)
+    visitor.visit(ast.parse(source))
+    return {function.key: function for function in visitor.found}
+
+
+def test_a_forwarder_inherits_the_arity_of_everything_downstream() -> None:
+    """The whole point of the tool: a two-read leaf caller is not a two-parameter function.
+
+    Counted locally this chain is 2/3/4 and every link converts. Counted the way a signature
+    actually works, the top of the chain carries all nine and breaches the ceiling.
+    """
+    tool = _module()
+    functions = _collect(
+        tool,
+        "chain.py",
+        """
+def top(reader):
+    middle(reader)
+    return reader.a, reader.b
+
+def middle(reader):
+    bottom(reader)
+    return reader.c, reader.d, reader.e
+
+def bottom(reader):
+    return reader.f, reader.g, reader.h, reader.i
+""",
+    )
+    closure = tool.resolve(list(functions.values()))
+    assert len(functions["chain.py::top"].members) == 2
+    assert len(closure["chain.py::top"]) == 9
+    assert len(closure["chain.py::bottom"]) == 4
+
+
+def test_a_forwarding_cycle_terminates_on_the_union() -> None:
+    """`NativeVisibleRenderer` is 15 mutually-forwarding methods; a naive walk never returns."""
+    tool = _module()
+    functions = _collect(
+        tool,
+        "cycle.py",
+        """
+class R:
+    def one(self, reader):
+        self.two(reader)
+        return reader.a
+
+    def two(self, reader):
+        self.one(reader)
+        return reader.b
+""",
+    )
+    closure = tool.resolve(list(functions.values()))
+    assert closure["cycle.py::R.one"] == closure["cycle.py::R.two"] == {"a", "b"}
+
+
+def test_a_write_back_is_architectural_however_small_it_is() -> None:
+    """One assignment to the host, and no parameter list can express the conversion."""
+    tool = _module()
+    functions = _collect(
+        tool,
+        "writer.py",
+        """
+def stash(reader):
+    reader._store = 1
+
+def peek(reader):
+    return reader._store
+""",
+    )
+    tiers = tool.classify(list(functions.values()))
+    assert [row.key for row in tiers["tierB"]] == ["writer.py::stash"]
+    assert [row.key for row in tiers["tierA"]] == ["writer.py::peek"]
+
+
+def test_an_import_scopes_a_forward_to_the_one_module_that_defines_it() -> None:
+    """Basename matching conflated same-named callees and inflated Tier B by an artifact."""
+    tool = _module()
+    caller = _collect(
+        tool,
+        "caller.py",
+        """
+from saitenka.app.real import configure
+
+def entry(reader):
+    configure(reader)
+""",
+    )
+    real = _collect(tool, "real.py", "def configure(reader):\n    return reader.wanted\n")
+    decoy = _collect(tool, "decoy.py", "def configure(reader):\n    return reader.unrelated\n")
+    closure = tool.resolve([*caller.values(), *real.values(), *decoy.values()])
+    assert closure["caller.py::entry"] == {"wanted"}
+
+
+def test_a_call_through_a_value_over_approximates_rather_than_missing() -> None:
+    """Protocol dispatch is unresolvable, so it must widen — never quietly report a small arity."""
+    tool = _module()
+    caller = _collect(tool, "caller.py", "def entry(reader):\n    reader.mode.activate(reader)\n")
+    one = _collect(tool, "one.py", "def activate(reader):\n    return reader.first\n")
+    two = _collect(tool, "two.py", "def activate(reader):\n    return reader.second\n")
+    closure = tool.resolve([*caller.values(), *one.values(), *two.values()])
+    assert closure["caller.py::entry"] == {"mode", "first", "second"}
+
+
+def test_the_census_matches_production() -> None:
+    tool = _module()
+    assert tool.check() == 0
+    tiers = tool.classify(tool.collect())
+    # The exempt tier is the runtime manifest's `host-composition` set, and the two tools disagreeing
+    # about it would make WP5's exit unanswerable from either.
+    assert {row.key for row in tiers["exempt"]} == set(tool.EXEMPT)
