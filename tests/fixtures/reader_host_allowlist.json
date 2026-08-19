@@ -7,7 +7,7 @@
   "saitenka.app.launch.run": 5,
   "saitenka.app.miner": 1,
   "saitenka.app.miner_ui": 9,
-  "saitenka.app.native_subtitles": 16,
+  "saitenka.app.native_subtitles": 15,
   "saitenka.app.nested_popup": 13,
   "saitenka.app.prefetch": 6,
   "saitenka.app.reader_deps": 2,
@@ -21,5 +21,5 @@
   "saitenka.app.subtitle_pipeline": 9,
   "saitenka.app.subtitle_render": 20,
   "saitenka.app.surfaces": 15,
-  "saitenka.app.tooltip": 52
+  "saitenka.app.tooltip": 51
 }

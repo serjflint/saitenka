@@ -182,10 +182,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._render_inputs"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._resolve_schedule_inputs"
     ],
     [
@@ -755,10 +751,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::copy_hovered"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::copy_token"
     ],
     [
       "reader-parameter",

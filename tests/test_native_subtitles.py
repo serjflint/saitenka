@@ -1441,7 +1441,7 @@ def test_unexpected_geometry_error_keeps_native_pixels(tmp_path: Path, monkeypat
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
-    def fail_render_inputs(_reader):
+    def fail_render_inputs(_prop, _osd):
         raise RuntimeError("unexpected profile failure")
 
     monkeypatch.setattr(result.native_geometry, "_render_inputs", fail_render_inputs)

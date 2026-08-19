@@ -8,7 +8,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from saitenka import otel_metrics
 from saitenka.app import cue_annotation
@@ -700,7 +700,7 @@ class NativeSubtitleGeometry:
         if path is None or not isinstance(active_rows, str) or not active_rows.strip():
             return None
         try:
-            render = self._render_inputs(reader)
+            render = self._render_inputs(reader._prop, reader.osd)
             cue = _CueInputs(
                 0,
                 1,
@@ -769,13 +769,17 @@ class NativeSubtitleGeometry:
         )
 
     @staticmethod
-    def _render_inputs(reader: Reader) -> _RenderInputs:
-        """Host shim: read the sixteen mpv properties native geometry depends on, then decide."""
+    def _render_inputs(prop: Callable[[str], Any], osd) -> _RenderInputs:
+        """Read the sixteen mpv properties native geometry depends on, then decide.
+
+        Takes the property reader and the OSD size rather than the host: those two are all it ever
+        wanted, and a shim that takes the whole `Reader` cannot be driven by the session runtime.
+        """
         return render_inputs_of(
-            reader._prop("osd-dimensions") or {},
-            reader._prop("video-out-params") or {},
+            prop("osd-dimensions") or {},
+            prop("video-out-params") or {},
             {
-                name: reader._prop(f"options/{name}")
+                name: prop(f"options/{name}")
                 for name in (
                     "sub-ass-override",
                     "sub-ass-scale-with-window",
@@ -792,7 +796,7 @@ class NativeSubtitleGeometry:
                     "sub-fonts-dir",
                 )
             },
-            fallback_size=reader.osd,
+            fallback_size=osd,
         )
 
     def _prefetch(
@@ -949,7 +953,7 @@ class NativeSubtitleGeometry:
             self._degrade_geometry(reader, "subtitle-ass-full-unsupported")
             return None
         try:
-            render = self._render_inputs(reader)
+            render = self._render_inputs(reader._prop, reader.osd)
         except (TypeError, ValueError) as error:
             self.worker.mark_not_ready()
             self._set_fallback("subtitle-render-input-unsupported", log_detail=str(error))

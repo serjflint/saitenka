@@ -1635,7 +1635,7 @@ class Reader:
         self._run_hover_command(hover_intents.HoverCommand.COPY)
 
     def _copy_token(self, t) -> None:
-        tooltip.copy_token(self, t)
+        tooltip.copy_token(self._toast, t)
 
     def copy_line(self) -> None:
         """Shift+C — copy the whole subtitle cue under the cursor (all its lines)."""

@@ -34,6 +34,8 @@ from saitenka.panel import Freq, header_add_rect, header_speaker_rect, panel_row
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.controller import Reader
     from saitenka.render.layout_backend import LayoutBackend
 
@@ -419,16 +421,18 @@ def spoken_form(token, hover_reading: str) -> str:
 
 def copy_hovered(reader: Reader) -> None:
     if 0 <= reader.hover < len(reader.tokens):
-        copy_token(reader, reader.tokens[reader.hover])
+        copy_token(reader._toast, reader.tokens[reader.hover])
 
 
 def token_clip(t) -> str:
     return f"{t.surface}【{t.reading}】" if t.reading else t.surface
 
 
-def copy_token(reader: Reader, t) -> None:
+def copy_token(toast: Callable[..., object], t) -> None:
+    """Copy a token and say so. Takes the toast, not the host: the clipboard write is the whole
+    behaviour and the host was only ever reached for the acknowledgement."""
     copy_clipboard(token_clip(t))
-    reader._toast(f"copied {t.surface}", "ok", 1.2)
+    toast(f"copied {t.surface}", "ok", 1.2)
 
 
 def flash(reader: Reader, oid: int) -> None:
@@ -453,7 +457,7 @@ def copy_click(reader: Reader) -> None:
     x, y = mp.get("x", -1), mp.get("y", -1)
     if reader._nest.rect is not None and in_rect(reader._nest.rect, x, y):
         if reader._nest.token is not None:
-            copy_token(reader, reader._nest.token)
+            copy_token(reader._toast, reader._nest.token)
             flash(reader, OverlayId.NESTED)
         return
     if reader._tip_rect is not None and in_rect(reader._tip_rect, x, y):
@@ -462,7 +466,7 @@ def copy_click(reader: Reader) -> None:
         return
     idx = reader._hit(x, y) if reader.tokens else -1  # not over a popup → the subtitle word, if any
     if idx >= 0:
-        copy_token(reader, reader.tokens[idx])
+        copy_token(reader._toast, reader.tokens[idx])
 
 
 # --- header hit-testing (⊕ / 🔊, shared by base tooltip and nested popup) -------------------------
