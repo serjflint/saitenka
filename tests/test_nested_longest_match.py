@@ -8,6 +8,7 @@ from util import FakeIPC
 from saitenka.app import nested_popup
 from saitenka.app.controller import Reader
 from saitenka.app.tokenize import Token
+from saitenka.app.tokenizer import get_tokenizer
 from saitenka.model import LinkBox, ScanBox
 from saitenka.panel import Definition, Entry
 
@@ -34,14 +35,17 @@ def _tok(surface: str, start: int) -> Token:
 _SPLIT = [_tok("コン", 0), _tok("サート", 2)]  # unidic-style over-split of コンサート
 
 
+def _extra_terms(dict_set, tokens):
+    """The probe needs a dict set and a tokenizer, so it takes them — no session in the way."""
+    return nested_popup._phrase_extra_terms(tokens, dict_set=dict_set, tokenizer=get_tokenizer())
+
+
 def test_phrase_extra_terms_returns_the_longest_dictionary_match():
-    reader = Reader(FakeIPC(), dict_set=_DS())
-    assert nested_popup._phrase_extra_terms(reader, _SPLIT) == ("コンサート",)
+    assert _extra_terms(_DS(), _SPLIT) == ("コンサート",)
 
 
 def test_phrase_extra_terms_is_empty_when_the_dict_set_has_no_phrase_probe():
-    reader = Reader(FakeIPC(), dict_set=object())
-    assert nested_popup._phrase_extra_terms(reader, _SPLIT) == ()
+    assert _extra_terms(object(), _SPLIT) == ()
 
 
 class _RecordingDS:
@@ -85,8 +89,7 @@ def test_open_link_navigates_the_whole_query(monkeypatch):
 
 
 def test_phrase_extra_terms_is_empty_off_a_known_phrase():
-    reader = Reader(FakeIPC(), dict_set=_DS())
-    assert nested_popup._phrase_extra_terms(reader, [_tok("犬", 0), _tok("猫", 1)]) == ()
+    assert _extra_terms(_DS(), [_tok("犬", 0), _tok("猫", 1)]) == ()
 
 
 def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):

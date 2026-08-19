@@ -1890,7 +1890,7 @@ class Reader:
         return gauges
 
     def _cap_for(self, frac: float) -> int:
-        return prefetch.cap_for(self, frac)
+        return prefetch.cap_for(frac)
 
     def _tip_cap(self) -> int:
         return prefetch.tip_cap(self)

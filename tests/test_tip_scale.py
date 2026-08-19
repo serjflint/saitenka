@@ -37,3 +37,35 @@ def test_raster_scale_snaps_osd_jitter_to_a_bucket():
     assert _reader(0.0, 2161)._raster_scale == 2.0  # 2.0009 → 2.00
     assert _reader(0.0, 2159)._raster_scale == 2.0  # 1.9991 → 2.00
     assert _reader(0.0, 1621)._raster_scale == 1.5  # 1.5009 → 1.50
+
+
+def test_the_viewport_cap_is_reference_based_not_live_osd():
+    """Same reason `_tip_display_scale` is a boundary value: a cap measured off the live OSD would
+    make the render cache resolution-dependent, so 4K and 1080p would never share a band."""
+    from saitenka.app.prefetch import cap_for
+
+    assert cap_for(0.5) == cap_for(0.5)  # no session, no OSD — nothing else to vary
+    assert cap_for(0.9) > cap_for(0.5)
+    margin = max(16, round(REF_H * 0.05))
+    assert cap_for(1.0) == REF_H - 2 * margin  # never taller than the reference clear of the margin
+
+
+def test_a_nested_popup_shrinks_only_when_the_room_above_is_worth_using():
+    """Below `NEST_MIN_ABOVE` the popup would be a slit, so it drops below the word instead."""
+    from saitenka.app.nested_popup import NEST_MIN_ABOVE, TIP_GAP, nested_view_h
+
+    margin = max(16, round(REF_H * 0.05))
+    roomy = NEST_MIN_ABOVE + TIP_GAP + margin + 40
+
+    assert nested_view_h(800, roomy, osd_h=REF_H, max_frac=1.0) == roomy - TIP_GAP - margin
+    cramped = NEST_MIN_ABOVE + TIP_GAP + margin - 1
+    assert (
+        nested_view_h(800, cramped, osd_h=REF_H, max_frac=1.0) == 800
+    )  # full height, placed below
+
+
+def test_the_nested_cap_bounds_the_viewport_before_the_room_above_does():
+    from saitenka.app.nested_popup import nested_view_h
+    from saitenka.app.prefetch import cap_for
+
+    assert nested_view_h(10_000, 10_000, osd_h=REF_H, max_frac=0.5) == cap_for(0.5)

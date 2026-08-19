@@ -585,7 +585,7 @@ def _warm_episode_loop(reader: Reader, idx: CueIndex) -> None:
 REF_W, REF_H = 1920, 1080
 
 
-def cap_for(reader: Reader, frac: float) -> int:  # noqa: ARG001 — reader kept for the call-site shape
+def cap_for(frac: float) -> int:
     """A viewport-height cap: ``frac`` of the REFERENCE height, clear of the header/footer margin.
     REFERENCE-based (not the live OSD, not ui_scale) so the tooltip render cache is resolution-independent;
     the display scale (osd_h/REF_H) then maps ``frac`` onto the ACTUAL viewport at upload."""
@@ -596,4 +596,4 @@ def cap_for(reader: Reader, frac: float) -> int:  # noqa: ARG001 — reader kept
 def tip_cap(reader: Reader) -> int:
     """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
     own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
-    return cap_for(reader, reader.tip_max_frac)
+    return cap_for(reader.tip_max_frac)

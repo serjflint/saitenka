@@ -374,10 +374,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_phrase_extra_terms"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/nested_popup.py::apply_nested_metadata"
     ],
     [
@@ -391,10 +387,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/nested_popup.py::kanji_current"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::nested_view_h"
     ],
     [
       "reader-parameter",
@@ -439,10 +431,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/prefetch.py::_warm_episode_loop"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::cap_for"
     ],
     [
       "reader-parameter",

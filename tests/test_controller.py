@@ -2021,7 +2021,7 @@ def test_nested_popup_shrinks_to_stay_above_inner_word():
     # a TALL entry anchored to an inner word in the upper-middle: default would drop below (more room
     # below), but the nested popup shrinks its viewport to the room above and stays ABOVE the word.
     wy = 220
-    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
+    view_h = nested_popup.nested_view_h(800, wy, osd_h=1080, max_frac=r.nested_max_frac)
     above_room = wy - nested_popup.TIP_GAP - margin
     assert view_h == above_room  # shrunk to fit above
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
@@ -2032,7 +2032,7 @@ def test_nested_popup_drops_below_when_no_room_above():
     r = Reader(FakeIPC())
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     wy = 90  # inner word near the very top → can't fit above
-    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
+    view_h = nested_popup.nested_view_h(800, wy, osd_h=1080, max_frac=r.nested_max_frac)
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
     assert ty >= wy  # falls back to below (safe)
 

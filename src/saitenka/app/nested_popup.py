@@ -36,12 +36,12 @@ class Anchor:
     wh: float
 
 
-def nested_view_h(reader: Reader, full_h: int, wy: float) -> int:
+def nested_view_h(full_h: int, wy: float, *, osd_h: int, max_frac: float) -> int:
     """Nested-popup viewport height, capped to the room ABOVE the hovered inner word (when that room
     is decent) so the popup stays above it and the text below the cursor — the definition and the
     subtitle sentence — remains readable (the popup scrolls, so capping loses nothing)."""
-    margin = max(16, round(reader.osd[1] * 0.05))
-    view_h = min(full_h, cap_for(reader, reader.nested_max_frac))
+    margin = max(16, round(osd_h * 0.05))
+    view_h = min(full_h, cap_for(max_frac))
     above_room = int(wy) - TIP_GAP - margin
     if view_h > above_room >= NEST_MIN_ABOVE:
         view_h = above_room  # shrink to fit above rather than drop below
@@ -81,7 +81,7 @@ def show_nested(reader: Reader, sb) -> None:
     # Longest-match, Yomitan-style: stack any multi-token dictionary term starting under the cursor
     # (コンサート over the over-split コン) — the same forward longest-match the base tooltip applies to a
     # hovered cue word, so an inner katakana/compound word opens whole instead of as its first morpheme.
-    extra = _phrase_extra_terms(reader, tokens)
+    extra = _phrase_extra_terms(tokens, dict_set=reader.dict_set, tokenizer=reader.tokenizer)
     sx, sy = reader._tip_xy  # anchor to the inner word's screen cell
     anchor = Anchor(sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
     # defer=True: a cold inner word's head+bands raster off the main thread (tier-3), re-derived from the
@@ -118,13 +118,13 @@ def apply_nested_metadata(reader: Reader, result) -> None:
     )
 
 
-def _phrase_extra_terms(reader: Reader, tokens) -> tuple[str, ...]:
+def _phrase_extra_terms(tokens, *, dict_set, tokenizer) -> tuple[str, ...]:
     """Longest-first multi-token dict terms starting at the scanned tail's first token (index 0), via
     the same ``phrase_terms`` seam the base tooltip uses. Empty when the dict set has no phrase probe."""
-    has_term = getattr(reader.dict_set, "has_term", None)
+    has_term = getattr(dict_set, "has_term", None)
     if has_term is None:
         return ()
-    got = reader.tokenizer.phrase_terms(tokens=tokens, index=0, has_term=has_term)
+    got = tokenizer.phrase_terms(tokens=tokens, index=0, has_term=has_term)
     return tuple(got[0]) if got is not None else ()
 
 
@@ -196,7 +196,9 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
     reader._nest.tail = tail
     reader._nest.scroll = 0
     reader._nest.desired_scroll = 0
-    reader._nest.view_h = nested_view_h(reader, st.full_height, anchor.wy)
+    reader._nest.view_h = nested_view_h(
+        st.full_height, anchor.wy, osd_h=reader.osd[1], max_frac=reader.nested_max_frac
+    )
     reader._nest.xy = reader._place_panel(
         st.width, anchor.wx, anchor.wy, anchor.wh, reader._nest.view_h
     )
