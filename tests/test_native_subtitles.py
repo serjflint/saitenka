@@ -2518,3 +2518,107 @@ def test_the_placement_tracks_the_video_size_not_a_fixed_resolution():
     retina = place_subtitle((400, 80), (3024, 1898), 60)
 
     assert retina[0] > hd[0] and retina[1] > hd[1]
+
+
+_SUPPORTED_SETTINGS = {
+    "sub-ass-override": "no",
+    "sub-ass-scale-with-window": False,
+    "sub-scale": 1.0,
+    "sub-pos": 100.0,
+    "sub-use-margins": True,
+    "sub-ass-force-margins": False,
+    "sub-ass-video-aspect-override": None,
+    "sub-ass-use-video-data": "all",
+    "sub-ass-vsfilter-aspect-compat": None,
+    "sub-ass-style-overrides": None,
+    "sub-font-provider": "auto",
+    "embeddedfonts": False,
+    "sub-fonts-dir": None,
+}
+_OSD = {"w": 1920, "h": 1080, "mt": 0, "mb": 0, "ml": 0, "mr": 0, "par": 1.0}
+_VIDEO = {"w": 1920, "h": 1080, "par": 1.0}
+
+
+def _inputs(*, osd=None, video=None, **settings):
+    from saitenka.app.native_subtitles import render_inputs_of
+
+    return render_inputs_of(
+        {**_OSD, **(osd or {})},
+        {**_VIDEO, **(video or {})},
+        {**_SUPPORTED_SETTINGS, **settings},
+        fallback_size=(1280, 720),
+    )
+
+
+def test_a_default_mpv_render_configuration_supports_native_geometry():
+    result = _inputs()
+
+    assert result.frame_size == (1920, 1080)
+    assert result.storage_size == (1920, 1080)
+    assert result.pixel_aspect == 1.0
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("sub-scale", 1.5),  # scales the text away from the geometry we computed
+        ("sub-pos", 50.0),  # moves it up the frame
+        ("sub-use-margins", False),
+        ("sub-ass-override", "force"),
+        ("sub-ass-scale-with-window", True),
+        ("sub-ass-use-video-data", "aspect-only"),
+        ("sub-font-provider", "fontconfig"),  # different glyphs, so different boxes
+        ("embeddedfonts", True),
+        ("sub-fonts-dir", "/fonts"),
+        ("sub-ass-style-overrides", ["Default.FontSize=60"]),
+    ],
+)
+def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: str, value: object):
+    """Every one of these has the same consequence: our boxes would be computed against a frame mpv
+    is not drawing into, so hit regions land beside the words rather than on them. The error names
+    the setting because a user who set it needs to know which one to undo."""
+    with pytest.raises(ValueError, match=name):
+        _inputs(**{name: value})
+
+
+def test_the_osd_surface_wins_over_the_reported_video_size():
+    """Subtitles are composited onto the OSD surface, so that is the frame the boxes belong to —
+    a letterboxed video reports a different size and would offset every box by the bars."""
+    result = _inputs(osd={"w": 1920, "h": 1080}, video={"w": 1280, "h": 720})
+
+    assert result.frame_size == (1920, 1080)
+    assert result.storage_size == (1280, 720)
+
+
+def test_a_missing_osd_size_falls_back_to_the_players_own():
+    result = _inputs(osd={"w": None, "h": None})
+
+    assert result.frame_size == (1280, 720)
+
+
+def test_margins_that_swallow_the_frame_are_rejected():
+    """Margins at or beyond the frame leave no area to lay text into; the geometry that came back
+    would be for a zero- or negative-sized region."""
+    with pytest.raises(ValueError, match="osd-margins"):
+        _inputs(osd={"mt": 600, "mb": 600})
+    with pytest.raises(ValueError, match="osd-margins"):
+        _inputs(osd={"ml": -1})
+
+
+@pytest.mark.parametrize("par", [-1.0, float("nan"), float("inf")])
+def test_a_meaningless_pixel_aspect_is_rejected(par: float):
+    with pytest.raises(ValueError, match="pixel-aspect"):
+        _inputs(video={"par": par})
+
+
+def test_an_unreported_pixel_aspect_means_square_pixels():
+    """mpv reports 0 for a par it does not know, and square is the right assumption — so the
+    `<= 0` rejection above can only ever fire for a NEGATIVE value, never for zero."""
+    assert _inputs(video={"par": 0}).pixel_aspect == 1.0
+    assert _inputs(osd={"par": 0}, video={"par": 2.0}).pixel_aspect == 2.0
+
+
+def test_the_profile_changes_when_any_setting_does():
+    """The profile keys the geometry cache. Two different render configurations sharing a key would
+    serve one's boxes for the other's frame."""
+    assert _inputs().profile != _inputs(**{"sub-ass-force-margins": True}).profile

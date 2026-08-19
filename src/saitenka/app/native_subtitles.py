@@ -173,6 +173,44 @@ def _pixel_aspect(osd: Mapping[str, object], video: Mapping[str, object]) -> flo
     return value
 
 
+def render_inputs_of(
+    osd: Mapping[str, object],
+    video: Mapping[str, object],
+    settings: Mapping[str, object],
+    *,
+    fallback_size: tuple[int, int],
+) -> _RenderInputs:
+    """Whether mpv's current render configuration lets us key geometry off it, and the frame it
+    implies. Raises `ValueError` naming what disqualified it.
+
+    This is the gate on native geometry, and everything it rejects has the same consequence: our
+    boxes would be computed against a frame mpv is not drawing into, so hit regions land beside the
+    words. `sub-scale`, `sub-pos` and the margin flags all move the text; the font settings change
+    which glyphs get laid out; a non-finite or non-positive pixel aspect makes the mapping
+    meaningless. `osd-dimensions` is preferred over the reported OSD size because it is the surface
+    subtitles are actually composited onto.
+    """
+
+    def _dim(source: Mapping[str, object], key: str, default: int) -> int:
+        return int(cast("int | float | str", source.get(key) or default))
+
+    frame_size = (_dim(osd, "w", fallback_size[0]), _dim(osd, "h", fallback_size[1]))
+    storage_size = (_dim(video, "w", frame_size[0]), _dim(video, "h", frame_size[1]))
+    margins = _frame_margins(osd)
+    unsupported = _unsupported_render_inputs(settings)
+    if unsupported:
+        raise ValueError(", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported))
+    _validate_frame(frame_size, margins)
+    return _RenderInputs(
+        frame_size,
+        storage_size,
+        _pixel_aspect(osd, video),
+        margins,
+        cast("bool", settings["sub-ass-force-margins"]),
+        tuple(sorted((name, repr(value)) for name, value in settings.items())),
+    )
+
+
 def _subtitle_clock(
     raw_time: SupportsFloat | None, raw_delay: SupportsFloat | None, fallback: float | None
 ) -> tuple[float, float, float, int]:
@@ -732,41 +770,29 @@ class NativeSubtitleGeometry:
 
     @staticmethod
     def _render_inputs(reader: Reader) -> _RenderInputs:
-        video = reader._prop("video-out-params") or {}
-        osd = reader._prop("osd-dimensions") or {}
-        frame_size = (int(osd.get("w") or reader.osd[0]), int(osd.get("h") or reader.osd[1]))
-        storage_size = (int(video.get("w") or frame_size[0]), int(video.get("h") or frame_size[1]))
-        margins = _frame_margins(osd)
-        settings = {
-            "sub-ass-override": reader._prop("options/sub-ass-override"),
-            "sub-ass-scale-with-window": reader._prop("options/sub-ass-scale-with-window"),
-            "sub-scale": reader._prop("options/sub-scale"),
-            "sub-pos": reader._prop("options/sub-pos"),
-            "sub-use-margins": reader._prop("options/sub-use-margins"),
-            "sub-ass-force-margins": reader._prop("options/sub-ass-force-margins"),
-            "sub-ass-video-aspect-override": reader._prop("options/sub-ass-video-aspect-override"),
-            "sub-ass-use-video-data": reader._prop("options/sub-ass-use-video-data"),
-            "sub-ass-vsfilter-aspect-compat": reader._prop(
-                "options/sub-ass-vsfilter-aspect-compat"
-            ),
-            "sub-ass-style-overrides": reader._prop("options/sub-ass-style-overrides"),
-            "sub-font-provider": reader._prop("options/sub-font-provider"),
-            "embeddedfonts": reader._prop("options/embeddedfonts"),
-            "sub-fonts-dir": reader._prop("options/sub-fonts-dir"),
-        }
-        unsupported = _unsupported_render_inputs(settings)
-        if unsupported:
-            raise ValueError(
-                ", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported)
-            )
-        _validate_frame(frame_size, margins)
-        return _RenderInputs(
-            frame_size,
-            storage_size,
-            _pixel_aspect(osd, video),
-            margins,
-            cast("bool", settings["sub-ass-force-margins"]),
-            tuple(sorted((name, repr(value)) for name, value in settings.items())),
+        """Host shim: read the sixteen mpv properties native geometry depends on, then decide."""
+        return render_inputs_of(
+            reader._prop("osd-dimensions") or {},
+            reader._prop("video-out-params") or {},
+            {
+                name: reader._prop(f"options/{name}")
+                for name in (
+                    "sub-ass-override",
+                    "sub-ass-scale-with-window",
+                    "sub-scale",
+                    "sub-pos",
+                    "sub-use-margins",
+                    "sub-ass-force-margins",
+                    "sub-ass-video-aspect-override",
+                    "sub-ass-use-video-data",
+                    "sub-ass-vsfilter-aspect-compat",
+                    "sub-ass-style-overrides",
+                    "sub-font-provider",
+                    "embeddedfonts",
+                    "sub-fonts-dir",
+                )
+            },
+            fallback_size=reader.osd,
         )
 
     def _prefetch(
