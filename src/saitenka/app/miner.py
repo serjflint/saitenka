@@ -273,12 +273,10 @@ class Miner:
             return
         start, end = r._get("sub-start"), r._get("sub-end")
         try:
-            from saitenka.app.mined_store import ensure_store
-
             with otel_metrics.traced(
                 "mined_store_write"
             ):  # main-thread SQLite on a mine (#253 link)
-                ensure_store(r).record(
+                r.mined_store.record(
                     note_id=note_id,
                     video_path=str(video),
                     cue_start=float(start) if start is not None else 0.0,

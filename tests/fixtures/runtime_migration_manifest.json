@@ -114,10 +114,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/mined_store.py::ensure_store"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/miner.py::Miner.__init__"
     ],
     [

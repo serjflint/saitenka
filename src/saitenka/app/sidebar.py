@@ -295,14 +295,14 @@ def _mine_rows(reader: Reader) -> list[SidebarRow]:
     index: CueIndex | None = reader._sub_index
     active = _active_index(reader)
     active_cue = index.cues[active] if index is not None and active >= 0 else None
-    store = mined_store.ensure_store(reader)
+    store = reader.mined_store
     return [_mined_row(card, active_cue) for card in store.for_path(video)]
 
 
 def _open_mined(reader: Reader, note_id: int) -> None:
     """Open a mined card from the Mine tab: seek to its cue (offline-safe), then round-trip the full
     preview via the retained note id when Anki is reachable."""
-    store = mined_store.ensure_store(reader)
+    store = reader.mined_store
     card = store.by_note_id(note_id)
     if card is None:
         return

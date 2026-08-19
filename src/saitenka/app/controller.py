@@ -3901,6 +3901,19 @@ class Reader:
         if not self._announce_close(ClosePhase.ARTIFACTS, str(self._tmp)):
             shutil.rmtree(self._tmp, ignore_errors=True)
 
+    @property
+    def mined_store(self) -> mined_store.MinedCardStore:
+        """The session-scoped mined-card store, opened on first use.
+
+        A property rather than a module function taking the Reader: lazily initialising a host's
+        own field is the host's business, and both callers (the mine-time writer and the Mine tab)
+        want the store, not a seam.
+        """
+        store = self._mined_store
+        if store is None:
+            store = self._mined_store = mined_store.MinedCardStore()
+        return store
+
     def finish_session_stats(self) -> str | None:
         """Close the current episode's row and retire the recorder. Idempotent."""
         recorder, self._session_recorder = self._session_recorder, None

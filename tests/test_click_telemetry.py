@@ -74,14 +74,13 @@ def test_mined_store_write_is_spanned(monkeypatch):
     # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
     from types import SimpleNamespace
 
-    from saitenka.app import mined_store
     from saitenka.app.miner import Miner
 
     spans = record_spans(monkeypatch)
-    monkeypatch.setattr(
-        mined_store, "ensure_store", lambda _r: SimpleNamespace(record=lambda **_kw: None)
-    )
     reader = Reader(_FakeIPC({"sub-start": 1.0, "sub-end": 3.0}))
+    # Seed the store through the field the property initialises, rather than stubbing a seam: the
+    # property returns whatever is already there, so this is the same state a real open produces.
+    reader._mined_store = SimpleNamespace(record=lambda **_kw: None)  # type: ignore[assignment]  # local fake
     reader.mine_cfg = SimpleNamespace(deck="Mining")
     card = SimpleNamespace(expression="猫", reading="ねこ")
 
