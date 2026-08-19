@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from typing import SupportsFloat
 
     from saitenka.app.controller import Reader
-    from saitenka.app.subtitle_pipeline import SubtitleGeometryWorker
+    from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
     from saitenka.app.token_cache import TokenizedCue
     from saitenka.app.tokenize import Token
     from saitenka.subtitles.geometry import GeometrySnapshot

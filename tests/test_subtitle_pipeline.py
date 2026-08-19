@@ -5,10 +5,10 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_pipeline import (
     GeometryResolution,
     GeometryTicket,
-    SubtitleGeometryWorker,
     SubtitleModeCoordinator,
 )
 from saitenka.app.subtitle_render import NullRenderer
@@ -565,7 +565,7 @@ def test_a_gatewayed_session_runs_geometry_on_the_broker_lane() -> None:
     """
     from util import FakeIPC, runtime_gateway
 
-    from saitenka.app.subtitle_pipeline import GEOMETRY_LANE, configure_runtime_job
+    from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, configure_runtime_job
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -582,7 +582,7 @@ def test_an_ungatewayed_session_still_executes_geometry() -> None:
     there is one execution path rather than a silently disabled feature."""
     from util import FakeIPC
 
-    from saitenka.app.subtitle_pipeline import configure_runtime_job
+    from saitenka.app.subtitle_geometry_job import configure_runtime_job
 
     assert configure_runtime_job(FakeIPC()) is None
 

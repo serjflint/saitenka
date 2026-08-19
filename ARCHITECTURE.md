@@ -42,8 +42,9 @@ internal modules with explicit dependency contracts, not independently published
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
 - **`subtitles/`** — the pure subtitle seam: immutable cues and authored events, lossless ASS semantic
   spans and fail-closed token-color rewriting, SRT/ASS/VTT parsing, cue navigation, and provider-neutral
-  geometry request/snapshot contracts. `app/subtitle_pipeline.py` owns generation-safe bounded worker,
-  lookahead, and result-cache orchestration. Pillow remains the default; the opt-in external-ASS path
+  geometry request/snapshot contracts. `app/subtitle_pipeline.py` owns the generation fence that decides
+  whether a result may still be published; `app/subtitle_geometry_job.py` owns the lane queue, lookahead,
+  and result cache that reserve against it. Pillow remains the default; the opt-in external-ASS path
   wires `LibassGeometryBackend` while leaving mpv as the visible owner.
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface

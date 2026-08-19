@@ -134,15 +134,11 @@ from saitenka.app.runtime import (
     LegacyCommandExecutor,
     LegacyPickerRepeatGuard,
 )
-from saitenka.app.subtitle_pipeline import (
-    GEOMETRY_LANE,
-    CurrentSubtitleRenderer,
-    SubtitleGeometryWorker,
-    SubtitleModeCoordinator,
-)
-from saitenka.app.subtitle_pipeline import (
+from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
+from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
 )
+from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer, SubtitleRenderer
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue
