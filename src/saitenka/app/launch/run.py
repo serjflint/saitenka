@@ -865,19 +865,41 @@ def _build_run_deps(req: RunDepsRequest):
     return scorer, anki, mine_conf, dict_set
 
 
-def _wait_for_subtitle_text(reader, ipc, video: str | None) -> str:
+#: One hop's worth of waiting. Bounded per attempt so the search keeps seeking rather than parking
+#: on the first wake, and bounded overall by `_CUE_SEARCH_SECONDS` rather than a hop count.
+_CUE_HOP_SECONDS = 0.12
+_CUE_SEARCH_SECONDS = 10.0
+
+
+def _wait_for_subtitle_text(reader, ipc, video: str | None, *, clock=time.monotonic) -> str:
     """Sample sub-text; on a real file with nothing showing yet, hop forward via sub-seek until one
-    lands (or 80 tries elapse). Falls back to DEMO_LINE if nothing ever appears."""
+    lands or the search deadline passes. Falls back to DEMO_LINE if nothing ever appears.
+
+    Driven by `SessionRunner`, not a sleep loop: each hop drains the session, so a cue that arrives
+    is seen when it arrives instead of at the end of a fixed nap — and the bound is a deadline the
+    caller can reason about rather than a retry count that means nothing on a slow machine.
+
+    ``clock`` is injected so a test can exhaust the deadline without spending it.
+    """
+    from saitenka.runtime.runner import SessionRunner
+
     reader.refresh_osd()
-    text = reader._get("sub-text") or ""
-    if not text and video:  # real file: hop to the next subtitle cue
-        for _ in range(80):
-            ipc.command("sub-seek", 1)
-            time.sleep(0.12)
-            text = reader._get("sub-text") or ""
-            if text:
-                break
-    return text or DEMO_LINE
+    if text := (reader._get("sub-text") or ""):
+        return text
+    if not video:  # no real file to seek through — nothing to wait for
+        return DEMO_LINE
+
+    def hop(timeout: float | None) -> None:
+        ipc.command("sub-seek", 1)
+        reader._drive_annotation_once(
+            _CUE_HOP_SECONDS if timeout is None else min(timeout, _CUE_HOP_SECONDS)
+        )
+
+    SessionRunner(hop, clock=clock).run_until(
+        lambda: bool(reader._get("sub-text")),
+        deadline=clock() + _CUE_SEARCH_SECONDS,
+    )
+    return (reader._get("sub-text") or "") or DEMO_LINE
 
 
 def _run_demo_actions(reader, ipc, demo: DemoSpec) -> None:

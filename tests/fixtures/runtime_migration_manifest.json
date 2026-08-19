@@ -70,7 +70,7 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::_wait_for_subtitle_text"
+      "src/saitenka/app/launch/run.py::_wait_for_subtitle_text.hop"
     ],
     [
       "direct-mpv-command",
