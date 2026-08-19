@@ -34,6 +34,11 @@ def load_sub_index(reader: Reader, path) -> None:
         native_geometry.set_source(Path(path), reader=reader)
 
     reader.invalidate_analysis()
+    # Reinstall the cue that is still on screen under the new source. `_replace_subtitle_source`
+    # retired its identity, and nothing re-derives one: cue arrival is event-driven, so mpv sends
+    # nothing until its *next* sub-text change and the overlay stays blank until then. Same
+    # reconcile `start_observing` runs after seeding, for the same reason.
+    reconcile_sub_text(reader, reader.sub_text)
     from saitenka.app import sidebar
 
     sidebar.on_index_changed(reader)
