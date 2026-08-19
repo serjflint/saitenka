@@ -417,11 +417,6 @@ def spoken_form(token, hover_reading: str) -> str:
     return hover_reading or token.reading or token.surface
 
 
-def speak_hovered(reader: Reader) -> None:
-    if 0 <= reader.hover < len(reader.tokens):
-        speak(spoken_form(reader.tokens[reader.hover], reader._hover_reading))
-
-
 def copy_hovered(reader: Reader) -> None:
     if 0 <= reader.hover < len(reader.tokens):
         copy_token(reader, reader.tokens[reader.hover])
@@ -1265,16 +1260,13 @@ _CRISP_MIN_SCALE = (
 )
 
 
-def hit_target(reader: Reader, *, nested: bool):
+def hit_target(nest, tip_state, tip_scroll: int, raster_scale: float, *, nested: bool):
     """The ``(panel, scale, scroll)`` to hit-test a popup against — the ONE reference panel, always. It's
     composited natively (glyph masks over 1× geometry), so the DRAWN panel IS the hit-tested panel and the
     inverse is a single ``(mx-sx)/scale + scroll`` against 1× geometry — the two-geometry seam bug can't
     occur. ``scale`` is the BUCKETED raster scale the blit drew at, so hit-test == draw exactly."""
-    if nested:
-        ref, scroll = reader._nest.state, reader._nest.scroll
-    else:
-        ref, scroll = reader._tip_state, reader._tip_scroll
-    return ref, reader._raster_scale, scroll
+    ref, scroll = (nest.state, nest.scroll) if nested else (tip_state, tip_scroll)
+    return ref, raster_scale, scroll
 
 
 def render_view(reader: Reader, view: PopupView) -> None:
@@ -1625,7 +1617,9 @@ def scan_hit(reader: Reader, mx: float, my: float):
     panel actually DRAWN (crisp native when shown, else reference) so a hover lands on the right cell."""
     if reader._tip_state is None or reader._tip_rect is None:
         return None
-    panel, s, scroll = hit_target(reader, nested=False)  # the on-screen panel + its scale/scroll
+    panel, s, scroll = hit_target(  # the on-screen panel + its scale/scroll
+        reader._nest, reader._tip_state, reader._tip_scroll, reader._raster_scale, nested=False
+    )
     if panel is None:
         return None
     sx, sy = reader._tip_xy

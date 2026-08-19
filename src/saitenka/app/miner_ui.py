@@ -170,11 +170,11 @@ def media_tempfile(anki, name, tmp_dir):
         return None
 
 
-def _grab_preview_keys(reader: Reader) -> None:
+def _grab_preview_keys(ipc, bindings) -> None:
     """Route the preview-scoped keys (Esc → close) to the preview while it's on screen."""
-    for b in active_bindings(reader, "preview"):
+    for b in bindings:
         send_correlated(
-            reader.ipc,
+            ipc,
             f"preview-keybind:{b.key}",
             "keybind",
             b.key,
@@ -183,19 +183,17 @@ def _grab_preview_keys(reader: Reader) -> None:
         )
 
 
-def _release_preview_keys(reader: Reader) -> None:
+def _release_preview_keys(ipc, bindings, *, help_open: bool, tip_keys_bound: bool) -> None:
     """Hand the preview's keys back when it closes. Esc is shared with the tooltip, so return it there
     if a tooltip is still up (the help overlay, if open, owns Esc itself — leave it alone)."""
-    if reader._help_open:
+    if help_open:
         return
-    for b in active_bindings(reader, "preview"):
+    for b in bindings:
         command = (
-            f"script-message {TIP_CLOSE_MSG}"
-            if b.key == "ESC" and reader._tip_keys_bound
-            else "ignore"
+            f"script-message {TIP_CLOSE_MSG}" if b.key == "ESC" and tip_keys_bound else "ignore"
         )
         send_correlated(
-            reader.ipc,
+            ipc,
             f"preview-keybind-release:{b.key}",
             "keybind",
             b.key,
@@ -217,7 +215,7 @@ def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
     reader.preview.last_preview, reader.preview.last_audio = pv, audio_path
     reader.preview.zoom = False
     render_preview(reader)
-    _grab_preview_keys(reader)
+    _grab_preview_keys(reader.ipc, active_bindings(reader, "preview"))
 
 
 def render_preview(reader: Reader) -> None:
@@ -244,7 +242,12 @@ def hide_preview(reader: Reader) -> None:
     )  # every dismiss path (✕ / Esc / new-cue) funnels here → stop the clip
     reader.lifecycle_surfaces.remove(OverlayId.PREVIEW)
     reader.preview.clear()
-    _release_preview_keys(reader)
+    _release_preview_keys(
+        reader.ipc,
+        active_bindings(reader, "preview"),
+        help_open=reader._help_open,
+        tip_keys_bound=reader._tip_keys_bound,
+    )
 
 
 def click_preview(reader: Reader, x: float, y: float) -> bool:

@@ -58,7 +58,9 @@ def _assert_agrees(reader, *, nested: bool) -> None:
     Only the on-screen window is measured + tested — you can only click what's drawn, and a full-panel
     measure per step is too slow across a stateful run (the corners get covered as scroll moves the
     window)."""
-    panel, s, scroll = tooltip.hit_target(reader, nested=nested)
+    panel, s, scroll = tooltip.hit_target(
+        reader._nest, reader._tip_state, reader._tip_scroll, reader._raster_scale, nested=nested
+    )
     if panel is None:
         return
     # One-panel invariant (C1): the hit-tested panel IS the one the blit composites from. This — not the
@@ -175,7 +177,9 @@ def test_the_agreement_oracle_has_teeth() -> None:
     # regression (a stale scroll / scale / panel after some transition) would turn the state machine red.
     r = _fresh_reader()
     r._show_tooltip(0)
-    panel, s, scroll = tooltip.hit_target(r, nested=False)
+    panel, s, scroll = tooltip.hit_target(
+        r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
+    )
     panel.windowed.viewport(scroll, r._tip_view_h)
     sx, sy = r._tip_xy
     lo, hi = scroll, scroll + r._tip_view_h

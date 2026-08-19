@@ -671,7 +671,18 @@ class Reader:
     def hover_view(self) -> hover_snapshot.HoverView:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
         the public seam tests observe instead of the private ``_nest`` / ``_tip_*`` fields (#43)."""
-        return hover_snapshot.snapshot(self)
+        return hover_snapshot.snapshot(
+            self._nest,
+            hover_snapshot.TipView(
+                state=self._tip_state,
+                key=self._tip_key,
+                rect=self._tip_rect,
+                hide_pending=self._hide_pending,
+            ),
+            paused=self._paused_by_tip,
+            nav_idx=self._nav_idx,
+            scan_target=self._scan_target,
+        )
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
@@ -834,7 +845,7 @@ class Reader:
             subtitle_modes.on_primary_changed(self, delta.sid)
         elif isinstance(delta, playback.SubtitleTimingChanged):
             if self.native_geometry is not None:
-                self.native_geometry.record_clock_change(self)
+                self.native_geometry.record_clock_change(self._prop)
         elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
             self._arm_geometry_refresh()
         else:
@@ -1845,7 +1856,14 @@ class Reader:
 
     # --- background prefetch (warm the current/next line's tooltips) — logic in app/prefetch.py --
     def start_prefetch(self) -> None:
-        prefetch.start_prefetch(self)
+        prefetch.start_prefetch(
+            self.ipc,
+            self.prefetch_state,
+            prefetch.HostPrefetchBackend(self),
+            self.tokenizer,
+            self.prefetch_workers,
+            enabled=bool(self.prefetch and self.dict_set is not None),
+        )
 
     def _update_prefetch(self) -> None:
         generation = self._prefetch_gen
@@ -2074,11 +2092,15 @@ class Reader:
     def _tip_link_hit(self, mx: float, my: float):
         # Hit-test the panel actually DRAWN for the base tooltip (crisp native when shown, else reference)
         # so a clicked/hovered cross-reference link lands right despite native-vs-reference wrap drift.
-        panel, scale, scroll = tooltip.hit_target(self, nested=False)
+        panel, scale, scroll = tooltip.hit_target(
+            self._nest, self._tip_state, self._tip_scroll, self._raster_scale, nested=False
+        )
         return nested_popup.link_hit(mx, my, panel, self._tip_xy, scroll, scale=scale)
 
     def _nest_link_hit(self, mx: float, my: float):
-        panel, scale, scroll = tooltip.hit_target(self, nested=True)
+        panel, scale, scroll = tooltip.hit_target(
+            self._nest, self._tip_state, self._tip_scroll, self._raster_scale, nested=True
+        )
         return nested_popup.link_hit(mx, my, panel, self._nest.xy, scroll, scale=scale)
 
     def _open_link(self, lb, xy, scroll: int) -> None:

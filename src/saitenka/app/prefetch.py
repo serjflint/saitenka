@@ -238,17 +238,23 @@ def prefetch_worker_count(tokenizer, configured: int) -> int:
     return _AUTO_WORKERS_FREE_THREADED if gil_disabled() else _AUTO_WORKERS_GIL
 
 
-def start_prefetch(reader: Reader) -> None:
-    if not reader.prefetch or reader.dict_set is None:
+def start_prefetch(
+    ipc,
+    state: PrefetchState,
+    backend: HostPrefetchBackend,
+    tokenizer,
+    workers: int,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled:
         return
-    state = reader.prefetch_state
     if state.closed or state.submitter is not None:
         return
-    register = getattr(reader.ipc, "register_runtime_job_lane", None)
+    register = getattr(ipc, "register_runtime_job_lane", None)
     if register is None:
         return
-    desired = prefetch_worker_count(reader.tokenizer, reader.prefetch_workers)
-    backend = HostPrefetchBackend(reader)
+    desired = prefetch_worker_count(tokenizer, workers)
     if not register(
         "speculative-prefetch",
         JobLanePolicy(capacity=desired, workers=desired),
@@ -256,7 +262,7 @@ def start_prefetch(reader: Reader) -> None:
     ):
         return
     state.workers = desired
-    state.submitter = reader.ipc.submit_runtime_job
+    state.submitter = ipc.submit_runtime_job
 
 
 def _submit_pending(

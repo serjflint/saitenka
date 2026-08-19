@@ -240,15 +240,14 @@ def _entry_row(entry: BacklogEntry, active_cue, *, language: str) -> SidebarRow:
     )
 
 
-def _matched_entry_rows(reader: Reader, store: BacklogStore, video: str | None) -> list[SidebarRow]:
+def _matched_entry_rows(
+    active: int, index, language: str, store: BacklogStore, video: str | None
+) -> list[SidebarRow]:
     if not video:
         return []
-    active = _active_index(reader)
-    index = reader._sub_index
     active_cue = index.cues[active] if index is not None and active >= 0 else None
     return [
-        _entry_row(entry, active_cue, language=reader.subtitle_language)
-        for entry in store.entries_for_path(video)
+        _entry_row(entry, active_cue, language=language) for entry in store.entries_for_path(video)
     ]
 
 
@@ -257,7 +256,9 @@ def _summary_rows(reader: Reader) -> list[SidebarRow]:
     grouped = _status_groups(store)
     video = reader._get("path")
     candidates = _candidate_rows(store, video)
-    matched = _matched_entry_rows(reader, store, video)
+    matched = _matched_entry_rows(
+        _active_index(reader), reader._sub_index, reader.subtitle_language, store, video
+    )
     return (
         candidates
         + matched

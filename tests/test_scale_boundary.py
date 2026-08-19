@@ -30,7 +30,9 @@ def _reader(scale: float, monkeypatch):
 @pytest.mark.parametrize("scale", _SCALES)
 def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
-    panel, s, scroll = tooltip.hit_target(r, nested=False)
+    panel, s, scroll = tooltip.hit_target(
+        r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
+    )
     assert panel is r._tip_state  # the ONE reference panel — there is no second native panel
     assert s == r._raster_scale  # inverse == the (bucketed) scale the blit drew at
     assert scroll == r._tip_scroll
@@ -39,7 +41,9 @@ def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
 @pytest.mark.parametrize("scale", _SCALES)
 def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
-    panel, s, scroll = tooltip.hit_target(r, nested=False)
+    panel, s, scroll = tooltip.hit_target(
+        r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
+    )
     panel.windowed.viewport(0, 1_000_000)  # force every block measured → full geometry
     sx, sy = r._tip_xy
     scans = panel.windowed.scan_boxes()
@@ -92,7 +96,9 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
     r = _reader(2.0, monkeypatch)
     tooltip.navigate_tip(r, "見る")
     assert r._tip_key is None  # no synthetic nav key needed — one panel
-    panel, s, scroll = tooltip.hit_target(r, nested=False)
+    panel, s, scroll = tooltip.hit_target(
+        r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
+    )
     assert panel is r._tip_state
     panel.windowed.viewport(0, 1_000_000)
     sx, sy = r._tip_xy

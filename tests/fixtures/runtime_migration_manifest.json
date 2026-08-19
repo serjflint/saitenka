@@ -94,10 +94,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/hover_snapshot.py::snapshot"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/launch/run.py::_advance_at_eof"
     ],
     [
@@ -123,14 +119,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/miner.py::Miner.__init__"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::_grab_preview_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::_release_preview_keys"
     ],
     [
       "reader-parameter",
@@ -218,10 +206,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.record_clock_change"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.refresh"
     ],
     [
@@ -306,10 +290,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::start_prefetch"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::update_prefetch"
     ],
     [
@@ -355,10 +335,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/sidebar.py::_ensure_store"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_matched_entry_rows"
     ],
     [
       "reader-parameter",
@@ -858,10 +834,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_target"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::navigate_tip"
     ],
     [
@@ -911,10 +883,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::show_tooltip_impl"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::speak_hovered"
     ],
     [
       "reader-parameter",

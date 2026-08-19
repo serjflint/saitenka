@@ -66,7 +66,11 @@ class SurfaceSpec:
     on_click: Callable[[Reader, float, float], bool] = _no_click
 
     def captures(self, reader: Reader) -> bool:
-        """Shown → owns the forced mouse section this tick (_wants_mouse_capture)."""
+        """Shown → owns the forced mouse section this tick (_wants_mouse_capture).
+
+        Still takes the host because `state_of` does: the whole family is one signature, and it
+        converts with the surface registry rather than one member at a time.
+        """
         return self.state_of(reader).open
 
 

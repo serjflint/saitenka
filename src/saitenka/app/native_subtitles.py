@@ -604,13 +604,13 @@ class NativeSubtitleGeometry:
             self.schedule(reader)
 
     @staticmethod
-    def record_clock_change(reader: Reader) -> None:
+    def record_clock_change(prop) -> None:
         with otel_metrics.traced("subtitle_geometry_clock") as span:
             try:
-                raw_start = reader._prop("sub-start")
+                raw_start = prop("sub-start")
                 video_time, sub_delay, subtitle_time, _timestamp_ms = _subtitle_clock(
-                    reader._prop("time-pos"),
-                    reader._prop("sub-delay"),
+                    prop("time-pos"),
+                    prop("sub-delay"),
                     None if raw_start is None else float(raw_start),
                 )
             except (TypeError, ValueError):
