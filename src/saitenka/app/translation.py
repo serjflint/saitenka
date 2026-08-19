@@ -38,7 +38,7 @@ def sync_auto_translation(reader: Reader) -> None:
         setup_secondary(reader)
         draw_translation(reader)
     elif not reader._translate_on:
-        reader.ov.hide(OverlayId.TRANS)
+        reader.lifecycle_surfaces.remove(OverlayId.TRANS)
         reader._trans_text = None
         subtitle_modes.release_secondary(reader)
 
@@ -49,7 +49,7 @@ def toggle_translation(reader: Reader) -> None:
         setup_secondary(reader)
         draw_translation(reader)
     else:
-        reader.ov.hide(OverlayId.TRANS)
+        reader.lifecycle_surfaces.remove(OverlayId.TRANS)
         reader._trans_text = None
         subtitle_modes.release_secondary(reader)
 
@@ -62,7 +62,7 @@ def draw_translation(reader: Reader) -> None:
     text = secondary_text(reader)
     reader._trans_text = text
     if not text:
-        reader.ov.hide(OverlayId.TRANS)
+        reader.lifecycle_surfaces.remove(OverlayId.TRANS)
         return
     size = max(20, round(reader.osd[1] * 0.032))
     style = Style(size=size, color=(220, 224, 235, 255))
@@ -76,4 +76,4 @@ def draw_translation(reader: Reader) -> None:
     # top of the screen (SubMiner-style) — separate from the JP subs at the bottom, and clear of the
     # tooltip that anchors above the hovered word.
     y = max(8, round(reader.osd[1] * 0.035))
-    reader.ov.show(flow, x, y, oid=OverlayId.TRANS)
+    reader.lifecycle_surfaces.present(flow, x, y, oid=OverlayId.TRANS)

@@ -198,7 +198,7 @@ def render_preview(reader: Reader) -> None:
         return
     pr = render_card_preview(pv, width=max(440, reader.tip_width), zoom=reader.preview.zoom)
     px, py = round(reader.osd[0] * 0.03), round(reader.osd[1] * 0.06)
-    reader.ov.show(pr.image, px, py, oid=OverlayId.PREVIEW)
+    reader.lifecycle_surfaces.present(pr.image, px, py, oid=OverlayId.PREVIEW)
     reader.preview.rect = (px, py, pr.image.width, pr.image.height)
 
     def _screen(r):
@@ -214,7 +214,7 @@ def hide_preview(reader: Reader) -> None:
     _stop_preview_audio(
         reader
     )  # every dismiss path (✕ / Esc / new-cue) funnels here → stop the clip
-    reader.ov.hide(OverlayId.PREVIEW)
+    reader.lifecycle_surfaces.remove(OverlayId.PREVIEW)
     reader.preview.clear()
     _release_preview_keys(reader)
 

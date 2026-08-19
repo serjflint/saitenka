@@ -2314,9 +2314,11 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     r = _auto_trans_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     shown = []
-    monkeypatch.setattr(r.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
     hidden = []
-    monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
+    monkeypatch.setattr(
+        r.lifecycle_surfaces, "present", lambda _img, *_a, oid=0, **_kw: shown.append(oid)
+    )
+    monkeypatch.setattr(r.lifecycle_surfaces, "remove", lambda oid, **_kw: hidden.append(oid))
     r.set_hover(0)
     assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
     assert r._trans_text == "I want you to read this."
@@ -2590,7 +2592,9 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
 
     # simulate a cue change while the tooltip is visible
     hidden = []
-    monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
+    # Returns a reply, not None: the fenced surface path reads `error` from it now, so a recorder
+    # that answers nothing reads as a torn overlay rather than as a recorded hide.
+    monkeypatch.setattr(r.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1])
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")
 
@@ -2690,7 +2694,7 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     assert r.hover_view().nested.state is not None
 
     hidden = []
-    monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
+    monkeypatch.setattr(r.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1])
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")
 

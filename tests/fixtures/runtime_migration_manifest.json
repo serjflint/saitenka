@@ -150,31 +150,11 @@
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/miner_ui.py::hide_preview"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/miner_ui.py::render_preview"
-    ],
-    [
-      "direct-overlay-mutation",
       "src/saitenka/app/nested_popup.py::hide_nested"
     ],
     [
       "direct-overlay-mutation",
       "src/saitenka/app/tooltip.py::decorate_and_upload"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/translation.py::draw_translation"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/translation.py::sync_auto_translation"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/translation.py::toggle_translation"
     ],
     [
       "driver-switch",
