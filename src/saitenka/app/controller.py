@@ -30,6 +30,7 @@ from saitenka.app import (
     hover_metadata,
     hover_snapshot,
     mask_atlas_startup,
+    mine_intents,
     mined_seed,
     mined_store,
     miner_ui,
@@ -2088,23 +2089,45 @@ class Reader:
     def _mine_tags(self, video) -> list[str]:
         return self._miner.mine_tags(video)
 
-    def mine_current(self, *, animated: bool | None = None) -> None:
-        if not self.anki or not self.mine_cfg:
+    # --- mining commands: pure reducer, executed here (WP5.3) ---------------------------------
+    def _mine_inputs(self) -> mine_intents.MineInputs:
+        """Read the facts the mining commands decide from, once, before deciding."""
+        configured = bool(self.anki and self.mine_cfg)
+        return mine_intents.MineInputs(
+            configured=configured,
+            # The target is only asked for once mining is possible: `mine_target` inspects hover
+            # and cue state, which an unconfigured session has no reason to walk.
+            target=self._mine_target() if configured else None,
+        )
+
+    def _run_mine_command(self, command: mine_intents.MineCommand) -> None:
+        inputs = self._mine_inputs()
+        if not inputs.configured:
             log.info(
                 "mine ignored: anki=%s mine_cfg=%s", self.anki is not None, bool(self.mine_cfg)
             )
-            return
-        idx = self._mine_target()
-        if idx is None:
-            self._toast("no word to mine", "warn")
-            log.info("mine: no target word (animated=%s)", bool(animated))
-            return
-        # Log the KEY-driven mine (still vs video) — without this, the trace can't tell a Ctrl+Shift+m
-        # video-mine from a plain one, and a keypress that reached the handler from one that never did.
-        log.info("mine: %r animated=%s", self.tokens[idx].surface, bool(animated))
-        with otel_metrics.traced("anki_mine", source="base") as span:
-            span.set("animated", bool(animated))
-            self._miner.mine_token(self.tokens[idx], animated=animated)
+        for effect in mine_intents.reduce(command, inputs):
+            self._apply_mine_effect(effect)
+
+    def _apply_mine_effect(self, effect: mine_intents.MineEffect) -> None:
+        if isinstance(effect, mine_intents.MineToken):
+            # Log the KEY-driven mine (still vs video) — without this, the trace can't tell a
+            # Ctrl+Shift+m video-mine from a plain one, and a keypress that reached the handler
+            # from one that never did.
+            log.info("mine: %r animated=%s", self.tokens[effect.index].surface, effect.animated)
+            with otel_metrics.traced("anki_mine", source="base") as span:
+                span.set("animated", bool(effect.animated))
+                self._miner.mine_token(self.tokens[effect.index], animated=effect.animated)
+        elif isinstance(effect, mine_intents.MineEpisode):
+            self._miner.bulk_mine()
+        elif isinstance(effect, Announce):
+            log.info("mine: no target word")
+            self._toast(effect.text, effect.kind)
+
+    def mine_current(self, *, animated: bool | None = None) -> None:
+        self._run_mine_command(
+            mine_intents.MineCommand.WORD_VIDEO if animated else mine_intents.MineCommand.WORD
+        )
 
     def mine_current_video(self) -> None:
         """The video-mine shortcut: mine the hovered word with an animated (motion) screenshot, even when
@@ -2174,7 +2197,7 @@ class Reader:
         return self._miner.capture_media(base, video)
 
     def bulk_mine(self) -> None:
-        self._miner.bulk_mine()
+        self._run_mine_command(mine_intents.MineCommand.EPISODE)
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def _setup_secondary(self) -> int | None:
@@ -2471,9 +2494,6 @@ class Reader:
             return route
 
         handlers = {
-            MINE_MSG: action("mine_current"),
-            MINE_VIDEO_MSG: action("mine_current_video"),
-            MINE_ALL_MSG: action("bulk_mine"),
             OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
             PROFILE_CYCLE_MSG: action("cycle_profile"),
             BOOKMARK_MSG: action("toggle_bookmark"),
@@ -2511,6 +2531,9 @@ class Reader:
             COPY_MSG: action("copy_hovered"),
             KANJI_MSG: action("kanji_current"),
             HOVER_PAUSE_MSG: action("toggle_hover_pause"),
+            MINE_MSG: action("mine_current"),
+            MINE_VIDEO_MSG: action("mine_current_video"),
+            MINE_ALL_MSG: action("bulk_mine"),
         }
         return LegacyCommandExecutor(
             {

@@ -115,9 +115,9 @@ saitenka-sub-prev|subtitle|cue|modal|migrated
 saitenka-sub-next|subtitle|cue|modal|migrated
 saitenka-sub-replay|subtitle|cue|modal|migrated
 saitenka-sub-anchor|subtitle|global|modal|migrated
-saitenka-mine|interaction|cue|modal|work-package-5
-saitenka-mine-video|interaction|cue|modal|work-package-5
-saitenka-mine-all|interaction|cue|modal|work-package-5
+saitenka-mine|interaction|cue|modal|migrated
+saitenka-mine-video|interaction|cue|modal|migrated
+saitenka-mine-all|interaction|cue|modal|migrated
 saitenka-toggle-bookmark|interaction|cue|modal|work-package-5
 saitenka-toggle-sidebar|interaction|global|modal|work-package-5
 saitenka-toggle-analysis|interaction|global|modal|work-package-5

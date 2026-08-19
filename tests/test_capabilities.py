@@ -157,9 +157,11 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
         gateway.close()
 
 
-#: Bounds a hang, never a race. Both are far past what the work needs; a test that only passes
-#: when the machine is idle is the defect these replace.
-_WEDGE_TIMEOUT = 30.0
+#: How long the first probe stays wedged before letting go on its own. Short on purpose — the
+#: replacement's result is only accepted once the call it replaced has finished.
+_WEDGE_TIMEOUT = 1.0
+#: Bounds a hang, never a race: far past what the work needs, because a test that passes only on an
+#: idle machine is the defect this replaced.
 _REPLACEMENT_TIMEOUT = 10.0
 
 
@@ -176,9 +178,10 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
         def probe() -> bool:
             calls[name] += 1
             if calls[name] == 1:
-                # Stays wedged for the whole assertion — released only by the `finally` below. A
-                # short wait here self-releases under load, and the freed probe can be retried, so
-                # `calls` grows past two and the test fails describing the wrong thing.
+                # Self-releases, and must: the wedge has to end for the *replacement's* terminal to
+                # be accepted, so holding it for the whole assertion deadlocks the very thing being
+                # measured. Retry timing runs off the injected clock, so this cannot re-fire the
+                # probe on wall time — it only bounds how long the first call blocks.
                 releases[name].wait(_WEDGE_TIMEOUT)
                 return False
             return True
