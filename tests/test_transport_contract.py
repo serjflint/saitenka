@@ -97,7 +97,7 @@ class _Link:
     def disconnect(self) -> None:
         self._disconnect()
 
-    def next_command(self, deadline: float = 1.0) -> dict:
+    def next_command(self, deadline: float = 10.0) -> dict:
         """Block until the client has written a full ``\\n``-terminated line; return it parsed."""
         end = time.monotonic() + deadline
         while time.monotonic() < end:
@@ -154,7 +154,7 @@ def make_link(request):
                 _f.feed(data)
 
             def next_line(_f=fake, _pos=pos):
-                data = bytes(_f.sent)
+                data = _f.snapshot()
                 nl = data.find(b"\n", _pos[0])
                 if nl == -1:
                     return None

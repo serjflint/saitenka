@@ -482,6 +482,15 @@ class FakeTransport:
         with self._cond:
             self.sent.extend(data)
 
+    def snapshot(self) -> bytes:
+        """What the client has written so far, copied under the lock.
+
+        The writer is another thread, so ``bytes(fake.sent)`` from the test races the ``extend``
+        that grows it — no-GIL has no bytecode-level shelter for the copy.
+        """
+        with self._cond:
+            return bytes(self.sent)
+
     def close(self) -> None:
         with self._cond:
             self._closed = True
