@@ -2240,10 +2240,10 @@ class Reader:
 
     # --- card preview (verify correctness / image / sound, one surface) — logic in app/miner_ui.py
     def _sentence_lines(self) -> list[str]:
-        return miner_ui.sentence_lines(self)
+        return miner_ui.sentence_lines(self.lines)
 
     def _footer(self, video) -> str:
-        return miner_ui.footer(self, video)
+        return miner_ui.footer(self.mine_cfg, self._provenance(video))
 
     def _preview_mined(self, card, tok, video, status: str = "mined") -> None:
         if not self.show_preview:
@@ -2264,10 +2264,10 @@ class Reader:
         miner_ui.preview_existing(self, note_id, card, status)
 
     def _media_image(self, name):
-        return miner_ui.media_image(self, name)
+        return miner_ui.media_image(self.anki, name)
 
     def _media_tempfile(self, name):
-        return miner_ui.media_tempfile(self, name)
+        return miner_ui.media_tempfile(self.anki, name, self._tmp)
 
     def _show_preview(self, pv: PreviewData, audio_path) -> None:
         miner_ui.show_preview(self, pv, audio_path)

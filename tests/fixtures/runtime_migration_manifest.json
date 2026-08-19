@@ -246,23 +246,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/miner_ui.py::footer"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/miner_ui.py::hide_preview"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/miner_ui.py::mark_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::media_image"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::media_tempfile"
     ],
     [
       "reader-parameter",
@@ -283,10 +271,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/miner_ui.py::rerender_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::sentence_lines"
     ],
     [
       "reader-parameter",

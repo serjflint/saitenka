@@ -2,6 +2,7 @@
 
 import functools
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -3287,3 +3288,31 @@ def test_a_refused_seek_is_reported_rather_than_discarded(caplog):
 
     assert any("sub-seek" in record.getMessage() for record in caplog.records)
     r.close()
+
+
+def test_anki_media_failures_are_absent_media_not_errors() -> None:
+    """An optional integration being down is an ordinary state, not something to raise through a
+    keypress — a preview missing its screenshot is still a preview."""
+    from saitenka.app.miner_ui import media_image, media_tempfile
+
+    class DownAnki:
+        def retrieve_media(self, _name):
+            raise OSError("connection refused")
+
+    assert media_image(None, "shot.png") is None  # no Anki configured
+    assert media_image(DownAnki(), "shot.png") is None  # Anki configured but down
+    assert media_image(DownAnki(), "") is None  # nothing to fetch
+    assert media_tempfile(DownAnki(), "clip.mp3", Path("/nonexistent")) is None
+
+
+def test_sentence_lines_rejoins_each_tokenized_line() -> None:
+    from saitenka.app.miner_ui import sentence_lines
+    from saitenka.app.tokenize import Token
+
+    def token(surface: str) -> Token:
+        return Token(surface, surface, "", "名詞", 0, len(surface))
+
+    assert sentence_lines([[token("猫"), token("を"), token("見る")], [token("犬")]]) == [
+        "猫を見る",
+        "犬",
+    ]

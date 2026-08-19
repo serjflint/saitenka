@@ -73,13 +73,15 @@ def rerender_nested(reader: Reader) -> None:
     reader._render_nested_view()
 
 
-def sentence_lines(reader: Reader) -> list[str]:
-    return ["".join(t.surface for t in line) for line in reader.lines]
+def sentence_lines(lines) -> list[str]:
+    """The cue's tokenized lines rejoined into plain text, one string per line."""
+    return ["".join(token.surface for token in line) for line in lines]
 
 
-def footer(reader: Reader, video) -> str:
-    assert reader.mine_cfg is not None  # previews only exist after a mine
-    return f"{reader.mine_cfg.deck} · {reader.mine_cfg.model} · {reader._provenance(video)}"
+def footer(mine_cfg, provenance: str) -> str:
+    """Where the card went and where its media came from — the preview's one line of provenance."""
+    assert mine_cfg is not None  # previews only exist after a mine
+    return f"{mine_cfg.deck} · {mine_cfg.model} · {provenance}"
 
 
 def preview_mined(reader: Reader, card, tok, video, status: str = "mined") -> None:
@@ -91,12 +93,12 @@ def preview_mined(reader: Reader, card, tok, video, status: str = "mined") -> No
         status,
         card.expression,
         card.reading,
-        sentence_lines(reader),
+        sentence_lines(reader.lines),
         tok.surface,
         list(card.glosses),
         img,
         secs,
-        footer(reader, video),
+        footer(reader.mine_cfg, reader._provenance(video)),
     )
     show_preview(reader, pv, reader.preview.last_audio)
 
@@ -117,8 +119,8 @@ def preview_existing(reader: Reader, note_id: int, card, status: str) -> None:
     def val(logical):
         return f.get(fld.get(logical, ""), {}).get("value", "")
 
-    img = media_image(reader, _media_name(val("picture"), r'src="([^"]+)"'))
-    mp3 = media_tempfile(reader, _media_name(val("audio"), r"\[sound:([^\]]+)\]"))
+    img = media_image(reader.anki, _media_name(val("picture"), r'src="([^"]+)"'))
+    mp3 = media_tempfile(reader.anki, _media_name(val("audio"), r"\[sound:([^\]]+)\]"), reader._tmp)
     secs = audio_duration(mp3) if mp3 else None
     pv = PreviewData(
         status,
@@ -129,31 +131,38 @@ def preview_existing(reader: Reader, note_id: int, card, status: str) -> None:
         _html_items(val("glossary")) or list(card.glosses),
         img,
         secs,
-        footer(reader, reader._get("path")),
+        footer(reader.mine_cfg, reader._provenance(reader._get("path"))),
     )
     show_preview(reader, pv, mp3)
 
 
-def media_image(reader: Reader, name):
-    if not name or reader.anki is None:
+def media_image(anki, name):
+    """Fetch a media file from Anki as an image, or None.
+
+    Every failure is None on purpose: a preview missing its screenshot is a preview, and Anki being
+    down is an ordinary state for an optional integration rather than something to raise through a
+    keypress.
+    """
+    if not name or anki is None:
         return None
     try:
-        data = reader.anki.retrieve_media(name)
+        data = anki.retrieve_media(name)
         return Image.open(io.BytesIO(data)) if data else None
     except (OSError, AnkiError, json.JSONDecodeError):
         return None
 
 
-def media_tempfile(reader: Reader, name):
-    if not name or reader.anki is None:
+def media_tempfile(anki, name, tmp_dir):
+    """Fetch a media file from Anki onto disk under ``tmp_dir``, or None. Fails soft, as above."""
+    if not name or anki is None:
         return None
     try:
-        data = reader.anki.retrieve_media(name)
+        data = anki.retrieve_media(name)
         if not data:
             return None
-        p = reader._tmp / name
-        p.write_bytes(data)
-        return p
+        path = tmp_dir / name
+        path.write_bytes(data)
+        return path
     except (OSError, AnkiError, json.JSONDecodeError):
         return None
 
