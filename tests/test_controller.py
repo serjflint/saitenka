@@ -51,6 +51,28 @@ class FakeIPC:
         on_finished(EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED))
         return True
 
+    def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
+        """Complete a correlated command inline, delivering through `command`.
+
+        Wired for this file (S-T's rule) so its Readers exercise the egress production takes. A
+        fake that refuses the submit leaves every caller on a synchronous fallback nobody runs,
+        and one that skips `command` stops its own recording seeing the write.
+        """
+        from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
+
+        outcome, error, result = EffectOutcome.SUCCEEDED, None, None
+        reply = self.command(*command)
+        if isinstance(reply, dict):
+            result = reply.get("data")
+            if reply.get("error") not in {None, "success"}:
+                outcome, error = EffectOutcome.FAILED, EffectError.INVALID_RESULT
+        on_finished(
+            EffectFinished(
+                EffectId(0), Owner.SUBTITLE, identity, outcome, result=result, error=error
+            )
+        )
+        return True
+
     def pump(self):
         pass
 
@@ -3238,4 +3260,30 @@ def test_the_sidebar_follows_the_cue_where_the_cue_settles(monkeypatch):
     r._settle_cue_observation()
 
     assert follows == [r]
+    r.close()
+
+
+def test_a_refused_seek_is_reported_rather_than_discarded(caplog):
+    """The instant render already drew the target, so what the write owes is a terminal outcome:
+    a seek that vanished into a discarded reply left the overlay showing a cue the video never
+    reached, with nothing in the log to say so."""
+    import logging
+
+    from saitenka.app.subtitle_intents import SeekCue
+
+    class RefusingIPC(FakeIPC):
+        def command(self, *args):
+            super().command(*args)
+            if args and args[0] == "sub-seek":
+                return {"error": "property unavailable"}
+            return (
+                {"data": self.props.get(args[1])} if args[0] == "get_property" else {"data": None}
+            )
+
+    ipc = RefusingIPC()
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    with caplog.at_level(logging.WARNING, logger="saitenka.app.mpv_egress"):
+        r._seek_cue(SeekCue(1, r.cue_revision))
+
+    assert any("sub-seek" in record.getMessage() for record in caplog.records)
     r.close()

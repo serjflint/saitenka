@@ -14,10 +14,6 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._apply_subtitle_effect"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._assert_mouse_capture"
     ],
     [
@@ -43,10 +39,6 @@
     [
       "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._release_mouse_capture"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._seek_cue"
     ],
     [
       "direct-mpv-command",

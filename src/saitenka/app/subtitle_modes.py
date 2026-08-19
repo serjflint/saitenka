@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.languages import MAIN_LANG, Language
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_selection import (
     FetchAction,
     SubtitleStartup,
@@ -42,25 +43,8 @@ def sub_tracks(ipc) -> list[dict]:
 
 
 def _send(ipc, identity: str, *command: object) -> None:
-    """Send one correlated subtitle command through the gateway.
-
-    Not awaited: mpv has a single ordered outbound channel and a synchronous read is queued behind
-    this write, so a readback after it still observes the write. What the correlation buys is a
-    terminal outcome — a rejected selection is reported instead of vanishing into a discarded reply.
-    """
-
-    def finished(completion: EffectFinished) -> None:
-        if completion.outcome is not EffectOutcome.SUCCEEDED:
-            log.warning("subtitle command %s did not apply: %s", identity, completion.outcome)
-
-    if not ipc.submit_runtime_mpv(
-        owner=Owner.SUBTITLE,
-        identity=identity,
-        command=command,
-        timeout_s=10.0,
-        on_finished=finished,
-    ):
-        log.warning("subtitle command %s was not admitted", identity)
+    """Send one correlated subtitle command through the gateway."""
+    send_correlated(ipc, identity, *command, owner=Owner.SUBTITLE)
 
 
 @dataclass(frozen=True)

@@ -105,6 +105,7 @@ from saitenka.app.media import (
     tts_available,
 )
 from saitenka.app.miner import Miner, tag_slug
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import Panel, PopupView
@@ -2482,7 +2483,14 @@ class Reader:
         elif isinstance(effect, subtitle_intents.SeekCue):
             self._seek_cue(effect)
         elif isinstance(effect, subtitle_intents.SetSubtitleDelay):
-            self.ipc.command("set_property", "sub-delay", f"{effect.seconds:.3f}")
+            send_correlated(
+                self.ipc,
+                "sub-delay",
+                "set_property",
+                "sub-delay",
+                f"{effect.seconds:.3f}",
+                owner=Owner.SUBTITLE,
+            )
         elif isinstance(effect, subtitle_intents.CopyCueText):
             copy_clipboard("\n".join(self._sentence_lines()))
         elif isinstance(effect, subtitle_intents.ToggleTranslation):
@@ -3348,7 +3356,10 @@ class Reader:
             span.set("outcome", "executed")
         self.subtitle_pipeline.invalidate()
         self._sub_nav(effect.delta)
-        self.ipc.command("sub-seek", str(effect.delta))
+        # Correlated: the instant render above already drew the target, so what this write owes is
+        # a terminal outcome — a refused seek that vanished into a discarded reply left the overlay
+        # showing a cue the video never reached.
+        send_correlated(self.ipc, "sub-seek", "sub-seek", str(effect.delta), owner=Owner.SUBTITLE)
         return True
 
     def _sub_nav(self, delta: int) -> bool:
