@@ -64,12 +64,32 @@ def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
     assert router.ignored == {"playback:RawMpvEvent": 1}
 
 
-def test_the_observer_never_retires_a_terminal_the_bridge_owns() -> None:
-    """TRANSITIONAL (dies with D4). The hazard that silently breaks every correlated command.
+def test_effect_ids_from_one_mailbox_never_collide_across_allocators() -> None:
+    """D2: the mailbox owns the ID because the mailbox is what the ID must be unique within.
 
-    `SessionReactor._finish` retires a completion it does not own; the bridge's own
-    `retire_terminal` then returns False and it drops the completion. Measured before the fence
-    existed: `bridge can now retire it: False`.
+    Before this, `LegacyRuntimeBridge` counted from 0 privately. A second allocator — which is
+    exactly what D3 makes the reactor — would have reissued IDs the bridge still held, and the
+    only symptom is `reserve_terminal` returning False, which every caller already treats as an
+    overloaded lane.
+    """
+    mailbox = SessionMailbox()
+    bridge_ids = [mailbox.allocate_effect() for _ in range(3)]
+    reactor_ids = mailbox.allocate_effects(3)
+
+    assert set(bridge_ids).isdisjoint(reactor_ids)
+    # Every one is reservable: a collision would surface here as a False, not as an exception.
+    assert all(mailbox.reserve_terminal(effect_id) for effect_id in (*bridge_ids, *reactor_ids))
+
+
+def test_the_observer_never_retires_a_terminal_the_bridge_owns() -> None:
+    """The hazard that silently breaks every correlated command.
+
+    Measured before `_finish` checked ownership: the reactor retired a completion it never
+    dispatched, the bridge's own `retire_terminal` then returned False, and it dropped the
+    completion — so whatever awaited that command waited forever.
+
+    Outlives D4 in meaning, not in form: the *rule* (retiring is a claim of ownership) is
+    permanent; only the second owner here is temporary.
     """
     mailbox = SessionMailbox()
     effect_id = EffectId(7)

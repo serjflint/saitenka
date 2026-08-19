@@ -86,16 +86,15 @@ class LegacyEventRouter:
         return self._mailbox
 
     def observe(self, reactor: SessionReactor) -> None:
-        """Give the reactor every envelope this consumer sees, except a terminal.
+        """Give the reactor every envelope this consumer sees, terminals included.
 
         Fanned out HERE rather than from the Reader's turn because this is the mailbox's declared
         sole consumer, and `SessionReactor.handle` takes an envelope without reading the mailbox —
         so a second observer costs no envelope. `run_until_idle` would consume, and must not be used
         while this router exists.
 
-        Terminals are withheld: `SessionReactor._finish` retires a completion it does not own, which
-        makes the bridge's own `retire_terminal` return False and silently drop the completion.
-        Until an owner's effects are the reactor's (D3), its terminals are the bridge's alone.
+        Terminals are safe to fan out because the reactor retires only what it dispatched; an
+        effect it never issued is not its to complete.
         """
         if self._reactor is not None:
             raise RuntimeError("reactor already observing")
@@ -127,9 +126,8 @@ class LegacyEventRouter:
         return events
 
     def _observe(self, envelope: EventEnvelope) -> None:
-        if self._reactor is None or isinstance(envelope.payload, EffectFinished):
-            return
-        self._reactor.handle(envelope)
+        if self._reactor is not None:
+            self._reactor.handle(envelope)
 
     def _route(
         self, payload: RuntimeEvent, events: list[object], *, ordered_terminals: bool = False

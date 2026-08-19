@@ -60,7 +60,6 @@ class LegacyRuntimeBridge:
         self._job_adapter = job_adapter
         self._clock = clock
         self._lock = threading.Lock()
-        self._next_effect = 0
         self._callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._timer_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._job_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
@@ -269,17 +268,11 @@ class LegacyRuntimeBridge:
             self._command_adapter.expire(expire)
 
     def _allocate_pair(self) -> tuple[EffectId, EffectId]:
-        with self._lock:
-            target = EffectId(self._next_effect)
-            timer = EffectId(self._next_effect + 1)
-            self._next_effect += 2
+        target, timer = self._mailbox.allocate_effects(2)
         return target, timer
 
     def _allocate_one(self) -> EffectId:
-        with self._lock:
-            effect = EffectId(self._next_effect)
-            self._next_effect += 1
-        return effect
+        return self._mailbox.allocate_effect()
 
     def _reserve_pair(self, target: EffectId, timer: EffectId) -> bool:
         if not self._mailbox.reserve_terminal(target):

@@ -224,7 +224,10 @@ class SessionReactor[StateT]:
     def _finish(self, completion: EffectFinished) -> EffectFinished | None:
         accepted = self._pending.get(completion.effect_id)
         if accepted is None:
-            self._mailbox.retire_terminal(completion.effect_id)
+            # Never retire an effect this reactor did not dispatch. Retiring is a claim of
+            # ownership, and the loser of that race does not find out: the other owner's
+            # `retire_terminal` returns False, indistinguishable from "already handled", so it
+            # drops the completion and whatever awaited it waits forever.
             return None
         if not self._mailbox.retire_terminal(completion.effect_id):
             return None

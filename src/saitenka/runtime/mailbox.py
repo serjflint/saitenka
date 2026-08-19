@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from saitenka.runtime.effects import EffectId
 from saitenka.runtime.events import (
     CloseRequested,
     CommandHandled,
@@ -23,7 +24,6 @@ from saitenka.runtime.events import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.runtime.effects import EffectId
     from saitenka.runtime.events import RuntimeEvent
 
 
@@ -73,6 +73,7 @@ class SessionMailbox:
         }
         self._clock = clock
         self._next_sequence = 0
+        self._next_effect = 0
         self._terminal_reservations: set[EffectId] = set()
         self._terminal_enqueued: set[EffectId] = set()
         self._command_reservations: set[int] = set()
@@ -178,6 +179,30 @@ class SessionMailbox:
             self._queues[TrafficClass.NORMAL].append(envelope)
             self._condition.notify()
             return True
+
+    def allocate_effect(self) -> EffectId:
+        """Take the next effect ID in this mailbox's terminal namespace.
+
+        The mailbox allocates because the mailbox is what the ID has to be unique *within* — it is
+        the key of `reserve_terminal`/`publish_terminal`/`retire_terminal`, and nothing else cares.
+        A second allocator on one namespace has only `reserve_terminal` returning False as its
+        collision detector, which reads identically to an overloaded lane.
+        """
+        return self.allocate_effects(1)[0]
+
+    def allocate_effects(self, count: int) -> tuple[EffectId, ...]:
+        """Take `count` IDs at once, for a caller that needs several before it can commit to any.
+
+        Ascending matters, not adjacency — a command and its deadline timer correlate by the
+        `effect-deadline:{target}` name, but `SessionReactor._apply` rejects an ID that does not
+        exceed every ID it has already dispatched.
+        """
+        if count <= 0:
+            raise ValueError("effect allocation count must be positive")
+        with self._condition:
+            first = self._next_effect
+            self._next_effect += count
+        return tuple(EffectId(value) for value in range(first, first + count))
 
     def reserve_terminal(self, effect_id: EffectId) -> bool:
         with self._condition:
