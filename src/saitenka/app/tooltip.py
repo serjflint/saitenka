@@ -1486,8 +1486,11 @@ def _install_navigated(reader: Reader, st: Panel) -> None:
 
 
 def tip_back(reader: Reader) -> bool:
-    """Pop one link-navigation step, restoring the previous base view. Returns False when there is no
-    history (a plain hovered word) so the caller falls through to closing the tooltip."""
+    """Pop one link-navigation step, restoring the previous base view.
+
+    Returns False when there is no history. `interaction_intents` makes that decision from
+    `Reader.tip_can_go_back` now, so the return is for callers that still ask-and-act in one go.
+    """
     if not reader._tip_nav:
         return False
     _restore_tip_view(reader, reader._tip_nav.pop())

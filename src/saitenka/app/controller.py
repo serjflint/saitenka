@@ -29,6 +29,7 @@ from saitenka.app import (
     hover_intents,
     hover_metadata,
     hover_snapshot,
+    interaction_intents,
     mask_atlas_startup,
     mine_intents,
     mined_seed,
@@ -97,6 +98,7 @@ from saitenka.app.bindings import (
 )
 from saitenka.app.config import ReaderOptions
 from saitenka.app.intents import Announce, DismissHover
+from saitenka.app.interaction_intents import InteractionCommand
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.media import (
     copy_clipboard,
@@ -2063,11 +2065,35 @@ class Reader:
         tooltip lane, so the seam lives on the Reader (no engaged-tooltip→tooltip import)."""
         return tooltip._navigated_panel(self, query)
 
-    def _tip_close_or_back(self) -> None:
-        """Esc while link-navigated steps back one entry; at the root (or a plain hovered word) it
-        closes the tooltip — the browser-back-then-close feel Yomitan's history gives."""
-        if not tooltip.tip_back(self):
+    # --- pointer and tooltip navigation: pure reducer, executed here (WP5.3) -------------------
+    @property
+    def tip_can_go_back(self) -> bool:
+        """A link-navigation step is available to pop — the fact, split from the act."""
+        return bool(self._tip_nav)
+
+    def _run_interaction_command(self, command: interaction_intents.InteractionCommand) -> None:
+        inputs = interaction_intents.InteractionInputs(
+            can_go_back=self.tip_can_go_back, tooltip_view_height=self._tip_ref_h
+        )
+        for effect in interaction_intents.reduce(command, inputs):
+            self._apply_interaction_effect(effect)
+
+    def _apply_interaction_effect(self, effect: interaction_intents.InteractionEffect) -> None:
+        if isinstance(effect, interaction_intents.RouteWheel):
+            surfaces.route_scroll(self, effect.steps)
+        elif isinstance(effect, interaction_intents.ScrollTooltip):
+            self._scroll_tip(effect.pixels)
+        elif isinstance(effect, interaction_intents.NavigateBack):
+            tooltip.tip_back(self)
+        elif isinstance(effect, DismissHover):
             self.set_hover(-1)
+        elif isinstance(effect, interaction_intents.RouteClick):
+            self.on_click()
+        elif isinstance(effect, interaction_intents.CopyUnderCursor):
+            self.copy_click()
+
+    def _tip_close_or_back(self) -> None:
+        self._run_interaction_command(interaction_intents.InteractionCommand.TOOLTIP_BACK_OR_CLOSE)
 
     def _open_search(self, pattern: str, wx: float, wy: float, wh: float) -> None:
         nested_popup.open_search(self, pattern, wx, wy, wh)
@@ -2560,25 +2586,12 @@ class Reader:
             self._sub_nav(delta)
             self.ipc.command("sub-seek", str(delta))
 
-        def scroll(delta: int) -> Callable[[], None]:
-            return lambda: self._scroll_tip(round(self._tip_ref_h * 0.12) * delta)
-
-        def wheel(steps: int) -> Callable[[], None]:
-            def route() -> None:
-                surfaces.route_scroll(self, steps)
-
-            return route
+        def interaction(command) -> Callable[[], None]:
+            return lambda: self._run_interaction_command(command)
 
         handlers = {
             PROFILE_CYCLE_MSG: action("cycle_profile"),
             BOOKMARK_MSG: action("toggle_bookmark"),
-            SCROLL_UP_MSG: wheel(-1),
-            SCROLL_DOWN_MSG: wheel(1),
-            COPY_CLICK_MSG: action("copy_click"),
-            CLICK_MSG: action("on_click"),
-            TIP_UP_MSG: scroll(-1),
-            TIP_DOWN_MSG: scroll(1),
-            TIP_CLOSE_MSG: action("_tip_close_or_back"),
         }
         # Migrated (WP4.2 / WP4.5 / WP5.3): the decision is a pure reducer — `subtitle_intents`,
         # `help_intents` or `hover_intents` — so these carry no compatibility binding at all.
@@ -2609,6 +2622,13 @@ class Reader:
             ANALYSIS_MSG: action("toggle_analysis"),
             PREVIEW_MSG: action("replay_preview"),
             PREVIEW_CLOSE_MSG: action("_hide_preview"),
+            SCROLL_UP_MSG: interaction(InteractionCommand.WHEEL_UP),
+            SCROLL_DOWN_MSG: interaction(InteractionCommand.WHEEL_DOWN),
+            TIP_UP_MSG: interaction(InteractionCommand.TOOLTIP_UP),
+            TIP_DOWN_MSG: interaction(InteractionCommand.TOOLTIP_DOWN),
+            TIP_CLOSE_MSG: interaction(InteractionCommand.TOOLTIP_BACK_OR_CLOSE),
+            CLICK_MSG: interaction(InteractionCommand.CLICK),
+            COPY_CLICK_MSG: interaction(InteractionCommand.COPY_UNDER_CURSOR),
             OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
         }
         return LegacyCommandExecutor(

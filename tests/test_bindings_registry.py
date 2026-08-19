@@ -123,16 +123,16 @@ saitenka-toggle-sidebar|interaction|global|modal|migrated
 saitenka-toggle-analysis|interaction|global|modal|migrated
 saitenka-preview|interaction|cue|modal|migrated
 saitenka-preview-close|interaction|global|modal|migrated
-saitenka-scroll-up|interaction|global|help|work-package-5
-saitenka-scroll-down|interaction|global|help|work-package-5
+saitenka-scroll-up|interaction|global|help|migrated
+saitenka-scroll-down|interaction|global|help|migrated
 saitenka-speak|interaction|cue|modal|migrated
 saitenka-copy|interaction|cue|modal|migrated
-saitenka-copy-click|interaction|cue|modal|work-package-5
-saitenka-click|interaction|cue|modal|work-package-5
+saitenka-copy-click|interaction|cue|modal|migrated
+saitenka-click|interaction|cue|modal|migrated
 saitenka-kanji|interaction|cue|modal|migrated
-saitenka-tip-up|interaction|global|modal|work-package-5
-saitenka-tip-down|interaction|global|modal|work-package-5
-saitenka-tip-close|interaction|global|modal|work-package-5
+saitenka-tip-up|interaction|global|modal|migrated
+saitenka-tip-down|interaction|global|modal|migrated
+saitenka-tip-close|interaction|global|modal|migrated
 saitenka-sub-picker|interaction|global|modal|migrated"""
 
 
