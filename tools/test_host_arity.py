@@ -170,6 +170,31 @@ def deactivate_all(reader):
     assert closure["coordinator.py::deactivate_all"] == {"renderer", "a", "b"}
 
 
+def test_a_dispatch_alias_is_named_by_the_method_not_by_the_local() -> None:
+    """`suspend = getattr(r, "suspend_for_overlay")` dispatches to `suspend_for_overlay`.
+
+    Falling back to the local's own name looks like it widens while matching nothing at all, which
+    is the same silent drop wearing a disguise — and it is the shape the real coordinator uses.
+    """
+    tool = _module()
+    caller = _collect(
+        tool,
+        "coordinator.py",
+        """
+def suspend_all(reader):
+    suspend = getattr(reader.renderer, "suspend_for_overlay", None)
+    if suspend is not None:
+        suspend(reader)
+""",
+    )
+    assert caller["coordinator.py::suspend_all"].forwards == {"?::suspend_for_overlay"}
+    renderer = _collect(
+        tool, "big.py", "def suspend_for_overlay(reader):\n    return reader.a, reader.b\n"
+    )
+    closure = tool.resolve([*caller.values(), *renderer.values()], {})
+    assert closure["coordinator.py::suspend_all"] == {"renderer", "a", "b"}
+
+
 def test_the_census_matches_production() -> None:
     tool = _module()
     assert tool.check() == 0

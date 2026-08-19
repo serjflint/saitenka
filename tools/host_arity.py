@@ -83,6 +83,9 @@ class _Visitor(ast.NodeVisitor):
         self.bindings: dict[str, set[str]] = {}
         #: Module-level def/class names; see `visit_Module`.
         self.defined: set[str] = set()
+        #: Local name -> the method it was fetched as. `suspend = getattr(r, "suspend_for_overlay")`
+        #: dispatches to `suspend_for_overlay`, and the local's own name says nothing about that.
+        self.aliases: dict[str, str] = {}
         self._stack: list[str] = []
         #: The innermost enclosing host-taking function, and the local name its host is bound to.
         self._host: list[tuple[Function, str]] = []
@@ -116,6 +119,14 @@ class _Visitor(ast.NodeVisitor):
         self._stack.append(node.name)
         self.generic_visit(node)
         self._stack.pop()
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        method = _fetched_method(node.value)
+        if method is not None:
+            self.aliases.update(
+                {target.id: method for target in node.targets if isinstance(target, ast.Name)}
+            )
+        self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         # A callable field's default is the first member of its family: `scroll: ... = _no_scroll`.
@@ -213,6 +224,8 @@ class _Visitor(ast.NodeVisitor):
         those fall back to the basename and over-approximate.
         """
         if isinstance(called, ast.Name):
+            if called.id in self.aliases:
+                return f"?::{self.aliases[called.id]}"
             if called.id in self.imports:
                 return f"{self.imports[called.id]}::{called.id}"
             return f"{self.module}::{called.id}" if called.id in self.defined else f"?::{called.id}"
@@ -233,6 +246,20 @@ def _host_argument(arguments: list[ast.arg]) -> str | None:
             annotation is not None and "Reader" in ast.unparse(annotation)
         ):
             return argument.arg
+    return None
+
+
+def _fetched_method(value: ast.expr) -> str | None:
+    """The method name in `getattr(obj, "name", …)`, which is what a local bound to it dispatches to."""
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "getattr"
+        and len(value.args) >= 2
+        and isinstance(name := value.args[1], ast.Constant)
+        and isinstance(name.value, str)
+    ):
+        return name.value
     return None
 
 
