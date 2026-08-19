@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_modes import (
     select_initial,
 )
@@ -33,6 +34,7 @@ from saitenka.app.subtitle_providers import (
 from saitenka.app.subtitle_selection import (
     lang_matches as _lang_matches,
 )
+from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,13 +64,15 @@ def select_sub_track(ipc, slang: str) -> int | None:
         for t in tracks:
             if _lang_matches(t.get("lang"), [want]):
                 sid = t.get("id")
-                ipc.command("set_property", "sid", sid)
+                send_correlated(
+                    ipc, "select-sub-track", "set_property", "sid", sid, owner=Owner.SUBTITLE
+                )
                 return sid
     return None
 
 
 def _add_and_select(ipc, sub_path: str | Path) -> None:
-    ipc.command("sub-add", str(sub_path), "select")
+    send_correlated(ipc, "sub-add-select", "sub-add", str(sub_path), "select", owner=Owner.SUBTITLE)
 
 
 def _subtitle_identity(

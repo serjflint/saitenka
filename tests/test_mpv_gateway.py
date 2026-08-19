@@ -624,3 +624,33 @@ def test_gateway_turns_inbound_overload_into_controlled_legacy_stop() -> None:
     else:  # pragma: no cover - bounded ingress contract
         raise AssertionError("mailbox overload did not stop the legacy session")
     assert gateway.snapshot.inbound_overloads == 1
+
+
+def test_a_correlated_write_reaches_the_wire_before_a_following_read() -> None:
+    """The premise `send_correlated` is built on, and which every non-awaited caller depends on:
+    the write is dispatched during the submit, not queued for the reactor, so a synchronous readback
+    right after it observes it. If it were deferred, `_add_and_select` would be followed by a
+    track-list read that cannot yet see the track it just added.
+    """
+    from saitenka.app.mpv_egress import send_correlated
+    from saitenka.runtime import Owner
+
+    order: list[str] = []
+
+    class Ledger(FakeIPC):
+        def command_async(self, *args, **kwargs) -> IPCRequest:
+            order.append(f"write:{args[0]}")
+            return super().command_async(*args, **kwargs)
+
+        def command(self, *args, **kwargs) -> dict:
+            order.append(f"read:{args[1]}")
+            return super().command(*args, **kwargs)
+
+    ipc = Ledger()
+    gateway = MpvGateway(ipc, SessionMailbox())
+    ipc.submit_runtime_mpv = gateway.submit_mpv  # type: ignore[attr-defined]
+
+    send_correlated(ipc, "sub-add-select", "sub-add", "/ep.srt", "select", owner=Owner.SUBTITLE)
+    ipc.command("get_property", "track-list")
+
+    assert order == ["write:sub-add", "read:track-list"]
