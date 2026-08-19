@@ -31,6 +31,34 @@ def test_runtime_migration_manifest_matches_production() -> None:
     assert checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader.run") in actual
 
 
+def test_wp5_owns_every_row_the_terminal_set_does_not_claim() -> None:
+    """WP5's exit is `total == 22`, which is only answerable if the remainder is one kind.
+
+    The interesting assertion is not the 22 — it is that everything *else* is a `reader-parameter`
+    row. A new kind appearing outside the terminal set would silently move WP5's finish line, and
+    the total alone cannot see that.
+    """
+    checker = _module()
+    actual, _, _ = checker.scan()
+    terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
+    assert len(terminal) == checker.TERMINAL_TOTAL == 22
+    remaining = {item for item in actual if (item.kind, item.source) not in terminal}
+    assert {item.kind for item in remaining} == {"reader-parameter"}
+
+
+def test_a_terminal_row_whose_symbol_moved_is_a_failure() -> None:
+    """A renamed terminal symbol lowers the number WP5 compares against, without touching a count."""
+    checker = _module()
+    actual, symbols, evidence = checker.scan()
+    manifest = {
+        "debt": [[item.kind, item.source] for item in sorted(actual)],
+        **{group: [] for group in ("startup", "close", "entrypoints")},
+    }
+    kept = symbols - {"src/saitenka/app/reader_factory.py::create_reader"}
+    problems = checker.failures(manifest, actual, kept, evidence)
+    assert problems["terminal_unresolved"] == ["src/saitenka/app/reader_factory.py::create_reader"]
+
+
 def test_scanner_detects_each_debt_category() -> None:
     checker = _module()
     source = """

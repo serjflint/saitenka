@@ -76,6 +76,71 @@ _MPV_READ_VERBS = {"get_property"}
 _DRIVER_SWITCH_SYMBOLS = {
     "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard",
 }
+#: What WP5 is allowed to leave behind, enumerated rather than described. Splitting it into three
+#: named sets is what makes WP5's exit ONE equality (`total == 22`) instead of a sentence with a
+#: tilde in it — a plan draft that said "~26" was wrong by four and nobody could tell.
+#:
+#: These are not exemptions: every row here is real debt that a LATER work package deletes. They are
+#: separated from WP5's denominator because WP5 cannot reach them, so counting them in its exit makes
+#: that exit permanently unreachable.
+#:
+#: Rows, not symbols. Five of these symbols carry a `reader-parameter` row as well, and that second
+#: row IS WP5's to convert — a symbol-keyed set would have quietly excused all five.
+_TERMINAL_DEBT = {
+    # WP6 deletes the driver: the tick loop, the legacy staging path it drives, and the repeat guard
+    # that exists only because the picker is polled.
+    "driver-switch": frozenset(
+        {
+            ("tick-stage", "src/saitenka/app/controller.py::Reader.poll_once"),
+            ("tick-stage", "src/saitenka/app/controller.py::Reader.run"),
+            ("driver-switch", "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"),
+            (
+                "direct-mpv-command",
+                "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action",
+            ),
+            (
+                "direct-mpv-command",
+                "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate",
+            ),
+            (
+                "direct-mpv-command",
+                "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate",
+            ),
+        }
+    ),
+    # Property reads. A read has no terminal outcome to correlate, so routing one through the egress
+    # gateway buys nothing until the transport itself grows a typed query port.
+    "transport-reads": frozenset(
+        ("direct-mpv-read", source)
+        for source in (
+            "src/saitenka/app/commands/attach.py::_finish_attach_subtitle_startup",
+            "src/saitenka/app/commands/attach.py::_install_attach_reslot_hook",
+            "src/saitenka/app/controller.py::Reader._get",
+            "src/saitenka/app/controller.py::Reader._probe_ass_full",
+            "src/saitenka/app/embedded_subs.py::_selected_sub_track",
+            "src/saitenka/app/media.py::current_timespan",
+            "src/saitenka/app/subselect.py::fetch_jimaku",
+            "src/saitenka/app/subselect.py::remove_external_sub_tracks",
+            "src/saitenka/app/subtitle_modes.py::sub_tracks",
+            "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility",
+        )
+    ),
+    # Take the host because the host is what they build or own. Converting these is not a smaller
+    # signature, it is a different composition root — WP7's job, not a `reader-parameter` row.
+    "host-composition": frozenset(
+        ("reader-parameter", source)
+        for source in (
+            "src/saitenka/app/controller.py::Reader.__init__",
+            "src/saitenka/app/miner.py::Miner.__init__",
+            "src/saitenka/app/reader_deps.py::apply_deps",
+            "src/saitenka/app/reader_deps.py::load_deps_async",
+            "src/saitenka/app/reader_factory.py::create_reader",
+            "src/saitenka/app/session_runtime.py::SessionRuntime.__init__",
+        )
+    ),
+}
+#: WP5's exit gate, as a number the tool can answer.
+TERMINAL_TOTAL = sum(len(group) for group in _TERMINAL_DEBT.values())
 _DUTY_IDS = {
     "startup": {
         "version-and-render-guard",
@@ -395,6 +460,15 @@ def failures(
             if isinstance(source, str) and source not in symbols:
                 unresolved.append(source)
     unresolved.sort()
+    # A terminal row that stopped resolving is a rename or a move, and it silently lowers the number
+    # WP5's exit compares against. Deliberately NOT "must still be debt": converting one early is
+    # progress, and the set is a ceiling on what WP5 may leave, not a floor.
+    terminal_unresolved = sorted(
+        source
+        for group in _TERMINAL_DEBT.values()
+        for _kind, source in group
+        if source not in symbols
+    )
     result = {
         # Reported, never a failure: `check` retires these itself. Kept in the payload so a run
         # that quietly shrank the denominator still says which rows it retired.
@@ -402,6 +476,7 @@ def failures(
         "missing": missing,
         "added": added,
         "unresolved": unresolved,
+        "terminal_unresolved": terminal_unresolved,
         "missing_evidence": sorted(missing_evidence),
         "schema": schema,
     }
@@ -472,7 +547,7 @@ def status() -> int:
     )
     live = {(item.kind, item.source) for item in actual}
     kinds = sorted({kind for kind, _ in blessed | live})
-    width = max(len(kind) for kind in kinds)
+    width = max(len(label) for label in [*kinds, *(f"terminal/{name}" for name in _TERMINAL_DEBT)])
     for kind in kinds:
         was = sum(1 for k, _ in blessed if k == kind)
         now = sum(1 for k, _ in live if k == kind)
@@ -481,6 +556,12 @@ def status() -> int:
     duties = sum(len(group) for group in duty_groups(manifest))
     print(f"{'':<{width}}  {'-' * 4}")
     print(f"{'total':<{width}}  {len(live):>4}   {duties} duties")
+    terminal = {row for group in _TERMINAL_DEBT.values() for row in group}
+    print()
+    for name, group in sorted(_TERMINAL_DEBT.items()):
+        print(f"{'terminal/' + name:<{width}}  {len(group):>4}")
+    print(f"{'WP5 converts':<{width}}  {len(live - terminal):>4}")
+    print(f"{'WP5 exit':<{width}}  total == {TERMINAL_TOTAL}")
     return 0
 
 
