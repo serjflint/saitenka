@@ -189,3 +189,71 @@ def test_remove_submission_exception_terminally_fails_revision():
     surfaces.remove(OverlayId.LOADING)
 
     assert surfaces.snapshot(OverlayId.LOADING).status is SurfaceStatus.FAILED
+
+
+def test_hiding_every_surface_and_showing_it_again_restores_what_was_there():
+    """`Alt+o`. Hiding retains each slot's desired state rather than forgetting it, so showing puts
+    the same surfaces back — a hide that dropped them would return the user to a blank overlay and
+    make them re-trigger every surface by hand.
+    """
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+    live_before = dict(overlay._live)
+
+    surfaces.set_visible(visible=False)
+    assert overlay.visible is False
+    assert ("overlay-remove", OverlayId.SUB) in ipc.commands
+
+    ipc.commands.clear()
+    surfaces.set_visible(visible=True)
+
+    assert overlay.visible is True
+    assert overlay._live == live_before
+    assert any(c[0] == "overlay-add" and c[1] == OverlayId.SUB for c in ipc.commands)
+
+
+def test_a_repeated_hide_is_not_re_issued():
+    """The toggle is driven by a reducer that may be asked twice; re-sending a hide would churn the
+    overlay slots for no change."""
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+
+    surfaces.set_visible(visible=False)
+    ipc.commands.clear()
+    surfaces.set_visible(visible=False)
+
+    assert ipc.commands == []
+
+
+def test_a_repaint_re_adds_the_live_surfaces_without_counting_as_a_change():
+    """The paused-nudge poke (mpv #8172). It must not bump the op counter the nudge arms off, or
+    each repaint would arm the next one and the session would nudge forever."""
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+    ops_before = overlay.ops
+    ipc.commands.clear()
+
+    surfaces.repaint()
+
+    assert any(c[0] == "overlay-add" and c[1] == OverlayId.SUB for c in ipc.commands)
+    assert overlay.ops == ops_before
+
+
+def test_a_repaint_while_hidden_draws_nothing():
+    """Re-adding a hidden surface would un-hide it — the toggle undone by a nudge."""
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+    surfaces.set_visible(visible=False)
+    ipc.commands.clear()
+
+    surfaces.repaint()
+
+    assert ipc.commands == []

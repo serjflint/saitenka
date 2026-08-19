@@ -92,6 +92,23 @@ class LifecycleSurfaces:
                     )
                 )
 
+    def set_visible(self, *, visible: bool) -> None:
+        """Hide or restore every saitenka surface at once, retaining each one's desired state.
+
+        Whole-surface, so it has no per-slot transaction to fence — but it is still presentation,
+        and a feature reaching past this layer to the overlay for it is the thing the direct-mutation
+        rule is about. Routed here so `Alt+o` talks to the surface layer like everything else.
+        """
+        self._overlay.set_visible(visible=visible)
+
+    def repaint(self) -> None:
+        """Re-issue every live surface so mpv composites and PRESENTS them.
+
+        Paused, mpv throttles OSD updates until something pokes it (mpv #8172), so a draw that
+        landed while paused sits invisible until the user jiggles the mouse. Re-adding is the poke.
+        """
+        self._overlay.repaint()
+
     def snapshot(self, oid: int):
         return self._runtime.snapshot(str(oid))
 

@@ -47,6 +47,9 @@ _AUTONOMOUS_DEADLINES = {
 _PRESENTATION_ADAPTERS = {
     "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra",
     "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove",
+    # Whole-surface bulk operations: no per-slot transaction to fence, but presentation all the same.
+    "src/saitenka/app/lifecycle_surfaces.py::LifecycleSurfaces.set_visible",
+    "src/saitenka/app/lifecycle_surfaces.py::LifecycleSurfaces.repaint",
 }
 _NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
 #: Writes that CANNOT go through the egress gateway, with the reason each is permanent. Not debt and

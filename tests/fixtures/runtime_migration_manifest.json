@@ -53,14 +53,6 @@
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility"
     ],
     [
-      "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader._apply_session_effect"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
-    ],
-    [
       "driver-switch",
       "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"
     ],

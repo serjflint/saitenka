@@ -274,12 +274,16 @@ def test_scanner_exempts_the_presentation_adapters_but_not_their_callers() -> No
         )
         not in actual
     )
+    # The counter-example moved: `_flush_paused_nudge` was the standing one until its `ov.repaint()`
+    # went behind `LifecycleSurfaces`, which took `direct-overlay-mutation` to zero. A planted
+    # feature stands in, so the exemption is still proved NOT to cover a caller.
+    scanner = checker.Scanner("src/saitenka/app/planted.py")
+    scanner.visit(ast.parse("def feature(self):\n    self.ov.show(img)\n"))
     assert (
-        checker.Debt(
-            "direct-overlay-mutation", "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
-        )
-        in actual
+        checker.Debt("direct-overlay-mutation", "src/saitenka/app/planted.py::feature")
+        in scanner.debt
     )
+    assert not [d for d in actual if d.kind == "direct-overlay-mutation"]
 
 
 def test_scanner_separates_a_direct_read_from_a_direct_write() -> None:

@@ -2367,7 +2367,7 @@ class Reader:
             self.hover = -1
             self._teardown_tip()
         elif isinstance(effect, session_intents.SetSurfacesVisible):
-            self.ov.set_visible(visible=effect.visible)
+            self.lifecycle_surfaces.set_visible(visible=effect.visible)
         elif isinstance(effect, session_intents.ReleaseSecondarySubtitles):
             subtitle_modes.release_secondary(self)
         elif isinstance(effect, session_intents.SuspendSubtitles):
@@ -3248,7 +3248,7 @@ class Reader:
         is already owed.
         """
         self._nudge_pending = False
-        self.ov.repaint()
+        self.lifecycle_surfaces.repaint()
         # No per-nudge log line — the osd_paused_nudge counter below carries the count (this fired
         # ~1600×/session at debug, 67% of the log, duplicating the counter for zero added detail).
         if otel_metrics.osd_paused_nudge is not None:
