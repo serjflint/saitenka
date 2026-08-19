@@ -932,3 +932,25 @@ def test_card_for_degrades_without_jamdict(monkeypatch):
     assert card.expression == "読む"
     assert card.glossary_html == ""
     lookup.card_data.cache_clear()  # don't leave the poisoned (jamdict-less) entry cached
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("mine:0", 0),
+        ("mine:3", 3),
+        ("それにしては", None),  # an ordinary cross-reference
+        ("mine:", None),
+        ("mine:abc", None),
+        ("mine:1.5", None),
+        (None, None),
+        (42, None),
+    ],
+)
+def test_a_stacked_entry_mine_link_is_read_without_breaking_navigation(query, expected):
+    """The ⊕ rides the normal link hit-test, so this runs on EVERY link click. A malformed suffix
+    has to read as "not a mine link" rather than raise, or one bad dictionary entry breaks
+    navigation for every link in the panel."""
+    from saitenka.app.tooltip import mine_index
+
+    assert mine_index(query) == expected

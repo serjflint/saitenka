@@ -550,21 +550,33 @@ def _mine_link(reader: Reader, lb, tok) -> bool:
     """A stacked entry's ⊕ arrives as a ``LinkBox('mine:<card_index>')`` (it rides the normal link
     hit-test). Mine that exact entry via ``cards_for(tok)[i]`` and report handled, so the caller does
     not treat it as a cross-reference navigation. Not a mine link → False."""
-    if (
-        tok is None
-        or not isinstance(getattr(lb, "query", None), str)
-        or not lb.query.startswith("mine:")
-    ):
+    idx = mine_index(getattr(lb, "query", None))
+    if tok is None or idx is None:
         return False
     # Same expanded card list the stacked panel was built from (phrase terms included), so the ⊕'s
     # card_index aligns with the group it sits on.
     cards = (
         reader.dict_set.cards_for(tok, extra_terms=reader._hover_terms) if reader.dict_set else []
     )
-    idx = int(lb.query[len("mine:") :])
     if 0 <= idx < len(cards):
         reader._mine_token(tok, card=cards[idx])
     return True
+
+
+def mine_index(query: object) -> int | None:
+    """The card index in a stacked entry's ``mine:<i>`` ⊕ link, or None when it is an ordinary
+    cross-reference.
+
+    The ⊕ rides the normal link hit-test, so this runs on EVERY link click — a malformed suffix has
+    to read as "not a mine link" rather than raise, or one bad dictionary entry breaks navigation
+    for every link in the panel.
+    """
+    if not isinstance(query, str) or not query.startswith("mine:"):
+        return None
+    try:
+        return int(query[len("mine:") :])
+    except ValueError:
+        return None
 
 
 def _click_nested(reader: Reader, x: float, y: float) -> bool:

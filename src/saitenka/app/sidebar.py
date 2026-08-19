@@ -14,6 +14,7 @@ from saitenka.app.languages import SECOND_LANG
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
+from saitenka.model import claims_pointer, in_rect
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
@@ -405,15 +406,15 @@ def contains(state: SidebarState, x: float, y: float) -> bool:
     """Whether ``(x, y)`` is inside the shown sidebar."""
     if not (state.open and state.rect):
         return False
-    left, top, width, height = state.rect
-    return left <= x < left + width and top <= y < top + height
+    return in_rect(state.rect, x, y)
 
 
 def suppress_hover(reader: Reader) -> bool:
     if not reader.sidebar.open:
         return False
-    mp = reader._prop("mouse-pos") or {}
-    if not contains(reader.sidebar, mp.get("x", -1), mp.get("y", -1)):
+    if not claims_pointer(
+        reader.sidebar.rect, reader._prop("mouse-pos"), open_=reader.sidebar.open
+    ):
         return False
     reader.set_annotation_hover(revealed=False)
     reader.set_hover(-1)

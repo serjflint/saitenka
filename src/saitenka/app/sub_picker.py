@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarRow, render_picker
+from saitenka.model import claims_pointer, in_rect
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy
 
@@ -293,16 +294,14 @@ def contains(state: PickerState, x: float, y: float) -> bool:
     """Whether ``(x, y)`` is inside the shown picker."""
     if not (state.open and state.rect):
         return False
-    left, top, width, height = state.rect
-    return left <= x < left + width and top <= y < top + height
+    return in_rect(state.rect, x, y)
 
 
 def suppress_hover(reader: Reader) -> bool:
     state = reader.sub_picker
     if not state.open:
         return False
-    mp = reader._prop("mouse-pos") or {}
-    if not contains(state, mp.get("x", -1), mp.get("y", -1)):
+    if not claims_pointer(state.rect, reader._prop("mouse-pos"), open_=state.open):
         return False
     reader.set_hover(-1)
     return True
@@ -312,13 +311,17 @@ def scroll(reader: Reader, steps: int) -> bool:
     state = reader.sub_picker
     if not state.open:
         return False
-    mp = reader._prop("mouse-pos") or {}
-    if not contains(state, mp.get("x", -1), mp.get("y", -1)):
+    if not claims_pointer(state.rect, reader._prop("mouse-pos"), open_=state.open):
         return False
-    maximum = max(0, len(state.candidates) - 1)
-    state.scroll = max(0, min(maximum, state.scroll + steps * ROWS_PER_WHEEL_STEP))
+    state.scroll = clamp_scroll(state.scroll, steps, len(state.candidates))
     reader.redraw_sub_picker()
     return True
+
+
+def clamp_scroll(scroll: int, steps: int, count: int) -> int:
+    """Where a wheel notch leaves the picker. Clamped at both ends rather than wrapped: a list that
+    jumped from the last row back to the first on one more notch reads as a lost scroll position."""
+    return max(0, min(max(0, count - 1), scroll + steps * ROWS_PER_WHEEL_STEP))
 
 
 def _download(reader: Reader, index: int) -> None:

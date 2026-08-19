@@ -7,6 +7,7 @@ These use the :class:`Driver` (tests/driver.py) so they read as interaction scri
 
 from __future__ import annotations
 
+import pytest
 from driver import Driver
 from util import FakeIPC
 
@@ -457,3 +458,28 @@ def test_the_nested_popup_and_the_tooltip_can_both_claim_a_shared_point():
     """The nested popup is anchored over the base tooltip, so their rectangles overlap by design.
     Both read as hovered; which one acts is the caller's topmost-first decision, not this one's."""
     assert _targets(50, 50, tip=(0, 0, 100, 100), nest=(40, 40, 100, 100)) == (-1, True, True)
+
+
+@pytest.mark.parametrize(
+    ("mouse_pos", "expected"),
+    [
+        ({"x": 50, "y": 50}, True),
+        ({"x": 500, "y": 50}, False),
+        ({}, False),  # mpv answers without x/y before the pointer has entered the window
+        (None, False),  # …and answers nothing at all when it has no surface yet
+    ],
+)
+def test_a_panel_claims_only_a_pointer_it_can_actually_see(mouse_pos: object, *, expected: bool):
+    """Missing coordinates must read as outside. Defaulting them to the origin would let a panel
+    anchored at the top-left swallow a pointer that is not there — and the sidebar and picker are
+    both anchored at an edge."""
+    from saitenka.model import claims_pointer
+
+    assert claims_pointer((0, 0, 100, 100), mouse_pos, open_=True) is expected
+
+
+def test_a_closed_or_unplaced_panel_claims_nothing():
+    from saitenka.model import claims_pointer
+
+    assert claims_pointer((0, 0, 100, 100), {"x": 50, "y": 50}, open_=False) is False
+    assert claims_pointer(None, {"x": 50, "y": 50}, open_=True) is False

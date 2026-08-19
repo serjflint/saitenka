@@ -532,3 +532,21 @@ def test_retiring_an_already_closed_picker_does_nothing():
 
     assert sub_picker.retire(state) is False
     assert state.generation == 3
+
+
+def test_a_wheel_notch_stops_at_both_ends_rather_than_wrapping():
+    """A list that jumped from the last row back to the first on one more notch reads as a lost
+    scroll position, not as a feature."""
+    from saitenka.app.sub_picker import ROWS_PER_WHEEL_STEP, clamp_scroll
+
+    assert clamp_scroll(0, -1, 10) == 0
+    assert clamp_scroll(9, 1, 10) == 9
+    assert clamp_scroll(0, 1, 10) == ROWS_PER_WHEEL_STEP
+
+
+def test_an_empty_listing_has_nowhere_to_scroll():
+    """Before a listing lands there are no rows; scrolling to a positive offset would render blank."""
+    from saitenka.app.sub_picker import clamp_scroll
+
+    assert clamp_scroll(0, 1, 0) == 0
+    assert clamp_scroll(0, 1, 1) == 0
