@@ -1095,7 +1095,7 @@
       "id": "temporary-artifacts",
       "source": "src/saitenka/app/controller.py::Reader._retire_artifacts",
       "evidence": [
-        "call:SessionClosing",
+        "call:self._announce_close",
         "call:shutil.rmtree"
       ],
       "target": "artifact-close",

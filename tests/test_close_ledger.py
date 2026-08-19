@@ -351,3 +351,33 @@ def test_composing_a_session_runtime_leaves_its_close_duties_reachable(
 
     assert telemetry._gauge_provider is None
     assert ledger.report() is None
+
+
+def test_close_announces_every_phase_in_teardown_order() -> None:
+    """The skeleton's whole point: phases exist up front, in one order, so a duty picks the one
+    matching where its step already sits instead of inventing one.
+
+    Order is asserted against the enum rather than a hand-written list — the enum is the
+    declaration, so a reordering there that the table does not follow is the bug this catches.
+    """
+    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.runtime.events import ClosePhase, SessionClosing
+
+    seen: list[ClosePhase] = []
+
+    class RecordingIPC(FakeIPC):
+        def deliver_runtime_event(self, event) -> bool:
+            if isinstance(event, SessionClosing):
+                seen.append(event.phase)
+            return super().deliver_runtime_event(event)
+
+    ipc = RecordingIPC()
+    gateway = install_session_runtime(ipc, startup_hint=False)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    try:
+        reader.close()
+    finally:
+        gateway.close()
+
+    assert seen == sorted(seen, key=list(ClosePhase).index)
+    assert set(seen) == set(ClosePhase)

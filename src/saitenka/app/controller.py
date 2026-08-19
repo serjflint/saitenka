@@ -3750,6 +3750,9 @@ class Reader:
                     lambda: self._anki_capability.close(),  # type: ignore[union-attr]  # `present` below
                     lambda: self._anki_capability,
                 ),
+                CloseStep(
+                    "phase:capabilities", lambda: self._announce_close(ClosePhase.CAPABILITIES)
+                ),
                 CloseStep("interaction-jobs", lambda: self._interaction_jobs.cancel_all()),
                 CloseStep(
                     "hover-metadata", lambda: hover_metadata.close(self._interaction_metadata)
@@ -3805,6 +3808,7 @@ class Reader:
                     "mask-atlas-uninstall",
                     lambda: mask_atlas_startup.uninstall(self.session.render_cache),
                 ),
+                CloseStep("phase:lanes", lambda: self._announce_close(ClosePhase.LANES)),
                 # No refresh may land after the provider closes, nor a settle deadline outlive it.
                 CloseStep("geometry-refresh", lambda: self.retire_geometry_refresh()),
                 CloseStep("settle-window", lambda: self.retire_settle_window()),
@@ -3824,6 +3828,7 @@ class Reader:
                         else self.subtitle_pipeline.close()
                     ),
                 ),
+                CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
                 CloseStep(
                     "session-stats", lambda: self._report_session(session_stats.finish(self))
                 ),
@@ -3837,6 +3842,7 @@ class Reader:
                     lambda: self._mined_store.close(),  # type: ignore[union-attr]  # `present` below
                     lambda: self._mined_store,
                 ),
+                CloseStep("phase:stores", lambda: self._announce_close(ClosePhase.STORES)),
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
                 # The `SURFACES` phase, announced here rather than with the participants: every
                 # render lane above has drained, so nothing can present again. Announcing it at
@@ -3859,6 +3865,15 @@ class Reader:
             log.warning("%s", report)
         return ledger
 
+    def _announce_close(self, phase: ClosePhase, scratch: str | None = None) -> bool:
+        """Tell the runtime the close sequence reached `phase`. False when no runtime owns us.
+
+        Delivered rather than published: the session loop has stopped, so a published event would
+        sit in the mailbox, and draining here would run a full domain turn against half-closed
+        collaborators.
+        """
+        return self.ipc.deliver_runtime_event(SessionClosing(phase, scratch))
+
     def _retire_surfaces(self) -> None:
         """Announce the `SURFACES` phase, or close them ourselves.
 
@@ -3869,9 +3884,7 @@ class Reader:
         a reactor saw the event, not that anything performed the effect. A session with a reactor
         but no registered resource would take the True and leak the overlays.
         """
-        if self._runtime_owns_surfaces and self.ipc.deliver_runtime_event(
-            SessionClosing(ClosePhase.SURFACES)
-        ):
+        if self._runtime_owns_surfaces and self._announce_close(ClosePhase.SURFACES):
             return
         self.lifecycle_surfaces.close()
 
@@ -3885,8 +3898,7 @@ class Reader:
         """
         import shutil
 
-        closing = SessionClosing(ClosePhase.ARTIFACTS, str(self._tmp))
-        if not self.ipc.deliver_runtime_event(closing):
+        if not self._announce_close(ClosePhase.ARTIFACTS, str(self._tmp)):
             shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _report_session(self, summary: str | None) -> None:

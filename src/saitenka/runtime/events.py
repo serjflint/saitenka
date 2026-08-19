@@ -43,18 +43,29 @@ class ClosePhase(StrEnum):
     """How far teardown has got. Close is a sequence, so its participants are not interchangeable.
 
     A phase is defined by what is already gone, because that is the only thing a participant can
-    depend on: `PARTICIPANTS` runs while every collaborator and the transport are still live;
-    `SURFACES` once every render lane has drained, so nothing can present again; `ARTIFACTS` once
-    nothing can write any more.
+    depend on. Declared in teardown order, and the whole sequence exists up front rather than one
+    phase per migrated duty: a duty picks the phase matching where its step already sits, instead
+    of inventing one and serialising behind the duty that invented the last.
 
-    Phases are what keep a migrated duty in its original position. `Reader.close` is a sequence,
-    so announcing everything at `PARTICIPANTS` would run a participant tens of steps early —
-    removing overlays while a lane can still add one, say. A duty migrates into the phase that
-    matches where its step used to sit, not into the first one that exists.
+    `Reader.close` is a sequence, so this ordering *is* the contract — announcing everything at
+    `PARTICIPANTS` would run a participant tens of steps early, removing overlays while a lane can
+    still add one. A phase with no effects yet is legitimate; it marks the seam for the duty that
+    lands there next.
     """
 
+    #: Optional collaborators are down; everything else is still live.
+    CAPABILITIES = "capabilities"
+    #: The runtime's own participants, while every collaborator and the transport still work.
     PARTICIPANTS = "participants"
+    #: Every job lane has drained, so no background work can still land.
+    LANES = "lanes"
+    #: Geometry and the subtitle pipeline are closed; nothing renders.
+    RENDERING = "rendering"
+    #: Session stores are flushed and closed.
+    STORES = "stores"
+    #: Nothing can present again, so overlays and their transport can go.
     SURFACES = "surfaces"
+    #: Nothing can write any more.
     ARTIFACTS = "artifacts"
 
 
