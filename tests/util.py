@@ -340,6 +340,11 @@ class FakeIPC:
             return False
         return self._runtime_gateway.publish_session_event(event)
 
+    def deliver_runtime_event(self, event) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.deliver_session_event(event)
+
     def submit_runtime_mpv(self, **kwargs) -> bool:
         if self._runtime_gateway is not None:
             return self._runtime_gateway.submit_mpv(**kwargs)

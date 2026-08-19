@@ -1078,15 +1078,16 @@
     },
     {
       "id": "telemetry",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/app/lifecycle_close.py::reduce_lifecycle_close",
       "evidence": [
-        "call:telemetry.set_gauge_provider"
+        "call:DetachDiagnostics",
+        "ref:state.closed"
       ],
       "target": "lifecycle-close",
       "work_package": "2,6",
       "replacement": "DetachDiagnostics -> CloseStepOutcome",
       "test": "diagnostic gauges detach without a post-close callback",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "temporary-artifacts",

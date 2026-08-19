@@ -130,4 +130,22 @@ class StopSession:
     reason: str
 
 
-type Effect = AsyncEffect | CoreControl | EmitDiagnostic | StopSession
+@dataclass(frozen=True, slots=True)
+class DetachDiagnostics:
+    """Drop the session's telemetry gauge provider.
+
+    Named rather than generic: the vocabulary is closed, so a lifecycle step arrives as its own
+    effect instead of an "invoke this callable" escape hatch that would reopen it. The close
+    duties in `tests/fixtures/runtime_migration_manifest.json` each declare the effect that
+    replaces them, and this is `telemetry`'s.
+    """
+
+
+type LifecycleEffect = StopSession | DetachDiagnostics
+
+#: What leaves the runtime through the effect dispatcher. `StopSession` is absent because the
+#: reactor performs it itself, and the two diagnostic/control kinds have their own ports.
+type DispatchedEffect = AsyncEffect | DetachDiagnostics
+
+
+type Effect = AsyncEffect | CoreControl | EmitDiagnostic | LifecycleEffect

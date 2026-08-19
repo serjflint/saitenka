@@ -40,6 +40,18 @@ class CloseRequested:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionClosing:
+    """The close sequence has reached the runtime's participants.
+
+    Distinct from `CloseRequested`, which is the *stop* signal a disconnect or an overloaded
+    mailbox raises to end the session. This is the session announcing that it is tearing down, so
+    the owners that registered lifetimes can retire them. One event for both would mean claiming
+    `CloseRequested` away from the legacy router, which is what turns a lost transport into a
+    stopped session.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class StartupHintRequested:
     """IPC is up: post the one thing that can be seen before any overlay exists."""
 
@@ -156,6 +168,7 @@ type RuntimeEvent = (
     | ConnectionReady
     | ConnectionReplaced
     | CloseRequested
+    | SessionClosing
     | RawMpvEvent
     | StartupHintRequested
     | StartupReady

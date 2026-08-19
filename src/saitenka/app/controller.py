@@ -159,6 +159,7 @@ from saitenka.runtime import (
     EffectFinished,
     EffectOutcome,
     Owner,
+    SessionClosing,
     StartupReady,
     UserCommand,
     playback,
@@ -3741,8 +3742,13 @@ class Reader:
                 ),
                 # Hand the mouse back before a detached mpv outlives us.
                 CloseStep("mouse-capture", lambda: self._release_mouse_capture()),
-                # Drop our cache-gauge closure before teardown.
-                CloseStep("telemetry-gauges", lambda: telemetry.set_gauge_provider(None)),
+                # The runtime's own close participants, in the position the Reader used to run
+                # them: it announces, the session reducer emits their effects. Delivered rather
+                # than published — the session loop has stopped, and draining here would run a
+                # full domain turn against half-closed collaborators.
+                CloseStep(
+                    "runtime-close", lambda: self.ipc.deliver_runtime_event(SessionClosing())
+                ),
                 # Signal the workers; they do no IPC so this is race-free.
                 CloseStep("stop-workers", lambda: self._stop.set()),
                 CloseStep("lane-budget", lambda: budget.append(time.monotonic() + 2.0)),

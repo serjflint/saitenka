@@ -151,6 +151,17 @@ class LegacyEventRouter:
         if not claimed:
             self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
 
+    def announce(self, event: RuntimeEvent, now: float, connection_epoch: int) -> bool:
+        """Show the reactor one event that never went through the mailbox.
+
+        The sequence number is the mailbox's ordering device and the reactor does not read it, so
+        an off-mailbox announcement carries 0 rather than inventing one that would collide.
+        """
+        if self._reactor is None:
+            return False
+        self._reactor.handle(EventEnvelope(0, now, EventOrigin.LIFECYCLE, connection_epoch, event))
+        return True
+
     def _observe(self, envelope: EventEnvelope) -> None:
         if self._reactor is not None:
             self._reactor.handle(envelope)
@@ -264,6 +275,16 @@ class MpvGateway:
         except MailboxFull:
             return False
         return True
+
+    def deliver_session_event(self, event: RuntimeEvent) -> bool:
+        """Hand a session fact straight to the observing reactor, bypassing the mailbox.
+
+        For facts that arise *after* the session loop has stopped — close, above all. Publishing
+        one would need someone to drain it, and a drain during teardown runs a full domain turn
+        (cue settlement, reconcile) against half-closed collaborators. `handle` reads nothing but
+        the envelope, so this is the whole cost.
+        """
+        return self._router.announce(event, self._clock(), self.connection_epoch)
 
     def dispatch_effect(self, effect) -> bool:
         """Perform one reactor-issued effect. Only the kinds an owner has actually migrated."""

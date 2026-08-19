@@ -146,3 +146,72 @@ def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
     assert order.index("mask-atlas-startup") < order.index("lane:mask-atlas-startup")
     assert order.index("lane:mask-atlas-startup") < order.index("mask-atlas-uninstall")
     assert order[-1] == "temporary-artifacts"
+
+
+# --- close participants the runtime owns ---------------------------------------------------------
+#
+# The `telemetry` close duty: the gauge provider is dropped by a session reducer emitting
+# `DetachDiagnostics`, not by a line in `Reader.close`. The Reader's remaining part is announcing
+# that close reached the runtime's participants.
+
+
+def test_closing_a_session_detaches_the_diagnostic_gauges_through_the_runtime() -> None:
+    """The duty's oracle: gauges detach with no post-close callback naming telemetry."""
+    from util import runtime_gateway
+
+    from saitenka.app import telemetry
+    from saitenka.app.session_routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    telemetry.set_gauge_provider(lambda: {"panel_cache.size": 1.0})
+    try:
+        assert telemetry._gauge_provider is not None  # negative control: the oracle can fail
+        ledger = reader.close()
+        detached = telemetry._gauge_provider is None
+    finally:
+        telemetry.set_gauge_provider(None)
+        gateway.close()
+
+    assert detached
+    assert "runtime-close" in ledger.completed
+    assert ledger.report() is None
+
+
+def test_a_session_without_a_runtime_still_closes_cleanly() -> None:
+    """`deliver_runtime_event` returns False rather than raising when no gateway owns the session —
+    a screenshot capture and most unit tests are exactly that, and close must not care."""
+    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+
+    ledger = reader.close()
+
+    assert ledger.report() is None
+    assert "runtime-close" in ledger.completed
+
+
+def test_a_second_close_announcement_does_not_re_detach() -> None:
+    """Latched on purpose: a stop racing an explicit close must not retire something an owner has
+    since reinstalled. Close is idempotent by design here, not by luck."""
+    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+    from saitenka.runtime.events import SessionClosing
+
+    first = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing())
+    second = reduce_lifecycle_close(first.state, SessionClosing())
+
+    assert len(first.effects) == 1
+    assert second.effects == ()
+
+
+def test_the_close_feature_ignores_the_events_it_shares_a_slot_with() -> None:
+    """It sits in `Owner.SESSION`'s slice, which broadcasts — so every other session event reaches
+    it too, and reacting to one would detach the gauges mid-session."""
+    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+    from saitenka.runtime.events import ConnectionReplaced, StartupReady
+
+    state = LifecycleCloseState()
+    for event in (StartupReady(), ConnectionReplaced(1)):
+        result = reduce_lifecycle_close(state, event)
+        assert result.effects == ()
+        assert result.state is state

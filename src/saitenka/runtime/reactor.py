@@ -10,6 +10,8 @@ from saitenka.runtime.effects import (
     AsyncEffect,
     CancelEffect,
     CoreControl,
+    DetachDiagnostics,
+    DispatchedEffect,
     Effect,
     EffectError,
     EffectId,
@@ -43,7 +45,7 @@ class Reducer[StateT](Protocol):
 
 
 class EffectDispatcher(Protocol):
-    def __call__(self, effect: AsyncEffect, /) -> bool: ...
+    def __call__(self, effect: DispatchedEffect, /) -> bool: ...
 
 
 class ControlDispatcher(Protocol):
@@ -171,6 +173,12 @@ class SessionReactor[StateT]:
             return
         if isinstance(effect, StopSession):
             self.close()
+            return
+        if isinstance(effect, DetachDiagnostics):
+            # Fire-and-forget, like `StopSession`: a lifecycle effect carries no ID because there
+            # is nothing to correlate a completion to. Reserving a terminal for one would leave a
+            # reservation nothing ever retires, and close is when that matters least and costs most.
+            self._dispatch(effect)
             return
         if isinstance(effect, (CancelEffect, ExpireEffect)):
             if self._control is not None:
