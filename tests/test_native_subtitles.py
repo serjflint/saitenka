@@ -2035,6 +2035,37 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     result.close()
 
 
+@pytest.mark.parametrize("trigger", ["empty-cue", "reconnect", "mode-change"])
+def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, trigger: str) -> None:
+    """WP4.3's "exactly one ownership result", driven at all four triggers rather than the
+    activation path alone.
+
+    "Exactly one" overstates it, and the empty cue is why: it settles ownership without asking mpv
+    anything, because nothing about the pixels changed. The contract that holds across all of them
+    is *at most* one assertion per trigger and one owner at the end — two writes to
+    `sub-visibility` from one trigger are what orphan an assertion and strand the pixels.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    ipc.commands.clear()
+
+    if trigger == "empty-cue":
+        renderer.cue_changed(result, nonempty=False)
+    elif trigger == "reconnect":
+        renderer.connection_replaced(result)
+    else:
+        result.subtitle_pipeline.activate(result)
+
+    assert ipc.commands.count(("set_property", "sub-visibility", True)) <= 1
+    assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE
+    assert not renderer.assertion_in_flight  # nothing left orphaned behind the result
+    result.close()
+
+
 def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
