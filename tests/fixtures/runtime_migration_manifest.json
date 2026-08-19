@@ -14,10 +14,6 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._build_command_router.seek"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._get"
     ],
     [
@@ -63,14 +59,6 @@
     [
       "direct-mpv-command",
       "src/saitenka/app/media.py::screenshot"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/sidebar.py::_open_mined"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/sidebar.py::_seek_hit"
     ],
     [
       "direct-mpv-command",

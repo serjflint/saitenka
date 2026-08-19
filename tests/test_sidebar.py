@@ -1,6 +1,7 @@
 """Whole-episode subtitle sidebar behavior at the Reader seam."""
 
 import pytest
+import util
 from PIL import Image
 
 from saitenka.app import sidebar
@@ -19,37 +20,10 @@ from saitenka.app.wordlists import KnownWords
 from saitenka.subtitles import Cue, CueIndex
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-        #: The runtime timer port, wired for this file only. The sidebar's manual-scroll hold is a
-        #: named deadline now, and it fails closed — a fake without the port would exercise the
-        #: no-hold arm and quietly stop testing the hold at all.
-        self.timers: dict[str, tuple] = {}
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
-
-    def schedule_runtime_timer(self, *, timer, identity, on_finished, **_kwargs) -> bool:
-        self.timers[timer] = (identity, on_finished)
-        return True
-
-    def cancel_runtime_timer(self, timer: str) -> bool:
-        return self.timers.pop(timer, None) is not None
-
-    def fire_runtime_timer(self, timer: str) -> bool:
-        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
-
-        entry = self.timers.pop(timer, None)
-        if entry is None:
-            return False
-        identity, on_finished = entry
-        on_finished(EffectFinished(EffectId(0), Owner.SESSION, identity, EffectOutcome.SUCCEEDED))
-        return True
+        super().__init__()
+        self.props.update(props or {})
 
 
 class FakeOverlay:

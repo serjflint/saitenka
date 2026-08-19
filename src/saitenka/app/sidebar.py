@@ -11,8 +11,10 @@ from saitenka import otel_metrics
 from saitenka.app import analysis_overlay, mined_store
 from saitenka.app.backlog import BacklogEntry, BacklogStore, MediaRecord, db_path
 from saitenka.app.languages import SECOND_LANG
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
+from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
@@ -296,7 +298,14 @@ def _open_mined(reader: Reader, note_id: int) -> None:
     card = store.by_note_id(note_id)
     if card is None:
         return
-    reader.ipc.command("set_property", "time-pos", card.cue_start)
+    send_correlated(
+        reader.ipc,
+        "sidebar-seek-mined",
+        "set_property",
+        "time-pos",
+        card.cue_start,
+        owner=Owner.PLAYBACK,
+    )
     if reader.anki and reader.mine_cfg:
         from saitenka.app import miner_ui
 
@@ -446,11 +455,23 @@ def update(reader: Reader) -> None:
 
 def _seek_hit(reader: Reader, hit) -> bool:
     if hit.kind == "seek" and reader._sub_index is not None:
-        reader.ipc.command("set_property", "time-pos", reader._sub_index.cues[hit.value].start)
+        send_correlated(
+            reader.ipc,
+            "sidebar-seek-cue",
+            "set_property",
+            "time-pos",
+            reader._sub_index.cues[hit.value].start,
+            owner=Owner.PLAYBACK,
+        )
         return True
     if hit.kind == "backlog-seek":
-        reader.ipc.command(
-            "set_property", "time-pos", _ensure_store(reader).entry(hit.value).cue_start
+        send_correlated(
+            reader.ipc,
+            "sidebar-seek-backlog",
+            "set_property",
+            "time-pos",
+            _ensure_store(reader).entry(hit.value).cue_start,
+            owner=Owner.PLAYBACK,
         )
         return True
     return False

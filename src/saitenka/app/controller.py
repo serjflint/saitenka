@@ -2784,11 +2784,6 @@ class Reader:
         def action(method_name: str) -> Callable[[], None]:
             return lambda: getattr(self, method_name)()
 
-        def seek(delta: int) -> None:
-            self.subtitle_pipeline.invalidate()
-            self._sub_nav(delta)
-            self.ipc.command("sub-seek", str(delta))
-
         def interaction(command) -> Callable[[], None]:
             return lambda: self._run_interaction_command(command)
 
