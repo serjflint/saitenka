@@ -11,13 +11,14 @@ It lives in `app/` rather than `mpvio/` because it names app features; `mpvio` m
 
 from __future__ import annotations
 
+import shutil
 import time
 from typing import TYPE_CHECKING
 
 from saitenka.app import telemetry
 from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
-from saitenka.runtime.effects import DetachDiagnostics, Owner
+from saitenka.runtime.effects import DetachDiagnostics, Owner, RemoveSessionArtifacts
 from saitenka.runtime.events import (
     ConnectionReplaced,
     EffectFinished,
@@ -90,6 +91,9 @@ def _dispatcher(gateway: MpvGateway) -> Callable[[Effect], bool]:
     def dispatch(effect: Effect) -> bool:
         if isinstance(effect, DetachDiagnostics):
             telemetry.set_gauge_provider(None)
+            return True
+        if isinstance(effect, RemoveSessionArtifacts):
+            shutil.rmtree(effect.path, ignore_errors=True)
             return True
         return gateway.dispatch_effect(effect)
 

@@ -14,22 +14,32 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.runtime.effects import DetachDiagnostics
-from saitenka.runtime.events import SessionClosing
+from saitenka.runtime.effects import DetachDiagnostics, RemoveSessionArtifacts
+from saitenka.runtime.events import ClosePhase, SessionClosing
 from saitenka.runtime.state import ReduceResult
 
 if TYPE_CHECKING:
+    from saitenka.runtime.effects import Effect
     from saitenka.runtime.events import RuntimeEvent
 
 
 @dataclass(frozen=True, slots=True)
 class LifecycleCloseState:
-    closed: bool = False
+    done: frozenset[ClosePhase] = frozenset()
+
+
+def _effects(event: SessionClosing) -> tuple[Effect, ...]:
+    """What this phase retires. Empty is legitimate — a phase nobody has migrated into yet."""
+    if event.phase is ClosePhase.PARTICIPANTS:
+        return (DetachDiagnostics(),)
+    if event.scratch is not None:
+        return (RemoveSessionArtifacts(event.scratch),)
+    return ()
 
 
 def reduce_lifecycle_close(state: object, event: RuntimeEvent, /) -> ReduceResult:
     """`FeatureReducer` for the close participants `Owner.SESSION` owns."""
     assert isinstance(state, LifecycleCloseState)
-    if not isinstance(event, SessionClosing) or state.closed:
+    if not isinstance(event, SessionClosing) or event.phase in state.done:
         return ReduceResult(state)
-    return ReduceResult(LifecycleCloseState(closed=True), effects=(DetachDiagnostics(),))
+    return ReduceResult(LifecycleCloseState(state.done | {event.phase}), effects=_effects(event))

@@ -215,3 +215,44 @@ def test_the_close_feature_ignores_the_events_it_shares_a_slot_with() -> None:
         result = reduce_lifecycle_close(state, event)
         assert result.effects == ()
         assert result.state is state
+
+
+def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() -> None:
+    """The `ARTIFACTS` phase, which runs once nothing can still write. The Reader's own `rmtree` is
+    a fallback for a session with no runtime, so this proves the runtime path really fires — not
+    that the directory merely ended up gone."""
+    from util import runtime_gateway
+
+    from saitenka.app.session_routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    scratch = reader._tmp
+    assert scratch.exists()  # negative control
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert not scratch.exists()
+    assert ledger.report() is None
+
+
+def test_the_artifacts_phase_is_separate_from_the_participants_phase() -> None:
+    """Close is a sequence: the scratch dir goes only after everything that writes to it stopped,
+    so one announcement for both phases would delete it while lanes were still draining."""
+    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+    from saitenka.runtime.effects import DetachDiagnostics, RemoveSessionArtifacts
+    from saitenka.runtime.events import ClosePhase, SessionClosing
+
+    participants = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing())
+    artifacts = reduce_lifecycle_close(
+        participants.state, SessionClosing(ClosePhase.ARTIFACTS, "/tmp/scratch")
+    )
+
+    assert [type(effect) for effect in participants.effects] == [DetachDiagnostics]
+    assert artifacts.effects == (RemoveSessionArtifacts("/tmp/scratch"),)
+    # Latched per phase, not globally: a re-announced phase is a no-op, a new one is not.
+    assert reduce_lifecycle_close(artifacts.state, SessionClosing()).effects == ()

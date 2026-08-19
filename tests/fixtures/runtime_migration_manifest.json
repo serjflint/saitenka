@@ -1007,11 +1007,11 @@
         "call:close_lane:mask-atlas-startup",
         "call:mask_atlas_startup.uninstall",
         "order:call:self._stop.set>call:close_lane:subtitle-fetch",
-        "order:call:close_lane:cue-annotation>call:shutil.rmtree",
-        "order:call:close_lane:tooltip-render-ahead>call:shutil.rmtree",
-        "order:call:close_lane:tooltip-engaged>call:shutil.rmtree",
-        "order:call:close_lane:speculative-prefetch>call:shutil.rmtree",
-        "order:call:close_lane:mask-atlas-startup>call:shutil.rmtree",
+        "order:call:close_lane:cue-annotation>call:self._retire_artifacts",
+        "order:call:close_lane:tooltip-render-ahead>call:self._retire_artifacts",
+        "order:call:close_lane:tooltip-engaged>call:self._retire_artifacts",
+        "order:call:close_lane:speculative-prefetch>call:self._retire_artifacts",
+        "order:call:close_lane:mask-atlas-startup>call:self._retire_artifacts",
         "call:self._annotation.close",
         "order:call:prefetch.close>call:close_lane:speculative-prefetch",
         "order:call:mask_atlas_startup.close>call:close_lane:mask-atlas-startup",
@@ -1078,10 +1078,10 @@
     },
     {
       "id": "telemetry",
-      "source": "src/saitenka/app/lifecycle_close.py::reduce_lifecycle_close",
+      "source": "src/saitenka/app/lifecycle_close.py::_effects",
       "evidence": [
         "call:DetachDiagnostics",
-        "ref:state.closed"
+        "ref:event.phase"
       ],
       "target": "lifecycle-close",
       "work_package": "2,6",
@@ -1091,8 +1091,9 @@
     },
     {
       "id": "temporary-artifacts",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/app/controller.py::Reader._retire_artifacts",
       "evidence": [
+        "call:SessionClosing",
         "call:shutil.rmtree"
       ],
       "target": "artifact-close",

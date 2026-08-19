@@ -39,16 +39,35 @@ class CloseRequested:
     reason: str = "requested"
 
 
+class ClosePhase(StrEnum):
+    """How far teardown has got. Close is a sequence, so its participants are not interchangeable.
+
+    A phase is defined by what is already gone, because that is the only thing a participant can
+    depend on: `PARTICIPANTS` runs while every collaborator and the transport are still live;
+    `ARTIFACTS` runs once nothing can write any more.
+    """
+
+    PARTICIPANTS = "participants"
+    ARTIFACTS = "artifacts"
+
+
 @dataclass(frozen=True, slots=True)
 class SessionClosing:
-    """The close sequence has reached the runtime's participants.
+    """The close sequence has reached the runtime's participants for `phase`.
 
     Distinct from `CloseRequested`, which is the *stop* signal a disconnect or an overloaded
     mailbox raises to end the session. This is the session announcing that it is tearing down, so
     the owners that registered lifetimes can retire them. One event for both would mean claiming
     `CloseRequested` away from the legacy router, which is what turns a lost transport into a
     stopped session.
+
+    `scratch` is the session's per-run directory, carried here because the runtime outlives no
+    Reader and the path is created per Reader — the *decision* to remove it, once and only after
+    everything that could still write to it has stopped, is what has moved.
     """
+
+    phase: ClosePhase = ClosePhase.PARTICIPANTS
+    scratch: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

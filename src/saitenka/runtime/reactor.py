@@ -18,6 +18,7 @@ from saitenka.runtime.effects import (
     EffectOutcome,
     EmitDiagnostic,
     ExpireEffect,
+    RemoveSessionArtifacts,
     StopSession,
 )
 from saitenka.runtime.events import (
@@ -174,7 +175,7 @@ class SessionReactor[StateT]:
         if isinstance(effect, StopSession):
             self.close()
             return
-        if isinstance(effect, DetachDiagnostics):
+        if isinstance(effect, DetachDiagnostics | RemoveSessionArtifacts):
             # Fire-and-forget, like `StopSession`: a lifecycle effect carries no ID because there
             # is nothing to correlate a completion to. Reserving a terminal for one would leave a
             # reservation nothing ever retires, and close is when that matters least and costs most.

@@ -141,11 +141,23 @@ class DetachDiagnostics:
     """
 
 
-type LifecycleEffect = StopSession | DetachDiagnostics
+@dataclass(frozen=True, slots=True)
+class RemoveSessionArtifacts:
+    """Delete the session's scratch directory, once nothing can still write to it."""
+
+    path: str
+
+
+type LifecycleEffect = StopSession | DetachDiagnostics | RemoveSessionArtifacts
+
+#: Lifecycle effects the reactor hands straight to the dispatcher. No `EffectId`, so no reserved
+#: terminal and no completion: nothing correlates to them, and a reservation raised during close
+#: is one nothing would ever retire.
+type FireAndForget = DetachDiagnostics | RemoveSessionArtifacts
 
 #: What leaves the runtime through the effect dispatcher. `StopSession` is absent because the
-#: reactor performs it itself, and the two diagnostic/control kinds have their own ports.
-type DispatchedEffect = AsyncEffect | DetachDiagnostics
+#: reactor performs it itself, and the diagnostic/control kinds have their own ports.
+type DispatchedEffect = AsyncEffect | FireAndForget
 
 
 type Effect = AsyncEffect | CoreControl | EmitDiagnostic | LifecycleEffect

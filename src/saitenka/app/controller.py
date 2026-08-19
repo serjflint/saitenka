@@ -151,6 +151,7 @@ from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.mpvio.osd import Overlay
 from saitenka.runtime import (
+    ClosePhase,
     CommandHandled,
     CommandReason,
     ConnectionLost,
@@ -3712,7 +3713,6 @@ class Reader:
         open one, so per-duty evidence and its pairwise `order:` constraints survive here — and
         would not survive being factored into a nested `def`.
         """
-        import shutil
 
         close_lane = getattr(self.ipc, "close_runtime_job_lane", None) or _no_lane
         # Armed by a step, not here: the 2s lane budget starts once the capabilities are down, and
@@ -3826,16 +3826,28 @@ class Reader:
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
                 CloseStep("lifecycle-surfaces", lambda: self.lifecycle_surfaces.close()),
                 CloseStep("transport", lambda: self.ov.close()),
-                # Per-session scratch dir.
-                CloseStep(
-                    "temporary-artifacts", lambda: shutil.rmtree(self._tmp, ignore_errors=True)
-                ),
+                # Per-session scratch dir, once nothing can still write to it.
+                CloseStep("temporary-artifacts", lambda: self._retire_artifacts()),
             )
         )
         report = ledger.report()
         if report is not None:
             log.warning("%s", report)
         return ledger
+
+    def _retire_artifacts(self) -> None:
+        """Hand the scratch dir to the runtime's `ARTIFACTS` phase, or remove it ourselves.
+
+        The fallback is what still keeps this duty out of the runtime: a `Reader` with no gateway
+        is not a session, but it did create the directory, and nothing else would remove it. It
+        goes when composition guarantees a runtime — until then two paths for one removal is the
+        honest state, not a migrated one.
+        """
+        import shutil
+
+        closing = SessionClosing(ClosePhase.ARTIFACTS, str(self._tmp))
+        if not self.ipc.deliver_runtime_event(closing):
+            shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _report_session(self, summary: str | None) -> None:
         if summary and self.options.stats.summary:
