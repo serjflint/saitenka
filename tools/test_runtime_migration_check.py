@@ -25,16 +25,10 @@ def test_runtime_migration_manifest_matches_production() -> None:
     # Two live rows, so the scanner is checked against production and not only against the
     # synthetic source below. They are anchors, not landmarks: as the migration converts them, point
     # these at whatever `poe runtime-status` still reports rather than weakening the assertion.
+    # `polled-deadline` is at zero, so these are `tick-stage` — the next kind WP5 empties.
+    assert checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader.poll_once") in actual
     assert (
-        checker.Debt(
-            "polled-deadline", "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
-        )
-        in actual
-    )
-    assert (
-        checker.Debt(
-            "polled-deadline", "src/saitenka/app/controller.py::Reader._request_mined_seed"
-        )
+        checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader._update_interaction")
         in actual
     )
 

@@ -14,6 +14,10 @@
     ],
     [
       "direct-mpv-command",
+      "src/saitenka/app/controller.py::Reader._assert_mouse_capture"
+    ],
+    [
+      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._build_command_router.seek"
     ],
     [
@@ -39,10 +43,6 @@
     [
       "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._seek_cue"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
     ],
     [
       "direct-mpv-command",
@@ -211,14 +211,6 @@
     [
       "driver-switch",
       "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._request_mined_seed"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
     ],
     [
       "reader-parameter",

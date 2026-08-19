@@ -22,6 +22,8 @@ class LifecycleTimerKind(StrEnum):
     TOAST_EXPIRY = "toast-expiry"
     FLASH_EXPIRY = "flash-expiry"
     SIDEBAR_MANUAL_HOLD = "sidebar-manual-hold"
+    MINED_SEED_RETRY = "mined-seed-retry"
+    MOUSE_CAPTURE_REASSERT = "mouse-capture-reassert"
     #: Hover dwell. Interaction-owned, but the same mechanism: one deadline per kind, latest wins.
     #: A second implementation of revision-fenced named timers is the divergence this avoids.
     HOVER_SWITCH = "hover-switch"

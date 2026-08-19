@@ -389,7 +389,7 @@ class Reader:
         self._mined_seed_inflight = False
         self._mined_seed_done = False
         self._mined_seed_failures = 0
-        self._mined_seed_next_due = 0.0
+        self._mined_seed_retry_pending = False
         self._mined_generation = 0
         from saitenka.app.interaction_jobs import InteractionJobs
 
@@ -595,7 +595,6 @@ class Reader:
         # Forced mouse-section state (see _sync_mouse_capture).
         self._mouse_section_defined = False
         self._mouse_captured = False
-        self._mouse_reassert_at = 0.0
         # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
         self.scan_delay = o.tooltip.scan_delay
         self.hover_switch_delay = o.tooltip.hover_switch_delay
@@ -1912,29 +1911,48 @@ class Reader:
         return surfaces.wants_mouse_capture(self)
 
     def _sync_mouse_capture(self) -> None:
-        """Own clicks/wheel while a saitenka surface is up (re-asserting the forced section every 0.5s
-        so a script re-forcing its own can't reclaim it), release it otherwise."""
+        """Own clicks/wheel while a saitenka surface is up, release it otherwise.
+
+        The re-assertion that keeps another script from reclaiming the forced section is a repeating
+        named deadline now, not a timestamp this compares against.
+        """
         if not self._mouse_section_defined:
             return
-        want = self._wants_mouse_capture()
         try:
-            if want:
-                now = time.monotonic()
-                if not self._mouse_captured or now >= self._mouse_reassert_at:
-                    self.ipc.command(
-                        "enable-section", MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging"
-                    )
-                    self._mouse_captured, self._mouse_reassert_at = True, now + 0.5
+            if self._wants_mouse_capture():
+                if not self._mouse_captured:
+                    self._assert_mouse_capture()
             elif self._mouse_captured:
-                self.ipc.command("disable-section", MOUSE_SECTION)
-                self._mouse_captured = False
+                self._release_mouse_capture()
         except (OSError, ValueError):
             pass  # mpv went away mid-tick — poll_once will notice
 
+    def _assert_mouse_capture(self) -> None:
+        """Force the section and arm its re-assertion.
+
+        Fails open: with no timer the section is forced once and never refreshed, so capture still
+        works and only the defence against a script reclaiming it is lost.
+        """
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        self.ipc.command("enable-section", MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
+        self._mouse_captured = True
+
+        def due() -> None:
+            # Re-check rather than trust the arm: the surface may have gone down since, and a
+            # re-assert then would take the mouse back from mpv for nothing.
+            if self._mouse_captured and self._wants_mouse_capture():
+                self._assert_mouse_capture()
+
+        self.lifecycle_timers.schedule(LifecycleTimerKind.MOUSE_CAPTURE_REASSERT, 0.5, due)
+
     def _release_mouse_capture(self) -> None:
-        """Drop the forced section on teardown so a detached mpv can't route clicks to a dead saitenka."""
+        """Drop the forced section so a detached mpv can't route clicks to a dead saitenka."""
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
         if not self._mouse_captured:
             return
+        self.lifecycle_timers.cancel(LifecycleTimerKind.MOUSE_CAPTURE_REASSERT)
         try:
             self.ipc.command("disable-section", MOUSE_SECTION)
         except (OSError, ValueError):
@@ -2477,7 +2495,7 @@ class Reader:
         if (
             self._mined_seed_inflight
             or self._mined_seed_done
-            or time.monotonic() < self._mined_seed_next_due
+            or self._mined_seed_retry_pending
             or self.anki is None
             or self.mine_cfg is None
         ):
@@ -2494,6 +2512,22 @@ class Reader:
             on_finished=self._finish_mined_seed,
         )
 
+    def _arm_mined_seed_retry(self, delay_s: float) -> None:
+        """Back off before the next mined-seed attempt.
+
+        Fails open: with no timer the retry simply is not held back, so the seed still lands on a
+        later capability pass. Losing the backoff costs requests; never retrying costs the feature.
+        """
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        def due() -> None:
+            self._mined_seed_retry_pending = False
+            self._request_mined_seed()
+
+        self._mined_seed_retry_pending = self.lifecycle_timers.schedule(
+            LifecycleTimerKind.MINED_SEED_RETRY, delay_s, due
+        )
+
     def _finish_mined_seed(self, completion: EffectFinished) -> None:
         generation = completion.identity
         if (
@@ -2506,9 +2540,7 @@ class Reader:
         values = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
         if not isinstance(values, set):
             self._mined_seed_failures += 1
-            self._mined_seed_next_due = time.monotonic() + min(
-                8.0, 0.25 * (2 ** (self._mined_seed_failures - 1))
-            )
+            self._arm_mined_seed_retry(min(8.0, 0.25 * (2 ** (self._mined_seed_failures - 1))))
             return
         self._mined_seed_done = True
         self._mined_seed_failures = 0

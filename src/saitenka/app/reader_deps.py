@@ -513,7 +513,10 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     reader._mined_seed_inflight = False
     reader._mined_seed_done = False
     reader._mined_seed_failures = 0
-    reader._mined_seed_next_due = 0.0
+    # A backoff armed against the previous deps would retry into the new ones, so retire it here
+    # rather than only clearing the flag that gates the next attempt.
+    reader.lifecycle_timers.cancel(LifecycleTimerKind.MINED_SEED_RETRY)
+    reader._mined_seed_retry_pending = False
     reader.scorer = deps.get("scorer")
     reader.anki = deps.get("anki")
     reader.mine_cfg = deps.get("mine_cfg")

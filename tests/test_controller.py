@@ -123,6 +123,42 @@ def test_mouse_controls_live_in_a_forced_section():
     assert ipc.commands[-1] == ("disable-section", name)
 
 
+def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
+    """A rival script can re-force its own section at any time, so ours is re-asserted on a repeating
+    deadline. The due event re-checks rather than trusting the arm: re-forcing after the surface
+    went down would take the mouse back from mpv for nothing."""
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    r._register_keybinds()
+    r._tip_rect = (0, 0, 10, 10)
+    r._sync_mouse_capture()
+    forced = ipc.commands.count(
+        ("enable-section", C.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
+    )
+
+    assert ipc.fire_runtime_timer("lifecycle:mouse-capture-reassert")  # a rival may have taken it
+    assert (
+        ipc.commands.count(
+            ("enable-section", C.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
+        )
+        == forced + 1
+    )
+
+    from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+    identity, due = ipc.timers["lifecycle:mouse-capture-reassert"]  # captured in flight
+    r._tip_rect = None
+    r._sync_mouse_capture()  # surface down → released, and the re-assertion retired with it
+    assert ipc.commands[-1] == ("disable-section", C.MOUSE_SECTION)
+
+    due(EffectFinished(EffectId(0), Owner.SESSION, identity, EffectOutcome.SUCCEEDED))
+
+    assert ipc.commands[-1] == (
+        "disable-section",
+        C.MOUSE_SECTION,
+    )  # the late one took nothing back
+
+
 def test_hover_pause_key_is_configurable():
     from saitenka.app.config import KeyOptions, ReaderOptions
 

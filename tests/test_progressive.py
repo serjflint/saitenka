@@ -147,8 +147,9 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
             time.sleep(0.001)
         assert r._mined == set()
 
-        r._mined_seed_next_due = 0.0
-        r._request_mined_seed()
+        # The backoff is a named deadline now, so firing it *is* the retry — and asserting it was
+        # armed proves the failure path scheduled one rather than silently giving up.
+        assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
         for _ in range(200):
             r._drain_events()
             if r._mined:
