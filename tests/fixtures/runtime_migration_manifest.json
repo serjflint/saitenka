@@ -410,10 +410,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subnav.py::_get_float"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subnav.py::load_sub_index"
     ],
     [

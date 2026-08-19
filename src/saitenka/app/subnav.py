@@ -14,6 +14,8 @@ from saitenka.app import subnav_policy, subnav_settle
 from saitenka.app.sub_index import load_index
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.controller import Reader
 
 
@@ -38,12 +40,18 @@ def load_sub_index(reader: Reader, path) -> None:
     reader.warm_episode_tokens()  # warm the whole episode's cues into the token cache (bg, best-effort)
 
 
-def _get_float(reader: Reader, prop: str) -> float | None:
-    v = reader._get(prop)  # a direct get_property is fine: nav keys are rare, not per-tick
+def _get_float(get: Callable[[str], object], prop: str) -> float | None:
+    """Read one mpv property as a float, or None if it is absent or not numeric.
+
+    Takes the getter rather than the host *or* the IPC: taking `ipc` would only trade this row of
+    `reader-parameter` debt for a row of `direct-mpv-read`, since `Reader._get` is a bare
+    `get_property`. A callable leaves the caller owning how the read happens.
+    """
+    v = get(prop)  # a direct get_property is fine: nav keys are rare, not per-tick
     if v is None:
         return None
     try:
-        return float(v)
+        return float(v)  # type: ignore[arg-type]  # TypeError is the point of the except below
     except (TypeError, ValueError):
         return None
 
@@ -68,8 +76,8 @@ def sub_nav(reader: Reader, delta: int) -> bool:
             idx,
             delta=delta,
             text=reader.sub_text,
-            sub_start=_get_float(reader, "sub-start"),
-            time_pos=_get_float(reader, "time-pos"),
+            sub_start=_get_float(reader._get, "sub-start"),
+            time_pos=_get_float(reader._get, "time-pos"),
             nav_idx=reader._nav_idx,
         )
         if target is None:
