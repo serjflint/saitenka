@@ -112,7 +112,7 @@ from saitenka.app.miner import Miner, tag_slug
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
-from saitenka.app.popups import Panel, PopupView
+from saitenka.app.popups import NO_HOVER_METADATA, HoverMetadata, Panel, PopupView
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
 from saitenka.app.reader_context import (
     Delegated,
@@ -313,8 +313,7 @@ class Reader:
     _last_mouse = Delegated[tuple[float, float]]("tip", "last_mouse")
     _flash_oid = Delegated[int | None]("tip", "flash_oid")
     _hover_reading = Delegated[str]("tip", "hover_reading")
-    _hover_terms = Delegated[tuple[str, ...]]("tip", "hover_terms")
-    _hover_span = Delegated[tuple[int, int] | None]("tip", "hover_span")
+    _hover_meta = Delegated[HoverMetadata]("tip", "hover")
     _kanji_index = Delegated[int]("tip", "kanji_index")
     _tip_keys_bound = Delegated[bool]("tip", "tip_keys_bound")
     _tip_tok = Delegated[Token | None]("tip", "tip_tok")
@@ -416,8 +415,6 @@ class Reader:
         self._interaction_jobs = InteractionJobs()
         self._interaction_metadata = hover_metadata.InteractionMetadataState()
         self._interaction_metadata_submit = hover_metadata.configure_runtime_job(ipc)
-        self._hover_mined = False
-        self._hover_group_mined: tuple[bool, ...] = ()
         self._loading = False
         self._load_frame = 0
         self._miner = Miner(self)  # mining flow (app/miner.py)
@@ -1069,8 +1066,7 @@ class Reader:
         self._tip_tok = self._tip_inflected = None
         self._tip_nav = []  # drop any link-navigation history with the tooltip
         self._hover_reading = ""
-        self._hover_terms = ()
-        self._hover_span = None
+        self._hover_meta = NO_HOVER_METADATA
         self._kanji_index = 0
         self._unbind_tip_keys()
         if self._paused_by_tip:
@@ -1538,7 +1534,7 @@ class Reader:
     def _clear_native_interaction(self) -> None:
         self._teardown_tip()
         self.hover = -1
-        self._hover_span = None
+        self._hover_meta = NO_HOVER_METADATA
         self.boxes = []
         self.subtitle_pipeline.clear(self)
 

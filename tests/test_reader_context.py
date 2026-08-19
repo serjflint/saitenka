@@ -10,7 +10,7 @@ from __future__ import annotations
 import util
 
 from saitenka.app.controller import Reader
-from saitenka.app.popups import PopupView, TooltipState
+from saitenka.app.popups import HoverMetadata, PopupView, TooltipState
 from saitenka.app.reader_context import EpisodeContext
 
 
@@ -92,7 +92,7 @@ def test_rebinding_tip_resets_the_whole_hover_stack():
     r._scan_target = "cell"
     r._word_target = 2
     r._flash_oid = 7
-    r._hover_terms = ("数ある",)
+    r._hover_meta = HoverMetadata(terms=("数ある",))
     r._kanji_index = 3
     r._paused_by_tip = True
 
@@ -103,7 +103,7 @@ def test_rebinding_tip_resets_the_whole_hover_stack():
     assert r._scan_target is None
     assert r._word_target is None
     assert r._flash_oid is None
-    assert r._hover_terms == ()
+    assert r._hover_meta.terms == ()
     assert r._kanji_index == 0
     assert r._paused_by_tip is False
 

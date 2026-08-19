@@ -17,7 +17,7 @@ import numpy as np
 
 from saitenka.app import tooltip, tooltip_engaged, tooltip_raster
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import Panel
+from saitenka.app.popups import NO_HOVER_METADATA, Panel
 from saitenka.app.render_cache import (
     RenderCache,
     config_signature,
@@ -314,7 +314,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    r._hover_terms = ()
+    r._hover_meta = NO_HOVER_METADATA
     i = next(i for i, t in enumerate(r.tokens) if t.is_content)
     tok = r.tokens[i]
     cap, w = r._tip_cap(), r.tip_width
@@ -664,7 +664,7 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None):
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    r._hover_terms = ()
+    r._hover_meta = NO_HOVER_METADATA
     r.session.render_cache.cache_min_height_px = 0  # store every head (no cost gate) for the test
     cache = _cache(tmp_path)
     r.session.render_cache.obj, r.session.render_cache.built = cache, True
@@ -735,7 +735,7 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
-    key = tooltip.panel_key(r, tok, inflected, mined=mined, phrase=r._hover_terms)
+    key = tooltip.panel_key(r, tok, inflected, mined=mined, phrase=r._hover_meta.terms)
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
     r._panel_cache.clear()

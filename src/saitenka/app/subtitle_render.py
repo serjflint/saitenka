@@ -152,7 +152,7 @@ def build_draw_request(reader: Reader) -> DrawRequest:
             mode=reader.annotation_mode, hover_annotation=reader._annotation_hover
         ),
         hover=reader.hover,
-        hover_span=reader._hover_span,
+        hover_span=reader._hover_meta.span,
         styles=reader.styles,
         boxes=reader.boxes,
     )

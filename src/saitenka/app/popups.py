@@ -11,6 +11,7 @@ Reader's ``Delegated`` shims (the hover FSM and its tests stay untouched).
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka.app.overlay_ids import OverlayId
@@ -244,6 +245,21 @@ class PopupView:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class HoverMetadata:
+    """What a hover lookup resolved: the phrase it found and whether it is already mined."""
+
+    terms: tuple[str, ...] = ()
+    span: tuple[int, int] | None = None
+    mined: bool = False
+    group_mined: tuple[bool, ...] = ()
+
+
+#: No word is hovered, or its lookup was retired. Named so the clear path is one assignment rather
+#: than four literals a reader has to recognise as "empty".
+NO_HOVER_METADATA = HoverMetadata()
+
+
 class TooltipState:
     """Runtime state of the base tooltip + its hover FSM — the big, hot interaction-scoped cluster:
     the shown panel and its scroll/viewport/screen-rect, the in-place link-nav stack, the nested scan
@@ -271,8 +287,10 @@ class TooltipState:
         self.last_mouse = (-1.0, -1.0)  # latest cursor pos — routes the wheel to the popup under it
         self.flash_oid: int | None = None  # a popup pulsing a "copied" highlight border
         self.hover_reading = ""  # dict-form reading of the hovered word, for TTS
-        self.hover_terms: tuple[str, ...] = ()  # multi-token terms starting at the hovered word
-        self.hover_span: tuple[int, int] | None = None  # token span the longest term covers
+        #: What a metadata lookup resolved about the hovered word. Replaced wholesale, never field
+        #: by field: the four values are one lookup's answer, and four separate assignments is how a
+        #: half-updated hover (new terms, stale mined flags) reaches a draw.
+        self.hover = NO_HOVER_METADATA
         self.kanji_index = 0  # `k` cycles the hovered word's kanji
         self.tip_keys_bound = False
         self.tip_tok: Token | None = None  # base tooltip's source token (for the crisp re-render)

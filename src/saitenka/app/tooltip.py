@@ -26,7 +26,7 @@ from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.nested_popup import TIP_GAP
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import timed
-from saitenka.app.popups import Panel, PopupView
+from saitenka.app.popups import NO_HOVER_METADATA, HoverMetadata, Panel, PopupView
 from saitenka.app.subtitles import box_for_token
 from saitenka.model import in_rect
 from saitenka.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
@@ -307,11 +307,13 @@ def resolve_hover(reader: Reader, index: int) -> None:
         if got is not None:
             term_list, start, end = got
             terms, span = tuple(term_list), (start, end)
-    reader._hover_terms = terms
-    reader._hover_span = span
-    reader._hover_mined = is_mined(reader.tokens[index], reader._mined)
-    reader._hover_group_mined = group_mined_of(
-        reader.tokens[index], reader._mined, reader.dict_set, extra_terms=terms
+    reader._hover_meta = HoverMetadata(
+        terms=terms,
+        span=span,
+        mined=is_mined(reader.tokens[index], reader._mined),
+        group_mined=group_mined_of(
+            reader.tokens[index], reader._mined, reader.dict_set, extra_terms=terms
+        ),
     )
 
 
@@ -362,10 +364,12 @@ def apply_hover_metadata(reader: Reader, result) -> None:
     if result.error:
         reader._interaction_jobs.finish("tooltip", "failed")
         return
-    reader._hover_terms = result.phrase_terms
-    reader._hover_span = result.phrase_span
-    reader._hover_mined = result.mined
-    reader._hover_group_mined = result.group_mined
+    reader._hover_meta = HoverMetadata(
+        terms=result.phrase_terms,
+        span=result.phrase_span,
+        mined=result.mined,
+        group_mined=result.group_mined,
+    )
     reader._draw_subtitle()
     if show_tooltip(reader, key.index):
         if reader._session_recorder is not None:
@@ -378,10 +382,7 @@ def set_hover(reader: Reader, index: int) -> None:
         return
     reader.hover = index
     if index < 0:
-        reader._hover_terms = ()
-        reader._hover_span = None
-        reader._hover_mined = False
-        reader._hover_group_mined = ()
+        reader._hover_meta = NO_HOVER_METADATA
         reader._draw_subtitle()
         reader._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
         return
@@ -394,10 +395,7 @@ def set_hover(reader: Reader, index: int) -> None:
         reader._tip_nav = []
         reader._tip_state = None
         reader._tip_rect = None
-        reader._hover_terms = ()
-        reader._hover_span = None
-        reader._hover_mined = False
-        reader._hover_group_mined = ()
+        reader._hover_meta = NO_HOVER_METADATA
         reader._draw_subtitle()
         _request_hover_metadata(reader, index)
         return
@@ -551,7 +549,9 @@ def _mine_link(reader: Reader, lb, tok) -> bool:
     # Same expanded card list the stacked panel was built from (phrase terms included), so the ⊕'s
     # card_index aligns with the group it sits on.
     cards = (
-        reader.dict_set.cards_for(tok, extra_terms=reader._hover_terms) if reader.dict_set else []
+        reader.dict_set.cards_for(tok, extra_terms=reader._hover_meta.terms)
+        if reader.dict_set
+        else []
     )
     if 0 <= idx < len(cards):
         reader._mine_token(tok, card=cards[idx])
@@ -994,8 +994,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     if b is None:
         log.debug("tooltip anchor disappeared for token index %d", index)
         reader.hover = -1
-        reader._hover_terms = ()
-        reader._hover_span = None
+        reader._hover_meta = NO_HOVER_METADATA
         reader._interaction_jobs.finish("tooltip", "failed")
         reader._teardown_tip()
         return False
@@ -1019,15 +1018,15 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # windowed engine composites the rest on scroll with overscan look-ahead.
     # jamdict card_for on the main thread (not worker-safe) — untraced until now; a suspect for the
     # tooltip_show self-time under --mine, where reader._mined is populated so this actually looks up.
-    mined = reader._hover_mined
-    phrase = reader._hover_terms
+    mined = reader._hover_meta.mined
+    phrase = reader._hover_meta.terms
     key = panel_key(
         reader,
         tok,
         inflected,
         mined=mined,
         phrase=phrase,
-        group_mined=reader._hover_group_mined,
+        group_mined=reader._hover_meta.group_mined,
     )
     reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
     ox, oy = reader.sub_origin
@@ -1063,7 +1062,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         min_h=cap,
         mined=mined,
         extra_terms=phrase,
-        group_mined=reader._hover_group_mined,
+        group_mined=reader._hover_meta.group_mined,
     )
     # Direct-paint hit built a fresh interactive panel — seed its first viewport from tier-2 (RAM inflate,
     # no disk on the main thread) so scrolling back to 0 later re-blits warm.

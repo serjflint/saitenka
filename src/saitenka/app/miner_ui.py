@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -58,7 +59,7 @@ def mark_mined(reader: Reader, expression: str) -> None:
     if reader.hover >= 0 and reader._tip_state is not None:
         token = reader.tokens[reader.hover]
         if expression in {token.lemma, token.surface}:
-            reader._hover_mined = True
+            reader._hover_meta = replace(reader._hover_meta, mined=True)
         reader._show_tooltip(reader.hover)  # rebuild the base tooltip (✓ if it's this word)
     if reader._nest.state is not None and reader._nest.token is not None:
         rerender_nested(reader)  # and the nested popup
