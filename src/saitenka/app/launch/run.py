@@ -23,6 +23,7 @@ from saitenka.app.jimaku import parse_filename
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
 from saitenka.app.profiles import resolve_launch_identity, resolve_profile
+from saitenka.app.session_runtime import SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
 from saitenka.runtime import Owner
@@ -876,80 +877,48 @@ def _build_run_deps(req: RunDepsRequest):
     return scorer, anki, mine_conf, dict_set
 
 
-#: One hop's worth of waiting. Bounded per attempt so the search keeps seeking rather than parking
-#: on the first wake, and bounded overall by `_CUE_SEARCH_SECONDS` rather than a hop count.
-_CUE_HOP_SECONDS = 0.12
 _CUE_SEARCH_SECONDS = 10.0
-
-
-def _wait_for_subtitle_text(reader, ipc, video: str | None, *, clock=time.monotonic) -> str:
-    """Sample sub-text; on a real file with nothing showing yet, hop forward via sub-seek until one
-    lands or the search deadline passes. Falls back to DEMO_LINE if nothing ever appears.
-
-    Driven by `SessionRunner`, not a sleep loop: each hop drains the session, so a cue that arrives
-    is seen when it arrives instead of at the end of a fixed nap — and the bound is a deadline the
-    caller can reason about rather than a retry count that means nothing on a slow machine.
-
-    ``clock`` is injected so a test can exhaust the deadline without spending it.
-    """
-    from saitenka.runtime.runner import SessionRunner
-
-    reader.refresh_osd()
-    if text := (reader._get("sub-text") or ""):
-        return text
-    if not video:  # no real file to seek through — nothing to wait for
-        return DEMO_LINE
-
-    def hop(timeout: float | None) -> None:
-        send_correlated(ipc, "demo-cue-hop", "sub-seek", 1, owner=Owner.SUBTITLE)
-        reader._drive_annotation_once(
-            _CUE_HOP_SECONDS if timeout is None else min(timeout, _CUE_HOP_SECONDS)
-        )
-
-    SessionRunner(hop, clock=clock).run_until(
-        lambda: bool(reader._get("sub-text")),
-        deadline=clock() + _CUE_SEARCH_SECONDS,
-    )
-    return (reader._get("sub-text") or "") or DEMO_LINE
-
 
 #: How long a capture waits for every staged surface to be acknowledged before shooting.
 _PAINT_SETTLE_SECONDS = 2.0
 
 
-def _run_demo_actions(reader, ipc, demo: DemoSpec) -> None:
-    from saitenka.runtime.runner import SessionRunner
+def _demo_cue_text(runtime: SessionRuntime, video: str | None) -> str:
+    """The cue a demo hovers: whatever is showing, else one hopped to, else `DEMO_LINE`."""
+    runtime.refresh_render_space()
+    if text := runtime.cue_text():
+        return text
+    if not video:  # no real file to seek through — nothing to wait for
+        return DEMO_LINE
+    return runtime.await_cue(timeout=_CUE_SEARCH_SECONDS) or DEMO_LINE
 
-    def painted() -> bool:
-        return reader.lifecycle_surfaces.settled() and reader.interaction_surfaces.settled()
 
-    def settle() -> None:
-        """Wait for the pixels to be acknowledged, not for a guessed number of milliseconds.
-
-        A capture taken while a slot is still PENDING photographs whatever was on screen before it,
-        and a sleep long enough to be safe on a slow machine is dead time on every other one.
-        """
-        SessionRunner(reader._drive_annotation_once).run_until(
-            painted, deadline=time.monotonic() + _PAINT_SETTLE_SECONDS
-        )
-
+def _run_demo_actions(runtime: SessionRuntime, demo: DemoSpec) -> None:
     for _ in range(demo.demo_scroll):
-        reader._scroll_tip(round(reader.osd[1] * 0.12))
+        runtime.scroll_tooltip()
     if demo.demo_translate:
-        reader._setup_secondary()
-        reader.toggle_translation()
-        settle()
+        runtime.enable_translation()
+        runtime.await_paint(timeout=_PAINT_SETTLE_SECONDS)
     if demo.mine:
-        (reader.bulk_mine if demo.bulk else reader.mine_current)()
+        runtime.mine(bulk=demo.bulk)
         time.sleep(0.5)  # Anki round-trip, not a paint — no surface to wait on
     if demo.screenshot:
-        settle()
-        # Stays synchronous: the reply is printed as the capture's result, and the file has to
-        # exist by the time this returns for the caller to have anything to look at.
-        r = ipc.command("screenshot-to-file", demo.screenshot, "window")
-        print("screenshot:", r, "->", demo.screenshot)
+        runtime.await_paint(timeout=_PAINT_SETTLE_SECONDS)
+        print("screenshot:", runtime.capture(demo.screenshot), "->", demo.screenshot)
     else:
         time.sleep(demo.seconds)  # hold the demo open; wall time is the point here
+
+
+def _execute_demo_session(runtime: SessionRuntime, demo: DemoSpec, *, video: str | None) -> None:
+    text = _demo_cue_text(runtime, video)
+    print("sub-text:", repr(text))
+    runtime.prepare_cue(text)
+    tokens = runtime.tokens()
+    idx = choose_demo_token(tokens, demo.demo_word or "読む", runtime.is_content_token)
+    print(f"demo hover → token[{idx}] = {tokens[idx].surface!r}")
+    runtime.prepare_hover(idx)
+    runtime.mark_ready()
+    _run_demo_actions(runtime, demo)
 
 
 def _execute_reader_session(
@@ -957,19 +926,7 @@ def _execute_reader_session(
 ) -> None:
     if demo.demo_word or demo.screenshot:
         time.sleep(0.8)
-        text = _wait_for_subtitle_text(reader, ipc, video)
-        print("sub-text:", repr(text))
-        reader.prepare_subtitle_blocking(text)
-        target = demo.demo_word or "読む"
-        idx = next((i for i, t in enumerate(reader.tokens) if target in t.surface), None)
-        if idx is None:
-            idx = next(
-                (i for i, t in enumerate(reader.tokens) if reader.tokenizer.is_content(t)), 0
-            )
-        print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
-        reader.prepare_hover_blocking(idx)
-        reader._mark_interactive_ready()
-        _run_demo_actions(reader, ipc, demo)
+        _execute_demo_session(SessionRuntime(reader, ipc), demo, video=video)
     else:
         print(
             f"reader running — hover words; '{translate_key}' toggles the EN translation; "

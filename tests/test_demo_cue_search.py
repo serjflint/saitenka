@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import util
 
-from saitenka.app.launch.run import DEMO_LINE, _wait_for_subtitle_text
+from saitenka.app.launch.run import DEMO_LINE, _demo_cue_text
+from saitenka.app.session_runtime import SessionRuntime, choose_demo_token
 
 
 class FakeIPC(util.FakeIPC):
@@ -46,7 +47,9 @@ def test_a_cue_already_showing_needs_no_search() -> None:
     clock = [0.0]
     reader = reader_for(["猫を見る"], ipc, clock)
 
-    assert _wait_for_subtitle_text(reader, ipc, "/a.mkv", clock=lambda: clock[0]) == "猫を見る"
+    assert (
+        _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv") == "猫を見る"
+    )
     assert ipc.seeks == 0
 
 
@@ -55,7 +58,9 @@ def test_it_hops_until_a_cue_lands() -> None:
     clock = [0.0]
     reader = reader_for(["", "", "犬も見る"], ipc, clock)
 
-    assert _wait_for_subtitle_text(reader, ipc, "/a.mkv", clock=lambda: clock[0]) == "犬も見る"
+    assert (
+        _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv") == "犬も見る"
+    )
     assert ipc.seeks == 2  # stopped at the cue rather than running a fixed count out
 
 
@@ -74,7 +79,7 @@ def test_each_hop_is_bounded_so_the_search_keeps_seeking() -> None:
 
     reader._drive_annotation_once = record
 
-    _wait_for_subtitle_text(reader, ipc, "/a.mkv", clock=lambda: clock[0])
+    _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv")
 
     assert waits
     assert max(w for w in waits if w is not None) <= 0.12
@@ -87,7 +92,9 @@ def test_a_search_that_never_finds_a_cue_falls_back() -> None:
     clock = [0.0]
     reader = reader_for([""], ipc, clock)
 
-    assert _wait_for_subtitle_text(reader, ipc, "/a.mkv", clock=lambda: clock[0]) == DEMO_LINE
+    assert (
+        _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv") == DEMO_LINE
+    )
 
 
 def test_no_video_never_seeks() -> None:
@@ -96,5 +103,39 @@ def test_no_video_never_seeks() -> None:
     clock = [0.0]
     reader = reader_for([""], ipc, clock)
 
-    assert _wait_for_subtitle_text(reader, ipc, None, clock=lambda: clock[0]) == DEMO_LINE
+    assert _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), None) == DEMO_LINE
     assert ipc.seeks == 0
+
+
+def _tok(surface: str):
+    return SimpleNamespace(surface=surface)
+
+
+def test_the_demo_hovers_the_requested_word_when_it_is_present() -> None:
+    tokens = [_tok("猫"), _tok("を"), _tok("見る")]
+
+    assert choose_demo_token(tokens, "見る", lambda _t: True) == 2
+
+
+def test_it_falls_back_to_the_first_content_word() -> None:
+    """The requested surface is absent, so the demo must still land on something worth a tooltip —
+    a particle would render an empty panel."""
+    tokens = [_tok("を"), _tok("猫"), _tok("見る")]
+
+    assert choose_demo_token(tokens, "読む", lambda t: t.surface != "を") == 1
+
+
+def test_a_tokenizer_without_a_content_test_is_only_consulted_on_a_miss() -> None:
+    """`is_content` is passed rather than read off the tokenizer because not every tokenizer has
+    one. Resolving it eagerly turned a hit into an AttributeError on a path that never looked."""
+
+    def explode(_token):
+        raise AttributeError("is_content")
+
+    assert choose_demo_token([_tok("猫"), _tok("見る")], "見る", explode) == 1
+
+
+def test_no_content_word_anywhere_still_yields_a_renderable_index() -> None:
+    """Every token is a particle. Returning -1 or raising here would abort the demo instead of
+    rendering a less interesting tooltip."""
+    assert choose_demo_token([_tok("を"), _tok("は")], "読む", lambda _t: False) == 0

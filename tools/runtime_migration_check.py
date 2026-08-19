@@ -64,8 +64,8 @@ _SYNCHRONOUS_BY_CONTRACT = {
     "src/saitenka/app/controller.py::Reader._release_mouse_capture",
     # The caller reads the file mpv writes, so this one genuinely must be awaited.
     "src/saitenka/app/media.py::screenshot",
-    # Same: prints the capture's reply, and the file must exist when it returns.
-    "src/saitenka/app/launch/run.py::_run_demo_actions",
+    # Same: the reply IS the capture's result, and the file must exist when it returns.
+    "src/saitenka/app/session_runtime.py::SessionRuntime.capture",
     # `quit`, issued while the reactor is stopping.
     "src/saitenka/app/launch/run.py::run_impl",
 }

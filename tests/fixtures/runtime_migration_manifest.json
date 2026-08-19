@@ -110,15 +110,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/launch/run.py::_run_demo_actions"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/launch/run.py::_start_run_provider_fetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_wait_for_subtitle_text"
     ],
     [
       "reader-parameter",
@@ -335,6 +327,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/reader_factory.py::create_reader"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/session_runtime.py::SessionRuntime.__init__"
     ],
     [
       "reader-parameter",
@@ -1243,8 +1239,8 @@
       "id": "demo-owned-player",
       "source": "src/saitenka/app/launch/run.py::_execute_reader_session",
       "evidence": [
-        "call:reader._mark_interactive_ready",
-        "call:_run_demo_actions"
+        "src/saitenka/app/launch/run.py::_execute_demo_session|call:runtime.mark_ready",
+        "call:_execute_demo_session"
       ],
       "target": "owned-session-composition",
       "work_package": "7",
@@ -1256,8 +1252,8 @@
       "source": "src/saitenka/app/launch/run.py::_execute_reader_session",
       "evidence": [
         "ref:demo.screenshot",
-        "call:_run_demo_actions",
-        "src/saitenka/app/launch/run.py::_run_demo_actions|call:ipc.command:screenshot-to-file"
+        "call:_execute_demo_session",
+        "src/saitenka/app/session_runtime.py::SessionRuntime.capture|call:self._ipc.command:screenshot-to-file"
       ],
       "target": "owned-session-composition",
       "work_package": "7",
