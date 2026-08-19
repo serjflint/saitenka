@@ -195,25 +195,24 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(capsys, monke
 def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeypatch):
     """`[perf].prefetch_workers` > 0 pins the count on both builds (a RAM/coverage knob); 0 auto-sizes
     — min(8, cores-2) free-threaded (render parallelizes), 2 on a GIL build (extra workers only contend)."""
-    from types import SimpleNamespace
 
     from saitenka.app import prefetch
     from saitenka.app.tokenizer import UnidicTokenizer
 
-    def fake_reader(prefetch_workers: int) -> SimpleNamespace:
-        return SimpleNamespace(prefetch_workers=prefetch_workers, tokenizer=UnidicTokenizer())
+    def count(configured: int) -> int:
+        return prefetch.prefetch_worker_count(UnidicTokenizer(), configured)
 
     # explicit override wins regardless of build
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert prefetch.prefetch_worker_count(fake_reader(3)) == 3
+    assert count(3) == 3
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: False)
-    assert prefetch.prefetch_worker_count(fake_reader(3)) == 3
+    assert count(3) == 3
 
     # auto (0): GIL build stays at the low default
-    assert prefetch.prefetch_worker_count(fake_reader(0)) == prefetch._AUTO_WORKERS_GIL
+    assert count(0) == prefetch._AUTO_WORKERS_GIL
     # auto (0): free-threaded uses the flat free-threaded default (no cpu-count arithmetic)
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert prefetch.prefetch_worker_count(fake_reader(0)) == prefetch._AUTO_WORKERS_FREE_THREADED
+    assert count(0) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
 def test_owned_startup_hint_clears_after_the_first_completed_poll():

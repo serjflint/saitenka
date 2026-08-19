@@ -192,7 +192,11 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     resolve_hover(reader, idx)  # forward longest-match → _hover_terms (the phrase/prefix seam)
     tok = reader.tokens[idx]
     entry = entry_for_tok(
-        reader, tok, reader._inflected_surface(idx), extra_terms=reader._hover_terms
+        tok,
+        reader._inflected_surface(idx),
+        dict_set=reader.dict_set,
+        scorer=reader.scorer,
+        extra_terms=reader._hover_terms,
     )
     return dict_set, tok, reader._hover_terms, entry
 

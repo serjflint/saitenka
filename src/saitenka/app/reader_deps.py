@@ -550,13 +550,12 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     reader._announce_runtime()  # workers are up now — print the banner with the real count (once)
 
 
-def draw_loading(reader: Reader) -> None:
+def draw_loading(surfaces, frame: int) -> None:
     """Draw one top-left spinner frame after its named timer becomes due."""
     from saitenka.app.loading import loading_image
 
-    img = loading_image("saitenka loading dictionaries", reader._load_frame)
-    reader._load_frame += 1
+    img = loading_image("saitenka loading dictionaries", frame)
     try:
-        reader.lifecycle_surfaces.present(img, 24, 24, oid=OverlayId.LOADING)
+        surfaces.present(img, 24, 24, oid=OverlayId.LOADING)
     except Exception:
         log.debug("loading spinner draw failed", exc_info=True)

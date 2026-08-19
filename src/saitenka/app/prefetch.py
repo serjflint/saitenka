@@ -217,7 +217,7 @@ def run_prefetch(work: object, cancelled: threading.Event, backend: HostPrefetch
         raise
 
 
-def prefetch_worker_count(reader: Reader) -> int:
+def prefetch_worker_count(tokenizer, configured: int) -> int:
     """An explicit ``[perf].prefetch_workers`` (>0) pins the count on both builds; ``0`` (auto) picks a
     flat per-build default (``_AUTO_WORKERS_FREE_THREADED`` / ``_AUTO_WORKERS_GIL``). Each worker is
     PERSISTENT and carries real per-thread RAM (SQLite page cache + FreeType faces + the free-threaded
@@ -232,9 +232,9 @@ def prefetch_worker_count(reader: Reader) -> int:
     for parallelism that never actually happens. Force the load now (its one-time cost lands at startup
     instead of on the first real subtitle line either way) so this reflects the GIL state that will
     actually hold for the session."""
-    reader.tokenizer.tokenize("")
-    if reader.prefetch_workers > 0:  # explicit [perf].prefetch_workers pins it on BOTH builds
-        return reader.prefetch_workers
+    tokenizer.tokenize("")
+    if configured > 0:  # explicit [perf].prefetch_workers pins it on BOTH builds
+        return configured
     return _AUTO_WORKERS_FREE_THREADED if gil_disabled() else _AUTO_WORKERS_GIL
 
 
@@ -247,7 +247,7 @@ def start_prefetch(reader: Reader) -> None:
     register = getattr(reader.ipc, "register_runtime_job_lane", None)
     if register is None:
         return
-    desired = prefetch_worker_count(reader)
+    desired = prefetch_worker_count(reader.tokenizer, reader.prefetch_workers)
     backend = HostPrefetchBackend(reader)
     if not register(
         "speculative-prefetch",
@@ -593,7 +593,7 @@ def cap_for(frac: float) -> int:
     return min(round(REF_H * frac), REF_H - 2 * margin)
 
 
-def tip_cap(reader: Reader) -> int:
+def tip_cap(max_frac: float) -> int:
     """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
     own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
-    return cap_for(reader.tip_max_frac)
+    return cap_for(max_frac)

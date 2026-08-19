@@ -635,13 +635,11 @@ def _auto_advance_enabled(cfg: dict, demo_word: str | None, screenshot: str | No
     return bool(watch.get("auto_advance"))
 
 
-def _mpv_has_next_playlist_entry(reader) -> bool:
+def _mpv_has_next_playlist_entry(pos: object, count: object) -> bool:
     """True when mpv has a further playlist entry to advance to on its own (autoload/explicit playlist).
     At mid-playlist EOF mpv advances NATIVELY (``--keep-open=yes`` only holds the FINAL entry), so on
     the eof edge we must NOT also loadfile — that would skip an episode. The reactive re-slot picks the
     native advance up via ``file-loaded`` regardless of whether auto-advance is on."""
-    pos = reader._prop("playlist-pos")
-    count = reader._prop("playlist-count")
     return isinstance(pos, int) and isinstance(count, int) and 0 <= pos < count - 1
 
 
@@ -650,7 +648,7 @@ def _advance_at_eof(reader) -> bool:
     ``file-loaded`` drives the re-slot. Otherwise ``loadfile`` the next sibling (#100 resolver); its
     ``file-loaded`` re-slots too. Return False (hold the last frame via keep-open) when there's no
     unambiguous next episode."""
-    if _mpv_has_next_playlist_entry(reader):
+    if _mpv_has_next_playlist_entry(reader._prop("playlist-pos"), reader._prop("playlist-count")):
         return True  # mpv advances natively; the reactive re-slot follows on file-loaded
     cur = reader.current_media_path()
     if cur is None:

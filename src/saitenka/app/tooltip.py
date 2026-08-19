@@ -761,7 +761,7 @@ def rareness_pill(tok, dict_set) -> Freq | None:
     return diff_pill(harmonic_of([float(r) for r in ranks]))
 
 
-def entry_for_tok(reader: Reader, tok, inflected, *, extra_terms: tuple[str, ...] = ()):
+def entry_for_tok(tok, inflected, *, dict_set, scorer, extra_terms: tuple[str, ...] = ()):
     """Look up the panel entry and fold in the blended-rareness pill and the JLPT pill (leading the
     frequency pills) when the word has them, so they mirror the subtitle underline / freq row.
     ``extra_terms`` are longer multi-token phrases starting at this word (数ある over 数); the dict set
@@ -769,17 +769,13 @@ def entry_for_tok(reader: Reader, tok, inflected, *, extra_terms: tuple[str, ...
 
     Never mutates the lru_cached Entry from lookup.lookup_entry / dict_set.entry_for — returns
     a shallow copy with a new freqs list so repeated calls do not accumulate pills."""
-    if reader.dict_set is None:
+    if dict_set is None:
         entry = entry_for(tok)
     elif extra_terms:  # only the phrase path needs the expanded lookup
-        entry = reader.dict_set.entry_for(tok, inflected=inflected, extra_terms=extra_terms)
+        entry = dict_set.entry_for(tok, inflected=inflected, extra_terms=extra_terms)
     else:
-        entry = reader.dict_set.entry_for(tok, inflected)
-    extra = [
-        p
-        for p in (rareness_pill(tok, reader.dict_set), jlpt_pill(tok, reader.scorer))
-        if p is not None
-    ]
+        entry = dict_set.entry_for(tok, inflected)
+    extra = [p for p in (rareness_pill(tok, dict_set), jlpt_pill(tok, scorer)) if p is not None]
     if extra and hasattr(entry, "freqs"):
         # Build the pill list into a shallow copy — never mutate the cached original.
         entry = _dc.replace(entry, freqs=[*extra, *entry.freqs])
@@ -810,7 +806,13 @@ def _build_panel(
     ):
         # The base tooltip stacks the hovered word's longer phrase terms (passed in); nested popups
         # (inner scanned words) and prefetch pass none and look up the bare word only.
-        entry = entry_for_tok(reader=reader, tok=tok, inflected=inflected, extra_terms=extra_terms)
+        entry = entry_for_tok(
+            tok,
+            inflected,
+            dict_set=reader.dict_set,
+            scorer=reader.scorer,
+            extra_terms=extra_terms,
+        )
         return Panel.from_rows(
             panel_rows(
                 entry,
@@ -1487,7 +1489,7 @@ def _navigated_panel(reader: Reader, query: str) -> Panel | None:
         )  # look up the WHOLE query as one term — never tokenize a link target
         if tok is None:
             return None
-        entry = entry_for_tok(reader, tok, tok.surface)
+        entry = entry_for_tok(tok, tok.surface, dict_set=reader.dict_set, scorer=reader.scorer)
         reading = getattr(entry, "reading", "") or tok.reading
     rows = panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok)
     return Panel.from_rows(

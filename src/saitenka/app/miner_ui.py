@@ -204,16 +204,16 @@ def _release_preview_keys(reader: Reader) -> None:
         )
 
 
-def _stop_preview_audio(reader: Reader) -> None:
+def _stop_preview_audio(preview) -> None:
     """Kill the ▶ clip's player if one is running (afplay / mpv --no-video / ffplay) — the fire-and-
     forget Popen outlives the panel otherwise, so a dismiss left the clip playing (#251). Idempotent."""
-    proc, reader.preview.audio_proc = reader.preview.audio_proc, None
+    proc, preview.audio_proc = preview.audio_proc, None
     kill_process_tree(proc)  # no-op on None / an already-exited process
 
 
 def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
     # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
-    _stop_preview_audio(reader)  # replay (P) / a new mine silences any clip still playing
+    _stop_preview_audio(reader.preview)  # replay (P) / a new mine silences any clip still playing
     reader.preview.last_preview, reader.preview.last_audio = pv, audio_path
     reader.preview.zoom = False
     render_preview(reader)
@@ -240,7 +240,7 @@ def render_preview(reader: Reader) -> None:
 
 def hide_preview(reader: Reader) -> None:
     _stop_preview_audio(
-        reader
+        reader.preview
     )  # every dismiss path (✕ / Esc / new-cue) funnels here → stop the clip
     reader.lifecycle_surfaces.remove(OverlayId.PREVIEW)
     reader.preview.clear()
@@ -265,7 +265,7 @@ def click_preview(reader: Reader, x: float, y: float) -> bool:
         and reader.play_audio
         and reader.preview.last_audio
     ):
-        _stop_preview_audio(reader)  # a second ▶ press replaces the clip, never stacks two
+        _stop_preview_audio(reader.preview)  # a second ▶ press replaces the clip, never stacks two
         reader.preview.audio_proc = play_audio(reader.preview.last_audio)  # ▶ → play on demand
     return True
 

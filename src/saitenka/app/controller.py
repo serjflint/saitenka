@@ -1664,7 +1664,7 @@ class Reader:
         return tooltip.rareness_pill(tok, self.dict_set)
 
     def _entry_for(self, tok, inflected):
-        return tooltip.entry_for_tok(self, tok, inflected)
+        return tooltip.entry_for_tok(tok, inflected, dict_set=self.dict_set, scorer=self.scorer)
 
     def _panel_for(
         self,
@@ -1895,7 +1895,7 @@ class Reader:
         return prefetch.cap_for(frac)
 
     def _tip_cap(self) -> int:
-        return prefetch.tip_cap(self)
+        return prefetch.tip_cap(self.tip_max_frac)
 
     def _show_tooltip(self, index: int) -> None:
         tooltip.show_tooltip(self, index)
@@ -3564,7 +3564,8 @@ class Reader:
         reader_deps.apply_deps(self, deps)
 
     def _draw_loading(self) -> None:
-        reader_deps.draw_loading(self)
+        reader_deps.draw_loading(self.lifecycle_surfaces, self._load_frame)
+        self._load_frame += 1
 
     def _schedule_loading_frame(self, *, delay_s: float) -> bool:
         from saitenka.app.lifecycle_timers import LifecycleTimerKind

@@ -188,8 +188,13 @@ def setup_secondary(reader: Reader) -> int | None:
 def release_secondary(reader: Reader) -> None:
     if reader._translation_secondary_sid is None:
         return
-    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
+    clear_secondary(reader.ipc)
     reader._translation_secondary_sid = None
+
+
+def clear_secondary(ipc) -> None:
+    """Drop mpv's secondary subtitle track — the EN reveal's lease on it."""
+    _send(ipc, "clear-secondary", "set_property", "secondary-sid", "no")
 
 
 def on_primary_changed(reader: Reader, sid) -> None:
@@ -418,14 +423,14 @@ def begin_acquisition(reader: Reader, video_path: str, source) -> None:
         _start_provider_fetch(reader, video_path)
 
 
-def _reset_sub_delay(reader: Reader) -> None:
+def _reset_sub_delay(ipc) -> None:
     """Zero mpv's ``sub-delay`` when we (re-)establish authoritative timing by selecting our own track.
     Our subtitle file IS the timing source of truth — resync rewrites the cue timestamps in the file —
     so a residual delay must not ride on top. mpv restores ``sub-delay`` from watch-later across runs
     and keeps it across tracks, so a stale offset from a previous run/track would silently mistime a
     freshly file-timed track (found live: a resync looked wrong until sub-delay was hand-zeroed). The
     manual anchor key stays cumulative — it just refines from this clean 0 baseline after a load."""
-    _send(reader.ipc, "reset-sub-delay", "set_property", "sub-delay", 0.0)
+    _send(ipc, "reset-sub-delay", "set_property", "sub-delay", 0.0)
 
 
 def _replace_japanese_track(
@@ -445,7 +450,7 @@ def _replace_japanese_track(
     _send(
         reader.ipc, "add-japanese", "sub-add", str(path), "select", "", "jpn"
     )  # mpv selects it now
-    _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
+    _reset_sub_delay(reader.ipc)  # our file is the timing truth; drop any persisted/stale offset
     reader.jp_sid = reader._get("sid")  # the just-selected track, not discover_tracks' first JP
     reader.en_sid = discover_tracks(reader.ipc, reader.subtitle_slang).en_sid
     reader.subtitle_language = MAIN_LANG
@@ -487,7 +492,7 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
     _send(reader.ipc, "select-japanese", "set_property", "sid", reader.jp_sid)
-    _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
+    _reset_sub_delay(reader.ipc)  # our file is the timing truth; drop any persisted/stale offset
     reader.subtitle_language = MAIN_LANG
     reader.set_subtitle("")
     if reader._translation_visible():

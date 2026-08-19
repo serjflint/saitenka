@@ -154,10 +154,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/launch/run.py::_mpv_has_next_playlist_entry"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/launch/run.py::_run_demo_actions"
     ],
     [
@@ -187,10 +183,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/miner_ui.py::_release_preview_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::_stop_preview_audio"
     ],
     [
       "reader-parameter",
@@ -370,15 +362,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::prefetch_worker_count"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::start_prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::tip_cap"
     ],
     [
       "reader-parameter",
@@ -395,10 +379,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/reader_deps.py::apply_deps"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/reader_deps.py::draw_loading"
     ],
     [
       "reader-parameter",
@@ -559,10 +539,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::_replace_japanese_track"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_reset_sub_delay"
     ],
     [
       "reader-parameter",
@@ -943,10 +919,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::decorate_and_upload"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::entry_for_tok"
     ],
     [
       "reader-parameter",
