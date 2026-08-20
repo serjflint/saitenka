@@ -109,16 +109,15 @@ class SidebarView:
         return self.index.cues[self.active]
 
 
-def _active_index(reader: Reader) -> int:
-    index = reader.episode.sub_index
+def _active_index(index: CueIndex | None, text: str, *, sub_start, time_pos, preferred: int) -> int:
+    """Which cue the sidebar highlights: the one matching `text`, disambiguated by timing.
+
+    Pure, and takes the facts rather than the host — the whole body was already a `locate` over
+    four values the caller reads anyway, so holding the Reader only made it untestable without one.
+    """
     if index is None:
         return -1
-    return index.locate(
-        text=reader.sub_text,
-        sub_start=reader._get("sub-start"),
-        time_pos=reader._get("time-pos"),
-        preferred=reader.episode.nav_idx,
-    )
+    return index.locate(text=text, sub_start=sub_start, time_pos=time_pos, preferred=preferred)
 
 
 def view_of(reader: Reader) -> SidebarView:
@@ -131,7 +130,13 @@ def view_of(reader: Reader) -> SidebarView:
     """
     return SidebarView(
         state=reader.sidebar,
-        active=_active_index(reader),
+        active=_active_index(
+            reader.episode.sub_index,
+            reader.sub_text,
+            sub_start=reader._get("sub-start"),
+            time_pos=reader._get("time-pos"),
+            preferred=reader.episode.nav_idx,
+        ),
         index=reader.episode.sub_index,
         language=reader.subtitle_language,
         osd=reader.osd,

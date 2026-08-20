@@ -218,10 +218,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::_active_index"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::_open_mined"
     ],
     [

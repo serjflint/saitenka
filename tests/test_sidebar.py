@@ -83,7 +83,16 @@ def test_active_row_uses_timing_to_disambiguate_repeated_text():
     reader.episode.sub_index = CueIndex([Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")])
     reader.sub_text = "same line"
 
-    assert sidebar._active_index(reader) == 1
+    assert (
+        sidebar._active_index(
+            reader.episode.sub_index,
+            reader.sub_text,
+            sub_start=reader._get("sub-start"),
+            time_pos=reader._get("time-pos"),
+            preferred=reader.episode.nav_idx,
+        )
+        == 1
+    )
 
 
 def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
