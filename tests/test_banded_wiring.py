@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from util import FakeIPC
 
+from saitenka.app import tooltip_panel
 from saitenka.app.controller import Reader
 from saitenka.panel import Definition, Entry
 
@@ -63,5 +64,7 @@ def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
     assert cells, "expected scan cells in the top viewport"
     cell = cells[0]
     sx, sy = r.tip.view.xy
-    hit = r._scan_hit(sx + cell.x + cell.w // 2, sy + cell.y + cell.h // 2)
+    hit = tooltip_panel.scan_hit(
+        r.tip, r.tip_scale.raster, sx + cell.x + cell.w // 2, sy + cell.y + cell.h // 2
+    )
     assert hit is not None and hit.text == cell.text

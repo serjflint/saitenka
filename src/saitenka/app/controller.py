@@ -186,7 +186,6 @@ if TYPE_CHECKING:
     from saitenka.app.render_cache import RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
-    from saitenka.panel import Freq
     from saitenka.subtitles import CueIndex, GeometryBackend
 
 log = logging.getLogger(__name__)
@@ -1765,28 +1764,8 @@ class Reader:
         """Shift+C — copy the whole subtitle cue under the cursor (all its lines)."""
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.COPY_LINE)
 
-    def _flash(self, oid: int) -> None:
-        tooltip.flash(self, oid)
-
     def copy_click(self) -> None:
         tooltip.copy_click(self)
-
-    def _hit_header_region(self, x: float, y: float, prect, xy, scroll: int, view_h: int) -> bool:
-        return tooltip.hit_header_region(
-            x, y, prect, xy, scroll, view_h, scale=self.tip_scale.display
-        )
-
-    def _hit_header_add(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_add(tooltip.chrome_for(self, self.tip.view), x, y)
-
-    def _hit_header_speaker(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_speaker(tooltip.chrome_for(self, self.tip.view), x, y)
-
-    def _hit_nested_add(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_add(tooltip.chrome_for(self, self.tip.nest), x, y)
-
-    def _hit_nested_speaker(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_speaker(tooltip.chrome_for(self, self.tip.nest), x, y)
 
     def on_click(self) -> None:
         if not self.ov.visible:
@@ -1814,24 +1793,6 @@ class Reader:
 
     def _is_mined(self, tok) -> bool:
         return tooltip_panel.is_mined(tok, self.session.mined)
-
-    def _anki_ok(self) -> bool:
-        return tooltip_panel.anki_ok(self.anki, self._anki_capability)
-
-    @staticmethod
-    def _darken(rgba, f: float = tooltip_panel.JLPT_DARKEN):
-        return tooltip_panel._darken(rgba, f)
-
-    def _jlpt_pill(self, tok) -> Freq | None:
-        return tooltip_panel.jlpt_pill(tok, self.scorer)
-
-    def _rareness_pill(self, tok) -> Freq | None:
-        return tooltip_panel.rareness_pill(tok, self.dict_set)
-
-    def _entry_for(self, tok, inflected):
-        return tooltip_panel.entry_for_tok(
-            tok, inflected, dict_set=self.dict_set, scorer=self.scorer
-        )
 
     @property
     def sidebar_view(self) -> sidebar_module.SidebarView:
@@ -2108,16 +2069,6 @@ class Reader:
     def _show_tooltip(self, index: int) -> None:
         tooltip.show_tooltip(self, index)
 
-    def _place_panel(
-        self, full_w: int, wx: float, wy: float, wh: float, view_h: int
-    ) -> tuple[int, int]:
-        return tooltip_panel.place_panel(
-            full_w, wx, wy, wh, view_h, scale=self.tip_scale.display, osd=self.osd
-        )
-
-    def _blit_panel(self, panel, scroll: int, view_h: int, xy, oid: int):
-        return tooltip_panel.blit_panel(self, panel, scroll, view_h, xy, oid)
-
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
         if self.tip.tip_keys_bound:
@@ -2197,38 +2148,6 @@ class Reader:
                 span.set("scale", f"{self.tip_scale.display:.4f}")
                 span.set("crisp_miss", self.tip.view.crisp_miss or "n/a")
 
-    def _scroll_nested(self, delta: int) -> None:
-        tooltip_panel.scroll_view(self, self.tip.nest, delta)
-
-    # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
-    def _scan_hit(self, mx: float, my: float):
-        return tooltip_panel.scan_hit(self.tip, self.tip_scale.raster, mx, my)
-
-    def _show_nested(self, sb) -> None:
-        nested_popup.show_nested(self, sb)
-
-    def _open_nested(self, tok, inflected, wx: float, wy: float, wh: float, tail=None) -> None:
-        nested_popup.open_nested(self, tok, inflected, nested_popup.Anchor(wx, wy, wh), tail)
-
-    def _place_nested(
-        self, st, key, token, word: str, wx: float, wy: float, wh: float, tail=None
-    ) -> None:
-        nested_popup.place_nested(self, st, key, token, word, nested_popup.Anchor(wx, wy, wh), tail)
-
-    # --- clickable cross-reference links ---------------------------------------------------------
-    def _link_hit(self, mx: float, my: float, *, nested: bool):
-        """Hit-test the panel actually DRAWN (crisp native when shown, else reference), so a clicked
-        or hovered cross-reference link lands right despite native-vs-reference wrap drift."""
-        return tooltip_panel.link_hit_at(self.tip, self.tip_scale.raster, mx, my, nested=nested)
-
-    def _open_link(self, lb, xy, scroll: int) -> None:
-        nested_popup.open_link(self, lb, xy, scroll)
-
-    def _navigate_tip(self, query: str) -> None:
-        """Yomitan-style: a cross-reference clicked in the BASE tooltip replaces its content in place
-        and pushes the previous view onto the back-stack (Esc/back returns)."""
-        tooltip.navigate_tip(self, query)
-
     def _navigated_panel(self, query: str):
         """The read-only reference Panel for a nav target — built off the main thread by the engaged
         tooltip lane, so the seam lives on the Reader (no engaged-tooltip→tooltip import)."""
@@ -2264,9 +2183,6 @@ class Reader:
     def _tip_close_or_back(self) -> None:
         self._run_interaction_command(interaction_intents.InteractionCommand.TOOLTIP_BACK_OR_CLOSE)
 
-    def _open_search(self, pattern: str, wx: float, wy: float, wh: float) -> None:
-        nested_popup.open_search(self, pattern, wx, wy, wh)
-
     def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
         """The (cached) panel for a clicked/keyed nested open — the shared builder the engaged-tooltip
         lane and session thread reach via the Reader seam. The worker
@@ -2279,9 +2195,6 @@ class Reader:
 
     def _open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
         nested_popup.open_kanji(self, ch, wx, wy, wh)
-
-    def _click_kanji_fallback(self, x: float, y: float) -> None:
-        nested_popup.click_kanji_fallback(self, x, y)
 
     def _hide_nested(self) -> None:
         nested_popup.hide_nested(self)

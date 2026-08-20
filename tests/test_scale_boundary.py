@@ -51,10 +51,10 @@ def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
     assert scans and links
     for b in scans:
         mx, my = sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s
-        assert r._scan_hit(mx, my) == b
+        assert tooltip_panel.scan_hit(r.tip, r.tip_scale.raster, mx, my) == b
     for lb in links:
         mx, my = sx + (lb.x + lb.w / 2) * s, sy + (lb.y + lb.h / 2 - scroll) * s
-        assert r._link_hit(mx, my, nested=False) == lb
+        assert tooltip_panel.link_hit_at(r.tip, r.tip_scale.raster, mx, my, nested=False) == lb
 
 
 @pytest.mark.parametrize("scale", _SCALES)
@@ -108,4 +108,4 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
     sx, sy = r.tip.view.xy
     for b in panel.windowed.scan_boxes():
         mx, my = sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s
-        assert r._scan_hit(mx, my) == b
+        assert tooltip_panel.scan_hit(r.tip, r.tip_scale.raster, mx, my) == b

@@ -1,7 +1,7 @@
 """L1 interface tests — moves/clicks/wheel driven through the REAL mouse-pos / hit-test path.
 
 These use the :class:`Driver` (tests/driver.py) so they read as interaction scripts and go through
-``_hit`` / ``on_click`` / ``_scan_hit`` — the same code a real cursor drives — rather than calling
+``_hit`` / ``on_click`` / ``scan_hit`` — the same code a real cursor drives — rather than calling
 ``set_hover`` / ``_show_tooltip`` directly. (Live real-mpv input injection is L3: tests/test_live_mpv.py.)
 """
 
@@ -268,8 +268,8 @@ def test_move_inside_tooltip_opens_nested_scan_popup():
 
 def test_full_stress_chain_through_the_hit_test_path():
     # The --stress bench chain (show → scroll → nested → scroll → dismiss) validated as ONE accumulating
-    # session through the REAL hit-test path (_hit / _scan_hit). The correctness twin test_stress.py runs
-    # the same chain but via direct _show_tooltip/_show_nested entry points, bypassing hit-testing — this
+    # session through the REAL hit-test path (_hit / scan_hit). The correctness twin test_stress.py runs
+    # the same chain but via direct _show_tooltip/show_nested entry points, bypassing hit-testing — this
     # is the only test that drives the whole chain the way a cursor does.
     r = _reader()
     ui = Driver(r)  # instant → no dwell to wait out

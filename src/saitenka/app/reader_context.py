@@ -166,6 +166,9 @@ class SessionContext:
     def __init__(self, render_cache: RenderCacheState) -> None:
         self.render_cache = render_cache
         self.mined = MinedSet()  # card expressions already in the deck → header ⊕ becomes ✓
-        self.anki_cache: tuple[float, bool] = (0.0, False)  # (checked_at, reachable) — see _anki_ok
+        self.anki_cache: tuple[float, bool] = (
+            0.0,
+            False,
+        )  # (checked_at, reachable) — see tooltip_panel.anki_ok
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle
         self.mined_store: MinedCardStore | None = None  # lazy mined-card DB handle (#253)

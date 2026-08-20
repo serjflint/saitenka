@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from util import FakeIPC
 
+from saitenka.app import nested_popup
 from saitenka.app.config import TooltipOptions
 from saitenka.app.controller import NESTED_ID, TIP_ID, Reader
 from saitenka.app.tokenize import Token
@@ -59,7 +60,7 @@ def _churn(r: Reader, term: str) -> bool:
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
     if boxes:
-        r._show_nested(boxes[len(boxes) // 3])  # nested popup on an inner cell
+        nested_popup.show_nested(r, boxes[len(boxes) // 3])  # nested popup on an inner cell
         opened = r.tip.nest.state is not None
         r._scroll_tip(round(r.osd[1] * 0.12))  # scroll while nested is up
         r._hide_nested()

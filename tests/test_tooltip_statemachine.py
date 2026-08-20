@@ -8,7 +8,7 @@ and asserts, after every step, three things:
     (`_tip_state` / `_nest.state`); a reintroduced second draw-panel (the Session5b two-geometry split)
     would make these diverge and fail this assertion;
   * inverse-transform correctness — every visible drawn element's displayed centre round-trips back to
-    that element through the real `_scan_hit` / `_link_hit`.
+    that element through the real `scan_hit` / `link_hit_at`.
 
 **What this does and does NOT catch (honest scope — see the review, finding C1).** The round-trip is
 *self-consistent by construction*: it derives each element's centre from `hit_target`'s panel and inverts
@@ -31,7 +31,7 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from tip_fakes import hidpi_reader
 
-from saitenka.app import tooltip, tooltip_panel
+from saitenka.app import nested_popup, tooltip, tooltip_panel
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -82,7 +82,9 @@ def _assert_agrees(reader, *, nested: bool) -> None:
         return
     sx, sy = xy
     lo, hi = scroll, scroll + view_h
-    link_hit = partial(reader._link_hit, nested=nested)
+    link_hit = partial(
+        tooltip_panel.link_hit_at, reader.tip, reader.tip_scale.raster, nested=nested
+    )
     for lb in panel.windowed.link_boxes():
         if not (lo <= lb.y + lb.h / 2 < hi):
             continue
@@ -95,7 +97,9 @@ def _assert_agrees(reader, *, nested: bool) -> None:
             if not (lo <= b.y + b.h / 2 < hi):
                 continue
             mx, my = sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s
-            assert reader._scan_hit(mx, my) == b, f"scan mis-hit (scale={s} scroll={scroll}): {b}"
+            assert tooltip_panel.scan_hit(reader.tip, reader.tip_scale.raster, mx, my) == b, (
+                f"scan mis-hit (scale={s} scroll={scroll}): {b}"
+            )
 
 
 @settings(
@@ -150,7 +154,7 @@ class TooltipSession(RuleBasedStateMachine):
     @rule()
     def open_nested(self) -> None:
         tok = self.r.tokens[0]
-        self.r._open_nested(tok, tok.surface, 200.0, 200.0, 40.0)
+        nested_popup.open_nested(self.r, tok, tok.surface, nested_popup.Anchor(200.0, 200.0, 40.0))
         self.nested_open = self.r.tip.nest.state is not None
         self._check("open_nested")
 
@@ -194,9 +198,23 @@ def test_the_agreement_oracle_has_teeth() -> None:
     visible = [b for b in panel.windowed.scan_boxes() if lo <= b.y + b.h / 2 < hi]
     assert visible  # the fixture shows scan cells to hit-test
     for b in visible:  # the true centres round-trip (the oracle passes on correct geometry)
-        assert r._scan_hit(sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s) == b
+        assert (
+            tooltip_panel.scan_hit(
+                r.tip,
+                r.tip_scale.raster,
+                sx + (b.x + b.w / 2) * s,
+                sy + (b.y + b.h / 2 - scroll) * s,
+            )
+            == b
+        )
     drifted = sum(
-        r._scan_hit(sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s + 40 * s) != b
+        tooltip_panel.scan_hit(
+            r.tip,
+            r.tip_scale.raster,
+            sx + (b.x + b.w / 2) * s,
+            sy + (b.y + b.h / 2 - scroll) * s + 40 * s,
+        )
+        != b
         for b in visible
     )
     assert drifted > 0  # a 40px transform drift mis-hits → the invariant can fail (has teeth)

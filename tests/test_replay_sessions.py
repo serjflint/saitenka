@@ -22,7 +22,7 @@ import util
 # oracle, so it asserts through exactly that check.
 from test_tooltip_statemachine import _NAV_QUERY, _assert_agrees, _fresh_reader
 
-from saitenka.app import tooltip, tooltip_panel
+from saitenka.app import nested_popup, tooltip, tooltip_panel
 
 Step = tuple[str, object]
 
@@ -68,7 +68,7 @@ def _apply(reader, action: str, arg: object) -> None:
         tooltip.tip_back(reader)
     elif action == "open_nested":
         tok = reader.tokens[0]
-        reader._open_nested(tok, tok.surface, 200.0, 200.0, 40.0)
+        nested_popup.open_nested(reader, tok, tok.surface, nested_popup.Anchor(200.0, 200.0, 40.0))
     elif action == "resize":
         scale = float(arg)  # type: ignore[arg-type]
         reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster

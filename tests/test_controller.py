@@ -1530,7 +1530,9 @@ def test_header_add_button_absent_without_anki(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     cx, cy = _click_center_of_add_button(r, ipc)
-    assert not r._hit_header_add(cx, cy)  # no ⊕ button when mining is unavailable
+    assert not tooltip.hit_header_add(
+        tooltip.chrome_for(r, r.tip.view), cx, cy
+    )  # no ⊕ button when mining is unavailable
 
 
 # --- R4: nested scanning (hover a word inside the tooltip) ------------------------------------------
@@ -1592,7 +1594,9 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     assert boxes
     sb = boxes[0]
     sx, sy = r.tip.view.xy
-    hit = r._scan_hit(sx + sb.x + sb.w / 2, sy + sb.y + sb.h / 2)
+    hit = tooltip_panel.scan_hit(
+        r.tip, r.tip_scale.raster, sx + sb.x + sb.w / 2, sy + sb.y + sb.h / 2
+    )
     assert hit is not None and hit.text.startswith("追")
 
 
@@ -1618,8 +1622,8 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     r = _tall_nested_reader(FakeIPC())
     monkeypatch.setattr(r, "renderer", NullRenderer())
     tok = r.tokens[0]
-    r._open_nested(
-        tok, tok.surface, 300.0, 2000.0, 40.0
+    nested_popup.open_nested(
+        r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # anchor low → nested_view_h keeps full height
     st = r.tip.nest.state
     assert st is not None
@@ -1627,7 +1631,7 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     # Wheel toward the bottom until the clamp stops moving; each notch grows the converging estimate.
     prev = -1
     for _ in range(200):
-        r._scroll_nested(10_000)
+        tooltip_panel.scroll_view(r, r.tip.nest, 10_000)
         if r.tip.nest.scroll == prev:
             break
         prev = r.tip.nest.scroll
@@ -1698,7 +1702,12 @@ def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
     s = r.tip_scale.display
     assert s == 2.0
     sx, sy = r.tip.view.xy
-    hit = r._scan_hit(sx + (sb.x + sb.w / 2) * s, sy + (sb.y + sb.h / 2 - r.tip.view.scroll) * s)
+    hit = tooltip_panel.scan_hit(
+        r.tip,
+        r.tip_scale.raster,
+        sx + (sb.x + sb.w / 2) * s,
+        sy + (sb.y + sb.h / 2 - r.tip.view.scroll) * s,
+    )
     assert hit is not None and hit.text == sb.text
 
 
@@ -2027,7 +2036,9 @@ def test_nested_popup_shrinks_to_stay_above_inner_word():
     view_h = nested_popup.nested_view_h(800, wy, osd_h=1080, max_frac=r.nested_max_frac)
     above_room = wy - nested_popup.TIP_GAP - margin
     assert view_h == above_room  # shrunk to fit above
-    _, ty = r._place_panel(300, 100, wy, 40, view_h)
+    _, ty = tooltip_panel.place_panel(
+        300, 100, wy, 40, view_h, scale=r.tip_scale.display, osd=r.osd
+    )
     assert ty + view_h <= wy  # …so it sits entirely above the inner word
 
 
@@ -2036,7 +2047,9 @@ def test_nested_popup_drops_below_when_no_room_above():
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     wy = 90  # inner word near the very top → can't fit above
     view_h = nested_popup.nested_view_h(800, wy, osd_h=1080, max_frac=r.nested_max_frac)
-    _, ty = r._place_panel(300, 100, wy, 40, view_h)
+    _, ty = tooltip_panel.place_panel(
+        300, 100, wy, 40, view_h, scale=r.tip_scale.display, osd=r.osd
+    )
     assert ty >= wy  # falls back to below (safe)
 
 
@@ -2423,16 +2436,20 @@ def test_jlpt_pill_matches_underline_color():
 
     r = Reader(FakeIPC(), dict_set=_FakeDS(), scorer=_jlpt_scorer({"本命": "N2", "ほんめい": "N2"}))
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
-    pill = r._jlpt_pill(tok)
+    pill = tooltip_panel.jlpt_pill(tok, r.scorer)
     assert pill is not None and pill.name == "JLPT" and pill.value == "N2"
-    assert pill.color == r._darken(Palette().jlpt["N2"])  # hue tied to the underline level color
+    assert pill.color == tooltip_panel._darken(
+        Palette().jlpt["N2"]
+    )  # hue tied to the underline level color
 
 
 def test_jlpt_pill_leads_the_frequency_row():
     from saitenka.app.tokenize import Token
 
     r = Reader(FakeIPC(), dict_set=_FakeDS(), scorer=_jlpt_scorer({"本命": "N2"}))
-    entry = r._entry_for(Token("本命", "本命", "ほんめい", "名詞", 0, 2), None)
+    entry = tooltip_panel.entry_for_tok(
+        Token("本命", "本命", "ほんめい", "名詞", 0, 2), None, dict_set=r.dict_set, scorer=r.scorer
+    )
     assert entry.freqs and entry.freqs[0].name == "JLPT" and entry.freqs[0].value == "N2"
 
 
@@ -2442,10 +2459,10 @@ def test_no_jlpt_pill_without_level_or_scorer():
     tok = Token("犬", "犬", "いぬ", "名詞", 0, 1)
     # word not in the JLPT dict → no pill, frequency row untouched
     r = Reader(FakeIPC(), dict_set=_FakeDS(), scorer=_jlpt_scorer({"本命": "N2"}))
-    assert r._jlpt_pill(tok) is None
-    assert r._entry_for(tok, None).freqs == []
+    assert tooltip_panel.jlpt_pill(tok, r.scorer) is None
+    assert tooltip_panel.entry_for_tok(tok, None, dict_set=r.dict_set, scorer=r.scorer).freqs == []
     # no scorer at all → no pill (coloring is optional)
-    assert Reader(FakeIPC(), dict_set=_FakeDS())._jlpt_pill(tok) is None
+    assert tooltip_panel.jlpt_pill(tok, Reader(FakeIPC(), dict_set=_FakeDS()).scorer) is None
 
 
 def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
@@ -2461,7 +2478,7 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
     ds = dicthelp.load_set(freq_zips=[fa, fb])
     r = Reader(FakeIPC(), dict_set=ds)
     tok = Token("猫", "猫", "ねこ", "名詞", 0, 1)
-    pill = r._rareness_pill(tok)
+    pill = tooltip_panel.rareness_pill(tok, r.dict_set)
     assert pill is not None and pill.name == "diff"
     assert pill.color == rareness_color(harmonic_of([1000.0, 2000.0]))  # ≈1333 → common (green)
 
@@ -2480,7 +2497,7 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
     )
     ds = dicthelp.load_set(freq_zips=[rank_z, occ_z])
     r = Reader(FakeIPC(), dict_set=ds)
-    pill = r._rareness_pill(Token("猫", "猫", "ねこ", "名詞", 0, 1))
+    pill = tooltip_panel.rareness_pill(Token("猫", "猫", "ねこ", "名詞", 0, 1), r.dict_set)
     assert pill is not None and pill.value == "1.5k"  # blend of {1500} alone, not pulled toward 1
 
 
@@ -2492,11 +2509,16 @@ def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
     fa = dicthelp.meta_zip(tmp_path / "fc.zip", "FreqC", "freq", [["猫", {"frequency": 1000}]])
     ds = dicthelp.load_set(freq_zips=[fa])
     r = Reader(FakeIPC(), dict_set=ds)
-    assert r._rareness_pill(Token("存在しない語", "存在しない語", "", "名詞", 0, 6)) is None
+    assert (
+        tooltip_panel.rareness_pill(
+            Token("存在しない語", "存在しない語", "", "名詞", 0, 6), r.dict_set
+        )
+        is None
+    )
     # no freq sources at all → no pill
     assert (
-        Reader(FakeIPC(), dict_set=_FakeDS())._rareness_pill(
-            Token("猫", "猫", "ねこ", "名詞", 0, 1)
+        tooltip_panel.rareness_pill(
+            Token("猫", "猫", "ねこ", "名詞", 0, 1), Reader(FakeIPC(), dict_set=_FakeDS()).dict_set
         )
         is None
     )
@@ -2509,10 +2531,12 @@ def test_no_jlpt_pill_for_function_words_even_on_reading_collision():
     from saitenka.app.tokenize import Token
 
     r = Reader(FakeIPC(), dict_set=_FakeDS(), scorer=_jlpt_scorer({"は": "N1", "ね": "N1"}))
-    assert r._jlpt_pill(Token("は", "は", "は", "助詞", 0, 1)) is None  # particle → no pill
-    assert r._jlpt_pill(Token("ね", "ね", "ね", "助詞", 0, 1)) is None
+    assert (
+        tooltip_panel.jlpt_pill(Token("は", "は", "は", "助詞", 0, 1), r.scorer) is None
+    )  # particle → no pill
+    assert tooltip_panel.jlpt_pill(Token("ね", "ね", "ね", "助詞", 0, 1), r.scorer) is None
     # a real content word whose reading legitimately maps still gets its pill
-    assert r._jlpt_pill(Token("葉", "葉", "は", "名詞", 0, 1)) is not None
+    assert tooltip_panel.jlpt_pill(Token("葉", "葉", "は", "名詞", 0, 1), r.scorer) is not None
 
 
 def test_jlpt_pill_suppressed_when_disabled():
@@ -2521,7 +2545,9 @@ def test_jlpt_pill_suppressed_when_disabled():
     sc = _jlpt_scorer({"本命": "N2"})
     sc.enable_jlpt = False
     r = Reader(FakeIPC(), dict_set=_FakeDS(), scorer=sc)
-    assert r._jlpt_pill(Token("本命", "本命", "ほんめい", "名詞", 0, 2)) is None
+    assert (
+        tooltip_panel.jlpt_pill(Token("本命", "本命", "ほんめい", "名詞", 0, 2), r.scorer) is None
+    )
 
 
 # --- mined-card metadata: hierarchical tags + structured MiscInfo (rearrange-friendly) -------------
@@ -2679,7 +2705,7 @@ def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
 
 
 def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
-    """_entry_for must not mutate the lru_cached Entry returned by entry_for / dict_set.entry_for.
+    """entry_for_tok must not mutate the lru_cached Entry returned by entry_for / dict_set.entry_for.
     Two calls with a JLPT-level token must yield exactly ONE pill each time, not accumulate.
     Uses a dict_set whose entry_for IS lru_cached (same object returned each call) to expose mutation."""
     from saitenka.app.tokenize import Token
@@ -2697,9 +2723,9 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
         FakeIPC(), dict_set=_CachedDS(), scorer=_jlpt_scorer({"本命": "N2", "ほんめい": "N2"})
     )
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
-    # Call entry_for twice directly via _entry_for so the lru_cache is hit on the second call.
-    e1 = r._entry_for(tok, None)
-    e2 = r._entry_for(tok, None)
+    # Call entry_for twice directly via entry_for_tok so the lru_cache is hit on the second call.
+    e1 = tooltip_panel.entry_for_tok(tok, None, dict_set=r.dict_set, scorer=r.scorer)
+    e2 = tooltip_panel.entry_for_tok(tok, None, dict_set=r.dict_set, scorer=r.scorer)
     jlpt_pills_1 = [f for f in e1.freqs if f.name == "JLPT"]
     jlpt_pills_2 = [f for f in e2.freqs if f.name == "JLPT"]
     assert len(jlpt_pills_1) == 1, f"first call: {len(jlpt_pills_1)} JLPT pills, want 1"

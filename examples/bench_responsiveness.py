@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from saitenka.app import nested_popup, tooltip, tooltip_panel
 from saitenka.app.config import load_config
 from saitenka.app.controller import Reader
 from saitenka.app.popups import NO_HOVER_METADATA
@@ -741,7 +742,7 @@ def run_stress(
         boxes = st.windowed.scan_boxes() if st else []
         if boxes:
             sb = boxes[len(boxes) // 3]  # a deterministic cell well inside the body
-            timed(lambda: reader._show_nested(sb))
+            timed(lambda: nested_popup.show_nested(reader, sb))
             timed(lambda: reader._scroll_tip(step))  # scroll while the nested popup is up
             timed(reader._hide_nested)
         timed(lambda: reader.set_hover(-1))  # dismiss the whole stack
@@ -1447,13 +1448,15 @@ def _timeline_interact(reader) -> None:
     boxes = st.windowed.scan_boxes()
     if boxes:
         sb = boxes[len(boxes) // 2]  # a cell well inside the body
-        reader._show_nested(
-            sb
+        nested_popup.show_nested(
+            reader, sb
         )  # cold inner word → off-thread compose (kind=engaged_nested / nested)
         time.sleep(0.02)  # let the worker compose the nested head
-        reader._show_nested(sb)  # warm → synchronous nested show (tip_compose kind="nested")
+        nested_popup.show_nested(
+            reader, sb
+        )  # warm → synchronous nested show (tip_compose kind="nested")
         # scroll the nested popup so its render-ahead + crisp-poll are exercised (the base already is)
-        reader._scroll_nested(round(reader.osd[1] * 0.1))
+        tooltip_panel.scroll_view(reader, reader.tip.nest, round(reader.osd[1] * 0.1))
         reader._hide_nested()
     # a clicked/keyed kanji open (deferred, tier-3): warms off-thread → prefetch_decode[engaged_open]
     reader.kanji_current()
@@ -1461,7 +1464,9 @@ def _timeline_interact(reader) -> None:
     reader._drain_events()  # pump the typed completion and warm placement
     reader._hide_nested()
     if 0 <= reader.hover < len(reader.tokens):
-        reader._navigate_tip(reader.tokens[reader.hover].surface)  # in-place nav → kind="clicked"
+        tooltip.navigate_tip(
+            reader, reader.tokens[reader.hover].surface
+        )  # in-place nav → kind="clicked"
         time.sleep(0.02)
         reader._drain_events()  # pump the typed completion and warm swap
 
@@ -2312,7 +2317,7 @@ def main() -> int:
             reader.tip.panel_cache.discard(
                 reader._panel_key(tokenize(sb.text)[0], tokenize(sb.text)[0].surface)
             )
-            reader._show_nested(sb)
+            nested_popup.show_nested(reader, sb)
 
         rows.append(("nested popup first paint  (inner word)", measure(nested_cold, args.reps)))
 

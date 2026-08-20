@@ -32,6 +32,7 @@ from saitenka.app.tooltip_panel import (
     entry_for_tok,
     group_mined_of,
     is_mined,
+    link_hit_at,
     panel_for,
     panel_key,
     place_tip,
@@ -152,7 +153,7 @@ def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
         if (over_tip and not over_nest)
         else None
     )
-    if scan is not None and reader._link_hit(mx, my, nested=False):
+    if scan is not None and link_hit_at(reader.tip, reader.tip_scale.raster, mx, my, nested=False):
         scan = None
     return (
         hover_machine.HoverObservation(
@@ -527,7 +528,7 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
     elif hit_header_speaker(chrome_for(reader, reader.tip.nest), x, y) and reader.tip.nest.state:
         speak(reader.tip.nest.state.reading)  # 🔊 → read the inner word aloud
     else:
-        lb = reader._link_hit(x, y, nested=True)
+        lb = link_hit_at(reader.tip, reader.tip_scale.raster, x, y, nested=True)
         if lb is not None and not _mine_link(
             reader.dict_set,
             reader.tip.hover.terms,
@@ -552,7 +553,7 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     if hit_header_speaker(chrome, x, y):
         reader.speak_hovered()  # 🔊 → hear the word (TTS)
         return True
-    lb = reader._link_hit(x, y, nested=False)
+    lb = link_hit_at(reader.tip, reader.tip_scale.raster, x, y, nested=False)
     if lb is not None:
         tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
         # stacked entry ⊕ → mine that entry
