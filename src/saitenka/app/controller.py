@@ -2177,27 +2177,10 @@ class Reader:
         nested_popup.place_nested(self, st, key, token, word, nested_popup.Anchor(wx, wy, wh), tail)
 
     # --- clickable cross-reference links ---------------------------------------------------------
-    def _tip_link_hit(self, mx: float, my: float):
-        # Hit-test the panel actually DRAWN for the base tooltip (crisp native when shown, else reference)
-        # so a clicked/hovered cross-reference link lands right despite native-vs-reference wrap drift.
-        panel, scale, scroll = tooltip_panel.hit_target(
-            self.tip.nest,
-            self.tip.view.state,
-            self.tip.view.scroll,
-            self.tip_scale.raster,
-            nested=False,
-        )
-        return nested_popup.link_hit(mx, my, panel, self.tip.view.xy, scroll, scale=scale)
-
-    def _nest_link_hit(self, mx: float, my: float):
-        panel, scale, scroll = tooltip_panel.hit_target(
-            self.tip.nest,
-            self.tip.view.state,
-            self.tip.view.scroll,
-            self.tip_scale.raster,
-            nested=True,
-        )
-        return nested_popup.link_hit(mx, my, panel, self.tip.nest.xy, scroll, scale=scale)
+    def _link_hit(self, mx: float, my: float, *, nested: bool):
+        """Hit-test the panel actually DRAWN (crisp native when shown, else reference), so a clicked
+        or hovered cross-reference link lands right despite native-vs-reference wrap drift."""
+        return tooltip_panel.link_hit_at(self.tip, self.tip_scale.raster, mx, my, nested=nested)
 
     def _open_link(self, lb, xy, scroll: int) -> None:
         nested_popup.open_link(self, lb, xy, scroll)

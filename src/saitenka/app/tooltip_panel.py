@@ -541,6 +541,30 @@ def hit_target(nest, tip_state, tip_scroll: int, raster_scale: float, *, nested:
     return ref, raster_scale, scroll
 
 
+def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
+    """The :class:`~saitenka.model.LinkBox` of ``state`` under (mx, my), via the windowed hit-test.
+    ``scale`` is the reference→display factor: the panel is composited at the reference size then
+    upscaled to the display, so the screen offset is divided back to panel px."""
+    if state is None:
+        return None
+    sx, sy = xy
+    return state.windowed.link_hit(int((mx - sx) / scale), int((my - sy) / scale + scroll))
+
+
+def link_hit_at(tip: TooltipState, raster_scale: float, mx: float, my: float, *, nested: bool):
+    """The cross-reference link under the cursor, in whichever popup is being hit-tested.
+
+    The base and the nested test were the same three calls twice over, differing only in the flag
+    `hit_target` already branches on and the anchor that goes with it. The anchor branches here now,
+    so the two cannot disagree about which popup they are testing.
+    """
+    view = tip.nest if nested else tip.view
+    panel, scale, scroll = hit_target(
+        tip.nest, tip.view.state, tip.view.scroll, raster_scale, nested=nested
+    )
+    return link_hit(mx, my, panel, view.xy, scroll, scale=scale)
+
+
 def render_view(reader: Reader, view: PopupView) -> None:
     """The SOLE blit path (SSOT) for BOTH the base tooltip and the nested popup: composite ``view``'s
     current viewport CRISP straight from the cached native-scale panel when it's built (the common case

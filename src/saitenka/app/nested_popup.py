@@ -244,16 +244,6 @@ def rerender_with_mined_state(reader: Reader) -> None:
     render_view(reader, reader.tip.nest)
 
 
-def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
-    """The :class:`~saitenka.model.LinkBox` of ``state`` under (mx, my), via the windowed hit-test.
-    ``scale`` is the reference→display factor (``TipScale.display``): the panel is composited at the
-    reference size then upscaled to the display, so the screen offset is divided back to panel px."""
-    if state is None:
-        return None
-    sx, sy = xy
-    return state.windowed.link_hit(int((mx - sx) / scale), int((my - sy) / scale + scroll))
-
-
 def _cached_rows_panel(tip: TooltipState, style: PanelStyle, cap: int, key, entry, reading: str):
     """Fetch-or-build (and LRU-touch) the panel-cache entry for a non-token popup (kanji / search),
     measuring its head. Idempotent — the main-thread build, the worker warm, and the tick re-show all

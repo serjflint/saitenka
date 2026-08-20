@@ -153,7 +153,7 @@ def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
         if (over_tip and not over_nest)
         else None
     )
-    if scan is not None and reader._tip_link_hit(mx, my):
+    if scan is not None and reader._link_hit(mx, my, nested=False):
         scan = None
     return (
         hover_machine.HoverObservation(
@@ -528,7 +528,7 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
     elif hit_header_speaker(chrome_for(reader, reader.tip.nest), x, y) and reader.tip.nest.state:
         speak(reader.tip.nest.state.reading)  # 🔊 → read the inner word aloud
     else:
-        lb = reader._nest_link_hit(x, y)
+        lb = reader._link_hit(x, y, nested=True)
         if lb is not None and not _mine_link(
             reader.dict_set,
             reader.tip.hover.terms,
@@ -553,7 +553,7 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     if hit_header_speaker(chrome, x, y):
         reader.speak_hovered()  # 🔊 → hear the word (TTS)
         return True
-    lb = reader._tip_link_hit(x, y)
+    lb = reader._link_hit(x, y, nested=False)
     if lb is not None:
         tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
         # stacked entry ⊕ → mine that entry
@@ -567,7 +567,7 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
             navigate_tip(reader, lb.query)
     else:
         # No link under the cursor: a single-ideograph scan cell opens its kanji entry. If this fires on
-        # a headword kanji click, the headword's kanji LinkBox was MISSED by _tip_link_hit (geometry).
+        # a headword kanji click, the headword's kanji LinkBox was MISSED by the base link hit-test (geometry).
         log.debug("tip click → no link at (%.0f,%.0f); kanji fallback", x, y)
         nested_popup.click_kanji_fallback(reader, x, y)
     return True

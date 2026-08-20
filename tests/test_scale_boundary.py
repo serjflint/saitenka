@@ -54,7 +54,7 @@ def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
         assert r._scan_hit(mx, my) == b
     for lb in links:
         mx, my = sx + (lb.x + lb.w / 2) * s, sy + (lb.y + lb.h / 2 - scroll) * s
-        assert r._tip_link_hit(mx, my) == lb
+        assert r._link_hit(mx, my, nested=False) == lb
 
 
 @pytest.mark.parametrize("scale", _SCALES)

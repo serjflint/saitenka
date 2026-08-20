@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 from util import FakeIPC, runtime_gateway
@@ -97,8 +98,15 @@ def test_a_stop_releases_a_receiver_blocked_with_no_events_pending() -> None:
     thread = threading.Thread(target=receiver)
     thread.start()
     try:
-        mailbox.wake()
-        assert released.wait(2.0)
+        # Re-sent until it lands, because the wake is deliberately un-latched: it frees whoever is
+        # blocked *now* and leaves no state, so one sent before the thread reaches `receive` is
+        # correctly a no-op. The loop stands in for what production gets for free — the runner
+        # re-tests `_stop` between receives, so a wake it misses costs one more turn, not a hang.
+        deadline = time.monotonic() + 2.0
+        while not released.is_set() and time.monotonic() < deadline:
+            mailbox.wake()
+            released.wait(0.01)
+        assert released.is_set()
     finally:
         thread.join(2.0)
 

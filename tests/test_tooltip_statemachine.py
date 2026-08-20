@@ -8,7 +8,7 @@ and asserts, after every step, three things:
     (`_tip_state` / `_nest.state`); a reintroduced second draw-panel (the Session5b two-geometry split)
     would make these diverge and fail this assertion;
   * inverse-transform correctness — every visible drawn element's displayed centre round-trips back to
-    that element through the real `_scan_hit` / `_tip_link_hit` / `_nest_link_hit`.
+    that element through the real `_scan_hit` / `_link_hit`.
 
 **What this does and does NOT catch (honest scope — see the review, finding C1).** The round-trip is
 *self-consistent by construction*: it derives each element's centre from `hit_target`'s panel and inverts
@@ -22,6 +22,8 @@ panel), not by the round-trip. Hypothesis shrinks any failing sequence. `integra
 """
 
 from __future__ import annotations
+
+from functools import partial
 
 import pytest
 from hypothesis import HealthCheck, event, settings
@@ -80,7 +82,7 @@ def _assert_agrees(reader, *, nested: bool) -> None:
         return
     sx, sy = xy
     lo, hi = scroll, scroll + view_h
-    link_hit = reader._nest_link_hit if nested else reader._tip_link_hit
+    link_hit = partial(reader._link_hit, nested=nested)
     for lb in panel.windowed.link_boxes():
         if not (lo <= lb.y + lb.h / 2 < hi):
             continue
