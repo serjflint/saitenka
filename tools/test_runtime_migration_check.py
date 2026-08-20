@@ -244,7 +244,7 @@ def test_manifest_rejects_added_moved_and_unresolved_debt() -> None:
     assert problems["missing"] == ["direct-mpv-command:old.py::f"]
     assert problems["added"] == ["direct-mpv-command:new.py::f"]
     assert problems["unresolved"] == ["missing.py::f"]
-    assert problems["missing_evidence"] == ["duty:call:missing"]
+    assert problems["missing_evidence"] == ["duty@missing.py::f:call:missing"]
 
 
 def test_manifest_rejects_deleted_added_and_moved_lifecycle_duties() -> None:
@@ -269,7 +269,12 @@ def test_manifest_rejects_deleted_added_and_moved_lifecycle_duties() -> None:
     moved = copy.deepcopy(original)
     moved["entrypoints"][0]["source"] = "src/saitenka/app/controller.py::Reader.run"
     problems = checker.failures(moved, actual, symbols, evidence)
-    assert any(item.startswith("run-owned-player:") for item in problems["missing_evidence"])
+    # The key names the SITE as well as the duty: a duty can be sourced at several entrypoints,
+    # and "one of them still does it by hand" is exactly what this census exists to report.
+    assert any(
+        item.startswith("run-owned-player@src/saitenka/app/controller.py::Reader.run:")
+        for item in problems["missing_evidence"]
+    )
 
 
 def test_scanner_separates_a_deadline_field_from_a_call_that_ends_in_until() -> None:
@@ -462,3 +467,35 @@ def test_growth_is_still_a_failure() -> None:
     assert checker.failures(manifest, actual, {"m.py::new_write"}, {})["added"] == [
         "direct-mpv-command:m.py::new_write"
     ]
+
+
+def test_a_duty_sourced_at_two_entrypoints_is_watched_at_both() -> None:
+    """A duty performed at several sites is migrated when ALL of them move.
+
+    `source` was a single string, so `transport` named only `run_impl` while `attach` did the
+    identical `ipc.close()` — outside the census entirely. Converting `run` would have reported the
+    duty migrated with attach still doing it by hand, which is the one thing the duty half of the
+    exit gate exists to prevent.
+    """
+    checker = _module()
+    duty = {
+        "id": "duty",
+        "source": ["a.py::f", "b.py::g"],
+        "target": "t",
+        "work_package": "6",
+        "replacement": "r",
+        "test": "t",
+        "evidence": ["call:ipc.close"],
+        "migrated": False,
+    }
+    manifest = {"debt": [], "startup": [], "close": [duty], "entrypoints": []}
+    symbols = {"a.py::f", "b.py::g"}
+
+    both = checker.failures(
+        manifest, set(), symbols, {"a.py::f": {"call:ipc.close"}, "b.py::g": {"call:ipc.close"}}
+    )
+    assert both.get("missing_evidence", []) == []
+
+    # The second site stops doing it: the duty is not silently satisfied by the first.
+    one = checker.failures(manifest, set(), symbols, {"a.py::f": {"call:ipc.close"}})
+    assert one.get("missing_evidence") == ["duty@b.py::g:call:ipc.close"]

@@ -1110,7 +1110,10 @@
     },
     {
       "id": "transport",
-      "source": "src/saitenka/app/launch/run.py::run_impl",
+      "source": [
+        "src/saitenka/app/launch/run.py::run_impl",
+        "src/saitenka/app/commands/attach.py::attach"
+      ],
       "evidence": [
         "call:ipc.close"
       ],

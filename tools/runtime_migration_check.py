@@ -434,11 +434,15 @@ def failures(
                 schema.append(f"duplicate or invalid duty id: {duty_id}")
             else:
                 ids.add(duty_id)
-            source = duty.get("source")
+            sources = _sources(duty)
             facts = duty.get("evidence")
-            if isinstance(source, str) and isinstance(facts, list):
+            if sources and isinstance(facts, list):
+                # Every named site must show every fact: a duty performed at two entrypoints is
+                # migrated when BOTH move, and "one of them still does it" is the state this
+                # census exists to make visible.
                 missing_evidence.extend(
-                    f"{duty_id}:{fact}"
+                    f"{duty_id}@{source}:{fact}"
+                    for source in sources
                     for fact in facts
                     if not isinstance(fact, str) or not _has_evidence(evidence, source, fact)
                 )
@@ -450,9 +454,7 @@ def failures(
     unresolved: list[str] = []
     for duties in duty_groups:
         for duty in duties:
-            source = duty.get("source")
-            if isinstance(source, str) and source not in symbols:
-                unresolved.append(source)
+            unresolved.extend(source for source in _sources(duty) if source not in symbols)
     unresolved.sort()
     # A terminal row that stopped resolving is a rename or a move, and it silently lowers the number
     # WP5's exit compares against. Deliberately NOT "must still be debt": converting one early is
@@ -509,6 +511,22 @@ def check() -> int:
         f"{sum(len(group) for group in duty_groups(manifest))} duties)"
     )
     return 0
+
+
+def _sources(duty: dict) -> tuple[str, ...]:
+    """The site(s) a duty is performed at.
+
+    A list, because a duty can be sourced at more than one entrypoint and a single string quietly
+    hid that: `transport` named only `run_impl`, so `attach`'s identical `ipc.close()` sat outside
+    the census entirely — converting `run` would have reported the duty migrated while attach still
+    did it by hand.
+    """
+    source = duty.get("source")
+    if isinstance(source, str):
+        return (source,)
+    if isinstance(source, list) and all(isinstance(item, str) for item in source):
+        return tuple(source)
+    return ()
 
 
 def duty_groups(manifest: dict[str, object]) -> list[list[object]]:
