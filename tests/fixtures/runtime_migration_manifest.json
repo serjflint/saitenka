@@ -754,6 +754,10 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/tooltip.py::chrome_for"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/tooltip.py::copy_click"
     ],
     [
@@ -763,18 +767,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::flash"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::header_chrome"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_nested_add"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_nested_speaker"
     ],
     [
       "reader-parameter",

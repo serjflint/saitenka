@@ -1656,16 +1656,16 @@ class Reader:
         )
 
     def _hit_header_add(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_add(tooltip.header_chrome(self), x, y)
+        return tooltip.hit_header_add(tooltip.chrome_for(self, self.tip.view), x, y)
 
     def _hit_header_speaker(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_speaker(tooltip.header_chrome(self), x, y)
+        return tooltip.hit_header_speaker(tooltip.chrome_for(self, self.tip.view), x, y)
 
     def _hit_nested_add(self, x: float, y: float) -> bool:
-        return tooltip.hit_nested_add(self, x, y)
+        return tooltip.hit_header_add(tooltip.chrome_for(self, self._nest), x, y)
 
     def _hit_nested_speaker(self, x: float, y: float) -> bool:
-        return tooltip.hit_nested_speaker(self, x, y)
+        return tooltip.hit_header_speaker(tooltip.chrome_for(self, self._nest), x, y)
 
     def on_click(self) -> None:
         if not self.ov.visible:

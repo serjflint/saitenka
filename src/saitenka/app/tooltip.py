@@ -506,15 +506,16 @@ def hit_header_region(
 
 
 def hit_header_add(chrome: HeaderChrome, x: float, y: float) -> bool:
-    if chrome.tip.view.state is None or not chrome.anki:  # ⊕ only when Anki is reachable now
+    """The ⊕ button of whichever popup `chrome` describes."""
+    if chrome.view.state is None or not chrome.anki:  # ⊕ only when Anki is reachable now
         return False
     return hit_header_region(
         x,
         y,
         header_add_rect(chrome.width, speak_button=chrome.tts),
-        chrome.tip.view.xy,
-        chrome.tip.view.scroll,
-        chrome.tip.view.view_h,
+        chrome.view.xy,
+        chrome.view.scroll,
+        chrome.view.view_h,
         scale=chrome.scale,
     )
 
@@ -524,22 +525,27 @@ class HeaderChrome:
     """What the tooltip header's buttons need to hit-test: the panel and its on-screen geometry,
     plus whether each button is shown at all.
 
-    One value because the two hit-tests need the same five things and a mismatched set puts a button
+    One value because the hit-tests need the same five things and a mismatched set puts a button
     where it is not drawn — `add_rect` shifts depending on whether 🔊 is present, so `tts` is
     geometry here, not only a capability.
+
+    Carries the *view*, not the tooltip state, which is what lets the base tooltip and the nested
+    popup share one pair of hit-tests: they were four functions differing only in which `PopupView`
+    they read, and `PopupView` is where `xy`, `scroll`, `view_h` and `state` live for both.
     """
 
-    tip: TooltipState
+    view: PopupView
     width: int
     scale: float
     tts: bool
     anki: bool
 
 
-def header_chrome(reader: Reader) -> HeaderChrome:
-    """Snapshot the host into the header's port — the seam, as `build_draw_request` is for the draw."""
+def chrome_for(reader: Reader, view: PopupView) -> HeaderChrome:
+    """Snapshot the host into a popup's header port — the seam, as `build_draw_request` is for the
+    draw. One function for both popups: the caller says which view, which is the only difference."""
     return HeaderChrome(
-        reader.tip,
+        view,
         reader.tip_width,
         reader._tip_display_scale,
         reader._tts_ok,
@@ -548,48 +554,18 @@ def header_chrome(reader: Reader) -> HeaderChrome:
 
 
 def hit_header_speaker(chrome: HeaderChrome, x: float, y: float) -> bool:
-    if chrome.tip.view.state is None or not chrome.tts:  # 🔊 hidden when no JA TTS voice
+    """The 🔊 button of whichever popup `chrome` describes."""
+    if chrome.view.state is None or not chrome.tts:  # 🔊 hidden when no JA TTS voice
         return False
     return hit_header_region(
         x,
         y,
         header_speaker_rect(chrome.width),
-        chrome.tip.view.xy,
-        chrome.tip.view.scroll,
-        chrome.tip.view.view_h,
+        chrome.view.xy,
+        chrome.view.scroll,
+        chrome.view.view_h,
         scale=chrome.scale,
     )
-
-
-def hit_nested_add(reader: Reader, x: float, y: float) -> bool:
-    if reader._nest.state is None or not anki_ok(reader.anki, reader._anki_capability):
-        return False
-    return hit_header_region(
-        x,
-        y,
-        header_add_rect(reader.tip_width, speak_button=reader._tts_ok),
-        reader._nest.xy,
-        reader._nest.scroll,
-        reader._nest.view_h,
-        scale=reader._tip_display_scale,
-    )
-
-
-def hit_nested_speaker(reader: Reader, x: float, y: float) -> bool:
-    if reader._nest.state is None or not reader._tts_ok:  # 🔊 hidden when no JA TTS voice
-        return False
-    return hit_header_region(
-        x,
-        y,
-        header_speaker_rect(reader.tip_width),
-        reader._nest.xy,
-        reader._nest.scroll,
-        reader._nest.view_h,
-        scale=reader._tip_display_scale,
-    )
-
-
-# --- click routing -----------------------------------------------------------------------------
 
 
 def _mine_link(reader: Reader, lb, tok) -> bool:
@@ -632,9 +608,9 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
     anything, it hit) so the caller doesn't fall through to the base tooltip underneath."""
     if reader._nest.rect is None or not in_rect(reader._nest.rect, x, y):
         return False
-    if hit_nested_add(reader, x, y) and reader._nest.token is not None:
+    if hit_header_add(chrome_for(reader, reader._nest), x, y) and reader._nest.token is not None:
         reader._mine_token(reader._nest.token)  # ⊕ → mine the *inner* (scanned) word
-    elif hit_nested_speaker(reader, x, y) and reader._nest.state:
+    elif hit_header_speaker(chrome_for(reader, reader._nest), x, y) and reader._nest.state:
         speak(reader._nest.state.reading)  # 🔊 → read the inner word aloud
     else:
         lb = reader._nest_link_hit(x, y)
@@ -647,7 +623,7 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the base tooltip. Returns True if it did."""
     if reader._tip_rect is None or not in_rect(reader._tip_rect, x, y):
         return False
-    chrome = header_chrome(reader)  # one snapshot: both buttons hit-test against the same geometry
+    chrome = chrome_for(reader, reader.tip.view)  # one snapshot: both buttons, same geometry
     if hit_header_add(chrome, x, y):
         reader.mine_current()  # ⊕ → mine the hovered word into Anki
         return True
