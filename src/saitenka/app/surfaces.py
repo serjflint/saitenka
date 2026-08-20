@@ -41,7 +41,23 @@ class SurfaceState(Protocol):
 _TIP_WHEEL_FRAC = 0.14
 
 
-def _never(_reader: Reader) -> bool:
+@dataclass(frozen=True, slots=True)
+class HoverSuppression:
+    """What a surface needs to decide whether it swallows the hover under the cursor.
+
+    Four members, cut by owner rather than assembled by call chain: the INTERACTION state the surface
+    reads, the pointer it hit-tests against, and the two teardowns it performs when it claims the
+    pointer. In the target `release_hover` is an event the tooltip feature reduces — this is the port
+    that lets the hook stop taking the host before that exists.
+    """
+
+    interaction: InteractionContext
+    pointer: object
+    release_hover: Callable[[], None]
+    hide_annotation: Callable[[], None]
+
+
+def _never(_suppression: HoverSuppression) -> bool:
     return False
 
 
@@ -64,7 +80,7 @@ class SurfaceSpec:
     #: The surface's state object (has `.open`), reached from the INTERACTION context that owns all
     #: five — not from the host. This is the member that made every accessor a host-taking row.
     state_of: Callable[[InteractionContext], SurfaceState]
-    suppress_hover: Callable[[Reader], bool] = _never
+    suppress_hover: Callable[[HoverSuppression], bool] = _never
     scroll: Callable[[Reader, int], bool] = _no_scroll
     on_click: Callable[[Reader, float, float], bool] = _no_click
 
@@ -144,9 +160,26 @@ def wants_mouse_capture(interaction: InteractionContext) -> bool:
     return any(s.captures(interaction) for s in SURFACES)
 
 
+def hover_suppression(reader: Reader) -> HoverSuppression:
+    """Snapshot the host into the port the hooks take.
+
+    The one host-taking row left in this chain, and deliberately so — it is the seam, the same shape
+    as `build_draw_request`. Named rather than inlined because a hook's own unit test needs to build
+    the same value production does; a test that assembles it by hand is a second definition of the
+    port that drifts from this one.
+    """
+    return HoverSuppression(
+        reader.interaction,
+        reader._prop("mouse-pos"),
+        reader.retire_hover,
+        lambda: reader.set_annotation_hover(revealed=False),
+    )
+
+
 def suppress_hover(reader: Reader) -> bool:
     """First surface (topmost-first) that swallows the hover under the cursor."""
-    return any(s.suppress_hover(reader) for s in SURFACES)
+    suppression = hover_suppression(reader)
+    return any(s.suppress_hover(suppression) for s in SURFACES)
 
 
 def route_scroll(reader: Reader, steps: int) -> bool:

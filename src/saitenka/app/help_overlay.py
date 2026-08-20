@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.bindings import ActiveBinding
     from saitenka.app.controller import Reader
+    from saitenka.app.surfaces import HoverSuppression
 
 
 @dataclass
@@ -80,5 +81,5 @@ def scroll(reader: Reader, steps: int) -> bool:
     return True
 
 
-def suppress_hover(reader: Reader) -> bool:
-    return reader.help.open
+def suppress_hover(suppression: HoverSuppression) -> bool:
+    return suppression.interaction.help.open

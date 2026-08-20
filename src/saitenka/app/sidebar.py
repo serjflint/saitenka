@@ -20,6 +20,7 @@ from saitenka.runtime import Owner
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
     from saitenka.app.mined_store import MinedCard
+    from saitenka.app.surfaces import HoverSuppression
     from saitenka.subtitles import Cue, CueIndex
 
 SIDEBAR_ID = OverlayId.SIDEBAR
@@ -410,15 +411,14 @@ def contains(state: SidebarState, x: float, y: float) -> bool:
     return in_rect(state.rect, x, y)
 
 
-def suppress_hover(reader: Reader) -> bool:
-    if not reader.sidebar.open:
+def suppress_hover(suppression: HoverSuppression) -> bool:
+    state = suppression.interaction.sidebar
+    if not state.open:
         return False
-    if not claims_pointer(
-        reader.sidebar.rect, reader._prop("mouse-pos"), open_=reader.sidebar.open
-    ):
+    if not claims_pointer(state.rect, suppression.pointer, open_=state.open):
         return False
-    reader.set_annotation_hover(revealed=False)
-    reader.retire_hover()
+    suppression.hide_annotation()  # the sidebar overlaps the cue, so the reveal goes with the hover
+    suppression.release_hover()
     return True
 
 

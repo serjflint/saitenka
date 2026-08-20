@@ -90,10 +90,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/help_overlay.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/launch/run.py::_advance_at_eof"
     ],
     [
@@ -370,10 +366,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::update"
     ],
     [
@@ -399,10 +391,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/sub_picker.py::scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::suppress_hover"
     ],
     [
       "reader-parameter",
@@ -646,10 +634,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/surfaces.py::_never"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/surfaces.py::_no_click"
     ],
     [
@@ -663,6 +647,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/surfaces.py::_tip_scroll"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/surfaces.py::hover_suppression"
     ],
     [
       "reader-parameter",

@@ -17,7 +17,7 @@ import util
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
-from saitenka.app import sub_picker, subtitle_modes
+from saitenka.app import sub_picker, subtitle_modes, surfaces
 from saitenka.app.bindings import HELP_CLOSE_MSG, SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
@@ -333,10 +333,10 @@ def test_suppress_hover_only_over_the_panel():
     assert rect is not None
 
     ipc.props["mouse-pos"] = {"x": rect[0] + 5, "y": rect[1] + 5}
-    assert sub_picker.suppress_hover(reader) is True
+    assert sub_picker.suppress_hover(surfaces.hover_suppression(reader)) is True
 
     ipc.props["mouse-pos"] = {"x": 0, "y": 0}
-    assert sub_picker.suppress_hover(reader) is False
+    assert sub_picker.suppress_hover(surfaces.hover_suppression(reader)) is False
 
 
 def test_open_picker_wants_the_forced_mouse_section():

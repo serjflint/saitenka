@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.subselect import SubtitleCandidate
+    from saitenka.app.surfaces import HoverSuppression
 
 log = logging.getLogger(__name__)
 
@@ -284,13 +285,13 @@ def contains(state: PickerState, x: float, y: float) -> bool:
     return in_rect(state.rect, x, y)
 
 
-def suppress_hover(reader: Reader) -> bool:
-    state = reader.sub_picker
+def suppress_hover(suppression: HoverSuppression) -> bool:
+    state = suppression.interaction.sub_picker
     if not state.open:
         return False
-    if not claims_pointer(state.rect, reader._prop("mouse-pos"), open_=state.open):
+    if not claims_pointer(state.rect, suppression.pointer, open_=state.open):
         return False
-    reader.retire_hover()
+    suppression.release_hover()
     return True
 
 
