@@ -67,6 +67,7 @@ def show_nested(reader: Reader, sb) -> None:
     """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
     Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
     popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
+    ports = reader.tip_ports
     if reader._interaction_metadata_submit is not None:
         from saitenka.app.hover_metadata import NestedMetadataKey, NestedMetadataRequest
 
@@ -76,7 +77,7 @@ def show_nested(reader: Reader, sb) -> None:
                     reader.prefetch_state.gen,
                     reader._dependency_generation,
                     reader.session.mined.generation,
-                    id(reader.tip.view.state),
+                    id(ports.tip.view.state),
                     sb.text,
                 ),
                 reader.tokenizer.name,
@@ -88,17 +89,17 @@ def show_nested(reader: Reader, sb) -> None:
     tokens = reader.tokenizer.tokenize(sb.text)
     tok = tokens[0] if tokens else None
     if tok is None or reader.tokenizer.is_skippable(tok):
-        hide_nested(reader.tip_ports)
+        hide_nested(ports)
         return
-    if tok.surface == reader.tip.nest.word and reader.tip.nest.state is not None:
-        reader.tip.nest.tail = sb.text  # same word, new cell → don't re-scan it
+    if tok.surface == ports.tip.nest.word and ports.tip.nest.state is not None:
+        ports.tip.nest.tail = sb.text  # same word, new cell → don't re-scan it
         return
     # Longest-match, Yomitan-style: stack any multi-token dictionary term starting under the cursor
     # (コンサート over the over-split コン) — the same forward longest-match the base tooltip applies to a
     # hovered cue word, so an inner katakana/compound word opens whole instead of as its first morpheme.
     extra = _phrase_extra_terms(tokens, dict_set=reader.dict_set, tokenizer=reader.tokenizer)
-    sx, sy = reader.tip.view.xy  # anchor to the inner word's screen cell
-    anchor = Anchor(sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
+    sx, sy = ports.tip.view.xy  # anchor to the inner word's screen cell
+    anchor = Anchor(sx + sb.x, sy + (sb.y - ports.tip.view.scroll), sb.h)
     # defer=True: a cold inner word's head+bands raster off the main thread (tier-3), re-derived from the
     # scan cell when it lands — the hover-scan path, unlike a clicked link, is re-derivable via scan_hit.
     open_nested(reader, tok, tok.surface, anchor, tail=sb.text, extra_terms=extra, defer=True)
@@ -163,6 +164,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     show NOTHING — its typed completion re-derives the
     anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
     clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
+    ports = reader.tip_ports
     if mined is None:
         mined = is_mined(tok, reader.session.mined)
     key = panel_key(
@@ -173,22 +175,22 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         phrase=extra_terms,
         group_mined=group_mined,
     )
-    if defer and key not in reader.tip.panel_cache:
+    if defer and key not in ports.tip.panel_cache:
         # Retain the identity-qualified presentation inputs while the engaged worker warms this key.
-        reader.tip.nest.key = key
-        reader.tip.nest.token = tok
-        reader.tip.nest.word = tok.surface
-        reader.tip.nest.tail = tail or tok.surface
+        ports.tip.nest.key = key
+        ports.tip.nest.token = tok
+        ports.tip.nest.word = tok.surface
+        ports.tip.nest.tail = tail or tok.surface
         request = tooltip_engaged.HoverRequest(
             tok,
             inflected,
             mined,
             tuple(key),
-            reader.tip_scale.cap,
+            ports.scale.cap,
             tuple(extra_terms),
             nested=True,
             tail=tail or tok.surface,
-            job_id=reader.tip.nest.job_id,
+            job_id=ports.tip.nest.job_id,
         )
         if reader._request_engaged_tooltip(request):
             return
@@ -196,13 +198,13 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         reader,
         tok,
         inflected,
-        min_h=reader.tip_scale.cap,
+        min_h=ports.scale.cap,
         mined=mined,
         nested=True,
         extra_terms=extra_terms,
         group_mined=group_mined,
     )
-    place_nested(reader.tip_ports, st, key, tok, tok.surface, anchor, tail)
+    place_nested(ports, st, key, tok, tok.surface, anchor, tail)
 
 
 def place_nested(ports: TipPorts, st, key, token, word: str, anchor: Anchor, tail=None) -> None:
@@ -233,14 +235,15 @@ def place_nested(ports: TipPorts, st, key, token, word: str, anchor: Anchor, tai
 
 def rerender_with_mined_state(reader: Reader) -> None:
     """Rebuild the nested popup in place with the current mined-state, keeping its position."""
-    tok = reader.tip.nest.token
+    ports = reader.tip_ports
+    tok = ports.tip.nest.token
     if tok is None:
         return
     mined = is_mined(tok, reader.session.mined)
-    st = panel_for(reader, tok, tok.surface, min_h=reader.tip_scale.cap, mined=mined)
-    reader.tip.nest.state = st
-    reader.tip.nest.key = panel_key(reader, tok, tok.surface, mined=mined)
-    render_view(reader.tip_ports, reader.tip.nest)
+    st = panel_for(reader, tok, tok.surface, min_h=ports.scale.cap, mined=mined)
+    ports.tip.nest.state = st
+    ports.tip.nest.key = panel_key(reader, tok, tok.surface, mined=mined)
+    render_view(ports, ports.tip.nest)
 
 
 def _cached_rows_panel(tip: TooltipState, style: PanelStyle, cap: int, key, entry, reading: str):
@@ -290,6 +293,7 @@ def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> No
     """Open a clicked/keyed nested popup, deferring the getmask2 raster off the main thread when a worker
     is available (like the scan-hover tier-3, but anchor-CARRIED since a clicked link/kanji isn't
     scan-re-derivable). Existence-checked first, so a 'no entry' toast still fires on the click tick."""
+    ports = reader.tip_ports
     built = _engaged_open_panel(reader, source, query)
     if built is None:
         if source == "kanji":
@@ -300,12 +304,12 @@ def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> No
         source,
         query,
         (anchor.wx, anchor.wy, anchor.wh),
-        id(reader.tip.view.state),
+        id(ports.tip.view.state),
         mined,
     )
     if reader._request_engaged_tooltip(request):
         return
-    place_nested(reader.tip_ports, st, key, token, word, anchor)
+    place_nested(ports, st, key, token, word, anchor)
 
 
 def open_link(reader: Reader, lb, xy, scroll: int) -> None:

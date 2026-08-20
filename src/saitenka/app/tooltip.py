@@ -315,22 +315,23 @@ def retire_hover(reader: Reader) -> None:
 
 
 def set_hover(reader: Reader, index: int) -> None:
+    ports = reader.tip_ports
     if index < 0:
         retire_hover(reader)  # any negative index means "nothing hovered"
         return
     if index == reader.hover:
         return
     reader.hover = index
-    reader.tip.view.job_id = reader.tip.jobs.begin("tooltip")
-    reader.tip.view.job_kind = "tooltip"
+    ports.tip.view.job_id = ports.tip.jobs.begin("tooltip")
+    ports.tip.view.job_kind = "tooltip"
     if reader._interaction_metadata_submit is not None:
         # Retire the previous tooltip's logical identity immediately. Its acknowledged pixels may stay
         # until the replacement paints, but stale nested/open results can no longer attach to it.
-        nested_popup.hide_nested(reader.tip_ports)
-        reader.tip.tip_nav = []
-        reader.tip.view.state = None
-        reader.tip.view.rect = None
-        reader.tip.hover = NO_HOVER_METADATA
+        nested_popup.hide_nested(ports)
+        ports.tip.tip_nav = []
+        ports.tip.view.state = None
+        ports.tip.view.rect = None
+        ports.tip.hover = NO_HOVER_METADATA
         reader._draw_subtitle()
         _request_hover_metadata(reader, index)
         return
@@ -386,16 +387,17 @@ def flash(ports: TipPorts, oid: int) -> None:
 def copy_click(reader: Reader) -> None:
     """Right-click — copy the word under the cursor (the inner scanned word if over the nested
     popup, else the hovered/pointed subtitle word), with a brief highlight flash."""
+    ports = reader.tip_ports
     mp = reader._get("mouse-pos") or {}
     x, y = mp.get("x", -1), mp.get("y", -1)
-    if reader.tip.nest.rect is not None and in_rect(reader.tip.nest.rect, x, y):
-        if reader.tip.nest.token is not None:
-            copy_token(reader._toast, reader.tip.nest.token)
-            flash(reader.tip_ports, OverlayId.NESTED)
+    if ports.tip.nest.rect is not None and in_rect(ports.tip.nest.rect, x, y):
+        if ports.tip.nest.token is not None:
+            copy_token(reader._toast, ports.tip.nest.token)
+            flash(ports, OverlayId.NESTED)
         return
-    if reader.tip.view.rect is not None and in_rect(reader.tip.view.rect, x, y):
+    if ports.tip.view.rect is not None and in_rect(ports.tip.view.rect, x, y):
         copy_hovered(reader._toast, reader.tokens, reader.hover)
-        flash(reader.tip_ports, OverlayId.TIP)
+        flash(ports, OverlayId.TIP)
         return
     idx = reader._hit(x, y) if reader.tokens else -1  # not over a popup → the subtitle word, if any
     if idx >= 0:
@@ -689,9 +691,10 @@ def _freeze_frame(ipc, prop, *, enabled: bool, already_paused: bool) -> bool:
 
 
 def show_tooltip_impl(reader: Reader, index: int) -> bool:
-    tip = reader.tip
+    ports = reader.tip_ports
+    tip = ports.tip
     view = tip.view
-    nested_popup.hide_nested(reader.tip_ports)  # switching the base word drops any stale scan popup
+    nested_popup.hide_nested(ports)  # switching the base word drops any stale scan popup
     tip.tip_nav = []  # a newly hovered word abandons any link-navigation back-history
     tip.kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = reader.tokens[index]
@@ -700,11 +703,11 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         log.debug("tooltip anchor disappeared for token index %d", index)
         reader.hover = -1
         tip.hover = NO_HOVER_METADATA
-        reader.tip.jobs.finish("tooltip", "failed")
+        ports.tip.jobs.finish("tooltip", "failed")
         reader._teardown_tip()
         return False
     inflected = reader._inflected_surface(index)
-    cap = reader.tip_scale.cap
+    cap = ports.scale.cap
     with otel_metrics.traced("pause_ipc"):
         if _freeze_frame(
             reader.ipc,
@@ -734,7 +737,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # full_h + decorate + upload the cached pixels NOW, skipping the whole build+measure+raster pipeline
     # so the user sees the tooltip in ~upload-time. The real interactive Panel is built right after (its
     # pixels are identical), off this paint's critical path — the reaction-latency window covers it.
-    painted = _paint_from_cache(reader.tip_ports, key, cap, anchor) if tip.tip_show_cold else False
+    painted = _paint_from_cache(ports, key, cap, anchor) if tip.tip_show_cold else False
 
     # Cold miss (nothing in the panel cache AND tier-2 direct-paint missed): do NOT build/raster on the
     # main thread — that synchronous build is what balloons tooltip_show p95+. Enqueue a TOP-priority
@@ -784,10 +787,10 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
             st.full_height,
             cap,
             anchor,
-            scale=reader.tip_scale.display,
-            osd=reader.osd,
+            scale=ports.scale.display,
+            osd=ports.osd,
         )
-        render_view(reader.tip_ports, reader.tip.view)
+        render_view(ports, ports.tip.view)
     reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
     # One panel: the blit above painted soft (instant) if the native viewport wasn't warm yet — the
     # direct-paint (#149) path is soft too. Ask the raster lane to warm the native bands; its completion
@@ -848,9 +851,10 @@ def apply_engaged_open(reader: Reader, result: tooltip_engaged.OpenReady) -> Non
     nested popup (an explicit open/`k`-cycle wins over a hover-scan popup — newest-wins on the slot keeps
     only the latest intent). Re-selects the (now-warm) cached panel via the shared builder and
     ``place_nested``s it at the carried anchor — a cache hit whose bands the worker rastered, no getmask2."""
-    if reader.tip.view.state is None:
+    ports = reader.tip_ports
+    if ports.tip.view.state is None:
         return
-    if id(reader.tip.view.state) != result.origin:
+    if id(ports.tip.view.state) != result.origin:
         return  # the base tooltip switched under us — don't open onto the new word
     built = nested_popup._engaged_open_panel(
         reader, result.source, result.query
@@ -858,9 +862,7 @@ def apply_engaged_open(reader: Reader, result: tooltip_engaged.OpenReady) -> Non
     if built is None:
         return
     st, key, token, word, _mined = built
-    nested_popup.place_nested(
-        reader.tip_ports, st, key, token, word, nested_popup.Anchor(*result.anchor)
-    )
+    nested_popup.place_nested(ports, st, key, token, word, nested_popup.Anchor(*result.anchor))
 
 
 def apply_engaged_nav(ports: TipPorts, result: tooltip_engaged.NavigateReady) -> None:
@@ -915,11 +917,12 @@ def _apply_engaged_nested(ports: TipPorts, tail: str) -> None:
 
 
 def apply_engaged_hover(reader: Reader, result: tooltip_engaged.HoverReady) -> None:
-    popup = reader.tip.nest if result.nested else reader.tip.view
+    ports = reader.tip_ports
+    popup = ports.tip.nest if result.nested else ports.tip.view
     if popup.job_id != result.job_id:
         return
     if result.nested:
-        _apply_engaged_nested(reader.tip_ports, result.tail)
+        _apply_engaged_nested(ports, result.tail)
     else:
         _apply_engaged_base(reader, result.key)
 
@@ -997,19 +1000,18 @@ def navigate_tip(reader: Reader, query: str) -> None:
     the click tick is a synchronous getmask2 raster (the ``tip_compose[clicked]`` tail). With a worker
     running, enqueue it — the worker builds + warms the bands, the tick swaps from warm bands (a cheap
     assemble, no raster). No worker → the synchronous path (unchanged)."""
+    ports = reader.tip_ports
     if reader.dict_set is None:
         return
-    if reader.tip.view.state is not None:
-        request = tooltip_engaged.NavigateRequest(query, id(reader.tip.view.state))
+    if ports.tip.view.state is not None:
+        request = tooltip_engaged.NavigateRequest(query, id(ports.tip.view.state))
         if reader._request_engaged_tooltip(request):
             return
     st = _navigated_panel(reader.panel_style, query)
     if st is None:
         return
-    st.render_head(
-        reader.tip_scale.cap
-    )  # warm the head so full_height sizes the viewport correctly
-    _install_navigated(reader.tip_ports, st)
+    st.render_head(ports.scale.cap)  # warm the head so full_height sizes the viewport correctly
+    _install_navigated(ports, st)
 
 
 def _install_navigated(ports: TipPorts, st: Panel) -> None:
@@ -1044,10 +1046,11 @@ def tip_back(ports: TipPorts) -> bool:
 
 def scroll_tip(reader: Reader, delta: int) -> None:
     # route the wheel to whichever popup the cursor is over (nested sits on top)
-    if reader.tip.nest.rect is not None and in_rect(reader.tip.nest.rect, *reader.tip.last_mouse):
-        scroll_view(reader.tip_ports, reader.tip.nest, delta)
+    ports = reader.tip_ports
+    if ports.tip.nest.rect is not None and in_rect(ports.tip.nest.rect, *ports.tip.last_mouse):
+        scroll_view(ports, ports.tip.nest, delta)
         return
-    if scroll_view(reader.tip_ports, reader.tip.view, delta):
+    if scroll_view(ports, ports.tip.view, delta):
         # Scrolling counts as interacting. Through the machine, not as a field write: the
         # hysteresis has one writer, and a second one leaves the next tick deciding against a state
         # it does not hold.
