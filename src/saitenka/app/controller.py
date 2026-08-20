@@ -120,6 +120,7 @@ from saitenka.app.popups import (
     NO_HOVER_METADATA,
     Panel,
     PopupView,
+    TipPorts,
 )
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
 from saitenka.app.reader_context import (
@@ -1809,6 +1810,24 @@ class Reader:
         return sidebar_module.actions_of(self)
 
     @property
+    def tip_ports(self) -> TipPorts:
+        """What the popup blit/scroll/placement chain needs, as one member rather than seven.
+
+        A property for the same reason `panel_style` is one: as a host-taking builder it would have
+        traded fifteen debt rows for a sixteenth, and every caller in the chain would still have
+        inherited the whole set it gathers.
+        """
+        return TipPorts(
+            tip=self.tip,
+            scale=self.tip_scale,
+            surfaces=self.interaction_surfaces,
+            hover_store=self._hover_store,
+            request_render_ahead=self._request_render_ahead,
+            osd=self.osd,
+            nested_max_frac=self.nested_max_frac,
+        )
+
+    @property
     def panel_style(self) -> tooltip_panel.PanelStyle:
         """The session-lifetime half of a panel build, as one value.
 
@@ -2119,10 +2138,10 @@ class Reader:
         return self._mouse.defined
 
     def _render_tip_view(self) -> None:
-        tooltip_panel.render_view(self, self.tip.view)
+        tooltip_panel.render_view(self.tip_ports, self.tip.view)
 
     def _render_nested_view(self) -> None:
-        tooltip_panel.render_view(self, self.tip.nest)
+        tooltip_panel.render_view(self.tip_ports, self.tip.nest)
 
     def _scroll_tip(self, delta: int) -> None:
         # event → redraw-finished latency for one scroll tick: nests the downstream "render"
@@ -2172,7 +2191,7 @@ class Reader:
         elif isinstance(effect, interaction_intents.ScrollTooltip):
             self._scroll_tip(effect.pixels)
         elif isinstance(effect, interaction_intents.NavigateBack):
-            tooltip.tip_back(self)
+            tooltip.tip_back(self.tip_ports)
         elif isinstance(effect, DismissHover):
             self.retire_hover()
         elif isinstance(effect, interaction_intents.RouteClick):
@@ -2197,7 +2216,7 @@ class Reader:
         nested_popup.open_kanji(self, ch, wx, wy, wh)
 
     def _hide_nested(self) -> None:
-        nested_popup.hide_nested(self)
+        nested_popup.hide_nested(self.tip_ports)
 
     # --- mining (flow lives in app/miner.py; thin delegates here) --------------------------------
     def _mine_target(self) -> int | None:
@@ -3160,7 +3179,7 @@ class Reader:
         if isinstance(result, tooltip_engaged.HoverReady):
             tooltip.apply_engaged_hover(self, result)
         elif isinstance(result, tooltip_engaged.NavigateReady):
-            tooltip.apply_engaged_nav(self, result)
+            tooltip.apply_engaged_nav(self.tip_ports, result)
         elif isinstance(result, tooltip_engaged.OpenReady):
             tooltip.apply_engaged_open(self, result)
 
@@ -3181,7 +3200,7 @@ class Reader:
         if isinstance(result, tooltip_engaged.HoverReady):
             tooltip.apply_engaged_hover(self, result)
         elif isinstance(result, tooltip_engaged.NavigateReady):
-            tooltip.apply_engaged_nav(self, result)
+            tooltip.apply_engaged_nav(self.tip_ports, result)
         elif isinstance(result, tooltip_engaged.OpenReady):
             tooltip.apply_engaged_open(self, result)
 
@@ -3207,7 +3226,7 @@ class Reader:
                 and view.job_id == identity.job_id
             ):
                 if succeeded:
-                    tooltip_panel.apply_pending_scroll(self, view)
+                    tooltip_panel.apply_pending_scroll(self.tip_ports, view)
                 else:
                     view.desired_scroll = view.scroll
                     self.tip.jobs.finish("scroll", "failed", job_id=identity.job_id)
@@ -3219,7 +3238,7 @@ class Reader:
         # is exactly what the tick used to notice. `apply_pending_crisp` is a no-op unless a view
         # is both pending and warm, so asking twice costs a flag check.
         for view in (self.tip.view, self.tip.nest):
-            tooltip_panel.apply_pending_crisp(self, view)
+            tooltip_panel.apply_pending_crisp(self.tip_ports, view)
 
     def _cancel_render_ahead(self) -> None:
         tooltip_raster.cancel(self._render_ahead)

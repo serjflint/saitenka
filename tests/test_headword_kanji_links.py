@@ -94,5 +94,5 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     # Reversible: back restores the base 読む tooltip.
     from saitenka.app import tooltip
 
-    assert tooltip.tip_back(r) is True
+    assert tooltip.tip_back(r.tip_ports) is True
     assert r.tip.view.state is base

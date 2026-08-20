@@ -65,14 +65,14 @@ def _apply(reader, action: str, arg: object) -> None:
     elif action == "navigate":
         tooltip.navigate_tip(reader, _NAV_QUERY)
     elif action == "back":
-        tooltip.tip_back(reader)
+        tooltip.tip_back(reader.tip_ports)
     elif action == "open_nested":
         tok = reader.tokens[0]
         nested_popup.open_nested(reader, tok, tok.surface, nested_popup.Anchor(200.0, 200.0, 40.0))
     elif action == "resize":
         scale = float(arg)  # type: ignore[arg-type]
         reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
-        tooltip_panel.render_view(reader, reader.tip.view)
+        tooltip_panel.render_view(reader.tip_ports, reader.tip.view)
     else:  # pragma: no cover - guards a typo in a scenario table
         raise AssertionError(f"unknown action {action!r}")
 

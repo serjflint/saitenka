@@ -1456,7 +1456,7 @@ def _timeline_interact(reader) -> None:
             reader, sb
         )  # warm → synchronous nested show (tip_compose kind="nested")
         # scroll the nested popup so its render-ahead + crisp-poll are exercised (the base already is)
-        tooltip_panel.scroll_view(reader, reader.tip.nest, round(reader.osd[1] * 0.1))
+        tooltip_panel.scroll_view(reader.tip_ports, reader.tip.nest, round(reader.osd[1] * 0.1))
         reader._hide_nested()
     # a clicked/keyed kanji open (deferred, tier-3): warms off-thread → prefetch_decode[engaged_open]
     reader.kanji_current()

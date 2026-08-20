@@ -388,9 +388,9 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     assert len(r.tip.tip_nav) == 1, "the previous view is pushed for back"
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
 
-    assert tooltip.tip_back(r) is True
+    assert tooltip.tip_back(r.tip_ports) is True
     assert r.tip.view.state is base and r.tip.tip_nav == []
-    assert tooltip.tip_back(r) is False, "no history left → caller falls through to close"
+    assert tooltip.tip_back(r.tip_ports) is False, "no history left → caller falls through to close"
 
 
 def test_navigation_history_resets_when_hovering_a_new_subtitle_word():

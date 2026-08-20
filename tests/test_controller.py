@@ -1631,7 +1631,7 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     # Wheel toward the bottom until the clamp stops moving; each notch grows the converging estimate.
     prev = -1
     for _ in range(200):
-        tooltip_panel.scroll_view(r, r.tip.nest, 10_000)
+        tooltip_panel.scroll_view(r.tip_ports, r.tip.nest, 10_000)
         if r.tip.nest.scroll == prev:
             break
         prev = r.tip.nest.scroll
@@ -1896,8 +1896,8 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
     r.on_click()
     assert r.hover_view().nested.state is None  # NOT a nested popup
     assert r.hover_view().tip.state is not None and r.hover_view().tip.state is not base
-    assert tooltip.tip_back(r) is True and r.hover_view().tip.state is base
-    assert tooltip.tip_back(r) is False
+    assert tooltip.tip_back(r.tip_ports) is True and r.hover_view().tip.state is base
+    assert tooltip.tip_back(r.tip_ports) is False
 
 
 class _WildcardDS:

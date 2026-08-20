@@ -145,7 +145,9 @@ class TooltipSession(RuleBasedStateMachine):
     @rule()
     def back(self) -> None:
         expected = self.nav_depth > 0
-        assert tooltip.tip_back(self.r) == expected  # False at the root → caller closes the tooltip
+        assert (
+            tooltip.tip_back(self.r.tip_ports) == expected
+        )  # False at the root → caller closes the tooltip
         if expected:
             self.nav_depth -= 1
         self._check("back")
@@ -162,7 +164,7 @@ class TooltipSession(RuleBasedStateMachine):
     @rule(scale=st.sampled_from(_SCALES))
     def resize(self, scale: int) -> None:
         self.r.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
-        tooltip_panel.render_view(self.r, self.r.tip.view)  # re-blit at the new scale
+        tooltip_panel.render_view(self.r.tip_ports, self.r.tip.view)  # re-blit at the new scale
         self._check("resize")
 
     @invariant()

@@ -150,10 +150,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/nested_popup.py::hide_nested"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/nested_popup.py::kanji_current"
     ],
     [
@@ -171,10 +167,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/nested_popup.py::open_search"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::place_nested"
     ],
     [
       "reader-parameter",
@@ -314,10 +306,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_apply_engaged_nested"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_click_nested"
     ],
     [
@@ -327,10 +315,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::_dwell_elapsed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_install_navigated"
     ],
     [
       "reader-parameter",
@@ -351,10 +335,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::apply_engaged_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_engaged_nav"
     ],
     [
       "reader-parameter",
@@ -422,10 +402,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::tip_back"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::update_hover"
     ],
     [
@@ -438,47 +414,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::_blit_crisp_or_soft"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::_blit_native"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::apply_pending_crisp"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::apply_pending_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::blit_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::decorate_and_upload"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::dispatch_hover"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip_panel.py::panel_for"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/tooltip_panel.py::panel_key"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::render_view"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::scroll_view"
     ]
   ],
   "startup": [

@@ -19,13 +19,41 @@ from saitenka.app.interaction_jobs import InteractionJobs
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import numpy as np
 
+    from saitenka.app.hover_store import HoverStore
+    from saitenka.app.interaction_surfaces import InteractionSurfaces
+    from saitenka.app.prefetch import TipScale
     from saitenka.app.render_cache import RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.model import Theme
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend
+
+
+@dataclass(frozen=True, slots=True)
+class TipPorts:
+    """Everything the popup blit, scroll and placement chain reaches the host for.
+
+    Seven members cover fifteen functions across `tooltip`, `tooltip_panel` and `nested_popup` —
+    the first place in the tooltip cluster where a port is actually available, because the chain
+    only ever wanted the tip's own state, the scale it draws at, and three collaborators to hand
+    the pixels to. Built as `Reader.tip_ports`, so a caller still holding the host pays one member
+    for it rather than the seven it gathers.
+
+    `tip` is the live mutable `TooltipState`, not a copy: the chain writes scroll and crisp flags
+    back onto the view it was given, and a snapshot would silently drop those.
+    """
+
+    tip: TooltipState
+    scale: TipScale
+    surfaces: InteractionSurfaces
+    hover_store: HoverStore
+    request_render_ahead: Callable[[PopupView, int], bool]
+    osd: tuple[int, int]
+    nested_max_frac: float
 
 
 class Panel:

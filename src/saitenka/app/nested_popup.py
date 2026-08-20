@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app import tooltip_engaged
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import PopupView
+from saitenka.app.popups import PopupView, TipPorts
 from saitenka.app.prefetch import cap_for
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
@@ -88,7 +88,7 @@ def show_nested(reader: Reader, sb) -> None:
     tokens = reader.tokenizer.tokenize(sb.text)
     tok = tokens[0] if tokens else None
     if tok is None or reader.tokenizer.is_skippable(tok):
-        hide_nested(reader)
+        hide_nested(reader.tip_ports)
         return
     if tok.surface == reader.tip.nest.word and reader.tip.nest.state is not None:
         reader.tip.nest.tail = sb.text  # same word, new cell → don't re-scan it
@@ -202,33 +202,33 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         extra_terms=extra_terms,
         group_mined=group_mined,
     )
-    place_nested(reader, st, key, tok, tok.surface, anchor, tail)
+    place_nested(reader.tip_ports, st, key, tok, tok.surface, anchor, tail)
 
 
-def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail=None) -> None:
+def place_nested(ports: TipPorts, st, key, token, word: str, anchor: Anchor, tail=None) -> None:
     """Anchor a built :class:`Panel` ``st`` as the nested popup. ``token`` is the inner Token to mine
     via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
-    reader.tip.nest.state, reader.tip.nest.key = st, key
-    reader.tip.nest.token, reader.tip.nest.word = token, word
-    reader.tip.nest.tail = tail
-    reader.tip.nest.scroll = 0
-    reader.tip.nest.desired_scroll = 0
-    reader.tip.nest.view_h = nested_view_h(
-        st.full_height, anchor.wy, osd_h=reader.osd[1], max_frac=reader.nested_max_frac
+    ports.tip.nest.state, ports.tip.nest.key = st, key
+    ports.tip.nest.token, ports.tip.nest.word = token, word
+    ports.tip.nest.tail = tail
+    ports.tip.nest.scroll = 0
+    ports.tip.nest.desired_scroll = 0
+    ports.tip.nest.view_h = nested_view_h(
+        st.full_height, anchor.wy, osd_h=ports.osd[1], max_frac=ports.nested_max_frac
     )
-    reader.tip.nest.xy = place_panel(
+    ports.tip.nest.xy = place_panel(
         st.width,
         anchor.wx,
         anchor.wy,
         anchor.wh,
-        reader.tip.nest.view_h,
-        scale=reader.tip_scale.display,
-        osd=reader.osd,
+        ports.tip.nest.view_h,
+        scale=ports.scale.display,
+        osd=ports.osd,
     )
     # Kick a render-ahead so a first wheel notch on the nested popup composites crisp off warm
     # bands, like the base tooltip.
-    render_view(reader, reader.tip.nest)
-    reader._request_render_ahead(reader.tip.nest, 1)
+    render_view(ports, ports.tip.nest)
+    ports.request_render_ahead(ports.tip.nest, 1)
 
 
 def rerender_with_mined_state(reader: Reader) -> None:
@@ -240,7 +240,7 @@ def rerender_with_mined_state(reader: Reader) -> None:
     st = panel_for(reader, tok, tok.surface, min_h=reader.tip_scale.cap, mined=mined)
     reader.tip.nest.state = st
     reader.tip.nest.key = panel_key(reader, tok, tok.surface, mined=mined)
-    render_view(reader, reader.tip.nest)
+    render_view(reader.tip_ports, reader.tip.nest)
 
 
 def _cached_rows_panel(tip: TooltipState, style: PanelStyle, cap: int, key, entry, reading: str):
@@ -305,7 +305,7 @@ def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> No
     )
     if reader._request_engaged_tooltip(request):
         return
-    place_nested(reader, st, key, token, word, anchor)
+    place_nested(reader.tip_ports, st, key, token, word, anchor)
 
 
 def open_link(reader: Reader, lb, xy, scroll: int) -> None:
@@ -369,7 +369,7 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
         open_kanji(reader, ch, sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
 
 
-def hide_nested(reader: Reader) -> None:
-    if reader.tip.nest.state is not None or reader.tip.nest.rect is not None:
-        reader.interaction_surfaces.remove(OverlayId.NESTED)
-    reader.tip.nest = PopupView(OverlayId.NESTED)
+def hide_nested(ports: TipPorts) -> None:
+    if ports.tip.nest.state is not None or ports.tip.nest.rect is not None:
+        ports.surfaces.remove(OverlayId.NESTED)
+    ports.tip.nest = PopupView(OverlayId.NESTED)

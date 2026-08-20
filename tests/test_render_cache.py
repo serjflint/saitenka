@@ -431,7 +431,7 @@ def test_cold_nested_scroll_rasters_on_the_interactive_thread():
         for _ in range(
             6
         ):  # each notch grows the height estimate and moves past the warmed overscan
-            tooltip_panel.scroll_view(r, r.tip.nest, r.tip.nest.view_h)
+            tooltip_panel.scroll_view(r.tip_ports, r.tip.nest, r.tip.nest.view_h)
 
     assert assert_no_interactive_raster(r.tip.nest, scroll_to_the_cold_tail) > 0
 
@@ -446,13 +446,13 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
         r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # soft first paint
     tooltip_panel.scroll_view(
-        r, r.tip.nest, r.tip.nest.view_h // 2
+        r.tip_ports, r.tip.nest, r.tip.nest.view_h // 2
     )  # soft-first + records a render-ahead
     assert r.tip.nest.crisp_pending
     r._render_ahead_submit.finish_all()
 
     rasters = assert_no_interactive_raster(
-        r.tip.nest, lambda: tooltip_panel.apply_pending_crisp(r, r.tip.nest)
+        r.tip.nest, lambda: tooltip_panel.apply_pending_crisp(r.tip_ports, r.tip.nest)
     )
     assert rasters == 0
     assert r.tip.nest.crisp_miss == "" and not r.tip.nest.crisp_pending  # upgraded soft → crisp
@@ -465,7 +465,7 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     tok = r.tokens[0]
     nested_popup.open_nested(r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0))
     nest = r.tip.nest.state
-    tooltip_panel.scroll_view(r, r.tip.nest, max(1, r.tip.nest.view_h // 3))
+    tooltip_panel.scroll_view(r.tip_ports, r.tip.nest, max(1, r.tip.nest.view_h // 3))
     pending = r._render_ahead.pending
     assert pending is not None
     req = pending[1]
@@ -486,7 +486,7 @@ def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
         return real(*a, **k)
 
     monkeypatch.setattr(st, "render_ahead", spy)
-    tooltip_panel.scroll_view(r, view, view.view_h)  # flick → records a render-ahead
+    tooltip_panel.scroll_view(r.tip_ports, view, view.view_h)  # flick → records a render-ahead
     r._render_ahead_submit.finish_all()
     return seen
 
@@ -544,10 +544,10 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     uploads: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda _v, *_a, oid=None, **_k: uploads.append(oid))
     tooltip_panel.apply_pending_crisp(
-        r, r.tip.view
+        r.tip_ports, r.tip.view
     )  # base native still cold → no-op, base not re-blit
     tooltip_panel.apply_pending_crisp(
-        r, r.tip.nest
+        r.tip_ports, r.tip.nest
     )  # nested native warm → upgrades the NESTED to crisp
 
     assert not r.tip.nest.crisp_pending and r.tip.nest.crisp_miss == ""  # nested is crisp now

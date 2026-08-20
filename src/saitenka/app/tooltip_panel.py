@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 from saitenka import otel_metrics
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import Panel, PopupView
+from saitenka.app.popups import Panel, PopupView, TipPorts
 from saitenka.panel import Freq, panel_rows
 from saitenka.runtime import events, hover
 
@@ -418,7 +418,7 @@ def compose_kind(oid: int, *, navigated: bool) -> str:
 
 
 def blit_panel(
-    reader: Reader,
+    ports: TipPorts,
     panel: Panel,
     scroll: int,
     view_h: int,
@@ -444,15 +444,15 @@ def blit_panel(
     with otel_metrics.traced(
         "tip_compose",
         soft_reason=soft_reason or "n/a",
-        scale=f"{reader.tip_scale.display:.4f}",
-        kind=compose_kind(oid, navigated=bool(reader.tip.tip_nav)),
+        scale=f"{ports.scale.display:.4f}",
+        kind=compose_kind(oid, navigated=bool(ports.tip.tip_nav)),
     ):
         view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
-    return decorate_and_upload(reader, view, y0, full_h, xy, oid)
+    return decorate_and_upload(ports, view, y0, full_h, xy, oid)
 
 
 def decorate_and_upload(
-    reader: Reader, view, y0: int, full_h: int, xy, oid: int, *, prescaled: bool = False
+    ports: TipPorts, view, y0: int, full_h: int, xy, oid: int, *, prescaled: bool = False
 ):
     """Draw the scrollbar thumb and the copy-flash border onto a REFERENCE-sized viewport BGRA array,
     then upscale by ``TipScale.display`` to the live display and upload. Decorations are drawn in
@@ -466,12 +466,12 @@ def decorate_and_upload(
         th = max(28, int(track * vh / full_h))
         tyb = 4 + int((track - th) * (y0 / max(1, full_h - vh)))
         view[tyb : tyb + th, full_w - 7 : full_w - 3] = (99, 99, 99, 210)
-    tip = reader.tip
+    tip = ports.tip
     if tip.flash_oid == oid:  # the deadline owns when this stops being true
         b = 4  # "copied" highlight border (a brief visual pulse)
         view[:b, :] = view[-b:, :] = FLASH_BGRA
         view[:, :b] = view[:, -b:] = FLASH_BGRA
-    s = reader.tip_scale.display
+    s = ports.scale.display
     if not prescaled and abs(s - 1.0) > 1e-3:  # only hi-dpi pays the resize; 1080p is a 1:1 no-op
         from saitenka.bgra import scale_bgra
 
@@ -484,11 +484,11 @@ def decorate_and_upload(
     def settled(*, painted: bool) -> None:
         if job_id is None:
             return
-        reader.tip.jobs.finish(kind, "painted" if painted else "failed", job_id=job_id)
+        ports.tip.jobs.finish(kind, "painted" if painted else "failed", job_id=job_id)
 
     # Fenced: a paint acknowledged after a newer paint or a hide settles nobody, so the intent's
     # latency is never closed out against pixels something else has already replaced.
-    reader.interaction_surfaces.present_bgra(view, tx, ty, oid=oid, on_settled=settled)
+    ports.surfaces.present_bgra(view, tx, ty, oid=oid, on_settled=settled)
     return (tx, ty, view.shape[1], view.shape[0])
 
 
@@ -505,14 +505,14 @@ def project_hysteresis(tip: TooltipState, state: hover.HoverState) -> None:
     tip.nest.hide_pending = state.nest_hide_pending
 
 
-def dispatch_hover(reader: Reader, event) -> tuple[hover.Decision, ...]:
+def dispatch_hover(ports: TipPorts, event) -> tuple[hover.Decision, ...]:
     """Route one interaction observation to `Owner.INTERACTION` and drain the turn's outbox.
 
     Here rather than beside the applier because the blit layer declares a scroll and must not
     import the module that performs a hover — that edge is the app-package cycle.
     """
-    decisions = reader._hover_store.dispatch(event)
-    project_hysteresis(reader.tip, reader._hover_store.current.hysteresis)
+    decisions = ports.hover_store.dispatch(event)
+    project_hysteresis(ports.tip, ports.hover_store.current.hysteresis)
     return decisions
 
 
@@ -549,7 +549,7 @@ def link_hit_at(tip: TooltipState, raster_scale: float, mx: float, my: float, *,
     return link_hit(mx, my, panel, view.xy, scroll, scale=scale)
 
 
-def render_view(reader: Reader, view: PopupView) -> None:
+def render_view(ports: TipPorts, view: PopupView) -> None:
     """The SOLE blit path (SSOT) for BOTH the base tooltip and the nested popup: composite ``view``'s
     current viewport CRISP straight from the cached native-scale panel when it's built (the common case
     once a word is shown — so scrolling stays crisp, no soft flash), else the soft reference upscale, and
@@ -558,10 +558,10 @@ def render_view(reader: Reader, view: PopupView) -> None:
     st = view.state
     if st is None:
         return
-    view.rect = _blit_crisp_or_soft(reader, view, st)
+    view.rect = _blit_crisp_or_soft(ports, view, st)
 
 
-def apply_pending_crisp(reader: Reader, view: PopupView) -> None:
+def apply_pending_crisp(ports: TipPorts, view: PopupView) -> None:
     """Poll loop: once a soft first paint's native bands are warmed by the scroll-ahead worker, re-blit
     ``view`` ONCE to upgrade soft→crisp (``_blit_native`` composites crisp when warm and clears the
     flag). Per-view, so a soft nested paint upgrades the NESTED popup (not the base). No-op until warm /
@@ -574,13 +574,13 @@ def apply_pending_crisp(reader: Reader, view: PopupView) -> None:
         return
     vh = min(view.view_h, st.full_height)
     y0 = max(0, min(view.scroll, max(0, st.full_height - vh)))
-    if st.native_viewport_warm(y0, vh, reader.tip_scale.raster):
+    if st.native_viewport_warm(y0, vh, ports.scale.raster):
         render_view(
-            reader, view
+            ports, view
         )  # warm now → _blit_native composites crisp and clears crisp_pending
 
 
-def _blit_native(reader: Reader, view: PopupView, st: Panel):
+def _blit_native(ports: TipPorts, view: PopupView, st: Panel):
     """One-panel (scale-boundary) blit: composite the ONE reference panel's viewport at the display scale
     — native crisp glyph masks over the 1× geometry — and upload 1:1. Soft below the crisp threshold
     (≈1080p, where native == the upscale). No second panel, no crisp cache: the drawn panel IS the
@@ -588,12 +588,12 @@ def _blit_native(reader: Reader, view: PopupView, st: Panel):
     owns the scroll/viewport/xy + the soft→crisp flags, so base and nested each track their own."""
     scroll, view_h, xy, oid = view.scroll, view.view_h, view.xy, view.oid
     scale = (
-        reader.tip_scale.raster
+        ports.scale.raster
     )  # bucketed → matches hit_target's inverse; reuses cached native bands
     if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
         view.crisp_miss = "not_hidpi"
         view.crisp_pending = False
-        return blit_panel(reader, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
+        return blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
     full_h = st.full_height
     vh = min(view_h, full_h)
     y0 = max(0, min(scroll, max(0, full_h - vh)))
@@ -604,7 +604,7 @@ def _blit_native(reader: Reader, view: PopupView, st: Panel):
     if not st.native_viewport_warm(y0, vh, scale):
         view.crisp_miss = "warming"
         view.crisp_pending = True  # poll's apply_pending_crisp re-blits once the bands warm
-        return blit_panel(reader, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
+        return blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
     try:
         # crisp=native (soft_reason="" — this IS the crisp path, not a soft fallback). warm_only: the
         # main thread NEVER rasters — the bands are warm (gated above); a raced eviction shows bg, not a
@@ -613,12 +613,12 @@ def _blit_native(reader: Reader, view: PopupView, st: Panel):
             "tip_compose",
             soft_reason="",
             scale=f"{scale:.4f}",
-            kind=compose_kind(oid, navigated=bool(reader.tip.tip_nav)),
+            kind=compose_kind(oid, navigated=bool(ports.tip.tip_nav)),
         ):
             arr = st.viewport(y0, vh, overscan=vh, scale=scale, warm_only=True)  # native, no raster
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)
         log.debug("native compose failed", exc_info=True)
-        return blit_panel(reader, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
+        return blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
     view.crisp_miss = ""
     view.crisp_pending = False
     if otel_metrics.crisp_swaps is not None:
@@ -626,18 +626,18 @@ def _blit_native(reader: Reader, view: PopupView, st: Panel):
     # y0/full_h are display px so decorate_and_upload's scrollbar-thumb geometry stays right; the array
     # is already native (prescaled) so no scale_bgra.
     return decorate_and_upload(
-        reader, arr, round(y0 * scale), round(full_h * scale), xy, oid, prescaled=True
+        ports, arr, round(y0 * scale), round(full_h * scale), xy, oid, prescaled=True
     )
 
 
-def _blit_crisp_or_soft(reader: Reader, view: PopupView, st: Panel):
+def _blit_crisp_or_soft(ports: TipPorts, view: PopupView, st: Panel):
     """Composite ``view``'s current viewport and return its display-px rect. One panel: the reference
     panel composites natively at the display scale (``_blit_native``), soft below the crisp threshold.
     The SSOT both popups blit through, so each is crisp exactly when hi-dpi."""
-    return _blit_native(reader, view, st)
+    return _blit_native(ports, view, st)
 
 
-def scroll_view(reader: Reader, view: PopupView, delta: int) -> bool:
+def scroll_view(ports: TipPorts, view: PopupView, delta: int) -> bool:
     """Scroll ``view`` by ``delta`` (clamped to the windowed full height, a converging estimate) and
     re-blit crisp, warming the NEXT native bands off the main thread so continued scrolling composites
     crisp without a synchronous raster. Shared by the base tooltip and the nested popup — nested finally
@@ -649,27 +649,27 @@ def scroll_view(reader: Reader, view: PopupView, delta: int) -> bool:
     ns = min(maxs, max(0, view.desired_scroll + delta))
     if ns == view.desired_scroll:
         return False
-    view.job_id = reader.tip.jobs.begin("scroll")
+    view.job_id = ports.tip.jobs.begin("scroll")
     view.job_kind = "scroll"
     view.desired_scroll = ns
     if view.oid == OverlayId.NESTED:
         # The nested popup's linger is the machine's fact, so it is declared, not assigned. It
         # publishes no decision, which is why the panel layer can declare it without an applier.
-        dispatch_hover(reader, events.HoverScrolled(nested=True))
+        dispatch_hover(ports, events.HoverScrolled(nested=True))
     else:
         view.hide_pending = False  # scrolling counts as interacting → keep this popup up
-    deferred = reader._request_render_ahead(view, 1 if delta > 0 else -1)
+    deferred = ports.request_render_ahead(view, 1 if delta > 0 else -1)
     if not deferred:
         view.scroll = ns
-        render_view(reader, view)
+        render_view(ports, view)
         return True
     if st.viewport_warm(ns, min(view.view_h, st.full_height)):
         view.scroll = ns
-        render_view(reader, view)
+        render_view(ports, view)
     return True
 
 
-def apply_pending_scroll(reader: Reader, view: PopupView) -> None:
+def apply_pending_scroll(ports: TipPorts, view: PopupView) -> None:
     """Publish the newest desired viewport once its raw bands are fully warm."""
     st = view.state
     if st is None or view.desired_scroll == view.scroll:
@@ -678,7 +678,7 @@ def apply_pending_scroll(reader: Reader, view: PopupView) -> None:
     if not st.viewport_warm(view.desired_scroll, view_h):
         return
     view.scroll = view.desired_scroll
-    render_view(reader, view)
+    render_view(ports, view)
 
 
 def scan_hit(tip: TooltipState, raster_scale: float, mx: float, my: float):
