@@ -172,8 +172,10 @@ from saitenka.runtime import (
     events,
     playback,
 )
+from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.runner import SessionRunner
+from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
@@ -271,10 +273,6 @@ class Reader:
     # Episode-tier state (app/reader_context.py) exposed under its historical field names so the ~15
     # call-site modules keep working while they migrate onto ``reader.episode.*`` (#30 lifetime split);
     # rebinding ``self.episode`` (#100 re-slot) resets all of it in one move, leak-free by construction.
-    jp_sid = Delegated[int | None]("episode.subtitle", "jp_sid")
-    en_sid = Delegated[int | None]("episode.subtitle", "en_sid")
-    subtitle_language = Delegated[subtitle_modes.Language]("episode.subtitle", "language")
-    subtitle_slang = Delegated[str]("episode.subtitle", "slang")
     _sub_index = Delegated[CueIndex | None]("episode", "sub_index")
     _nav_idx = Delegated[int]("episode", "nav_idx")
     _sub_settle = Delegated[subnav_settle.SettleWindow]("episode", "sub_settle")
@@ -298,9 +296,6 @@ class Reader:
     sidebar = Delegated[sidebar_module.SidebarState]("interaction", "sidebar")
     preview = Delegated[card_preview.PreviewState]("interaction", "preview")
     tip = Delegated[popups.TooltipState]("interaction", "tip")
-    _translation_secondary_sid = Delegated[int | None](
-        "episode.subtitle", "translation_secondary_sid"
-    )
     # Prefetch runtime state (app/prefetch.py PrefetchState) under its historical flat names.
     _head_built = Delegated[int]("prefetch_state", "head_built")
     _prefetch_gen = Delegated[int]("prefetch_state", "gen")
@@ -645,7 +640,6 @@ class Reader:
         # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
-        self._last_announced_sid: int | None = None
         self.sidebar = sidebar.SidebarState()
         self.sub_picker = sub_picker.PickerState()
         self._sub_picker_lister: Callable[[str], tuple] | None = None
@@ -670,6 +664,10 @@ class Reader:
         reducer = PlaybackReducer()
         self._projection = reducer.projection
         self._playback_store = PlaybackStore(self.ipc, reducer=reducer)
+        # `Owner.SUBTITLE`'s slice: which mpv track plays which role. Session-lived like the
+        # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
+        # whose event resets the whole state.
+        self._subtitle_tracks = SubtitleTrackStore(self.ipc)
         self._geometry_refresh = geometry_refresh.RefreshWindow()
         #: Latest cue identity observed this drain, reconciled once at the batch boundary.
         self._pending_cue: playback.ObservedCue | None = None
@@ -841,6 +839,44 @@ class Reader:
         replies = register_observer_set(self.ipc, tuple(OBSERVED_PROPS))
         replies = {name: replies.get(name) or {"error": "unavailable"} for name in OBSERVED_PROPS}
         return replies
+
+    @property
+    def subtitle_tracks(self) -> subtitle_state.SubtitleTrackState:
+        """`Owner.SUBTITLE`'s slice, read-only. Change it by declaring what you selected."""
+        return self._subtitle_tracks.current
+
+    @property
+    def jp_sid(self) -> int | None:
+        return self._subtitle_tracks.current.jp_sid
+
+    @property
+    def en_sid(self) -> int | None:
+        return self._subtitle_tracks.current.en_sid
+
+    @property
+    def subtitle_language(self) -> subtitle_modes.Language:
+        return self._subtitle_tracks.current.language
+
+    @property
+    def subtitle_slang(self) -> str:
+        return self._subtitle_tracks.current.slang
+
+    @property
+    def _translation_secondary_sid(self) -> int | None:
+        return self._subtitle_tracks.current.secondary_sid
+
+    @property
+    def _last_announced_sid(self) -> int | None:
+        return self._subtitle_tracks.current.announced_sid
+
+    def declare_subtitle(self, event: events.SubtitleEvent) -> subtitle_state.SubtitleTrackState:
+        """Advance `Owner.SUBTITLE`'s slice by one declaration and hand back what it now holds.
+
+        No setters on the properties above: a track selection is a decision with a writer, and an
+        assignment hides which decision was made. The return value is the new state, because a
+        caller that has just declared something usually needs to read it back in the same breath.
+        """
+        return self._subtitle_tracks.dispatch(event)
 
     @property
     def _playback(self) -> playback.PlaybackState:

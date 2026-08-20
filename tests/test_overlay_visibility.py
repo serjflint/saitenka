@@ -8,6 +8,7 @@ from saitenka.app.config import KeyOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.mpvio.osd import Overlay
+from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleTracksDiscovered
 
 
 class FakeIPC(util.FakeIPC):
@@ -95,12 +96,11 @@ def test_overlay_toggle_key_is_configurable():
 def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling(monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
-    reader.jp_sid = 2
-    reader.en_sid = 1
+    reader.declare_subtitle(SubtitleTracksDiscovered(2, 1))
     reader._observing = True
     reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
     reader._translate_on = True
-    reader._translation_secondary_sid = 1
+    reader.declare_subtitle(SubtitleSecondaryLeased(1))
     monkeypatch.setattr(reader, "_draw_translation", lambda: None)
 
     reader.toggle_overlay()

@@ -24,6 +24,14 @@ from saitenka.app.subtitle_selection import initial as _initial
 from saitenka.app.subtitle_selection import matching_track as _matching_track
 from saitenka.app.subtitle_selection import primary_role as _primary_role_for
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+from saitenka.runtime.events import (
+    SubtitleLanguageChanged,
+    SubtitlePrimaryAdopted,
+    SubtitleSecondaryLeased,
+    SubtitleStartupConfigured,
+    SubtitleTrackAnnounced,
+    SubtitleTracksDiscovered,
+)
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
@@ -170,10 +178,11 @@ def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
 
 
 def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,jp") -> None:
-    reader.jp_sid = startup.tracks.jp_sid
-    reader.en_sid = startup.tracks.en_sid
-    reader.subtitle_language = startup.active or MAIN_LANG
-    reader.subtitle_slang = slang
+    reader.declare_subtitle(
+        SubtitleStartupConfigured(
+            startup.tracks.jp_sid, startup.tracks.en_sid, startup.active or MAIN_LANG, slang
+        )
+    )
     # Declare the track rather than let the renderer read it back. `select_initial` wrote `sid`
     # fire-and-forget moments ago, so mid-session (a live profile cycle) mpv has not echoed it yet
     # and `_prop("sid")` still answers with the track being replaced — the selection would look
@@ -187,19 +196,14 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     )
     if reader._get("secondary-sid") not in {None, False, "no"}:
         _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    # Null the mirror too: configure now runs mid-session (a live profile cycle re-selects the track),
-    # where a stale _translation_secondary_sid would leave the EN reveal stuck off — setup_secondary's
-    # `mirror == sid` guard would skip re-issuing secondary-sid. At launch the mirror is already None.
-    reader._translation_secondary_sid = None
-
     reader.invalidate_analysis()
 
 
 def setup_secondary(reader: Reader) -> int | None:
     if reader.jp_sid is None and reader.en_sid is None:
         tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
-        reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-    sid = reader.en_sid if reader.subtitle_language == MAIN_LANG else reader.jp_sid
+        reader.declare_subtitle(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
+    sid = reader.subtitle_tracks.translation_sid
     if sid is None or sid == reader._get("sid"):
         release_secondary(reader)
         return None
@@ -207,7 +211,7 @@ def setup_secondary(reader: Reader) -> int | None:
         return sid
     _send(reader.ipc, "select-secondary", "set_property", "secondary-sid", sid)
     _send(reader.ipc, "hide-secondary", "set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
-    reader._translation_secondary_sid = sid
+    reader.declare_subtitle(SubtitleSecondaryLeased(sid))
     return sid
 
 
@@ -215,7 +219,7 @@ def release_secondary(reader: Reader) -> None:
     if reader._translation_secondary_sid is None:
         return
     clear_secondary(reader.ipc)
-    reader._translation_secondary_sid = None
+    reader.declare_subtitle(SubtitleSecondaryLeased(None))
 
 
 def clear_secondary(ipc) -> None:
@@ -243,15 +247,15 @@ def on_primary_changed(reader: Reader, sid) -> None:
         SubtitleTracks(reader.jp_sid, reader.en_sid),
         _sample_cue_text(reader._sub_index, reader.sub_text),
     )
+    changed = language != reader.subtitle_language
     if not known:
-        if language == MAIN_LANG:
-            reader.jp_sid = sid
-        else:
-            reader.en_sid = sid
+        # One declaration for both halves: the adoption *is* what makes this track's role true,
+        # and the reducer's steal rule is why they cannot be two events that disagree.
+        reader.declare_subtitle(SubtitlePrimaryAdopted(sid, language))
         log.info("subtitle sid=%s adopted as %s", sid, language)
-    if language != reader.subtitle_language:
-        reader.subtitle_language = language
-
+    elif changed:
+        reader.declare_subtitle(SubtitleLanguageChanged(language))
+    if changed:
         reader.invalidate_analysis()
     if reader._translation_visible():
         setup_secondary(reader)
@@ -283,7 +287,7 @@ def announce_track(reader: Reader, sid) -> None:
     tracks = sub_tracks(reader.ipc)
     for index, track in enumerate(tracks, 1):
         if track.get("id") == sid:
-            reader._last_announced_sid = sid
+            reader.declare_subtitle(SubtitleTrackAnnounced(sid))
             name = language_name(track.get("lang"))
             # Log the same signal the toast shows: a surprising "unknown language (10/11)" here is the
             # earliest sign of a wrong-track selection, and belongs in the bundle, not just on screen.
@@ -295,11 +299,11 @@ def announce_track(reader: Reader, sid) -> None:
 def select_track(reader: Reader, sid: int, target: Language) -> None:
     """Carry out a decided language switch: make ``sid`` primary and adopt ``target`` as the role."""
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
-    reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
+    reader.declare_subtitle(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
     _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    reader._translation_secondary_sid = None
+    reader.declare_subtitle(SubtitleSecondaryLeased(None))
     _send(reader.ipc, "select-primary", "set_property", "sid", sid)
-    reader.subtitle_language = target
+    reader.declare_subtitle(SubtitleLanguageChanged(target))
     reader._sub_index = None
 
     reader.invalidate_analysis()
@@ -318,12 +322,11 @@ def adopt_current_as_target(reader: Reader, sid) -> None:
     """Override: treat mpv's current primary subtitle track as the Japanese target, whatever its tag.
     The manual escape hatch — bound to a key so the user acts in mpv directly — for the rare case
     auto-adoption guessed wrong (an untagged track that is really English) or never fired."""
-    reader.jp_sid = sid
-    if reader.en_sid == sid:
-        reader.en_sid = None
-    if reader.subtitle_language != MAIN_LANG:
-        reader.subtitle_language = MAIN_LANG
-
+    changed = reader.subtitle_language != MAIN_LANG
+    # The reducer takes the sid off the English role if it held it — the whole point of the
+    # override is that the track on screen was filed wrong.
+    reader.declare_subtitle(SubtitlePrimaryAdopted(sid, MAIN_LANG))
+    if changed:
         reader.invalidate_analysis()
     reader._sub_index = None
     from saitenka.app.embedded_subs import build_sub_index_for_current_track
@@ -501,14 +504,18 @@ def _replace_japanese_track(
         if track.get("external") and track.get("id") is not None:
             _send(reader.ipc, "remove-external", "sub-remove", track["id"])
     _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    reader._translation_secondary_sid = None
+    reader.declare_subtitle(SubtitleSecondaryLeased(None))
     _send(
         reader.ipc, "add-japanese", "sub-add", str(path), "select", "", "jpn"
     )  # mpv selects it now
     _reset_sub_delay(reader.ipc)  # our file is the timing truth; drop any persisted/stale offset
-    reader.jp_sid = reader._get("sid")  # the just-selected track, not discover_tracks' first JP
-    reader.en_sid = discover_tracks(reader.ipc, reader.subtitle_slang).en_sid
-    reader.subtitle_language = MAIN_LANG
+    reader.declare_subtitle(
+        SubtitleTracksDiscovered(
+            reader._get("sid"),  # the just-selected track, not discover_tracks' first JP
+            discover_tracks(reader.ipc, reader.subtitle_slang).en_sid,
+        )
+    )
+    reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))
     reader.set_subtitle("")
     build_sub_index_for_current_track(reader)  # replaces the index on success; retains it if the
     # just-added track can't resolve yet (rebuild is fail-soft) rather than blanking the cues
@@ -525,7 +532,7 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     had_japanese = reader.jp_sid is not None
     _send(reader.ipc, "add-japanese-background", "sub-add", str(path), "auto", "", "jpn")
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
-    reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
+    reader.declare_subtitle(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
     select_japanese = selects_background_japanese(
         select_if_unchanged=result.select_if_unchanged,
         had_japanese=had_japanese,
@@ -545,10 +552,10 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
         log.info("%s", status)
         return
     _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    reader._translation_secondary_sid = None
+    reader.declare_subtitle(SubtitleSecondaryLeased(None))
     _send(reader.ipc, "select-japanese", "set_property", "sid", reader.jp_sid)
     _reset_sub_delay(reader.ipc)  # our file is the timing truth; drop any persisted/stale offset
-    reader.subtitle_language = MAIN_LANG
+    reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))
     reader.set_subtitle("")
     if reader._translation_visible():
         setup_secondary(reader)

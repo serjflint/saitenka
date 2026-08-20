@@ -9,7 +9,7 @@ from util import runtime_gateway
 
 from saitenka.app.loading import SPINNER, loading_image
 from saitenka.mpvio.ipc import IPCRequest
-from saitenka.runtime.events import PropertySeeded
+from saitenka.runtime.events import PropertySeeded, SubtitleLanguageChanged
 
 
 def test_loading_image_renders_a_visible_frame():
@@ -142,7 +142,8 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
     r = Reader(ipc)
     ipc.drain_events()
     r.ov = _RecOv()
-    r.subtitle_language = "en"  # plain path -> no dict/tokenize deps needed to raster a cue
+    # plain path -> no dict/tokenize deps needed to raster a cue
+    r.declare_subtitle(SubtitleLanguageChanged("en"))
     r.set_subtitle("hello")
     assert r._first_sub_logged
     assert ("show-text", "", 1) not in ipc.commands

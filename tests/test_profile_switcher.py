@@ -20,6 +20,7 @@ from saitenka.app.subtitle_providers import enabled_providers_for, register_prov
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import register_tokenizer
+from saitenka.runtime.events import SubtitleSecondaryLeased
 from saitenka.subtitles import CueIndex, parse_srt
 
 _FR = Profile(name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenizer="latin")
@@ -236,7 +237,7 @@ def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror(requ
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
     reader.ipc.props["track-list"] = _JA_FR_TRACKS
     reader.ipc.props["secondary-sid"] = 6  # the EN translation is currently revealed
-    reader._translation_secondary_sid = 6
+    reader.declare_subtitle(SubtitleSecondaryLeased(6))
 
     reader.cycle_profile()  # → fr, re-selects the track (configure runs mid-session)
 

@@ -6,6 +6,7 @@ from util import keybind_registry
 
 from saitenka.app.backlog import BacklogStore, Capture, normalize_match_name
 from saitenka.app.controller import Reader
+from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
 
 
 def _capture(path: Path, *, start: float = 1.0, jp: str = "猫です") -> Capture:
@@ -183,8 +184,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     )
     reader = Reader(ipc)
     reader.sub_text = "日本語"
-    reader.jp_sid = 3
-    reader.en_sid = 4
+    reader.declare_subtitle(SubtitleTracksDiscovered(3, 4))
     reader.tokens = [SimpleNamespace(surface="日本", lemma="日本")]
     reader.hover = 0
     store = BacklogStore(tmp_path / "reader.sqlite", clock=lambda: 10.0)
@@ -239,7 +239,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
         }
     )
     reader = Reader(ipc)
-    reader.subtitle_language = "en"
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.sub_text = "English line"
     store = BacklogStore(tmp_path / "reader.sqlite")
     reader._backlog_store = store

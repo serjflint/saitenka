@@ -18,6 +18,7 @@ from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime.events import SubtitleLanguageChanged
 
 
 def _tok(surface: str) -> Token:
@@ -136,7 +137,7 @@ def test_repeated_line_is_a_cache_hit_and_skips_tokenization(monkeypatch):
 
 def test_renderer_draws_plain_while_a_cue_is_pending():
     reader = _reader(dict_set=_ExistsDS())
-    reader.subtitle_language = "jp"
+    reader.declare_subtitle(SubtitleLanguageChanged("jp"))
     reader.tokens = [_tok("猫")]
     reader.lines = [[_tok("猫")]]
     reader.sub_text = "猫"

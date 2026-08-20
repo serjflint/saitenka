@@ -5,6 +5,7 @@ import util
 from saitenka.app import subselect
 from saitenka.app.commands import attach as attach_commands
 from saitenka.app.subtitle_modes import SubtitleStartup, SubtitleTracks
+from saitenka.runtime.events import SubtitleTracksDiscovered
 
 
 class IPC(util.FakeIPC):
@@ -117,7 +118,8 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
 
     ipc = _TrackIPC()
     reader = RealReader(ipc)
-    reader.jp_sid = 99  # stale prior-episode state the re-slot must clear
+    # stale prior-episode state the re-slot must clear
+    reader.declare_subtitle(SubtitleTracksDiscovered(99, None))
     episode_before = reader.episode
 
     started: list[str] = []

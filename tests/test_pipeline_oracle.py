@@ -25,6 +25,7 @@ from saitenka.app.launch.run import RunDepsRequest, _build_run_deps
 from saitenka.app.profiles import resolve_launch_identity
 from saitenka.app.tooltip import entry_for_tok, resolve_hover
 from saitenka.render.sc_adapter import _text_of
+from saitenka.runtime.events import SubtitleLanguageChanged
 
 pytest.importorskip(
     "saitenka_deinflect"
@@ -186,7 +187,8 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     dict_set = _dict_set_via_run(ident)
     reader = Reader(FakeIPC(), dict_set=dict_set, profile=ident.profile)
     reader.osd = (1920, 1080)
-    reader.subtitle_language = MAIN_LANG  # main track → tokenize (not the plain secondary path)
+    # main track → tokenize (not the plain secondary path)
+    reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))
     reader.set_subtitle(cue)
     idx = _index_at(reader.tokens, at)
     resolve_hover(reader, idx)  # forward longest-match → _hover_meta.terms (the phrase/prefix seam)

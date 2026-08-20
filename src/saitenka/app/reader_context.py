@@ -13,7 +13,6 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, overload
 
-from saitenka.app.languages import MAIN_LANG
 from saitenka.app.mined_set import MinedSet
 from saitenka.app.subnav_settle import SettleWindow
 
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
     from saitenka.app.card_preview import PreviewState
     from saitenka.app.help_overlay import HelpState
-    from saitenka.app.languages import Language
     from saitenka.app.mined_store import MinedCardStore
     from saitenka.app.popups import TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
@@ -70,18 +68,15 @@ class Delegated[T]:
 
 
 class SubtitleSource:
-    """Subtitle acquisition + selection for one file: the chosen JP/EN tracks plus the background
-    provider-fetch and retry handshake. Reset whenever the episode changes."""
+    """The background provider-fetch and retry handshake for one file.
+
+    The *selection* it used to hold moved to `Owner.SUBTITLE`'s slice. What is left is the part no
+    reducer can take: a lock and the flag it guards."""
 
     def __init__(self) -> None:
-        self.jp_sid: int | None = None
-        self.en_sid: int | None = None
-        self.language: Language = MAIN_LANG
-        self.slang = "ja,jpn,jp"
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()
-        self.translation_secondary_sid: int | None = None  # the mpv sid feeding the EN reveal
 
 
 class EpisodeContext:

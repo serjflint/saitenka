@@ -10,6 +10,7 @@ from saitenka.app import session_stats, subselect
 from saitenka.app.controller import Reader
 from saitenka.app.launch import run as cli_run
 from saitenka.app.subtitle_render import NullRenderer
+from saitenka.runtime.events import SubtitleTracksDiscovered
 
 
 class FakeIPC(util.FakeIPC):
@@ -90,7 +91,8 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
     # closes+reopens the stats row and rebinds the leak-free EpisodeContext so no prior state leaks.
     ipc = FakeIPC()
     reader = Reader(ipc)
-    reader.jp_sid = 5  # dirty episode state that the re-slot must reset
+    # dirty episode state that the re-slot must reset
+    reader.declare_subtitle(SubtitleTracksDiscovered(5, None))
     episode_before = reader.episode
     cur = tmp_path / "Show 04.mkv"
     ipc.props["path"] = str(cur)

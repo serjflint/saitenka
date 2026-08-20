@@ -12,6 +12,7 @@ import util
 from saitenka.app.controller import Reader
 from saitenka.app.popups import HoverMetadata, PopupView, TooltipState
 from saitenka.app.reader_context import EpisodeContext
+from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleStartupConfigured
 
 
 class FakeIPC(util.FakeIPC):
@@ -20,7 +21,7 @@ class FakeIPC(util.FakeIPC):
 
 def test_episode_context_defaults_are_the_no_episode_state():
     ctx = EpisodeContext()
-    assert (ctx.subtitle.jp_sid, ctx.subtitle.en_sid, ctx.subtitle.language) == (None, None, "jp")
+    assert (ctx.subtitle.retry_factory, ctx.subtitle.retry_active) == (None, False)
     assert (
         ctx.sub_index,
         ctx.nav_idx,
@@ -39,36 +40,44 @@ def test_episode_context_defaults_are_the_no_episode_state():
 def test_reader_delegates_episode_fields_to_the_context():
     r = Reader(FakeIPC())
     # a nested field (episode.subtitle) and a direct one (episode) both read through…
-    assert r.jp_sid is r.episode.subtitle.jp_sid is None
+    assert r.episode.subtitle.retry_active is False
     assert r._nav_idx == r.episode.nav_idx == -1
     # …and writes land on the owning context, under both the public and historical private names
-    r.jp_sid = 3
-    r.subtitle_language = "en"
+    r.episode.subtitle.retry_active = True
     r._nav_idx = 7
-    assert (r.episode.subtitle.jp_sid, r.episode.subtitle.language, r.episode.nav_idx) == (
-        3,
-        "en",
-        7,
-    )
+    assert (r.episode.subtitle.retry_active, r.episode.nav_idx) == (True, 7)
 
 
 def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     r = Reader(FakeIPC())
-    r.jp_sid = 5
-    r.en_sid = 6
-    r.subtitle_language = "en"
     r._nav_idx = 9
     r._sub_settle = r._sub_settle.begin()
     r.episode.subtitle.retry_active = True  # a nested-cluster field, migrated fully off the Reader
 
     r.episode = EpisodeContext()  # the re-slot move: one rebind resets every episode field
 
-    assert r.jp_sid is None
-    assert r.en_sid is None
-    assert r.subtitle_language == "jp"
     assert r._nav_idx == -1
     assert r._sub_settle.open is False
     assert r.episode.subtitle.retry_active is False
+
+
+def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
+    """`Owner.SUBTITLE`'s slice is session-lived, so the episode rebind cannot clear it.
+
+    What keeps it episode-safe is that a re-slot always configures the new file's tracks, and that
+    declaration is a whole-state reset. Asserted here because it is the one episode fact the
+    leak-free-by-construction rebind no longer covers.
+    """
+    r = Reader(FakeIPC())
+    r.declare_subtitle(SubtitleStartupConfigured(5, 6, "en", "ja,jpn,jp"))
+    r.declare_subtitle(SubtitleSecondaryLeased(6))
+
+    r.episode = EpisodeContext()
+    assert (r.jp_sid, r.en_sid, r.subtitle_language) == (5, 6, "en")  # the rebind does not reach it
+
+    r.declare_subtitle(SubtitleStartupConfigured(None, None, "jp", "ja,jpn,jp"))
+    assert (r.jp_sid, r.en_sid, r.subtitle_language) == (None, None, "jp")
+    assert r._translation_secondary_sid is None  # the lease goes with the selection
 
 
 def test_reader_delegates_tooltip_fields_to_tip_state():

@@ -13,6 +13,11 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
 from saitenka.app.wordlists import KnownWords
 from saitenka.render.analysis import render_analysis
+from saitenka.runtime.events import (
+    SubtitleLanguageChanged,
+    SubtitleStartupConfigured,
+    SubtitleTracksDiscovered,
+)
 from saitenka.subtitles import Cue, CueIndex
 
 
@@ -30,8 +35,7 @@ def reader():
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     reader = Reader(ipc, scorer=Scorer(known=KnownWords.from_set(["本"])))
-    reader.jp_sid = 1
-    reader.subtitle_language = "jp"
+    reader.declare_subtitle(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
     reader._sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
     yield reader
     reader.close()
@@ -65,7 +69,8 @@ def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader):
 def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
     # Regression: JP subs from an external / extracted / jimaku .srt carry no mpv jp_sid, but _sub_index
     # holds the cues we render AND analyse — so analysis must run, not report "Japanese track unavailable".
-    reader.jp_sid = None  # external index → no embedded-track sid
+    # external index → no embedded-track sid
+    reader.declare_subtitle(SubtitleTracksDiscovered(None, reader.en_sid))
 
     reader._handle(ANALYSIS_MSG)
     assert reader.analysis.status == "Analyzing…"
@@ -196,7 +201,7 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
 
 
 def test_english_or_missing_japanese_track_is_unavailable(reader):
-    reader.subtitle_language = "en"
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
 
     _toggle_analysis(reader)
 

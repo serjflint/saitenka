@@ -19,6 +19,7 @@ from saitenka.app.subtitles import (
     render_sidebar,
 )
 from saitenka.app.wordlists import KnownWords
+from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
 from saitenka.subtitles import Cue, CueIndex
 
 
@@ -176,7 +177,7 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
 
 def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
-    reader.subtitle_language = "en"
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.scorer = object()
     monkeypatch.setattr(
         reader.tokenizer, "tokenize", lambda _text: (_ for _ in ()).throw(AssertionError)
@@ -204,7 +205,7 @@ def test_rows_use_shared_episode_analysis_when_ready():
 
 def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
-    reader.jp_sid = 1
+    reader.declare_subtitle(SubtitleTracksDiscovered(1, reader.en_sid))
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader._sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
     reader.analysis.current = analyze_cues(

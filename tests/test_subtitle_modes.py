@@ -14,6 +14,7 @@ from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleSecondaryLeased
 from saitenka.subtitles import CueIndex, parse_srt
 
 
@@ -347,7 +348,7 @@ def test_language_switch_releases_secondary_before_selecting_its_track(monkeypat
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     reader._translate_on = True
-    reader._translation_secondary_sid = 1
+    reader.declare_subtitle(SubtitleSecondaryLeased(1))
     ipc.props["secondary-sid"] = 1
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
     monkeypatch.setattr(
@@ -367,8 +368,8 @@ def test_secondary_sid_event_does_not_change_primary_language():
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader.subtitle_language = "en"
-    reader._translation_secondary_sid = 2
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
+    reader.declare_subtitle(SubtitleSecondaryLeased(2))
 
     subtitle_modes.on_primary_changed(reader, 2)
 
@@ -1001,7 +1002,7 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader.subtitle_language = SECOND_LANG  # English on screen
+    reader.declare_subtitle(SubtitleLanguageChanged(SECOND_LANG))  # English on screen
     replaced: list = []
     monkeypatch.setattr(
         subtitle_modes, "_replace_japanese_track", lambda *a, **_k: replaced.append(a)

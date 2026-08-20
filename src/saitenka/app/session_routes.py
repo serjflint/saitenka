@@ -31,6 +31,7 @@ from saitenka.runtime.effects import (
 )
 from saitenka.runtime.events import (
     PLAYBACK_EVENTS,
+    SUBTITLE_EVENTS,
     ConnectionReplaced,
     EffectFinished,
     EventEnvelope,
@@ -47,6 +48,8 @@ from saitenka.runtime.playback_slice import (
 from saitenka.runtime.reactor import SessionReactor
 from saitenka.runtime.routing import OwnerRouter
 from saitenka.runtime.state import RouteKey, SessionReducer, SessionState, SliceReducer
+from saitenka.runtime.subtitle import SubtitleTrackState
+from saitenka.runtime.subtitle_slice import SUBTITLE_FEATURE, subtitle_slice_reducer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -104,6 +107,8 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
         return Owner.SESSION
     if isinstance(event, PLAYBACK_EVENTS):
         return Owner.PLAYBACK
+    if isinstance(event, SUBTITLE_EVENTS):
+        return Owner.SUBTITLE
     return None
 
 
@@ -212,6 +217,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     # feature is a registration rather than a rewrite of the hint's reducer.
     session = SliceReducer({STARTUP_HINT: hint, LIFECYCLE_CLOSE: reduce_lifecycle_close})
     playback = playback_slice_reducer()
+    subtitle = subtitle_slice_reducer()
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
@@ -219,6 +225,10 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     # the deltas the turn published. What has moved is the *state* — the slot is where the
     # projection lives, so there is one of it. The duties that read it move next.
     routes.update({RouteKey(event, Owner.PLAYBACK): playback for event in PLAYBACK_EVENTS})
+    # `Owner.SUBTITLE` is not claimed either, and for a sharper reason: every event it takes is a
+    # declaration of a track selection the sender has already sent to mpv. The slot holds what was
+    # decided; the sending stays where it is until the duties move.
+    routes.update({RouteKey(event, Owner.SUBTITLE): subtitle for event in SUBTITLE_EVENTS})
     ledger = RuntimeLedger()
     gateway.session_ledger = ledger
     control = ControlSink(gateway, ledger)
@@ -228,7 +238,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
                 {STARTUP_HINT: StartupHintState(), LIFECYCLE_CLOSE: LifecycleCloseState()}
             ),
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
-            subtitle=None,
+            subtitle=subtitle.initial({SUBTITLE_FEATURE: SubtitleTrackState()}),
             interaction=None,
             presentation=None,
         ),

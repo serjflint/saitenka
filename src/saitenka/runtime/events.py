@@ -246,6 +246,78 @@ PLAYBACK_EVENTS = (
 )
 
 
+#: `Owner.SUBTITLE`'s vocabulary. Every one is a *declaration*: the sender has already told mpv
+#: which track to select, and this is what it selected. Nothing here is an mpv observation —
+#: `on_primary_changed` arrives as an mpv event and is turned into `SubtitlePrimaryAdopted` by the
+#: code that classified the track, because the classification is the decision, not the property.
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleStartupConfigured:
+    """The startup selection: both role tracks, the active role, and the search language list."""
+
+    jp_sid: int | None
+    en_sid: int | None
+    language: str
+    slang: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleTracksDiscovered:
+    """A fresh track-list scan replaced both role slots."""
+
+    jp_sid: int | None
+    en_sid: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitlePrimaryAdopted:
+    """One track took a role — a manual cycle, a drag-'n'-drop, or the user's override key."""
+
+    sid: int | None
+    language: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleLanguageChanged:
+    """The active role changed without either role slot moving."""
+
+    language: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleSecondaryLeased:
+    """mpv's secondary track is feeding the translation reveal; `sid` is `None` when released."""
+
+    sid: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleTrackAnnounced:
+    """The track whose name was last put on screen — the guard against re-announcing it."""
+
+    sid: int | None
+
+
+type SubtitleEvent = (
+    SubtitleStartupConfigured
+    | SubtitleTracksDiscovered
+    | SubtitlePrimaryAdopted
+    | SubtitleLanguageChanged
+    | SubtitleSecondaryLeased
+    | SubtitleTrackAnnounced
+)
+
+SUBTITLE_EVENTS = (
+    SubtitleStartupConfigured,
+    SubtitleTracksDiscovered,
+    SubtitlePrimaryAdopted,
+    SubtitleLanguageChanged,
+    SubtitleSecondaryLeased,
+    SubtitleTrackAnnounced,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class EffectFinished:
     effect_id: EffectId
@@ -278,6 +350,7 @@ type RuntimeEvent = (
     | CommandHandled
     | EffectFinished
     | PlaybackEvent
+    | SubtitleEvent
 )
 
 
