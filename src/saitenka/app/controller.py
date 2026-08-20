@@ -1811,11 +1811,11 @@ class Reader:
 
     @property
     def tip_ports(self) -> TipPorts:
-        """What the popup blit/scroll/placement chain needs, as one member rather than nine.
+        """What the popup blit/scroll/placement chain needs, as one member rather than the set.
 
-        A property for the same reason `panel_style` is one: as a host-taking builder it would have
-        traded seventeen debt rows for an eighteenth, and every caller in the chain would still have
-        inherited the whole set it gathers.
+        A property for the same reason `panel_style` is one: as a host-taking builder it would
+        trade the chain's debt rows for one more, and every caller in the chain would still inherit
+        everything it gathers.
         """
         return TipPorts(
             tip=self.tip,
