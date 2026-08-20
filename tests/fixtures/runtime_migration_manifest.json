@@ -685,30 +685,39 @@
     },
     {
       "id": "demo-owned-player",
-      "source": "src/saitenka/app/launch/run.py::_execute_reader_session",
+      "source": [
+        "src/saitenka/app/launch/run.py::_execute_demo_session"
+      ],
       "evidence": [
-        "src/saitenka/app/launch/run.py::_execute_demo_session|call:runtime.mark_ready",
-        "call:_execute_demo_session"
+        "call:runtime.mark_ready",
+        "order:call:runtime.prepare_hover>call:runtime.mark_ready",
+        "src/saitenka/app/launch/run.py::_demo_cue_text|call:runtime.await_render_space",
+        "src/saitenka/app/session_runtime.py::SessionRuntime.await_render_space|call:self.run_until"
       ],
       "target": "owned-session-composition",
       "work_package": "7",
-      "replacement": "run_until DemoReady -> owned close",
+      "replacement": "run_until render space -> mark_ready -> owned close",
       "test": "demo waits for readiness and uses the owned terminal sequence",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "screenshot-owned-player",
-      "source": "src/saitenka/app/launch/run.py::_execute_reader_session",
+      "source": [
+        "src/saitenka/app/launch/run.py::_run_demo_actions"
+      ],
       "evidence": [
         "ref:demo.screenshot",
-        "call:_execute_demo_session",
+        "call:runtime.await_paint",
+        "call:runtime.capture",
+        "order:call:runtime.await_paint>call:runtime.capture",
+        "src/saitenka/app/session_runtime.py::SessionRuntime.await_paint|call:self.run_until",
         "src/saitenka/app/session_runtime.py::SessionRuntime.capture|call:self._ipc.command:screenshot-to-file"
       ],
       "target": "owned-session-composition",
       "work_package": "7",
-      "replacement": "run_until CaptureComplete -> owned close",
+      "replacement": "run_until painted -> capture -> owned close",
       "test": "screenshot captures after readiness and uses the owned terminal sequence",
-      "migrated": false
+      "migrated": true
     }
   ]
 }

@@ -79,6 +79,23 @@ class SessionRuntime:
     def refresh_render_space(self) -> None:
         self._reader.refresh_osd()
 
+    def await_render_space(self, *, timeout: float) -> bool:
+        """Pump until mpv publishes its window geometry. `False` if the deadline passed first.
+
+        A demo used to sleep here instead. What the nap was standing in for is exactly this fact,
+        and the two are not the same: `Reader.osd` falls back to a 720p default that is never
+        obviously wrong and never right either, so a demo that composed its tooltip before the real
+        geometry landed produced a screenshot of a panel sized for a window that does not exist —
+        with nothing failing anywhere. A fixed nap is also the wrong instrument twice over: too
+        short on a cold machine, dead time on every warm one.
+        """
+        return self.run_until(self._render_space_known, timeout=timeout)
+
+    def _render_space_known(self) -> bool:
+        self._reader.refresh_osd()  # fold in whatever this turn observed
+        dimensions = self._reader._prop("osd-dimensions") or {}
+        return bool(dimensions.get("w")) and bool(dimensions.get("h"))
+
     def cue_text(self) -> str:
         return self._reader._get("sub-text") or ""
 

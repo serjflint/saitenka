@@ -890,10 +890,14 @@ _CUE_SEARCH_SECONDS = 10.0
 #: How long a capture waits for every staged surface to be acknowledged before shooting.
 _PAINT_SETTLE_SECONDS = 2.0
 
+#: How long a demo waits for mpv to publish its window geometry before composing anything against
+#: it. A ceiling on a wait, not a nap: a demo on a warm machine passes through it immediately.
+_RENDER_SPACE_SECONDS = 5.0
+
 
 def _demo_cue_text(runtime: SessionRuntime, video: str | None) -> str:
     """The cue a demo hovers: whatever is showing, else one hopped to, else `DEMO_LINE`."""
-    runtime.refresh_render_space()
+    runtime.await_render_space(timeout=_RENDER_SPACE_SECONDS)
     if text := runtime.cue_text():
         return text
     if not video:  # no real file to seek through — nothing to wait for
@@ -933,7 +937,6 @@ def _execute_reader_session(
     reader, ipc, demo: DemoSpec, *, video: str | None, translate_key: str
 ) -> None:
     if demo.demo_word or demo.screenshot:
-        time.sleep(0.8)
         _execute_demo_session(SessionRuntime(reader, ipc), demo, video=video)
     else:
         print(

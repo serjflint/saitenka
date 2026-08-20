@@ -39,7 +39,14 @@ def reader_for(texts: list[str], ipc: FakeIPC, clock: list[float]):
     def drive(timeout: float | None) -> None:
         clock[0] += timeout or 0.0
 
-    return SimpleNamespace(refresh_osd=lambda: None, _get=get, _drive_annotation_once=drive)
+    def prop(name: str):
+        # mpv has already published its geometry, so the render-space wait ahead of the search
+        # passes through without a turn — these tests are about what the *cue* search costs.
+        return {"w": 1920, "h": 1080} if name == "osd-dimensions" else None
+
+    return SimpleNamespace(
+        refresh_osd=lambda: None, _get=get, _prop=prop, _drive_annotation_once=drive
+    )
 
 
 def test_a_cue_already_showing_needs_no_search() -> None:
