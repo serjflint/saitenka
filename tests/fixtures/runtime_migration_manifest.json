@@ -330,10 +330,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::chrome_for"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::copy_click"
     ],
     [

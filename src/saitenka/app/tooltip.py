@@ -25,7 +25,6 @@ from saitenka.app.perf import timed
 from saitenka.app.popups import NO_HOVER_METADATA, HoverMetadata, Panel, PopupView, TipPorts
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
-    anki_ok,
     compose_kind,
     decorate_and_upload,
     dispatch_hover,
@@ -51,6 +50,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.popups import TooltipState
+    from saitenka.app.prefetch import TipScale
     from saitenka.app.tooltip_panel import PanelStyle
 
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed,
@@ -455,16 +455,14 @@ class HeaderChrome:
     anki: bool
 
 
-def chrome_for(reader: Reader, view: PopupView) -> HeaderChrome:
-    """Snapshot the host into a popup's header port — the seam, as `build_draw_request` is for the
-    draw. One function for both popups: the caller says which view, which is the only difference."""
-    return HeaderChrome(
-        view,
-        reader.tip_scale.width,
-        reader.tip_scale.display,
-        reader._tts_ok,
-        anki_ok(reader.anki, reader._anki_capability),
-    )
+def chrome_for(view: PopupView, *, scale: TipScale, style: PanelStyle) -> HeaderChrome:
+    """A popup's header port. One function for both popups: the caller says which view.
+
+    Both buttons come off `PanelStyle` rather than being re-derived here. Whether a popup can offer
+    to mine is `anki_ok(anki, capability)`, and computing it in two places is how the header and the
+    panel it sits on end up disagreeing about the same word.
+    """
+    return HeaderChrome(view, style.width, scale.display, style.speak_button, style.add_button)
 
 
 def hit_header_speaker(chrome: HeaderChrome, x: float, y: float) -> bool:
@@ -521,11 +519,18 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
     if reader.tip.nest.rect is None or not in_rect(reader.tip.nest.rect, x, y):
         return False
     if (
-        hit_header_add(chrome_for(reader, reader.tip.nest), x, y)
+        hit_header_add(
+            chrome_for(reader.tip.nest, scale=reader.tip_scale, style=reader.panel_style), x, y
+        )
         and reader.tip.nest.token is not None
     ):
         reader._mine_token(reader.tip.nest.token)  # ⊕ → mine the *inner* (scanned) word
-    elif hit_header_speaker(chrome_for(reader, reader.tip.nest), x, y) and reader.tip.nest.state:
+    elif (
+        hit_header_speaker(
+            chrome_for(reader.tip.nest, scale=reader.tip_scale, style=reader.panel_style), x, y
+        )
+        and reader.tip.nest.state
+    ):
         speak(reader.tip.nest.state.reading)  # 🔊 → read the inner word aloud
     else:
         lb = link_hit_at(reader.tip, reader.tip_scale.raster, x, y, nested=True)
@@ -546,7 +551,9 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the base tooltip. Returns True if it did."""
     if reader.tip.view.rect is None or not in_rect(reader.tip.view.rect, x, y):
         return False
-    chrome = chrome_for(reader, reader.tip.view)  # one snapshot: both buttons, same geometry
+    chrome = chrome_for(
+        reader.tip.view, scale=reader.tip_scale, style=reader.panel_style
+    )  # one snapshot: both buttons, same geometry
     if hit_header_add(chrome, x, y):
         reader.mine_current()  # ⊕ → mine the hovered word into Anki
         return True

@@ -1531,7 +1531,7 @@ def test_header_add_button_absent_without_anki(monkeypatch):
     r._show_tooltip(0)
     cx, cy = _click_center_of_add_button(r, ipc)
     assert not tooltip.hit_header_add(
-        tooltip.chrome_for(r, r.tip.view), cx, cy
+        tooltip.chrome_for(r.tip.view, scale=r.tip_scale, style=r.panel_style), cx, cy
     )  # no ⊕ button when mining is unavailable
 
 
