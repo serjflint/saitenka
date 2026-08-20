@@ -17,7 +17,7 @@ import util
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
-from saitenka.app import sub_picker, subtitle_modes, surfaces
+from saitenka.app import sub_picker, subtitle_modes
 from saitenka.app.bindings import HELP_CLOSE_MSG, SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
@@ -285,7 +285,7 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     hit = next(h for h in reader.sub_picker.hits if h.kind == "picker-download" and h.value == 1)
     gx, gy = rect[0] + hit.x + hit.w / 2, rect[1] + hit.y + hit.h / 2
 
-    assert sub_picker.on_click(surfaces.click_target(reader), gx, gy) is True
+    assert sub_picker.on_click(reader.click_target, gx, gy) is True
     assert reader.sub_picker.open is False  # panel closes; the swap lands from broker completion
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
     assert len(fetches) == 1
@@ -304,7 +304,7 @@ def test_click_outside_the_panel_is_not_captured():
     reader.sub_picker.open = True
     reader.redraw_sub_picker()
 
-    assert sub_picker.on_click(surfaces.click_target(reader), 0, 0) is False
+    assert sub_picker.on_click(reader.click_target, 0, 0) is False
 
 
 def test_scroll_only_fires_with_the_pointer_over_the_panel():
@@ -317,11 +317,11 @@ def test_scroll_only_fires_with_the_pointer_over_the_panel():
     assert rect is not None
 
     ipc.props["mouse-pos"] = {"x": 0, "y": 0}
-    assert sub_picker.scroll(surfaces.wheel_step(reader), 1) is False
+    assert sub_picker.scroll(reader.wheel_step, 1) is False
     assert reader.sub_picker.scroll == 0
 
     ipc.props["mouse-pos"] = {"x": rect[0] + 5, "y": rect[1] + 5}
-    assert sub_picker.scroll(surfaces.wheel_step(reader), 1) is True
+    assert sub_picker.scroll(reader.wheel_step, 1) is True
     assert reader.sub_picker.scroll == sub_picker.ROWS_PER_WHEEL_STEP
 
 
@@ -335,10 +335,10 @@ def test_suppress_hover_only_over_the_panel():
     assert rect is not None
 
     ipc.props["mouse-pos"] = {"x": rect[0] + 5, "y": rect[1] + 5}
-    assert sub_picker.suppress_hover(surfaces.hover_suppression(reader)) is True
+    assert sub_picker.suppress_hover(reader.hover_suppression) is True
 
     ipc.props["mouse-pos"] = {"x": 0, "y": 0}
-    assert sub_picker.suppress_hover(surfaces.hover_suppression(reader)) is False
+    assert sub_picker.suppress_hover(reader.hover_suppression) is False
 
 
 def test_open_picker_wants_the_forced_mouse_section():

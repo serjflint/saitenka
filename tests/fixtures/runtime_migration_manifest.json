@@ -150,14 +150,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::actions_of"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::view_of"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sub_picker.py::open_picker"
     ],
     [
@@ -167,18 +159,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::target_of"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::click_target"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::hover_suppression"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::wheel_step"
     ]
   ],
   "startup": [

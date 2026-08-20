@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from saitenka.app import nested_popup, surfaces, tooltip, tooltip_panel
+from saitenka.app import nested_popup, tooltip, tooltip_panel
 from saitenka.app.config import load_config
 from saitenka.app.controller import Reader
 from saitenka.app.popups import NO_HOVER_METADATA
@@ -1149,7 +1149,7 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
         if tab is None or reader.sidebar.rect is None:
             return
         sidebar.on_click(
-            surfaces.click_target(reader),
+            reader.click_target,
             reader.sidebar.rect[0] + tab.x + 1,
             reader.sidebar.rect[1] + tab.y + 1,
         )

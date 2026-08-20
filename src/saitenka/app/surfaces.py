@@ -21,7 +21,6 @@ from saitenka.app import help_overlay, sidebar, sub_picker, tooltip
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.popups import ClickPorts, HoverInputs, TipPorts
     from saitenka.app.reader_context import InteractionContext
     from saitenka.app.sidebar import SidebarActions, SidebarView
@@ -203,58 +202,9 @@ def wants_mouse_capture(interaction: InteractionContext) -> bool:
     return any(s.captures(interaction) for s in SURFACES)
 
 
-def hover_suppression(reader: Reader) -> HoverSuppression:
-    """Snapshot the host into the port the hooks take.
-
-    The one host-taking row left in this chain, and deliberately so — it is the seam, the same shape
-    as `build_draw_request`. Named rather than inlined because a hook's own unit test needs to build
-    the same value production does; a test that assembles it by hand is a second definition of the
-    port that drifts from this one.
-    """
-    return HoverSuppression(
-        reader.interaction,
-        reader._prop("mouse-pos"),
-        reader.retire_hover,
-        lambda: reader.set_annotation_hover(revealed=False),
-    )
-
-
 def suppress_hover(suppression: HoverSuppression) -> bool:
     """First surface (topmost-first) that swallows the hover under the cursor."""
     return any(s.suppress_hover(suppression) for s in SURFACES)
-
-
-def wheel_step(reader: Reader) -> WheelStep:
-    """Snapshot the host into the port the wheel hooks take — `hover_suppression`'s twin."""
-    return WheelStep(
-        reader.interaction,
-        reader._prop("mouse-pos"),
-        lambda steps: reader._run_help_command(reader.help_page_command(steps)),
-        reader.redraw_sub_picker,
-        reader.sidebar_view,
-        reader.hold_sidebar_scroll,
-        reader._scroll_tip,
-        reader.tip_scale.ref_h,
-    )
-
-
-def click_target(reader: Reader) -> ClickTarget:
-    """Snapshot the host into the port the click hooks take — `hover_suppression`'s twin."""
-    return ClickTarget(
-        reader.interaction,
-        sub_picker.DownloadPorts(
-            reader._toast,
-            reader._submit_subtitle_fetch,
-            reader._get,
-            reader.lifecycle_surfaces,
-        ),
-        reader.sidebar_view,
-        reader.sidebar_actions,
-        reader.tip_ports,
-        reader.panel_ports,
-        reader.click_ports,
-        reader.hover_inputs,
-    )
 
 
 def route_scroll(wheel: WheelStep, steps: int) -> bool:

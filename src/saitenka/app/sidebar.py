@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
 from saitenka.app import analysis_overlay, mined_store
-from saitenka.app.backlog import BacklogEntry, BacklogStore, MediaRecord, db_path
+from saitenka.app.backlog import BacklogEntry, BacklogStore, MediaRecord
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
@@ -118,40 +118,6 @@ def _active_index(index: CueIndex | None, text: str, *, sub_start, time_pos, pre
     if index is None:
         return -1
     return index.locate(text=text, sub_start=sub_start, time_pos=time_pos, preferred=preferred)
-
-
-def view_of(reader: Reader) -> SidebarView:
-    """Build the value the sidebar draws from. Reached as `Reader.sidebar_view`.
-
-    A builder rather than a seam every caller goes through: while the draw path took the host and
-    snapshotted here, each of the seven callers inherited all fifteen reads. They take the value
-    now, and a hook's own test still builds what production builds by asking the same builder —
-    a test that assembles a `SidebarView` by hand is a second definition of it.
-    """
-    return SidebarView(
-        state=reader.sidebar,
-        active=_active_index(
-            reader.episode.sub_index,
-            reader.sub_text,
-            sub_start=reader._get("sub-start"),
-            time_pos=reader._get("time-pos"),
-            preferred=reader.episode.nav_idx,
-        ),
-        index=reader.episode.sub_index,
-        language=reader.subtitle_language,
-        osd=reader.osd,
-        chrome_scale=reader.chrome_scale,
-        surfaces=reader.lifecycle_surfaces,
-        video=reader._get("path"),
-        backlog=lambda: _ensure_store(reader.session),
-        mined=lambda: reader.mined_store,
-        mined_exists=reader.session.mined_store is not None or mined_store.db_path().exists(),
-        backlog_exists=reader.session.backlog_store is not None or db_path().exists(),
-        scorer=reader.scorer,
-        tokenizer=reader.tokenizer,
-        analysis=reader.analysis.current,
-        can_mine=bool(reader.anki and reader.mine_cfg),
-    )
 
 
 def _ensure_store(session: SessionContext) -> BacklogStore:
@@ -562,18 +528,6 @@ class SidebarActions:
     bookmark: Callable[[], None]
     mine: Callable[[], None]
     open_mined: Callable[[int], None]
-
-
-def actions_of(reader: Reader) -> SidebarActions:
-    """Bind the click actions to the host. Reached as `Reader.sidebar_actions`."""
-    return SidebarActions(
-        seek=lambda name, at: send_correlated(
-            reader.ipc, name, "set_property", "time-pos", at, owner=Owner.PLAYBACK
-        ),
-        bookmark=reader.toggle_bookmark,
-        mine=reader.mine_current,
-        open_mined=lambda note_id: _open_mined(reader, note_id),
-    )
 
 
 def _seek_hit(view: SidebarView, actions: SidebarActions, hit) -> bool:

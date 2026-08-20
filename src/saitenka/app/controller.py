@@ -1719,9 +1719,7 @@ class Reader:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
-        if not getattr(self.ov, "visible", True) or surfaces.suppress_hover(
-            surfaces.hover_suppression(self)
-        ):
+        if not getattr(self.ov, "visible", True) or surfaces.suppress_hover(self.hover_suppression):
             return
         tooltip.update_hover(self.tip_ports, self.hover_actions, self.hover_inputs)
 
@@ -1792,7 +1790,7 @@ class Reader:
         if not self.ov.visible:
             return
         mp = self._get("mouse-pos") or {}
-        surfaces.route_click(surfaces.click_target(self), mp.get("x", -1), mp.get("y", -1))
+        surfaces.route_click(self.click_target, mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
         self,
@@ -1837,12 +1835,90 @@ class Reader:
         Every consumer takes the value now, so the host is read here and nowhere else in the chain
         — the precondition for the surface owning its own state.
         """
-        return sidebar_module.view_of(self)
+        return sidebar_module.SidebarView(
+            state=self.sidebar,
+            active=sidebar_module._active_index(
+                self.episode.sub_index,
+                self.sub_text,
+                sub_start=self._get("sub-start"),
+                time_pos=self._get("time-pos"),
+                preferred=self.episode.nav_idx,
+            ),
+            index=self.episode.sub_index,
+            language=self.subtitle_language,
+            osd=self.osd,
+            chrome_scale=self.chrome_scale,
+            surfaces=self.lifecycle_surfaces,
+            video=self._get("path"),
+            backlog=lambda: sidebar_module._ensure_store(self.session),
+            mined=lambda: self.mined_store,
+            mined_exists=self.session.mined_store is not None or mined_store.db_path().exists(),
+            backlog_exists=self.session.backlog_store is not None or backlog.db_path().exists(),
+            scorer=self.scorer,
+            tokenizer=self.tokenizer,
+            analysis=self.analysis.current,
+            can_mine=bool(self.anki and self.mine_cfg),
+        )
 
     @property
     def sidebar_actions(self) -> sidebar_module.SidebarActions:
         """The sidebar's click acts, bound. Paired with `sidebar_view`."""
-        return sidebar_module.actions_of(self)
+        return sidebar_module.SidebarActions(
+            seek=lambda name, at: send_correlated(
+                self.ipc, name, "set_property", "time-pos", at, owner=Owner.PLAYBACK
+            ),
+            bookmark=self.toggle_bookmark,
+            mine=self.mine_current,
+            open_mined=lambda note_id: sidebar_module._open_mined(self, note_id),
+        )
+
+    @property
+    def hover_suppression(self) -> surfaces.HoverSuppression:
+        """What a surface needs to decide whether it swallows the hover under the cursor.
+
+        Named rather than inlined at the one call site: a hook's own unit test needs to build the
+        same value production does, and a test that assembles the port by hand is a second
+        definition of it that drifts from this one. Same for its two twins below.
+        """
+        return surfaces.HoverSuppression(
+            self.interaction,
+            self._prop("mouse-pos"),
+            self.retire_hover,
+            lambda: self.set_annotation_hover(revealed=False),
+        )
+
+    @property
+    def wheel_step(self) -> surfaces.WheelStep:
+        """What a surface needs to decide whether it claims a coalesced wheel step."""
+        return surfaces.WheelStep(
+            self.interaction,
+            self._prop("mouse-pos"),
+            lambda steps: self._run_help_command(self.help_page_command(steps)),
+            self.redraw_sub_picker,
+            self.sidebar_view,
+            self.hold_sidebar_scroll,
+            self._scroll_tip,
+            self.tip_scale.ref_h,
+        )
+
+    @property
+    def click_target(self) -> surfaces.ClickTarget:
+        """What a surface needs to decide whether it claims a left-click."""
+        return surfaces.ClickTarget(
+            self.interaction,
+            sub_picker.DownloadPorts(
+                self._toast,
+                self._submit_subtitle_fetch,
+                self._get,
+                self.lifecycle_surfaces,
+            ),
+            self.sidebar_view,
+            self.sidebar_actions,
+            self.tip_ports,
+            self.panel_ports,
+            self.click_ports,
+            self.hover_inputs,
+        )
 
     @property
     def hover_actions(self) -> HoverActions:
@@ -2359,7 +2435,7 @@ class Reader:
 
     def _apply_interaction_effect(self, effect: interaction_intents.InteractionEffect) -> None:
         if isinstance(effect, interaction_intents.RouteWheel):
-            surfaces.route_scroll(surfaces.wheel_step(self), effect.steps)
+            surfaces.route_scroll(self.wheel_step, effect.steps)
         elif isinstance(effect, interaction_intents.ScrollTooltip):
             self._scroll_tip(effect.pixels)
         elif isinstance(effect, interaction_intents.NavigateBack):
