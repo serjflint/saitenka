@@ -1155,7 +1155,9 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
         )
 
     def bookmark() -> None:
-        backlog.capture_current(reader)  # toggles create/delete each call — both are writes
+        backlog.capture_current(
+            reader.capture_ports
+        )  # toggles create/delete each call — both are writes
 
     def persist_mine() -> None:
         note_id["n"] += 1

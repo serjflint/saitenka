@@ -69,7 +69,7 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     reader.sub_text = "猫です"
     reader.session.backlog_store = backlog.BacklogStore(tmp_path / "backlog.sqlite")
 
-    backlog.capture_current(reader)
+    backlog.capture_current(reader.capture_ports)
     (attrs,) = _named(spans, "backlog_write")
     assert attrs["op"] == "toggle"
 

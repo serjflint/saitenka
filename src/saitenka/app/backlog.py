@@ -18,6 +18,8 @@ from saitenka.app.languages import MAIN_LANG
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.tokenize import Token
+
 Status = Literal["open", "reviewed", "mined", "archived"]
 MatchKind = Literal["matched", "ambiguous", "candidate", "unmatched"]
 STATUSES: tuple[Status, ...] = ("open", "reviewed", "mined", "archived")
@@ -458,52 +460,66 @@ class BacklogStore:
         return [dict(row) for row in rows]
 
 
-def capture_current(reader) -> BacklogEntry | None:
+@dataclass(frozen=True, slots=True)
+class CapturePorts:
+    """What one bookmark toggle samples the cue from, and where it reports.
+
+    Everything but `store` is read once, at the top: the whole point of the value is that the cue
+    it writes is the cue that was on screen when the key was pressed. `store` stays a callable
+    because opening the SQLite handle is lazy — a session that never bookmarks never opens one.
+    """
+
+    video: object
+    #: mpv reports cue bounds as numbers, `None` before one is on screen.
+    start: float | None
+    end: float | None
+    text: str
+    secondary_text: str
+    language: str
+    tokens: list[Token]
+    hover: int
+    jp_sid: int | None
+    en_sid: int | None
+    tracks: list
+    store: Callable[[], BacklogStore]
+    toast: Callable[..., None]
+    record_capture: Callable[[], None]
+
+
+def capture_current(ports: CapturePorts) -> BacklogEntry | None:
     """Sample current cue metadata, then perform one local transaction."""
-    video = reader._get("path")
-    start = reader._get("sub-start")
-    end = reader._get("sub-end")
-    if not video or start is None or end is None or not reader.sub_text.strip():
+    if not ports.video or ports.start is None or ports.end is None or not ports.text.strip():
         return None  # `mine_intents` owns the eligibility decision and its announcement
 
-    jp_text, en_text = _cue_languages(
-        reader.sub_text, reader._secondary_text(), reader.subtitle_language
-    )
-    hovered = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
-    tracks = reader._get("track-list") or []
+    jp_text, en_text = _cue_languages(ports.text, ports.secondary_text, ports.language)
+    hovered = ports.tokens[ports.hover] if 0 <= ports.hover < len(ports.tokens) else None
+    main = ports.language == MAIN_LANG
     capture = Capture(
-        video_path=str(video),
-        cue_start=float(start),
-        cue_end=float(end),
+        video_path=str(ports.video),
+        cue_start=float(ports.start),
+        cue_end=float(ports.end),
         jp_text=jp_text,
         en_text=en_text,
         subtitle_track={
-            "language": reader.subtitle_language,
-            "primary_sid": reader.jp_sid
-            if reader.subtitle_language == MAIN_LANG
-            else reader.en_sid,
-            "secondary_sid": reader.en_sid
-            if reader.subtitle_language == MAIN_LANG
-            else reader.jp_sid,
-            "jp_sid": reader.jp_sid,
-            "en_sid": reader.en_sid,
-            "jp_track": _track_metadata(tracks, reader.jp_sid),
-            "en_track": _track_metadata(tracks, reader.en_sid),
+            "language": ports.language,
+            "primary_sid": ports.jp_sid if main else ports.en_sid,
+            "secondary_sid": ports.en_sid if main else ports.jp_sid,
+            "jp_sid": ports.jp_sid,
+            "en_sid": ports.en_sid,
+            "jp_track": _track_metadata(ports.tracks, ports.jp_sid),
+            "en_track": _track_metadata(ports.tracks, ports.en_sid),
         },
         hovered_surface=hovered.surface if hovered else None,
         hovered_lemma=hovered.lemma if hovered else None,
     )
     try:
-        store = reader.session.backlog_store
-        if store is None:
-            store = reader.session.backlog_store = BacklogStore()
         with otel_metrics.traced("backlog_write", op="toggle"):  # main-thread SQLite on a bookmark
-            entry, created = store.toggle_capture_result(capture)
+            entry, created = ports.store().toggle_capture_result(capture)
     except (OSError, sqlite3.Error, ValueError) as exc:
-        reader._toast(f"bookmark failed: {exc}", "err")
+        ports.toast(f"bookmark failed: {exc}", "err")
         return None
     state = "saved" if entry.status == "open" else entry.status
-    if created and reader.episode.session_recorder is not None:
-        reader.episode.session_recorder.record_capture()
-    reader._toast(f"bookmark {state}")
+    if created:
+        ports.record_capture()
+    ports.toast(f"bookmark {state}")
     return entry

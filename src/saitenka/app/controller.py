@@ -2183,6 +2183,30 @@ class Reader:
         )
 
     @property
+    def capture_ports(self) -> backlog.CapturePorts:
+        """What a bookmark toggle samples the cue from — read now, so the write is this cue."""
+        return backlog.CapturePorts(
+            video=self._get("path"),
+            start=self._get("sub-start"),
+            end=self._get("sub-end"),
+            text=self.sub_text,
+            secondary_text=self._secondary_text(),
+            language=self.subtitle_language,
+            tokens=self.tokens,
+            hover=self.hover,
+            jp_sid=self.jp_sid,
+            en_sid=self.en_sid,
+            tracks=self._get("track-list") or [],
+            store=lambda: sidebar_module._ensure_store(self.session),
+            toast=self._toast,
+            record_capture=self._record_capture,
+        )
+
+    def _record_capture(self) -> None:
+        if self.episode.session_recorder is not None:
+            self.episode.session_recorder.record_capture()
+
+    @property
     def tip_ports(self) -> TipPorts:
         """What the popup blit/scroll/placement chain needs, as one member rather than the set.
 
@@ -2702,7 +2726,7 @@ class Reader:
         elif isinstance(effect, mine_intents.MineEpisode):
             self._miner.bulk_mine()
         elif isinstance(effect, mine_intents.BookmarkCue):
-            backlog.capture_current(self)
+            backlog.capture_current(self.capture_ports)
         elif isinstance(effect, Announce):
             log.info("mine: no target word")
             self._toast(effect.text, effect.kind)

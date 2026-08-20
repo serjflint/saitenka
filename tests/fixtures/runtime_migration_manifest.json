@@ -58,10 +58,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/backlog.py::capture_current"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/commands/attach.py::_attach_reslot"
     ],
     [
