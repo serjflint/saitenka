@@ -29,6 +29,7 @@ from saitenka.runtime import (
     EffectOutcome,
     Owner,
 )
+from saitenka.runtime.help import HelpCommand
 
 
 class FakeIPC(util.FakeIPC):
@@ -399,7 +400,7 @@ def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
     monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
-    reader.help.open = True
+    reader._help_store.dispatch(HelpCommand.TOGGLE)
     ipc.events = [
         {"event": "client-message", "args": [SUB_PICKER_MSG]},
         {"event": "client-message", "args": [HELP_CLOSE_MSG]},

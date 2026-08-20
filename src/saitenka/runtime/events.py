@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, Owner
 
 if TYPE_CHECKING:
+    from saitenka.runtime.help import HelpCommand
     from saitenka.runtime.hover import HoverDelays, HoverObservation
     from saitenka.runtime.hover import Intent as HoverIntent
     from saitenka.runtime.playback import RetireReason
@@ -418,8 +419,38 @@ class HoverDwellRefused:
     intent: HoverIntent
 
 
+@dataclass(frozen=True, slots=True)
+class HelpCommanded:
+    """A shortcut-overlay command, with the document length the paging arms decide against.
+
+    `page_count` rides on the event rather than being read in the turn for the reason the dwell
+    lengths do: the number comes from rendering the document against the current screen, which is
+    neither pure nor free, and a reducer that reached for it would be neither.
+    """
+
+    command: HelpCommand
+    page_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class HelpRepaginated:
+    """The document was measured again — a resize, or a bindings change. Carries only its length.
+
+    Separate from `HelpCommanded` because nothing the user pressed decides it, and folding it in as
+    a null command would make "no command" a value every paging arm has to exclude.
+    """
+
+    page_count: int
+
+
 type InteractionEvent = (
-    HoverConfigured | HoverObserved | HoverScrolled | HoverDwellElapsed | HoverDwellRefused
+    HoverConfigured
+    | HoverObserved
+    | HoverScrolled
+    | HoverDwellElapsed
+    | HoverDwellRefused
+    | HelpCommanded
+    | HelpRepaginated
 )
 
 INTERACTION_EVENTS = (
@@ -428,6 +459,8 @@ INTERACTION_EVENTS = (
     HoverScrolled,
     HoverDwellElapsed,
     HoverDwellRefused,
+    HelpCommanded,
+    HelpRepaginated,
 )
 
 

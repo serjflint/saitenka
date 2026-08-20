@@ -59,7 +59,9 @@ from saitenka.runtime.events import (
     StartupReady,
 )
 from saitenka.runtime.interaction_slice import (
+    HELP_FEATURE,
     INTERACTION_FEATURE,
+    HelpFeature,
     HoverFeature,
     interaction_slice_reducer,
 )
@@ -414,7 +416,9 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             ),
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
             subtitle=subtitle.initial({SUBTITLE_FEATURE: SubtitleTrackState()}),
-            interaction=interaction.initial({INTERACTION_FEATURE: HoverFeature()}),
+            interaction=interaction.initial(
+                {INTERACTION_FEATURE: HoverFeature(), HELP_FEATURE: HelpFeature()}
+            ),
             presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),
         ),
         OwnerRouter(SessionReducer(routes), owner_of, ledger=ledger, broadcast=LIFETIME_EVENTS),

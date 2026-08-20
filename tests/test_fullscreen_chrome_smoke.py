@@ -18,6 +18,7 @@ from saitenka.app import sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+from saitenka.runtime.help import HelpCommand
 from saitenka.subtitles import Cue, CueIndex
 
 BASELINE_1080 = (1920, 1080)
@@ -84,7 +85,7 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> Reader:
 
 
 def _draw_help(r: Reader) -> None:
-    r.help.open = True
+    r._help_store.dispatch(HelpCommand.TOGGLE)
     r._redraw_help()
 
 

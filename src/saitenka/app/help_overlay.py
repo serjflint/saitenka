@@ -1,14 +1,13 @@
-"""The in-player shortcut reference: its state, and the parts of it that need no session.
+"""The in-player shortcut reference: building its document, and rendering a page of it.
 
-Building the document and rendering a page are functions of the bindings and the screen, so they
-live here and can be checked at any size without a Reader. Deciding whether the overlay is open and
-which page it shows is `help_intents`; doing it is the Reader. The `SurfaceSpec` hooks take the
-registry's own ports, so nothing here holds the host.
+Both are functions of the bindings and the screen, so they live here and can be checked at any size
+without a Reader. Whether the overlay is open and which page it shows is `Owner.INTERACTION`'s
+`help` slice (`runtime/help.py` decides, `interaction_slice` holds); drawing it is the Reader. The
+`SurfaceSpec` hooks take the registry's own ports, so nothing here holds the host.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka.render.help import HelpEntry, build_document, render_page
@@ -18,14 +17,6 @@ if TYPE_CHECKING:
 
     from saitenka.app.bindings import ActiveBinding
     from saitenka.app.surfaces import HoverSuppression, WheelStep
-
-
-@dataclass
-class HelpState:
-    """In-player shortcut-reference overlay: whether it is showing, and which page."""
-
-    open: bool = False
-    page: int = 0
 
 
 def help_entries(bindings: Iterable[ActiveBinding]) -> tuple[HelpEntry, ...]:

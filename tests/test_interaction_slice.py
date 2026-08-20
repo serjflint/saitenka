@@ -1,4 +1,4 @@
-"""`Owner.INTERACTION`'s reducer, its outbox, and its store.
+"""`Owner.INTERACTION`'s reducers, their outboxes, and their stores.
 
 The store test is the point of the file, as it is for subtitle: a Reader with a session reactor and
 one without must decide the same hover, because only one of the two paths is the one production
@@ -6,6 +6,9 @@ takes and the other is the one almost every test takes.
 
 The outbox is what is new here. SUBTITLE declares, so its turns hand back nothing; INTERACTION
 observes, so the reducer is what decides and the decisions have to come back.
+
+Two features share this slot, so the second thing the file pins is that they are independent: one
+feature's events reach the other by broadcast, and each has to leave the other's state alone.
 """
 
 from __future__ import annotations
@@ -15,12 +18,15 @@ from util import FakeIPC, runtime_gateway
 
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.runtime.events import (
+    EpisodeRetired,
+    HelpCommanded,
     HoverConfigured,
     HoverDwellElapsed,
     HoverDwellRefused,
     HoverObserved,
     HoverScrolled,
 )
+from saitenka.runtime.help import HelpCommand, HelpState, OpenHelp, ShowHelpPage
 from saitenka.runtime.hover import (
     Arm,
     Dwell,
@@ -31,7 +37,14 @@ from saitenka.runtime.hover import (
     ShowWord,
     SwitchTo,
 )
-from saitenka.runtime.interaction_slice import HoverFeature, HoverReducer, HoverStore
+from saitenka.runtime.interaction_slice import (
+    HelpFeature,
+    HelpReducer,
+    HelpStore,
+    HoverFeature,
+    HoverReducer,
+    HoverStore,
+)
 
 DELAYS = HoverDelays(scan=0.1, hide=0.2, switch=0.3)
 
@@ -172,3 +185,86 @@ def test_the_hover_view_projects_what_the_slice_holds() -> None:
         assert reader.hover_view().scan_target is None
     finally:
         reader.close()
+
+
+# --- the slot's second feature --------------------------------------------------------------------
+
+
+def test_help_and_hover_share_the_slot_without_reading_each_other(request) -> None:
+    """`help` joined by registering a reducer and an initial state — nothing in `hover` moved.
+
+    The proof is the broadcast: `SliceReducer` hands every event to every feature, so a hover
+    stream reaches `HelpReducer` and a help command reaches `HoverReducer`. If either decided
+    anything on the other's vocabulary, one of these two states would not survive the other's turn.
+    """
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    hover, help_ = HoverStore(ipc), HelpStore(ipc)
+
+    assert help_.dispatch(HelpCommand.TOGGLE) == (OpenHelp(),)
+    for event in STREAM:
+        hover.dispatch(event)
+
+    assert help_.current == HelpState(open=True)  # the hover stream left it alone
+    assert hover.current.delays == DELAYS  # …and the help command left the hover alone
+
+
+def test_a_help_turn_clears_the_hover_outbox_rather_than_leaving_it_standing() -> None:
+    """A stale outbox reads to its drainer as a decision *this* turn made. The broadcast is what
+    makes it reachable: the hover feature is asked to reduce a command it decides nothing about."""
+    reducer = HoverReducer()
+    state = reducer.reduce(HoverFeature(), HoverConfigured(DELAYS))
+    state = reducer.reduce(state, HoverObserved(HoverObservation(hover=-1, word=0)))
+    assert state.published  # negative control: there is something to leave behind
+
+    assert reducer.reduce(state, HelpCommanded(HelpCommand.TOGGLE)).published == ()
+
+
+def test_the_overlay_survives_an_episode_ending() -> None:
+    """The retirement event is a fan-out, and "this owner has no per-episode facts" is a permanent
+    and correct answer for the shortcut reference — it is the session's, not the episode's. The
+    hover half is the contrast: its hysteresis is exactly an episode fact and is reset."""
+    reducer = HelpReducer()
+    open_ = reducer.reduce(HelpFeature(), HelpCommanded(HelpCommand.TOGGLE))
+
+    assert reducer.reduce(open_, EpisodeRetired()).overlay == HelpState(open=True)
+
+
+def test_the_same_commands_decide_the_same_overlay_with_or_without_a_reactor(request) -> None:
+    """The differential `HoverStore` gets, for the feature that joined after it."""
+    commands = (
+        (HelpCommand.TOGGLE, 3),
+        (HelpCommand.NEXT, 3),
+        (HelpCommand.NEXT, 3),
+        (HelpCommand.PREVIOUS, 3),
+        (HelpCommand.CLOSE, 3),
+        (HelpCommand.NEXT, 3),
+    )
+    local = HelpStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = HelpStore(ipc)
+
+    assert [local.dispatch(c, page_count=n) for c, n in commands] == [
+        routed.dispatch(c, page_count=n) for c, n in commands
+    ]
+    assert local.current == routed.current
+
+
+def test_a_shrunk_document_is_folded_in_through_the_store(request) -> None:
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = HelpStore(ipc)
+    store.dispatch(HelpCommand.TOGGLE)
+    assert store.dispatch(HelpCommand.NEXT, page_count=9) == (ShowHelpPage(1),)
+
+    store.repaginate(1)
+
+    assert store.current == HelpState(open=True, page=0)

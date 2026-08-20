@@ -24,7 +24,6 @@ _MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
     from saitenka.app.card_preview import PreviewState
-    from saitenka.app.help_overlay import HelpState
     from saitenka.app.mined_store import MinedCardStore
     from saitenka.app.popups import TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
@@ -33,6 +32,8 @@ if TYPE_CHECKING:
     from saitenka.app.sub_picker import PickerState
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
+    from saitenka.runtime.help import HelpState
+    from saitenka.runtime.interaction_slice import HelpStore
     from saitenka.subtitles import Cue, CueIndex
 
 
@@ -104,20 +105,27 @@ class EpisodeContext:
 class InteractionContext:
     """State scoped to the current on-screen interaction (hover/tooltip).
 
-    Owns the five OSD surface states — help, sub_picker, sidebar, preview, tip — which `Reader`
-    assigns during construction through their `Delegated` descriptors, and which `app/surfaces.py`
-    keeps a registry over. They are the INTERACTION owner's state; gathering them here is what lets a
-    surface hook stop taking the whole host to reach one of them.
+    Gathers the five OSD surface states — help, sub_picker, sidebar, preview, tip — that
+    `app/surfaces.py` keeps a registry over. They are the INTERACTION owner's state; gathering them
+    here is what lets a surface hook stop taking the whole host to reach one of them.
     """
 
-    #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the five need
+    #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the four need
     #: constructor arguments this container has no business knowing. Declared here so the container
     #: states its own shape rather than acquiring it from whoever writes first.
-    help: HelpState
     sub_picker: PickerState
     sidebar: SidebarState
     preview: PreviewState
     tip: TooltipState
+
+    #: `help` is the first of the five to become a slice feature, so the container asks for it
+    #: rather than holding it. Reached the same way by every surface hook — `interaction.help` — so
+    #: nothing downstream can tell which of the five have moved yet.
+    help_store: HelpStore
+
+    @property
+    def help(self) -> HelpState:
+        return self.help_store.current
 
 
 class RenderCacheState:

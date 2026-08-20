@@ -125,15 +125,17 @@ def test_every_surface_state_exposes_open(spec):
 
 
 def test_scroll_command_routes_to_open_help(monkeypatch):
+    from saitenka.runtime.help import HelpCommand
+
     reader = Reader(_FakeIPC())
-    reader.help.open = True
+    reader._help_store.dispatch(
+        HelpCommand.TOGGLE
+    )  # the slice owns "open"; nothing else may set it
     steps: list[int] = []
-    # The help surface routes the wheel into the help *command*; paging is `help_intents`' call.
+    # The help surface routes the wheel into the help *command*; which page that is is the slice's.
     monkeypatch.setattr(reader, "_run_help_command", lambda command: steps.append(command))
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
-
-    from saitenka.app.help_intents import HelpCommand
 
     assert steps == [HelpCommand.NEXT]
 
@@ -174,15 +176,18 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     Constructing the context directly is the proof: if any hook still reached past it, this cannot run.
     """
     from saitenka.app.card_preview import PreviewState
-    from saitenka.app.help_overlay import HelpState
     from saitenka.app.popups import TooltipState
     from saitenka.app.reader_context import InteractionContext
     from saitenka.app.sidebar import SidebarState
     from saitenka.app.sub_picker import PickerState
     from saitenka.app.surfaces import wants_mouse_capture
+    from saitenka.runtime.interaction_slice import HelpStore
+    from saitenka.runtime.jobs import NoSessionRuntime
 
     interaction = InteractionContext()
-    interaction.help = HelpState()
+    # `help` is a slice feature now, so the context is given the store rather than the state — and
+    # `NoSessionRuntime` is how a transport-less stand-in says "no reactor here".
+    interaction.help_store = HelpStore(NoSessionRuntime())
     interaction.sub_picker = PickerState()
     interaction.sidebar = SidebarState()
     interaction.preview = PreviewState()

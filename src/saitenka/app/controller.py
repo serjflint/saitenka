@@ -25,8 +25,6 @@ from saitenka.app import (
     cue_annotation,
     episode_reslot,
     geometry_refresh,
-    help_intents,
-    help_overlay,
     hover_intents,
     hover_metadata,
     hover_snapshot,
@@ -179,9 +177,11 @@ from saitenka.runtime import (
     events,
     playback,
 )
+from saitenka.runtime import help as help_machine
 from saitenka.runtime import subtitle as subtitle_state
+from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
-from saitenka.runtime.interaction_slice import HoverStore
+from saitenka.runtime.interaction_slice import HelpStore, HoverStore
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.runner import SessionRunner
@@ -284,7 +284,6 @@ class Reader:
     # what lets a hook reach one without the host. Every other flat alias is gone: the lifetime
     # containers are addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`),
     # because an alias per field made one object look like N host members to every ratchet.
-    help = Delegated[help_overlay.HelpState]("interaction", "help")
     sub_picker = Delegated[sub_picker_module.PickerState]("interaction", "sub_picker")
     sidebar = Delegated[sidebar_module.SidebarState]("interaction", "sidebar")
     preview = Delegated[card_preview.PreviewState]("interaction", "preview")
@@ -576,7 +575,6 @@ class Reader:
         self.sub_picker = sub_picker.PickerState()
         self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
-        self.help = help_overlay.HelpState()
         # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
         # Delegated shims below keep the historical ``reader._last_*``/``_preview_*`` names working.
         self.preview = card_preview.PreviewState()
@@ -689,6 +687,10 @@ class Reader:
         # so they arrive as a declaration rather than being read in the turn — a reducer that read
         # them off the host would not be pure.
         self._hover_store = HoverStore(self.ipc)
+        # The same slot's second feature: the shortcut overlay. A registration, not a rewrite —
+        # `hover` did not change to make room for it.
+        self._help_store = HelpStore(self.ipc)
+        self.interaction.help_store = self._help_store
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self._translation = TranslationStore(self.ipc)
@@ -3082,11 +3084,18 @@ class Reader:
         analysis_overlay.invalidate(self.analysis, vocabulary_changed=vocabulary_changed)
         self._refresh_analysis()
 
-    # --- help-overlay commands: pure reducer, executed here (WP5.3) ---------------------------
-    def help_page_command(self, steps: int):
-        from saitenka.app import help_intents
+    # --- help overlay: the slice decides, this performs ----------------------------------------
+    @property
+    def help(self) -> HelpState:
+        """What the shortcut overlay shows. Read-only: the slice owns it, so writing is an event.
 
-        return help_intents.HelpCommand.NEXT if steps > 0 else help_intents.HelpCommand.PREVIOUS
+        Reached through the interaction context rather than the store so that the host and a surface
+        hook read one thing — the flat name is the last user of it, not a second path to it.
+        """
+        return self.interaction.help
+
+    def help_page_command(self, steps: int) -> HelpCommand:
+        return HelpCommand.NEXT if steps > 0 else HelpCommand.PREVIOUS
 
     def _help_document(self):
         from saitenka.app import help_overlay
@@ -3105,7 +3114,7 @@ class Reader:
         if not self.help.open:
             return
         document = self._help_document()
-        self.help.page = min(self.help.page, len(document.pages) - 1)
+        self._help_store.repaginate(len(document.pages))
         image = help_overlay.page_image(document, self.help.page)
         x = (self.osd[0] - document.width) // 2
         y = (self.osd[1] - document.height) // 2
@@ -3149,37 +3158,22 @@ class Reader:
                 owner=Owner.INTERACTION,
             )
 
-    def _run_help_command(self, command) -> None:
-        from saitenka.app import help_intents
+    def _run_help_command(self, command: HelpCommand) -> None:
+        # The page count means rendering the document, so only the open case pays for it: a
+        # keypress the closed arm discards should not build a document to be told so.
+        pages = len(self._help_document().pages) if self.help.open else 0
+        for decision in self._help_store.dispatch(command, page_count=pages):
+            self._apply_help_effect(decision)
 
-        if not self.help.open:
-            inputs = help_intents.HelpInputs(open=False)
-        else:
-            # The page count means rendering the document, so only the open case pays for it: a
-            # keypress the closed arm discards should not build a document to be told so.
-            inputs = help_intents.HelpInputs(
-                open=True,
-                page=self.help.page,
-                page_count=len(self._help_document().pages),
-            )
-        for effect in help_intents.reduce(command, inputs):
-            self._apply_help_effect(effect)
-
-    def _apply_help_effect(self, effect) -> None:
-        from saitenka.app import help_intents
-
-        if isinstance(effect, help_intents.OpenHelp):
-            self.help.open = True
-            self.help.page = effect.page
+    def _apply_help_effect(self, effect: help_machine.HelpEffect) -> None:
+        """Perform one decision. The state already moved — what is left is keys and pixels."""
+        if isinstance(effect, help_machine.OpenHelp):
             self._bind_help_keys()
             self._redraw_help()
-        elif isinstance(effect, help_intents.CloseHelp):
-            self.help.open = False
+        elif isinstance(effect, help_machine.CloseHelp):
             self.lifecycle_surfaces.remove(OverlayId.HELP)
             self._restore_help_context_keys()
-            self.help.page = 0
-        elif isinstance(effect, help_intents.ShowHelpPage):
-            self.help.page = effect.index
+        elif isinstance(effect, help_machine.ShowHelpPage):
             self._redraw_help()
 
     def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
@@ -3309,7 +3303,7 @@ class Reader:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
 
     def toggle_help(self) -> None:
-        self._run_help_command(help_intents.HelpCommand.TOGGLE)
+        self._run_help_command(HelpCommand.TOGGLE)
 
     def _register_keybinds(self) -> None:
         """Install the "global"-scoped bindings as ONE mpv input section.
@@ -3379,7 +3373,7 @@ class Reader:
         # because `LegacyCommandExecutor` goes with the driver in WP6, not before it.
         handlers: dict[str, Callable[[], None]] = {}
         # Migrated (WP4.2 / WP4.5 / WP5.3): the decision is a pure reducer — `subtitle_intents`,
-        # `help_intents`, `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
+        # `runtime.help`, `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
         # `interaction_intents`.
         reducers = {
             SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
@@ -3393,9 +3387,9 @@ class Reader:
             SUB_REPLAY_MSG: action("_replay_cue"),
             SUB_ANCHOR_MSG: action("_anchor_subtitles"),
             HELP_TOGGLE_MSG: action("toggle_help"),
-            HELP_PREV_MSG: lambda: self._run_help_command(help_intents.HelpCommand.PREVIOUS),
-            HELP_NEXT_MSG: lambda: self._run_help_command(help_intents.HelpCommand.NEXT),
-            HELP_CLOSE_MSG: lambda: self._run_help_command(help_intents.HelpCommand.CLOSE),
+            HELP_PREV_MSG: lambda: self._run_help_command(HelpCommand.PREVIOUS),
+            HELP_NEXT_MSG: lambda: self._run_help_command(HelpCommand.NEXT),
+            HELP_CLOSE_MSG: lambda: self._run_help_command(HelpCommand.CLOSE),
             SPEAK_MSG: action("speak_hovered"),
             COPY_MSG: action("copy_hovered"),
             KANJI_MSG: action("kanji_current"),

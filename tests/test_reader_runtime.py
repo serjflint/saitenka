@@ -15,6 +15,7 @@ from saitenka.app.runtime import (
     LegacyPickerRepeatGuard,
 )
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
+from saitenka.runtime.help import HelpCommand
 
 
 def test_legacy_command_executor_dispatches_accepted_feature_action():
@@ -153,7 +154,7 @@ def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request
     ipc = FakeIPC()
     reader = create_reader(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
-    reader.help.open = True
+    reader._help_store.dispatch(HelpCommand.TOGGLE)
     calls: list[int] = []
     monkeypatch.setattr(
         "saitenka.app.surfaces.route_scroll", lambda _reader, steps: calls.append(steps)
