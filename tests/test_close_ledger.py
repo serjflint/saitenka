@@ -410,3 +410,34 @@ def test_a_closed_session_reactor_rejects_further_work() -> None:
         gateway.mailbox.publish(
             RawMpvEvent("after-close"), origin=EventOrigin.MPV, traffic=TrafficClass.NORMAL
         )
+
+
+def test_the_artifacts_effect_carries_its_path_instead_of_looking_one_up() -> None:
+    """Why `_retire_artifacts` may gate on the announcement while `_retire_surfaces` may not.
+
+    `announce` reports that a reactor *saw* the event, not that anything performed the effect. That
+    is why the surfaces path also checks the registration: a session with a reactor but no registered
+    resource would take the True and leak the overlays. The artifacts path has no such gap only
+    because `RemoveSessionArtifacts` carries the directory in the effect, so a reactor that saw it
+    can always perform it.
+
+    That is a real invariant and it was unstated. The moment this effect grows a
+    `session_resources` lookup like the surfaces effects have, the announcement stops implying the
+    removal and the scratch dir leaks — silently, at close, on the path nobody watches.
+    """
+    from dataclasses import fields
+    from pathlib import Path
+
+    from saitenka.runtime import RemoveSessionArtifacts
+
+    assert [f.name for f in fields(RemoveSessionArtifacts)] == ["path"]
+
+    dispatcher_source = (
+        Path(__file__).resolve().parents[1] / "src/saitenka/app/session_routes.py"
+    ).read_text()
+    branch = dispatcher_source.split("if isinstance(effect, RemoveSessionArtifacts):")[1]
+    body = branch.split("return True")[0]
+    assert "session_resources" not in body, (
+        "RemoveSessionArtifacts now looks up a resource, so `_retire_artifacts` must gate on the "
+        "registration the way `_retire_surfaces` does"
+    )

@@ -382,12 +382,9 @@ class Reader:
         # Reader without implementing every runtime port, and construction must not demand one.
         from saitenka.app.session_routes import OVERLAY_RESOURCE, SURFACES_RESOURCE
 
-        register = getattr(ipc, "register_session_resource", None)
-        self._runtime_owns_surfaces = bool(
-            register
-            and register(SURFACES_RESOURCE, self.lifecycle_surfaces)
-            and register(OVERLAY_RESOURCE, self.ov)
-        )
+        self._runtime_owns_surfaces = ipc.register_session_resource(
+            SURFACES_RESOURCE, self.lifecycle_surfaces
+        ) and ipc.register_session_resource(OVERLAY_RESOURCE, self.ov)
         self.interaction_surfaces = InteractionSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
         self._analysis_submit = analysis_overlay.configure_runtime_job(ipc)

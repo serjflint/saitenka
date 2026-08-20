@@ -75,7 +75,8 @@ class NoSessionRuntime:
     decision, and the same refusal a live `MpvIPC` gives before its gateway is installed — so every
     feature already has a path for it.
 
-    Covers both ports a stand-in gets asked about: job lanes and lifecycle timers. It grew the timer
+    Covers the ports a stand-in gets asked about: job lanes, lifecycle timers, and the session
+    resource registry. It grew the timer
     half the same way it grew the first — a probe was replaced by a call, and the call found a fake
     that had never declared the port.
     """
@@ -96,6 +97,9 @@ class NoSessionRuntime:
         return False
 
     def cancel_runtime_timer(self, _timer: str) -> bool:
+        return False
+
+    def register_session_resource(self, _name: str, _resource: object) -> bool:
         return False
 
 
