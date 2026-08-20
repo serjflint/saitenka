@@ -798,7 +798,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     tip.tip_tok, tip.tip_inflected = tok, inflected
     if painted:
         view.crisp_pending = True  # direct-paint is soft → poll upgrades once bands warm
-    reader._request_render_ahead(view, 1)
+    ports.request_render_ahead(view, 1)
     return True
 
 
