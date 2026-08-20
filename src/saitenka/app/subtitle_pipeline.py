@@ -13,7 +13,6 @@ from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.subtitle_render import DrawResult, SubtitleTarget
     from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
@@ -128,25 +127,22 @@ class SubtitleModeCoordinator:
     def renderer(self, renderer: CurrentSubtitleRenderer) -> None:
         self._renderer = renderer
 
-    def draw_current(self, reader: Reader) -> None:
-        """The one place that turns a host into a draw request and the result back into host state.
+    def draw_current(self, target: SubtitleTarget) -> DrawResult | None:
+        """Draw the current cue and hand the geometry back. The one place a draw is staged.
 
         Was spread across each renderer's `draw`. Collapsing it here is what makes the renderers
         host-free: they share one protocol member, so the widest of them set the signature for all.
-        """
-        from saitenka.app.subtitle_render import build_draw_request, target_of
 
-        self._renderer.activate(target_of(reader))
-        result = self._renderer.draw(
-            build_draw_request(reader), reader.lifecycle_surfaces, reader.ipc
-        )
-        if result is None:
-            return
-        # Returned, not assigned by the renderer: the boxes and origin belong to the cue that
-        # produced them, and writing them onto a host mid-render outlives a superseded cue.
-        reader.boxes = result.boxes
-        reader.sub_origin = result.origin
-        reader._first_sub_logged = self._renderer.logged_first
+        Returned rather than written back, for the reason the renderers return rather than assign:
+        the boxes and origin belong to the cue that produced them, and a write that happens
+        mid-render outlives a superseded cue. Doing it here as well is what stops this one function
+        from being the whole subtitle chain's reason to hold a host.
+
+        The request is built through `target.draw_request` and not passed in: the legacy stage needs
+        it built at stage time, not at snapshot time.
+        """
+        self._renderer.activate(target)
+        return self._renderer.draw(target.draw_request(), target.surfaces, target.ipc)
 
     def clear(self, surfaces: LifecycleSurfaces, ipc) -> None:
         self._renderer.clear(surfaces, ipc)

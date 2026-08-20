@@ -270,10 +270,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.draw_current"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::build_draw_request"
     ],
     [

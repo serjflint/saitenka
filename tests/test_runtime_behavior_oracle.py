@@ -156,14 +156,14 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
     renderer.use_native(target_of(reader))
     reader.hover = 0
-    reader.subtitle_pipeline.draw_current(reader)
+    reader.subtitle_pipeline.draw_current(target_of(reader))
     trace.observe("geometry-ready", outcome="interaction-ready")
     reader.boxes = []
     renderer.degrade_geometry(target_of(reader))
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
     renderer.use_native(target_of(reader))
-    reader.subtitle_pipeline.draw_current(reader)
+    reader.subtitle_pipeline.draw_current(target_of(reader))
     trace.observe("geometry-recovered", outcome="interaction-ready")
 
     assert [record["pixels"] for record in trace.records()] == [

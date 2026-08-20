@@ -2054,7 +2054,7 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
         renderer.cue_changed(target_of(result), nonempty=True)
         assert renderer.ownership_state.owner.value == "unknown"
-        result.subtitle_pipeline.draw_current(result)
+        result.subtitle_pipeline.draw_current(target_of(result))
         # The retry is a named deadline now: nothing happens until it is due.
         assert ipc.timers["subtitle:ownership-retry"][1] == pytest.approx(0.05)
         assert ipc.commands.count(("set_property", "sub-visibility", True)) == 1

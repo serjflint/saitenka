@@ -230,7 +230,7 @@ def test_coordinator_delegates_current_renderer() -> None:
     coordinator = reader.subtitle_pipeline
     coordinator.renderer = renderer
 
-    coordinator.draw_current(reader)
+    coordinator.draw_current(reader._subtitle_target())
 
     assert renderer.drawn is not None
     assert renderer.drawn is not reader

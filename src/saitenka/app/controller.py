@@ -1666,7 +1666,13 @@ class Reader:
         self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:
-        self.subtitle_pipeline.draw_current(self)
+        result = self.subtitle_pipeline.draw_current(self._subtitle_target())
+        if result is not None:
+            # The write-back, here rather than inside the stage: the boxes and origin belong to the
+            # cue that produced them, and this is the one place that owns them.
+            self.boxes = result.boxes
+            self.sub_origin = result.origin
+            self._first_sub_logged = self.subtitle_pipeline.renderer.logged_first
         if self.native_geometry is not None:
             self.native_geometry.sync_pixel_owner(self.subtitle_pipeline.renderer)
 
