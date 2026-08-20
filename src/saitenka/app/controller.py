@@ -2210,7 +2210,7 @@ class Reader:
     def _navigated_panel(self, query: str):
         """The read-only reference Panel for a nav target — built off the main thread by the engaged
         tooltip lane, so the seam lives on the Reader (no engaged-tooltip→tooltip import)."""
-        return tooltip._navigated_panel(self, query)
+        return tooltip._navigated_panel(tooltip_panel.panel_style(self), query)
 
     # --- pointer and tooltip navigation: pure reducer, executed here (WP5.3) -------------------
     @property

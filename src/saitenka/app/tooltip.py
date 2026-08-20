@@ -34,13 +34,15 @@ from saitenka.app.tooltip_panel import (
     is_mined,
     panel_for,
     panel_key,
+    panel_style,
     place_tip,
     render_view,
+    rows_panel,
     scan_hit,
     scroll_view,
 )
 from saitenka.model import in_rect
-from saitenka.panel import header_add_rect, header_speaker_rect, panel_rows
+from saitenka.panel import header_add_rect, header_speaker_rect
 from saitenka.runtime import Owner, events
 from saitenka.runtime import hover as hover_machine
 
@@ -49,6 +51,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.popups import TooltipState
+    from saitenka.app.tooltip_panel import PanelStyle
 
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed,
 # which is an unconditional deque append and stays on every tick)
@@ -948,40 +951,32 @@ def _restore_tip_view(tip: TooltipState, view: tuple) -> None:
     tip.view.desired_scroll = tip.view.scroll
 
 
-def _navigated_panel(reader: Reader, query: str) -> Panel | None:
+def _navigated_panel(style: PanelStyle, query: str) -> Panel | None:
     """The read-only reference Panel for a navigation target: a wildcard/prefix query → search results,
-    else the exact term. No ⊕ — the header mine button acts on the hovered SUBTITLE word, which the
-    navigated term is not, so mining stays on the base word (reachable via back). Built at 1× like every
-    panel; the one-panel blit composites it natively at the display scale."""
-    if reader.dict_set is None:
+    else the exact term. Built at 1× like every panel; the one-panel blit composites it natively at
+    the display scale."""
+    # The dictionary and the tokenizer travel together — `panel_style` reads both off one host,
+    # and a navigated query is looked up whole by one and rendered by the other.
+    if style.dict_set is None or style.tokenizer is None:
         return None
     if query.startswith("kanji:"):  # a headword kanji click → the kanji entry, navigated in place
-        entry = reader.dict_set.kanji_for(
-            query[len("kanji:") :], stroke_order=reader.kanji_stroke_order
+        entry = style.dict_set.kanji_for(
+            query[len("kanji:") :], stroke_order=style.kanji_stroke_order
         )
         if entry is None:
             return None
         reading = getattr(entry, "reading", "") or ""
     elif any(c in query for c in "*?＊？"):
-        entry = reader.dict_set.search(query)
+        entry = style.dict_set.search(query)
         reading = ""
     else:
-        tok = reader.tokenizer.query_token(
-            query
-        )  # look up the WHOLE query as one term — never tokenize a link target
+        # the WHOLE query as one term — never tokenize a link target
+        tok = style.tokenizer.query_token(query)
         if tok is None:
             return None
-        entry = entry_for_tok(tok, tok.surface, dict_set=reader.dict_set, scorer=reader.scorer)
+        entry = entry_for_tok(tok, tok.surface, dict_set=style.dict_set, scorer=style.scorer)
         reading = getattr(entry, "reading", "") or tok.reading
-    rows = panel_rows(entry, reader.tip_scale.width, add_button=False, speak_button=reader._tts_ok)
-    return Panel.from_rows(
-        rows,
-        reader.tip_scale.width,
-        reading,
-        band_cache_max=reader.band_cache_max,
-        raw_band_ceiling=reader.raw_band_ceiling,
-        layout_backend=reader.layout_backend,
-    )
+    return rows_panel(style, entry, reading)
 
 
 def navigate_tip(reader: Reader, query: str) -> None:
@@ -999,7 +994,7 @@ def navigate_tip(reader: Reader, query: str) -> None:
         request = tooltip_engaged.NavigateRequest(query, id(reader.tip.view.state))
         if reader._request_engaged_tooltip(request):
             return
-    st = _navigated_panel(reader, query)
+    st = _navigated_panel(panel_style(reader), query)
     if st is None:
         return
     st.render_head(

@@ -134,10 +134,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_cached_rows_panel"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/nested_popup.py::_engaged_open_panel"
     ],
     [
@@ -359,10 +355,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::_install_navigated"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_navigated_panel"
     ],
     [
       "reader-parameter",

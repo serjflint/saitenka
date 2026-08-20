@@ -17,7 +17,7 @@ from __future__ import annotations
 import dataclasses as _dc
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app.lookup import card_for, entry_for
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.popups import TooltipState
+    from saitenka.app.tokenizer import Tokenizer
     from saitenka.render.layout_backend import LayoutBackend
 
 TIP_GAP = 12  # px between an anchored popup and the word it points at
@@ -204,6 +205,18 @@ def entry_for_tok(tok, inflected, *, dict_set, scorer, extra_terms: tuple[str, .
     return entry
 
 
+class PanelDictionary(Protocol):
+    """What a panel build asks the dictionary set for beyond `entry_for`.
+
+    Declared rather than `object` for the reason `SubtitleEgress` is: a stand-in that cannot answer
+    one of these should fail to type, not to `getattr` at the moment somebody navigates a link.
+    """
+
+    def kanji_for(self, char: str, *, stroke_order: bool = False) -> object | None: ...
+
+    def search(self, pattern: str, limit: int = 30) -> object: ...
+
+
 @dataclass(frozen=True, slots=True)
 class PanelStyle:
     """Everything a panel build needs that does not change between hovers.
@@ -220,8 +233,13 @@ class PanelStyle:
     layout_engine: str
     add_button: bool
     speak_button: bool
-    dict_set: object = None
+    dict_set: PanelDictionary | None = None
     scorer: object = None
+    #: The rest of the dictionary contract. `tokenizer` is here for the same reason `dict_set` is —
+    #: a navigated query is looked up whole, never tokenized — and `kanji_stroke_order` is a lookup
+    #: option, not a display one: it selects which entry the dictionary returns.
+    tokenizer: Tokenizer | None = None
+    kanji_stroke_order: bool = False
 
 
 def panel_style(reader: Reader) -> PanelStyle:
@@ -236,6 +254,25 @@ def panel_style(reader: Reader) -> PanelStyle:
         speak_button=reader._tts_ok,
         dict_set=reader.dict_set,
         scorer=reader.scorer,
+        tokenizer=reader.tokenizer,
+        kanji_stroke_order=reader.kanji_stroke_order,
+    )
+
+
+def rows_panel(style: PanelStyle, entry, reading: str) -> Panel:
+    """A read-only reference panel for a non-token target — a kanji, a search, a navigated term.
+
+    No ⊕: the header's mine button acts on the hovered *subtitle* word, which none of these is.
+    One function because the navigated and the nested-cached builds were the same eleven arguments
+    twice over, which only became visible once both stopped reading them off the host.
+    """
+    return Panel.from_rows(
+        panel_rows(entry, style.width, add_button=False, speak_button=style.speak_button),
+        style.width,
+        reading,
+        band_cache_max=style.band_cache_max,
+        raw_band_ceiling=style.raw_band_ceiling,
+        layout_backend=style.layout_backend,
     )
 
 

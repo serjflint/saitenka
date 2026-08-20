@@ -14,11 +14,12 @@ out through a one-line ``Reader`` delegation.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
 from saitenka.app import tooltip_engaged
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import Panel, PopupView
+from saitenka.app.popups import PopupView
 from saitenka.app.prefetch import cap_for
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
@@ -26,15 +27,18 @@ from saitenka.app.tooltip_panel import (
     is_mined,
     panel_for,
     panel_key,
+    panel_style,
     place_panel,
     render_view,
+    rows_panel,
     scan_hit,
 )
 from saitenka.model import is_ideograph
-from saitenka.panel import panel_rows
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
+    from saitenka.app.popups import TooltipState
+    from saitenka.app.tooltip_panel import PanelStyle
 
 NEST_MIN_ABOVE = 140  # min room above an inner word to keep its nested popup above it (else below)
 
@@ -250,24 +254,12 @@ def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0
     return state.windowed.link_hit(int((mx - sx) / scale), int((my - sy) / scale + scroll))
 
 
-def _cached_rows_panel(reader: Reader, key, entry, reading: str) -> Panel:
-    """Fetch-or-build (and LRU-touch) the ``_panel_cache`` entry for a non-token popup (kanji / search),
+def _cached_rows_panel(tip: TooltipState, style: PanelStyle, cap: int, key, entry, reading: str):
+    """Fetch-or-build (and LRU-touch) the panel-cache entry for a non-token popup (kanji / search),
     measuring its head. Idempotent — the main-thread build, the worker warm, and the tick re-show all
     land on the same cached Panel."""
-    st = reader.tip.panel_cache.get_or_build(
-        key,
-        lambda: Panel.from_rows(
-            panel_rows(
-                entry, reader.tip_scale.width, add_button=False, speak_button=reader._tts_ok
-            ),
-            reader.tip_scale.width,
-            reading,
-            band_cache_max=reader.band_cache_max,
-            raw_band_ceiling=reader.raw_band_ceiling,
-            layout_backend=reader.layout_backend,
-        ),
-    )
-    st.render_head(reader.tip_scale.cap)
+    st = tip.panel_cache.get_or_build(key, lambda: rows_panel(style, entry, reading))
+    st.render_head(cap)
     return st
 
 
@@ -278,21 +270,24 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
     ``None`` (no entry — the caller toasts). ``source`` ∈ {``kanji``, ``search``, ``link``}. ``mined`` is
     forced by the worker (which must NOT touch jamdict via ``is_mined``); ``None`` = compute it here
     (main thread only — the tick recomputes for the freshest ⊕/✓)."""
-    ds = reader.dict_set
-    if ds is None:
+    style = panel_style(reader)
+    ds = style.dict_set
+    if ds is None or style.tokenizer is None:  # the pair travels together — see `_navigated_panel`
         return None
+    cap = reader.tip_scale.cap
+    cached = partial(_cached_rows_panel, reader.tip, style, cap)
     key: tuple  # a ("kanji"/"search", …) tuple or a PanelKey (a NamedTuple) — both are tuples
     if source == "kanji":
-        entry = ds.kanji_for(query, stroke_order=reader.kanji_stroke_order)
+        entry = ds.kanji_for(query, stroke_order=style.kanji_stroke_order)
         if entry is None:
             return None
-        key = ("kanji", query, reader.tip_scale.width)
-        return _cached_rows_panel(reader, key, entry, entry.reading), key, None, query, False
+        key = ("kanji", query, style.width)
+        return cached(key, entry, getattr(entry, "reading", "")), key, None, query, False
     if source == "search":
-        key = ("search", query, reader.tip_scale.width)
-        return _cached_rows_panel(reader, key, ds.search(query), ""), key, None, query, False
+        key = ("search", query, style.width)
+        return cached(key, ds.search(query), ""), key, None, query, False
     # link → the WHOLE query as one exact term (never tokenize a link target); minable inner word
-    tok = reader.tokenizer.query_token(query)
+    tok = style.tokenizer.query_token(query)
     if tok is None:
         return None
     if mined is None:  # main-thread only — jamdict (card_for) is not worker-safe
