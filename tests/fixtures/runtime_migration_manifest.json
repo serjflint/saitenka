@@ -402,14 +402,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_blit_crisp_or_soft"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_blit_native"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_click_nested"
     ],
     [
@@ -478,27 +470,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_pending_crisp"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_pending_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::blit_panel"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::chrome_for"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::copy_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::decorate_and_upload"
     ],
     [
       "reader-parameter",
@@ -518,22 +494,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::panel_for"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::panel_key"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::panel_style"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::render_view"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::resolve_hover"
     ],
     [
@@ -543,10 +503,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::scroll_tip"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::scroll_view"
     ],
     [
       "reader-parameter",
@@ -575,6 +531,50 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::update_hover_instrumented"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::_blit_crisp_or_soft"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::_blit_native"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::apply_pending_crisp"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::apply_pending_scroll"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::blit_panel"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::decorate_and_upload"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::panel_for"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::panel_key"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::panel_style"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::render_view"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::scroll_view"
     ]
   ],
   "startup": [

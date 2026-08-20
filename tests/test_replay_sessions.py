@@ -22,7 +22,7 @@ import util
 # oracle, so it asserts through exactly that check.
 from test_tooltip_statemachine import _NAV_QUERY, _assert_agrees, _fresh_reader
 
-from saitenka.app import tooltip
+from saitenka.app import tooltip, tooltip_panel
 
 Step = tuple[str, object]
 
@@ -72,7 +72,7 @@ def _apply(reader, action: str, arg: object) -> None:
     elif action == "resize":
         scale = float(arg)  # type: ignore[arg-type]
         reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes _raster_scale
-        tooltip.render_view(reader, reader.tip.view)
+        tooltip_panel.render_view(reader, reader.tip.view)
     else:  # pragma: no cover - guards a typo in a scenario table
         raise AssertionError(f"unknown action {action!r}")
 

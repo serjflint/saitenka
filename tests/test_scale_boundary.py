@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from tip_fakes import hidpi_reader
 
-from saitenka.app import tooltip
+from saitenka.app import tooltip, tooltip_panel
 from saitenka.app.subtitle_render import NullRenderer
 
 _SCALES = [1.5, 2.0]
@@ -30,7 +30,7 @@ def _reader(scale: float, monkeypatch):
 @pytest.mark.parametrize("scale", _SCALES)
 def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
-    panel, s, scroll = tooltip.hit_target(
+    panel, s, scroll = tooltip_panel.hit_target(
         r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
     )
     assert panel is r._tip_state  # the ONE reference panel — there is no second native panel
@@ -41,7 +41,7 @@ def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
 @pytest.mark.parametrize("scale", _SCALES)
 def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
-    panel, s, scroll = tooltip.hit_target(
+    panel, s, scroll = tooltip_panel.hit_target(
         r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
     )
     panel.windowed.viewport(0, 1_000_000)  # force every block measured → full geometry
@@ -68,7 +68,7 @@ def test_cold_paint_is_soft_then_upgrades_to_crisp_when_bands_warm(scale, monkey
     vh = min(r._tip_view_h, st.full_height)
     y0 = max(0, min(r._tip_scroll, max(0, st.full_height - vh)))
     st.viewport(y0, vh, scale=r._raster_scale)  # simulate the worker warming the native viewport
-    tooltip.apply_pending_crisp(r, r._tip_view)  # the poll-loop upgrade
+    tooltip_panel.apply_pending_crisp(r, r._tip_view)  # the poll-loop upgrade
 
     assert r._crisp_miss == "" and not r._crisp_pending  # now composited crisp
     assert r._tip_rect is not None
@@ -86,7 +86,7 @@ def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
     vh = min(r._tip_view_h, st.full_height)
     y0 = max(0, min(r._tip_scroll, max(0, st.full_height - vh)))
     st.viewport(y0, vh, scale=r._raster_scale)  # warm the native viewport
-    tooltip.render_view(r, r.tip.view)  # re-blit with warm bands
+    tooltip_panel.render_view(r, r.tip.view)  # re-blit with warm bands
     assert r._crisp_miss == "" and not r._crisp_pending
 
 
@@ -96,7 +96,7 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
     r = _reader(2.0, monkeypatch)
     tooltip.navigate_tip(r, "見る")
     assert r._tip_key is None  # no synthetic nav key needed — one panel
-    panel, s, scroll = tooltip.hit_target(
+    panel, s, scroll = tooltip_panel.hit_target(
         r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
     )
     assert panel is r._tip_state

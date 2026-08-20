@@ -238,12 +238,14 @@ def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch
     viewport warm too. Sweeping only the view the job named would leave that one soft until some
     later scroll happened to ask again — which is exactly what the tick was covering.
     """
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip_panel
 
     r = _reader()
     r._tip_state = _RecordingPanel()  # type: ignore[assignment]
     swept: list = []
-    monkeypatch.setattr(tooltip, "apply_pending_crisp", lambda _r, view: swept.append(id(view)))
+    monkeypatch.setattr(
+        tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
+    )
 
     r._request_render_ahead(r._tip_view, 1)
     r._render_ahead_submit.finish()
@@ -254,12 +256,14 @@ def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch
 def test_a_failed_terminal_sweeps_nothing(monkeypatch):
     """Nothing warmed, so there is nothing to upgrade — and the failed job still has to report its
     own outcome rather than being swallowed by a sweep."""
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip_panel
 
     r = _reader()
     r._tip_state = _RecordingPanel()  # type: ignore[assignment]
     swept: list = []
-    monkeypatch.setattr(tooltip, "apply_pending_crisp", lambda _r, view: swept.append(id(view)))
+    monkeypatch.setattr(
+        tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
+    )
 
     r._request_render_ahead(r._tip_view, 1)
     r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)

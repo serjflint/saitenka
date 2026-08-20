@@ -56,6 +56,7 @@ from saitenka.app import (
     telemetry,
     tooltip,
     tooltip_engaged,
+    tooltip_panel,
     tooltip_raster,
     translation,
 )
@@ -319,7 +320,7 @@ class Reader:
     _tip_view_h = Delegated[int]("tip.view", "view_h")
     _tip_xy = Delegated[tuple[int, int]]("tip.view", "xy")
     _tip_state = Delegated[Panel | None]("tip.view", "state")
-    _tip_key = Delegated[tooltip.PanelKey | None]("tip.view", "key")
+    _tip_key = Delegated[tooltip_panel.PanelKey | None]("tip.view", "key")
     _tip_nav = Delegated[list]("tip", "tip_nav")
     _nest = Delegated[PopupView]("tip", "nest")
     _scan_target = Delegated[str | None]("tip", "scan_target")
@@ -1851,8 +1852,8 @@ class Reader:
         mined: bool = False,
         phrase: tuple[str, ...] = (),
         group_mined: tuple[bool, ...] | None = None,
-    ) -> tooltip.PanelKey:
-        return tooltip.panel_key(
+    ) -> tooltip_panel.PanelKey:
+        return tooltip_panel.panel_key(
             self,
             tok,
             inflected,
@@ -1862,23 +1863,25 @@ class Reader:
         )
 
     def _is_mined(self, tok) -> bool:
-        return tooltip.is_mined(tok, self._mined)
+        return tooltip_panel.is_mined(tok, self._mined)
 
     def _anki_ok(self) -> bool:
-        return tooltip.anki_ok(self.anki, self._anki_capability)
+        return tooltip_panel.anki_ok(self.anki, self._anki_capability)
 
     @staticmethod
-    def _darken(rgba, f: float = tooltip.JLPT_DARKEN):
-        return tooltip._darken(rgba, f)
+    def _darken(rgba, f: float = tooltip_panel.JLPT_DARKEN):
+        return tooltip_panel._darken(rgba, f)
 
     def _jlpt_pill(self, tok) -> Freq | None:
-        return tooltip.jlpt_pill(tok, self.scorer)
+        return tooltip_panel.jlpt_pill(tok, self.scorer)
 
     def _rareness_pill(self, tok) -> Freq | None:
-        return tooltip.rareness_pill(tok, self.dict_set)
+        return tooltip_panel.rareness_pill(tok, self.dict_set)
 
     def _entry_for(self, tok, inflected):
-        return tooltip.entry_for_tok(tok, inflected, dict_set=self.dict_set, scorer=self.scorer)
+        return tooltip_panel.entry_for_tok(
+            tok, inflected, dict_set=self.dict_set, scorer=self.scorer
+        )
 
     def _panel_for(
         self,
@@ -1891,7 +1894,7 @@ class Reader:
         extra_terms: tuple[str, ...] = (),
         group_mined: tuple[bool, ...] | None = None,
     ):
-        return tooltip.panel_for(
+        return tooltip_panel.panel_for(
             self,
             tok,
             inflected,
@@ -2124,12 +2127,12 @@ class Reader:
     def _place_panel(
         self, full_w: int, wx: float, wy: float, wh: float, view_h: int
     ) -> tuple[int, int]:
-        return tooltip.place_panel(
+        return tooltip_panel.place_panel(
             full_w, wx, wy, wh, view_h, scale=self._tip_display_scale, osd=self.osd
         )
 
     def _blit_panel(self, panel, scroll: int, view_h: int, xy, oid: int):
-        return tooltip.blit_panel(self, panel, scroll, view_h, xy, oid)
+        return tooltip_panel.blit_panel(self, panel, scroll, view_h, xy, oid)
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
@@ -2181,10 +2184,10 @@ class Reader:
         return self._mouse.defined
 
     def _render_tip_view(self) -> None:
-        tooltip.render_view(self, self.tip.view)
+        tooltip_panel.render_view(self, self.tip.view)
 
     def _render_nested_view(self) -> None:
-        tooltip.render_view(self, self._nest)
+        tooltip_panel.render_view(self, self._nest)
 
     def _scroll_tip(self, delta: int) -> None:
         # event → redraw-finished latency for one scroll tick: nests the downstream "render"
@@ -2211,11 +2214,11 @@ class Reader:
                 span.set("crisp_miss", self._crisp_miss or "n/a")
 
     def _scroll_nested(self, delta: int) -> None:
-        tooltip.scroll_view(self, self._nest, delta)
+        tooltip_panel.scroll_view(self, self._nest, delta)
 
     # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
     def _scan_hit(self, mx: float, my: float):
-        return tooltip.scan_hit(self.tip, self._raster_scale, mx, my)
+        return tooltip_panel.scan_hit(self.tip, self._raster_scale, mx, my)
 
     def _show_nested(self, sb) -> None:
         nested_popup.show_nested(self, sb)
@@ -2232,13 +2235,13 @@ class Reader:
     def _tip_link_hit(self, mx: float, my: float):
         # Hit-test the panel actually DRAWN for the base tooltip (crisp native when shown, else reference)
         # so a clicked/hovered cross-reference link lands right despite native-vs-reference wrap drift.
-        panel, scale, scroll = tooltip.hit_target(
+        panel, scale, scroll = tooltip_panel.hit_target(
             self._nest, self._tip_state, self._tip_scroll, self._raster_scale, nested=False
         )
         return nested_popup.link_hit(mx, my, panel, self._tip_xy, scroll, scale=scale)
 
     def _nest_link_hit(self, mx: float, my: float):
-        panel, scale, scroll = tooltip.hit_target(
+        panel, scale, scroll = tooltip_panel.hit_target(
             self._nest, self._tip_state, self._tip_scroll, self._raster_scale, nested=True
         )
         return nested_popup.link_hit(mx, my, panel, self._nest.xy, scroll, scale=scale)
@@ -3295,7 +3298,7 @@ class Reader:
                 and view.job_id == identity.job_id
             ):
                 if succeeded:
-                    tooltip.apply_pending_scroll(self, view)
+                    tooltip_panel.apply_pending_scroll(self, view)
                 else:
                     view.desired_scroll = view.scroll
                     self._interaction_jobs.finish("scroll", "failed", job_id=identity.job_id)
@@ -3307,7 +3310,7 @@ class Reader:
         # is exactly what the tick used to notice. `apply_pending_crisp` is a no-op unless a view
         # is both pending and warm, so asking twice costs a flag check.
         for view in (self._tip_view, self._nest):
-            tooltip.apply_pending_crisp(self, view)
+            tooltip_panel.apply_pending_crisp(self, view)
 
     def _cancel_render_ahead(self) -> None:
         tooltip_raster.cancel(self._render_ahead)

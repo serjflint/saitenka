@@ -11,7 +11,8 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC
 
-from saitenka.app.tooltip import _freeze_frame, _place_tip
+from saitenka.app.tooltip import _freeze_frame
+from saitenka.app.tooltip_panel import place_tip
 
 
 def _paused(ipc: FakeIPC) -> list[tuple]:
@@ -59,28 +60,28 @@ def test_pause_on_tooltip_off_means_no_pause_at_all() -> None:
 def test_placing_a_panel_resets_the_scroll_of_the_previous_word() -> None:
     """A new word starts at the top: carrying the last word's scroll shows its middle."""
     view = _View()
-    _place_tip(view, 300, 900, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
+    place_tip(view, 300, 900, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
     assert (view.scroll, view.desired_scroll) == (0, 0)
 
 
 def test_a_tall_entry_is_capped_rather_than_fitted() -> None:
     """It scrolls, so the cap wins — fitting a 900px entry would spill under the window chrome."""
     view = _View()
-    _place_tip(view, 300, 900, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
+    place_tip(view, 300, 900, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
     assert view.view_h == 400
 
 
 def test_a_short_entry_uses_its_own_height() -> None:
     """The negative control for the cap: it must not pad a short panel out to the ceiling."""
     view = _View()
-    _place_tip(view, 300, 120, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
+    place_tip(view, 300, 120, 400, (10, 20, 30), scale=1.0, osd=(1920, 1080))
     assert view.view_h == 120
 
 
 def test_placement_lands_inside_the_screen() -> None:
     """Anchored at the far corner — the safe area is the whole reason placement is not just (wx, wy)."""
     view = _View()
-    _place_tip(view, 300, 200, 400, (1900, 1060, 30), scale=1.0, osd=(1920, 1080))
+    place_tip(view, 300, 200, 400, (1900, 1060, 30), scale=1.0, osd=(1920, 1080))
     assert view.xy is not None
     x, y = view.xy
     assert 0 <= x <= 1920 - 300
@@ -95,7 +96,7 @@ def test_a_panel_build_needs_no_host() -> None:
     no Reader in scope is the assertion.
     """
     from saitenka.app.tokenize import Token
-    from saitenka.app.tooltip import PanelKey, PanelStyle, _build_panel
+    from saitenka.app.tooltip_panel import PanelKey, PanelStyle, _build_panel
     from saitenka.panel import Definition, Entry
 
     class _DictSet:
@@ -134,7 +135,7 @@ def test_a_panel_build_needs_no_host() -> None:
 def test_the_style_is_frozen_so_a_build_cannot_see_it_change() -> None:
     from dataclasses import FrozenInstanceError
 
-    from saitenka.app.tooltip import PanelStyle
+    from saitenka.app.tooltip_panel import PanelStyle
 
     style = PanelStyle(
         width=420,

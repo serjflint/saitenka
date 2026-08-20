@@ -13,11 +13,11 @@ from util import FakeIPC as RuntimeFakeIPC
 from util import keybind_registry, runtime_gateway
 
 import saitenka.app.controller as C
-from saitenka.app import bindings, miner_ui, nested_popup, tooltip
+from saitenka.app import bindings, miner_ui, nested_popup, tooltip, tooltip_panel
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.tooltip import PanelKey
+from saitenka.app.tooltip_panel import PanelKey
 
 
 class FakeIPC(RuntimeFakeIPC):
@@ -2147,7 +2147,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
     oid, view = shots[-1]
-    hl = np.array(tooltip.FLASH_BGRA, np.uint8)
+    hl = np.array(tooltip_panel.FLASH_BGRA, np.uint8)
     assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
 
     assert ipc.fire_runtime_timer("lifecycle:flash-expiry")  # redraw without the border

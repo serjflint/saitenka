@@ -29,7 +29,7 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from tip_fakes import hidpi_reader
 
-from saitenka.app import tooltip
+from saitenka.app import tooltip, tooltip_panel
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -58,7 +58,7 @@ def _assert_agrees(reader, *, nested: bool) -> None:
     Only the on-screen window is measured + tested — you can only click what's drawn, and a full-panel
     measure per step is too slow across a stateful run (the corners get covered as scroll moves the
     window)."""
-    panel, s, scroll = tooltip.hit_target(
+    panel, s, scroll = tooltip_panel.hit_target(
         reader._nest, reader._tip_state, reader._tip_scroll, reader._raster_scale, nested=nested
     )
     if panel is None:
@@ -150,7 +150,7 @@ class TooltipSession(RuleBasedStateMachine):
     @rule(scale=st.sampled_from(_SCALES))
     def resize(self, scale: int) -> None:
         self.r.osd = (round(1920 * scale), round(1080 * scale))  # live → changes _raster_scale
-        tooltip.render_view(self.r, self.r.tip.view)  # re-blit at the new scale
+        tooltip_panel.render_view(self.r, self.r.tip.view)  # re-blit at the new scale
         self._check("resize")
 
     @invariant()
@@ -177,7 +177,7 @@ def test_the_agreement_oracle_has_teeth() -> None:
     # regression (a stale scroll / scale / panel after some transition) would turn the state machine red.
     r = _fresh_reader()
     r._show_tooltip(0)
-    panel, s, scroll = tooltip.hit_target(
+    panel, s, scroll = tooltip_panel.hit_target(
         r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
     )
     panel.windowed.viewport(scroll, r._tip_view_h)

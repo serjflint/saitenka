@@ -15,7 +15,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from saitenka.app import tooltip, tooltip_engaged, tooltip_raster
+from saitenka.app import tooltip, tooltip_engaged, tooltip_panel, tooltip_raster
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.popups import NO_HOVER_METADATA, Panel
 from saitenka.app.render_cache import (
@@ -423,7 +423,7 @@ def test_cold_nested_scroll_rasters_on_the_interactive_thread():
         for _ in range(
             6
         ):  # each notch grows the height estimate and moves past the warmed overscan
-            tooltip.scroll_view(r, r._nest, r._nest.view_h)
+            tooltip_panel.scroll_view(r, r._nest, r._nest.view_h)
 
     assert assert_no_interactive_raster(r._nest, scroll_to_the_cold_tail) > 0
 
@@ -435,11 +435,15 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
     r = _nested_reader()
     tok = r.tokens[0]
     r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)  # soft first paint
-    tooltip.scroll_view(r, r._nest, r._nest.view_h // 2)  # soft-first + records a render-ahead
+    tooltip_panel.scroll_view(
+        r, r._nest, r._nest.view_h // 2
+    )  # soft-first + records a render-ahead
     assert r._nest.crisp_pending
     r._render_ahead_submit.finish_all()
 
-    rasters = assert_no_interactive_raster(r._nest, lambda: tooltip.apply_pending_crisp(r, r._nest))
+    rasters = assert_no_interactive_raster(
+        r._nest, lambda: tooltip_panel.apply_pending_crisp(r, r._nest)
+    )
     assert rasters == 0
     assert r._nest.crisp_miss == "" and not r._nest.crisp_pending  # upgraded soft → crisp
 
@@ -451,7 +455,7 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     tok = r.tokens[0]
     r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)
     nest = r._nest.state
-    tooltip.scroll_view(r, r._nest, max(1, r._nest.view_h // 3))
+    tooltip_panel.scroll_view(r, r._nest, max(1, r._nest.view_h // 3))
     pending = r._render_ahead.pending
     assert pending is not None
     req = pending[1]
@@ -472,7 +476,7 @@ def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
         return real(*a, **k)
 
     monkeypatch.setattr(st, "render_ahead", spy)
-    tooltip.scroll_view(r, view, view.view_h)  # flick → records a render-ahead
+    tooltip_panel.scroll_view(r, view, view.view_h)  # flick → records a render-ahead
     r._render_ahead_submit.finish_all()
     return seen
 
@@ -525,8 +529,12 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
 
     uploads: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda _v, *_a, oid=None, **_k: uploads.append(oid))
-    tooltip.apply_pending_crisp(r, r._tip_view)  # base native still cold → no-op, base not re-blit
-    tooltip.apply_pending_crisp(r, r._nest)  # nested native warm → upgrades the NESTED to crisp
+    tooltip_panel.apply_pending_crisp(
+        r, r._tip_view
+    )  # base native still cold → no-op, base not re-blit
+    tooltip_panel.apply_pending_crisp(
+        r, r._nest
+    )  # nested native warm → upgrades the NESTED to crisp
 
     assert not r._nest.crisp_pending and r._nest.crisp_miss == ""  # nested is crisp now
     assert r._tip_view.crisp_pending  # base still pending (untouched by the nested upgrade)
@@ -730,12 +738,12 @@ def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
 
 
 def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatch):
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip, tooltip_panel
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
-    key = tooltip.panel_key(r, tok, inflected, mined=mined, phrase=r._hover_meta.terms)
+    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined, phrase=r._hover_meta.terms)
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
     r._panel_cache.clear()
@@ -754,11 +762,11 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
     import contextlib
 
     from saitenka import otel_metrics
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip_panel
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     _i, tok, inflected, mined = _first_content(r)
-    key = tooltip.panel_key(r, tok, inflected, mined=mined)
+    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
     spans = []
 
     @contextlib.contextmanager
@@ -781,12 +789,12 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
 
 
 def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkeypatch):
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip, tooltip_panel
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
-    old_key = tooltip.panel_key(r, tok, inflected, mined=mined)
+    old_key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
     r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
@@ -874,12 +882,12 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     # The nested worker compose WARMS the nested-cap viewport bands (so the re-show has no synchronous
     # raster) but does NOT persist to disk — the nested viewport is nested-cap-shaped, not the base head
     # the render-cache keys share, so a write would collide.
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip_panel
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     _i, tok, inflected, mined = _first_content(r)
-    key = tooltip.panel_key(r, tok, inflected, mined=mined)
+    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
 
     r._panel_cache.clear()
     assert r._request_engaged_tooltip(
@@ -928,9 +936,10 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     _i, tok, _inflected, _mined = _first_content(r)
     r._tip_xy, r._tip_scroll = (0, 0), 0
     sb = SimpleNamespace(text=tok.surface, x=10, y=10, h=20)
-    monkeypatch.setattr(
-        tooltip, "scan_hit", lambda _tip, _scale, _mx, _my: sb
-    )  # re-derive lands on the cell
+    # Both lookup sites: the metadata completion re-derives through `nested_popup`, the composed
+    # head through `tooltip`.
+    for module in (tooltip, nested_popup):
+        monkeypatch.setattr(module, "scan_hit", lambda _tip, _scale, _mx, _my: sb)
 
     r._panel_cache.clear()
     nested_popup.show_nested(r, sb)  # cold → defer (same phrase the worker will build under)

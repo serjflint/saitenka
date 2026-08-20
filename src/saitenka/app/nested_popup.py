@@ -5,6 +5,10 @@ results, both of which reuse the same nested-popup anchoring.
 
 Takes ``reader: Reader`` (the AGENTS.md seam pattern); the nested popup's own state
 (``reader._nest``, a :class:`~saitenka.app.popups.PopupView`) stays on the Reader.
+
+Builds and blits through :mod:`saitenka.app.tooltip_panel` — the leaf importing the panel
+machinery, which is the direction that does not cycle. Every one of those calls used to go back
+out through a one-line ``Reader`` delegation.
 """
 
 from __future__ import annotations
@@ -17,13 +21,21 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.popups import Panel, PopupView
 from saitenka.app.prefetch import cap_for
 from saitenka.app.subtitles import box_for_token
+from saitenka.app.tooltip_panel import (
+    TIP_GAP,
+    is_mined,
+    panel_for,
+    panel_key,
+    place_panel,
+    render_view,
+    scan_hit,
+)
 from saitenka.model import is_ideograph
 from saitenka.panel import panel_rows
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
 
-TIP_GAP = 12
 NEST_MIN_ABOVE = 140  # min room above an inner word to keep its nested popup above it (else below)
 
 
@@ -100,7 +112,7 @@ def apply_nested_metadata(reader: Reader, result) -> None:
         or key.tooltip_origin != id(reader._tip_state)
     ):
         return
-    sb = reader._scan_hit(*reader._last_mouse)
+    sb = scan_hit(reader.tip, reader._raster_scale, *reader._last_mouse)
     if sb is None or sb.text != key.tail:
         return
     sx, sy = reader._tip_xy
@@ -149,8 +161,9 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
     clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
     if mined is None:
-        mined = reader._is_mined(tok)
-    key = reader._panel_key(
+        mined = is_mined(tok, reader._mined)
+    key = panel_key(
+        reader,
         tok,
         inflected,
         mined=mined,
@@ -176,7 +189,8 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         )
         if reader._request_engaged_tooltip(request):
             return
-    st = reader._panel_for(
+    st = panel_for(
+        reader,
         tok,
         inflected,
         min_h=reader._tip_cap(),
@@ -199,13 +213,18 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
     reader._nest.view_h = nested_view_h(
         st.full_height, anchor.wy, osd_h=reader.osd[1], max_frac=reader.nested_max_frac
     )
-    reader._nest.xy = reader._place_panel(
-        st.width, anchor.wx, anchor.wy, anchor.wh, reader._nest.view_h
+    reader._nest.xy = place_panel(
+        st.width,
+        anchor.wx,
+        anchor.wy,
+        anchor.wh,
+        reader._nest.view_h,
+        scale=reader._tip_display_scale,
+        osd=reader.osd,
     )
-    # Blit through the shared SSOT path via the Reader seam (a direct tooltip import would cycle —
-    # tooltip already imports this module for TIP_GAP); also kick a render-ahead so a first wheel notch
-    # on the nested popup composites crisp off warm bands, like the base tooltip.
-    reader._render_nested_view()
+    # Kick a render-ahead so a first wheel notch on the nested popup composites crisp off warm
+    # bands, like the base tooltip.
+    render_view(reader, reader._nest)
     reader._request_render_ahead(reader._nest, 1)
 
 
@@ -214,11 +233,11 @@ def rerender_with_mined_state(reader: Reader) -> None:
     tok = reader._nest.token
     if tok is None:
         return
-    mined = reader._is_mined(tok)
-    st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
+    mined = is_mined(tok, reader._mined)
+    st = panel_for(reader, tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
     reader._nest.state = st
-    reader._nest.key = reader._panel_key(tok, tok.surface, mined=mined)
-    reader._render_nested_view()
+    reader._nest.key = panel_key(reader, tok, tok.surface, mined=mined)
+    render_view(reader, reader._nest)
 
 
 def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
@@ -255,7 +274,7 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
     Shared by the main-thread open (existence check + defer decision), the worker (warm the bands
     off-thread), and the tick (warm cache-hit re-show). Returns ``(panel, key, token, word, mined)`` or
     ``None`` (no entry — the caller toasts). ``source`` ∈ {``kanji``, ``search``, ``link``}. ``mined`` is
-    forced by the worker (which must NOT touch jamdict via ``_is_mined``); ``None`` = compute it here
+    forced by the worker (which must NOT touch jamdict via ``is_mined``); ``None`` = compute it here
     (main thread only — the tick recomputes for the freshest ⊕/✓)."""
     ds = reader.dict_set
     if ds is None:
@@ -275,9 +294,9 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
     if tok is None:
         return None
     if mined is None:  # main-thread only — jamdict (card_for) is not worker-safe
-        mined = reader._is_mined(tok)
-    key = reader._panel_key(tok, tok.surface, mined=mined)
-    st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), mined=mined, nested=True)
+        mined = is_mined(tok, reader._mined)
+    key = panel_key(reader, tok, tok.surface, mined=mined)
+    st = panel_for(reader, tok, tok.surface, min_h=reader._tip_cap(), mined=mined, nested=True)
     return st, key, tok, tok.surface, mined
 
 
@@ -347,7 +366,7 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
     entry instead — reuses the nested-popup route."""
     if reader.dict_set is None:
         return
-    sb = reader._scan_hit(x, y)
+    sb = scan_hit(reader.tip, reader._raster_scale, x, y)
     if sb is None or not sb.text:
         return
     ch = sb.text[0]

@@ -845,7 +845,7 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip_panel
     from saitenka.app.controller import Reader
     from saitenka.app.tokenize import Token
 
@@ -858,10 +858,10 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     r = Reader(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
-        tooltip.group_mined_of(tok, r._mined, r.dict_set) == ()
+        tooltip_panel.group_mined_of(tok, r._mined, r.dict_set) == ()
     )  # nothing mined yet → no per-group flags
     r._mined.add("退く")
-    assert tooltip.group_mined_of(tok, r._mined, r.dict_set) == (
+    assert tooltip_panel.group_mined_of(tok, r._mined, r.dict_set) == (
         True,
         True,
     )  # both entries share expression 退く
