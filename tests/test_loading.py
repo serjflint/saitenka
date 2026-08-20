@@ -355,3 +355,38 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
         built["n"] == 1
     )  # built exactly once — by begin_deps_build, not re-run by load_deps_async
     assert r._pending_deps == {"scorer": "SCORER", "anki": None, "mine_cfg": None, "dict_set": None}
+
+
+def test_each_entrypoint_declares_its_own_startup_hint() -> None:
+    """`attach` and `run` differ here on purpose, and nothing pinned the difference.
+
+    The breadcrumb covers the file-load wait. `run` owns the player, so it shows one unless the
+    session is a screenshot capture; `attach` joins an mpv that is already playing, so the wait it
+    would cover has already happened. Unifying them looks like a tidy-up and is a behaviour change
+    in both directions — a breadcrumb for a wait that never happens, or a screenshot carrying one.
+
+    Asserted against the call site because that IS the fact: which argument each entrypoint passes
+    is composition, and composition is what the duty census tracks.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+
+    def hint_argument(relative: str) -> str:
+        tree = ast.parse((root / relative).read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "install_session_runtime"
+            ):
+                for keyword in node.keywords:
+                    if keyword.arg == "startup_hint":
+                        return ast.unparse(keyword.value)
+        raise AssertionError(
+            f"{relative} no longer installs a session runtime with a hint decision"
+        )
+
+    assert hint_argument("src/saitenka/app/commands/attach.py") == "False"
+    assert hint_argument("src/saitenka/app/launch/run.py") == "not opts.screenshot"
