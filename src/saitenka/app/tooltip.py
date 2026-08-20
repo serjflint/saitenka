@@ -505,33 +505,59 @@ def hit_header_region(
     return in_rect((sx + px * s, sy + top * s, pw * s, ph * s), x, y)
 
 
-def hit_header_add(reader: Reader, x: float, y: float) -> bool:
-    if reader._tip_state is None or not anki_ok(
-        reader.anki, reader._anki_capability
-    ):  # ⊕ only when Anki is reachable now
+def hit_header_add(chrome: HeaderChrome, x: float, y: float) -> bool:
+    if chrome.tip.view.state is None or not chrome.anki:  # ⊕ only when Anki is reachable now
         return False
     return hit_header_region(
         x,
         y,
-        header_add_rect(reader.tip_width, speak_button=reader._tts_ok),
-        reader._tip_xy,
-        reader._tip_scroll,
-        reader._tip_view_h,
-        scale=reader._tip_display_scale,
+        header_add_rect(chrome.width, speak_button=chrome.tts),
+        chrome.tip.view.xy,
+        chrome.tip.view.scroll,
+        chrome.tip.view.view_h,
+        scale=chrome.scale,
     )
 
 
-def hit_header_speaker(reader: Reader, x: float, y: float) -> bool:
-    if reader._tip_state is None or not reader._tts_ok:  # 🔊 hidden when no JA TTS voice
+@dataclass(frozen=True, slots=True)
+class HeaderChrome:
+    """What the tooltip header's buttons need to hit-test: the panel and its on-screen geometry,
+    plus whether each button is shown at all.
+
+    One value because the two hit-tests need the same five things and a mismatched set puts a button
+    where it is not drawn — `add_rect` shifts depending on whether 🔊 is present, so `tts` is
+    geometry here, not only a capability.
+    """
+
+    tip: TooltipState
+    width: int
+    scale: float
+    tts: bool
+    anki: bool
+
+
+def header_chrome(reader: Reader) -> HeaderChrome:
+    """Snapshot the host into the header's port — the seam, as `build_draw_request` is for the draw."""
+    return HeaderChrome(
+        reader.tip,
+        reader.tip_width,
+        reader._tip_display_scale,
+        reader._tts_ok,
+        anki_ok(reader.anki, reader._anki_capability),
+    )
+
+
+def hit_header_speaker(chrome: HeaderChrome, x: float, y: float) -> bool:
+    if chrome.tip.view.state is None or not chrome.tts:  # 🔊 hidden when no JA TTS voice
         return False
     return hit_header_region(
         x,
         y,
-        header_speaker_rect(reader.tip_width),
-        reader._tip_xy,
-        reader._tip_scroll,
-        reader._tip_view_h,
-        scale=reader._tip_display_scale,
+        header_speaker_rect(chrome.width),
+        chrome.tip.view.xy,
+        chrome.tip.view.scroll,
+        chrome.tip.view.view_h,
+        scale=chrome.scale,
     )
 
 
@@ -621,10 +647,11 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the base tooltip. Returns True if it did."""
     if reader._tip_rect is None or not in_rect(reader._tip_rect, x, y):
         return False
-    if hit_header_add(reader, x, y):
+    chrome = header_chrome(reader)  # one snapshot: both buttons hit-test against the same geometry
+    if hit_header_add(chrome, x, y):
         reader.mine_current()  # ⊕ → mine the hovered word into Anki
         return True
-    if hit_header_speaker(reader, x, y):
+    if hit_header_speaker(chrome, x, y):
         reader.speak_hovered()  # 🔊 → hear the word (TTS)
         return True
     lb = reader._tip_link_hit(x, y)

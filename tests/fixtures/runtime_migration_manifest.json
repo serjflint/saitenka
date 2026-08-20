@@ -766,11 +766,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_header_add"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_header_speaker"
+      "src/saitenka/app/tooltip.py::header_chrome"
     ],
     [
       "reader-parameter",
