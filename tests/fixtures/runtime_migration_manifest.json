@@ -382,10 +382,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_restore_tip_view"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::apply_engaged_hover"
     ],
     [

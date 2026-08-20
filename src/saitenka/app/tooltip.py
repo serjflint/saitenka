@@ -927,18 +927,20 @@ def _capture_tip_view(tip: TooltipState) -> tuple:
     )
 
 
-def _restore_tip_view(reader: Reader, view: tuple) -> None:
+def _restore_tip_view(tip: TooltipState, view: tuple) -> None:
+    """Put back what `_capture_tip_view` took. Same object, same order, so the pair reads as one
+    round trip rather than two lists of names that have to be diffed to be trusted."""
     (
-        reader._tip_state,
-        reader._tip_key,
-        reader._hover_reading,
-        reader._tip_view_h,
-        reader._tip_xy,
-        reader._tip_scroll,
-        reader._tip_tok,
-        reader._tip_inflected,
+        tip.view.state,
+        tip.view.key,
+        tip.hover_reading,
+        tip.view.view_h,
+        tip.view.xy,
+        tip.view.scroll,
+        tip.tip_tok,
+        tip.tip_inflected,
     ) = view
-    reader._tip_view.desired_scroll = reader._tip_scroll
+    tip.view.desired_scroll = tip.view.scroll
 
 
 def _navigated_panel(reader: Reader, query: str) -> Panel | None:
@@ -1024,7 +1026,7 @@ def tip_back(reader: Reader) -> bool:
     """
     if not reader._tip_nav:
         return False
-    _restore_tip_view(reader, reader._tip_nav.pop())
+    _restore_tip_view(reader.tip, reader._tip_nav.pop())
     render_view(reader, reader.tip.view)
     return True
 
