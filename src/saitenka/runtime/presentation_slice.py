@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime.events import (
     PRESENTATION_EVENTS,
+    EpisodeRetired,
     EventEnvelope,
     EventOrigin,
     TranslationDrawn,
@@ -23,20 +24,27 @@ from saitenka.runtime.state import OwnerSlice, ReduceResult, SliceReducer
 if TYPE_CHECKING:
     from saitenka.runtime.events import PresentationEvent, RuntimeEvent
 
+#: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
+type PresentationSliceEvent = PresentationEvent | EpisodeRetired
+
 
 class TranslationReducer:
     """Reduce one presentation declaration. Pure: no overlay, no mpv, no clock."""
 
-    def reduce(self, state: TranslationState, event: PresentationEvent) -> TranslationState:
+    def reduce(self, state: TranslationState, event: PresentationSliceEvent) -> TranslationState:
         match event:
             case TranslationHeld(held=held):
                 return replace(state, held=held)
             case TranslationDrawn(text=text):
                 return replace(state, drawn=text)
+            # The drawn line belonged to the old episode's cue; the manual hold did not — it is the
+            # user's standing preference and survives the file change, as it does today.
+            case EpisodeRetired():
+                return replace(state, drawn=None)
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, TranslationState)
-        assert isinstance(event, PRESENTATION_EVENTS)
+        assert isinstance(event, (*PRESENTATION_EVENTS, EpisodeRetired))
         return ReduceResult(self.reduce(state, event))
 
 
@@ -79,6 +87,12 @@ class TranslationStore:
         )
 
     @property
+    def routed(self) -> bool:
+        """Whether the reactor owns this slice. Asked once, when an episode retires: a routed
+        session fans one event out to every slice, an unrouted one has to reduce each store."""
+        return self._port is not None
+
+    @property
     def current(self) -> TranslationState:
         if self._port is None:
             return self._state
@@ -90,7 +104,7 @@ class TranslationStore:
             raise RuntimeError("the reactor owns this slice; send it an event")
         self._state = value
 
-    def dispatch(self, event: PresentationEvent) -> TranslationState:
+    def dispatch(self, event: PresentationSliceEvent) -> TranslationState:
         """Reduce one declaration and return the state to read from afterwards."""
         if self._port is None:
             self._state = self._reducer.reduce(self._state, event)
@@ -98,7 +112,7 @@ class TranslationStore:
         return slice_of(self._port.route_session_presentation(_envelope(event)))
 
 
-def _envelope(event: PresentationEvent) -> EventEnvelope:
+def _envelope(event: PresentationSliceEvent) -> EventEnvelope:
     # These never enter the mailbox, so `sequence` is unread; the epoch is None because a reveal is
     # re-decided on reconnect rather than replayed.
     return EventEnvelope(0, time.monotonic(), EventOrigin.PRESENTATION, None, event)

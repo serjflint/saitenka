@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime.events import (
     SUBTITLE_EVENTS,
+    EpisodeRetired,
     EventEnvelope,
     EventOrigin,
     SubtitleLanguageChanged,
@@ -28,11 +29,14 @@ from saitenka.runtime.subtitle import SubtitleTrackState, adopt
 if TYPE_CHECKING:
     from saitenka.runtime.events import RuntimeEvent, SubtitleEvent
 
+#: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
+type SubtitleSliceEvent = SubtitleEvent | EpisodeRetired
+
 
 class SubtitleReducer:
     """Reduce one subtitle declaration. Pure: no mpv, no I/O, no clock."""
 
-    def reduce(self, state: SubtitleTrackState, event: SubtitleEvent) -> SubtitleTrackState:
+    def reduce(self, state: SubtitleTrackState, event: SubtitleSliceEvent) -> SubtitleTrackState:
         match event:
             case SubtitleStartupConfigured(jp_sid=jp, en_sid=en, language=language, slang=slang):
                 # A whole-state reset, and that is what keeps this session-lived slot episode-safe:
@@ -51,10 +55,15 @@ class SubtitleReducer:
                 return replace(state, secondary_sid=sid)
             case SubtitleTrackAnnounced(sid=sid):
                 return replace(state, announced_sid=sid)
+            # The named reset the slot's episode-safety used to rest on `configure` always running.
+            # A structural guarantee traded for a procedural one is only as good as the rule; this
+            # is the rule, said out loud and asserted.
+            case EpisodeRetired():
+                return SubtitleTrackState()
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, SubtitleTrackState)
-        assert isinstance(event, SUBTITLE_EVENTS)
+        assert isinstance(event, (*SUBTITLE_EVENTS, EpisodeRetired))
         return ReduceResult(self.reduce(state, event))
 
 
@@ -96,6 +105,12 @@ class SubtitleTrackStore:
         )
 
     @property
+    def routed(self) -> bool:
+        """Whether the reactor owns this slice. Asked once, when an episode retires: a routed
+        session fans one event out to every slice, an unrouted one has to reduce each store."""
+        return self._port is not None
+
+    @property
     def current(self) -> SubtitleTrackState:
         if self._port is None:
             return self._state
@@ -107,7 +122,7 @@ class SubtitleTrackStore:
             raise RuntimeError("the reactor owns this slice; send it an event")
         self._state = value
 
-    def dispatch(self, event: SubtitleEvent) -> SubtitleTrackState:
+    def dispatch(self, event: SubtitleSliceEvent) -> SubtitleTrackState:
         """Reduce one declaration and return the state to read from afterwards."""
         if self._port is None:
             self._state = self._reducer.reduce(self._state, event)
@@ -115,7 +130,7 @@ class SubtitleTrackStore:
         return slice_of(self._port.route_session_subtitle(_envelope(event)))
 
 
-def _envelope(event: SubtitleEvent) -> EventEnvelope:
+def _envelope(event: SubtitleSliceEvent) -> EventEnvelope:
     # These never enter the mailbox, so `sequence` is unread; the epoch is None because a track
     # selection is not epoch-fenced — a reconnect re-selects rather than replaying.
     return EventEnvelope(0, time.monotonic(), EventOrigin.MPV, None, event)

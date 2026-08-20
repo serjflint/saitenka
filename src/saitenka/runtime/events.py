@@ -287,6 +287,20 @@ PLAYBACK_EVENTS = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class EpisodeRetired:
+    """The episode ended: every owner retires its per-episode facts.
+
+    The one event that is not any single owner's. It is routed to every slice that registers it,
+    and the atomicity comes from the turn boundary — which is the whole reason a lifetime is an
+    event here rather than a container somebody rebinds. An owner with no per-episode facts simply
+    has no route for it; that is an answer, not a gap.
+
+    No payload: "the episode ended" is the entire fact. A reason would be the *producer's* story
+    about why, and no reducer here has a branch for one.
+    """
+
+
 #: `Owner.SUBTITLE`'s vocabulary. Every one is a *declaration*: the sender has already told mpv
 #: which track to select, and this is what it selected. Nothing here is an mpv observation —
 #: `on_primary_changed` arrives as an mpv event and is turned into `SubtitlePrimaryAdopted` by the
@@ -460,7 +474,8 @@ class EffectFinished:
 
 
 type RuntimeEvent = (
-    ConnectionLost
+    EpisodeRetired
+    | ConnectionLost
     | ConnectionReady
     | ConnectionReplaced
     | CloseRequested

@@ -17,18 +17,22 @@ from saitenka.runtime.events import (
     CueIdentityInstalled,
     CueIdentityRetireRequested,
     CueTextReplaced,
+    EpisodeRetired,
     EventEnvelope,
     EventOrigin,
     PropertyObserved,
     PropertySeeded,
     SourceReplaced,
 )
-from saitenka.runtime.playback import PlaybackProjection, PlaybackState
+from saitenka.runtime.playback import PlaybackProjection, PlaybackState, RetireReason
 from saitenka.runtime.state import OwnerSlice, ReduceResult, SliceReducer
 
 if TYPE_CHECKING:
     from saitenka.runtime.events import PlaybackEvent, RuntimeEvent
     from saitenka.runtime.playback import PlaybackDelta
+
+#: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
+type PlaybackSliceEvent = PlaybackEvent | EpisodeRetired
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +60,7 @@ class PlaybackReducer:
     def projection(self) -> PlaybackProjection:
         return self._projection
 
-    def reduce(self, slice_: PlaybackSlice, event: PlaybackEvent) -> PlaybackSlice:
+    def reduce(self, slice_: PlaybackSlice, event: PlaybackSliceEvent) -> PlaybackSlice:
         projection = self._projection
         state = slice_.state
         match event:
@@ -77,10 +81,14 @@ class PlaybackReducer:
                 return PlaybackSlice(projection.cue_replaced(state, text))
             case SourceReplaced(path=path):
                 return PlaybackSlice(projection.source_replaced(state, path).state)
+            # The episode ended. Its deltas are dropped for the declarations' reason: the sender is
+            # tearing the episode down and has nothing left to apply them to.
+            case EpisodeRetired():
+                return PlaybackSlice(projection.retire(state, RetireReason.SOURCE)[0])
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, PlaybackSlice)
-        assert isinstance(event, PLAYBACK_EVENTS)
+        assert isinstance(event, (*PLAYBACK_EVENTS, EpisodeRetired))
         return ReduceResult(self.reduce(state, event))
 
 
@@ -132,6 +140,12 @@ class PlaybackStore:
         )
 
     @property
+    def routed(self) -> bool:
+        """Whether the reactor owns this slice. Asked once, when an episode retires: a routed
+        session fans one event out to every slice, an unrouted one has to reduce each store."""
+        return self._port is not None
+
+    @property
     def current(self) -> PlaybackSlice:
         if self._port is None:
             return self._slice
@@ -143,7 +157,7 @@ class PlaybackStore:
             raise RuntimeError("the reactor owns this slice; send it an event")
         self._slice = value
 
-    def dispatch(self, event: PlaybackEvent) -> tuple[PlaybackDelta, ...]:
+    def dispatch(self, event: PlaybackSliceEvent) -> tuple[PlaybackDelta, ...]:
         """Reduce one event and return the deltas to act on, empty when the turn did not run.
 
         Identity, not `published`: a reactor that is closing drops the event and leaves the
@@ -158,7 +172,7 @@ class PlaybackStore:
         return () if after is before else after.published
 
 
-def _envelope(event: PlaybackEvent) -> EventEnvelope:
+def _envelope(event: PlaybackSliceEvent) -> EventEnvelope:
     # `sequence` is the mailbox's ordering device and the reactor reads none of it; these events
     # never enter the mailbox. The epoch is None because the projection applies its own.
     return EventEnvelope(0, time.monotonic(), EventOrigin.MPV, None, event)

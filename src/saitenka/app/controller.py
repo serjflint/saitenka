@@ -3398,7 +3398,28 @@ class Reader:
     def rebind_episode(self) -> None:
         sub_picker.close_picker(self.sub_picker, self.lifecycle_surfaces)
         self._subtitle_force_select_revision += 1
+        self._retire_episode()
         self.episode = EpisodeContext()
+
+    def _retire_episode(self) -> None:
+        """Retire every owner's per-episode facts in one turn.
+
+        The container rebind below is leak-free by construction; the slots are session-lived and
+        are not, so their reset has to be *named*. A routed session hands the reactor one event and
+        it reaches every slice at once — the atomicity `EpisodeContext` gets from being one object.
+        Without a reactor there is no turn to be atomic in, so each store reduces it in turn.
+        """
+        retired = events.EpisodeRetired()
+        if self._playback_store.routed:
+            self._playback_store.dispatch(retired)
+            return
+        for store in (
+            self._playback_store,
+            self._subtitle_tracks,
+            self._hover_store,
+            self._translation,
+        ):
+            store.dispatch(retired)
 
     # --- run loop -----------------------------------------------------------------------------
     def current_media_path(self) -> Path | None:

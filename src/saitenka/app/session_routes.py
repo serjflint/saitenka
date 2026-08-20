@@ -50,6 +50,7 @@ from saitenka.runtime.events import (
     SUBTITLE_EVENTS,
     ConnectionReplaced,
     EffectFinished,
+    EpisodeRetired,
     EventEnvelope,
     EventOrigin,
     SessionClosing,
@@ -163,6 +164,10 @@ INPUT_PARTICIPANT = "start:input"
 COLLABORATORS_PARTICIPANT = "start:collaborators"
 HISTORY_PARTICIPANT = "start:history"
 DIAGNOSTICS_PARTICIPANT = "start:diagnostics"
+
+
+#: Events that belong to no single owner and are reduced by every slice that registers them.
+LIFETIME_EVENTS = (EpisodeRetired,)
 
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
@@ -385,6 +390,16 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     routes.update(
         {RouteKey(event, Owner.PRESENTATION): presentation for event in PRESENTATION_EVENTS}
     )
+    # The one event that is nobody's: an episode ending retires each owner's per-episode facts in
+    # a single turn. Registered per owner that has any — SESSION has none, and its absence from
+    # this list is the answer rather than a gap.
+    for owner, reducer in (
+        (Owner.PLAYBACK, playback),
+        (Owner.SUBTITLE, subtitle),
+        (Owner.INTERACTION, interaction),
+        (Owner.PRESENTATION, presentation),
+    ):
+        routes[RouteKey(EpisodeRetired, owner)] = reducer
     ledger = RuntimeLedger()
     gateway.session_ledger = ledger
     control = ControlSink(gateway, ledger)
@@ -402,7 +417,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             interaction=interaction.initial({INTERACTION_FEATURE: HoverFeature()}),
             presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),
         ),
-        OwnerRouter(SessionReducer(routes), owner_of, ledger=ledger),
+        OwnerRouter(SessionReducer(routes), owner_of, ledger=ledger, broadcast=LIFETIME_EVENTS),
         gateway.mailbox,
         _dispatcher(gateway, ledger),
         diagnostics=ledger.diagnostic,

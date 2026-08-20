@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
+    EpisodeRetired,
     EventEnvelope,
     EventOrigin,
     HoverConfigured,
@@ -33,6 +34,9 @@ from saitenka.runtime.state import OwnerSlice, ReduceResult, SliceReducer
 if TYPE_CHECKING:
     from saitenka.runtime.events import InteractionEvent, RuntimeEvent
     from saitenka.runtime.hover import Decision
+
+#: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
+type InteractionSliceEvent = InteractionEvent | EpisodeRetired
 
 #: Until a session declares its own. Zero would make every dwell fire instantly, which is the one
 #: default that changes behaviour rather than deferring it.
@@ -51,7 +55,7 @@ class HoverFeature:
 class HoverReducer:
     """Reduce one interaction observation. Pure: no host, no timers, no clock."""
 
-    def reduce(self, state: HoverFeature, event: InteractionEvent) -> HoverFeature:
+    def reduce(self, state: HoverFeature, event: InteractionSliceEvent) -> HoverFeature:
         match event:
             case HoverConfigured(delays=delays):
                 return replace(state, delays=delays, published=())
@@ -63,11 +67,15 @@ class HoverReducer:
                 turn = scrolled(state.hysteresis, nested=nested)
             case HoverDwellRefused(intent=intent):
                 turn = refused(state.hysteresis, intent)
+            # Nothing is hovered in a new episode, and no dwell armed against the old one may fire
+            # into it. The delays survive: they are the session's configuration, not the episode's.
+            case EpisodeRetired():
+                return replace(state, hysteresis=HoverState(), published=())
         return replace(state, hysteresis=turn.state, published=turn.decisions)
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, HoverFeature)
-        assert isinstance(event, INTERACTION_EVENTS)
+        assert isinstance(event, (*INTERACTION_EVENTS, EpisodeRetired))
         return ReduceResult(self.reduce(state, event))
 
 
@@ -112,6 +120,12 @@ class HoverStore:
         )
 
     @property
+    def routed(self) -> bool:
+        """Whether the reactor owns this slice. Asked once, when an episode retires: a routed
+        session fans one event out to every slice, an unrouted one has to reduce each store."""
+        return self._port is not None
+
+    @property
     def current(self) -> HoverFeature:
         if self._port is None:
             return self._state
@@ -123,7 +137,7 @@ class HoverStore:
             raise RuntimeError("the reactor owns this slice; send it an event")
         self._state = value
 
-    def dispatch(self, event: InteractionEvent) -> tuple[Decision, ...]:
+    def dispatch(self, event: InteractionSliceEvent) -> tuple[Decision, ...]:
         """Reduce one observation and drain the turn's outbox."""
         if self._port is None:
             self._state = self._reducer.reduce(self._state, event)
@@ -131,7 +145,7 @@ class HoverStore:
         return slice_of(self._port.route_session_interaction(_envelope(event))).published
 
 
-def _envelope(event: InteractionEvent) -> EventEnvelope:
+def _envelope(event: InteractionSliceEvent) -> EventEnvelope:
     # These never enter the mailbox, so `sequence` is unread; the epoch is None because a hover is
     # not epoch-fenced — a reconnect re-observes rather than replaying.
     return EventEnvelope(0, time.monotonic(), EventOrigin.MPV, None, event)

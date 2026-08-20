@@ -19,13 +19,14 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING
 
+from saitenka.runtime.effects import Owner
 from saitenka.runtime.state import RoutedEvent, RouteError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.runtime.diagnostics import RuntimeLedger
-    from saitenka.runtime.effects import Effect, Owner
+    from saitenka.runtime.effects import Effect
     from saitenka.runtime.events import RuntimeEvent
     from saitenka.runtime.state import SessionReducer, SessionState
 
@@ -43,9 +44,11 @@ class OwnerRouter:
         owner_of: OwnerOf,
         *,
         ledger: RuntimeLedger | None = None,
+        broadcast: tuple[type, ...] = (),
     ) -> None:
         self._reducer = reducer
         self._owner_of = owner_of
+        self._broadcast = broadcast
         self._ignored: Counter[str] = Counter()
         self._ledger = ledger
 
@@ -59,9 +62,29 @@ class OwnerRouter:
         if self._ledger is not None:
             self._ledger.ignored(key)
 
+    def _fan_out(
+        self, state: SessionState, event: RuntimeEvent
+    ) -> tuple[SessionState, tuple[Effect, ...]]:
+        """Reduce a lifetime event into every slice that registers it, in one turn.
+
+        A missing route is NOT counted here, unlike everywhere else in this class: for an owned
+        event it means "not migrated yet", but for a lifetime event it means "this owner has no
+        per-episode facts", which is a permanent and correct answer.
+        """
+        effects: tuple[Effect, ...] = ()
+        for owner in Owner:
+            try:
+                result = self._reducer.reduce_turn(state, RoutedEvent(owner, event))
+            except RouteError:
+                continue
+            state, effects = result.state, (*effects, *result.effects)
+        return state, effects
+
     def __call__(
         self, state: SessionState, event: RuntimeEvent
     ) -> tuple[SessionState, tuple[Effect, ...]]:
+        if isinstance(event, self._broadcast):
+            return self._fan_out(state, event)
         owner = self._owner_of(event)
         if owner is None:
             self._ignore(f"-:{type(event).__name__}")
