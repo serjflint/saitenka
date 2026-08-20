@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from saitenka.app.hover_store import HoverStore
     from saitenka.app.interaction_surfaces import InteractionSurfaces
     from saitenka.app.prefetch import TipScale
-    from saitenka.app.render_cache import RenderCache
+    from saitenka.app.render_cache import LoadedView, RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.model import Theme
     from saitenka.render.banded import WindowedPanel
@@ -37,11 +37,16 @@ if TYPE_CHECKING:
 class TipPorts:
     """Everything the popup blit, scroll and placement chain reaches the host for.
 
-    Seven members cover fifteen functions across `tooltip`, `tooltip_panel` and `nested_popup` —
-    the first place in the tooltip cluster where a port is actually available, because the chain
-    only ever wanted the tip's own state, the scale it draws at, and three collaborators to hand
-    the pixels to. Built as `Reader.tip_ports`, so a caller still holding the host pays one member
-    for it rather than the seven it gathers.
+    Nine members cover seventeen functions across `tooltip`, `tooltip_panel` and `nested_popup` —
+    the one place in the tooltip cluster where a port is actually available, because the chain only
+    ever wanted the tip's own state, the scale it draws at, and the collaborators to hand the pixels
+    to. Built as `Reader.tip_ports`, so a caller still holding the host pays one member for it
+    rather than the nine it gathers.
+
+    A closure search over the cluster says this is the whole of it: outside these seventeen every
+    further member buys at most one function, which is the host under another name. The last two
+    were the flat tail's only exceptions — `peek_render_cache` and `schedule_flash_expiry` each
+    bought a function that already took the port and reached past it for one thing.
 
     `tip` is the live mutable `TooltipState`, not a copy: the chain writes scroll and crisp flags
     back onto the view it was given, and a snapshot would silently drop those.
@@ -54,6 +59,11 @@ class TipPorts:
     request_render_ahead: Callable[[PopupView, int], bool]
     osd: tuple[int, int]
     nested_max_frac: float
+    #: The in-RAM tier-2 head cache, read on the hover path. Never SQLite — see `Reader._peek_render_cache`.
+    peek_render_cache: Callable[[object], LoadedView | None]
+    #: Arms the deadline that ends a copy-flash pulse; `False` when nothing can arm one (a closing
+    #: session). The pulse is only drawn once its own retirement exists, so the port carries both.
+    schedule_flash_expiry: Callable[[], bool]
 
 
 class Panel:

@@ -318,10 +318,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_paint_from_cache"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_perform"
     ],
     [
@@ -351,10 +347,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::copy_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::flash"
     ],
     [
       "reader-parameter",

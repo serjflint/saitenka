@@ -1811,10 +1811,10 @@ class Reader:
 
     @property
     def tip_ports(self) -> TipPorts:
-        """What the popup blit/scroll/placement chain needs, as one member rather than seven.
+        """What the popup blit/scroll/placement chain needs, as one member rather than nine.
 
         A property for the same reason `panel_style` is one: as a host-taking builder it would have
-        traded fifteen debt rows for a sixteenth, and every caller in the chain would still have
+        traded seventeen debt rows for an eighteenth, and every caller in the chain would still have
         inherited the whole set it gathers.
         """
         return TipPorts(
@@ -1825,6 +1825,8 @@ class Reader:
             request_render_ahead=self._request_render_ahead,
             osd=self.osd,
             nested_max_frac=self.nested_max_frac,
+            peek_render_cache=self._peek_render_cache,
+            schedule_flash_expiry=self.schedule_flash_expiry,
         )
 
     @property

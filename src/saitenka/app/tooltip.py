@@ -368,18 +368,18 @@ def copy_token(toast: Callable[..., object], t) -> None:
     toast(f"copied {t.surface}", "ok", 1.2)
 
 
-def flash(reader: Reader, oid: int) -> None:
+def flash(ports: TipPorts, oid: int) -> None:
     """Pulse a "copied" highlight border on a popup as copy feedback, retired by a named deadline.
 
     Fails closed: a pulse that cannot be retired is a border stuck on the popup until the next
     redraw happens to clear it, which reads as a rendering bug rather than as missing feedback. So
     the highlight is only drawn once its own expiry is armed.
     """
-    if not reader.schedule_flash_expiry():
+    if not ports.schedule_flash_expiry():
         return
-    reader.tip.flash_oid = oid
-    render_view(reader.tip_ports, reader.tip.nest) if oid == OverlayId.NESTED else render_view(
-        reader.tip_ports, reader.tip.view
+    ports.tip.flash_oid = oid
+    render_view(ports, ports.tip.nest) if oid == OverlayId.NESTED else render_view(
+        ports, ports.tip.view
     )
 
 
@@ -391,11 +391,11 @@ def copy_click(reader: Reader) -> None:
     if reader.tip.nest.rect is not None and in_rect(reader.tip.nest.rect, x, y):
         if reader.tip.nest.token is not None:
             copy_token(reader._toast, reader.tip.nest.token)
-            flash(reader, OverlayId.NESTED)
+            flash(reader.tip_ports, OverlayId.NESTED)
         return
     if reader.tip.view.rect is not None and in_rect(reader.tip.view.rect, x, y):
         copy_hovered(reader._toast, reader.tokens, reader.hover)
-        flash(reader, OverlayId.TIP)
+        flash(reader.tip_ports, OverlayId.TIP)
         return
     idx = reader._hit(x, y) if reader.tokens else -1  # not over a popup → the subtitle word, if any
     if idx >= 0:
@@ -727,7 +727,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # full_h + decorate + upload the cached pixels NOW, skipping the whole build+measure+raster pipeline
     # so the user sees the tooltip in ~upload-time. The real interactive Panel is built right after (its
     # pixels are identical), off this paint's critical path — the reaction-latency window covers it.
-    painted = _paint_from_cache(reader, key, cap, anchor) if tip.tip_show_cold else False
+    painted = _paint_from_cache(reader.tip_ports, key, cap, anchor) if tip.tip_show_cold else False
 
     # Cold miss (nothing in the panel cache AND tier-2 direct-paint missed): do NOT build/raster on the
     # main thread — that synchronous build is what balloons tooltip_show p95+. Enqueue a TOP-priority
@@ -792,7 +792,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     return True
 
 
-def _paint_from_cache(reader: Reader, key, cap: int, anchor) -> bool:
+def _paint_from_cache(ports: TipPorts, key, cap: int, anchor) -> bool:
     """Paint a cold hover DIRECTLY from the persistent render cache (#149): place by the cached ``full_h``
     and decorate + upload the cached premul-BGRA first viewport, skipping the entire build+measure+raster
     pipeline. Sets ``_tip_xy``/``_tip_view_h``/``_tip_scroll``/``_tip_rect`` so the real Panel built right
@@ -800,7 +800,7 @@ def _paint_from_cache(reader: Reader, key, cap: int, anchor) -> bool:
 
     The array is copied because ``decorate_and_upload`` mutates it in place (scrollbar/flash) and the
     disk-backed buffer is read-only. Same content ⇒ the real panel's geometry matches this placement."""
-    loaded = reader._peek_render_cache(key)
+    loaded = ports.peek_render_cache(key)
     if loaded is None:
         if otel_metrics.render_cache_misses is not None:
             otel_metrics.render_cache_misses.add(
@@ -809,7 +809,7 @@ def _paint_from_cache(reader: Reader, key, cap: int, anchor) -> bool:
         return False
     if otel_metrics.render_cache_hits is not None:
         otel_metrics.render_cache_hits.add(1)  # cold hover served straight from disk (the #149 win)
-    tip = reader.tip
+    tip = ports.tip
     full_h = loaded.full_h
     xy = place_tip(
         tip.view,
@@ -817,8 +817,8 @@ def _paint_from_cache(reader: Reader, key, cap: int, anchor) -> bool:
         full_h,
         cap,
         anchor,
-        scale=reader.tip_scale.display,
-        osd=reader.osd,
+        scale=ports.scale.display,
+        osd=ports.osd,
     )
     with otel_metrics.traced(
         "tip_compose",
@@ -826,7 +826,7 @@ def _paint_from_cache(reader: Reader, key, cap: int, anchor) -> bool:
         kind=compose_kind(OverlayId.TIP, navigated=bool(tip.tip_nav)),
     ):
         pixels = loaded.array.copy()
-    tip.view.rect = decorate_and_upload(reader.tip_ports, pixels, 0, full_h, xy, OverlayId.TIP)
+    tip.view.rect = decorate_and_upload(ports, pixels, 0, full_h, xy, OverlayId.TIP)
     return True
 
 
