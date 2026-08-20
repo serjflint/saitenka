@@ -125,11 +125,13 @@ def test_the_lane_budget_is_armed_after_the_capabilities_come_down() -> None:
     getting less time to drain on a slow machine — invisible until a close silently truncates.
     """
     reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    assert reader._lane_deadline == 0.0  # negative control: unarmed before close
 
     order = reader.close().completed
 
-    assert order.index("stop-workers") < order.index("lane-budget")
-    assert order.index("lane-budget") < order.index("lane:subtitle-fetch")
+    assert order.index("capability:anki") < order.index("lanes:stop-workers")
+    assert order.index("lanes:stop-workers") < order.index("lanes:subtitle-fetch")
+    assert reader._lane_deadline > 0.0  # armed by the step, not by building the table
 
 
 def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
@@ -142,9 +144,9 @@ def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
 
     assert ledger.report() is None
     order = ledger.completed
-    assert order.index("lane:geometry") < order.index("subtitle-close")
-    assert order.index("mask-atlas-startup") < order.index("lane:mask-atlas-startup")
-    assert order.index("lane:mask-atlas-startup") < order.index("mask-atlas-uninstall")
+    assert order.index("lanes:geometry") < order.index("subtitle-close")
+    assert order.index("lanes:mask-atlas-startup-worker") < order.index("lanes:mask-atlas-startup")
+    assert order.index("lanes:mask-atlas-startup") < order.index("lanes:mask-atlas-uninstall")
     # The scratch dir goes last of the participants — nothing above may still write to it — and the
     # session runtime closes after even that, because its mailbox is what `_retire_artifacts`
     # announces ARTIFACTS through. A reactor closed one step earlier would reject that announcement.
@@ -491,7 +493,9 @@ def test_the_participants_phase_retires_the_input_capture_and_nothing_else_does(
         state = result.state
         seen[phase] = [type(effect) for effect in result.effects]
 
-    assert seen[ClosePhase.PARTICIPANTS][0] is ReleaseInputCapture
+    # Second, not first: the interaction work is cancelled before the capture goes, which is the
+    # order the Reader's table had — a click routed to a cancelled job is worse than one dropped.
+    assert seen[ClosePhase.PARTICIPANTS][1] is ReleaseInputCapture
     assert [p for p, kinds in seen.items() if ReleaseInputCapture in kinds] == [
         ClosePhase.PARTICIPANTS
     ]
@@ -626,3 +630,27 @@ def test_every_migrated_phase_retires_something_and_no_two_share_a_participant()
             seen.extend(_RESOURCE_OF.get(type(effect), ()))
 
     assert len(seen) == len(set(seen))
+
+
+def test_a_gateway_without_a_reactor_still_runs_every_close_participant() -> None:
+    """Registration is not performance, and the fallback has to know the difference.
+
+    A session with a gateway but no reactor registers every participant and runs none of them, so a
+    fallback gated on registration alone is skipped by a runtime that never acted — a close that
+    leaves lanes draining and stores open, silently. The phase's announcement is what answers,
+    which is why it runs before the steps it may replace.
+    """
+    from util import runtime_gateway
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)  # a gateway, deliberately without `install_session_reactor`
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    lanes: list[str] = []
+    ipc.close_runtime_job_lane = lambda name, _timeout: bool(lanes.append(name)) or True
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert "subtitle-fetch" in lanes  # the Reader ran them itself
+    assert ledger.report() is None

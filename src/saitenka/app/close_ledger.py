@@ -59,6 +59,17 @@ def fallback_for(present: Callable[[], object], *, owned: bool) -> Callable[[], 
     return _absent if owned else present
 
 
+def fallback_after(performed: Callable[[], bool], present: Callable[[], object]):
+    """`fallback_for` for a decision only the announcement can make.
+
+    Registering a participant is not the same as something performing it: a session with a gateway
+    but no reactor registers everything and runs nothing, so a fallback gated on registration alone
+    is skipped by a runtime that never acted. The phase's announcement is what actually answers,
+    which is why it has to run *before* the steps it might replace.
+    """
+    return lambda: _absent() if performed() else present()
+
+
 @dataclass(slots=True)
 class CloseLedger:
     """Records what happened to each participant. Truthy failures mean close was not clean."""

@@ -23,10 +23,13 @@ from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
     AttachSessionDiagnostics,
+    CancelInteractionWork,
+    CloseCapabilityActors,
     CloseSessionOverlay,
     CloseSessionStores,
     CloseSessionSurfaces,
     CloseSubtitleRendering,
+    CloseWorkerLanes,
     DetachDiagnostics,
     EffectOutcome,
     EstablishRenderSpace,
@@ -114,6 +117,31 @@ SUBTITLE_DEACTIVATE_RESOURCE = "subtitle-deactivate"
 SUBTITLE_CLEAR_RESOURCE = "subtitle-clear"
 SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
 
+#: The optional collaborators' probes, and the interaction work that outlives a cancelled hover.
+CAPABILITY_PARTICIPANTS = ("capability:tts", "capability:anki")
+INTERACTION_WORK_PARTICIPANTS = ("interaction-jobs", "hover-metadata")
+
+#: Every worker and job lane, in the one order that is safe. Declared here rather than derived from
+#: the lane registry: the registry knows the lanes, not that the geometry executor must stop before
+#: the state it renders against, nor that the atlas is uninstalled only after its lane has drained.
+WORKER_LANE_PARTICIPANTS = (
+    "lanes:stop-workers",
+    "lanes:subtitle-fetch",
+    "lanes:subtitle-picker",
+    "lanes:geometry",
+    "lanes:annotation",
+    "lanes:cue-annotation",
+    "lanes:tooltip-raster",
+    "lanes:tooltip-render-ahead",
+    "lanes:tooltip-engaged-worker",
+    "lanes:tooltip-engaged",
+    "lanes:prefetch",
+    "lanes:speculative-prefetch",
+    "lanes:mask-atlas-startup-worker",
+    "lanes:mask-atlas-startup",
+    "lanes:mask-atlas-uninstall",
+)
+
 #: Setup participants. Prefixed because the two halves are separate contracts, not two uses of one:
 #: a startup participant answers `start()` and a close participant answers `close()`.
 RENDER_GUARD_PARTICIPANT = "start:render-guard"
@@ -151,6 +179,9 @@ _RESOURCE_OF: dict[type, tuple[str, ...]] = {
     CloseSessionSurfaces: (SURFACES_RESOURCE,),
     CloseSessionOverlay: (OVERLAY_RESOURCE,),
     ReleaseInputCapture: (INPUT_CAPTURE_RESOURCE,),
+    CloseCapabilityActors: CAPABILITY_PARTICIPANTS,
+    CancelInteractionWork: INTERACTION_WORK_PARTICIPANTS,
+    CloseWorkerLanes: WORKER_LANE_PARTICIPANTS,
     CloseSessionStores: (SESSION_SUMMARY_RESOURCE, BACKLOG_RESOURCE, MINED_RESOURCE),
     CloseSubtitleRendering: (
         SUBTITLE_DEACTIVATE_RESOURCE,

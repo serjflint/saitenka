@@ -15,10 +15,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka.runtime.effects import (
+    CancelInteractionWork,
+    CloseCapabilityActors,
     CloseSessionOverlay,
     CloseSessionStores,
     CloseSessionSurfaces,
     CloseSubtitleRendering,
+    CloseWorkerLanes,
     DetachDiagnostics,
     ReleaseInputCapture,
     RemoveSessionArtifacts,
@@ -38,10 +41,16 @@ class LifecycleCloseState:
 
 def _effects(event: SessionClosing) -> tuple[Effect, ...]:
     """What this phase retires. Empty is legitimate — a phase nobody has migrated into yet."""
+    if event.phase is ClosePhase.CAPABILITIES:
+        return (CloseCapabilityActors(),)
     if event.phase is ClosePhase.PARTICIPANTS:
-        # The capture goes first and while the transport still works: it is a write to mpv, and
-        # detaching diagnostics is the point past which the session stops being observable.
-        return (ReleaseInputCapture(), DetachDiagnostics())
+        # Order is the contract, and it is the order the Reader's table already had: cancel the
+        # interaction work, then the capture — a write to mpv, so it goes while the transport still
+        # works — and only then diagnostics, which is the point past which the session stops being
+        # observable.
+        return (CancelInteractionWork(), ReleaseInputCapture(), DetachDiagnostics())
+    if event.phase is ClosePhase.LANES:
+        return (CloseWorkerLanes(),)
     if event.phase is ClosePhase.RENDERING:
         return (CloseSubtitleRendering(),)
     if event.phase is ClosePhase.STORES:

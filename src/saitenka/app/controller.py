@@ -102,7 +102,7 @@ from saitenka.app.bindings import (
     active_bindings,
     section_contents,
 )
-from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_for
+from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.config import ReaderOptions
 from saitenka.app.intents import Announce, DismissHover
 from saitenka.app.interaction_intents import InteractionCommand
@@ -656,9 +656,7 @@ class Reader:
         self._mouse = mouse_capture.MouseCapture(
             ipc, self.lifecycle_timers, self._wants_mouse_capture
         )
-        self._runtime_owns_input_capture = ipc.register_session_resource(
-            INPUT_CAPTURE_RESOURCE, self._mouse
-        )
+        ipc.register_session_resource(INPUT_CAPTURE_RESOURCE, self._mouse)
         # The session's persistent writers, retired at `STORES`. Wrapped rather than registered
         # directly: the recorder is per-episode and both stores open lazily, so the resource has
         # to resolve them when it closes, not when it registers.
@@ -671,23 +669,31 @@ class Reader:
             SUBTITLE_DEACTIVATE_RESOURCE,
         )
 
-        self._runtime_owns_stores = all(
-            (
-                ipc.register_session_resource(
-                    SESSION_SUMMARY_RESOURCE,
-                    session_resources.Retiring(
-                        lambda: self._report_session(self.finish_session_stats())
-                    ),
-                ),
-                ipc.register_session_resource(
-                    BACKLOG_RESOURCE,
-                    session_resources.Retiring(lambda: self._close_backlog_store()),
-                ),
-                ipc.register_session_resource(
-                    MINED_RESOURCE, session_resources.Retiring(lambda: self._close_mined_store())
-                ),
-            )
+        for name, retire in (
+            (SESSION_SUMMARY_RESOURCE, lambda: self._report_session(self.finish_session_stats())),
+            (BACKLOG_RESOURCE, lambda: self._close_backlog_store()),
+            (MINED_RESOURCE, lambda: self._close_mined_store()),
+        ):
+            ipc.register_session_resource(name, session_resources.Retiring(retire))
+        # The capability probes, the interaction work, and every worker lane — the close half's
+        # three remaining phases. Named by the same tables the dispatcher orders them from, so a
+        # step and its position cannot drift apart.
+        from saitenka.app.session_routes import (
+            CAPABILITY_PARTICIPANTS,
+            INTERACTION_WORK_PARTICIPANTS,
+            WORKER_LANE_PARTICIPANTS,
         )
+
+        self._close_participants: dict[str, Callable[[], object]] = {}
+        #: Which close phases the runtime actually performed, filled by the announcement.
+        self._runtime_close_phases: dict[ClosePhase, bool] = {}
+        self._lane_deadline = 0.0
+        for name in (
+            CAPABILITY_PARTICIPANTS + INTERACTION_WORK_PARTICIPANTS + WORKER_LANE_PARTICIPANTS
+        ):
+            ipc.register_session_resource(
+                name, session_resources.Retiring(self._participant_for(name))
+            )
         # The setup steps, run phase by phase from `run`. Registered here so the runtime owns
         # *what* each phase does; the Reader keeps only the order and the no-runtime fallback.
         from saitenka.app.session_routes import (
@@ -722,24 +728,15 @@ class Reader:
             ipc.register_session_resource(name, session_resources.Starting(self._step_for(step)))
         # The subtitle raster, retired at `RENDERING`. `native_geometry` is installed after this
         # point, so every one of these resolves it when it closes rather than now.
-        self._runtime_owns_subtitle_rendering = all(
+        for name, retire in (
             (
-                ipc.register_session_resource(
-                    SUBTITLE_DEACTIVATE_RESOURCE,
-                    session_resources.Retiring(
-                        lambda: self.subtitle_pipeline.deactivate(self._subtitle_target())
-                    ),
-                ),
-                ipc.register_session_resource(
-                    SUBTITLE_CLEAR_RESOURCE,
-                    session_resources.Retiring(lambda: self._clear_subtitle_pixels()),
-                ),
-                ipc.register_session_resource(
-                    SUBTITLE_CLOSE_RESOURCE,
-                    session_resources.Retiring(lambda: self._close_subtitle_raster()),
-                ),
-            )
-        )
+                SUBTITLE_DEACTIVATE_RESOURCE,
+                lambda: self.subtitle_pipeline.deactivate(self._subtitle_target()),
+            ),
+            (SUBTITLE_CLEAR_RESOURCE, lambda: self._clear_subtitle_pixels()),
+            (SUBTITLE_CLOSE_RESOURCE, lambda: self._close_subtitle_raster()),
+        ):
+            ipc.register_session_resource(name, session_resources.Retiring(retire))
         # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
         self.scan_delay = o.tooltip.scan_delay
         self.hover_switch_delay = o.tooltip.hover_switch_delay
@@ -3834,142 +3831,96 @@ class Reader:
         would not survive being factored into a nested `def`.
         """
 
-        close_lane = self.ipc.close_runtime_job_lane
-        # Armed by a step, not here: the 2s lane budget starts once the capabilities are down, and
-        # computing it at table-build time would silently spend that window on their teardown.
-        budget: list[float] = []
+        from saitenka.app.session_routes import (
+            CAPABILITY_PARTICIPANTS,
+            INTERACTION_WORK_PARTICIPANTS,
+            WORKER_LANE_PARTICIPANTS,
+        )
 
-        def remaining() -> float:
-            return max(0.0, budget[0] - time.monotonic())
-
+        self._build_close_participants()
         self._mined_seed_generation += 1  # invalidate in-flight seeds before anything tears down
         ledger = CloseLedger()
         ledger.run(
             (
-                CloseStep(
-                    "tts-capability",
-                    lambda: self._tts_capability.close(),  # type: ignore[union-attr]  # `present` below
-                    lambda: self._tts_capability,
-                ),
-                CloseStep(
-                    "anki-capability",
-                    lambda: self._anki_capability.close(),  # type: ignore[union-attr]  # `present` below
-                    lambda: self._anki_capability,
-                ),
+                # Each phase is announced *before* the steps it may replace, because only the
+                # announcement can say whether anything performed them: a session with a gateway
+                # but no reactor registers every participant and runs none of them.
                 CloseStep(
                     "phase:capabilities", lambda: self._announce_close(ClosePhase.CAPABILITIES)
                 ),
-                CloseStep("interaction-jobs", lambda: self._interaction_jobs.cancel_all()),
-                CloseStep(
-                    "hover-metadata", lambda: hover_metadata.close(self._interaction_metadata)
-                ),
-                # Handed back by the `PARTICIPANTS` phase below when a runtime owns the capture;
-                # this is the fallback for a Reader that has none, and must stay ahead of it so a
-                # detached mpv never outlives us still routing clicks here.
+                *self._fallback_steps(CAPABILITY_PARTICIPANTS, ClosePhase.CAPABILITIES),
+                # The runtime's own close participants: it announces, the session reducer emits
+                # their effects. Delivered rather than published — the session loop has stopped,
+                # and draining here would run a full domain turn against half-closed collaborators.
+                CloseStep("runtime-close", lambda: self._announce_close(ClosePhase.PARTICIPANTS)),
+                *self._fallback_steps(INTERACTION_WORK_PARTICIPANTS, ClosePhase.PARTICIPANTS),
+                # A detached mpv must never outlive us still routing clicks here.
                 CloseStep(
                     "mouse-capture",
                     lambda: self._mouse.release(),
-                    # `present` skips on None, not on falsy — a `not owns` bool would keep the
-                    # fallback running beside the effect, which is the thing it is a fallback for.
-                    fallback_for(lambda: self._mouse, owned=self._runtime_owns_input_capture),
-                ),
-                # The runtime's own close participants, in the position the Reader used to run
-                # them: it announces, the session reducer emits their effects. Delivered rather
-                # than published — the session loop has stopped, and draining here would run a
-                # full domain turn against half-closed collaborators.
-                CloseStep(
-                    "runtime-close", lambda: self.ipc.deliver_runtime_event(SessionClosing())
-                ),
-                # Signal the workers; they do no IPC so this is race-free.
-                CloseStep("stop-workers", lambda: self._stop.set()),
-                CloseStep("lane-budget", lambda: budget.append(time.monotonic() + 2.0)),
-                CloseStep("lane:subtitle-fetch", lambda: close_lane("subtitle-fetch", remaining())),
-                CloseStep(
-                    "lane:subtitle-picker", lambda: close_lane("subtitle-picker", remaining())
-                ),
-                # Stop the executor before the state it renders against is torn down: a job
-                # admitted after this cannot outlive `native_geometry.close()` below.
-                CloseStep("lane:geometry", lambda: close_lane(GEOMETRY_LANE, remaining())),
-                CloseStep(
-                    "annotation",
-                    lambda: self._annotation.close(),  # type: ignore[union-attr]  # `present` below
-                    lambda: self._annotation,
-                ),
-                CloseStep("lane:cue-annotation", lambda: close_lane("cue-annotation", remaining())),
-                CloseStep("tooltip-raster", lambda: tooltip_raster.close(self._render_ahead)),
-                CloseStep(
-                    "lane:tooltip-render-ahead",
-                    lambda: close_lane("tooltip-render-ahead", remaining()),
-                ),
-                CloseStep("tooltip-engaged", lambda: tooltip_engaged.close(self._engaged_tooltip)),
-                CloseStep(
-                    "lane:tooltip-engaged", lambda: close_lane("tooltip-engaged", remaining())
-                ),
-                CloseStep("prefetch", lambda: prefetch.close(self.prefetch_state)),
-                CloseStep(
-                    "lane:speculative-prefetch",
-                    lambda: close_lane("speculative-prefetch", remaining()),
-                ),
-                CloseStep(
-                    "mask-atlas-startup",
-                    lambda: mask_atlas_startup.close(self._mask_atlas_startup),
-                ),
-                CloseStep(
-                    "lane:mask-atlas-startup",
-                    lambda: close_lane("mask-atlas-startup", remaining()),
-                ),
-                CloseStep(
-                    "mask-atlas-uninstall",
-                    lambda: mask_atlas_startup.uninstall(self.session.render_cache),
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.PARTICIPANTS),
+                        lambda: self._mouse,
+                    ),
                 ),
                 CloseStep("phase:lanes", lambda: self._announce_close(ClosePhase.LANES)),
+                # The order between these is the contract either way — it is the one
+                # `WORKER_LANE_PARTICIPANTS` declares.
+                *self._fallback_steps(WORKER_LANE_PARTICIPANTS, ClosePhase.LANES),
                 # No refresh may land after the provider closes, nor a settle deadline outlive it.
                 CloseStep("geometry-refresh", lambda: self.retire_geometry_refresh()),
                 CloseStep("settle-window", lambda: self.retire_settle_window()),
-                # Retired by the `RENDERING` phase below when a runtime owns the raster; these
-                # three are the fallback for a Reader that has none. A step each, so a failure in
-                # one isolates — which is what `_retire` reproduces on the migrated path.
+                CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
+                # A step each, so a failure in one isolates — the guarantee `_retire` reproduces
+                # on the migrated path.
                 CloseStep(
                     "subtitle-deactivate",
                     lambda: self.subtitle_pipeline.deactivate(self._subtitle_target()),
-                    fallback_for(
-                        lambda: self.subtitle_pipeline, owned=self._runtime_owns_subtitle_rendering
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                        lambda: self.subtitle_pipeline,
                     ),
                 ),
                 CloseStep(
                     "subtitle-clear",
                     self._clear_subtitle_pixels,
-                    fallback_for(
-                        lambda: self.native_geometry, owned=self._runtime_owns_subtitle_rendering
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                        lambda: self.native_geometry,
                     ),
                 ),
                 CloseStep(
                     "subtitle-close",
                     self._close_subtitle_raster,
-                    fallback_for(
-                        lambda: self.subtitle_pipeline, owned=self._runtime_owns_subtitle_rendering
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                        lambda: self.subtitle_pipeline,
                     ),
                 ),
-                CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
-                # Retired by the `STORES` phase below when a runtime owns them; these three are
-                # the fallback for a Reader that has none, and must stay ahead of the announcement
-                # so the ordering is the same either way.
+                CloseStep("phase:stores", lambda: self._announce_close(ClosePhase.STORES)),
                 CloseStep(
                     "session-stats",
                     lambda: self._report_session(self.finish_session_stats()),
-                    fallback_for(lambda: self.session, owned=self._runtime_owns_stores),
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.STORES), lambda: self.session
+                    ),
                 ),
                 CloseStep(
                     "backlog-store",
                     self._close_backlog_store,
-                    fallback_for(lambda: self._backlog_store, owned=self._runtime_owns_stores),
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.STORES),
+                        lambda: self._backlog_store,
+                    ),
                 ),
                 CloseStep(
                     "mined-store",
                     self._close_mined_store,
-                    fallback_for(lambda: self._mined_store, owned=self._runtime_owns_stores),
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.STORES),
+                        lambda: self._mined_store,
+                    ),
                 ),
-                CloseStep("phase:stores", lambda: self._announce_close(ClosePhase.STORES)),
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
                 # The `SURFACES` phase, announced here rather than with the participants: every
                 # render lane above has drained, so nothing can present again. Announcing it at
@@ -3981,7 +3932,9 @@ class Reader:
                 CloseStep(
                     "transport",
                     lambda: self.ov.close(),
-                    fallback_for(lambda: self.ov, owned=self._runtime_owns_surfaces),
+                    fallback_after(
+                        lambda: self._phase_performed(ClosePhase.SURFACES), lambda: self.ov
+                    ),
                 ),
                 # Disarm what `PROCESS` armed. Process-global and session-lived: `run` turns it on
                 # because *this* thread is the render loop, and a session that ends without turning
@@ -4054,10 +4007,105 @@ class Reader:
             LifecycleTimerKind.STARTUP_HEALTH, 8.0, self._check_startup_health
         )
 
+    def _fallback_steps(self, names: tuple[str, ...], phase: ClosePhase) -> tuple[CloseStep, ...]:
+        """One `CloseStep` per participant, skipped when the runtime retires it instead.
+
+        A step each rather than one for the group, so a failure in one isolates — the guarantee
+        `_retire` reproduces on the migrated path.
+        """
+        return tuple(
+            CloseStep(
+                name,
+                self._participant_for(name),
+                fallback_after(lambda: self._phase_performed(phase), lambda: self),
+            )
+            for name in names
+        )
+
+    def _participant_for(self, name: str) -> Callable[[], None]:
+        """Bind one close participant late: the table it reads is built in `close`."""
+
+        def run() -> None:
+            self._close_participants[name]()
+
+        return run
+
+    def _close_tts_capability(self) -> None:
+        if self._tts_capability is not None:
+            self._tts_capability.close()
+
+    def _close_anki_capability(self) -> None:
+        if self._anki_capability is not None:
+            self._anki_capability.close()
+
+    def _close_annotation(self) -> None:
+        if self._annotation is not None:
+            self._annotation.close()
+
+    def _lane_remaining(self) -> float:
+        """What is left of the lane budget. Zero once it is spent, never negative."""
+        return max(0.0, self._lane_deadline - time.monotonic())
+
+    def _build_close_participants(self) -> None:
+        """The steps behind `CloseCapabilityActors`, `CancelInteractionWork` and `CloseWorkerLanes`.
+
+        Built in `close` rather than at construction because half of them read collaborators that
+        are installed afterwards, and because the lane budget starts when the capabilities are down
+        — computing it at construction would spend the whole window on the session.
+        """
+        from saitenka.app.session_routes import (
+            CAPABILITY_PARTICIPANTS,
+            INTERACTION_WORK_PARTICIPANTS,
+            WORKER_LANE_PARTICIPANTS,
+        )
+
+        close_lane = self.ipc.close_runtime_job_lane
+
+        def lane(name: str) -> Callable[[], object]:
+            return lambda: close_lane(name, self._lane_remaining())
+
+        def start_lane_budget() -> None:
+            # Armed here, not at table-build time: the 2s budget starts once the capabilities are
+            # down, and computing it earlier would silently spend that window on their teardown.
+            self._stop.set()  # the workers do no IPC, so signalling them is race-free
+            self._lane_deadline = time.monotonic() + 2.0
+
+        self._close_participants = dict(
+            zip(
+                CAPABILITY_PARTICIPANTS + INTERACTION_WORK_PARTICIPANTS + WORKER_LANE_PARTICIPANTS,
+                (
+                    self._close_tts_capability,
+                    self._close_anki_capability,
+                    lambda: self._interaction_jobs.cancel_all(),
+                    lambda: hover_metadata.close(self._interaction_metadata),
+                    start_lane_budget,
+                    lane("subtitle-fetch"),
+                    lane("subtitle-picker"),
+                    lane(GEOMETRY_LANE),
+                    self._close_annotation,
+                    lane("cue-annotation"),
+                    lambda: tooltip_raster.close(self._render_ahead),
+                    lane("tooltip-render-ahead"),
+                    lambda: tooltip_engaged.close(self._engaged_tooltip),
+                    lane("tooltip-engaged"),
+                    lambda: prefetch.close(self.prefetch_state),
+                    lane("speculative-prefetch"),
+                    lambda: mask_atlas_startup.close(self._mask_atlas_startup),
+                    lane("mask-atlas-startup"),
+                    lambda: mask_atlas_startup.uninstall(self.session.render_cache),
+                ),
+                strict=True,
+            )
+        )
+
     def _release_main_render(self) -> None:
         from saitenka.render.banded import guard_main_render
 
         guard_main_render(on=False)
+
+    def _phase_performed(self, phase: ClosePhase) -> bool:
+        """Whether the runtime performed `phase`'s steps, so this session's own must not."""
+        return self._runtime_close_phases.get(phase, False)
 
     def _announce_close(self, phase: ClosePhase, scratch: str | None = None) -> bool:
         """Tell the runtime the close sequence reached `phase`. False when no runtime owns us.
@@ -4066,7 +4114,9 @@ class Reader:
         sit in the mailbox, and draining here would run a full domain turn against half-closed
         collaborators.
         """
-        return self.ipc.deliver_runtime_event(SessionClosing(phase, scratch))
+        performed = self.ipc.deliver_runtime_event(SessionClosing(phase, scratch))
+        self._runtime_close_phases[phase] = performed
+        return performed
 
     def _retire_surfaces(self) -> None:
         """Announce the `SURFACES` phase, or close them ourselves.

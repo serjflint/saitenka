@@ -234,6 +234,27 @@ STARTUP_EFFECTS = (
 
 
 @dataclass(frozen=True, slots=True)
+class CloseCapabilityActors:
+    """Close the optional collaborators' probes, before anything they answer for goes down."""
+
+
+@dataclass(frozen=True, slots=True)
+class CancelInteractionWork:
+    """Cancel the in-flight interaction jobs and retire their metadata broker."""
+
+
+@dataclass(frozen=True, slots=True)
+class CloseWorkerLanes:
+    """Signal the workers and drain every job lane, in the one order that is safe.
+
+    Sixteen participants, and the order between them is the contract — the geometry executor stops
+    before the state it renders against, and every lane drains before the scratch dir it writes to
+    is removed. The budget is not carried here: a lane close needs a *deadline*, and a reducer that
+    computed one would be a clock in pure policy. The announcer owns it, as it owns `scratch`.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class CloseSubtitleRendering:
     """Give the subtitle pixels back and close the geometry provider, once no lane can render.
 
@@ -261,8 +282,14 @@ type LifecycleEffect = (
     | StartupEffect
     | DetachDiagnostics
     | ReleaseInputCapture
+    | CloseCapabilityActors
+    | CancelInteractionWork
+    | CloseWorkerLanes
     | CloseSubtitleRendering
     | CloseSessionStores
+    | CloseCapabilityActors
+    | CancelInteractionWork
+    | CloseWorkerLanes
     | CloseSubtitleRendering
     | CloseSessionStores
     | CloseSessionSurfaces
@@ -277,8 +304,14 @@ type FireAndForget = (
     StartupEffect
     | DetachDiagnostics
     | ReleaseInputCapture
+    | CloseCapabilityActors
+    | CancelInteractionWork
+    | CloseWorkerLanes
     | CloseSubtitleRendering
     | CloseSessionStores
+    | CloseCapabilityActors
+    | CancelInteractionWork
+    | CloseWorkerLanes
     | CloseSubtitleRendering
     | CloseSessionStores
     | CloseSessionSurfaces

@@ -10,10 +10,13 @@ from saitenka.runtime.effects import (
     AsyncEffect,
     AttachSessionDiagnostics,
     CancelEffect,
+    CancelInteractionWork,
+    CloseCapabilityActors,
     CloseSessionOverlay,
     CloseSessionStores,
     CloseSessionSurfaces,
     CloseSubtitleRendering,
+    CloseWorkerLanes,
     CoreControl,
     DetachDiagnostics,
     DispatchedEffect,
@@ -207,6 +210,9 @@ class SessionReactor[StateT]:
             | AttachSessionDiagnostics
             | DetachDiagnostics
             | ReleaseInputCapture
+            | CloseCapabilityActors
+            | CancelInteractionWork
+            | CloseWorkerLanes
             | CloseSubtitleRendering
             | CloseSessionStores
             | CloseSessionSurfaces

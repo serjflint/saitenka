@@ -693,41 +693,18 @@
   "close": [
     {
       "id": "worker-and-capability-actors",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/app/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self._tts_capability.close",
-        "call:self._anki_capability.close",
-        "call:self._interaction_jobs.cancel_all",
-        "call:hover_metadata.close",
-        "call:self._stop.set",
-        "call:close_lane:subtitle-fetch",
-        "call:close_lane:subtitle-picker",
-        "call:close_lane:cue-annotation",
-        "call:tooltip_raster.close",
-        "call:close_lane:tooltip-render-ahead",
-        "call:tooltip_engaged.close",
-        "call:close_lane:tooltip-engaged",
-        "call:prefetch.close",
-        "call:close_lane:speculative-prefetch",
-        "call:mask_atlas_startup.close",
-        "call:close_lane:mask-atlas-startup",
-        "call:mask_atlas_startup.uninstall",
-        "order:call:self._stop.set>call:close_lane:subtitle-fetch",
-        "order:call:close_lane:cue-annotation>call:self._retire_artifacts",
-        "order:call:close_lane:tooltip-render-ahead>call:self._retire_artifacts",
-        "order:call:close_lane:tooltip-engaged>call:self._retire_artifacts",
-        "order:call:close_lane:speculative-prefetch>call:self._retire_artifacts",
-        "order:call:close_lane:mask-atlas-startup>call:self._retire_artifacts",
-        "call:self._annotation.close",
-        "order:call:prefetch.close>call:close_lane:speculative-prefetch",
-        "order:call:mask_atlas_startup.close>call:close_lane:mask-atlas-startup",
-        "order:call:close_lane:mask-atlas-startup>call:mask_atlas_startup.uninstall"
+        "call:CloseCapabilityActors",
+        "call:CancelInteractionWork",
+        "call:CloseWorkerLanes",
+        "ref:event.phase"
       ],
       "target": "job-broker-lanes",
       "work_package": "3,5",
       "replacement": "CloseParticipantRequested -> CloseParticipantOutcome",
       "test": "each admitted job retires or is quarantined before closed",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "input-capture",
