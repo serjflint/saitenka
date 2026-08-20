@@ -34,7 +34,6 @@ from saitenka.app.tooltip_panel import (
     is_mined,
     panel_for,
     panel_key,
-    panel_style,
     place_tip,
     render_view,
     rows_panel,
@@ -955,7 +954,7 @@ def _navigated_panel(style: PanelStyle, query: str) -> Panel | None:
     """The read-only reference Panel for a navigation target: a wildcard/prefix query → search results,
     else the exact term. Built at 1× like every panel; the one-panel blit composites it natively at
     the display scale."""
-    # The dictionary and the tokenizer travel together — `panel_style` reads both off one host,
+    # The dictionary and the tokenizer travel together — `Reader.panel_style` reads both off one host,
     # and a navigated query is looked up whole by one and rendered by the other.
     if style.dict_set is None or style.tokenizer is None:
         return None
@@ -994,7 +993,7 @@ def navigate_tip(reader: Reader, query: str) -> None:
         request = tooltip_engaged.NavigateRequest(query, id(reader.tip.view.state))
         if reader._request_engaged_tooltip(request):
             return
-    st = _navigated_panel(panel_style(reader), query)
+    st = _navigated_panel(reader.panel_style, query)
     if st is None:
         return
     st.render_head(

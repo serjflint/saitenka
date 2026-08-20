@@ -62,7 +62,7 @@ class _RecordingDS:
 def test_link_query_is_looked_up_whole_not_tokenized():
     # Regression (それにしては → その): a cross-reference link ``?query=それにしては`` must look up the WHOLE
     # compound, not tokenize it and take the first token (それ). Both nav paths build a whole-query token.
-    from saitenka.app import tooltip, tooltip_panel
+    from saitenka.app import tooltip
     from saitenka.app.tokenize import query_token
 
     assert query_token("それにしては").surface == "それにしては"
@@ -70,7 +70,7 @@ def test_link_query_is_looked_up_whole_not_tokenized():
 
     ds = _RecordingDS()
     reader = Reader(FakeIPC(), dict_set=ds)
-    tooltip._navigated_panel(tooltip_panel.panel_style(reader), "それにしては")
+    tooltip._navigated_panel(reader.panel_style, "それにしては")
     assert ds.seen == ["それにしては"]  # the WHOLE query reached the lookup, not それ
 
 

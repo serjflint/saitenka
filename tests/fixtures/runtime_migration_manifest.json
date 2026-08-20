@@ -498,10 +498,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::panel_style"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip_panel.py::render_view"
     ],
     [

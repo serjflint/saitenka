@@ -7,9 +7,10 @@ hover/click policy on top of it. While these lived in ``tooltip``, every nested 
 back through a one-line ``Reader`` delegation — a round trip through the host for an intra-feature
 call, and the reason both modules read the host for things neither one owns.
 
-Host-taking (the AGENTS.md seam pattern) for now: :func:`panel_style` is the one snapshot of the
-session-lifetime build configuration, and the blit path still reaches the host for the display
-scale and the surfaces.
+Host-taking (the AGENTS.md seam pattern) for now, but the build configuration is not: it arrives as
+`Reader.panel_style`, one member rather than the eleven it gathers. As a host-taking snapshot every
+caller in the chain inherited all eleven, which is most of what made the tooltip cluster measure as
+coupled to the host. The blit path still reaches the host for the display scale and the surfaces.
 """
 
 from __future__ import annotations
@@ -242,23 +243,6 @@ class PanelStyle:
     kanji_stroke_order: bool = False
 
 
-def panel_style(reader: Reader) -> PanelStyle:
-    """Snapshot the build configuration off the host. The one host read in the build chain."""
-    return PanelStyle(
-        width=reader.tip_scale.width,
-        band_cache_max=reader.band_cache_max,
-        raw_band_ceiling=reader.raw_band_ceiling,
-        layout_backend=reader.layout_backend,
-        layout_engine=reader.layout_engine,
-        add_button=anki_ok(reader.anki, reader._anki_capability),
-        speak_button=reader._tts_ok,
-        dict_set=reader.dict_set,
-        scorer=reader.scorer,
-        tokenizer=reader.tokenizer,
-        kanji_stroke_order=reader.kanji_stroke_order,
-    )
-
-
 def rows_panel(style: PanelStyle, entry, reading: str) -> Panel:
     """A read-only reference panel for a non-token target — a kanji, a search, a navigated term.
 
@@ -358,7 +342,7 @@ def panel_for(
     )
     # No `_panel_cache_get` wrapper any more: it existed to hold the fetch-or-build-then-LRU-touch
     # protocol, and `PanelCache` owns that now.
-    style = panel_style(reader)
+    style = reader.panel_style
     during_scroll = reader._scrolled_this_tick
     st = reader.tip.panel_cache.get_or_build(
         key,

@@ -1830,6 +1830,29 @@ class Reader:
             tok, inflected, dict_set=self.dict_set, scorer=self.scorer
         )
 
+    @property
+    def panel_style(self) -> tooltip_panel.PanelStyle:
+        """The session-lifetime half of a panel build, as one value.
+
+        A property and not a snapshot function: as the latter every caller in the build chain
+        inherited all eleven reads it gathers, which is most of what made the tooltip cluster
+        measure as coupled to the host. Per-turn facts — the mined set, the scroll flag — stay
+        parameters, because a value holding those would be the Reader under another name.
+        """
+        return tooltip_panel.PanelStyle(
+            width=self.tip_scale.width,
+            band_cache_max=self.band_cache_max,
+            raw_band_ceiling=self.raw_band_ceiling,
+            layout_backend=self.layout_backend,
+            layout_engine=self.layout_engine,
+            add_button=tooltip_panel.anki_ok(self.anki, self._anki_capability),
+            speak_button=self._tts_ok,
+            dict_set=self.dict_set,
+            scorer=self.scorer,
+            tokenizer=self.tokenizer,
+            kanji_stroke_order=self.kanji_stroke_order,
+        )
+
     def _panel_for(
         self,
         tok,
@@ -2192,7 +2215,7 @@ class Reader:
     def _navigated_panel(self, query: str):
         """The read-only reference Panel for a nav target — built off the main thread by the engaged
         tooltip lane, so the seam lives on the Reader (no engaged-tooltip→tooltip import)."""
-        return tooltip._navigated_panel(tooltip_panel.panel_style(self), query)
+        return tooltip._navigated_panel(self.panel_style, query)
 
     # --- pointer and tooltip navigation: pure reducer, executed here (WP5.3) -------------------
     @property

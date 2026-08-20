@@ -27,7 +27,6 @@ from saitenka.app.tooltip_panel import (
     is_mined,
     panel_for,
     panel_key,
-    panel_style,
     place_panel,
     render_view,
     rows_panel,
@@ -260,7 +259,7 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
     ``None`` (no entry — the caller toasts). ``source`` ∈ {``kanji``, ``search``, ``link``}. ``mined`` is
     forced by the worker (which must NOT touch jamdict via ``is_mined``); ``None`` = compute it here
     (main thread only — the tick recomputes for the freshest ⊕/✓)."""
-    style = panel_style(reader)
+    style = reader.panel_style
     ds = style.dict_set
     if ds is None or style.tokenizer is None:  # the pair travels together — see `_navigated_panel`
         return None
