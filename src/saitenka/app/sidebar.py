@@ -501,21 +501,29 @@ def suppress_hover(suppression: HoverSuppression) -> bool:
     return True
 
 
-def scroll(reader: Reader, steps: int) -> bool:
-    if not reader.sidebar.open:
+def wheel(view: SidebarView, steps: int, pointer, *, hold: Callable[[float], bool]) -> bool:
+    state = view.state
+    if not state.open:
         return False
-    mp = reader._prop("mouse-pos") or {}
-    if not contains(reader.sidebar, mp.get("x", -1), mp.get("y", -1)):
+    at = pointer or {}
+    if not contains(state, at.get("x", -1), at.get("y", -1)):
         return False
-    maximum = max(0, reader.sidebar.total - _capacity(reader.osd, reader.chrome_scale))
-    reader.sidebar.scroll = max(
-        0, min(maximum, reader.sidebar.scroll + steps * ROWS_PER_WHEEL_STEP)
-    )
+    maximum = max(0, state.total - view.capacity)
+    state.scroll = max(0, min(maximum, state.scroll + steps * ROWS_PER_WHEEL_STEP))
     # Fails closed: a hold that cannot be released would suppress auto-follow for the rest of
     # the session, which is worse than a manual scroll the next cue scrolls away from.
-    reader.sidebar.manual_hold = reader.hold_sidebar_scroll(MANUAL_SCROLL_HOLD)
-    redraw(reader)
+    state.manual_hold = hold(MANUAL_SCROLL_HOLD)
+    draw(view)
     return True
+
+
+def scroll(reader: Reader, steps: int) -> bool:
+    return wheel(
+        view_of(reader),
+        steps,
+        reader._prop("mouse-pos"),
+        hold=reader.hold_sidebar_scroll,
+    )
 
 
 def follow(view: SidebarView) -> None:
