@@ -61,10 +61,14 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     def run() -> bool:
         nonlocal calls
         calls += 1
+        # Generous, because these bound a WEDGE, not a timeout: the first probe must still be stuck
+        # when the replacement publishes. At 1s under `-n auto` it can expire on its own before the
+        # test gets there, unwedge, and publish False — the failure looks like a rejected-late-result
+        # bug and is really the fixture giving up early.
         if calls == 1:
-            first.wait(1)
+            first.wait(30)
             return False
-        second.wait(1)
+        second.wait(30)
         return True
 
     probe = CapabilityProbe(run, name="test", ttl=30, retry=1, timeout=5, clock=lambda: clock[0])
@@ -77,6 +81,7 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     assert probe.value is True and calls == 2
 
     first.set()
+    # Not a wait: let the unwedged first probe finish and prove its stale result is still rejected.
     time.sleep(0.01)
     assert probe.value is True
 

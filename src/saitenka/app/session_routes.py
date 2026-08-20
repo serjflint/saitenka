@@ -180,7 +180,7 @@ def install_session_runtime(ipc: MpvIPC, *, startup_hint: bool = True) -> MpvGat
     from saitenka.mpvio.gateway import install_legacy_gateway
 
     gateway = install_legacy_gateway(ipc)
-    install_session_reactor(gateway, startup_hint=startup_hint)
+    gateway.session_reactor = install_session_reactor(gateway, startup_hint=startup_hint)
     return gateway
 
 

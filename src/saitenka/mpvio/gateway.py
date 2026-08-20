@@ -227,6 +227,11 @@ class MpvGateway:
         #: reactor because the router that counts unrouted events is not the reactor's to expose,
         #: and the gateway is the one handle every entrypoint already holds.
         self.session_ledger: RuntimeLedger | None = None
+        #: The session's reactor, once one is installed. Held because close is a *state transition*
+        #: the reactor owns (`StopSession` -> `close()`, and the reject-new-work latch behind it),
+        #: and a handle nobody keeps is a transition nothing can reach — which is why that path has
+        #: been implemented and unreachable since it landed.
+        self.session_reactor: object | None = None
         self._router = router = LegacyEventRouter(mailbox)
         ipc.install_runtime_ingress(
             self._publish_observation,

@@ -881,3 +881,22 @@ def test_a_feature_without_an_initial_state_is_refused_at_construction() -> None
         assert "exactly one initial state" in str(error)
     else:  # pragma: no cover - slice construction contract
         raise AssertionError("slice accepted a feature with no state")
+
+
+def test_installing_a_session_runtime_keeps_the_reactor_reachable() -> None:
+    """Close is a state transition the reactor owns, so something has to be able to reach it.
+
+    `install_session_runtime` used to drop `install_session_reactor`'s return value, so no entrypoint
+    ever held a reactor. That is why `SessionReactor.close()` and its reject-new-work latch have been
+    implemented and unreachable: `StopSession` dispatches to `close()` already, but nothing outside the
+    reactor could ask for the transition, and nothing could observe that it had happened.
+    """
+    from util import FakeIPC
+
+    from saitenka.app.session_routes import install_session_runtime
+
+    gateway = install_session_runtime(FakeIPC())
+    try:
+        assert isinstance(gateway.session_reactor, SessionReactor)
+    finally:
+        gateway.close()
