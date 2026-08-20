@@ -203,7 +203,7 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
     install_session_reactor(gateway)
     reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
     reader._register_keybinds()
-    reader._tip_rect = (0, 0, 10, 10)
+    reader.tip.view.rect = (0, 0, 10, 10)
     reader._sync_mouse_capture()
     try:
         assert reader._mouse_captured  # negative control: there is a capture to hand back

@@ -105,4 +105,4 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
     reader.set_hover(0)
 
     assert len(submitted) == 1
-    assert reader._tip_state is None
+    assert reader.tip.view.state is None

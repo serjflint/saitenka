@@ -72,14 +72,14 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)  # base tooltip for 読む
 
-    lb = next(b for b in r._tip_state.windowed.link_boxes() if b.query == "kanji:読")
-    sx, sy = r._tip_xy
+    lb = next(b for b in r.tip.view.state.windowed.link_boxes() if b.query == "kanji:読")
+    sx, sy = r.tip.view.xy
     r.ipc.props["mouse-pos"] = {
         "hover": True,
         "x": sx + lb.x + lb.w / 2,
-        "y": sy + (lb.y - r._tip_scroll) + lb.h / 2,
+        "y": sy + (lb.y - r.tip.view.scroll) + lb.h / 2,
     }
-    base = r._tip_state
+    base = r.tip.view.state
     r.on_click()
 
     # A click must NEVER spawn a nested popup (hover-governed → self-dismisses unless the cursor chases
@@ -87,12 +87,12 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     assert r.hover_view().nested.state is None
     # Content swapped to 読's kanji entry, previous view pushed for back. len==1 is only reached when
     # kanji_for('読') resolved and installed — a dead/missing kanji would leave the stack empty.
-    assert r._tip_state is not None and r._tip_state is not base
-    assert len(r._tip_nav) == 1
+    assert r.tip.view.state is not None and r.tip.view.state is not base
+    assert len(r.tip.tip_nav) == 1
     # A navigated view is keyless — not a subtitle token, so scroll won't rebuild it from a token.
-    assert r._tip_key is None and r._tip_tok is None
+    assert r.tip.view.key is None and r.tip.tip_tok is None
     # Reversible: back restores the base 読む tooltip.
     from saitenka.app import tooltip
 
     assert tooltip.tip_back(r) is True
-    assert r._tip_state is base
+    assert r.tip.view.state is base

@@ -91,21 +91,21 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
     # Negative control: with no prefetch worker, the open builds + shows on the calling tick (unchanged).
     r = _reader(tmp_path, worker=False)
     nested_popup.open_kanji(r, "読", 100.0, 300.0, 40.0)
-    assert r._nest.state is not None and r._nest.word == "読"
+    assert r.tip.nest.state is not None and r.tip.nest.word == "読"
     assert r._engaged_tooltip.inflight is None  # nothing deferred
 
 
 def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(r, "読", 100.0, 300.0, 40.0)
-    assert r._nest.state is None  # deferred — nothing shown on the click tick
+    assert r.tip.nest.state is None  # deferred — nothing shown on the click tick
     assert r._engaged_tooltip_submit.calls
 
     r._engaged_tooltip_submit.finish()
 
-    assert r._nest.state is not None and r._nest.word == "読"
+    assert r.tip.nest.state is not None and r.tip.nest.word == "読"
     # the place composited from worker-warmed bands — zero synchronous glyph rasters on this tick
-    assert r._nest.state.windowed.last_frame_rasters == 0
+    assert r.tip.nest.state.windowed.last_frame_rasters == 0
 
 
 def test_kanji_open_worker_failure_uses_current_origin_sync_fallback(tmp_path):
@@ -114,7 +114,7 @@ def test_kanji_open_worker_failure_uses_current_origin_sync_fallback(tmp_path):
 
     r._engaged_tooltip_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert r._nest.state is not None and r._nest.word == "読"
+    assert r.tip.nest.state is not None and r.tip.nest.word == "読"
 
 
 def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
@@ -131,7 +131,7 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
             EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
         )
     )
-    assert r._nest.state is None  # the stale open was dropped, not opened onto 見る
+    assert r.tip.nest.state is None  # the stale open was dropped, not opened onto 見る
 
 
 def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
@@ -147,7 +147,7 @@ def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
 
     r._engaged_tooltip_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert rebuilt == [] and r._nest.state is None
+    assert rebuilt == [] and r.tip.nest.state is None
 
 
 def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
@@ -156,7 +156,7 @@ def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
     monkeypatch.setattr(r, "_toast", lambda text, _k="ok", _s=2.8: toasts.append(text))
     nested_popup.open_kanji(r, "犬", 100.0, 300.0, 40.0)  # 犬 isn't in the kanji bank
     assert toasts and "犬" in toasts[0]  # the no-entry toast fired on the tick…
-    assert r._engaged_tooltip.inflight is None and r._nest.state is None
+    assert r._engaged_tooltip.inflight is None and r.tip.nest.state is None
 
 
 def test_cross_reference_link_open_defers(tmp_path):
@@ -165,7 +165,7 @@ def test_cross_reference_link_open_defers(tmp_path):
 
     r = _reader(tmp_path, worker=True)
     lb = LinkBox("見る", 10, 20, 40, 40)
-    tooltip.nested_popup.open_link(r, lb, r._tip_xy, r._tip_scroll)
-    assert r._nest.state is None and r._engaged_tooltip_submit.calls
+    tooltip.nested_popup.open_link(r, lb, r.tip.view.xy, r.tip.view.scroll)
+    assert r.tip.nest.state is None and r._engaged_tooltip_submit.calls
     r._engaged_tooltip_submit.finish()
-    assert r._nest.state is not None and r._nest.word == "見る"
+    assert r.tip.nest.state is not None and r.tip.nest.word == "見る"

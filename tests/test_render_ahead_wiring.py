@@ -41,9 +41,9 @@ class _RecordingPanel:
 def _reader() -> Reader:
     r = Reader(_FakeIPC(), options=ReaderOptions(prefetch=True))
     r._render_ahead_submit = ManualRenderAheadSubmitter()
-    r._tip_view_h = 300
-    r._tip_scroll = 120
-    r._tip_view.desired_scroll = 120
+    r.tip.view.view_h = 300
+    r.tip.view.scroll = 120
+    r.tip.view.desired_scroll = 120
     return r
 
 
@@ -57,11 +57,11 @@ def _tall_panel() -> Panel:
 
 def test_scroll_keeps_one_newest_pending_request():
     r = _reader()
-    r._tip_state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
-    r._request_render_ahead(r._tip_view, 1)
-    r._tip_scroll = 999
-    r._tip_view.desired_scroll = 999
-    r._request_render_ahead(r._tip_view, -1)
+    r.tip.view.state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
+    r._request_render_ahead(r.tip.view, 1)
+    r.tip.view.scroll = 999
+    r.tip.view.desired_scroll = 999
+    r._request_render_ahead(r.tip.view, -1)
     pending = r._render_ahead.pending
     assert pending is not None
     req = pending[1]
@@ -71,14 +71,14 @@ def test_scroll_keeps_one_newest_pending_request():
 def test_newest_pending_request_runs_once_after_inflight_completion():
     r = _reader()
     panel = _RecordingPanel()
-    r._tip_state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r._tip_view, 1)
-    r._tip_view.desired_scroll = 999
-    r._request_render_ahead(r._tip_view, -1)
+    r.tip.view.state = panel  # type: ignore[assignment]
+    r._request_render_ahead(r.tip.view, 1)
+    r.tip.view.desired_scroll = 999
+    r._request_render_ahead(r.tip.view, -1)
 
     r._render_ahead_submit.finish()
     assert len(r._render_ahead_submit.calls) == 1
-    r._tip_view.scroll = 999
+    r.tip.view.scroll = 999
     r._render_ahead_submit.finish()
 
     assert [call[0] for call in panel.calls if isinstance(call[0], int)] == [999]
@@ -102,14 +102,14 @@ def test_running_stale_request_observes_supersession_before_newest_runs():
     r = _reader()
     old = BlockingPanel()
     new = _RecordingPanel()
-    r._tip_state = old  # type: ignore[assignment]
-    r._request_render_ahead(r._tip_view, 1)
+    r.tip.view.state = old  # type: ignore[assignment]
+    r._request_render_ahead(r.tip.view, 1)
     worker = threading.Thread(target=r._render_ahead_submit.finish)
     worker.start()
     assert entered.wait(1)
 
-    r._tip_state = new  # type: ignore[assignment]
-    r._request_render_ahead(r._tip_view, -1)
+    r.tip.view.state = new  # type: ignore[assignment]
+    r._request_render_ahead(r.tip.view, -1)
     release.set()
     worker.join(1)
     r._render_ahead_submit.finish()
@@ -120,19 +120,19 @@ def test_running_stale_request_observes_supersession_before_newest_runs():
 
 def test_render_ahead_survives_disabled_speculative_prefetch():
     r = _reader()
-    r._tip_state = None
-    assert not r._request_render_ahead(r._tip_view, 1)
+    r.tip.view.state = None
+    assert not r._request_render_ahead(r.tip.view, 1)
 
-    r._tip_state = _RecordingPanel()  # type: ignore[assignment]
+    r.tip.view.state = _RecordingPanel()  # type: ignore[assignment]
     r.prefetch = False
-    assert r._request_render_ahead(r._tip_view, 1)
+    assert r._request_render_ahead(r.tip.view, 1)
 
 
 def test_broker_completion_warms_the_requested_viewport():
     r = _reader()
     panel = _RecordingPanel()
-    r._tip_state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r._tip_view, 1)
+    r.tip.view.state = panel  # type: ignore[assignment]
+    r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish()
     # warmed at the scroll pos, not cancelled, at the (bucketed) display scale — native bands (one panel)
     assert panel.calls == [(120, 300, 1, False, r._raster_scale)]
@@ -141,13 +141,13 @@ def test_broker_completion_warms_the_requested_viewport():
 def test_stale_completion_from_a_word_switch_is_not_published():
     r = _reader()
     panel = _RecordingPanel()
-    r._tip_state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r._tip_view, 1)
+    r.tip.view.state = panel  # type: ignore[assignment]
+    r._request_render_ahead(r.tip.view, 1)
     r._prefetch_gen += 1
     r._cancel_render_ahead()
-    before = r._tip_view.scroll
+    before = r.tip.view.scroll
     r._render_ahead_submit.finish()
-    assert r._tip_view.scroll == before
+    assert r.tip.view.scroll == before
     assert panel.calls == []
 
 
@@ -163,12 +163,12 @@ def test_prefetch_state_cancel_bumps_the_generation():
 
 def test_worker_actually_warms_a_real_panel():
     r = _reader()
-    r._tip_scroll = 0
-    r._tip_state = _tall_panel()
-    r._request_render_ahead(r._tip_view, 1)
+    r.tip.view.scroll = 0
+    r.tip.view.state = _tall_panel()
+    r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish()
 
-    assert r._tip_state.windowed.cached_blocks > 0  # blocks warmed without any viewport() call
+    assert r.tip.view.state.windowed.cached_blocks > 0  # blocks warmed without any viewport() call
 
 
 def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
@@ -186,12 +186,12 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
     monkeypatch.setattr(otel_metrics, "traced", traced)
     r = _reader()
     panel = BrokenPanel()
-    r._tip_state = panel  # type: ignore[assignment]
-    r._tip_view.job_id = r._interaction_jobs.begin("scroll")
-    r._request_render_ahead(r._tip_view, 1)
+    r.tip.view.state = panel  # type: ignore[assignment]
+    r.tip.view.job_id = r._interaction_jobs.begin("scroll")
+    r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert r._tip_view.desired_scroll == r._tip_view.scroll
+    assert r.tip.view.desired_scroll == r.tip.view.scroll
     assert spans[-1][0] == "scroll_request"
     assert spans[-1][1]["outcome"] == "failed"
 
@@ -199,35 +199,35 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
 def test_old_failure_cannot_roll_back_a_new_scroll_to_the_same_coordinate() -> None:
     r = _reader()
     panel = _RecordingPanel()
-    r._tip_state = panel  # type: ignore[assignment]
-    r._tip_view.desired_scroll = 100
+    r.tip.view.state = panel  # type: ignore[assignment]
+    r.tip.view.desired_scroll = 100
     old_job = r._interaction_jobs.begin("scroll")
-    r._tip_view.job_id = old_job
-    r._request_render_ahead(r._tip_view, -1)
+    r.tip.view.job_id = old_job
+    r._request_render_ahead(r.tip.view, -1)
 
-    r._tip_view.desired_scroll = 200
-    r._tip_view.job_id = r._interaction_jobs.begin("scroll")
-    r._tip_view.desired_scroll = 100
+    r.tip.view.desired_scroll = 200
+    r.tip.view.job_id = r._interaction_jobs.begin("scroll")
+    r.tip.view.desired_scroll = 100
     current_job = r._interaction_jobs.begin("scroll")
-    r._tip_view.job_id = current_job
+    r.tip.view.job_id = current_job
     r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert r._tip_view.desired_scroll == 100
-    assert r._tip_view.job_id == current_job
+    assert r.tip.view.desired_scroll == 100
+    assert r.tip.view.job_id == current_job
 
 
 def test_close_rejects_new_work_and_quarantines_late_completion() -> None:
     r = _reader()
     panel = _RecordingPanel()
-    r._tip_state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r._tip_view, 1)
-    before = r._tip_view.scroll
+    r.tip.view.state = panel  # type: ignore[assignment]
+    r._request_render_ahead(r.tip.view, 1)
+    before = r.tip.view.scroll
 
     tooltip_raster.close(r._render_ahead)
     r._render_ahead_submit.finish()
 
-    assert r._tip_view.scroll == before
-    assert not r._request_render_ahead(r._tip_view, -1)
+    assert r.tip.view.scroll == before
+    assert not r._request_render_ahead(r.tip.view, -1)
 
 
 def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch):
@@ -241,16 +241,16 @@ def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch
     from saitenka.app import tooltip_panel
 
     r = _reader()
-    r._tip_state = _RecordingPanel()  # type: ignore[assignment]
+    r.tip.view.state = _RecordingPanel()  # type: ignore[assignment]
     swept: list = []
     monkeypatch.setattr(
         tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
     )
 
-    r._request_render_ahead(r._tip_view, 1)
+    r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish()
 
-    assert swept == [id(r._tip_view), id(r._nest)]
+    assert swept == [id(r.tip.view), id(r.tip.nest)]
 
 
 def test_a_failed_terminal_sweeps_nothing(monkeypatch):
@@ -259,13 +259,13 @@ def test_a_failed_terminal_sweeps_nothing(monkeypatch):
     from saitenka.app import tooltip_panel
 
     r = _reader()
-    r._tip_state = _RecordingPanel()  # type: ignore[assignment]
+    r.tip.view.state = _RecordingPanel()  # type: ignore[assignment]
     swept: list = []
     monkeypatch.setattr(
         tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
     )
 
-    r._request_render_ahead(r._tip_view, 1)
+    r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert swept == []

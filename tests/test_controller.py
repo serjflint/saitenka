@@ -37,15 +37,15 @@ class FakeIPC(RuntimeFakeIPC):
 
 def test_hover_view_snapshots_the_hover_stack():
     r = Reader(FakeIPC())
-    r._paused_by_tip = True
+    r.tip.paused_by_tip = True
     r._nav_idx = 4
-    r._scan_target = "本"
-    r._nest.word = "読"
+    r.tip.scan_target = "本"
+    r.tip.nest.word = "読"
     view = r.hover_view()
     assert (view.paused, view.nav_idx, view.scan_target) == (True, 4, "本")
     assert view.nested.word == "読"
     # a frozen point-in-time copy: later mutation of the reader must not leak into a taken snapshot
-    r._paused_by_tip = False
+    r.tip.paused_by_tip = False
     assert view.paused is True
 
 
@@ -125,10 +125,10 @@ def test_mouse_controls_live_in_a_separate_forced_section():
     # no surface up → not enabled; a tooltip up → enabled; gone → disabled
     r._sync_mouse_capture()
     assert not any(c[0] == "enable-section" and c[1] == name for c in ipc.commands)
-    r._tip_rect = (0, 0, 10, 10)
+    r.tip.view.rect = (0, 0, 10, 10)
     r._sync_mouse_capture()
     assert ipc.commands[-1][:2] == ("enable-section", name)
-    r._tip_rect = None
+    r.tip.view.rect = None
     r._sync_mouse_capture()
     assert ipc.commands[-1] == ("disable-section", name)
 
@@ -164,7 +164,7 @@ def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
     ipc = FakeIPC()
     r = Reader(ipc)
     r._register_keybinds()
-    r._tip_rect = (0, 0, 10, 10)
+    r.tip.view.rect = (0, 0, 10, 10)
     r._sync_mouse_capture()
     forced = ipc.commands.count(
         ("enable-section", bindings.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
@@ -181,7 +181,7 @@ def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
     from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
     identity, due = ipc.timers["lifecycle:mouse-capture-reassert"]  # captured in flight
-    r._tip_rect = None
+    r.tip.view.rect = None
     r._sync_mouse_capture()  # surface down → released, and the re-assertion retired with it
     assert ipc.commands[-1] == ("disable-section", bindings.MOUSE_SECTION)
 
@@ -1128,7 +1128,7 @@ def test_transit_over_word_does_not_switch(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)
     r.tokens = ["a", "b"]
-    r._tip_rect = (100, 100, 80, 60)
+    r.tip.view.rect = (100, 100, 80, 60)
     monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
     monkeypatch.setattr(r, "_hit", lambda _x, y: 0 if y < 10 else (1 if y < 60 else -1))
     clock = [1000.0]
@@ -1151,7 +1151,7 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)
     r.tokens = ["x"]
-    r._tip_rect = (100, 100, 60, 40)
+    r.tip.view.rect = (100, 100, 60, 40)
     # Both halves of the hover fact are stubbed: this test is about the DWELL, not about what a
     # build or a teardown does — the panel build needs a dictionary this Reader has no use for.
     monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
@@ -1192,10 +1192,10 @@ def test_tooltip_capped_and_inside_safe_area():
 
     # osd == REFERENCE (1080p) so _tip_display_scale == 1.0 → viewport px are display px.
     margin = max(16, round(1080 * 0.05))
-    assert r._tip_view_h <= round(1080 * 0.5)  # height capped
-    _tx, ty = r._tip_xy
+    assert r.tip.view.view_h <= round(1080 * 0.5)  # height capped
+    _tx, ty = r.tip.view.xy
     assert ty >= margin  # top clears the header margin
-    assert ty + r._tip_view_h <= 1080 - margin  # bottom stays inside the window
+    assert ty + r.tip.view.view_h <= 1080 - margin  # bottom stays inside the window
 
 
 def test_panel_cache_avoids_rerender_on_revisit():
@@ -1300,7 +1300,7 @@ def test_pause_on_tooltip_respects_manual_pause():
 def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
-    r._paused_by_tip = True
+    r.tip.paused_by_tip = True
     monkeypatch.setattr(r, "_toast", lambda *_args: None)
     r.toggle_hover_pause()
     assert ("set_property", "pause", False) in ipc.commands
@@ -1389,10 +1389,10 @@ def test_prefetch_worker_warms_cache_then_close_joins():
             mined=False,
         )
         for _ in range(300):
-            if key in r._panel_cache:
+            if key in r.tip.panel_cache:
                 break
             time.sleep(0.01)
-        assert key in r._panel_cache  # prefetched in the background, no hover needed
+        assert key in r.tip.panel_cache  # prefetched in the background, no hover needed
     finally:
         r.close()
         gateway.close()
@@ -1444,14 +1444,14 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     r = _tall_reader(FakeIPC())
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
-    wp = r._tip_state.windowed
+    wp = r.tip.view.state.windowed
     assert wp.measured < wp.count  # head only — the whole tall panel was NOT rendered up front
-    assert r._tip_view_h >= r._tip_cap() - 1  # …but the viewport is fully covered
+    assert r.tip.view.view_h >= r._tip_cap() - 1  # …but the viewport is fully covered
     assert (
-        r.hover_view().tip.state.full_height >= r._tip_view_h
+        r.hover_view().tip.state.full_height >= r.tip.view.view_h
     )  # estimate at least fills the viewport
     before = wp.measured
-    r._scroll_tip(r._tip_state.full_height)  # wheel toward the bottom
+    r._scroll_tip(r.tip.view.state.full_height)  # wheel toward the bottom
     assert wp.measured > before  # scrolling measured more blocks (the deferred tail)
 
 
@@ -1459,9 +1459,9 @@ def _click_center_of_add_button(r, ipc):
     from saitenka.panel import header_add_rect
 
     px, py, pw, ph = header_add_rect(r.tip_width)
-    sx, sy = r._tip_xy
+    sx, sy = r.tip.view.xy
     cx = sx + px + pw / 2
-    cy = sy + (py - r._tip_scroll) + ph / 2
+    cy = sy + (py - r.tip.view.scroll) + ph / 2
     ipc.props["mouse-pos"] = {"hover": True, "x": cx, "y": cy}
     return cx, cy
 
@@ -1495,7 +1495,7 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     events = []
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
-    tx, ty, tw, th = r._tip_rect
+    tx, ty, tw, th = r.tip.view.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + th - 5}  # low in the body
     r.on_click()
     assert events == []  # neither speaks nor mines
@@ -1513,11 +1513,11 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
     events = []
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     px, py, pw, ph = header_speaker_rect(r.tip_width)
-    sx, sy = r._tip_xy
+    sx, sy = r.tip.view.xy
     ipc.props["mouse-pos"] = {
         "hover": True,
         "x": sx + px + pw / 2,
-        "y": sy + (py - r._tip_scroll) + ph / 2,
+        "y": sy + (py - r.tip.view.scroll) + ph / 2,
     }
     r.on_click()
     assert events == ["speak"]  # only the 🔊 button plays audio
@@ -1573,12 +1573,12 @@ def _fire_dwell(ipc, kind: str) -> bool:
 
 def _hover_first_scan_cell(r, ipc):
     """Point the cursor at the first scan cell of the base tooltip; return the ScanBox."""
-    sb = r._tip_state.windowed.scan_boxes()[0]
-    sx, sy = r._tip_xy
+    sb = r.tip.view.state.windowed.scan_boxes()[0]
+    sx, sy = r.tip.view.xy
     ipc.props["mouse-pos"] = {
         "hover": True,
         "x": sx + sb.x + sb.w / 2,
-        "y": sy + (sb.y - r._tip_scroll) + sb.h / 2,
+        "y": sy + (sb.y - r.tip.view.scroll) + sb.h / 2,
     }
     return sb
 
@@ -1588,10 +1588,10 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.hover = 0
     r._show_tooltip(0)
-    boxes = r._tip_state.windowed.scan_boxes()
+    boxes = r.tip.view.state.windowed.scan_boxes()
     assert boxes
     sb = boxes[0]
-    sx, sy = r._tip_xy
+    sx, sy = r.tip.view.xy
     hit = r._scan_hit(sx + sb.x + sb.w / 2, sy + sb.y + sb.h / 2)
     assert hit is not None and hit.text.startswith("追")
 
@@ -1621,20 +1621,22 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     r._open_nested(
         tok, tok.surface, 300.0, 2000.0, 40.0
     )  # anchor low → nested_view_h keeps full height
-    st = r._nest.state
+    st = r.tip.nest.state
     assert st is not None
     assert st.windowed.measured < st.windowed.count  # head only on open — the tall tail is deferred
     # Wheel toward the bottom until the clamp stops moving; each notch grows the converging estimate.
     prev = -1
     for _ in range(200):
         r._scroll_nested(10_000)
-        if r._nest.scroll == prev:
+        if r.tip.nest.scroll == prev:
             break
-        prev = r._nest.scroll
+        prev = r.tip.nest.scroll
     assert (
         st.windowed.measured == st.windowed.count
     )  # whole panel measured — the estimate never froze
-    assert r._nest.scroll == max(0, st.full_height - r._nest.view_h)  # reached the true bottom
+    assert r.tip.nest.scroll == max(
+        0, st.full_height - r.tip.nest.view_h
+    )  # reached the true bottom
 
 
 def test_tooltip_geometry_is_resolution_independent():
@@ -1687,13 +1689,13 @@ def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.hover = 0
     r._show_tooltip(0)
-    boxes = r._tip_state.windowed.scan_boxes()
+    boxes = r.tip.view.state.windowed.scan_boxes()
     assert boxes
     sb = boxes[0]
     s = r._tip_display_scale
     assert s == 2.0
-    sx, sy = r._tip_xy
-    hit = r._scan_hit(sx + (sb.x + sb.w / 2) * s, sy + (sb.y + sb.h / 2 - r._tip_scroll) * s)
+    sx, sy = r.tip.view.xy
+    hit = r._scan_hit(sx + (sb.x + sb.w / 2) * s, sy + (sb.y + sb.h / 2 - r.tip.view.scroll) * s)
     assert hit is not None and hit.text == sb.text
 
 
@@ -1736,8 +1738,8 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     r.scan_delay = 0.25
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
-    boxes = r._tip_state.windowed.scan_boxes()
-    sx, sy = r._tip_xy
+    boxes = r.tip.view.state.windowed.scan_boxes()
+    sx, sy = r.tip.view.xy
 
     def hover(sb):
         ipc.props["mouse-pos"] = {
@@ -1792,7 +1794,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     assert r.hover_view().nested.state is not None
     ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave the whole stack
     r._update_hover()
-    assert r._nest.hide_pending  # scheduled, not instant
+    assert r.tip.nest.hide_pending  # scheduled, not instant
 
     assert _fire_dwell(ipc, "nested-hide")
 
@@ -1817,11 +1819,11 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     mined = []
     monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
     px, py, pw, ph = header_add_rect(r.tip_width)
-    nx, ny = r._nest.xy
+    nx, ny = r.tip.nest.xy
     ipc.props["mouse-pos"] = {
         "hover": True,
         "x": nx + px + pw / 2,
-        "y": ny + (py - r._nest.scroll) + ph / 2,
+        "y": ny + (py - r.tip.nest.scroll) + ph / 2,
     }
     r.on_click()
     assert mined and mined[0].startswith("追")  # ⊕ mined the scanned inner word
@@ -1857,12 +1859,12 @@ def _link_reader(ipc):
 
 def _point_at_link(r, ipc):
     # the body cross-reference link (skip the header's per-kanji `kanji:` links, which now sit first)
-    lb = next(b for b in r._tip_state.windowed.link_boxes() if not b.query.startswith("kanji:"))
-    sx, sy = r._tip_xy
+    lb = next(b for b in r.tip.view.state.windowed.link_boxes() if not b.query.startswith("kanji:"))
+    sx, sy = r.tip.view.xy
     ipc.props["mouse-pos"] = {
         "hover": True,
         "x": sx + lb.x + lb.w / 2,
-        "y": sy + (lb.y - r._tip_scroll) + lb.h / 2,
+        "y": sy + (lb.y - r.tip.view.scroll) + lb.h / 2,
     }
     return lb
 
@@ -1877,7 +1879,7 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     assert r.hover_view().tip.state.windowed.link_boxes()  # the def body exposed a clickable link
-    base = r._tip_state
+    base = r.tip.view.state
     _point_at_link(r, ipc)
     r.on_click()
     assert r.hover_view().nested.state is None  # NOT a nested popup
@@ -1919,19 +1921,21 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     # the wildcard cross-ref in the body (skip the header's per-kanji `kanji:` links)
-    lb = next(b for b in r._tip_state.windowed.link_boxes() if not b.query.startswith("kanji:"))
+    lb = next(b for b in r.tip.view.state.windowed.link_boxes() if not b.query.startswith("kanji:"))
     assert "*" in lb.query  # the cross-ref is a wildcard pattern
-    sx, sy = r._tip_xy
+    sx, sy = r.tip.view.xy
     ipc.props["mouse-pos"] = {
         "hover": True,
         "x": sx + lb.x + lb.w / 2,
-        "y": sy + (lb.y - r._tip_scroll) + lb.h / 2,
+        "y": sy + (lb.y - r.tip.view.scroll) + lb.h / 2,
     }
     r.on_click()
     # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
     assert r.hover_view().nested.state is None
-    assert len(r._tip_nav) == 1
-    results = [b for b in r._tip_state.windowed.link_boxes() if not b.query.startswith("kanji:")]
+    assert len(r.tip.tip_nav) == 1
+    results = [
+        b for b in r.tip.view.state.windowed.link_boxes() if not b.query.startswith("kanji:")
+    ]
     assert (
         results[0].query == "食べる"
     )  # the base now shows results, each drilling into an exact term
@@ -2006,7 +2010,7 @@ def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
-    links = r._tip_state.windowed.link_boxes()
+    links = r.tip.view.state.windowed.link_boxes()
     assert any(lb.query == "思し召し" for lb in links)  # the furigana'd cross-ref IS clickable
 
 
@@ -2044,7 +2048,7 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     r._update_hover()
     assert r.hover_view().nested.state is None  # hover did NOT open a scan popup over the link
     r.on_click()  # …a click navigates the base in place (no floating popup)
-    assert r.hover_view().nested.state is None and len(r._tip_nav) == 1
+    assert r.hover_view().nested.state is None and len(r.tip.tip_nav) == 1
 
 
 def test_scroll_resets_scan_dwell(monkeypatch):
@@ -2057,7 +2061,7 @@ def test_scroll_resets_scan_dwell(monkeypatch):
     r._update_hover()
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().scan_target is not None  # a scan target is settling
-    r._tip_view_h = 20  # make the panel scrollable
+    r.tip.view.view_h = 20  # make the panel scrollable
     r._scroll_tip(20)  # scrolling the panel…
     assert r.hover_view().scan_target is None  # …restarts the dwell so no popup fires mid-scroll
 
@@ -2074,7 +2078,7 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_link(r, ipc)
     r.on_click()
-    assert events == [] and len(r._tip_nav) == 1  # navigated the base, no mine/speak fallthrough
+    assert events == [] and len(r.tip.tip_nav) == 1  # navigated the base, no mine/speak fallthrough
 
 
 # --- copy: Shift+C (whole line) and right-click (word under cursor) + highlight flash ---------------
@@ -2101,7 +2105,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     r.set_hover(0)
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
-    tx, ty, tw, _th = r._tip_rect
+    tx, ty, tw, _th = r.tip.view.rect
     ipc.props["mouse-pos"] = {
         "hover": True,
         "x": tx + tw / 2,
@@ -2109,7 +2113,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     }  # header, not a scan cell
     r.copy_click()
     assert got and "本命" in got[0]  # copied the hovered word
-    assert r._flash_oid == C.TIP_ID
+    assert r.tip.flash_oid == C.TIP_ID
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
@@ -2122,11 +2126,11 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     _fire_dwell(ipc, "scan-open")  # open the nested popup
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
-    nx, ny, nw, nh = r._nest.rect
+    nx, ny, nw, nh = r.tip.nest.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": nx + nw / 2, "y": ny + nh / 2}
     r.copy_click()
     assert got and got[0].startswith("追")  # copied the inner scanned word
-    assert r._flash_oid == C.NESTED_ID
+    assert r.tip.flash_oid == C.NESTED_ID
 
 
 def test_flash_border_drawn_then_cleared(monkeypatch):
@@ -2143,7 +2147,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     monkeypatch.setattr(
         r.ov, "show_bgra", lambda bgra, _x, _y, oid: shots.append((oid, bgra.copy()))
     )
-    tx, ty, tw, _th = r._tip_rect
+    tx, ty, tw, _th = r.tip.view.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
     oid, view = shots[-1]
@@ -2164,7 +2168,7 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     r.set_hover(0)
-    tx, ty, tw, _th = r._tip_rect
+    tx, ty, tw, _th = r.tip.view.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
     stale = ipc.timers["lifecycle:flash-expiry"]
@@ -2173,7 +2177,7 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
 
     assert ipc.timers["lifecycle:flash-expiry"] != stale
     assert ipc.fire_runtime_timer("lifecycle:flash-expiry")
-    assert r._flash_oid is None  # the latest due event, and only it, retired the pulse
+    assert r.tip.flash_oid is None  # the latest due event, and only it, retired the pulse
 
 
 def test_closing_retires_a_pending_copy_flash(monkeypatch):
@@ -2183,7 +2187,7 @@ def test_closing_retires_a_pending_copy_flash(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     r.set_hover(0)
-    tx, ty, tw, _th = r._tip_rect
+    tx, ty, tw, _th = r.tip.view.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
 
@@ -2573,16 +2577,16 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
     # insert (the real tooltip below) triggers a single eviction of the oldest.
     sentinel = object()
     for i in range(r.panel_cache_max):
-        r._panel_cache.setdefault(f"key_{i}", sentinel)
+        r.tip.panel_cache.setdefault(f"key_{i}", sentinel)
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
     r.tokens = [tok]
     r._show_tooltip(0)
     # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
-    assert f"key_{r.panel_cache_max - 1}" in r._panel_cache, (
+    assert f"key_{r.panel_cache_max - 1}" in r.tip.panel_cache, (
         "LRU eviction removed recently-used entry"
     )
-    assert "key_0" not in r._panel_cache, "LRU eviction should have removed oldest entry"
+    assert "key_0" not in r.tip.panel_cache, "LRU eviction should have removed oldest entry"
 
 
 def test_close_cleans_up_tmp_dir():
@@ -3120,7 +3124,7 @@ def test_popups_module_unifies_popup_view_state():
     assert pv.state is None and pv.scroll == 0 and pv.rect is None and not pv.hide_pending
     assert C._Nested is PopupView
     r = Reader(FakeIPC())
-    assert isinstance(r._nest, PopupView)
+    assert isinstance(r.tip.nest, PopupView)
     # Panel wraps the windowed engine and is constructible from rows
     entry = Entry(
         headword="本命", reading="ほんめい", defs=[Definition("辞書", ["これは定義です。"])]

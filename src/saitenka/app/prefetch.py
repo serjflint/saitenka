@@ -480,7 +480,7 @@ def _head_prefetch_candidate(
         return None
     inflected = reader.tokenizer.inflected_in(toks, i)
     key = reader._panel_key(t, inflected, mined=False)
-    if key in reader._panel_cache:
+    if key in reader.tip.panel_cache:
         return None  # already warm (hovered earlier, or a prior speculative render)
     return priority, HeadPrefetchItem(gen, t, inflected, mined=False)
 

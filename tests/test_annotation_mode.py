@@ -98,7 +98,7 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
     assert calls == [("style", True)]
     # The switch is a decision the dwell has not made yet: the target is armed, the tooltip has not
     # moved. No stub stands in for the build — nothing calls it.
-    assert reader._word_target == 1
+    assert reader.tip.word_target == 1
     assert reader.hover == 0
 
 

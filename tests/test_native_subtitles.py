@@ -741,7 +741,7 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     result.hover = 0
-    result._paused_by_tip = True
+    result.tip.paused_by_tip = True
     ipc.commands.clear()
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
@@ -756,7 +756,7 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert result.boxes == []
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result._paused_by_tip = False
+    result.tip.paused_by_tip = False
     result.close()
 
 
@@ -775,7 +775,7 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     assert result.native_geometry.status.geometry_ready
     result._sub_pending = None
     result.hover = 0
-    result._paused_by_tip = True
+    result.tip.paused_by_tip = True
     ipc.commands.clear()
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
@@ -790,7 +790,7 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     assert ("set_property", "pause", False) not in ipc.commands
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result._paused_by_tip = False
+    result.tip.paused_by_tip = False
     result.close()
 
 
@@ -1410,7 +1410,7 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
     result.set_hover(2)
 
     assert result.hover == 2
-    assert result._tip_state is not None
+    assert result.tip.view.state is not None
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
     ]
@@ -1428,10 +1428,10 @@ def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: 
     result._show_tooltip(0)
 
     assert result.hover == -1
-    assert result._tip_state is None
+    assert result.tip.view.state is None
     result.hover = 0
     kanji_current(result)
-    assert result._kanji_index == 0
+    assert result.tip.kanji_index == 0
     result.close()
 
 

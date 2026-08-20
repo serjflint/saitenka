@@ -33,12 +33,12 @@ def test_retiring_a_hover_clears_every_field_together() -> None:
     """Against the real Reader, so the delegation to the tooltip state is exercised too."""
     reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
-        reader._hover_meta = HoverMetadata(
+        reader.tip.hover = HoverMetadata(
             terms=("本命を",), span=(0, 2), mined=True, group_mined=(True, False)
         )
-        reader._hover_meta = NO_HOVER_METADATA
+        reader.tip.hover = NO_HOVER_METADATA
 
-        meta = reader._hover_meta
+        meta = reader.tip.hover
         assert (meta.terms, meta.span, meta.mined, meta.group_mined) == ((), None, False, ())
     finally:
         reader.close()
@@ -49,9 +49,9 @@ def test_the_reader_shim_and_the_tooltip_state_are_the_same_value() -> None:
     reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
         meta = HoverMetadata(terms=("読む",), span=(1, 2), mined=False, group_mined=(False,))
-        reader._hover_meta = meta
+        reader.tip.hover = meta
 
         assert reader.tip.hover is meta
-        assert reader._hover_meta is reader.tip.hover
+        assert reader.tip.hover is reader.tip.hover
     finally:
         reader.close()

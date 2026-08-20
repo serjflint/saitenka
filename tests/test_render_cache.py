@@ -314,7 +314,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    r._hover_meta = NO_HOVER_METADATA
+    r.tip.hover = NO_HOVER_METADATA
     i = next(i for i, t in enumerate(r.tokens) if t.is_content)
     tok = r.tokens[i]
     cap, w = r._tip_cap(), r.tip_width
@@ -334,7 +334,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
 
     uploaded: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda view, *_a, **_k: uploaded.append(np.array(view)))
-    r._panel_cache.clear()  # force cold
+    r.tip.panel_cache.clear()  # force cold
     r._show_tooltip(i)
 
     assert uploaded and np.array_equal(
@@ -342,7 +342,9 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     )  # painted from disk, not a fresh raster
     from saitenka.app.popups import Panel
 
-    assert isinstance(r._tip_state, Panel)  # …and the real interactive panel was still built after
+    assert isinstance(
+        r.tip.view.state, Panel
+    )  # …and the real interactive panel was still built after
 
 
 # --- the reusable raster-accounting oracle + the unified popup view (Phase A) --------------------
@@ -423,9 +425,9 @@ def test_cold_nested_scroll_rasters_on_the_interactive_thread():
         for _ in range(
             6
         ):  # each notch grows the height estimate and moves past the warmed overscan
-            tooltip_panel.scroll_view(r, r._nest, r._nest.view_h)
+            tooltip_panel.scroll_view(r, r.tip.nest, r.tip.nest.view_h)
 
-    assert assert_no_interactive_raster(r._nest, scroll_to_the_cold_tail) > 0
+    assert assert_no_interactive_raster(r.tip.nest, scroll_to_the_cold_tail) > 0
 
 
 def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
@@ -436,16 +438,16 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
     tok = r.tokens[0]
     r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)  # soft first paint
     tooltip_panel.scroll_view(
-        r, r._nest, r._nest.view_h // 2
+        r, r.tip.nest, r.tip.nest.view_h // 2
     )  # soft-first + records a render-ahead
-    assert r._nest.crisp_pending
+    assert r.tip.nest.crisp_pending
     r._render_ahead_submit.finish_all()
 
     rasters = assert_no_interactive_raster(
-        r._nest, lambda: tooltip_panel.apply_pending_crisp(r, r._nest)
+        r.tip.nest, lambda: tooltip_panel.apply_pending_crisp(r, r.tip.nest)
     )
     assert rasters == 0
-    assert r._nest.crisp_miss == "" and not r._nest.crisp_pending  # upgraded soft → crisp
+    assert r.tip.nest.crisp_miss == "" and not r.tip.nest.crisp_pending  # upgraded soft → crisp
 
 
 def test_nested_scroll_requests_render_ahead_for_the_nested_view():
@@ -454,8 +456,8 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     r = _nested_reader()
     tok = r.tokens[0]
     r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)
-    nest = r._nest.state
-    tooltip_panel.scroll_view(r, r._nest, max(1, r._nest.view_h // 3))
+    nest = r.tip.nest.state
+    tooltip_panel.scroll_view(r, r.tip.nest, max(1, r.tip.nest.view_h // 3))
     pending = r._render_ahead.pending
     assert pending is not None
     req = pending[1]
@@ -489,7 +491,7 @@ def test_render_ahead_warms_raw_bands_ahead_on_hidpi(monkeypatch):
     r.hover = 0
     monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
     r._show_tooltip(0)
-    scales = _render_ahead_scales(r, r._tip_view, monkeypatch)
+    scales = _render_ahead_scales(r, r.tip.view, monkeypatch)
     assert r._raster_scale > 1.0  # the fixture is 4K → native scale
     assert r._raster_scale in scales  # native bands warmed ahead (unchanged)
     assert 1.0 in scales  # …and the raw bands the soft flick path reads (the fix)
@@ -503,7 +505,7 @@ def test_render_ahead_warms_raw_once_on_lodpi(monkeypatch):
     r.hover = 0
     monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
     r._show_tooltip(0)
-    scales = _render_ahead_scales(r, r._tip_view, monkeypatch)
+    scales = _render_ahead_scales(r, r.tip.view, monkeypatch)
     assert r._raster_scale == 1.0
     assert scales == [1.0]  # exactly one raw warm, no duplicate
 
@@ -515,29 +517,29 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     r = _nested_reader(two_words=True)  # distinct base/nested words → distinct panels
     r.hover = 0
     r._show_tooltip(0)  # base tooltip up, cold → its own crisp_pending
-    assert r._tip_view.crisp_pending
+    assert r.tip.view.crisp_pending
     tok = r.tokens[1]  # nested on a DIFFERENT word, so warming it can't warm the base
     r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)  # nested soft paint
-    assert r._nest.crisp_pending  # nested has its OWN pending flag…
-    assert r._tip_view.crisp_pending  # …and did NOT clobber the base's
+    assert r.tip.nest.crisp_pending  # nested has its OWN pending flag…
+    assert r.tip.view.crisp_pending  # …and did NOT clobber the base's
 
-    nest = r._nest.state
+    nest = r.tip.nest.state
     assert nest is not None
-    vh = min(r._nest.view_h, nest.full_height)
-    y0 = max(0, min(r._nest.scroll, max(0, nest.full_height - vh)))
+    vh = min(r.tip.nest.view_h, nest.full_height)
+    y0 = max(0, min(r.tip.nest.scroll, max(0, nest.full_height - vh)))
     nest.viewport(y0, vh, overscan=vh, scale=r._raster_scale)  # worker warms ONLY the nested native
 
     uploads: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda _v, *_a, oid=None, **_k: uploads.append(oid))
     tooltip_panel.apply_pending_crisp(
-        r, r._tip_view
+        r, r.tip.view
     )  # base native still cold → no-op, base not re-blit
     tooltip_panel.apply_pending_crisp(
-        r, r._nest
+        r, r.tip.nest
     )  # nested native warm → upgrades the NESTED to crisp
 
-    assert not r._nest.crisp_pending and r._nest.crisp_miss == ""  # nested is crisp now
-    assert r._tip_view.crisp_pending  # base still pending (untouched by the nested upgrade)
+    assert not r.tip.nest.crisp_pending and r.tip.nest.crisp_miss == ""  # nested is crisp now
+    assert r.tip.view.crisp_pending  # base still pending (untouched by the nested upgrade)
     assert uploads == [
         OverlayId.NESTED
     ]  # ONLY the nested re-blit; the base was not spuriously redrawn
@@ -672,7 +674,7 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None):
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    r._hover_meta = NO_HOVER_METADATA
+    r.tip.hover = NO_HOVER_METADATA
     r.session.render_cache.cache_min_height_px = 0  # store every head (no cost gate) for the test
     cache = _cache(tmp_path)
     r.session.render_cache.obj, r.session.render_cache.built = cache, True
@@ -686,10 +688,10 @@ def test_preloop_demo_hover_is_ready_with_a_real_runtime_gateway(tmp_path, monke
     gateway = runtime_gateway(ipc)
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch, ipc)
     i, _tok, _inflected, _mined = _first_content(r)
-    r._panel_cache.clear()
+    r.tip.panel_cache.clear()
     try:
         r.prepare_hover_blocking(i)
-        assert r._tip_state is not None
+        assert r.tip.view.state is not None
         assert r._engaged_tooltip.inflight is None
     finally:
         r.close()
@@ -712,7 +714,7 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
     r._precompose_head(st, tok, inflected, mined=mined, cap=cap, protected=True)  # a prewarmed head
     assert cache.stats()[0] == 1  # persisted to disk
 
-    r._panel_cache.clear()  # simulate the in-memory panel evicted
+    r.tip.panel_cache.clear()  # simulate the in-memory panel evicted
     fresh = r._panel_for(tok, inflected, min_h=cap, mined=mined)
     assert fresh.windowed.first_view is None  # cold rebuild
     assert r._worker_seed_head(fresh, tok, inflected, mined=mined, cap=cap) is True
@@ -731,9 +733,9 @@ def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, _tok, _inflected, _mined = _first_content(r)
-    r._panel_cache.clear()  # ensure cold
+    r.tip.panel_cache.clear()  # ensure cold
     tooltip.show_tooltip(r, i)
-    assert r._tip_state is None  # nothing shown — deferred
+    assert r.tip.view.state is None  # nothing shown — deferred
     assert submitter.calls  # handed to the runtime actor
 
 
@@ -743,19 +745,19 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
-    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined, phrase=r._hover_meta.terms)
+    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined, phrase=r.tip.hover.terms)
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
-    r._panel_cache.clear()
+    r.tip.panel_cache.clear()
     tooltip.show_tooltip(r, i)
-    assert r._tip_state is None and submitter.calls
+    assert r.tip.view.state is None and submitter.calls
     r.hover = i
     submitter.finish()
     assert cache.stats()[0] == 1 and len(r.session.render_cache.mem) == 1
 
     # Still hovering the same word → completion shows the now-warm tooltip.
-    assert r._tip_state is not None  # shown
-    assert tuple(r._tip_key) == tuple(key)
+    assert r.tip.view.state is not None  # shown
+    assert tuple(r.tip.view.key) == tuple(key)
 
 
 def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monkeypatch):
@@ -776,10 +778,10 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
     submitter = _enable_engaged(r)
-    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
-            tok, inflected, mined, tuple(key), r._tip_cap(), job_id=r._tip_view.job_id
+            tok, inflected, mined, tuple(key), r._tip_cap(), job_id=r.tip.view.job_id
         )
     )
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
@@ -795,10 +797,10 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
     old_key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
-    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
-            tok, inflected, mined, tuple(old_key), r._tip_cap(), job_id=r._tip_view.job_id
+            tok, inflected, mined, tuple(old_key), r._tip_cap(), job_id=r.tip.view.job_id
         )
     )
 
@@ -807,7 +809,7 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
     monkeypatch.setattr(tooltip, "_paint_from_cache", lambda *_args: False)
     submitter.finish()
 
-    assert r._tip_state is not None or submitter.calls
+    assert r.tip.view.state is not None or submitter.calls
     if submitter.calls:
         queued = submitter.calls[-1]["request"].request
         assert isinstance(queued, tooltip_engaged.HoverRequest)
@@ -820,11 +822,11 @@ def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.hover, r._tip_state = -1, None  # not hovering that word anymore
+    r.hover, r.tip.view.state = -1, None  # not hovering that word anymore
     tooltip.apply_engaged_hover(
         r, tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=None)
     )
-    assert r._tip_state is None  # nothing shown
+    assert r.tip.view.state is None  # nothing shown
 
 
 def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
@@ -834,13 +836,13 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     i, _tok, _inflected, _mined = _first_content(r)
     old_job = r._interaction_jobs.begin("tooltip")
     r.hover = i
-    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
 
     tooltip.apply_engaged_hover(
         r, tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=old_job)
     )
 
-    assert r._tip_state is None
+    assert r.tip.view.state is None
     assert r._engaged_tooltip.pending is None
 
 
@@ -855,10 +857,10 @@ def test_nested_cold_miss_defers_and_enqueues_nested(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     _i, tok, inflected, _mined = _first_content(r)
-    r._tip_xy, r._tip_scroll = (0, 0), 0
-    r._panel_cache.clear()
+    r.tip.view.xy, r.tip.view.scroll = (0, 0), 0
+    r.tip.panel_cache.clear()
     nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
-    assert r._nest.state is None  # nothing shown — deferred
+    assert r.tip.nest.state is None  # nothing shown — deferred
     request = submitter.calls[-1]["request"].request
     assert isinstance(request, tooltip_engaged.HoverRequest) and request.nested
 
@@ -871,10 +873,10 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.prefetch = False
     _i, tok, inflected, _mined = _first_content(r)
-    r._tip_xy, r._tip_scroll = (0, 0), 0
-    r._panel_cache.clear()
+    r.tip.view.xy, r.tip.view.scroll = (0, 0), 0
+    r.tip.panel_cache.clear()
     nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
-    assert r._nest.state is not None  # shown synchronously
+    assert r.tip.nest.state is not None  # shown synchronously
     assert r._engaged_tooltip.pending is None and r._engaged_tooltip.inflight is None
 
 
@@ -889,7 +891,7 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     _i, tok, inflected, mined = _first_content(r)
     key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
 
-    r._panel_cache.clear()
+    r.tip.panel_cache.clear()
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
             tok, inflected, mined, tuple(key), r._tip_cap(), nested=True, tail=tok.surface
@@ -897,7 +899,7 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     )
     submitter.finish()
     assert cache.stats()[0] == 0  # nested never persisted to disk
-    st = r._panel_cache.get(key)  # panel warmed into the cache
+    st = r.tip.panel_cache.get(key)  # panel warmed into the cache
     assert st is not None
     vh = min(st.full_height, r._cap_for(r.nested_max_frac))
     st.viewport(0, vh, overscan=vh)
@@ -934,21 +936,21 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     r._interaction_metadata_submit = submit_metadata
     submitter = _enable_engaged(r)
     _i, tok, _inflected, _mined = _first_content(r)
-    r._tip_xy, r._tip_scroll = (0, 0), 0
+    r.tip.view.xy, r.tip.view.scroll = (0, 0), 0
     sb = SimpleNamespace(text=tok.surface, x=10, y=10, h=20)
     # Both lookup sites: the metadata completion re-derives through `nested_popup`, the composed
     # head through `tooltip`.
     for module in (tooltip, nested_popup):
         monkeypatch.setattr(module, "scan_hit", lambda _tip, _scale, _mx, _my: sb)
 
-    r._panel_cache.clear()
+    r.tip.panel_cache.clear()
     nested_popup.show_nested(r, sb)  # cold → defer (same phrase the worker will build under)
     deadline = time.monotonic() + 1
     while not submitter.calls and time.monotonic() < deadline:
         time.sleep(0.001)
-    assert r._nest.state is None and submitter.calls
+    assert r.tip.nest.state is None and submitter.calls
     submitter.finish()
-    assert r._nest.state is not None  # nested popup now shown
+    assert r.tip.nest.state is not None  # nested popup now shown
     assert cache.stats()[0] == 0  # still never persisted
 
 
@@ -960,7 +962,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     requests = []
     monkeypatch.setattr(r, "_request_interaction_metadata", requests.append)
     r.hover = index
-    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
     tooltip._request_hover_metadata(r, index)
     original = requests[-1]
     r._mined.add("__newly-mined__")  # bumps the generation because membership actually moved
@@ -976,7 +978,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     )
 
     assert requests[-1].key.mined_generation == r._mined.generation
-    assert requests[-1].key.job_id == r._tip_view.job_id
+    assert requests[-1].key.job_id == r.tip.view.job_id
 
 
 def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
@@ -985,11 +987,11 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
     from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r._tip_state, r._tip_rect = None, None
+    r.tip.view.state, r.tip.view.rect = None, None
     tooltip.apply_engaged_hover(
         r, tooltip_engaged.HoverReady(("k",), nested=True, tail="本", job_id=None)
     )
-    assert r._nest.state is None
+    assert r.tip.nest.state is None
 
 
 # --- clicked cross-reference navigation: off the main thread too (tier-3) ------------------------
@@ -997,7 +999,7 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
 
 def _base_tip_up(r):
     _i, tok, inflected, mined = _first_content(r)
-    r._tip_state = r._panel_for(tok, inflected, min_h=r._tip_cap(), mined=mined)
+    r.tip.view.state = r._panel_for(tok, inflected, min_h=r._tip_cap(), mined=mined)
     return tok
 
 
@@ -1012,7 +1014,7 @@ def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
     tooltip.navigate_tip(r, tok.surface)
     request = submitter.calls[-1]["request"].request
     assert isinstance(request, tooltip_engaged.NavigateRequest) and request.query == tok.surface
-    assert r._tip_nav == []  # nothing pushed / swapped yet
+    assert r.tip.tip_nav == []  # nothing pushed / swapped yet
 
 
 def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
@@ -1023,7 +1025,7 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r, tok.surface)
     assert r._engaged_tooltip.inflight is None
-    assert len(r._tip_nav) == 1  # synchronous swap pushed the previous view
+    assert len(r.tip.tip_nav) == 1  # synchronous swap pushed the previous view
 
 
 def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
@@ -1032,12 +1034,12 @@ def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    old = r._tip_state
+    old = r.tip.view.state
     tooltip.navigate_tip(r, tok.surface)  # defer
     submitter.finish()
-    assert r._tip_state is not None and r._tip_state is not old  # navigated panel installed
-    assert len(r._tip_nav) == 1  # previous view pushed for Esc/back
-    assert r._tip_key is None  # a navigated view is keyless
+    assert r.tip.view.state is not None and r.tip.view.state is not old  # navigated panel installed
+    assert len(r.tip.tip_nav) == 1  # previous view pushed for Esc/back
+    assert r.tip.view.key is None  # a navigated view is keyless
 
 
 def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, monkeypatch):
@@ -1046,20 +1048,20 @@ def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    old = r._tip_state
+    old = r.tip.view.state
 
     tooltip.navigate_tip(r, tok.surface)
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert r._tip_state is not None and r._tip_state is not old
-    assert len(r._tip_nav) == 1
+    assert r.tip.view.state is not None and r.tip.view.state is not old
+    assert len(r.tip.tip_nav) == 1
 
 
 def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    old = r._tip_state
+    old = r.tip.view.state
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(tok, tok.surface, mined=False, key=("old",), cap=r._tip_cap())
     )
@@ -1070,8 +1072,8 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
 
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert r._tip_state is not None and r._tip_state is not old
-    assert len(r._tip_nav) == 1
+    assert r.tip.view.state is not None and r.tip.view.state is not old
+    assert len(r.tip.tip_nav) == 1
 
 
 def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
@@ -1087,7 +1089,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
     result = tooltip_engaged.run_engaged(call["request"], threading.Event(), submitter.backend)
     # A word switch in the defer window → a genuinely different panel object under _tip_state.
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
-    r._tip_state = r._panel_for(
+    r.tip.view.state = r._panel_for(
         r.tokens[j], r._inflected_surface(j), min_h=r._tip_cap(), mined=False
     )
     call["on_finished"](
@@ -1095,7 +1097,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
             EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
         )
     )
-    assert r._tip_nav == []  # not swapped — origin mismatch
+    assert r.tip.tip_nav == []  # not swapped — origin mismatch
 
 
 def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
@@ -1106,7 +1108,7 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r, tok.surface)
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
-    r._tip_state = r._panel_for(
+    r.tip.view.state = r._panel_for(
         r.tokens[j], r._inflected_surface(j), min_h=r._tip_cap(), mined=False
     )
     rebuilt = []
@@ -1114,7 +1116,7 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
 
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert rebuilt == [] and r._tip_nav == []
+    assert rebuilt == [] and r.tip.tip_nav == []
 
 
 def test_the_panel_cache_evicts_the_least_recently_used_entry_at_the_cap():

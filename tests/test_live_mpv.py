@@ -41,8 +41,8 @@ def _targets_for(reader, x, y):
         x,
         y,
         inside=True,
-        tip_rect=reader._tip_rect,
-        nest_rect=reader._nest.rect,
+        tip_rect=reader.tip.view.rect,
+        nest_rect=reader.tip.nest.rect,
         hit=lambda hx, hy: reader._hit(hx, hy) if reader.tokens else -1,
     )
 
@@ -60,7 +60,7 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
 
         _poll_until(
             reader,
-            lambda: reader._tip_rect is not None,
+            lambda: reader.tip.view.rect is not None,
             "a real mouse over a word did not show a tooltip",
         )
         ipc.command("screenshot-to-file", str(tmp / "live_hover.png"), "window")
@@ -102,22 +102,24 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
 
     with _live_reader() as (_tmp, reader, ipc):
         reader.dict_set = _TallDS()  # rebuild the next hover's panel as a tall, scrolling tip
-        reader._panel_cache.clear()
+        reader.tip.panel_cache.clear()
         i = next(k for k, t in enumerate(reader.tokens) if t.is_content)
         box = next(b for b in reader.boxes if b.index == i)
         ox, oy = reader.sub_origin
         ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
-        _poll_until(reader, lambda: reader._tip_rect is not None, "hover did not show a tooltip")
+        _poll_until(
+            reader, lambda: reader.tip.view.rect is not None, "hover did not show a tooltip"
+        )
 
         # occlusion calc: the dead centre of the rendered tooltip must read over_tip (keep the lease),
         # NOT a word beneath it. This checks the windowed-renderer _tip_rect against the same OSD
         # coordinate space mpv reports mouse-pos in — the alignment the headless fakes can't see.
-        tx, ty, tw, th = reader._tip_rect
+        tx, ty, tw, th = reader.tip.view.rect
         cx, cy = int(tx + tw / 2), int(ty + th / 2)
         over_word, over_tip, _nest = _targets_for(reader, cx, cy)
         assert over_tip and over_word == -1, (
             f"cursor over the tooltip must read over_tip (occlusion); got over_tip={over_tip} "
-            f"over_word={over_word} — _tip_rect={reader._tip_rect} (windowed-renderer rect calc?)"
+            f"over_word={over_word} — _tip_rect={reader.tip.view.rect} (windowed-renderer rect calc?)"
         )
 
         # real cursor onto the tooltip → the lease holds (hover stays on the aimed word, not hijacked)
@@ -127,7 +129,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
             time.sleep(0.02)
         assert reader.hover == i, (
             f"resting on the tooltip must keep its lease; hover={reader.hover} aimed={i} "
-            f"(_tip_rect={reader._tip_rect})"
+            f"(_tip_rect={reader.tip.view.rect})"
         )
 
         # a real left-click on the tooltip body must be captured (tip stays), not fall through
@@ -135,7 +137,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         for _ in range(5):
             reader.pump()
             time.sleep(0.02)
-        assert reader._tip_rect is not None, (
+        assert reader.tip.view.rect is not None, (
             "a click on the tooltip must be captured, not tear it down"
         )
 
@@ -145,11 +147,11 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         for _ in range(3):
             reader.pump()
             time.sleep(0.02)
-        sx, sy, sw, sh = reader._tip_rect
+        sx, sy, sw, sh = reader.tip.view.rect
         word2, tip2, _ = _targets_for(reader, int(sx + sw / 2), int(sy + sh / 2))
         assert tip2 and word2 == -1, (
             f"after scroll, tooltip centre must still read over_tip; got over_tip={tip2} "
-            f"over_word={word2} — _tip_rect={reader._tip_rect} (post-scroll windowed rect calc?)"
+            f"over_word={word2} — _tip_rect={reader.tip.view.rect} (post-scroll windowed rect calc?)"
         )
 
 
@@ -185,13 +187,13 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
         ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
         _poll_until(
             reader,
-            lambda: reader._tip_rect is not None and reader._mouse_captured,
+            lambda: reader.tip.view.rect is not None and reader._mouse_captured,
             "tooltip did not show / mouse section not captured",
         )
 
         # a click on the tooltip must reach saitenka, NOT the rival → pause unchanged
         ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC wire value
-        tx, ty, tw, th = reader._tip_rect
+        tx, ty, tw, th = reader.tip.view.rect
         ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):

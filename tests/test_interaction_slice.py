@@ -168,7 +168,7 @@ def test_the_hover_view_projects_what_the_slice_holds() -> None:
         reader._update_hover()
 
         assert reader._hover_store.current.hysteresis.word_target == 1
-        assert reader._word_target == 1
+        assert reader.tip.word_target == 1
         assert reader.hover_view().scan_target is None
     finally:
         reader.close()

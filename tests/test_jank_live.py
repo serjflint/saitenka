@@ -3,6 +3,7 @@ dropped/delayed frames. No mpv, no display — the humble-object part the real h
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -76,26 +77,30 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
     mod = _jank_module()
 
     class Reader:
-        _tip_scroll = 0
         osd = (1920, 1080)
 
+        def __init__(self):
+            self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
+
         def _scroll_tip(self, delta):
-            self._tip_scroll += delta
+            self.tip.view.scroll += delta
 
         def pump(self):
             return True
 
     reader = Reader()
     mod._scroll_four(reader)
-    assert reader._tip_scroll == 4 * round(1080 * 0.12)
+    assert reader.tip.view.scroll == 4 * round(1080 * 0.12)
 
 
 def test_scroll_workload_rejects_a_non_scrollable_tooltip():
     mod = _jank_module()
 
     class Reader:
-        _tip_scroll = 0
         osd = (1920, 1080)
+
+        def __init__(self):
+            self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
 
         def _scroll_tip(self, _delta):
             pass

@@ -398,18 +398,18 @@ def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, boo
         else True
     )
     reader._show_tooltip(box.index)
-    opened = reader._tip_state is not None
+    opened = reader.tip.view.state is not None
     return hit, focus, opened
 
 
 def _scroll_and_close_tooltip(reader: Reader) -> bool:
-    opened = reader._tip_state is not None
+    opened = reader.tip.view.state is not None
     reader._scroll_tip(1)
     scrolled = (
         opened
         and reader._scrolled_this_tick
-        and reader._tip_state is not None
-        and reader._tip_scroll > 0
+        and reader.tip.view.state is not None
+        and reader.tip.view.scroll > 0
     )
     reader._teardown_tip()
     reader.hover = -1

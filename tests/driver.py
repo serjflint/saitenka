@@ -52,7 +52,7 @@ class Driver:
     def move_into_tip(self, dx: float = 0.5, dy: float = 0.5) -> Driver:
         """Move to a point inside the shown tooltip (fractions of its rect) — e.g. to scan an inner
         word or hit a body region."""
-        x, y, w, h = self.r._tip_rect
+        x, y, w, h = self.r.tip.view.rect
         return self.move(x + w * dx, y + h * dy)
 
     # --- clicks / wheel / keys (client-message path) ----------------------------------------------
@@ -83,8 +83,8 @@ class Driver:
 
     @property
     def tip_shown(self) -> bool:
-        return self.r._tip_rect is not None
+        return self.r.tip.view.rect is not None
 
     @property
     def nested_shown(self) -> bool:
-        return self.r._nest.state is not None
+        return self.r.tip.nest.state is not None

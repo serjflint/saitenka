@@ -93,5 +93,5 @@ def test_session_replay_keeps_the_seam_under_each_backend(scenario, backend_name
         _apply(reader, action, arg)
         # The render↔hit-test agreement holds after every transition, base panel and (when open) nested.
         _assert_agrees(reader, nested=False)
-        if reader._nest.state is not None:
+        if reader.tip.nest.state is not None:
             _assert_agrees(reader, nested=True)

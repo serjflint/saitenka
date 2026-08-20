@@ -85,7 +85,7 @@ def test_open_link_navigates_the_whole_query(monkeypatch):
     lb = LinkBox("それにつけても", 0, 0, 10, 10)
     nested_popup.open_link(reader, lb, (0, 0), 0)  # no worker → synchronous open
     assert ds.seen == ["それにつけても"]  # the WHOLE query reached the lookup, not それ
-    assert reader._nest.word == "それにつけても"  # …and it's the shown nested word
+    assert reader.tip.nest.word == "それにつけても"  # …and it's the shown nested word
 
 
 def test_phrase_extra_terms_is_empty_off_a_known_phrase():
@@ -100,6 +100,6 @@ def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
 
     nested_popup.show_nested(reader, ScanBox("コンサート", 0, 0, 20, 20))
 
-    assert reader._nest.state is not None, "a nested popup must open"
+    assert reader.tip.nest.state is not None, "a nested popup must open"
     # The longest match is stacked on the panel's identity — コンサート, not the bare コン.
-    assert reader._nest.key.phrase_terms == ("コンサート",)
+    assert reader.tip.nest.key.phrase_terms == ("コンサート",)

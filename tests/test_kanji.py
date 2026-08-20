@@ -231,16 +231,16 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     # find the scan cell whose tail starts with 本
-    sb = next(b for b in r._tip_state.windowed.scan_boxes() if b.text.startswith("本"))
+    sb = next(b for b in r.tip.view.state.windowed.scan_boxes() if b.text.startswith("本"))
     # make the term lookup miss so the fallback triggers (本 has no term entry in this fixture… it
     # actually might tokenize to 本 with a lemma the dict lacks — force the miss deterministically)
     monkeypatch.setattr(type(ds), "has_term", lambda _self, *_forms: False)
-    sx, sy = r._tip_xy
+    sx, sy = r.tip.view.xy
     ipc = r.ipc
     ipc.props["mouse-pos"] = {
         "hover": True,
         "x": sx + sb.x + sb.w / 2,
-        "y": sy + (sb.y - r._tip_scroll) + sb.h / 2,
+        "y": sy + (sb.y - r.tip.view.scroll) + sb.h / 2,
     }
     r.on_click()
     assert r.hover_view().nested.state is not None

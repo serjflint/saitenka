@@ -187,7 +187,7 @@ def test_main_flow_renders_at_4k_without_caches():
     r.set_subtitle("本命を読む")
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert ui.tip_shown and r._tip_rect is not None
+    assert ui.tip_shown and r.tip.view.rect is not None
 
 
 def test_tooltip_keeps_lease_over_occluded_word(monkeypatch):
@@ -222,12 +222,12 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
     ui = Driver(r)
     ui.move_to_word(0)
-    assert r._hover_meta.terms == ("本命を",)
-    assert r._hover_meta.span == (0, 2), (
+    assert r.tip.hover.terms == ("本命を",)
+    assert r.tip.hover.span == (0, 2), (
         "the highlight must span the hovered token and its phrase partner"
     )
     ui.move_to_word(2)  # switch to 読む — a word with no following phrase term
-    assert r._hover_meta.span is None and r._hover_meta.terms == ()
+    assert r.tip.hover.span is None and r.tip.hover.terms == ()
 
 
 def test_phrase_reaches_panel_lookup(monkeypatch):
@@ -279,9 +279,9 @@ def test_full_stress_chain_through_the_hit_test_path():
     assert ui.tip_shown, "hover shows the tooltip"
 
     ui.move_into_tip(0.5, 0.5)  # cursor over the tip so the wheel routes to it
-    before = r._tip_scroll
+    before = r.tip.view.scroll
     ui.wheel(1)
-    assert r._tip_scroll > before, "wheel over the tip scrolls it (hit-test-routed)"
+    assert r.tip.view.scroll > before, "wheel over the tip scrolls it (hit-test-routed)"
 
     ui.move_into_tip(0.5, 0.6)  # rest on an inner word → nested scan popup
     assert ui.nested_shown, "hovering inside the body opens the nested popup"
@@ -307,7 +307,7 @@ def test_empty_body_click_does_nothing(monkeypatch):
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     # click low in the body, away from the ⊕/🔊 header buttons
-    x, y, w, h = r._tip_rect
+    x, y, w, h = r.tip.view.rect
     ui.move(x + w * 0.5, y + h - 6).click()
     assert events == [], "a click in an empty body area must not mine or speak"
 
@@ -317,9 +317,9 @@ def test_wheel_scrolls_the_tooltip():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     ui.move_into_tip(0.5, 0.5)  # cursor over the tip so the wheel routes to it
-    before = r._tip_scroll
+    before = r.tip.view.scroll
     ui.wheel(1)  # one notch down
-    assert r._tip_scroll > before, "wheeling over a scrollable tooltip must scroll it down"
+    assert r.tip.view.scroll > before, "wheeling over a scrollable tooltip must scroll it down"
 
 
 def test_scroll_warms_native_bands_ahead_at_hidpi():
@@ -332,14 +332,14 @@ def test_scroll_warms_native_bands_ahead_at_hidpi():
     r._render_ahead_submit = lambda **kwargs: submitted.append(kwargs) or True
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
     Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
-    assert r._tip_state.full_height > r._tip_view_h  # scrollable
+    assert r.tip.view.state.full_height > r.tip.view.view_h  # scrollable
     tooltip.scroll_tip(r, 200)  # what the wheel drives
-    assert r._tip_scroll > 0  # scrolled
+    assert r.tip.view.scroll > 0  # scrolled
     pending = r._render_ahead.pending
     assert pending is not None
     req = pending[1]
     assert (
-        req is not None and req.scroll == r._tip_scroll and req.direction == 1
+        req is not None and req.scroll == r.tip.view.scroll and req.direction == 1
     )  # warm follows scroll
 
 
@@ -365,11 +365,11 @@ def test_golden_base_and_nested_render():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert r.hover_view().tip.state is not None
-    assert_golden(_full_panel_image(r._tip_state), "interaction_base_tooltip.png", tol=3.0)
+    assert_golden(_full_panel_image(r.tip.view.state), "interaction_base_tooltip.png", tol=3.0)
 
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
     assert r.hover_view().nested.state is not None
-    assert_golden(_full_panel_image(r._nest.state), "interaction_nested_popup.png", tol=3.0)
+    assert_golden(_full_panel_image(r.tip.nest.state), "interaction_nested_popup.png", tol=3.0)
 
 
 def test_link_click_navigates_the_base_tooltip_in_place_with_back():
@@ -381,15 +381,15 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown
-    base = r._tip_state
+    base = r.tip.view.state
 
     tooltip.navigate_tip(r, "本命")  # what _click_tip routes a link to
-    assert r._tip_state is not None and r._tip_state is not base
-    assert len(r._tip_nav) == 1, "the previous view is pushed for back"
+    assert r.tip.view.state is not None and r.tip.view.state is not base
+    assert len(r.tip.tip_nav) == 1, "the previous view is pushed for back"
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
 
     assert tooltip.tip_back(r) is True
-    assert r._tip_state is base and r._tip_nav == []
+    assert r.tip.view.state is base and r.tip.tip_nav == []
     assert tooltip.tip_back(r) is False, "no history left → caller falls through to close"
 
 
@@ -401,11 +401,11 @@ def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
     i = _content_word(r)
     ui.move_to_word(i)
     tooltip.navigate_tip(r, "本命")
-    assert r._tip_nav
+    assert r.tip.tip_nav
 
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
     ui.move_to_word(j)  # a newly hovered word abandons the link-navigation
-    assert r._tip_nav == []
+    assert r.tip.tip_nav == []
 
 
 def test_esc_steps_back_through_navigation_then_closes():
@@ -416,12 +416,12 @@ def test_esc_steps_back_through_navigation_then_closes():
 
     tooltip.navigate_tip(r, "本命")
     tooltip.navigate_tip(r, "読む")
-    assert len(r._tip_nav) == 2
+    assert len(r.tip.tip_nav) == 2
 
     r._tip_close_or_back()
-    assert len(r._tip_nav) == 1 and ui.tip_shown
+    assert len(r.tip.tip_nav) == 1 and ui.tip_shown
     r._tip_close_or_back()
-    assert r._tip_nav == [] and ui.tip_shown
+    assert r.tip.tip_nav == [] and ui.tip_shown
     r._tip_close_or_back()  # at the root → close
     assert not ui.tip_shown
 

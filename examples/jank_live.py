@@ -94,11 +94,11 @@ def _counter(ipc, prop: str) -> int:
 
 
 def _scroll_four(reader) -> None:
-    before = reader._tip_scroll
+    before = reader.tip.view.scroll
     for _ in range(4):
         reader._scroll_tip(round(reader.osd[1] * 0.12))
         reader.pump()
-    if reader._tip_scroll == before:
+    if reader.tip.view.scroll == before:
         raise RuntimeError("live scroll workload did not advance the tooltip viewport")
 
 
@@ -133,7 +133,7 @@ def run(*, settle_s: float = 0.4) -> dict:
                 return False
 
         reader.dict_set = TallDS()
-        reader._panel_cache.clear()
+        reader.tip.panel_cache.clear()
 
         def sample(step: str, interaction_ms: float = 0.0) -> None:
             # let playback advance so any overlay-induced VO delay accrues before we read the counters
@@ -172,12 +172,12 @@ def run(*, settle_s: float = 0.4) -> dict:
         def hover() -> None:
             ipc.command("mouse", cx, cy)  # tooltip composites; pause lease engages
 
-        sample("hover", timed(hover, lambda: reader._tip_rect is not None))
+        sample("hover", timed(hover, lambda: reader.tip.view.rect is not None))
 
         sample("scroll", timed(lambda: _scroll_four(reader)))
 
-        if reader._tip_rect is not None:  # nested popup over an inner word
-            tx, ty, tw, th = reader._tip_rect
+        if reader.tip.view.rect is not None:  # nested popup over an inner word
+            tx, ty, tw, th = reader.tip.view.rect
 
             def nested() -> None:
                 ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))

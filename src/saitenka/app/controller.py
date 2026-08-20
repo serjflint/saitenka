@@ -119,9 +119,7 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import (
     NO_HOVER_METADATA,
-    HoverMetadata,
     Panel,
-    PanelCache,
     PopupView,
 )
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
@@ -154,7 +152,6 @@ from saitenka.app.subtitle_render import (
 )
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue
-from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.mpvio.osd import Overlay
@@ -189,6 +186,7 @@ if TYPE_CHECKING:
     from saitenka.app.card_preview import PreviewData
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.render_cache import RenderCache
+    from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.panel import Freq
     from saitenka.subtitles import GeometryBackend
@@ -309,35 +307,10 @@ class Reader:
     _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
     _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
     _mined_store = Delegated[mined_store.MinedCardStore | None]("session", "mined_store")
-    # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState) under its historical flat
-    # names — the hot interaction-scoped cluster, woven through tooltip.py / nested_popup.py / prefetch.
-    _paused_by_tip = Delegated[bool]("tip", "paused_by_tip")
-    _hide_pending = Delegated[bool]("tip", "hide_pending")
-    # The base tooltip's PopupView + its fields, delegated through the dotted "tip.view" path so the
-    # historical flat names keep resolving while base and nested share one view type + blit machinery.
-    _tip_view = Delegated[PopupView]("tip", "view")
-    _tip_rect = Delegated[tuple | None]("tip.view", "rect")
-    _tip_scroll = Delegated[int]("tip.view", "scroll")
-    _tip_view_h = Delegated[int]("tip.view", "view_h")
-    _tip_xy = Delegated[tuple[int, int]]("tip.view", "xy")
-    _tip_state = Delegated[Panel | None]("tip.view", "state")
-    _tip_key = Delegated[tooltip_panel.PanelKey | None]("tip.view", "key")
-    _tip_nav = Delegated[list]("tip", "tip_nav")
-    _nest = Delegated[PopupView]("tip", "nest")
-    _scan_target = Delegated[str | None]("tip", "scan_target")
-    _word_target = Delegated[int | None]("tip", "word_target")
-    _last_mouse = Delegated[tuple[float, float]]("tip", "last_mouse")
-    _flash_oid = Delegated[int | None]("tip", "flash_oid")
-    _hover_reading = Delegated[str]("tip", "hover_reading")
-    _hover_meta = Delegated[HoverMetadata]("tip", "hover")
-    _kanji_index = Delegated[int]("tip", "kanji_index")
-    _tip_keys_bound = Delegated[bool]("tip", "tip_keys_bound")
-    _tip_tok = Delegated[Token | None]("tip", "tip_tok")
-    _tip_inflected = Delegated[str | None]("tip", "tip_inflected")
-    _crisp_miss = Delegated[str]("tip.view", "crisp_miss")
-    _crisp_pending = Delegated[bool]("tip.view", "crisp_pending")
-    _tip_show_cold = Delegated[bool]("tip", "tip_show_cold")
-    _panel_cache = Delegated[PanelCache]("tip", "panel_cache")
+    # The base tooltip's own state (`app/popups.py` TooltipState) is reached through `tip`, not
+    # through twenty-five flat aliases. The aliases were not merely indirection: eight reads of one
+    # object looked like eight host members to every ratchet, so the arity census read this cluster
+    # as far more coupled than it is.
 
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
         self,
@@ -805,16 +778,16 @@ class Reader:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
         the public seam tests observe instead of the private ``_nest`` / ``_tip_*`` fields (#43)."""
         return hover_snapshot.snapshot(
-            self._nest,
+            self.tip.nest,
             hover_snapshot.TipView(
-                state=self._tip_state,
-                key=self._tip_key,
-                rect=self._tip_rect,
-                hide_pending=self._hide_pending,
+                state=self.tip.view.state,
+                key=self.tip.view.key,
+                rect=self.tip.view.rect,
+                hide_pending=self.tip.hide_pending,
             ),
-            paused=self._paused_by_tip,
+            paused=self.tip.paused_by_tip,
             nav_idx=self._nav_idx,
-            scan_target=self._scan_target,
+            scan_target=self.tip.scan_target,
         )
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
@@ -1286,16 +1259,16 @@ class Reader:
         hide = getattr(self.ov, "hide_interactive", self.ov.hide)
         hide(TIP_ID)
         self._hide_nested()
-        self._tip_rect = None
-        self._tip_state = None
-        self._tip_key = None
-        self._tip_tok = self._tip_inflected = None
-        self._tip_nav = []  # drop any link-navigation history with the tooltip
-        self._hover_reading = ""
-        self._hover_meta = NO_HOVER_METADATA
-        self._kanji_index = 0
+        self.tip.view.rect = None
+        self.tip.view.state = None
+        self.tip.view.key = None
+        self.tip.tip_tok = self.tip.tip_inflected = None
+        self.tip.tip_nav = []  # drop any link-navigation history with the tooltip
+        self.tip.hover_reading = ""
+        self.tip.hover = NO_HOVER_METADATA
+        self.tip.kanji_index = 0
         self._unbind_tip_keys()
-        if self._paused_by_tip:
+        if self.tip.paused_by_tip:
             self._resume_after_hover_pause()
         self._sync_auto_translation()
 
@@ -1758,7 +1731,7 @@ class Reader:
     def _clear_native_interaction(self) -> None:
         self._teardown_tip()
         self.hover = -1
-        self._hover_meta = NO_HOVER_METADATA
+        self.tip.hover = NO_HOVER_METADATA
         self.boxes = []
         self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
 
@@ -1865,10 +1838,10 @@ class Reader:
         return tooltip.hit_header_speaker(tooltip.chrome_for(self, self.tip.view), x, y)
 
     def _hit_nested_add(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_add(tooltip.chrome_for(self, self._nest), x, y)
+        return tooltip.hit_header_add(tooltip.chrome_for(self, self.tip.nest), x, y)
 
     def _hit_nested_speaker(self, x: float, y: float) -> bool:
-        return tooltip.hit_header_speaker(tooltip.chrome_for(self, self._nest), x, y)
+        return tooltip.hit_header_speaker(tooltip.chrome_for(self, self.tip.nest), x, y)
 
     def on_click(self) -> None:
         if not self.ov.visible:
@@ -1938,7 +1911,7 @@ class Reader:
         )
 
     def _panel_cache_setdefault(self, key, st) -> Panel:
-        return self._panel_cache.setdefault(key, st)
+        return self.tip.panel_cache.setdefault(key, st)
 
     # --- persistent render cache (#149): seed a cold hover's first viewport from disk ----------
     def _render_cache(self) -> RenderCache | None:
@@ -2119,8 +2092,8 @@ class Reader:
         ``dict_cache.size`` the decoded-entry count across every dictionary. Read under ``_cache_lock``
         so a concurrent prefetch job mutating the panel cache can't fault the iteration."""
         with self._cache_lock:
-            panel_n = len(self._panel_cache)
-            panel_bytes = sum(st.retained_nbytes for st in self._panel_cache.values())
+            panel_n = len(self.tip.panel_cache)
+            panel_bytes = sum(st.retained_nbytes for st in self.tip.panel_cache.values())
         dict_n = self.dict_set.decoded_entry_count() if self.dict_set is not None else 0
         gauges = {
             "panel_cache.size": float(panel_n),
@@ -2168,9 +2141,9 @@ class Reader:
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
-        if self._tip_keys_bound:
+        if self.tip.tip_keys_bound:
             return
-        self._tip_keys_bound = True
+        self.tip.tip_keys_bound = True
         if self._help_open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
@@ -2183,9 +2156,9 @@ class Reader:
         ``[input] Command name missing`` / ``Invalid command for key binding 'LEFT': ''`` triple (visible
         on the Windows console; silently on the mac log). Rebind to the valid no-op ``ignore`` instead:
         no error, and the key stops doing tooltip work while the popup is gone."""
-        if not self._tip_keys_bound:
+        if not self.tip.tip_keys_bound:
             return
-        self._tip_keys_bound = False
+        self.tip.tip_keys_bound = False
         if self._help_open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
@@ -2219,7 +2192,7 @@ class Reader:
         tooltip_panel.render_view(self, self.tip.view)
 
     def _render_nested_view(self) -> None:
-        tooltip_panel.render_view(self, self._nest)
+        tooltip_panel.render_view(self, self.tip.nest)
 
     def _scroll_tip(self, delta: int) -> None:
         # event → redraw-finished latency for one scroll tick: nests the downstream "render"
@@ -2234,7 +2207,7 @@ class Reader:
             layout_backend=self.layout_engine,
         ) as span:
             tooltip.scroll_tip(self, delta)
-            st = self._tip_state
+            st = self.tip.view.state
             if st is not None:
                 # Attribute a janky frame: bands rastered synchronously (render_ahead was behind) and
                 # the panel's height. A warm frame is bands=0; the jank tail is the frames with bands>0.
@@ -2243,10 +2216,10 @@ class Reader:
                 # Crisp health per scroll frame: the display scale (does it jitter mid-scroll?) and the
                 # soft-fallback reason ("" = composited crisp) — so a soft run is attributable to a cause.
                 span.set("scale", f"{self._tip_display_scale:.4f}")
-                span.set("crisp_miss", self._crisp_miss or "n/a")
+                span.set("crisp_miss", self.tip.view.crisp_miss or "n/a")
 
     def _scroll_nested(self, delta: int) -> None:
-        tooltip_panel.scroll_view(self, self._nest, delta)
+        tooltip_panel.scroll_view(self, self.tip.nest, delta)
 
     # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
     def _scan_hit(self, mx: float, my: float):
@@ -2268,15 +2241,23 @@ class Reader:
         # Hit-test the panel actually DRAWN for the base tooltip (crisp native when shown, else reference)
         # so a clicked/hovered cross-reference link lands right despite native-vs-reference wrap drift.
         panel, scale, scroll = tooltip_panel.hit_target(
-            self._nest, self._tip_state, self._tip_scroll, self._raster_scale, nested=False
+            self.tip.nest,
+            self.tip.view.state,
+            self.tip.view.scroll,
+            self._raster_scale,
+            nested=False,
         )
-        return nested_popup.link_hit(mx, my, panel, self._tip_xy, scroll, scale=scale)
+        return nested_popup.link_hit(mx, my, panel, self.tip.view.xy, scroll, scale=scale)
 
     def _nest_link_hit(self, mx: float, my: float):
         panel, scale, scroll = tooltip_panel.hit_target(
-            self._nest, self._tip_state, self._tip_scroll, self._raster_scale, nested=True
+            self.tip.nest,
+            self.tip.view.state,
+            self.tip.view.scroll,
+            self._raster_scale,
+            nested=True,
         )
-        return nested_popup.link_hit(mx, my, panel, self._nest.xy, scroll, scale=scale)
+        return nested_popup.link_hit(mx, my, panel, self.tip.nest.xy, scroll, scale=scale)
 
     def _open_link(self, lb, xy, scroll: int) -> None:
         nested_popup.open_link(self, lb, xy, scroll)
@@ -2295,7 +2276,7 @@ class Reader:
     @property
     def tip_can_go_back(self) -> bool:
         """A link-navigation step is available to pop — the fact, split from the act."""
-        return bool(self._tip_nav)
+        return bool(self.tip.tip_nav)
 
     def _run_interaction_command(self, command: interaction_intents.InteractionCommand) -> None:
         inputs = interaction_intents.InteractionInputs(
@@ -2652,20 +2633,20 @@ class Reader:
         if not 0 <= self.hover < len(self.tokens):
             return hover_intents.HoverInputs(
                 pause_on_tooltip=self.pause_on_tooltip,
-                paused_by_tooltip=self._paused_by_tip,
+                paused_by_tooltip=self.tip.paused_by_tip,
             )
         token = self.tokens[self.hover]
         return hover_intents.HoverInputs(
             hovered=True,
             surface=token.surface,
-            reading=self._hover_reading,
+            reading=self.tip.hover_reading,
             token_reading=token.reading,
             kanji=tuple(char for char in token.surface if is_ideograph(char)),
-            kanji_index=self._kanji_index,
+            kanji_index=self.tip.kanji_index,
             has_dictionaries=self.dict_set is not None,
             anchored=box_for_token(self.boxes, self.hover) is not None,
             pause_on_tooltip=self.pause_on_tooltip,
-            paused_by_tooltip=self._paused_by_tip,
+            paused_by_tooltip=self.tip.paused_by_tip,
         )
 
     def _run_hover_command(self, command: hover_intents.HoverCommand) -> None:
@@ -2684,7 +2665,7 @@ class Reader:
             False,  # noqa: FBT003  # mpv IPC wire value
             owner=Owner.PLAYBACK,
         )
-        self._paused_by_tip = False
+        self.tip.paused_by_tip = False
 
     def _apply_hover_effect(self, effect: hover_intents.HoverEffect) -> None:
         from saitenka.app.media import speak
@@ -2698,7 +2679,7 @@ class Reader:
             box = box_for_token(self.boxes, self.hover)
             assert box is not None  # the reducer only opens against an anchored token
             origin_x, origin_y = self.sub_origin
-            self._kanji_index += 1
+            self.tip.kanji_index += 1
             self._open_kanji(effect.char, origin_x + box.x, origin_y + box.y, box.h)
         elif isinstance(effect, hover_intents.SetHoverPause):
             self.pause_on_tooltip = effect.enabled
@@ -2818,7 +2799,7 @@ class Reader:
             binding.key: binding.spec.message for binding in active_bindings(self.keys, "tooltip")
         }
         for binding in active_bindings(self.keys, "help"):
-            message = tooltip_by_key.get(binding.key) if self._tip_keys_bound else None
+            message = tooltip_by_key.get(binding.key) if self.tip.tip_keys_bound else None
             command = f"script-message {message}" if message else "ignore"
             send_correlated(
                 self.ipc,
@@ -3307,7 +3288,7 @@ class Reader:
 
     def _fallback_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> None:
         if isinstance(request, tooltip_engaged.NavigateRequest | tooltip_engaged.OpenRequest) and (
-            request.origin != id(self._tip_state)
+            request.origin != id(self.tip.view.state)
         ):
             return
         try:
@@ -3341,7 +3322,7 @@ class Reader:
         identity, request, succeeded = finished
         if identity.generation != self._prefetch_gen:
             return
-        for view in (self._tip_view, self._nest):
+        for view in (self.tip.view, self.tip.nest):
             if (
                 view.state is request.panel
                 and view.desired_scroll == identity.scroll
@@ -3359,7 +3340,7 @@ class Reader:
         # raised for the nested popup can leave the base tooltip's viewport warm — and that upgrade
         # is exactly what the tick used to notice. `apply_pending_crisp` is a no-op unless a view
         # is both pending and warm, so asking twice costs a flag check.
-        for view in (self._tip_view, self._nest):
+        for view in (self.tip.view, self.tip.nest):
             tooltip_panel.apply_pending_crisp(self, view)
 
     def _cancel_render_ahead(self) -> None:
@@ -3712,7 +3693,7 @@ class Reader:
         )
 
     def _flash_expired(self) -> None:
-        oid, self._flash_oid = self._flash_oid, None
+        oid, self.tip.flash_oid = self.tip.flash_oid, None
         if oid == NESTED_ID:
             self._render_nested_view()  # redraw without the highlight border
         elif oid == TIP_ID:

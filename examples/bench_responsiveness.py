@@ -342,8 +342,8 @@ def _bench_word(reader, term: str, reading: str, reps: int) -> dict:
     reader.sub_origin = (0, 0)
 
     def cold():
-        reader._panel_cache.clear()
-        reader._tip_state = None
+        reader.tip.panel_cache.clear()
+        reader.tip.view.state = None
         reader.hover = 0
         reader._show_tooltip(0)
 
@@ -493,7 +493,7 @@ def run_render_cache(
         reader.tokens = [tok]
         reader.boxes = [WordBox(0, 400, 800, 60, 60)]
         reader.sub_origin = (0, 0)
-        reader._hover_meta = NO_HOVER_METADATA
+        reader.tip.hover = NO_HOVER_METADATA
         key = reader._panel_key(tok, reader._inflected_surface(0), mined=False)
         if reader._peek_render_cache(key) is None:
             return None  # below the cost gate — not persisted
@@ -733,7 +733,7 @@ def run_stress(
         timed(lambda: reader._show_tooltip(0))
         for _ in range(4):  # scroll toward the bottom of a tall entry
             timed(lambda: reader._scroll_tip(step))
-        st = reader._tip_state
+        st = reader.tip.view.state
         boxes = st.windowed.scan_boxes() if st else []
         if boxes:
             sb = boxes[len(boxes) // 3]  # a deterministic cell well inside the body
@@ -758,7 +758,7 @@ def run_stress(
     tracemalloc.stop()
 
     m = _stats(frames)
-    cache_len = len(reader._panel_cache)
+    cache_len = len(reader.tip.panel_cache)
     growth = rss_peak - rss_base
     gil_rc = finalize_runtime(rt, require_ft)
 
@@ -830,15 +830,15 @@ def _scroll_span_live(reader, subset, step: int, span_px: int, speed: float) -> 
     dwell = step / speed
     frames: list[float] = []
     for term, reading, _tops, _times in subset:
-        reader._panel_cache.clear()
+        reader.tip.panel_cache.clear()
         reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
         reader.boxes = [WordBox(0, 400, 800, 60, 60)]
         reader.sub_origin = (0, 0)
         reader.hover = 0
         reader._show_tooltip(0)
-        if reader._tip_state is None:
+        if reader.tip.view.state is None:
             continue
-        reader._tip_scroll = 0
+        reader.tip.view.scroll = 0
         for _s in range(max(1, span_px // step)):
             t0 = time.perf_counter()
             reader._scroll_tip(step)  # scroll_tip requests render-ahead in this direction
@@ -863,13 +863,13 @@ def _block_profile(reader, term: str, reading: str, span_px: int) -> tuple[list[
     from saitenka.app.subtitles import WordBox
     from saitenka.render.banded import _row_bands
 
-    reader._panel_cache.clear()
+    reader.tip.panel_cache.clear()
     reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
     reader.boxes = [WordBox(0, 400, 800, 60, 60)]
     reader.sub_origin = (0, 0)
     reader.hover = 0
     reader._show_tooltip(0)
-    st = reader._tip_state
+    st = reader.tip.view.state
     if st is None:
         return [], []
     wp = st.windowed
@@ -957,10 +957,10 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
         reader._show_tooltip(0)
 
     def traverse(bucket: list[float], word: str | None) -> None:
-        st = reader._tip_state
+        st = reader.tip.view.state
         if st is None:
             return
-        reader._tip_scroll = 0
+        reader.tip.view.scroll = 0
         # Scroll DOWN into the cold tail, capped: a 90 kpx entry is ~1000 wheel steps — far past what a
         # user scrolls, and every cold step rasterises a block. _SCROLL_JANK_STEPS samples enough cold
         # blocks to surface the jank without rendering the whole monster.
@@ -976,7 +976,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
         show(term, reading)
     for _ in range(max(1, reps)):
         for term, reading in corpus:
-            reader._panel_cache.clear()  # cold panel → tail blocks rasterise DURING the scroll (jank)
+            reader.tip.panel_cache.clear()  # cold panel → tail blocks rasterise DURING the scroll (jank)
             show(term, reading)  # untimed first paint (head only)
             traverse(cold, term)  # top→bottom over cold blocks — the scroll jank
             traverse(warm, None)  # immediate re-traverse: blocks now cached — the warm floor
@@ -1437,7 +1437,7 @@ def _timeline_interact(reader) -> None:
     kind=nested|clicked|engaged_open latency — not only base hovers. Each deferred interaction is pumped
     through the runtime mailbox so the warm swap is measured rather than omitted. Best-effort: a word
     with no scan cells or kanji simply skips."""
-    st = reader._tip_state
+    st = reader.tip.view.state
     if st is None:
         return
     boxes = st.windowed.scan_boxes()
@@ -1574,7 +1574,7 @@ def run_timeline(
             # so this check reflects the REAL cache panel_for() reads.
             mined = reader._is_mined(tok)
             key = reader._panel_key(tok, reader._inflected_surface(idx), mined=mined)
-            panel_already_warm = key in reader._panel_cache
+            panel_already_warm = key in reader.tip.panel_cache
             hovers += 1
             t0 = time.perf_counter()
             reader.set_hover(idx)
@@ -1836,20 +1836,20 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
                     key = reader._panel_key(
                         tok, reader._inflected_surface(idx), mined=reader._is_mined(tok)
                     )
-                    panel_already_warm = key in reader._panel_cache
+                    panel_already_warm = key in reader.tip.panel_cache
                     t0 = time.perf_counter()
                     reader.set_hover(idx)  # tip stays up so a following scroll event can scroll it
                     dt = (time.perf_counter() - t0) * 1000.0
                     (hov_warm if warm else hov_cold).append(dt)
                     (panel_warm if panel_already_warm else panel_cold).append(dt)
-                    if panel_already_warm and reader._tip_state is not None:
+                    if panel_already_warm and reader.tip.view.state is not None:
                         # Step 2: a warm hover whose first viewport was precomposed in idle rasters 0
                         # bands on the show (served from the cached BGRA copy); one that only had its
                         # head built still re-composites overscan bands synchronously (>0).
-                        precomposed = reader._tip_state.last_frame_rasters == 0
+                        precomposed = reader.tip.view.state.last_frame_rasters == 0
                         (panel_precomposed if precomposed else panel_recomposed).append(dt)
                 elif ev["kind"] == "scroll":
-                    if reader._tip_state is None:
+                    if reader.tip.view.state is None:
                         continue  # nothing shown to scroll (a scroll before the first hover)
                     t0 = time.perf_counter()
                     reader._scroll_tip(step)
@@ -2254,7 +2254,7 @@ def main() -> int:
     cyc = {"cold": 0, "warm": 0}  # cycle through the words so each sample times ONE tooltip
 
     def show_cold(i):
-        reader._panel_cache.clear()
+        reader.tip.panel_cache.clear()
         reader.set_hover(-1)
         reader._show_tooltip(i)
 
@@ -2290,14 +2290,14 @@ def main() -> int:
     step = round(OSD[1] * 0.12)
 
     def scroll_frame():
-        reader._tip_scroll = 0
+        reader.tip.view.scroll = 0
         reader._scroll_tip(step)  # down one step (re-render)
 
     rows.append((f"scroll frame  (one {step}px step)", measure(scroll_frame, args.reps * 3)))
 
     # 4) nested popup first paint: hover a word inside the tooltip
     show_warm(tall)
-    st = reader._tip_state
+    st = reader.tip.view.state
     boxes = st.windowed.scan_boxes() if st else []
     if boxes:
         sb = boxes[len(boxes) // 3]  # a cell well inside the body
@@ -2305,7 +2305,7 @@ def main() -> int:
         def nested_cold():
             reader._hide_nested()
             # drop only the inner word's cached panel so we measure a cold nested paint
-            reader._panel_cache.discard(
+            reader.tip.panel_cache.discard(
                 reader._panel_key(tokenize(sb.text)[0], tokenize(sb.text)[0].surface)
             )
             reader._show_nested(sb)
@@ -2314,8 +2314,8 @@ def main() -> int:
 
     # 5) per-tick hover hit-test: the poll-loop cost while the cursor sits on the tooltip body
     show_warm(tall)
-    assert reader._tip_rect is not None
-    tx, ty, tw, th = reader._tip_rect
+    assert reader.tip.view.rect is not None
+    tx, ty, tw, th = reader.tip.view.rect
     fake_ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + th - 8}
     reader.scan_delay = 1e9  # isolate the hit-test; don't actually open a nested popup
     rows.append(

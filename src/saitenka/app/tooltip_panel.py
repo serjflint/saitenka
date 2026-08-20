@@ -323,7 +323,7 @@ def panel_for(
     # protocol, and `PanelCache` owns that now.
     style = panel_style(reader)
     during_scroll = reader._scrolled_this_tick
-    st = reader._panel_cache.get_or_build(
+    st = reader.tip.panel_cache.get_or_build(
         key,
         lambda: _build_panel(
             style,
@@ -424,7 +424,7 @@ def blit_panel(
         "tip_compose",
         soft_reason=soft_reason or "n/a",
         scale=f"{reader._tip_display_scale:.4f}",
-        kind=compose_kind(oid, navigated=bool(reader._tip_nav)),
+        kind=compose_kind(oid, navigated=bool(reader.tip.tip_nav)),
     ):
         view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
     return decorate_and_upload(reader, view, y0, full_h, xy, oid)
@@ -568,7 +568,7 @@ def _blit_native(reader: Reader, view: PopupView, st: Panel):
             "tip_compose",
             soft_reason="",
             scale=f"{scale:.4f}",
-            kind=compose_kind(oid, navigated=bool(reader._tip_nav)),
+            kind=compose_kind(oid, navigated=bool(reader.tip.tip_nav)),
         ):
             arr = st.viewport(y0, vh, overscan=vh, scale=scale, warm_only=True)  # native, no raster
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)

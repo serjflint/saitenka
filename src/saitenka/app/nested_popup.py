@@ -73,7 +73,7 @@ def show_nested(reader: Reader, sb) -> None:
                     reader._prefetch_gen,
                     reader._dependency_generation,
                     reader._mined.generation,
-                    id(reader._tip_state),
+                    id(reader.tip.view.state),
                     sb.text,
                 ),
                 reader.tokenizer.name,
@@ -87,15 +87,15 @@ def show_nested(reader: Reader, sb) -> None:
     if tok is None or reader.tokenizer.is_skippable(tok):
         hide_nested(reader)
         return
-    if tok.surface == reader._nest.word and reader._nest.state is not None:
-        reader._nest.tail = sb.text  # same word, new cell → don't re-scan it
+    if tok.surface == reader.tip.nest.word and reader.tip.nest.state is not None:
+        reader.tip.nest.tail = sb.text  # same word, new cell → don't re-scan it
         return
     # Longest-match, Yomitan-style: stack any multi-token dictionary term starting under the cursor
     # (コンサート over the over-split コン) — the same forward longest-match the base tooltip applies to a
     # hovered cue word, so an inner katakana/compound word opens whole instead of as its first morpheme.
     extra = _phrase_extra_terms(tokens, dict_set=reader.dict_set, tokenizer=reader.tokenizer)
-    sx, sy = reader._tip_xy  # anchor to the inner word's screen cell
-    anchor = Anchor(sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
+    sx, sy = reader.tip.view.xy  # anchor to the inner word's screen cell
+    anchor = Anchor(sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
     # defer=True: a cold inner word's head+bands raster off the main thread (tier-3), re-derived from the
     # scan cell when it lands — the hover-scan path, unlike a clicked link, is re-derivable via scan_hit.
     open_nested(reader, tok, tok.surface, anchor, tail=sb.text, extra_terms=extra, defer=True)
@@ -109,14 +109,14 @@ def apply_nested_metadata(reader: Reader, result) -> None:
         or key.generation != reader._prefetch_gen
         or key.dependency_generation != reader._dependency_generation
         or key.mined_generation != reader._mined.generation
-        or key.tooltip_origin != id(reader._tip_state)
+        or key.tooltip_origin != id(reader.tip.view.state)
     ):
         return
-    sb = scan_hit(reader.tip, reader._raster_scale, *reader._last_mouse)
+    sb = scan_hit(reader.tip, reader._raster_scale, *reader.tip.last_mouse)
     if sb is None or sb.text != key.tail:
         return
-    sx, sy = reader._tip_xy
-    anchor = Anchor(sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
+    sx, sy = reader.tip.view.xy
+    anchor = Anchor(sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
     open_nested(
         reader,
         result.token,
@@ -170,12 +170,12 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         phrase=extra_terms,
         group_mined=group_mined,
     )
-    if defer and key not in reader._panel_cache:
+    if defer and key not in reader.tip.panel_cache:
         # Retain the identity-qualified presentation inputs while the engaged worker warms this key.
-        reader._nest.key = key
-        reader._nest.token = tok
-        reader._nest.word = tok.surface
-        reader._nest.tail = tail or tok.surface
+        reader.tip.nest.key = key
+        reader.tip.nest.token = tok
+        reader.tip.nest.word = tok.surface
+        reader.tip.nest.tail = tail or tok.surface
         request = tooltip_engaged.HoverRequest(
             tok,
             inflected,
@@ -185,7 +185,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
             tuple(extra_terms),
             nested=True,
             tail=tail or tok.surface,
-            job_id=reader._nest.job_id,
+            job_id=reader.tip.nest.job_id,
         )
         if reader._request_engaged_tooltip(request):
             return
@@ -205,39 +205,39 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
 def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail=None) -> None:
     """Anchor a built :class:`Panel` ``st`` as the nested popup. ``token`` is the inner Token to mine
     via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
-    reader._nest.state, reader._nest.key = st, key
-    reader._nest.token, reader._nest.word = token, word
-    reader._nest.tail = tail
-    reader._nest.scroll = 0
-    reader._nest.desired_scroll = 0
-    reader._nest.view_h = nested_view_h(
+    reader.tip.nest.state, reader.tip.nest.key = st, key
+    reader.tip.nest.token, reader.tip.nest.word = token, word
+    reader.tip.nest.tail = tail
+    reader.tip.nest.scroll = 0
+    reader.tip.nest.desired_scroll = 0
+    reader.tip.nest.view_h = nested_view_h(
         st.full_height, anchor.wy, osd_h=reader.osd[1], max_frac=reader.nested_max_frac
     )
-    reader._nest.xy = place_panel(
+    reader.tip.nest.xy = place_panel(
         st.width,
         anchor.wx,
         anchor.wy,
         anchor.wh,
-        reader._nest.view_h,
+        reader.tip.nest.view_h,
         scale=reader._tip_display_scale,
         osd=reader.osd,
     )
     # Kick a render-ahead so a first wheel notch on the nested popup composites crisp off warm
     # bands, like the base tooltip.
-    render_view(reader, reader._nest)
-    reader._request_render_ahead(reader._nest, 1)
+    render_view(reader, reader.tip.nest)
+    reader._request_render_ahead(reader.tip.nest, 1)
 
 
 def rerender_with_mined_state(reader: Reader) -> None:
     """Rebuild the nested popup in place with the current mined-state, keeping its position."""
-    tok = reader._nest.token
+    tok = reader.tip.nest.token
     if tok is None:
         return
     mined = is_mined(tok, reader._mined)
     st = panel_for(reader, tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
-    reader._nest.state = st
-    reader._nest.key = panel_key(reader, tok, tok.surface, mined=mined)
-    render_view(reader, reader._nest)
+    reader.tip.nest.state = st
+    reader.tip.nest.key = panel_key(reader, tok, tok.surface, mined=mined)
+    render_view(reader, reader.tip.nest)
 
 
 def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
@@ -254,7 +254,7 @@ def _cached_rows_panel(reader: Reader, key, entry, reading: str) -> Panel:
     """Fetch-or-build (and LRU-touch) the ``_panel_cache`` entry for a non-token popup (kanji / search),
     measuring its head. Idempotent — the main-thread build, the worker warm, and the tick re-show all
     land on the same cached Panel."""
-    st = reader._panel_cache.get_or_build(
+    st = reader.tip.panel_cache.get_or_build(
         key,
         lambda: Panel.from_rows(
             panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok),
@@ -314,7 +314,7 @@ def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> No
         source,
         query,
         (anchor.wx, anchor.wy, anchor.wh),
-        id(reader._tip_state),
+        id(reader.tip.view.state),
         mined,
     )
     if reader._request_engaged_tooltip(request):
@@ -346,12 +346,12 @@ def kanji_current(reader: Reader) -> None:
     if not chars:
         reader._toast("no kanji in this word", "warn", 1.2)
         return
-    ch = chars[reader._kanji_index % len(chars)]
+    ch = chars[reader.tip.kanji_index % len(chars)]
     ox, oy = reader.sub_origin
     b = box_for_token(reader.boxes, reader.hover)
     if b is None:
         return
-    reader._kanji_index += 1
+    reader.tip.kanji_index += 1
     open_kanji(reader, ch, ox + b.x, oy + b.y, b.h)
 
 
@@ -379,11 +379,11 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
         and len(tok.surface) == 1
         and not reader.dict_set.has_term(tok.lemma, tok.surface, tok.reading)
     ):
-        sx, sy = reader._tip_xy
-        open_kanji(reader, ch, sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
+        sx, sy = reader.tip.view.xy
+        open_kanji(reader, ch, sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
 
 
 def hide_nested(reader: Reader) -> None:
-    if reader._nest.state is not None or reader._nest.rect is not None:
+    if reader.tip.nest.state is not None or reader.tip.nest.rect is not None:
         reader.interaction_surfaces.remove(OverlayId.NESTED)
-    reader._nest = PopupView(OverlayId.NESTED)
+    reader.tip.nest = PopupView(OverlayId.NESTED)

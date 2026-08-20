@@ -48,7 +48,7 @@ def _fresh_reader():
         Token("見る", "見る", "みる", "動詞", 5, 7),
     ]
     r.boxes = [WordBox(i, 100, 300 + 60 * i, 40, 40) for i in range(3)]
-    r._last_mouse = (0, 0)
+    r.tip.last_mouse = (0, 0)
     return r
 
 
@@ -59,19 +59,23 @@ def _assert_agrees(reader, *, nested: bool) -> None:
     measure per step is too slow across a stateful run (the corners get covered as scroll moves the
     window)."""
     panel, s, scroll = tooltip_panel.hit_target(
-        reader._nest, reader._tip_state, reader._tip_scroll, reader._raster_scale, nested=nested
+        reader.tip.nest,
+        reader.tip.view.state,
+        reader.tip.view.scroll,
+        reader._raster_scale,
+        nested=nested,
     )
     if panel is None:
         return
     # One-panel invariant (C1): the hit-tested panel IS the one the blit composites from. This — not the
     # self-consistent round-trip below — is what would catch a reintroduced second draw-panel.
-    drawn = reader._nest.state if nested else reader._tip_state
+    drawn = reader.tip.nest.state if nested else reader.tip.view.state
     assert panel is drawn, (
         f"hit_target panel is not the drawn panel (two-panel regression, nested={nested})"
     )
-    view_h = reader._nest.view_h if nested else reader._tip_view_h
+    view_h = reader.tip.nest.view_h if nested else reader.tip.view.view_h
     panel.windowed.viewport(scroll, view_h)  # measure just the visible band range
-    xy = reader._nest.xy if nested else reader._tip_xy
+    xy = reader.tip.nest.xy if nested else reader.tip.view.xy
     if xy is None:
         return
     sx, sy = xy
@@ -121,10 +125,12 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule()
     def navigate(self) -> None:
-        before = len(self.r._tip_nav)
+        before = len(self.r.tip.tip_nav)
         tooltip.navigate_tip(self.r, _NAV_QUERY)
-        assert len(self.r._tip_nav) == before + 1  # the wildcard target always resolves
-        assert self.r._tip_key is None  # a navigated view is keyless (one panel, no synthetic key)
+        assert len(self.r.tip.tip_nav) == before + 1  # the wildcard target always resolves
+        assert (
+            self.r.tip.view.key is None
+        )  # a navigated view is keyless (one panel, no synthetic key)
         self.nav_depth += 1
         self.nested_open = False  # navigate hides the stale nested popup
         self._check("navigate")
@@ -143,7 +149,7 @@ class TooltipSession(RuleBasedStateMachine):
     def open_nested(self) -> None:
         tok = self.r.tokens[0]
         self.r._open_nested(tok, tok.surface, 200.0, 200.0, 40.0)
-        self.nested_open = self.r._nest.state is not None
+        self.nested_open = self.r.tip.nest.state is not None
         self._check("open_nested")
 
     @precondition(lambda self: self.shown)
@@ -155,15 +161,15 @@ class TooltipSession(RuleBasedStateMachine):
 
     @invariant()
     def model_matches_impl(self) -> None:
-        assert (self.r._tip_state is not None) == self.shown
-        assert len(self.r._tip_nav) == self.nav_depth
-        assert (self.r._nest.state is not None) == self.nested_open
+        assert (self.r.tip.view.state is not None) == self.shown
+        assert len(self.r.tip.tip_nav) == self.nav_depth
+        assert (self.r.tip.nest.state is not None) == self.nested_open
 
     def _check(self, action: str) -> None:
         view = "nested" if self.nested_open else ("nav" if self.nav_depth else "base")
         event(f"action={action} view={view} scale={self.r._raster_scale}")  # drift-gate signal
         _assert_agrees(self.r, nested=False)
-        if self.r._nest.state is not None:
+        if self.r.tip.nest.state is not None:
             _assert_agrees(self.r, nested=True)
 
 
@@ -178,11 +184,11 @@ def test_the_agreement_oracle_has_teeth() -> None:
     r = _fresh_reader()
     r._show_tooltip(0)
     panel, s, scroll = tooltip_panel.hit_target(
-        r._nest, r._tip_state, r._tip_scroll, r._raster_scale, nested=False
+        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r._raster_scale, nested=False
     )
-    panel.windowed.viewport(scroll, r._tip_view_h)
-    sx, sy = r._tip_xy
-    lo, hi = scroll, scroll + r._tip_view_h
+    panel.windowed.viewport(scroll, r.tip.view.view_h)
+    sx, sy = r.tip.view.xy
+    lo, hi = scroll, scroll + r.tip.view.view_h
     visible = [b for b in panel.windowed.scan_boxes() if lo <= b.y + b.h / 2 < hi]
     assert visible  # the fixture shows scan cells to hit-test
     for b in visible:  # the true centres round-trip (the oracle passes on correct geometry)

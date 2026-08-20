@@ -55,12 +55,12 @@ def _churn(r: Reader, term: str) -> bool:
     r.set_hover(0)  # draws the subtitle (builds boxes) + shows the tip; set_hover(-1) tears it down
     for _ in range(4):  # scroll toward the bottom of the tall entry
         r._scroll_tip(round(r.osd[1] * 0.12))
-    st = r._tip_state
+    st = r.tip.view.state
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
     if boxes:
         r._show_nested(boxes[len(boxes) // 3])  # nested popup on an inner cell
-        opened = r._nest.state is not None
+        opened = r.tip.nest.state is not None
         r._scroll_tip(round(r.osd[1] * 0.12))  # scroll while nested is up
         r._hide_nested()
     r.set_hover(-1)  # dismiss the whole stack
@@ -74,15 +74,15 @@ def test_sustained_churn_evicts_and_stays_clean():
     nested_seen = 0
     for term in _CORPUS:  # fill past the cap → eviction
         nested_seen += _churn(r, term)
-    assert len(r._panel_cache) <= PANEL_CACHE_MAX, (
-        f"cache overflowed its LRU cap mid-fill: {len(r._panel_cache)}"
+    assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX, (
+        f"cache overflowed its LRU cap mid-fill: {len(r.tip.panel_cache)}"
     )
     for term in _CORPUS[:8]:  # revisit the earliest (now-evicted) entries → cold rebuild, no crash
         nested_seen += _churn(r, term)
 
     assert nested_seen > 0, "nested popups never opened — the nested path wasn't exercised"
-    assert len(r._panel_cache) <= PANEL_CACHE_MAX, (
-        f"panel cache overflowed its LRU cap: {len(r._panel_cache)}"
+    assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX, (
+        f"panel cache overflowed its LRU cap: {len(r.tip.panel_cache)}"
     )
     # after the final set_hover(-1) the whole hover stack must be torn down
     assert r.hover_view().tip.state is None

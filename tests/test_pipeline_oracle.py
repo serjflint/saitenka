@@ -198,9 +198,9 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
         reader._inflected_surface(idx),
         dict_set=reader.dict_set,
         scorer=reader.scorer,
-        extra_terms=reader._hover_meta.terms,
+        extra_terms=reader.tip.hover.terms,
     )
-    return dict_set, tok, reader._hover_meta.terms, entry
+    return dict_set, tok, reader.tip.hover.terms, entry
 
 
 def _all_text(entry) -> str:

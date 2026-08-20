@@ -84,9 +84,9 @@ def test_reader_delegates_tooltip_fields_to_tip_state():
     r = Reader(FakeIPC())
     assert isinstance(r.tip, TooltipState)
     # the historical private names read/write through the grouped state, incl. the nested-popup handle
-    assert r._nest is r.tip.nest and isinstance(r._nest, PopupView)
-    r._tip_scroll = 4
-    r._hover_reading = "よむ"
+    assert r.tip.nest is r.tip.nest and isinstance(r.tip.nest, PopupView)
+    r.tip.view.scroll = 4
+    r.tip.hover_reading = "よむ"
     # base view-state fields live on the shared PopupView (tip.view); FSM fields stay flat on TooltipState
     assert r.tip.view.scroll == 4 and r.tip.hover_reading == "よむ"
 
@@ -96,25 +96,25 @@ def test_rebinding_tip_resets_the_whole_hover_stack():
     scan/word dwell, flash pulse, hovered-word metadata) returns to its no-hover default in a single move,
     leak-free by construction — the same property the episode re-slot relies on, one tier down."""
     r = Reader(FakeIPC())
-    r._tip_rect = (1, 2, 3, 4)
-    r._tip_scroll = 9
-    r._scan_target = "cell"
-    r._word_target = 2
-    r._flash_oid = 7
-    r._hover_meta = HoverMetadata(terms=("数ある",))
-    r._kanji_index = 3
-    r._paused_by_tip = True
+    r.tip.view.rect = (1, 2, 3, 4)
+    r.tip.view.scroll = 9
+    r.tip.scan_target = "cell"
+    r.tip.word_target = 2
+    r.tip.flash_oid = 7
+    r.tip.hover = HoverMetadata(terms=("数ある",))
+    r.tip.kanji_index = 3
+    r.tip.paused_by_tip = True
 
     r.tip = TooltipState()  # the teardown/re-slot move
 
-    assert r._tip_rect is None
-    assert r._tip_scroll == 0
-    assert r._scan_target is None
-    assert r._word_target is None
-    assert r._flash_oid is None
-    assert r._hover_meta.terms == ()
-    assert r._kanji_index == 0
-    assert r._paused_by_tip is False
+    assert r.tip.view.rect is None
+    assert r.tip.view.scroll == 0
+    assert r.tip.scan_target is None
+    assert r.tip.word_target is None
+    assert r.tip.flash_oid is None
+    assert r.tip.hover.terms == ()
+    assert r.tip.kanji_index == 0
+    assert r.tip.paused_by_tip is False
 
 
 def test_session_state_survives_an_episode_reslot():

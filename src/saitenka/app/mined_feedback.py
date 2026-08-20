@@ -26,10 +26,10 @@ def mark_mined(reader: Reader, expression: str) -> None:
     if not expression:
         return
     reader._mined.add(expression)
-    if reader.hover >= 0 and reader._tip_state is not None:
+    if reader.hover >= 0 and reader.tip.view.state is not None:
         token = reader.tokens[reader.hover]
         if expression in {token.lemma, token.surface}:
-            reader._hover_meta = replace(reader._hover_meta, mined=True)
+            reader.tip.hover = replace(reader.tip.hover, mined=True)
         reader._show_tooltip(reader.hover)  # rebuild the base tooltip (✓ if it's this word)
-    if reader._nest.state is not None and reader._nest.token is not None:
+    if reader.tip.nest.state is not None and reader.tip.nest.token is not None:
         nested_popup.rerender_with_mined_state(reader)
