@@ -402,7 +402,13 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
         lambda _ports, _src, nid, card, status: opened.append((nid, card.expression, status)),
     )
 
-    sidebar._open_mined(reader, 111)
+    sidebar._open_mined(
+        reader.sidebar_view,
+        reader.sidebar_actions,
+        reader.preview_ports,
+        reader.card_source,
+        111,
+    )
 
     assert opened == [(111, "本", "exists")]
 

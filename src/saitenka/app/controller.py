@@ -52,6 +52,7 @@ from saitenka.app import (
     subnav_settle,
     subtitle_intents,
     subtitle_modes,
+    subtitle_raster,
     surfaces,
     telemetry,
     tooltip,
@@ -149,11 +150,11 @@ from saitenka.app.subtitle_geometry_job import (
 )
 from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
 from saitenka.app.subtitle_render import (
+    DrawRequest,
     NativeVisibleRenderer,
     NullRenderer,
     SubtitleRenderer,
     SubtitleTarget,
-    target_of,
 )
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
@@ -949,8 +950,51 @@ class Reader:
 
     def _subtitle_target(self) -> SubtitleTarget:
         """What the subtitle renderers act on. Built per call — `native_geometry` is installed
-        after construction, so a target cached on the Reader would predate it."""
-        return target_of(self)
+        after construction, so a target cached on the Reader would predate it.
+
+        `draw_request` and `refresh` stay callables: the target outlives the observation, and the
+        legacy stage needs the request built at stage time rather than at snapshot time.
+        """
+        geometry = self.native_geometry
+        return SubtitleTarget(
+            ipc=self.ipc,
+            get=self._get,
+            prop=self._prop,
+            surfaces=self.lifecycle_surfaces,
+            refresh=(
+                (lambda: None)
+                if geometry is None
+                else (lambda: geometry.refresh(self._geometry_observation()))
+            ),
+            draw_request=self._draw_request,
+            source=None if geometry is None else geometry.source_path,
+        )
+
+    def _draw_request(self) -> DrawRequest:
+        """Snapshot the host once per draw, so the values cannot drift apart mid-render.
+
+        The ONE place in the draw path that reads the host; everything downstream of it is a value.
+        Named rather than inlined at its callers: two copies of this snapshot that drift apart is
+        precisely the bug `DrawRequest` was introduced to prevent.
+        """
+        return DrawRequest(
+            text=self.sub_text,
+            lines=self.lines,
+            osd=self.osd,
+            sub_size=self.sub_size,
+            bg_opacity=self.sub_bg_opacity,
+            bottom_margin=self.bottom_margin,
+            secondary_role=self.subtitle_language == SECOND_LANG,
+            upgrade_pending=self._sub_pending is not None,
+            annotation_degraded=self._annotation_degraded,
+            annotation_visible=subtitle_raster.annotation_visible(
+                mode=self.annotation_mode, hover_annotation=self._annotation_hover
+            ),
+            hover=self.hover,
+            hover_span=self.tip.hover.span,
+            styles=self.styles,
+            boxes=self.boxes,
+        )
 
     def _reduce_playback(self, event: events.PlaybackEvent) -> None:
         """Advance `Owner.PLAYBACK`'s slice by one event and apply what that turn published.
@@ -1881,7 +1925,13 @@ class Reader:
             ),
             bookmark=self.toggle_bookmark,
             mine=self.mine_current,
-            open_mined=lambda note_id: sidebar_module._open_mined(self, note_id),
+            open_mined=lambda note_id: sidebar_module._open_mined(
+                self.sidebar_view,
+                self.sidebar_actions,
+                self.preview_ports,
+                self.card_source,
+                note_id,
+            ),
         )
 
     @property

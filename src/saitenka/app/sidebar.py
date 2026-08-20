@@ -11,18 +11,16 @@ from saitenka import otel_metrics
 from saitenka.app import analysis_overlay, mined_store
 from saitenka.app.backlog import BacklogEntry, BacklogStore, MediaRecord
 from saitenka.app.languages import SECOND_LANG
-from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
 from saitenka.model import claims_pointer, in_rect
-from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.mined_store import MinedCard
+    from saitenka.app.miner_ui import CardSource, PreviewPorts
     from saitenka.app.reader_context import SessionContext
     from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
     from saitenka.subtitles import Cue, CueIndex
@@ -346,30 +344,24 @@ def _mine_rows(view: SidebarView) -> list[SidebarRow]:
     return [_mined_row(card, view.active_cue) for card in store.for_path(view.video)]
 
 
-def _open_mined(reader: Reader, note_id: int) -> None:
+def _open_mined(
+    view: SidebarView,
+    actions: SidebarActions,
+    preview: PreviewPorts,
+    source: CardSource,
+    note_id: int,
+) -> None:
     """Open a mined card from the Mine tab: seek to its cue (offline-safe), then round-trip the full
     preview via the retained note id when Anki is reachable."""
-    store = reader.mined_store
-    card = store.by_note_id(note_id)
+    card = view.mined().by_note_id(note_id)
     if card is None:
         return
-    send_correlated(
-        reader.ipc,
-        "sidebar-seek-mined",
-        "set_property",
-        "time-pos",
-        card.cue_start,
-        owner=Owner.PLAYBACK,
-    )
-    if reader.anki and reader.mine_cfg:
+    actions.seek("sidebar-seek-mined", card.cue_start)
+    if view.can_mine:
         from saitenka.app import miner_ui
 
         miner_ui.preview_existing(
-            reader.preview_ports,
-            reader.card_source,
-            note_id,
-            _MinedPreviewCard(card.expression, card.reading),
-            "exists",
+            preview, source, note_id, _MinedPreviewCard(card.expression, card.reading), "exists"
         )
 
 

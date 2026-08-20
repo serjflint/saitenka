@@ -17,7 +17,7 @@ from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
-from saitenka.app.subtitle_render import NativeVisibleRenderer, target_of
+from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
@@ -504,9 +504,9 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     ipc.commands.clear()
 
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
     ipc.props["sid"] = 6
-    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
 
     assert _visibility_asserts(ipc) == 2
     result.close()
@@ -519,10 +519,10 @@ def test_reconfiguring_the_same_track_does_not_reassert(tmp_path: Path) -> None:
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
     ipc.commands.clear()
 
-    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
 
     assert _visibility_asserts(ipc) == 0
     result.close()
@@ -538,7 +538,7 @@ def test_same_session_reconnect_reasserts_native_and_preserves_restore_baseline(
     ipc.props["sub-visibility"] = False
     ipc.commands.clear()
 
-    renderer.connection_replaced(target_of(result))
+    renderer.connection_replaced(result._subtitle_target())
 
     assert renderer.ownership_state.owner.value == "native"
     assert renderer.ownership_state.context.connection_epoch == 1
@@ -965,7 +965,7 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
     try:
         ipc.set_property_error = "rejected"
         result.set_subtitle("猫を見る")
-        result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+        result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
 
         renderer = result.subtitle_pipeline.renderer
         assert isinstance(renderer, NativeVisibleRenderer)
@@ -974,8 +974,8 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
             otel_metrics.snapshot()["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
         )
         ipc.set_property_error = None
-        renderer.suspend_for_overlay(target_of(result))
-        renderer.resume_after_overlay(target_of(result))
+        renderer.suspend_for_overlay(result._subtitle_target())
+        renderer.resume_after_overlay(result._subtitle_target())
 
         assert renderer.ownership_state.owner.value == "legacy"
         assert (
@@ -1695,7 +1695,7 @@ def test_only_one_assertion_is_in_flight_across_a_reassert(tmp_path: Path) -> No
 
     # Through the fact, not a verb: an overlay release is the production trigger for a
     # re-verification with the selection unchanged.
-    result.subtitle_pipeline.renderer.resume_after_overlay(target_of(result))
+    result.subtitle_pipeline.renderer.resume_after_overlay(result._subtitle_target())
 
     # A second assertion would orphan the first's effect id and leave a terminal nobody retires.
     assert [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c] == visibility
@@ -2052,9 +2052,9 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
-        renderer.cue_changed(target_of(result), nonempty=True)
+        renderer.cue_changed(result._subtitle_target(), nonempty=True)
         assert renderer.ownership_state.owner.value == "unknown"
-        result.subtitle_pipeline.draw_current(target_of(result))
+        result.subtitle_pipeline.draw_current(result._subtitle_target())
         # The retry is a named deadline now: nothing happens until it is due.
         assert ipc.timers["subtitle:ownership-retry"][1] == pytest.approx(0.05)
         assert ipc.commands.count(("set_property", "sub-visibility", True)) == 1
@@ -2087,11 +2087,11 @@ def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, tr
     ipc.commands.clear()
 
     if trigger == "empty-cue":
-        renderer.cue_changed(target_of(result), nonempty=False)
+        renderer.cue_changed(result._subtitle_target(), nonempty=False)
     elif trigger == "reconnect":
-        renderer.connection_replaced(target_of(result))
+        renderer.connection_replaced(result._subtitle_target())
     else:
-        result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+        result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
 
     assert ipc.commands.count(("set_property", "sub-visibility", True)) <= 1
     assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
@@ -2116,7 +2116,7 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     ipc.set_property_error = "disconnected"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
 
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert any(command[0] == "overlay-add" for command in ipc.commands)
@@ -2134,7 +2134,7 @@ def _establish_native(result: Reader, ipc: FakeIPC, sid: int) -> NativeVisibleRe
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     result._sub_pending = None
-    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
     assert renderer.ownership_state.native_pixels_established
     return renderer
 
@@ -2212,11 +2212,9 @@ def test_an_overtaken_subtitle_surface_never_acknowledges_over_the_current_one(
     result.set_subtitle("猫を見る")
     ipc.correlate_commands = True
 
-    from saitenka.app.subtitle_render import build_draw_request
-
     def stage():
         return renderer._fallback.draw(
-            build_draw_request(result), result.lifecycle_surfaces, result.ipc
+            result._draw_request(), result.lifecycle_surfaces, result.ipc
         )
 
     older, newer = stage(), stage()
@@ -2254,7 +2252,7 @@ def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: 
     ipc.commands.clear()
 
     ipc.correlate_commands = True
-    renderer.resume_after_overlay(target_of(result))
+    renderer.resume_after_overlay(result._subtitle_target())
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the visibility write
     ipc.props["sub-visibility"] = False  # mpv refuses to keep its subtitles visible
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # readback FALSE: hand to legacy
@@ -2287,7 +2285,7 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     ipc.overlay_add_error = "unsupported format"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result._subtitle_target(), draw=result._draw_subtitle)
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None
@@ -2305,11 +2303,11 @@ def test_rejected_legacy_rehandoff_keeps_mpv_visible_and_retries(tmp_path: Path)
     result._draw_subtitle()
     assert renderer.ownership_state.owner.value == "legacy"
     ipc.set_property_exception = None
-    renderer.suspend_for_overlay(target_of(result))
+    renderer.suspend_for_overlay(result._subtitle_target())
     ipc.commands.clear()
     ipc.overlay_add_error = "unsupported format"
 
-    renderer.resume_after_overlay(target_of(result))
+    renderer.resume_after_overlay(result._subtitle_target())
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None

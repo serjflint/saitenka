@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app import subtitle_raster
-from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_ownership import (
     ASK_MPV,
@@ -43,7 +42,6 @@ from saitenka.runtime.surfaces import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from saitenka.app.controller import Reader
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
@@ -130,36 +128,6 @@ class DrawResult:
     boxes: list[WordBox]
     origin: tuple[int, int]
     transaction: SurfaceTransaction | None
-
-
-def build_draw_request(reader: Reader) -> DrawRequest:
-    """Snapshot the host once per draw, so the values cannot drift apart mid-render.
-
-    The ONE function in the draw path that reads a `Reader`; everything downstream of it is a value.
-    It is a `reader-parameter` row and it should stay one — this is a seam, not a leak, and the gate
-    counting it is what keeps that judgement explicit instead of assumed.
-
-    Not inlined at its two callers: two copies of this snapshot that drift apart is precisely the
-    bug `DrawRequest` was introduced to prevent.
-    """
-    return DrawRequest(
-        text=reader.sub_text,
-        lines=reader.lines,
-        osd=reader.osd,
-        sub_size=reader.sub_size,
-        bg_opacity=reader.sub_bg_opacity,
-        bottom_margin=reader.bottom_margin,
-        secondary_role=reader.subtitle_language == SECOND_LANG,
-        upgrade_pending=reader._sub_pending is not None,
-        annotation_degraded=reader._annotation_degraded,
-        annotation_visible=subtitle_raster.annotation_visible(
-            mode=reader.annotation_mode, hover_annotation=reader._annotation_hover
-        ),
-        hover=reader.hover,
-        hover_span=reader.tip.hover.span,
-        styles=reader.styles,
-        boxes=reader.boxes,
-    )
 
 
 FOCUS_PAD = 3
@@ -393,30 +361,6 @@ class SubtitleTarget:
     refresh: Callable[[], None]
     draw_request: Callable[[], DrawRequest]
     source: object = None
-
-
-def target_of(reader: Reader) -> SubtitleTarget:
-    """Snapshot the host into what a renderer acts on.
-
-    This module's second host-taking seam, beside `build_draw_request` — which it wraps as
-    `draw_request`, because the legacy stage needs the request built at stage time, not at
-    snapshot time.
-    """
-    geometry = reader.native_geometry
-    return SubtitleTarget(
-        ipc=reader.ipc,
-        get=reader._get,
-        prop=reader._prop,
-        surfaces=reader.lifecycle_surfaces,
-        refresh=(
-            (lambda: None)
-            if geometry is None
-            # Snapshot at call time, not here: the target outlives the observation.
-            else (lambda: geometry.refresh(reader._geometry_observation()))
-        ),
-        draw_request=lambda: build_draw_request(reader),
-        source=None if geometry is None else geometry.source_path,
-    )
 
 
 class NullRenderer(NoPixelOwnership):

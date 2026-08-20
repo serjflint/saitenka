@@ -111,18 +111,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/session_runtime.py::SessionRuntime.__init__"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_open_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::build_draw_request"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::target_of"
     ]
   ],
   "startup": [

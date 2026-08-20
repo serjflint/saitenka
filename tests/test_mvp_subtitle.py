@@ -154,7 +154,7 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
     import util
 
     from saitenka.app.controller import Reader
-    from saitenka.app.subtitle_render import SubtitleRenderer, build_draw_request
+    from saitenka.app.subtitle_render import SubtitleRenderer
 
     def origin_for(frac: float) -> tuple[int, int]:
         reader = Reader(util.FakeIPC())
@@ -163,7 +163,7 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
         reader.sub_origin = (999, 999)  # a stale origin the draw has to replace
         reader.set_subtitle("猫を見る")
         result = SubtitleRenderer().draw(
-            build_draw_request(reader), reader.lifecycle_surfaces, reader.ipc
+            reader._draw_request(), reader.lifecycle_surfaces, reader.ipc
         )
         assert result is not None
         reader.sub_origin = result.origin  # the coordinator's write-back, done here by hand

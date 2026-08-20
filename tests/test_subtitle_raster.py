@@ -251,10 +251,9 @@ def test_a_draw_onto_a_closed_surface_settles_its_caller_as_uncommitted(recorder
     settled: list[bool] = []
 
     renderer.close()
-    from saitenka.app.subtitle_render import build_draw_request
 
     result = renderer.draw(
-        build_draw_request(reader),
+        reader._draw_request(),
         reader.lifecycle_surfaces,
         reader.ipc,
         on_settled=settled.append,
