@@ -4009,10 +4009,10 @@ class Reader:
     def _retire_artifacts(self) -> None:
         """Hand the scratch dir to the runtime's `ARTIFACTS` phase, or remove it ourselves.
 
-        The fallback is what still keeps this duty out of the runtime: a `Reader` with no gateway
-        is not a session, but it did create the directory, and nothing else would remove it. It
-        goes when composition guarantees a runtime — until then two paths for one removal is the
-        honest state, not a migrated one.
+        The fallback is not what keeps this unmigrated — every migrated close duty has one, because
+        a `Reader` with no gateway still built the thing. What makes the gate sound here is that
+        `RemoveSessionArtifacts` carries its own path: a reactor that *saw* the event can always
+        perform it, which is the one case where `announce`'s return answers the question asked.
         """
         import shutil
 

@@ -803,16 +803,16 @@
     },
     {
       "id": "temporary-artifacts",
-      "source": "src/saitenka/app/controller.py::Reader._retire_artifacts",
+      "source": "src/saitenka/app/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self._announce_close",
-        "call:shutil.rmtree"
+        "call:RemoveSessionArtifacts",
+        "ref:event.scratch"
       ],
       "target": "artifact-close",
       "work_package": "3,4,6",
       "replacement": "RemoveSessionArtifacts -> CloseStepOutcome",
       "test": "temporary artifacts are removed after their providers stop or are quarantined",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "transport",
