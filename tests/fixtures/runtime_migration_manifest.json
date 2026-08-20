@@ -78,10 +78,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/embedded_subs.py::build_sub_index_for_current_track"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/help_overlay.py::scroll"
     ],
     [
@@ -295,18 +291,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/sub_picker.py::scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subnav.py::load_sub_index"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subnav.py::reconcile_sub_text"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subnav.py::sub_nav"
     ],
     [
       "reader-parameter",

@@ -6,6 +6,7 @@ Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating metho
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,10 +17,39 @@ from saitenka.app.sub_index import load_index
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.native_subtitles import NativeSubtitleGeometry
+    from saitenka.app.reader_context import EpisodeContext
+    from saitenka.subtitles import Cue
+
+    PropertyGet = Callable[[str], object]
 
 
-def load_sub_index(reader: Reader, path) -> None:
+@dataclass(frozen=True, slots=True)
+class NavPorts:
+    """What navigating cues needs from the session.
+
+    `episode` is the container itself, not five callables over it: every nav field these functions
+    read and write is one of its own, and reaching them through the host's flat names is what hid
+    that they are one lifetime. Writing `episode.nav_idx` also puts the write where the reset is,
+    so a re-slot cannot leave a stale hint behind.
+    """
+
+    episode: EpisodeContext
+    geometry: NativeSubtitleGeometry | None
+    get: PropertyGet
+    cue_text: Callable[[], str]
+    cue_retired: Callable[[], bool]
+    draw_cue: Callable[..., None]
+    replace_source: Callable[..., None]
+    invalidate: Callable[[], None]
+    open_settle: Callable[[], None]
+    retire_settle: Callable[[], None]
+    warm_tokens: Callable[[], None]
+    index_changed: Callable[[], None]
+    geometry_hint: Callable[[Cue | None], None]
+
+
+def load_sub_index(ports: NavPorts, path) -> None:
     """Parse the external subtitle file at ``path`` into a cue index so Alt+←/→/↓ can render the
     target line instantly. Fail-soft: an unreadable/empty/unsupported file RETAINS the prior cues
     (a transient track-switch/resolve failure must not blank a good index) — navigation still falls
@@ -27,22 +57,19 @@ def load_sub_index(reader: Reader, path) -> None:
     idx = load_index(path)
     if idx is None:
         return
-    reader._replace_subtitle_source(path, reason="subtitle-index")
-    reader._sub_index = idx
-    native_geometry = getattr(reader, "native_geometry", None)
-    if native_geometry is not None:
-        native_geometry.set_source(Path(path), live=True)
+    ports.replace_source(path, reason="subtitle-index")
+    ports.episode.sub_index = idx
+    if ports.geometry is not None:
+        ports.geometry.set_source(Path(path), live=True)
 
-    reader.invalidate_analysis()
-    # Reinstall the cue that is still on screen under the new source. `_replace_subtitle_source`
+    ports.invalidate()
+    # Reinstall the cue that is still on screen under the new source. `replace_source`
     # retired its identity, and nothing re-derives one: cue arrival is event-driven, so mpv sends
     # nothing until its *next* sub-text change and the overlay stays blank until then. Same
     # reconcile `start_observing` runs after seeding, for the same reason.
-    reconcile_sub_text(reader, reader.sub_text)
-    from saitenka.app import sidebar
-
-    sidebar.on_index_changed(reader)
-    reader.warm_episode_tokens()  # warm the whole episode's cues into the token cache (bg, best-effort)
+    reconcile_sub_text(ports, ports.cue_text())
+    ports.index_changed()
+    ports.warm_tokens()  # warm the whole episode's cues into the token cache (bg, best-effort)
 
 
 def _get_float(get: Callable[[str], object], prop: str) -> float | None:
@@ -61,7 +88,7 @@ def _get_float(get: Callable[[str], object], prop: str) -> float | None:
         return None
 
 
-def sub_nav(reader: Reader, delta: int) -> bool:
+def sub_nav(ports: NavPorts, delta: int) -> bool:
     """Render the cue ``delta`` steps away (-1 prev / 0 replay / +1 next) in the overlay right now,
     from the parsed index — the perceived-instant half of subtitle navigation. Returns True if it
     drew a target line. The caller still issues the real ``sub-seek`` so the video catches up; the
@@ -70,7 +97,8 @@ def sub_nav(reader: Reader, delta: int) -> bool:
     Chaining works while the video seek is still in flight (time-pos/sub-start are stale): after a
     nav render ``sub_text`` is the line we drew, so ``locate`` finds it by text and ``_nav_idx``
     disambiguates duplicates — next/next/next steps forward predictably."""
-    idx = reader._sub_index
+    episode = ports.episode
+    idx = episode.sub_index
     if idx is None:
         return False
     # Span covers the decision AND the render it triggers below — set_subtitle's own "cue_redraw"
@@ -80,10 +108,10 @@ def sub_nav(reader: Reader, delta: int) -> bool:
         target = subnav_policy.resolve_target(
             idx,
             delta=delta,
-            text=reader.sub_text,
-            sub_start=_get_float(reader._get, "sub-start"),
-            time_pos=_get_float(reader._get, "time-pos"),
-            nav_idx=reader._nav_idx,
+            text=ports.cue_text(),
+            sub_start=_get_float(ports.get, "sub-start"),
+            time_pos=_get_float(ports.get, "time-pos"),
+            nav_idx=episode.nav_idx,
         )
         if target is None:
             return False  # no index match / out of range → let mpv's sub-seek handle it
@@ -93,23 +121,23 @@ def sub_nav(reader: Reader, delta: int) -> bool:
         # Captured BEFORE set_subtitle overwrites sub_text — mpv's OWN native sub-seek (fired right
         # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
         # before landing on the real target; reconcile below must not mistake that for a correction.
-        reader._nav_prev_text = reader.sub_text
-        reader._geometry_cue_hint = target.cue
+        episode.nav_prev_text = ports.cue_text()
+        ports.geometry_hint(target.cue)
         try:
-            reader.set_subtitle(
+            ports.draw_cue(
                 target.cue.text,
                 provisional_navigation=True,
-            )  # instant overlay render (also resets _nav_idx)
+            )  # instant overlay render (also resets nav_idx)
         finally:
-            reader._geometry_cue_hint = None
-        reader._nav_idx = target.index
+            ports.geometry_hint(None)
+        episode.nav_idx = target.index
         # Guard the reconcile: mpv's sub-text briefly reads empty (or the pre-nav cue) mid-seek;
         # ignoring that avoids reverting the render before it settles.
-        reader.open_settle_window()
+        ports.open_settle()
     return True
 
 
-def reconcile_sub_text(reader: Reader, text: str) -> None:
+def reconcile_sub_text(ports: NavPorts, text: str) -> None:
     """Poll-loop hook: adopt mpv's current ``sub-text`` when it changed. mpv is the source of truth
     (it corrects the line if our instant-nav index guessed wrong), EXCEPT for two transient values
     mpv emits mid-seek right after a manual sub-nav: an empty blip, and mpv re-reporting the PRE-nav
@@ -120,14 +148,15 @@ def reconcile_sub_text(reader: Reader, text: str) -> None:
     already correct. Swallow both within the settle window."""
     # Empty is a stable retired state: the first transition already cleared every interaction
     # surface, so reinstalling the same empty observation would only repeat teardown every poll.
-    if text == reader.sub_text and (not reader._cue_retired or not text.strip()):
+    episode, drawn = ports.episode, ports.cue_text()
+    if text == drawn and (not ports.cue_retired() or not text.strip()):
         return
-    identity_reinstall = text == reader.sub_text and reader._cue_retired
-    window = reader._sub_settle
+    identity_reinstall = text == drawn and ports.cue_retired()
+    window = episode.sub_settle
     if subnav_settle.swallows(
         window,
         text=text,
-        nav_prev_text=reader._nav_prev_text,
+        nav_prev_text=episode.nav_prev_text,
         identity_reinstall=identity_reinstall,
     ):
         return
@@ -140,12 +169,12 @@ def reconcile_sub_text(reader: Reader, text: str) -> None:
     with otel_metrics.instrumented(
         otel_metrics.sub_text_reconcile_duration_ms, "sub_text_reconcile"
     ):
-        nav_idx = reader._nav_idx
-        if identity_reinstall and window.open and reader._nav_provisional_cue_counted:
-            reader.set_subtitle(text, revise_session_cue=True)
+        nav_idx = episode.nav_idx
+        if identity_reinstall and window.open and episode.nav_provisional_cue_counted:
+            ports.draw_cue(text, revise_session_cue=True)
         else:
-            reader.set_subtitle(text)
-        reader._nav_provisional_cue_counted = False
+            ports.draw_cue(text)
+        episode.nav_provisional_cue_counted = False
         if identity_reinstall:
-            reader._nav_idx = nav_idx
-    reader.retire_settle_window()
+            episode.nav_idx = nav_idx
+    ports.retire_settle()

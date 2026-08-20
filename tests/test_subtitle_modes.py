@@ -326,9 +326,7 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     messages = []
     monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
     rebuilt = []
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", rebuilt.append
-    )
+    monkeypatch.setattr(reader, "rebuild_sub_index", lambda: rebuilt.append("rebuilt"))
     ipc.commands.clear()
 
     reader.toggle_subtitle_language()
@@ -337,7 +335,7 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     assert reader._translate_on is True
     assert ("set_property", "sid", 1) in ipc.commands
     assert ("set_property", "secondary-sid", 2) in ipc.commands
-    assert rebuilt == [reader]
+    assert rebuilt == ["rebuilt"]
     assert not [c for c in ipc.commands if c[0] in {"seek", "sub-seek"}]
     assert not [c for c in ipc.commands if c[:2] == ("set_property", "pause")]
     assert messages == ["subtitles: English (1/2)"]
@@ -352,7 +350,7 @@ def test_language_switch_releases_secondary_before_selecting_its_track(monkeypat
     ipc.props["secondary-sid"] = 1
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     ipc.commands.clear()
 
@@ -474,9 +472,7 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
     messages = []
     rebuilt = []
     monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", rebuilt.append
-    )
+    monkeypatch.setattr(reader, "rebuild_sub_index", lambda: rebuilt.append("rebuilt"))
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
     ipc.commands.clear()
@@ -487,7 +483,7 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
     assert ("sub-add", str(path), "auto", "", "jpn") in ipc.commands
     assert reader.jp_sid == 9 and reader.subtitle_language == "jp"
     assert ("set_property", "sid", 9) in ipc.commands
-    assert rebuilt == [reader]
+    assert rebuilt == ["rebuilt"]
     assert messages == ["Japanese subtitles ready"]
 
 
@@ -516,7 +512,7 @@ def test_startup_japanese_arrival_is_selected_after_missing_both(tmp_path, monke
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
@@ -540,7 +536,7 @@ def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypa
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader, "_toast", lambda *_a: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
@@ -561,7 +557,7 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch):
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # jp mode
     monkeypatch.setattr(reader, "_toast", lambda *_a: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = Path(tmp_path / "episode.synced.srt")
     path.write_text("Japanese", encoding="utf-8")
@@ -671,7 +667,7 @@ def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypat
     messages: list[str] = []
     monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = tmp_path / "episode.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
@@ -976,7 +972,7 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, m
     reader._sub_index = old
     monkeypatch.setattr(reader, "_toast", lambda *_a: None)
     monkeypatch.setattr(  # the new track isn't resolvable at this instant
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
@@ -1009,7 +1005,7 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_
     )
     monkeypatch.setattr(reader, "_toast", lambda *_a: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
@@ -1031,7 +1027,7 @@ def test_toggle_from_english_returns_to_japanese(monkeypatch):
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # JP active
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
 
     reader.toggle_subtitle_language()  # JP → EN

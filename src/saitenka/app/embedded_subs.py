@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING
 from saitenka.app import subtitle_artifact
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
+    from collections.abc import Callable
+
+    from saitenka.app.native_subtitles import NativeSubtitleGeometry
+
+    PropertyGet = Callable[[str], object]
 
 log = logging.getLogger(__name__)
 
@@ -71,29 +75,28 @@ def extract_embedded_track(video: str | Path, ff_index: int, dest: Path) -> bool
     return True
 
 
-def build_sub_index_for_current_track(reader: Reader) -> None:
-    """Populate ``reader._sub_index`` from whichever subtitle track mpv currently has selected.
+def build_sub_index_for_current_track(
+    ipc, get: PropertyGet, load: Callable[[Path], None], geometry: NativeSubtitleGeometry | None
+) -> None:
+    """Populate the episode's cue index from whichever subtitle track mpv currently has selected.
     External/jimaku tracks (added via ``sub-add``, ``sub_file=`` or the jimaku fetch) already sit on
     disk — read the path straight off track-list's ``external-filename``. An embedded track is
     extracted once via ffmpeg and cached. Either way the result feeds the same
     ``sub_index.load_index`` parser that already powers Alt+←/→/↓ nav, so prefetch lookahead
     (app/prefetch.py's ``upcoming_cue_texts``) gets real upcoming lines regardless of subtitle
     source. Fail-soft throughout: no selected track / no video path / extraction failure just
-    leaves ``_sub_index`` unset."""
-    native_geometry = getattr(reader, "native_geometry", None)
-    if native_geometry is not None:
-        native_geometry.set_source(None, live=True)
-    artifact = subtitle_artifact.resolve(
-        _selected_sub_track(reader.ipc), media_path=reader._get("path")
-    )
+    leaves the index unset."""
+    if geometry is not None:
+        geometry.set_source(None, live=True)
+    artifact = subtitle_artifact.resolve(_selected_sub_track(ipc), media_path=get("path"))
     if isinstance(artifact, subtitle_artifact.ArtifactUnavailable):
         log.debug("no subtitle artifact for the current track: %s", artifact.value)
         return
     if isinstance(artifact, subtitle_artifact.ExternalArtifact):
-        reader.load_sub_index(Path(artifact.path))
+        load(Path(artifact.path))
         return
     video_path = Path(artifact.media_path)
     dest = embedded_subs_cache_dir() / embedded_subs_cache_key(video_path, artifact.ff_index)
     if not dest.exists() and not extract_embedded_track(video_path, artifact.ff_index, dest):
         return
-    reader.load_sub_index(dest)
+    load(dest)

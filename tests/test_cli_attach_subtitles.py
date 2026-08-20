@@ -29,11 +29,13 @@ class Reader:
     def configure_sub_picker(self, lister):
         self.picker_lister = lister
 
+    def rebuild_sub_index(self):
+        self.rebuilt = True
+
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):
     reader, ipc = Reader(), IPC()
     calls = []
-    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _reader: None)
 
     def fetch(video, providers, **kwargs):
         calls.append((video, providers, kwargs["tsukihime_config"]))
@@ -65,9 +67,8 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
     assert calls[-1][0] == "/videos/Show - 02.mkv"
 
 
-def test_attach_configures_retry_even_when_startup_fetch_is_unneeded(monkeypatch):
+def test_attach_configures_retry_even_when_startup_fetch_is_unneeded():
     reader, ipc = Reader(), IPC()
-    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _reader: None)
 
     attach_commands._finish_attach_subtitle_startup(
         reader,
@@ -125,7 +126,6 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     started: list[str] = []
     monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
     monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
-    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _r: None)
     monkeypatch.setattr(reader, "start_prefetch", lambda: None)
     monkeypatch.setattr(reader, "_toast", lambda *_a, **_k: None)
     # new episode carries English only → prepare_attach_startup defers a jimaku fetch

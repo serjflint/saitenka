@@ -1,7 +1,6 @@
 {
   "saitenka.app.backlog": 1,
   "saitenka.app.commands.attach": 3,
-  "saitenka.app.embedded_subs": 1,
   "saitenka.app.help_overlay": 1,
   "saitenka.app.launch.run": 4,
   "saitenka.app.mined_feedback": 1,
@@ -15,7 +14,6 @@
   "saitenka.app.session_stats": 1,
   "saitenka.app.sidebar": 12,
   "saitenka.app.sub_picker": 4,
-  "saitenka.app.subnav": 3,
   "saitenka.app.subtitle_pipeline": 1,
   "saitenka.app.subtitle_render": 2,
   "saitenka.app.surfaces": 8,

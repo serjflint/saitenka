@@ -9,7 +9,6 @@ import cyclopts
 
 from saitenka import otel_metrics
 from saitenka.app.config import TooltipOptions, load_config
-from saitenka.app.embedded_subs import build_sub_index_for_current_track
 from saitenka.app.subselect import ProviderConfig
 
 log = logging.getLogger(__name__)
@@ -102,7 +101,7 @@ def _finish_attach_subtitle_startup(
         with otel_metrics.traced("startup.subtitle_mode_configure"):
             reader.configure_subtitle_mode(startup, slang=cfg.slang)
     with otel_metrics.traced("startup.subtitle_index"):
-        build_sub_index_for_current_track(reader)
+        reader.rebuild_sub_index()
     from saitenka.app.subselect import configure_providers, provider_fetch_factory
 
     configure_providers(

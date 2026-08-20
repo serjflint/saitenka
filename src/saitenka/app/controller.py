@@ -970,7 +970,7 @@ class Reader:
             invalidate=self.invalidate_analysis,
             translation_visible=self._translation_visible,
             drop_index=self._drop_sub_index,
-            rebuild_index=self._rebuild_sub_index,
+            rebuild_index=self.rebuild_sub_index,
             sample_cue=self._sample_cue_text,
             clear_cue=lambda: self.set_subtitle(""),
             redraw_cue=lambda: self.set_subtitle(self.sub_text),
@@ -979,10 +979,13 @@ class Reader:
     def _drop_sub_index(self) -> None:
         self._sub_index = None
 
-    def _rebuild_sub_index(self) -> None:
+    def rebuild_sub_index(self) -> None:
+        """Re-index whichever track mpv has selected. The one place the four facts are bound."""
         from saitenka.app.embedded_subs import build_sub_index_for_current_track
 
-        build_sub_index_for_current_track(self)
+        build_sub_index_for_current_track(
+            self.ipc, self._get, self.load_sub_index, self.native_geometry
+        )
 
     def _sample_cue_text(self) -> str:
         return subtitle_modes._sample_cue_text(self._sub_index, self.sub_text)
@@ -1723,10 +1726,8 @@ class Reader:
             return False
         startup = subtitle_modes.select_initial(self.ipc, new_slang)
         self.configure_subtitle_mode(startup, slang=new_slang)
-        from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
         self._sub_index = None  # the old track's index is wrong for the new one; rebuild from disk
-        build_sub_index_for_current_track(self)
+        self.rebuild_sub_index()
         return True
 
     def _retokenize_current_cue(self) -> None:
@@ -3792,8 +3793,33 @@ class Reader:
         self._miner.seed_mined()
 
     # --- subtitle navigation (instant render, then seek) --------------------------------------
+    @property
+    def nav_ports(self) -> subnav.NavPorts:
+        """The seam `subnav` converted onto. `geometry` is read here, not probed for: it is a
+        declared field, so a `getattr` fallback could only ever hide a rename as a silent
+        geometry-off."""
+
+        def geometry_hint(cue) -> None:
+            self._geometry_cue_hint = cue
+
+        return subnav.NavPorts(
+            episode=self.episode,
+            geometry=self.native_geometry,
+            get=self._get,
+            cue_text=lambda: self.sub_text,
+            cue_retired=lambda: self._cue_retired,
+            draw_cue=self.set_subtitle,
+            replace_source=self._replace_subtitle_source,
+            invalidate=self.invalidate_analysis,
+            open_settle=self.open_settle_window,
+            retire_settle=self.retire_settle_window,
+            warm_tokens=self.warm_episode_tokens,
+            index_changed=lambda: sidebar.on_index_changed(self),
+            geometry_hint=geometry_hint,
+        )
+
     def load_sub_index(self, path) -> None:
-        subnav.load_sub_index(self, path)
+        subnav.load_sub_index(self.nav_ports, path)
 
     def _seek_cue(self, effect: subtitle_intents.SeekCue) -> bool:
         """Carry out a navigation step, unless the cue it was decided against is gone.
@@ -3819,10 +3845,10 @@ class Reader:
         return True
 
     def _sub_nav(self, delta: int) -> bool:
-        return subnav.sub_nav(self, delta)
+        return subnav.sub_nav(self.nav_ports, delta)
 
     def _reconcile_sub_text(self, text: str) -> None:
-        subnav.reconcile_sub_text(self, text)
+        subnav.reconcile_sub_text(self.nav_ports, text)
 
     # --- progressive dep loading --------------------------------------------------------------
     def load_deps_async(self, cfg: dict, build=None, *, prebuilt=None) -> None:

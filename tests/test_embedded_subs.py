@@ -1,7 +1,7 @@
-"""Prefetch lookahead needs reader._sub_index regardless of subtitle source: external/jimaku files
-already had a path, embedded (baked-in) tracks need extracting first. A FakeIPC serves track-list/
-path like test_subselect.py's; a FakeReader records what load_sub_index was called with instead of
-building a real Reader (this module only touches .ipc, ._get and .load_sub_index)."""
+"""Prefetch lookahead needs the episode's cue index regardless of subtitle source: external/jimaku
+files already had a path, embedded (baked-in) tracks need extracting first. A FakeIPC serves
+track-list/path like test_subselect.py's, and the loader is a list's `append` — the function takes
+the four facts, so there is no host to stand in for."""
 
 from __future__ import annotations
 
@@ -18,16 +18,15 @@ class FakeIPC(util.FakeIPC):
         util.runtime_gateway(self)
 
 
-class FakeReader:
-    def __init__(self, ipc):
-        self.ipc = ipc
-        self.loaded_paths: list = []
+def build(ipc) -> list:
+    """Run the index build against `ipc`, returning the paths it asked the loader for."""
+    loaded: list = []
 
-    def _get(self, prop):
-        return self.ipc.command("get_property", prop).get("data")
+    def get(prop):
+        return ipc.command("get_property", prop).get("data")
 
-    def load_sub_index(self, path):
-        self.loaded_paths.append(path)
+    es.build_sub_index_for_current_track(ipc, get, loaded.append, None)
+    return loaded
 
 
 EXTERNAL = {
@@ -57,15 +56,13 @@ EMBEDDED_EN_SECONDARY = {
 
 
 def test_no_selected_track_leaves_index_unset():
-    reader = FakeReader(FakeIPC(tracks=[]))
-    es.build_sub_index_for_current_track(reader)
-    assert reader.loaded_paths == []
+    loaded = build(FakeIPC(tracks=[]))
+    assert loaded == []
 
 
 def test_external_track_loads_straight_from_track_list_path():
-    reader = FakeReader(FakeIPC(tracks=[EXTERNAL]))
-    es.build_sub_index_for_current_track(reader)
-    assert reader.loaded_paths == [es.Path("/tmp/fetched.ja.srt")]
+    loaded = build(FakeIPC(tracks=[EXTERNAL]))
+    assert loaded == [es.Path("/tmp/fetched.ja.srt")]
 
 
 def test_embedded_track_extracts_via_ffmpeg_then_loads_the_cache_path(tmp_path, monkeypatch):
@@ -83,13 +80,12 @@ def test_embedded_track_extracts_via_ffmpeg_then_loads_the_cache_path(tmp_path, 
 
     monkeypatch.setattr(es, "extract_embedded_track", fake_extract)
 
-    reader = FakeReader(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
-    es.build_sub_index_for_current_track(reader)
+    loaded = build(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
 
     assert len(calls) == 1
     assert calls[0][0] == video
     assert calls[0][1] == 10
-    assert reader.loaded_paths == [calls[0][2]]
+    assert loaded == [calls[0][2]]
 
 
 def test_embedded_track_reuses_cached_extraction_without_re_extracting(tmp_path, monkeypatch):
@@ -106,9 +102,8 @@ def test_embedded_track_reuses_cached_extraction_without_re_extracting(tmp_path,
 
     monkeypatch.setattr(es, "extract_embedded_track", boom)
 
-    reader = FakeReader(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
-    es.build_sub_index_for_current_track(reader)
-    assert reader.loaded_paths == [dest]
+    loaded = build(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
+    assert loaded == [dest]
 
 
 def test_embedded_extraction_failure_leaves_index_unset(tmp_path, monkeypatch):
@@ -117,15 +112,13 @@ def test_embedded_extraction_failure_leaves_index_unset(tmp_path, monkeypatch):
     monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: tmp_path / "cache")
     monkeypatch.setattr(es, "extract_embedded_track", lambda *_a, **_kw: False)
 
-    reader = FakeReader(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
-    es.build_sub_index_for_current_track(reader)
-    assert reader.loaded_paths == []
+    loaded = build(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
+    assert loaded == []
 
 
 def test_primary_selection_wins_over_secondary():
-    reader = FakeReader(FakeIPC(tracks=[EMBEDDED_EN_SECONDARY, EMBEDDED_JA], path="/v/ep.mkv"))
-    track = es._selected_sub_track(reader.ipc)
-    assert track is EMBEDDED_JA
+    ipc = FakeIPC(tracks=[EMBEDDED_EN_SECONDARY, EMBEDDED_JA], path="/v/ep.mkv")
+    assert es._selected_sub_track(ipc) is EMBEDDED_JA
 
 
 # --- the ffmpeg extraction argv itself (the tests above monkeypatch extract_embedded_track away) ---

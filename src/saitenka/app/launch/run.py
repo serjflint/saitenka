@@ -18,7 +18,6 @@ from saitenka.app import session_stats
 from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config, subtitle_geometry_options
 from saitenka.app.continuity import resolve_sibling
-from saitenka.app.embedded_subs import build_sub_index_for_current_track
 from saitenka.app.jimaku import parse_filename
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
@@ -773,7 +772,7 @@ def reslot_to_current(
             startup.tracks.jp_sid,
             startup.tracks.en_sid,
         )
-        build_sub_index_for_current_track(reader)
+        reader.rebuild_sub_index()
         reader.configure_subtitle_mode(startup, slang=subs.slang)
         session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
@@ -1162,7 +1161,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         with otel_metrics.traced("startup.subtitle_index"):
-            build_sub_index_for_current_track(reader)
+            reader.rebuild_sub_index()
         reader.load_deps_async(
             cfg, prebuilt=deps_future
         )  # the build has been running since pre-launch
