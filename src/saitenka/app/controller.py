@@ -1593,6 +1593,10 @@ class Reader:
     def set_hover(self, index: int) -> None:
         tooltip.set_hover(self, index)
 
+    def retire_hover(self) -> None:
+        """Publish that nothing is hovered — the teardown half of the old `set_hover(-1)`."""
+        tooltip.retire_hover(self)
+
     def prepare_hover_blocking(self, index: int) -> None:
         """Build the deterministic demo/screenshot hover before the event loop starts."""
         metadata_submit, engaged_submit = (
@@ -2150,7 +2154,7 @@ class Reader:
         elif isinstance(effect, interaction_intents.NavigateBack):
             tooltip.tip_back(self)
         elif isinstance(effect, DismissHover):
-            self.set_hover(-1)
+            self.retire_hover()
         elif isinstance(effect, interaction_intents.RouteClick):
             self.on_click()
         elif isinstance(effect, interaction_intents.CopyUnderCursor):
@@ -2232,7 +2236,7 @@ class Reader:
 
     def _apply_panel_effect(self, effect: panel_intents.PanelEffect) -> None:
         if isinstance(effect, DismissHover):
-            self.set_hover(-1)
+            self.retire_hover()
         elif isinstance(effect, panel_intents.ReplayCardPreview):
             miner_ui.replay_preview(self)
         elif isinstance(effect, panel_intents.OpenPanel):

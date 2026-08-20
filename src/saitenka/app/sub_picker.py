@@ -155,7 +155,7 @@ def open_picker(reader: Reader) -> None:
     state.warnings = ()
     state.scroll = 0
     state.generation += 1
-    reader.set_hover(-1)
+    reader.retire_hover()
     reader.redraw_sub_picker()
     _start_listing(reader, str(video))
 
@@ -290,7 +290,7 @@ def suppress_hover(reader: Reader) -> bool:
         return False
     if not claims_pointer(state.rect, reader._prop("mouse-pos"), open_=state.open):
         return False
-    reader.set_hover(-1)
+    reader.retire_hover()
     return True
 
 

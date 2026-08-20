@@ -418,7 +418,7 @@ def suppress_hover(reader: Reader) -> bool:
     ):
         return False
     reader.set_annotation_hover(revealed=False)
-    reader.set_hover(-1)
+    reader.retire_hover()
     return True
 
 

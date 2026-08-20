@@ -870,6 +870,10 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/tooltip.py::retire_hover"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/tooltip.py::scan_hit"
     ],
     [

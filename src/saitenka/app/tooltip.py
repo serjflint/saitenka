@@ -209,12 +209,12 @@ def _linger_word_hover(reader: Reader) -> None:
 
     def hidden() -> None:
         reader._hide_pending = False
-        reader.set_hover(-1)
+        reader.retire_hover()
 
     if reader.arm_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE, reader.hide_delay, hidden):
         reader._hide_pending = True
     else:
-        reader.set_hover(-1)
+        reader.retire_hover()
 
 
 def _update_word_hover(reader: Reader, over_word: int, *, over_tip: bool, over_nest: bool) -> None:
@@ -381,15 +381,29 @@ def apply_hover_metadata(reader: Reader, result) -> None:
         reader._sync_auto_translation()
 
 
+def retire_hover(reader: Reader) -> None:
+    """Nothing is hovered any more: clear the metadata, redraw the cue, tear the tip down.
+
+    Split from `set_hover` because every caller of the old `set_hover(-1)` meant exactly this and
+    nothing else — a sidebar taking the pointer, a picker opening, the mouse leaving the cue. One
+    function that both retires and builds makes a caller wanting the teardown inherit the build
+    chain, and in the target this teardown is a fact the tooltip feature reduces, not a call.
+    """
+    if reader.hover < 0:
+        return
+    reader.hover = -1
+    reader._hover_meta = NO_HOVER_METADATA
+    reader._draw_subtitle()
+    reader._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
+
+
 def set_hover(reader: Reader, index: int) -> None:
+    if index < 0:
+        retire_hover(reader)  # any negative index means "nothing hovered"
+        return
     if index == reader.hover:
         return
     reader.hover = index
-    if index < 0:
-        reader._hover_meta = NO_HOVER_METADATA
-        reader._draw_subtitle()
-        reader._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
-        return
     reader._tip_view.job_id = reader._interaction_jobs.begin("tooltip")
     reader._tip_view.job_kind = "tooltip"
     if reader._interaction_metadata_submit is not None:

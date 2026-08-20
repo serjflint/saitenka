@@ -1147,8 +1147,10 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
     r = Reader(ipc)
     r.tokens = ["x"]
     r._tip_rect = (100, 100, 60, 40)
-    seen = []
-    monkeypatch.setattr(r, "set_hover", lambda i: (seen.append(i), setattr(r, "hover", i)))
+    # Both halves of the hover fact are stubbed: this test is about the DWELL, not about what a
+    # build or a teardown does — the panel build needs a dictionary this Reader has no use for.
+    monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
+    monkeypatch.setattr(r, "retire_hover", lambda: setattr(r, "hover", -1))
     monkeypatch.setattr(r, "_hit", lambda x, y: 0 if (x < 10 and y < 10) else -1)
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
@@ -1169,7 +1171,7 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
     mouse(300, 300)  # leave everything → reschedule hide
     assert r.hover_view().tip.hide_pending
     assert _fire_dwell(ipc, "tooltip-hide")  # …and let it elapse
-    assert seen[-1] == -1  # hidden only after the delay
+    assert r.hover == -1  # hidden only after the delay
 
 
 def test_tooltip_capped_and_inside_safe_area():
