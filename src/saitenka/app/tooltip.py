@@ -568,22 +568,20 @@ def hit_header_speaker(chrome: HeaderChrome, x: float, y: float) -> bool:
     )
 
 
-def _mine_link(reader: Reader, lb, tok) -> bool:
+def _mine_link(dict_set, terms, mine_token, lb, tok) -> bool:
     """A stacked entry's ⊕ arrives as a ``LinkBox('mine:<card_index>')`` (it rides the normal link
     hit-test). Mine that exact entry via ``cards_for(tok)[i]`` and report handled, so the caller does
-    not treat it as a cross-reference navigation. Not a mine link → False."""
+    not treat it as a cross-reference navigation. Not a mine link → False.
+
+    `terms` is the hovered word's extra terms, passed rather than read: the card list has to be the
+    one the stacked panel was built from, so the ⊕'s index aligns with the group it sits on.
+    """
     idx = mine_index(getattr(lb, "query", None))
     if tok is None or idx is None:
         return False
-    # Same expanded card list the stacked panel was built from (phrase terms included), so the ⊕'s
-    # card_index aligns with the group it sits on.
-    cards = (
-        reader.dict_set.cards_for(tok, extra_terms=reader._hover_meta.terms)
-        if reader.dict_set
-        else []
-    )
+    cards = dict_set.cards_for(tok, extra_terms=terms) if dict_set else []
     if 0 <= idx < len(cards):
-        reader._mine_token(tok, card=cards[idx])
+        mine_token(tok, card=cards[idx])
     return True
 
 
@@ -614,7 +612,13 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
         speak(reader._nest.state.reading)  # 🔊 → read the inner word aloud
     else:
         lb = reader._nest_link_hit(x, y)
-        if lb is not None and not _mine_link(reader, lb, reader._nest.token):
+        if lb is not None and not _mine_link(
+            reader.dict_set,
+            reader._hover_meta.terms,
+            reader._mine_token,
+            lb,
+            reader._nest.token,
+        ):
             reader._open_link(lb, reader._nest.xy, reader._nest.scroll)  # cross-ref → navigate
     return True
 
@@ -633,7 +637,8 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     lb = reader._tip_link_hit(x, y)
     if lb is not None:
         tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
-        if _mine_link(reader, lb, tok):  # stacked entry ⊕ → mine that entry
+        # stacked entry ⊕ → mine that entry
+        if _mine_link(reader.dict_set, reader._hover_meta.terms, reader._mine_token, lb, tok):
             log.debug("tip click → mine link %r", lb.query)
         else:
             # A headword kanji (``kanji:<ch>``) and a cross-reference both navigate the base tooltip IN

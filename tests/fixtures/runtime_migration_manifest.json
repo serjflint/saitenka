@@ -686,10 +686,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_mine_link"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_navigated_panel"
     ],
     [
