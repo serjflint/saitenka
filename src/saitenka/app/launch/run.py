@@ -773,7 +773,12 @@ def reslot_to_current(
         )
         reader.rebuild_sub_index()
         reader.configure_subtitle_mode(startup, slang=subs.slang)
-        session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
+        session_stats.start(
+            reader.episode,
+            enabled=reader.options.stats.enabled,
+            path=lambda: reader._prop("path"),
+            arm=reader.arm_session_persist,
+        )  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
             reader._toast(
                 "Fetching Japanese subtitles…"

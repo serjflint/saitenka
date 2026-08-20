@@ -10,13 +10,21 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from saitenka.app import nested_popup
+from saitenka.app import nested_popup, tooltip
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
+    from saitenka.app.popups import HoverInputs, ShowActions, TipPorts, WordLookup
+    from saitenka.app.tooltip_panel import PanelPorts
 
 
-def mark_mined(reader: Reader, expression: str) -> None:
+def mark_mined(
+    ports: TipPorts,
+    panel: PanelPorts,
+    lookup: WordLookup,
+    inputs: HoverInputs,
+    show: ShowActions,
+    expression: str,
+) -> None:
     """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately.
 
     The rebuild is unconditional; the generation bump is `MinedSet`'s call. Re-mining a word already
@@ -25,11 +33,13 @@ def mark_mined(reader: Reader, expression: str) -> None:
     """
     if not expression:
         return
-    reader.session.mined.add(expression)
-    if reader.hover >= 0 and reader.tip.view.state is not None:
-        token = reader.tokens[reader.hover]
+    lookup.mined.add(expression)
+    hovered = inputs.hover()
+    if hovered >= 0 and ports.tip.view.state is not None:
+        token = inputs.tokens[hovered]
         if expression in {token.lemma, token.surface}:
-            reader.tip.hover = replace(reader.tip.hover, mined=True)
-        reader._show_tooltip(reader.hover)  # rebuild the base tooltip (✓ if it's this word)
-    if reader.tip.nest.state is not None and reader.tip.nest.token is not None:
-        nested_popup.rerender_with_mined_state(reader.tip_ports, reader.panel_ports)
+            ports.tip.hover = replace(ports.tip.hover, mined=True)
+        # Re-SHOW, not re-hover: the word did not change, and `set_hover` would return early.
+        tooltip.show_tooltip(ports, panel, inputs, show, hovered)
+    if ports.tip.nest.state is not None and ports.tip.nest.token is not None:
+        nested_popup.rerender_with_mined_state(ports, panel)

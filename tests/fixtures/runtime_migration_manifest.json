@@ -94,15 +94,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/mined_feedback.py::mark_mined"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/miner.py::Miner.__init__"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::observation_of"
     ],
     [
       "reader-parameter",
@@ -122,15 +114,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/session_stats.py::start"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::_open_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::open_picker"
     ],
     [
       "reader-parameter",

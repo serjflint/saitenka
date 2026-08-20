@@ -165,7 +165,12 @@ def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
         _finish_attach_subtitle_startup(
             reader, ipc, startup, ep_cfg, fetch_in_background=fetch_background
         )
-        session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
+        session_stats.start(
+            reader.episode,
+            enabled=reader.options.stats.enabled,
+            path=lambda: reader._prop("path"),
+            arm=reader.arm_session_persist,
+        )  # fresh row; identity read from mpv's now-current path
         reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
         span.set("active", (startup.active if startup else None) or "none")
     log.info("attach re-slot onto %s: %s", path.name, status or "no subtitle selection")

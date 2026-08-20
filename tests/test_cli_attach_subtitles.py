@@ -125,7 +125,9 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
 
     started: list[str] = []
     monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
-    monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
+    monkeypatch.setattr(
+        session_stats, "start", lambda _episode, *, path, **_kw: started.append(str(path()))
+    )
     monkeypatch.setattr(reader, "start_prefetch", lambda: None)
     monkeypatch.setattr(reader, "_toast", lambda *_a, **_k: None)
     # new episode carries English only → prepare_attach_startup defers a jimaku fetch

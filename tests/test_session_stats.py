@@ -177,16 +177,17 @@ def test_analysis_snapshot_reuses_shared_result_without_cues():
     )
 
 
-def test_disabled_reader_does_not_touch_ipc():
-    reader = SimpleNamespace(
-        episode=SimpleNamespace(session_recorder=None),
-        options=SimpleNamespace(stats=SimpleNamespace(enabled=False)),
-        _prop=lambda _name: (_ for _ in ()).throw(AssertionError("IPC touched")),
+def test_disabled_stats_does_not_touch_ipc():
+    episode = SimpleNamespace(session_recorder=None)
+
+    start(
+        episode,
+        enabled=False,
+        path=lambda: (_ for _ in ()).throw(AssertionError("IPC touched")),
+        arm=lambda _seconds: None,
     )
 
-    start(reader)
-
-    assert reader.episode.session_recorder is None
+    assert episode.session_recorder is None
 
 
 def test_stats_command_lists_complete_and_incomplete_sessions(tmp_path, monkeypatch, capsys):

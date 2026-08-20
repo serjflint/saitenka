@@ -19,7 +19,6 @@ from saitenka.app.subtitle_geometry_diagnostics import (
     geometry_failure_reason,
 )
 from saitenka.app.subtitles import WordBox
-from saitenka.app.token_cache import cue_key
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
     GeometryRequest,
@@ -35,7 +34,6 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import SupportsFloat
 
-    from saitenka.app.controller import Reader
     from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.token_cache import TokenizedCue
@@ -348,23 +346,6 @@ class GeometryObservation:
     cue_hint: Cue | None
     cue_revision: int
     is_skippable: Callable[[Token], bool]
-
-
-def observation_of(reader: Reader) -> GeometryObservation:
-    """Snapshot the host into the facts one geometry decision is made from."""
-    return GeometryObservation(
-        prop=reader._prop,
-        osd=reader.osd,
-        text=reader.sub_text,
-        tokens=reader.tokens,
-        lines=reader.lines,
-        index=reader.episode.sub_index,
-        normalise=cue_key,
-        nav_index=reader.episode.nav_idx,
-        cue_hint=reader.episode.geometry_cue_hint,
-        cue_revision=reader.cue_revision,
-        is_skippable=reader.tokenizer.is_skippable,
-    )
 
 
 class NativeSubtitleGeometry:

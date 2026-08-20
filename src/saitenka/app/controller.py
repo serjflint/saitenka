@@ -933,7 +933,19 @@ class Reader:
 
     def _geometry_observation(self) -> native_subtitles.GeometryObservation:
         """The facts the geometry owner decides from, per operation — they all move per cue."""
-        return native_subtitles.observation_of(self)
+        return native_subtitles.GeometryObservation(
+            prop=self._prop,
+            osd=self.osd,
+            text=self.sub_text,
+            tokens=self.tokens,
+            lines=self.lines,
+            index=self.episode.sub_index,
+            normalise=cue_key,
+            nav_index=self.episode.nav_idx,
+            cue_hint=self.episode.geometry_cue_hint,
+            cue_revision=self.cue_revision,
+            is_skippable=self.tokenizer.is_skippable,
+        )
 
     def _subtitle_target(self) -> SubtitleTarget:
         """What the subtitle renderers act on. Built per call — `native_geometry` is installed
@@ -2108,6 +2120,19 @@ class Reader:
         return True
 
     @property
+    def listing_ports(self) -> sub_picker_module.ListingPorts:
+        """What one subtitle listing needs to run and to publish itself back."""
+        return sub_picker_module.ListingPorts(
+            lister=self._sub_picker_lister,
+            state=self.sub_picker,
+            redraw=self.redraw_sub_picker,
+            submit=self._sub_picker_submit,
+            stop=self._stop,
+            current_episode=lambda: self.episode,
+            toast=self._toast,
+        )
+
+    @property
     def tip_ports(self) -> TipPorts:
         """What the popup blit/scroll/placement chain needs, as one member rather than the set.
 
@@ -2566,7 +2591,9 @@ class Reader:
             self.set_analysis_open(open=opening)
         elif panel is panel_intents.Panel.SUBTITLE_PICKER:
             (
-                sub_picker.open_picker(self)
+                sub_picker.open_picker(
+                    self.listing_ports, self._get("path"), retire_hover=self.retire_hover
+                )
                 if opening
                 else sub_picker.close_picker(self.sub_picker, self.lifecycle_surfaces)
             )
@@ -2645,7 +2672,14 @@ class Reader:
             self._miner.mine_token(tok, card=card)
 
     def _mark_mined(self, expression: str) -> None:
-        mined_feedback.mark_mined(self, expression)
+        mined_feedback.mark_mined(
+            self.tip_ports,
+            self.panel_ports,
+            self.word_lookup,
+            self.hover_inputs,
+            self.show_actions,
+            expression,
+        )
 
     # --- card preview (verify correctness / image / sound, one surface) — logic in app/miner_ui.py
     def _sentence_lines(self) -> list[str]:
@@ -4307,7 +4341,12 @@ class Reader:
         self.arm_capability_refresh()
 
     def _open_session_history(self) -> None:
-        session_stats.start(self)
+        session_stats.start(
+            self.episode,
+            enabled=self.options.stats.enabled,
+            path=lambda: self._prop("path"),
+            arm=self.arm_session_persist,
+        )
 
     def _attach_diagnostics(self) -> None:
         from saitenka.app.lifecycle_timers import LifecycleTimerKind

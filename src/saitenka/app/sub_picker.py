@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     import threading
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.subselect import SubtitleCandidate
     from saitenka.app.subtitle_modes import FetchSubmitter
     from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
@@ -112,19 +111,23 @@ class ListingPorts:
     would compare the completion against the episode it was issued for rather than the one playing.
     """
 
-    lister: Callable[[str], tuple]
+    #: `None` when no provider is configured — the picker refuses to open rather than showing empty.
+    lister: Callable[[str], tuple] | None
     state: PickerState
     redraw: Callable[[], None]
     submit: JobSubmitter | None
     stop: threading.Event
     current_episode: Callable[[], object]
+    toast: Callable[..., None]
 
 
 def _start_listing(video: str, ports: ListingPorts) -> None:
     episode = ports.current_episode()
     generation = ports.state.generation
-    submitter = ports.submit
-    if submitter is None:
+    lister, submitter = ports.lister, ports.submit
+    # `lister is None` cannot be reached through `open_picker`, which refuses with its own message —
+    # it is here so the two ways a listing cannot run have one answer rather than two.
+    if lister is None or submitter is None:
         apply_listing(
             ports.state,
             ports.redraw,
@@ -147,21 +150,21 @@ def _start_listing(video: str, ports: ListingPorts) -> None:
         owner=Owner.SUBTITLE,
         identity=generation,
         lane="subtitle-picker",
-        request=ListingRequest(ports.lister, video),
+        request=ListingRequest(lister, video),
         on_finished=finished,
     )
 
 
-def open_picker(reader: Reader) -> None:
-    lister = reader._sub_picker_lister
-    if lister is None:
-        reader._toast("Subtitle picker needs a provider — run with --jimaku or --tsukihime", "warn")
+def open_picker(ports: ListingPorts, video: object, *, retire_hover: Callable[[], None]) -> None:
+    """Open the picker and start one listing. `ports.lister` being `None` is the "no provider"
+    case, and `video` being empty is "nothing loaded" — both are refusals, not errors."""
+    if ports.lister is None:
+        ports.toast("Subtitle picker needs a provider — run with --jimaku or --tsukihime", "warn")
         return
-    video = reader._get("path")
     if not video:
-        reader._toast("No media loaded", "warn")
+        ports.toast("No media loaded", "warn")
         return
-    state = reader.sub_picker
+    state = ports.state
     state.open = True
     state.loading = True
     state.error = None
@@ -169,19 +172,9 @@ def open_picker(reader: Reader) -> None:
     state.warnings = ()
     state.scroll = 0
     state.generation += 1
-    reader.retire_hover()
-    reader.redraw_sub_picker()
-    _start_listing(
-        str(video),
-        ListingPorts(
-            lister=lister,
-            state=state,
-            redraw=reader.redraw_sub_picker,
-            submit=reader._sub_picker_submit,
-            stop=reader._stop,
-            current_episode=lambda: reader.episode,
-        ),
-    )
+    retire_hover()
+    ports.redraw()
+    _start_listing(str(video), ports)
 
 
 def close_picker(state, lifecycle_surfaces) -> None:

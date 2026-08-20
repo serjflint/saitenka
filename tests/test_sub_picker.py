@@ -97,10 +97,14 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
 
     reader.configure_sub_picker(lister)
     try:
-        sub_picker.open_picker(reader)
+        sub_picker.open_picker(
+            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+        )
         assert old_started.wait(1)
         sub_picker.close_picker(reader.sub_picker, reader.lifecycle_surfaces)
-        sub_picker.open_picker(reader)
+        sub_picker.open_picker(
+            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+        )
         _drain_until(reader, lambda: bool(reader.sub_picker.candidates))
         assert reader.sub_picker.candidates[0].name == "current.ass"
 
@@ -173,7 +177,9 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
 
     reader.configure_sub_picker(lister)
     try:
-        sub_picker.open_picker(reader)
+        sub_picker.open_picker(
+            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+        )
         assert started.wait(1)
         reader.rebind_episode()
         assert reader.sub_picker.open is False
@@ -208,7 +214,9 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
         sub_picker, "_start_listing", lambda _v, _ports: None
     )  # no real search thread
 
-    sub_picker.open_picker(reader)
+    sub_picker.open_picker(
+        reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+    )
     assert reader.sub_picker.open and reader.sub_picker.loading
 
     sub_picker.apply_listing(
@@ -358,7 +366,9 @@ def test_toggle_closes_an_open_picker():
 
     sub_picker.close_picker(
         reader.sub_picker, reader.lifecycle_surfaces
-    ) if reader.sub_picker.open else sub_picker.open_picker(reader)
+    ) if reader.sub_picker.open else sub_picker.open_picker(
+        reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+    )
 
     assert reader.sub_picker.open is False
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands

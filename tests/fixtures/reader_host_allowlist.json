@@ -2,13 +2,9 @@
   "saitenka.app.backlog": 1,
   "saitenka.app.commands.attach": 3,
   "saitenka.app.launch.run": 4,
-  "saitenka.app.mined_feedback": 1,
   "saitenka.app.miner": 1,
-  "saitenka.app.native_subtitles": 1,
   "saitenka.app.reader_deps": 2,
   "saitenka.app.session_runtime": 1,
-  "saitenka.app.session_stats": 1,
   "saitenka.app.sidebar": 1,
-  "saitenka.app.sub_picker": 1,
   "saitenka.app.subtitle_render": 2
 }

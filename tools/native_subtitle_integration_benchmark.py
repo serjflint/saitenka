@@ -21,7 +21,6 @@ import psutil
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
-from saitenka.app.native_subtitles import observation_of
 from saitenka.panel import Definition, Entry
 from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import (
@@ -378,7 +377,7 @@ def _present(reader: Reader, text: str, *, native: bool) -> bool:
     reader.set_subtitle(text)
     if native:
         assert reader.native_geometry is not None
-        return reader.native_geometry.apply(observation_of(reader))
+        return reader.native_geometry.apply(reader._geometry_observation())
     return bool(reader.boxes)
 
 
