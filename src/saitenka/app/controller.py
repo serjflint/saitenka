@@ -186,8 +186,10 @@ from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import (
     HelpStore,
+    HoverPauseStore,
     HoverStore,
     PickerStore,
+    PulseStore,
     SidebarStore,
     TipNavStore,
 )
@@ -710,6 +712,14 @@ class Reader:
         # views the slice never looks inside — it decides only whether there is a step to pop.
         self._nav_store = TipNavStore(self.ipc)
         self.interaction.nav_store = self._nav_store
+        # …and its sixth and seventh: the copy-flash pulse and the tooltip's claim on the playback
+        # pause. Both used to be a flag written beside the act that earned it, so the refusal each
+        # carries — an expiry that would not arm, a pause that was never ours — was resolved at the
+        # call site and unreachable from a test.
+        self._pulse_store = PulseStore(self.ipc)
+        self.interaction.pulse_store = self._pulse_store
+        self._pause_store = HoverPauseStore(self.ipc)
+        self.interaction.pause_store = self._pause_store
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self._translation = TranslationStore(self.ipc)
@@ -778,7 +788,7 @@ class Reader:
                 rect=self.tip.view.rect,
                 hide_pending=self.tip.hide_pending,
             ),
-            paused=self.tip.paused_by_tip,
+            paused=self.interaction.hover_pause.held,
             nav_idx=self.episode.nav_idx,
             scan_target=self.tip.scan_target,
         )
@@ -1275,7 +1285,7 @@ class Reader:
     # --- subtitle -----------------------------------------------------------------------------
     def _teardown_tip(self) -> None:
         """Tear down the hover stack unconditionally: hide TIP_ID/NESTED_ID, reset all tooltip
-        state, and release any _paused_by_tip. Called by set_hover(-1) AND set_subtitle so that
+        state, and release any pause a tooltip took. Called by set_hover(-1) AND set_subtitle so that
         a cue change while a tooltip is showing always clears it via the real path — avoiding the
         early-return in set_hover (index == self.hover) that would otherwise short-circuit teardown
         when hover is already -1 but the tip is still on screen."""
@@ -1292,8 +1302,7 @@ class Reader:
         self.tip.hover = NO_HOVER_METADATA
         self.tip.kanji_index = 0
         self._unbind_tip_keys()
-        if self.tip.paused_by_tip:
-            self._resume_after_hover_pause()
+        self._resume_after_hover_pause()
         self._sync_auto_translation()
 
     def set_subtitle(
@@ -1330,7 +1339,7 @@ class Reader:
         self.subtitle_pipeline.cue_changed(self._subtitle_target(), nonempty=bool(text.strip()))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
-        # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
+        # any tooltip-owned pause is released.  We cannot rely on set_hover(-1) here because its
         # early-return (index == self.hover) would skip teardown if hover is already -1 but
         # tip state is present (e.g. _show_tooltip was called directly without set_hover).
         with otel_metrics.traced("teardown_tip"):
@@ -2267,6 +2276,8 @@ class Reader:
         """
         return TipPorts(
             tip=self.tip,
+            pulse_store=self._pulse_store,
+            pause_store=self._pause_store,
             scale=self.tip_scale,
             surfaces=self.interaction_surfaces,
             hover_store=self._hover_store,
@@ -2997,7 +3008,7 @@ class Reader:
         if not 0 <= self.hover < len(self.tokens):
             return hover_intents.HoverInputs(
                 pause_on_tooltip=self.pause_on_tooltip,
-                paused_by_tooltip=self.tip.paused_by_tip,
+                paused_by_tooltip=self.interaction.hover_pause.held,
             )
         token = self.tokens[self.hover]
         return hover_intents.HoverInputs(
@@ -3010,7 +3021,7 @@ class Reader:
             has_dictionaries=self.dict_set is not None,
             anchored=box_for_token(self.boxes, self.hover) is not None,
             pause_on_tooltip=self.pause_on_tooltip,
-            paused_by_tooltip=self.tip.paused_by_tip,
+            paused_by_tooltip=self.interaction.hover_pause.held,
         )
 
     def _run_hover_command(self, command: hover_intents.HoverCommand) -> None:
@@ -3018,9 +3029,14 @@ class Reader:
             self._apply_hover_effect(effect)
 
     def _resume_after_hover_pause(self) -> None:
-        """Give playback back after a hover auto-pause. One path, because there were three: two
+        """Give playback back, if a tooltip is what took it. One path, because there were three: two
         reached mpv through a `getattr(ipc, "command_async", ipc.command)` duck-probe — invisible to
-        the direct-write gate, and a fake missing the port silently took the other branch."""
+        the direct-write gate, and a fake missing the port silently took the other branch.
+
+        Whether anything is owed is the slice's answer, not a flag read here: both callers used to
+        ask and then act, and the clearing happened at a third site."""
+        if not self._pause_store.dispatch(events.HoverPauseReleased()):
+            return
         send_correlated(
             self.ipc,
             "hover-pause-resume",
@@ -3029,7 +3045,6 @@ class Reader:
             False,  # noqa: FBT003  # mpv IPC wire value
             owner=Owner.PLAYBACK,
         )
-        self.tip.paused_by_tip = False
 
     def _apply_hover_effect(self, effect: hover_intents.HoverEffect) -> None:
         from saitenka.app.media import speak
@@ -4079,11 +4094,11 @@ class Reader:
         )
 
     def _flash_expired(self) -> None:
-        oid, self.tip.flash_oid = self.tip.flash_oid, None
-        if oid == NESTED_ID:
-            self._render_nested_view()  # redraw without the highlight border
-        elif oid == TIP_ID:
-            self._render_tip_view()
+        for decision in self._pulse_store.dispatch(events.CopyPulseExpired()):
+            if decision.overlay == NESTED_ID:
+                self._render_nested_view()  # redraw without the highlight border
+            elif decision.overlay == TIP_ID:
+                self._render_tip_view()
 
     def _mark_interactive_ready(self) -> bool:
         """Announce interactive readiness once. True when this call published the fact."""

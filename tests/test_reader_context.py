@@ -98,17 +98,15 @@ def test_reader_delegates_tooltip_fields_to_tip_state():
 
 def test_rebinding_tip_resets_the_whole_hover_stack():
     """Tearing down / re-slotting the tooltip is one rebind: every hover-FSM field (shown panel, scroll,
-    scan/word dwell, flash pulse, hovered-word metadata) returns to its no-hover default in a single move,
+    scan/word dwell, hovered-word metadata) returns to its no-hover default in a single move,
     leak-free by construction — the same property the episode re-slot relies on, one tier down."""
     r = Reader(FakeIPC())
     r.tip.view.rect = (1, 2, 3, 4)
     r.tip.view.scroll = 9
     r.tip.scan_target = "cell"
     r.tip.word_target = 2
-    r.tip.flash_oid = 7
     r.tip.hover = HoverMetadata(terms=("数ある",))
     r.tip.kanji_index = 3
-    r.tip.paused_by_tip = True
 
     r.tip = TooltipState()  # the teardown/re-slot move
 
@@ -116,10 +114,8 @@ def test_rebinding_tip_resets_the_whole_hover_stack():
     assert r.tip.view.scroll == 0
     assert r.tip.scan_target is None
     assert r.tip.word_target is None
-    assert r.tip.flash_oid is None
     assert r.tip.hover.terms == ()
     assert r.tip.kanji_index == 0
-    assert r.tip.paused_by_tip is False
 
 
 def test_session_state_survives_an_episode_reslot():

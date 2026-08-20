@@ -20,7 +20,7 @@ from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, events
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
     Cue,
@@ -741,7 +741,7 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     result.hover = 0
-    result.tip.paused_by_tip = True
+    result._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     ipc.commands.clear()
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
@@ -756,7 +756,7 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert result.boxes == []
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.tip.paused_by_tip = False
+    result._pause_store.dispatch(events.HoverPauseReleased())
     result.close()
 
 
@@ -775,7 +775,7 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     assert result.native_geometry.status.geometry_ready
     result._sub_pending = None
     result.hover = 0
-    result.tip.paused_by_tip = True
+    result._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     ipc.commands.clear()
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
@@ -790,7 +790,7 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     assert ("set_property", "pause", False) not in ipc.commands
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.tip.paused_by_tip = False
+    result._pause_store.dispatch(events.HoverPauseReleased())
     result.close()
 
 

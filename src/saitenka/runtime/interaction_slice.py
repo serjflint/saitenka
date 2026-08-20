@@ -1,5 +1,6 @@
 """`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, the picker, the
-sidebar, and the tooltip's link-navigation back-stack.
+sidebar, the tooltip's link-navigation back-stack, its copy-flash pulse, and its claim on the
+playback pause.
 
 The third slice, and the first whose events are *observations* rather than declarations. SUBTITLE
 needs no outbox because the sender has already done the thing it is declaring; here the reducer is
@@ -11,7 +12,7 @@ where it was.
 reactor ignores an event while closing) leaves the previous turn's outbox in place, and slice
 identity is the only thing that answers whether this turn is the one that filled it.
 
-Five features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
+Seven features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
 reducer and an initial state, with nothing in the others changing. Dispatch inside the slice is a
 broadcast, so each feature clears its own outbox on an event it does not own — a stale outbox reads
 to its caller as a decision this turn made.
@@ -23,9 +24,11 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime import picker, sidebar, tipnav
+from saitenka.runtime import hover_pause, picker, pulse, sidebar, tipnav
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
+    CopyPulsed,
+    CopyPulseExpired,
     EpisodeRetired,
     EventEnvelope,
     EventOrigin,
@@ -35,6 +38,8 @@ from saitenka.runtime.events import (
     HoverDwellElapsed,
     HoverDwellRefused,
     HoverObserved,
+    HoverPauseClaimed,
+    HoverPauseReleased,
     HoverScrolled,
     PickerClosed,
     PickerListed,
@@ -54,7 +59,9 @@ from saitenka.runtime.events import (
 from saitenka.runtime.help import HelpCommand, HelpState, repaginate
 from saitenka.runtime.help import decide as decide_help
 from saitenka.runtime.hover import HoverDelays, HoverState, decide, elapsed, refused, scrolled
+from saitenka.runtime.hover_pause import PauseClaim
 from saitenka.runtime.picker import PickerState
+from saitenka.runtime.pulse import PulseState
 from saitenka.runtime.sidebar import Redraw, SidebarState
 from saitenka.runtime.state import OwnerSlice, ReduceResult, SliceReducer
 from saitenka.runtime.tipnav import TipNavState
@@ -63,7 +70,9 @@ if TYPE_CHECKING:
     from saitenka.runtime.events import InteractionEvent, RuntimeEvent
     from saitenka.runtime.help import HelpEffect
     from saitenka.runtime.hover import Decision
+    from saitenka.runtime.hover_pause import ResumePlayback
     from saitenka.runtime.picker import ListingAdopted, PickerRetired
+    from saitenka.runtime.pulse import Repaint
     from saitenka.runtime.tipnav import TipViewRestored
 
 #: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
@@ -250,12 +259,69 @@ class TipNavReducer:
         return ReduceResult(self.reduce(state, event))
 
 
+@dataclass(frozen=True, slots=True)
+class PulseFeature:
+    """The slice: which popup is wearing the copy border, and the turn's outbox."""
+
+    pulse: PulseState = field(default_factory=PulseState)
+    published: tuple[Repaint, ...] = ()
+
+
+class PulseReducer:
+    """Reduce one copy-flash event. Pure: no overlay, no timer, no host."""
+
+    def reduce(self, state: PulseFeature, event: RuntimeEvent) -> PulseFeature:
+        match event:
+            case CopyPulsed(overlay=overlay, armed=armed):
+                turn = pulse.pulsed(state.pulse, overlay, armed=armed)
+            case CopyPulseExpired():
+                turn = pulse.expired(state.pulse)
+            case _:
+                return replace(state, published=())
+        return PulseFeature(turn.state, turn.decisions)
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, PulseFeature)
+        return ReduceResult(self.reduce(state, event))
+
+
+@dataclass(frozen=True, slots=True)
+class HoverPauseFeature:
+    """The slice: whether a tooltip owes playback a resume, and the turn's outbox."""
+
+    claim: PauseClaim = field(default_factory=PauseClaim)
+    published: tuple[ResumePlayback, ...] = ()
+
+
+class HoverPauseReducer:
+    """Reduce one pause-claim event. Pure: it never asks mpv anything."""
+
+    def reduce(self, state: HoverPauseFeature, event: RuntimeEvent) -> HoverPauseFeature:
+        match event:
+            case HoverPauseClaimed(paused=paused):
+                turn = hover_pause.claimed(state.claim, paused=paused)
+            case HoverPauseReleased():
+                turn = hover_pause.released(state.claim)
+            # An episode's tooltip is torn down by the cue change, and that teardown is what
+            # releases the claim. Retiring here as well would drop a claim mpv is still holding,
+            # leaving the next episode paused with nobody owing it a resume.
+            case _:
+                return replace(state, published=())
+        return HoverPauseFeature(turn.state, turn.decisions)
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, HoverPauseFeature)
+        return ReduceResult(self.reduce(state, event))
+
+
 #: `Owner.INTERACTION`'s features, named once so a reader of the slot never spells a key itself.
 INTERACTION_FEATURE = "hover"
 HELP_FEATURE = "help"
 PICKER_FEATURE = "picker"
 SIDEBAR_FEATURE = "sidebar"
 TIP_NAV_FEATURE = "tip-nav"
+PULSE_FEATURE = "copy-pulse"
+HOVER_PAUSE_FEATURE = "hover-pause"
 
 
 def interaction_slice_reducer() -> SliceReducer:
@@ -266,6 +332,8 @@ def interaction_slice_reducer() -> SliceReducer:
             PICKER_FEATURE: PickerReducer(),
             SIDEBAR_FEATURE: SidebarReducer(),
             TIP_NAV_FEATURE: TipNavReducer(),
+            PULSE_FEATURE: PulseReducer(),
+            HOVER_PAUSE_FEATURE: HoverPauseReducer(),
         }
     )
 
@@ -302,6 +370,20 @@ def tip_nav_slice_of(slot: object) -> TipNavFeature:
     assert isinstance(slot, OwnerSlice)
     state = slot.get(TIP_NAV_FEATURE)
     assert isinstance(state, TipNavFeature)
+    return state
+
+
+def pulse_slice_of(slot: object) -> PulseFeature:
+    assert isinstance(slot, OwnerSlice)
+    state = slot.get(PULSE_FEATURE)
+    assert isinstance(state, PulseFeature)
+    return state
+
+
+def hover_pause_slice_of(slot: object) -> HoverPauseFeature:
+    assert isinstance(slot, OwnerSlice)
+    state = slot.get(HOVER_PAUSE_FEATURE)
+    assert isinstance(state, HoverPauseFeature)
     return state
 
 
@@ -468,6 +550,58 @@ class TipNavStore:
             self._state = self._reducer.reduce(self._state, event)
             return self._state.published
         return tip_nav_slice_of(self._port.route_session_interaction(_envelope(event))).published
+
+
+class PulseStore:
+    """Where the copy-flash pulse is kept, chosen once — same rule as the others."""
+
+    def __init__(self, port: InteractionRoutePort, *, reducer: PulseReducer | None = None) -> None:
+        self._reducer = reducer if reducer is not None else PulseReducer()
+        self._state = PulseFeature()
+        self._port: InteractionRoutePort | None = (
+            port if port.route_session_interaction(None) is not None else None
+        )
+
+    @property
+    def current(self) -> PulseState:
+        if self._port is None:
+            return self._state.pulse
+        return pulse_slice_of(self._port.route_session_interaction(None)).pulse
+
+    def dispatch(self, event: InteractionSliceEvent) -> tuple[Repaint, ...]:
+        """Reduce one pulse event and drain the turn's outbox."""
+        if self._port is None:
+            self._state = self._reducer.reduce(self._state, event)
+            return self._state.published
+        return pulse_slice_of(self._port.route_session_interaction(_envelope(event))).published
+
+
+class HoverPauseStore:
+    """Where the tooltip's pause claim is kept, chosen once — same rule as the others."""
+
+    def __init__(
+        self, port: InteractionRoutePort, *, reducer: HoverPauseReducer | None = None
+    ) -> None:
+        self._reducer = reducer if reducer is not None else HoverPauseReducer()
+        self._state = HoverPauseFeature()
+        self._port: InteractionRoutePort | None = (
+            port if port.route_session_interaction(None) is not None else None
+        )
+
+    @property
+    def current(self) -> PauseClaim:
+        if self._port is None:
+            return self._state.claim
+        return hover_pause_slice_of(self._port.route_session_interaction(None)).claim
+
+    def dispatch(self, event: InteractionSliceEvent) -> tuple[ResumePlayback, ...]:
+        """Reduce one claim event and drain the turn's outbox."""
+        if self._port is None:
+            self._state = self._reducer.reduce(self._state, event)
+            return self._state.published
+        return hover_pause_slice_of(
+            self._port.route_session_interaction(_envelope(event))
+        ).published
 
 
 def _envelope(event: InteractionSliceEvent) -> EventEnvelope:

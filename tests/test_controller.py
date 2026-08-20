@@ -36,8 +36,10 @@ class FakeIPC(RuntimeFakeIPC):
 
 
 def test_hover_view_snapshots_the_hover_stack():
+    from saitenka.runtime import events
+
     r = Reader(FakeIPC())
-    r.tip.paused_by_tip = True
+    r._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     r.episode.nav_idx = 4
     r.tip.scan_target = "本"
     r.tip.nest.word = "読"
@@ -45,7 +47,7 @@ def test_hover_view_snapshots_the_hover_stack():
     assert (view.paused, view.nav_idx, view.scan_target) == (True, 4, "本")
     assert view.nested.word == "読"
     # a frozen point-in-time copy: later mutation of the reader must not leak into a taken snapshot
-    r.tip.paused_by_tip = False
+    r._pause_store.dispatch(events.HoverPauseReleased())
     assert view.paused is True
 
 
@@ -1298,9 +1300,11 @@ def test_pause_on_tooltip_respects_manual_pause():
 
 
 def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
+    from saitenka.runtime import events
+
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
-    r.tip.paused_by_tip = True
+    r._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     monkeypatch.setattr(r, "_toast", lambda *_args: None)
     r.toggle_hover_pause()
     assert ("set_property", "pause", False) in ipc.commands
@@ -2131,7 +2135,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     }  # header, not a scan cell
     r.copy_click()
     assert got and "本命" in got[0]  # copied the hovered word
-    assert r.tip.flash_oid == C.TIP_ID
+    assert r.interaction.copy_pulse.overlay == C.TIP_ID
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
@@ -2148,7 +2152,7 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     ipc.props["mouse-pos"] = {"hover": True, "x": nx + nw / 2, "y": ny + nh / 2}
     r.copy_click()
     assert got and got[0].startswith("追")  # copied the inner scanned word
-    assert r.tip.flash_oid == C.NESTED_ID
+    assert r.interaction.copy_pulse.overlay == C.NESTED_ID
 
 
 def test_flash_border_drawn_then_cleared(monkeypatch):
@@ -2195,7 +2199,9 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
 
     assert ipc.timers["lifecycle:flash-expiry"] != stale
     assert ipc.fire_runtime_timer("lifecycle:flash-expiry")
-    assert r.tip.flash_oid is None  # the latest due event, and only it, retired the pulse
+    assert (
+        r.interaction.copy_pulse.overlay is None
+    )  # the latest due event, and only it, retired the pulse
 
 
 def test_closing_retires_a_pending_copy_flash(monkeypatch):

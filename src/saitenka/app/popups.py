@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend
     from saitenka.runtime.hover import Intent
-    from saitenka.runtime.interaction_slice import TipNavStore
+    from saitenka.runtime.interaction_slice import HoverPauseStore, PulseStore, TipNavStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +59,11 @@ class TipPorts:
     #: The link-navigation back-stack, a slice feature of its own. Beside `tip` rather than on it:
     #: the stack is frozen and `tip` is not, and a frozen fact inside a mutable bag invites a write.
     nav_store: TipNavStore
+    #: The copy-flash pulse and the tooltip's claim on the playback pause. Both are decisions with
+    #: a refusal — a pulse whose expiry cannot be armed is not drawn, a resume is only owed if the
+    #: tooltip is what paused — so both are slice features rather than flags anyone can set.
+    pulse_store: PulseStore
+    pause_store: HoverPauseStore
     request_render_ahead: Callable[[PopupView, int], bool]
     osd: tuple[int, int]
     nested_max_frac: float
@@ -519,7 +524,6 @@ class TooltipState:
 
     def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
         """`cache_lock` is shared with the Reader's other cache accounting, so it is injected."""
-        self.paused_by_tip = False  # mpv was auto-paused by a tooltip show (resume on hide)
         self.hide_pending = False  # a linger deadline is armed to hide the tooltip
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
         # PopupView type + blit machinery as the nested popup. The historical flat names (_tip_state,
@@ -533,7 +537,6 @@ class TooltipState:
             None  # subtitle word the cursor is settling on (switch dwell)
         )
         self.last_mouse = (-1.0, -1.0)  # latest cursor pos — routes the wheel to the popup under it
-        self.flash_oid: int | None = None  # a popup pulsing a "copied" highlight border
         self.hover_reading = ""  # dict-form reading of the hovered word, for TTS
         #: What a metadata lookup resolved about the hovered word. Replaced wholesale, never field
         #: by field: the four values are one lookup's answer, and four separate assignments is how a

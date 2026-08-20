@@ -485,7 +485,7 @@ def decorate_and_upload(
         tyb = 4 + int((track - th) * (y0 / max(1, full_h - vh)))
         view[tyb : tyb + th, full_w - 7 : full_w - 3] = (99, 99, 99, 210)
     tip = ports.tip
-    if tip.flash_oid == oid:  # the deadline owns when this stops being true
+    if ports.pulse_store.current.overlay == oid:  # the deadline owns when this stops being true
         b = 4  # "copied" highlight border (a brief visual pulse)
         view[:b, :] = view[-b:, :] = FLASH_BGRA
         view[:, :b] = view[:, -b:] = FLASH_BGRA

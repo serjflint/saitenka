@@ -387,12 +387,10 @@ def flash(ports: TipPorts, oid: int) -> None:
     redraw happens to clear it, which reads as a rendering bug rather than as missing feedback. So
     the highlight is only drawn once its own expiry is armed.
     """
-    if not ports.schedule_flash_expiry():
-        return
-    ports.tip.flash_oid = oid
-    render_view(ports, ports.tip.nest) if oid == OverlayId.NESTED else render_view(
-        ports, ports.tip.view
-    )
+    armed = ports.schedule_flash_expiry()
+    for decision in ports.pulse_store.dispatch(events.CopyPulsed(oid, armed=armed)):
+        view = ports.tip.nest if decision.overlay == OverlayId.NESTED else ports.tip.view
+        render_view(ports, view)
 
 
 def copy_click(ports: TipPorts, click: ClickPorts, inputs: HoverInputs) -> None:
@@ -605,14 +603,14 @@ def on_click(ports: TipPorts, panel: PanelPorts, click: ClickPorts, inputs: Hove
     # Diagnostic: correlate a click with whether it landed on the tip rect and the pause lease, so the
     # report shows if a click while paused misses _tip_rect (mouse-pos↔OSD mismatch) or tears the tip down.
     log.debug(
-        "click at (%.0f,%.0f) hover=%s in_tip=%s captured=%s tip_rect=%s paused_by_tip=%s mpv_pause=%s",
+        "click at (%.0f,%.0f) hover=%s in_tip=%s captured=%s tip_rect=%s hover_paused=%s mpv_pause=%s",
         x,
         y,
         bool(mp.get("hover")),
         in_tip,
         captured,
         ports.tip.view.rect,
-        ports.tip.paused_by_tip,
+        ports.pause_store.current.held,
         click.paused(),
     )
 
@@ -718,8 +716,10 @@ def show_tooltip_impl(
     inflected = show.inflected(index)
     cap = ports.scale.cap
     with otel_metrics.traced("pause_ipc"):
-        if show.freeze(already_paused=tip.paused_by_tip):
-            tip.paused_by_tip = True
+        held = ports.pause_store.current.held
+        ports.pause_store.dispatch(
+            events.HoverPauseClaimed(paused=show.freeze(already_paused=held))
+        )
     # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
     # windowed engine composites the rest on scroll with overscan look-ahead.
     # jamdict card_for on the main thread (not worker-safe) — untraced until now; a suspect for the

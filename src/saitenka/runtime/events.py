@@ -540,6 +540,32 @@ class TipNavCleared:
     content nobody can navigate to any more."""
 
 
+@dataclass(frozen=True, slots=True)
+class CopyPulsed:
+    """A copy asked for its "copied" border on `overlay`. `armed` is whether the expiry deadline
+    took — a refusal the reducer decides against, not one the caller resolves on its own."""
+
+    overlay: int
+    armed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CopyPulseExpired:
+    """The pulse's deadline landed."""
+
+
+@dataclass(frozen=True, slots=True)
+class HoverPauseClaimed:
+    """A tooltip show ran the pause policy. `paused` is whether *this* show is what paused mpv."""
+
+    paused: bool
+
+
+@dataclass(frozen=True, slots=True)
+class HoverPauseReleased:
+    """The tooltip that may have paused playback is going away."""
+
+
 type InteractionEvent = (
     HoverConfigured
     | HoverObserved
@@ -562,6 +588,10 @@ type InteractionEvent = (
     | TipNavPushed
     | TipNavPopped
     | TipNavCleared
+    | CopyPulsed
+    | CopyPulseExpired
+    | HoverPauseClaimed
+    | HoverPauseReleased
 )
 
 INTERACTION_EVENTS = (
@@ -586,6 +616,10 @@ INTERACTION_EVENTS = (
     TipNavPushed,
     TipNavPopped,
     TipNavCleared,
+    CopyPulsed,
+    CopyPulseExpired,
+    HoverPauseClaimed,
+    HoverPauseReleased,
 )
 
 

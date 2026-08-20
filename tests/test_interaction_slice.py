@@ -7,7 +7,7 @@ takes and the other is the one almost every test takes.
 The outbox is what is new here. SUBTITLE declares, so its turns hand back nothing; INTERACTION
 observes, so the reducer is what decides and the decisions have to come back.
 
-Five features share this slot, so the second thing the file pins is that they are independent: one
+Seven features share this slot, so the second thing the file pins is that they are independent: one
 feature's events reach the others by broadcast, and each has to leave the others' state alone.
 """
 
@@ -18,12 +18,16 @@ from util import FakeIPC, runtime_gateway
 
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.runtime.events import (
+    CopyPulsed,
+    CopyPulseExpired,
     EpisodeRetired,
     HelpCommanded,
     HoverConfigured,
     HoverDwellElapsed,
     HoverDwellRefused,
     HoverObserved,
+    HoverPauseClaimed,
+    HoverPauseReleased,
     HoverScrolled,
     PickerClosed,
     PickerListed,
@@ -53,9 +57,11 @@ from saitenka.runtime.interaction_slice import (
     HelpReducer,
     HelpStore,
     HoverFeature,
+    HoverPauseStore,
     HoverReducer,
     HoverStore,
     PickerStore,
+    PulseStore,
     SidebarStore,
     TipNavStore,
 )
@@ -531,6 +537,70 @@ def test_the_same_nav_events_decide_the_same_stack_with_or_without_a_reactor(req
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = TipNavStore(ipc)
+
+    assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
+    assert local.current == routed.current
+
+
+# --- the slot's sixth and seventh features ------------------------------------------------------
+
+
+def test_a_pulse_and_a_pause_claim_are_independent_of_each_other(request) -> None:
+    """Both are the tooltip's, and both reach the other's reducer by broadcast. Neither may move
+    the other's state, and each still clears its own outbox."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    pulse = PulseStore(ipc)
+    pause = HoverPauseStore(ipc)
+
+    pulse.dispatch(CopyPulsed(overlay=1, armed=True))
+    assert pause.dispatch(HoverPauseClaimed(paused=True)) == ()
+
+    assert pulse.current.overlay == 1
+    assert pause.current.held is True
+    assert pulse.dispatch(CopyPulseExpired()) != ()
+    assert pause.current.held is True
+
+
+def test_the_same_pulse_events_decide_the_same_slot_with_or_without_a_reactor(request) -> None:
+    stream = (
+        CopyPulseExpired(),
+        CopyPulsed(overlay=1, armed=False),
+        CopyPulsed(overlay=1, armed=True),
+        CopyPulsed(overlay=2, armed=True),
+        CopyPulseExpired(),
+        CopyPulseExpired(),
+    )
+    local = PulseStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = PulseStore(ipc)
+
+    assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
+    assert local.current == routed.current
+
+
+def test_the_same_claim_events_decide_the_same_slot_with_or_without_a_reactor(request) -> None:
+    stream = (
+        HoverPauseReleased(),
+        HoverPauseClaimed(paused=False),
+        HoverPauseReleased(),
+        HoverPauseClaimed(paused=True),
+        HoverPauseReleased(),
+        HoverPauseReleased(),
+    )
+    local = HoverPauseStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = HoverPauseStore(ipc)
 
     assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
     assert local.current == routed.current

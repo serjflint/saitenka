@@ -33,13 +33,17 @@ if TYPE_CHECKING:
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
     from saitenka.runtime.help import HelpState
+    from saitenka.runtime.hover_pause import PauseClaim
     from saitenka.runtime.interaction_slice import (
         HelpStore,
+        HoverPauseStore,
         PickerStore,
+        PulseStore,
         SidebarStore,
         TipNavStore,
     )
     from saitenka.runtime.picker import PickerState
+    from saitenka.runtime.pulse import PulseState
     from saitenka.runtime.sidebar import SidebarState
     from saitenka.runtime.tipnav import TipNavState
     from saitenka.subtitles import Cue, CueIndex
@@ -134,6 +138,8 @@ class InteractionContext:
     #: sits beside `tip` rather than on it — a mutable container holding a frozen fact would read
     #: as writable at every call site that already writes its neighbours.
     nav_store: TipNavStore
+    pulse_store: PulseStore
+    pause_store: HoverPauseStore
     #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
     #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
     picker_panel: PickerPanel
@@ -154,6 +160,14 @@ class InteractionContext:
     @property
     def tip_nav(self) -> TipNavState:
         return self.nav_store.current
+
+    @property
+    def copy_pulse(self) -> PulseState:
+        return self.pulse_store.current
+
+    @property
+    def hover_pause(self) -> PauseClaim:
+        return self.pause_store.current
 
 
 class RenderCacheState:
