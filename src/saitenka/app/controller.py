@@ -163,9 +163,10 @@ from saitenka.runtime import (
     SessionClosing,
     StartupReady,
     UserCommand,
+    events,
     playback,
 )
-from saitenka.runtime.playback import PlaybackProjection, PlaybackState
+from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice
 from saitenka.runtime.runner import SessionRunner
 from saitenka.subtitles import Cue, CueIndex
 
@@ -643,8 +644,9 @@ class Reader:
         # Sole interpreter of raw mpv observations (saitenka/runtime/playback.py): it owns the
         # latest values, the explicit source/track/render-space revisions, and the decision that a
         # given observation conflicts with the installed cue identity.
-        self._projection = PlaybackProjection()
-        self._playback = PlaybackState()
+        self._playback_reducer = PlaybackReducer()
+        self._projection = self._playback_reducer.projection
+        self._playback_slice = PlaybackSlice()
         self._geometry_refresh = geometry_refresh.RefreshWindow()
         #: Latest cue identity observed this drain, reconciled once at the batch boundary.
         self._pending_cue: playback.ObservedCue | None = None
@@ -787,7 +789,7 @@ class Reader:
             if connection_replaced:
                 self._observe_property(name, data)
             else:
-                self._playback = self._projection.seed(self._playback, name, data)
+                self._reduce_playback(events.PropertySeeded(name, data))
             if name == "sub-text/ass-full" and self.native_geometry is not None:
                 self.native_geometry.observe_ass_full_reply(reply)
         self._observing = True
@@ -817,6 +819,25 @@ class Reader:
         replies = {name: replies.get(name) or {"error": "unavailable"} for name in OBSERVED_PROPS}
         return replies
 
+    @property
+    def _playback(self) -> playback.PlaybackState:
+        return self._playback_slice.state
+
+    @_playback.setter
+    def _playback(self, state: playback.PlaybackState) -> None:
+        self._playback_slice = PlaybackSlice(state)
+
+    def _reduce_playback(self, event: events.PlaybackEvent) -> None:
+        """Advance `Owner.PLAYBACK`'s slice by one event and apply what that turn published.
+
+        The published tuple is bound before the loop: applying a delta can reduce another event
+        (`AuthoredCueStale` probes mpv and seeds the reply), which replaces the slice underneath.
+        """
+        slice_ = self._playback_reducer.reduce(self._playback_slice, event)
+        self._playback_slice = slice_
+        for delta in slice_.published:
+            self._apply_playback_delta(delta)
+
     def _prop(self, name: str) -> Any:
         """Latest value of a property: the observed (event-driven) state when observing, else a
         blocking get_property (tests / pre-run paths)."""
@@ -836,10 +857,7 @@ class Reader:
             # d3d11 flip-model VO won't re-present the window on an overlay-add (see the
             # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
             log.debug("mpv pause -> %s", data)
-        projected = self._projection.observe(self._playback, name, data)
-        self._playback = projected.state
-        for delta in projected.deltas:
-            self._apply_playback_delta(delta)
+        self._reduce_playback(events.PropertyObserved(name, data))
 
     def _probe_ass_full(self) -> None:
         """Resolve mpv's authored-ASS capability once per file. Driven by `AuthoredCueStale`, which
@@ -848,9 +866,7 @@ class Reader:
             return
         if self.native_geometry.ass_full_capability.value == "unknown":
             reply = self.ipc.command("get_property", "sub-text/ass-full")
-            self._playback = self._projection.seed(
-                self._playback, "sub-text/ass-full", reply.get("data")
-            )
+            self._reduce_playback(events.PropertySeeded("sub-text/ass-full", reply.get("data")))
             self.native_geometry.observe_ass_full_reply(reply)
         self._ass_full_probe_dirty = False
 
@@ -910,10 +926,8 @@ class Reader:
         decides which later observation conflicts with it."""
         self._current_cue_identity = identity
         self._cue_retired = False
-        self._playback = self._projection.install(
-            self._playback,
-            start=identity.observed_start,
-            end=identity.observed_end,
+        self._reduce_playback(
+            events.CueIdentityInstalled(identity.observed_start, identity.observed_end)
         )
 
     # --- coalesced geometry refresh (WP4.4) ----------------------------------------------------
@@ -1005,7 +1019,7 @@ class Reader:
         self.retire_settle_window()
         """A new authored subtitle source is live: revise it in the projection (which every cue
         identity is derived from) and retire the identity the old source produced."""
-        self._playback = self._projection.source_replaced(self._playback, path).state
+        self._reduce_playback(events.SourceReplaced(path))
         self._retire_cue_identity(reason)
 
     def _clear_cue_identity(self) -> None:
@@ -1013,9 +1027,7 @@ class Reader:
         sub-start/sub-end observations as conflicts."""
         self._cue_retired = True
         self._current_cue_identity = None
-        self._playback, _deltas = self._projection.retire(
-            self._playback, playback.RetireReason.CUE_TEXT
-        )
+        self._reduce_playback(events.CueIdentityRetireRequested(playback.RetireReason.CUE_TEXT))
 
     def _retire_cue_identity(self, reason: str) -> None:
         if self._cue_retired:
@@ -1139,7 +1151,7 @@ class Reader:
         # Invariant 13: the projection owns which cue is current, so a Reader-side decision about
         # it has to reach the projection too — otherwise the next changed cue fact reconciles mpv's
         # stale text back over this one.
-        self._playback = self._projection.cue_replaced(self._playback, text)
+        self._reduce_playback(events.CueTextReplaced(text))
         self._clear_cue_identity()
         self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
         self._annotation_degraded = False

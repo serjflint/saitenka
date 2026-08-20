@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, Owner
+
+if TYPE_CHECKING:
+    from saitenka.runtime.playback import RetireReason
 
 
 class EventOrigin(StrEnum):
@@ -169,6 +173,79 @@ class CommandHandled:
             raise ValueError("command outcome and reason are inconsistent")
 
 
+#: `Owner.PLAYBACK`'s vocabulary. Two kinds, and the difference decides who acts on the deltas:
+#: an *observation* is mpv reporting a fact, so what the projection publishes is news; a
+#: *declaration* is the Reader announcing a decision it is already carrying out, so the same
+#: deltas reflected back would be that action performed twice.
+
+
+@dataclass(frozen=True, slots=True)
+class PropertyObserved:
+    """One ordered mpv property observation. An older epoch cannot change state."""
+
+    name: str
+    data: object = None
+    connection_epoch: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PropertySeeded:
+    """An observer snapshot value: it establishes facts and observes no change."""
+
+    name: str
+    data: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class CueIdentityInstalled:
+    """The owning reducer bound an identity to the cue and the timing it observed for it."""
+
+    start: object = None
+    end: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class CueIdentityRetireRequested:
+    """Declaration: the identity is being retired by whoever sends this."""
+
+    reason: RetireReason
+
+
+@dataclass(frozen=True, slots=True)
+class CueTextReplaced:
+    """Declaration: a cue the sender chose itself rather than observed from mpv."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class SourceReplaced:
+    """Declaration: a new authored subtitle source is live."""
+
+    path: object = None
+
+
+type PlaybackEvent = (
+    PropertyObserved
+    | PropertySeeded
+    | CueIdentityInstalled
+    | CueIdentityRetireRequested
+    | CueTextReplaced
+    | SourceReplaced
+)
+
+#: The runtime form of `PlaybackEvent`, for `isinstance`. A literal tuple rather than the alias'
+#: `__value__` for the same reason the reactor spells its fire-and-forget union out.
+PLAYBACK_EVENTS = (
+    PropertyObserved,
+    PropertySeeded,
+    CueIdentityInstalled,
+    CueIdentityRetireRequested,
+    CueTextReplaced,
+    SourceReplaced,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class EffectFinished:
     effect_id: EffectId
@@ -200,6 +277,7 @@ type RuntimeEvent = (
     | UserCommand
     | CommandHandled
     | EffectFinished
+    | PlaybackEvent
 )
 
 
