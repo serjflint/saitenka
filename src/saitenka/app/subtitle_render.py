@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app import subtitle_raster
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from saitenka.app.controller import Reader
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
     from saitenka.runtime.surfaces import SurfaceTransaction
@@ -355,6 +356,64 @@ class SubtitleRenderer(NoPixelOwnership):
         surfaces.remove(SUB_ID, owner=Owner.SUBTITLE)
 
 
+class SubtitleEgress(Protocol):
+    """The transport calls a renderer makes.
+
+    Declared rather than `object`, for the reason `RuntimeJobPort` is: a stand-in that has no timer
+    port must *refuse* one, and a `getattr` probe cannot tell that apart from a renamed method.
+    """
+
+    def command(self, *args: object) -> dict: ...
+
+    def submit_runtime_mpv(self, **kwargs: object) -> bool: ...
+
+    def schedule_runtime_timer(self, **kwargs: object) -> bool: ...
+
+    def cancel_runtime_timer(self, timer: str) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleTarget:
+    """What a subtitle renderer acts on, once it stops acting on the host.
+
+    Measured, not assembled: outside `build_draw_request` — which has its own seam because the soft
+    path reads fifteen presentation facts — every renderer in the module reaches exactly these.
+    Two contracts, mpv-read and presentation, plus the two things the geometry owner is asked for.
+
+    `refresh` and `source` rather than the geometry object, because handing the object over would
+    also hand over `refresh(reader)`, which takes the host: the member would smuggle back in what
+    the cut removes. `refresh` is a no-op when there is no geometry owner, which is the same guard
+    the call site used to spell inline.
+    """
+
+    ipc: SubtitleEgress
+    get: Callable[[str], object]
+    prop: Callable[[str], object]
+    surfaces: LifecycleSurfaces
+    refresh: Callable[[], None]
+    draw_request: Callable[[], DrawRequest]
+    source: object = None
+
+
+def target_of(reader: Reader) -> SubtitleTarget:
+    """Snapshot the host into what a renderer acts on.
+
+    This module's second host-taking seam, beside `build_draw_request` — which it wraps as
+    `draw_request`, because the legacy stage needs the request built at stage time, not at
+    snapshot time.
+    """
+    geometry = reader.native_geometry
+    return SubtitleTarget(
+        ipc=reader.ipc,
+        get=reader._get,
+        prop=reader._prop,
+        surfaces=reader.lifecycle_surfaces,
+        refresh=(lambda: None) if geometry is None else (lambda: geometry.refresh(reader)),
+        draw_request=lambda: build_draw_request(reader),
+        source=None if geometry is None else geometry.source_path,
+    )
+
+
 class NullRenderer(NoPixelOwnership):
     """No-op draw strategy: run the reader's hover/nav/prefetch logic without rasterizing."""
 
@@ -476,7 +535,7 @@ class NativeVisibleRenderer:
                 # consumers were told "not yet" and a re-drive is owed.
                 span.set("deferred", deferred)
 
-    def _assert_native(self, reader: Reader, action: OwnershipAction) -> None:
+    def _assert_native(self, target: SubtitleTarget, action: OwnershipAction) -> None:
         """Assert native visibility, then read back what mpv actually holds.
 
         Two correlated hops when the gateway admits them, the synchronous trio otherwise. The
@@ -493,7 +552,7 @@ class NativeVisibleRenderer:
         # replays, so issued concurrently or after it reads back our own `true` and close then
         # restores the wrong visibility to the user's mpv. A sync read is queued ahead of a later
         # async write on the same ordered outbound channel, so ordering holds.
-        self._capture_restore_visibility(reader.ipc)
+        self._capture_restore_visibility(target.ipc)
         # True once this call has handed a "not yet" back to its caller. Only then does a settle
         # owe a re-drive; a result that lands before the return (no gateway, or a fake completing
         # inline) is still the caller's own answer, and refreshing there would arm a geometry
@@ -511,14 +570,14 @@ class NativeVisibleRenderer:
                 exhausted_before=exhausted_before,
                 deferred=deferred,
             )
-            self._execute(reader, followups)
+            self._execute(target, followups)
             established = (
                 self._state.owner == PixelOwner.NATIVE and owner_before != PixelOwner.NATIVE
             )
-            if deferred and established and reader.native_geometry is not None:
+            if deferred and established:
                 # Every consumer that asked `use_native` mid-flight was told "not yet" and
                 # published nothing. The refresh is the seam that rebuilds hit boxes.
-                reader.native_geometry.refresh(reader)
+                target.refresh()
 
         def confirm(*, accepted: bool, reply: object) -> Callable[[EffectFinished], None]:
             def confirmed(read: EffectFinished) -> None:
@@ -539,7 +598,7 @@ class NativeVisibleRenderer:
             # since the code is what tells a dead pipe from a rejected value.
             accepted = write.outcome is EffectOutcome.SUCCEEDED
             reply = write.result if accepted else {"error": str(write.error or write.outcome)}
-            if not reader.ipc.submit_runtime_mpv(
+            if not target.ipc.submit_runtime_mpv(
                 owner=Owner.SUBTITLE,
                 identity=_VISIBILITY_READBACK,
                 command=("get_property", "sub-visibility"),
@@ -550,7 +609,7 @@ class NativeVisibleRenderer:
                 # decides what happens next.
                 settle(accepted=accepted, visibility=Visibility.UNKNOWN, reply=reply)
 
-        if reader.ipc.submit_runtime_mpv(
+        if target.ipc.submit_runtime_mpv(
             owner=Owner.SUBTITLE,
             identity=_VISIBILITY_ASSERT,
             command=("set_property", "sub-visibility", True),
@@ -624,7 +683,7 @@ class NativeVisibleRenderer:
             failure = reply.get("error") if isinstance(reply, dict) else "unknown"
             log.warning("mpv rejected subtitle visibility assertion: %s", failure)
 
-    def _stage_legacy(self, reader: Reader, action: OwnershipAction) -> None:
+    def _stage_legacy(self, target: SubtitleTarget, action: OwnershipAction) -> None:
         """Stage legacy pixels, then hide mpv's — never the other way round.
 
         The hide may not precede a confirmed commit: mpv's subtitles would vanish while ours are
@@ -636,14 +695,14 @@ class NativeVisibleRenderer:
             if committed and self._state.visibility != Visibility.FALSE:
                 # mpv is still showing its own; hide them now that ours are acknowledged, and let
                 # that write's outcome decide whether the handoff completed.
-                self._hide_mpv_subtitles(reader.ipc, on_finished=lambda ok: finish(accepted=ok))
+                self._hide_mpv_subtitles(target.ipc, on_finished=lambda ok: finish(accepted=ok))
             else:
                 finish(accepted=committed)
 
         def finish(*, accepted: bool) -> None:
             owner_before = self._state.owner
             if not accepted:
-                self._fallback.clear(reader.lifecycle_surfaces, reader.ipc)
+                self._fallback.clear(target.surfaces, target.ipc)
             self._state, followups = reduce_ownership(
                 self._state,
                 OwnershipEvent(
@@ -668,13 +727,13 @@ class NativeVisibleRenderer:
                 and self._state.context.mode == OwnershipMode.NATIVE_VISIBLE
             ):
                 self._record_catastrophic_fallback()
-            self._execute(reader, followups)
+            self._execute(target, followups)
 
         try:
             self._fallback.draw(
-                build_draw_request(reader),
-                reader.lifecycle_surfaces,
-                reader.ipc,
+                target.draw_request(),
+                target.surfaces,
+                target.ipc,
                 on_settled=lambda ok: settled(committed=ok),
             )
         except Exception:  # noqa: BLE001  # rollback preserves the last confirmed surface
@@ -698,46 +757,44 @@ class NativeVisibleRenderer:
             "native subtitle pixels confirmed absent; committed catastrophic legacy recovery"
         )
 
-    def _execute(self, reader: Reader, actions: tuple[OwnershipAction, ...]) -> None:
+    def _execute(self, target: SubtitleTarget, actions: tuple[OwnershipAction, ...]) -> None:
         pending = list(actions)
         while pending:
             batch, pending = pending, []
             for action in batch:
-                self._apply_action(reader, action)
+                self._apply_action(target, action)
             # A retry the timer port refused runs after its batch commits, so an immediate retry
             # never re-enters mid-batch. The FSM's bounded attempt count stops it looping.
             if (effect_id := self._retry_immediate) is not None:
                 self._retry_immediate = None
                 pending.extend(self._retry_actions(effect_id))
 
-    def _apply_action(self, reader: Reader, action: OwnershipAction) -> None:
+    def _apply_action(self, target: SubtitleTarget, action: OwnershipAction) -> None:
         if action.kind == ActionKind.ASSERT_NATIVE_VISIBILITY:
-            self._assert_native(reader, action)
+            self._assert_native(target, action)
         elif action.kind == ActionKind.CLEAR_LEGACY:
-            self._fallback.clear(reader.lifecycle_surfaces, reader.ipc)
+            self._fallback.clear(target.surfaces, target.ipc)
         elif action.kind == ActionKind.CLEAR_INTERACTION:
-            self._hide_focus(reader.ipc)
+            self._hide_focus(target.ipc)
         elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
-            self._stage_legacy(reader, action)
+            self._stage_legacy(target, action)
         elif action.kind == ActionKind.SHOW_MPV:
-            reader.ipc.command(
+            target.ipc.command(
                 "set_property",
                 "sub-visibility",
                 True,  # noqa: FBT003  # mpv IPC wire value
             )
         elif action.kind == ActionKind.SCHEDULE_RETRY:
-            self._arm_retry(reader, action)
+            self._arm_retry(target, action)
         elif action.kind == ActionKind.CANCEL_RETRY:
             self._retry_effect_id = None
             self._retry_immediate = None
-            cancel = getattr(reader.ipc, "cancel_runtime_timer", None)
-            if cancel is not None:
-                cancel(OWNERSHIP_RETRY_TIMER)
+            target.ipc.cancel_runtime_timer(OWNERSHIP_RETRY_TIMER)
         elif action.kind == ActionKind.RESTORE_VISIBILITY:
             restore = True if self._restore_visibility is None else self._restore_visibility
-            reader.ipc.command("set_property", "sub-visibility", restore)
+            target.ipc.command("set_property", "sub-visibility", restore)
 
-    def _arm_retry(self, reader: Reader, action: OwnershipAction) -> None:
+    def _arm_retry(self, target: SubtitleTarget, action: OwnershipAction) -> None:
         """Arm the ownership retry as a named deadline, fenced by its effect id."""
         effect_id = action.effect_id
         self._retry_effect_id = effect_id
@@ -746,10 +803,9 @@ class NativeVisibleRenderer:
 
         def due(completion: EffectFinished) -> None:
             if completion.outcome is EffectOutcome.SUCCEEDED:
-                self._execute(reader, self._retry_actions(effect_id))
+                self._execute(target, self._retry_actions(effect_id))
 
-        schedule = getattr(reader.ipc, "schedule_runtime_timer", None)
-        if schedule is not None and schedule(
+        if target.ipc.schedule_runtime_timer(
             owner=Owner.SUBTITLE,
             identity=OwnershipRetryDue(effect_id),
             timer=OWNERSHIP_RETRY_TIMER,
@@ -776,7 +832,7 @@ class NativeVisibleRenderer:
         )
         return actions
 
-    def _ensure_selection(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> None:
+    def _ensure_selection(self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV) -> None:
         """Publish a selection change if one happened.
 
         The change is enough on its own: `_change_context` re-runs `_start_mode`, which re-shows
@@ -788,8 +844,8 @@ class NativeVisibleRenderer:
         """
         selection = repr(
             (
-                reader._prop("sid") if isinstance(sid, AskMpv) else sid,
-                reader.native_geometry.source_path if reader.native_geometry else None,
+                target.prop("sid") if isinstance(sid, AskMpv) else sid,
+                target.source,
             )
         )
         if selection == self._selection:
@@ -805,7 +861,7 @@ class NativeVisibleRenderer:
             self._state,
             OwnershipEvent(EventKind.SELECTION_CHANGED, context=context),
         )
-        self._execute(reader, actions)
+        self._execute(target, actions)
 
     def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> bool:
         """Own the pixels, idempotently. `False` means the caller must draw them itself.
@@ -814,7 +870,8 @@ class NativeVisibleRenderer:
         selected: mpv has not echoed the write yet when it calls, so reading `sid` back would
         compare the incoming track against itself.
         """
-        self._ensure_selection(reader, sid)
+        target = target_of(reader)
+        self._ensure_selection(target, sid)
         if (
             not self._state.native_pixels_established
             and self._state.active_assertion_id is None
@@ -824,18 +881,19 @@ class NativeVisibleRenderer:
             self._state, actions = reduce_ownership(
                 self._state, OwnershipEvent(EventKind.ENSURE_MODE)
             )
-            self._execute(reader, actions)
+            self._execute(target, actions)
         return self._state.owner == PixelOwner.NATIVE
 
-    def _verify_native(self, reader: Reader) -> bool:
+    def _verify_native(self, target: SubtitleTarget) -> bool:
         """Re-prove ownership against mpv rather than trusting the established flag."""
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.VERIFY_NATIVE)
         )
-        self._execute(reader, actions)
+        self._execute(target, actions)
         return self._state.owner == PixelOwner.NATIVE
 
     def connection_replaced(self, reader: Reader) -> None:
+        target = target_of(reader)
         context = OwnershipContext(
             self._state.context.connection_epoch + 1,
             self._state.context.ownership_epoch + 1,
@@ -848,26 +906,29 @@ class NativeVisibleRenderer:
             OwnershipEvent(EventKind.CONNECTION_REPLACED, context=context),
         )
         self._trace_ownership("connection-replaced", owner_before=owner_before)
-        self._execute(reader, actions)
+        self._execute(target, actions)
 
     def use_native(self, reader: Reader) -> bool:
+        target = target_of(reader)
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.GEOMETRY_READY)
         )
-        self._execute(reader, actions)
+        self._execute(target, actions)
         return self.activate(reader)
 
     def degrade_geometry(self, reader: Reader) -> None:
+        target = target_of(reader)
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.GEOMETRY_DEGRADED)
         )
-        self._execute(reader, actions)
+        self._execute(target, actions)
 
     def cue_changed(self, reader: Reader, *, nonempty: bool) -> None:
+        target = target_of(reader)
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CUE_CHANGED, nonempty=nonempty)
         )
-        self._execute(reader, actions)
+        self._execute(target, actions)
         if nonempty:
             self.activate(reader)
 
@@ -916,33 +977,36 @@ class NativeVisibleRenderer:
         return self._fallback.logged_first
 
     def deactivate(self, reader: Reader) -> None:
+        target = target_of(reader)
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CLOSE_REQUESTED)
         )
         try:
-            self._execute(reader, actions)
+            self._execute(target, actions)
         except (OSError, ValueError):
             log.info("could not finish native subtitle ownership teardown")
         self._state, _ = reduce_ownership(self._state, OwnershipEvent(EventKind.CLOSE_FINISHED))
 
     def suspend_for_overlay(self, reader: Reader) -> None:
-        self._hide_focus(reader.ipc)
-        self._fallback.clear(reader.lifecycle_surfaces, reader.ipc)
-        _send_visibility(reader.ipc, "subtitle:suspend-native-for-overlay", visible=True)
+        target = target_of(reader)
+        self._hide_focus(target.ipc)
+        self._fallback.clear(target.surfaces, target.ipc)
+        _send_visibility(target.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
     def resume_after_overlay(self, reader: Reader) -> None:
+        target = target_of(reader)
         if self._state.owner == PixelOwner.LEGACY:
             self._state, actions = reduce_ownership(
                 self._state, OwnershipEvent(EventKind.LEGACY_REHANDOFF)
             )
-            self._execute(reader, actions)
+            self._execute(target, actions)
             return
         # The track can change while the overlay is up, so publish the selection first — `reassert`
         # did, and dropping it left the epoch naming a track that is gone.
-        self._ensure_selection(reader)
+        self._ensure_selection(target)
         # Verify, not activate: `suspend_for_overlay` set sub-visibility behind the FSM's back, so
         # the established flag is stale by construction and only mpv can settle it.
-        self._verify_native(reader)
+        self._verify_native(target)
 
     def _hide_focus(self, ipc) -> None:
         self._submit_focus(ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))

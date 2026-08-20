@@ -490,34 +490,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._arm_retry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._assert_native"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._ensure_selection"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._execute"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._stage_legacy"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._verify_native"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.activate"
     ],
     [
@@ -599,6 +571,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::build_draw_request"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::target_of"
     ],
     [
       "reader-parameter",
