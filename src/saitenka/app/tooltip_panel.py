@@ -23,14 +23,13 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 from saitenka import otel_metrics
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import Panel, PopupView, TipPorts
+from saitenka.app.popups import Panel, PanelCache, PopupView, TipPorts
 from saitenka.panel import Freq, panel_rows
 from saitenka.runtime import events, hover
 
 if TYPE_CHECKING:
     from collections.abc import Collection
 
-    from saitenka.app.controller import Reader
     from saitenka.app.popups import TooltipState
     from saitenka.app.tokenizer import Tokenizer
     from saitenka.render.layout_backend import LayoutBackend
@@ -69,7 +68,7 @@ class PanelKey(NamedTuple):
 
 
 def panel_key(
-    reader: Reader,
+    ports: PanelPorts,
     tok,
     inflected,
     *,
@@ -85,11 +84,11 @@ def panel_key(
         tok.surface,
         tok.reading,
         inflected,
-        reader.tip_scale.width,
-        anki_ok(reader.anki, reader._anki_capability),
+        ports.style.width,
+        ports.style.add_button,
         mined,
-        reader._tts_ok,
-        group_mined_of(tok, reader.session.mined, reader.dict_set, extra_terms=phrase)
+        ports.style.speak_button,
+        group_mined_of(tok, ports.mined_set, ports.style.dict_set, extra_terms=phrase)
         if group_mined is None
         else group_mined,
         # the stacked phrase terms are part of the base panel's identity (数 alone vs 数 under 数ある)
@@ -243,6 +242,25 @@ class PanelStyle:
     kanji_stroke_order: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class PanelPorts:
+    """A panel build's per-turn half — the counterpart `PanelStyle` names but does not hold.
+
+    `PanelStyle` is what does not change between hovers; the rest of this does. The live mined set
+    decides the ⊕ vs ✓ header and is part of the cache key, `during_scroll` picks the cheaper build
+    while the wheel is moving, and `cache`/`cap` say where the result goes and how tall to measure.
+
+    One value rather than a style plus a `TipPorts`: the build already takes eight parameters of its
+    own, and two ports would put it over the arity ceiling that exists to stop exactly this.
+    """
+
+    style: PanelStyle
+    mined_set: Collection[str]
+    during_scroll: bool
+    cache: PanelCache
+    cap: int
+
+
 def rows_panel(style: PanelStyle, entry, reading: str) -> Panel:
     """A read-only reference panel for a non-token target — a kanji, a search, a navigated term.
 
@@ -310,7 +328,7 @@ def _build_panel(
 
 
 def panel_for(
-    reader: Reader,
+    ports: PanelPorts,
     tok,
     inflected=None,
     min_h: int | None = None,
@@ -331,9 +349,9 @@ def panel_for(
     OrderedDict.get() is NOT atomic, so cache hits also acquire the lock briefly to move_to_end.
     Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
     if mined is None:
-        mined = is_mined(tok, reader.session.mined)
+        mined = is_mined(tok, ports.mined_set)
     key = panel_key(
-        reader,
+        ports,
         tok,
         inflected,
         mined=mined,
@@ -342,26 +360,24 @@ def panel_for(
     )
     # No `_panel_cache_get` wrapper any more: it existed to hold the fetch-or-build-then-LRU-touch
     # protocol, and `PanelCache` owns that now.
-    style = reader.panel_style
-    during_scroll = reader._scrolled_this_tick
-    st = reader.tip.panel_cache.get_or_build(
+    st = ports.cache.get_or_build(
         key,
         lambda: _build_panel(
-            style,
+            ports.style,
             key,
             tok,
             inflected,
             mined=mined,
             nested=nested,
             extra_terms=extra_terms,
-            during_scroll=during_scroll,
+            during_scroll=ports.during_scroll,
         ),
     )
     # The head walk+wrap (offset measure for placement) — runs on every hover, cold or warm, and was
     # the untraced bulk of tooltip_show's self-time (#158 territory). Cheap on a re-measured cached
     # panel, a full walk on a fresh one. Nests under tooltip_show / prefetch_decode.
     with otel_metrics.traced("measure"):
-        st.render_head(min_h if min_h is not None else reader.tip_scale.cap)
+        st.render_head(min_h if min_h is not None else ports.cap)
     return st
 
 

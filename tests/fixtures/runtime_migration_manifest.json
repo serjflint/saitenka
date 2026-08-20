@@ -351,14 +351,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::show_tooltip_impl"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::panel_for"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip_panel.py::panel_key"
     ]
   ],
   "startup": [

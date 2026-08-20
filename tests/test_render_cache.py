@@ -757,7 +757,9 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
-    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined, phrase=r.tip.hover.terms)
+    key = tooltip_panel.panel_key(
+        r.panel_ports, tok, inflected, mined=mined, phrase=r.tip.hover.terms
+    )
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
     r.tip.panel_cache.clear()
@@ -780,7 +782,7 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     _i, tok, inflected, mined = _first_content(r)
-    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
+    key = tooltip_panel.panel_key(r.panel_ports, tok, inflected, mined=mined)
     spans = []
 
     @contextlib.contextmanager
@@ -808,7 +810,7 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
-    old_key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
+    old_key = tooltip_panel.panel_key(r.panel_ports, tok, inflected, mined=mined)
     r.tip.view.job_id = r.tip.jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
@@ -901,7 +903,7 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     _i, tok, inflected, mined = _first_content(r)
-    key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
+    key = tooltip_panel.panel_key(r.panel_ports, tok, inflected, mined=mined)
 
     r.tip.panel_cache.clear()
     assert r._request_engaged_tooltip(

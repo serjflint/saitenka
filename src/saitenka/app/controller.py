@@ -1785,12 +1785,27 @@ class Reader:
         group_mined: tuple[bool, ...] | None = None,
     ) -> tooltip_panel.PanelKey:
         return tooltip_panel.panel_key(
-            self,
+            self.panel_ports,
             tok,
             inflected,
             mined=mined,
             phrase=phrase,
             group_mined=group_mined,
+        )
+
+    @property
+    def panel_ports(self) -> tooltip_panel.PanelPorts:
+        """A panel build's per-turn inputs. `panel_style` is the half that does not change.
+
+        Built per call so the mined set and the scroll flag are both read fresh: a panel keyed on a
+        stale mined set shows the wrong header for a word that was mined since.
+        """
+        return tooltip_panel.PanelPorts(
+            style=self.panel_style,
+            mined_set=self.session.mined,
+            during_scroll=self._scrolled_this_tick,
+            cache=self.tip.panel_cache,
+            cap=self.tip_scale.cap,
         )
 
     def _is_mined(self, tok) -> bool:
@@ -1911,7 +1926,7 @@ class Reader:
         group_mined: tuple[bool, ...] | None = None,
     ):
         return tooltip_panel.panel_for(
-            self,
+            self.panel_ports,
             tok,
             inflected,
             min_h,

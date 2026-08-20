@@ -168,7 +168,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     if mined is None:
         mined = is_mined(tok, reader.session.mined)
     key = panel_key(
-        reader,
+        reader.panel_ports,
         tok,
         inflected,
         mined=mined,
@@ -195,7 +195,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         if reader._request_engaged_tooltip(request):
             return
     st = panel_for(
-        reader,
+        reader.panel_ports,
         tok,
         inflected,
         min_h=ports.scale.cap,
@@ -240,9 +240,9 @@ def rerender_with_mined_state(reader: Reader) -> None:
     if tok is None:
         return
     mined = is_mined(tok, reader.session.mined)
-    st = panel_for(reader, tok, tok.surface, min_h=ports.scale.cap, mined=mined)
+    st = panel_for(reader.panel_ports, tok, tok.surface, min_h=ports.scale.cap, mined=mined)
     ports.tip.nest.state = st
-    ports.tip.nest.key = panel_key(reader, tok, tok.surface, mined=mined)
+    ports.tip.nest.key = panel_key(reader.panel_ports, tok, tok.surface, mined=mined)
     render_view(ports, ports.tip.nest)
 
 
@@ -284,8 +284,15 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
         return None
     if mined is None:  # main-thread only — jamdict (card_for) is not worker-safe
         mined = is_mined(tok, reader.session.mined)
-    key = panel_key(reader, tok, tok.surface, mined=mined)
-    st = panel_for(reader, tok, tok.surface, min_h=reader.tip_scale.cap, mined=mined, nested=True)
+    key = panel_key(reader.panel_ports, tok, tok.surface, mined=mined)
+    st = panel_for(
+        reader.panel_ports,
+        tok,
+        tok.surface,
+        min_h=reader.tip_scale.cap,
+        mined=mined,
+        nested=True,
+    )
     return st, key, tok, tok.surface, mined
 
 

@@ -716,7 +716,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # tooltip_show self-time under --mine, where reader._mined is populated so this actually looks up.
     meta = tip.hover
     key = panel_key(
-        reader,
+        reader.panel_ports,
         tok,
         inflected,
         mined=meta.mined,
@@ -751,7 +751,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
             return True
 
     st = panel_for(
-        reader,
+        reader.panel_ports,
         tok,
         inflected,
         min_h=cap,
