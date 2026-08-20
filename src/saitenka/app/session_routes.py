@@ -46,6 +46,7 @@ from saitenka.runtime.effects import (
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     PLAYBACK_EVENTS,
+    PRESENTATION_EVENTS,
     SUBTITLE_EVENTS,
     ConnectionReplaced,
     EffectFinished,
@@ -65,6 +66,11 @@ from saitenka.runtime.playback_slice import (
     PLAYBACK_FEATURE,
     PlaybackSlice,
     playback_slice_reducer,
+)
+from saitenka.runtime.presentation import TranslationState
+from saitenka.runtime.presentation_slice import (
+    PRESENTATION_FEATURE,
+    presentation_slice_reducer,
 )
 from saitenka.runtime.reactor import SessionReactor
 from saitenka.runtime.routing import OwnerRouter
@@ -176,6 +182,8 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
         return Owner.SUBTITLE
     if isinstance(event, INTERACTION_EVENTS):
         return Owner.INTERACTION
+    if isinstance(event, PRESENTATION_EVENTS):
+        return Owner.PRESENTATION
     return None
 
 
@@ -355,6 +363,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     playback = playback_slice_reducer()
     subtitle = subtitle_slice_reducer()
     interaction = interaction_slice_reducer()
+    presentation = presentation_slice_reducer()
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
@@ -371,6 +380,11 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     # slice's outbox for the Reader to perform. The slot owns the hysteresis; the acts do not move
     # until the tooltip's own state does.
     routes.update({RouteKey(event, Owner.INTERACTION): interaction for event in INTERACTION_EVENTS})
+    # `Owner.PRESENTATION` is a declaring slice like SUBTITLE's: the sender has already drawn or
+    # removed the surface. The slot holds what is on screen and who is holding it up.
+    routes.update(
+        {RouteKey(event, Owner.PRESENTATION): presentation for event in PRESENTATION_EVENTS}
+    )
     ledger = RuntimeLedger()
     gateway.session_ledger = ledger
     control = ControlSink(gateway, ledger)
@@ -386,7 +400,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
             subtitle=subtitle.initial({SUBTITLE_FEATURE: SubtitleTrackState()}),
             interaction=interaction.initial({INTERACTION_FEATURE: HoverFeature()}),
-            presentation=None,
+            presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),
         ),
         OwnerRouter(SessionReducer(routes), owner_of, ledger=ledger),
         gateway.mailbox,

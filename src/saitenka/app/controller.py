@@ -178,6 +178,7 @@ from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import HoverStore
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
+from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.runner import SessionRunner
 from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 from saitenka.subtitles import Cue, CueIndex
@@ -289,8 +290,6 @@ class Reader:
     _help_open = Delegated[bool]("help", "open")
     _help_page = Delegated[int]("help", "page")
     # Interaction-tier state (app/reader_context.py InteractionContext) under historical flat names.
-    _translate_on = Delegated[bool]("interaction", "translate_on")
-    _trans_text = Delegated[str | None]("interaction", "trans_text")
     # The five OSD surfaces. They are the INTERACTION owner's state, and `surfaces.SURFACES` is a
     # registry over exactly these — so a hook can stop taking the host once they live in one place
     # rather than five bare attributes. `Delegated` writes as well as reads, so the constructor
@@ -761,6 +760,9 @@ class Reader:
         # so they arrive as a declaration rather than being read in the turn — a reducer that read
         # them off the host would not be pure.
         self._hover_store = HoverStore(self.ipc)
+        # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
+        # already drawn or already gone by the time one arrives.
+        self._translation = TranslationStore(self.ipc)
         self._hover_store.dispatch(
             events.HoverConfigured(
                 HoverDelays(
@@ -2506,6 +2508,24 @@ class Reader:
     def _setup_secondary(self) -> int | None:
         return subtitle_modes.setup_secondary(self)
 
+    @property
+    def _translate_on(self) -> bool:
+        """The manual translation hold, off `Owner.PRESENTATION`'s slice.
+
+        The setter is a declaration, not a back door: assigning it is the same event the toggle
+        sends, so a caller establishing this precondition takes the path production takes.
+        """
+        return self._translation.current.held
+
+    @_translate_on.setter
+    def _translate_on(self, held: bool) -> None:
+        self._translation.dispatch(events.TranslationHeld(held))
+
+    @property
+    def _trans_text(self) -> str | None:
+        """What the translation surface is showing. Read-only: it is set by drawing it."""
+        return self._translation.current.drawn
+
     def _translation_visible(self) -> bool:
         # Two conditions, and not interchangeable: whether the user wants it, and whether
         # saitenka is drawing anything at all. Code deciding what to do once the surfaces come
@@ -2863,7 +2883,7 @@ class Reader:
         elif isinstance(effect, subtitle_intents.CopyCueText):
             copy_clipboard("\n".join(self._sentence_lines()))
         elif isinstance(effect, subtitle_intents.ToggleTranslation):
-            self._translate_on = not self._translate_on
+            self._translation.dispatch(events.TranslationHeld(not self._translate_on))
             self._reveal_translation() if self._translation_visible() else self._hide_translation(
                 release=True
             )
@@ -2892,7 +2912,7 @@ class Reader:
 
     def _draw_translation(self) -> None:
         text = self._secondary_text()
-        self._trans_text = text
+        self._translation.dispatch(events.TranslationDrawn(text))
         if not text:
             self.lifecycle_surfaces.remove(OverlayId.TRANS)
             return
@@ -2908,7 +2928,7 @@ class Reader:
         paths that own the reveal may do — an auto-reveal ending must not release a track the
         manual toggle is still holding."""
         self.lifecycle_surfaces.remove(OverlayId.TRANS)
-        self._trans_text = None
+        self._translation.dispatch(events.TranslationDrawn(None))
         if release:
             subtitle_modes.release_secondary(self)
 

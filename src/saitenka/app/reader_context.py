@@ -98,7 +98,7 @@ class EpisodeContext:
 
 
 class InteractionContext:
-    """State scoped to the current on-screen interaction (hover/tooltip/reveal).
+    """State scoped to the current on-screen interaction (hover/tooltip).
 
     Owns the five OSD surface states — help, sub_picker, sidebar, preview, tip — which `Reader`
     assigns during construction through their `Delegated` descriptors, and which `app/surfaces.py`
@@ -114,10 +114,6 @@ class InteractionContext:
     sidebar: SidebarState
     preview: PreviewState
     tip: TooltipState
-
-    def __init__(self) -> None:
-        self.translate_on = False
-        self.trans_text: str | None = None
 
 
 class RenderCacheState:

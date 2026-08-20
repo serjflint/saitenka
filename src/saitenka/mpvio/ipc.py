@@ -695,6 +695,16 @@ class MpvIPC:
             reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
         return reactor.state.interaction  # type: ignore[attr-defined]  # `object` by design
 
+    def route_session_presentation(self, envelope: object | None) -> object | None:
+        """`Owner.PRESENTATION`'s half of the same port. See `route_session_playback`."""
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.presentation  # type: ignore[attr-defined]  # `object` by design
+
     def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         gateway = self._runtime_gateway
         if gateway is None:

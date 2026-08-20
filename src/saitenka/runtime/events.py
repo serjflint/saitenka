@@ -417,6 +417,29 @@ INTERACTION_EVENTS = (
 )
 
 
+#: `Owner.PRESENTATION`'s vocabulary. Declarations, like SUBTITLE's: the sender has already drawn
+#: or removed the surface, and this is what it drew.
+
+
+@dataclass(frozen=True, slots=True)
+class TranslationHeld:
+    """The manual toggle moved. Only this decides whether the secondary track may be released."""
+
+    held: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TranslationDrawn:
+    """What the translation surface is showing; `None` when it was taken down."""
+
+    text: str | None
+
+
+type PresentationEvent = TranslationHeld | TranslationDrawn
+
+PRESENTATION_EVENTS = (TranslationHeld, TranslationDrawn)
+
+
 @dataclass(frozen=True, slots=True)
 class EffectFinished:
     effect_id: EffectId
@@ -452,6 +475,7 @@ type RuntimeEvent = (
     | PlaybackEvent
     | SubtitleEvent
     | InteractionEvent
+    | PresentationEvent
 )
 
 
