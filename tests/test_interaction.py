@@ -325,15 +325,13 @@ def test_wheel_scrolls_the_tooltip():
 def test_scroll_warms_native_bands_ahead_at_hidpi():
     # One-panel: a scroll must warm the NEXT native bands off the main thread (render-ahead), so continued
     # scrolling composites crisp without a synchronous raster (the old bug: only the first band was crisp).
-    from saitenka.app import tooltip
-
     r = _reader()
     submitted = []
     r._render_ahead_submit = lambda **kwargs: submitted.append(kwargs) or True
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
     Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
     assert r.tip.view.state.full_height > r.tip.view.view_h  # scrollable
-    tooltip.scroll_tip(r, 200)  # what the wheel drives
+    r._scroll_tip(200)  # the entry the wheel drives, rather than the module function under it
     assert r.tip.view.scroll > 0  # scrolled
     pending = r._render_ahead.pending
     assert pending is not None

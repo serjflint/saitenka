@@ -61,7 +61,7 @@ def _apply(reader, action: str, arg: object) -> None:
     if action == "hover":
         reader._show_tooltip(int(arg))  # type: ignore[arg-type]
     elif action == "scroll":
-        tooltip.scroll_tip(reader, int(arg))  # type: ignore[arg-type]
+        reader._scroll_tip(int(arg))  # type: ignore[arg-type]
     elif action == "navigate":
         tooltip.navigate_tip(reader, _NAV_QUERY)
     elif action == "back":

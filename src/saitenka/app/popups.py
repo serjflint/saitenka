@@ -25,12 +25,14 @@ if TYPE_CHECKING:
 
     from saitenka.app.hover_store import HoverStore
     from saitenka.app.interaction_surfaces import InteractionSurfaces
+    from saitenka.app.lifecycle_timers import LifecycleTimerKind
     from saitenka.app.prefetch import TipScale
     from saitenka.app.render_cache import LoadedView, RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.model import Theme
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend
+    from saitenka.runtime.hover import Intent
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,29 @@ class TipPorts:
     #: Arms the deadline that ends a copy-flash pulse; `False` when nothing can arm one (a closing
     #: session). The pulse is only drawn once its own retirement exists, so the port carries both.
     schedule_flash_expiry: Callable[[], bool]
+
+
+@dataclass(frozen=True, slots=True)
+class HoverActions:
+    """What performing a hover decision does — the counterpart to `TipPorts`, as `SidebarActions`
+    is to `SidebarView`. The port carries the facts; this carries the acts.
+
+    The hysteresis machine decides and the applier performs, and until this existed the applier was
+    the only thing in the hover chain still holding the host — which pinned the routing cycle
+    (`route_hover` -> `_perform` -> `route_hover`) to it as well, since a cycle converts as a unit
+    or not at all.
+
+    `arm` takes the intent rather than a callback because the re-entry it schedules must resolve
+    through the host when it fires: a deadline that lands after an episode re-slot has to reach the
+    tip that exists then, and a callback closing over a port would reach the one that existed when
+    it was armed.
+    """
+
+    arm: Callable[[LifecycleTimerKind, float, Intent], bool]
+    cancel: Callable[[LifecycleTimerKind], None]
+    show_word: Callable[[int], None]
+    retire_word: Callable[[], None]
+    open_nested: Callable[[object], None]
 
 
 class Panel:

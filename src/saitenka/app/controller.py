@@ -118,6 +118,7 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import (
     NO_HOVER_METADATA,
+    HoverActions,
     Panel,
     PopupView,
     TipPorts,
@@ -1810,6 +1811,26 @@ class Reader:
         return sidebar_module.actions_of(self)
 
     @property
+    def hover_actions(self) -> HoverActions:
+        """The acts a hover decision performs, bound. Paired with `tip_ports`.
+
+        Every callable resolves through `self` when it runs, which is what lets the applier and the
+        routing cycle stop taking the host without freezing anything: an armed dwell that fires
+        after an episode re-slot reaches the tip that exists then.
+        """
+        return HoverActions(
+            arm=lambda kind, delay, intent: self.arm_hover_deadline(
+                kind,
+                delay,
+                lambda: tooltip._dwell_elapsed(self.tip_ports, self.hover_actions, intent),
+            ),
+            cancel=self.cancel_hover_deadline,
+            show_word=self.set_hover,
+            retire_word=self.retire_hover,
+            open_nested=lambda scan: nested_popup.show_nested(self, scan),
+        )
+
+    @property
     def tip_ports(self) -> TipPorts:
         """What the popup blit/scroll/placement chain needs, as one member rather than the set.
 
@@ -2157,7 +2178,7 @@ class Reader:
             "scroll_frame",
             layout_backend=self.layout_engine,
         ) as span:
-            tooltip.scroll_tip(self, delta)
+            tooltip.scroll_tip(self.tip_ports, self.hover_actions, delta)
             st = self.tip.view.state
             if st is not None:
                 # Attribute a janky frame: bands rastered synchronously (render_ahead was behind) and

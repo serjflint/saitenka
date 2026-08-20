@@ -302,14 +302,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_dwell_elapsed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_perform"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_read_mouse"
     ],
     [
@@ -355,14 +347,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::retire_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::route_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::scroll_tip"
     ],
     [
       "reader-parameter",

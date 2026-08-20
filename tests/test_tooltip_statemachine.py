@@ -125,7 +125,7 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule(delta=st.integers(min_value=-500, max_value=500))
     def scroll(self, delta: int) -> None:
-        tooltip.scroll_tip(self.r, delta)
+        self.r._scroll_tip(delta)
         self._check("scroll")
 
     @precondition(lambda self: self.shown)
