@@ -22,7 +22,7 @@ from saitenka.app.jimaku import parse_filename
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
 from saitenka.app.profiles import resolve_launch_identity, resolve_profile
-from saitenka.app.session_runtime import SessionRuntime, choose_demo_token
+from saitenka.app.session_runtime import SessionEntry, SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
 from saitenka.runtime import Owner
@@ -941,17 +941,17 @@ def _execute_demo_session(runtime: SessionRuntime, demo: DemoSpec, *, video: str
 
 
 def _execute_reader_session(
-    reader, ipc, demo: DemoSpec, *, video: str | None, translate_key: str
+    entry: SessionEntry, demo: DemoSpec, *, video: str | None, translate_key: str
 ) -> None:
     if demo.demo_word or demo.screenshot:
-        _execute_demo_session(SessionRuntime(reader, ipc), demo, video=video)
+        _execute_demo_session(entry.runtime, demo, video=video)
     else:
         print(
             f"reader running — hover words; '{translate_key}' toggles the EN translation; "
             "Ctrl+C or quit mpv to stop."
         )
         log.info("session: mode=run")  # the mode a bundled report needs (vs attach/plugin)
-        reader.run()
+        entry.run()
 
 
 def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the extracted seam)
@@ -1202,8 +1202,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     try:
         _execute_reader_session(
-            reader,
-            ipc,
+            reader.session_entry,
             DemoSpec(
                 demo_word=demo_word,
                 screenshot=screenshot,

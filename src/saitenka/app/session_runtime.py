@@ -15,6 +15,7 @@ that remains, and it is one row instead of one per helper.
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from saitenka.app.mpv_egress import send_correlated
@@ -27,6 +28,20 @@ if TYPE_CHECKING:
 #: One hop's worth of waiting. Bounded per attempt so a cue search keeps seeking rather than parking
 #: on the first wake; the overall bound is the caller's deadline, not a retry count.
 CUE_HOP_SECONDS = 0.12
+
+
+@dataclass(frozen=True, slots=True)
+class SessionEntry:
+    """Which of the two run-mode branches is taken, as one value: drive a demo, or enter the loop.
+
+    `runtime` is built eagerly rather than behind a factory because `SessionRuntime.__init__`
+    resolves nothing — the interactive branch that never touches it pays a bound attribute, and the
+    alternative is a callable whose only job is to hide a constructor.
+    """
+
+    runtime: SessionRuntime
+    #: Enters the blocking reader loop and returns when the session ends.
+    run: Callable[[], None]
 
 
 def choose_demo_token(tokens: Sequence[Any], target: str, is_content: Callable[[Any], bool]) -> int:

@@ -145,6 +145,7 @@ from saitenka.app.runtime import (
     LegacyCommandExecutor,
     LegacyPickerRepeatGuard,
 )
+from saitenka.app.session_runtime import SessionEntry, SessionRuntime
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
@@ -4224,6 +4225,11 @@ class Reader:
             f"[saitenka] runtime: {mode} · {self.prefetch_state.workers} prefetch worker(s)"
         )
         log.info("runtime: %s, %d prefetch worker(s)", mode, self.prefetch_state.workers)
+
+    @property
+    def session_entry(self) -> SessionEntry:
+        """This reader as run mode's entry point: the demo runtime, and the loop."""
+        return SessionEntry(runtime=SessionRuntime(self, self.ipc), run=self.run)
 
     def run(self) -> None:
         """Bring the session up phase by phase, then hand the thread to the loop.

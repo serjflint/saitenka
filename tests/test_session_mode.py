@@ -14,6 +14,7 @@ import threading
 import pytest
 
 from saitenka.app.launch import run as cli_run
+from saitenka.app.session_runtime import SessionEntry, SessionRuntime
 from saitenka.app.tokenize import Token
 
 
@@ -22,17 +23,22 @@ class _FakeReader:
 
     def __init__(self) -> None:
         self.ran = False
+        self.ipc = None
 
     def run(self) -> None:
         self.ran = True
+
+    @property
+    def session_entry(self):
+        """The shape `Reader.session_entry` builds — the seam the entry point is driven through."""
+        return SessionEntry(runtime=SessionRuntime(self, self.ipc), run=self.run)
 
 
 def test_run_session_logs_mode_run_before_the_loop(caplog):
     reader = _FakeReader()
     with caplog.at_level(logging.INFO, logger="saitenka.app.launch.run"):
         cli_run._execute_reader_session(
-            reader,
-            ipc=None,
+            reader.session_entry,
             demo=cli_run.DemoSpec(),  # no demo_word / screenshot → the real interactive branch
             video=None,
             translate_key="t",
@@ -48,10 +54,18 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
 
     class Reader:
         osd = (1280, 720)
+        ipc = None
 
         def __init__(self) -> None:
             self.tokens = []
             self.hovered = None
+
+        def run(self) -> None:  # pragma: no cover — the demo branch never enters the loop
+            raise AssertionError("a demo must not fall through to the interactive loop")
+
+        @property
+        def session_entry(self):
+            return SessionEntry(runtime=SessionRuntime(self, self.ipc), run=self.run)
 
         def refresh_osd(self) -> None:
             pass
@@ -78,7 +92,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
     monkeypatch.setattr(cli_run.time, "sleep", lambda _seconds: None)
     thread = threading.Thread(
         target=cli_run._execute_reader_session,
-        args=(reader, None, cli_run.DemoSpec(demo_word="猫")),
+        args=(reader.session_entry, cli_run.DemoSpec(demo_word="猫")),
         kwargs={"video": None, "translate_key": "t"},
     )
     thread.start()

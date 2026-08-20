@@ -62,10 +62,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/launch/run.py::_execute_reader_session"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/miner.py::Miner.__init__"
     ],
     [

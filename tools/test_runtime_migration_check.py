@@ -36,19 +36,18 @@ def test_runtime_migration_manifest_matches_production() -> None:
     assert not any(item.kind == "tick-stage" for item in actual)
 
 
-def test_wp5_owns_every_row_the_terminal_set_does_not_claim() -> None:
-    """WP5's exit is `total == 22`, which is only answerable if the remainder is one kind.
+def test_the_terminal_set_claims_every_remaining_row() -> None:
+    """WP5 is out: every live row is now a *named* terminal one, not merely a counted one.
 
-    The interesting assertion is not the 22 — it is that everything *else* is a `reader-parameter`
-    row. A new kind appearing outside the terminal set would silently move WP5's finish line, and
-    the total alone cannot see that.
+    The interesting assertion is not `total == 20` — it is that the remainder is empty. A new row
+    appearing outside the terminal set (a regression, or a kind nobody enumerated) would leave the
+    total at 20 by displacing a converted row, and the count alone cannot see that.
     """
     checker = _module()
     actual, _, _ = checker.scan()
     terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
     assert len(terminal) == checker.TERMINAL_TOTAL == 20
-    remaining = {item for item in actual if (item.kind, item.source) not in terminal}
-    assert {item.kind for item in remaining} == {"reader-parameter"}
+    assert [item for item in actual if (item.kind, item.source) not in terminal] == []
 
 
 def test_a_terminal_row_whose_symbol_moved_is_a_failure() -> None:
