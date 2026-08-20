@@ -395,33 +395,51 @@ def update_prefetch(reader: Reader) -> None:
             )
         )
     if reader.prefetch_lookahead > 0:
-        jobs.extend(_lookahead_items(reader, gen, {t.lemma for _, _, t in cands}))
+        jobs.extend(
+            _lookahead_items(
+                LookaheadCues(
+                    reader._sub_index, reader.sub_text, reader._nav_idx, reader.prefetch_lookahead
+                ),
+                reader.tokenizer,
+                gen,
+                {t.lemma for _, _, t in cands},
+            )
+        )
     if reader.head_prefetch_lookahead > 0:
         jobs.extend(_head_prefetch_items(reader, gen, {t.lemma for _, _, t in cands}))
     schedule(state, jobs, reader._finish_speculative_prefetch)
 
 
-def _lookahead_items(reader: Reader, gen: int, seen: set[str]) -> list[tuple[int, PrefetchItem]]:
+@dataclass(frozen=True, slots=True)
+class LookaheadCues:
+    """Which cues to warm ahead of the current one. One value, because these four are read together
+    and a mismatched set warms the wrong line — `preferred` only means anything against `index`."""
+
+    index: object
+    text: str
+    nav_index: int
+    lookahead: int
+
+
+def _lookahead_items(
+    cues: LookaheadCues, tokenizer, gen: int, seen: set[str]
+) -> list[tuple[int, PrefetchItem]]:
     """WARM (dict-only, never full, ``mined=False``) the content words of the next
     ``prefetch_lookahead`` cues — a future line is never *engaged* and never builds a header, so no
     main-thread jamdict/scorer work runs here. ``seen`` carries the current line's lemmas so a word
     already queued isn't warmed twice. No-op without an external sub index."""
     items: list[tuple[int, PrefetchItem]] = []
-    cue_limit = min(max(0, reader.prefetch_lookahead), _MAX_WARM_PENDING)
-    for text in upcoming_cue_texts(
-        reader._sub_index, cue_limit, text=reader.sub_text, preferred=reader._nav_idx
-    ):
-        toks = reader.tokenizer.tokenize(text)
+    cue_limit = min(max(0, cues.lookahead), _MAX_WARM_PENDING)
+    for text in upcoming_cue_texts(cues.index, cue_limit, text=cues.text, preferred=cues.nav_index):
+        toks = tokenizer.tokenize(text)
         for i, t in enumerate(toks):
-            if not reader.tokenizer.is_content(t) or t.lemma in seen:
+            if not tokenizer.is_content(t) or t.lemma in seen:
                 continue
             seen.add(t.lemma)
             items.append(
                 (
                     3,
-                    PrefetchItem(
-                        gen, t, reader.tokenizer.inflected_in(toks, i), mined=False, full=False
-                    ),
+                    PrefetchItem(gen, t, tokenizer.inflected_in(toks, i), mined=False, full=False),
                 )
             )
             if len(items) >= _MAX_WARM_PENDING:

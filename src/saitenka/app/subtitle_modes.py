@@ -232,7 +232,12 @@ def on_primary_changed(reader: Reader, sid) -> None:
         from saitenka.app.embedded_subs import build_sub_index_for_current_track
 
         build_sub_index_for_current_track(reader)
-    language = _primary_role(reader, sid)
+    language = _primary_role(
+        reader.ipc,
+        sid,
+        SubtitleTracks(reader.jp_sid, reader.en_sid),
+        _sample_cue_text(reader._sub_index, reader.sub_text),
+    )
     if not known:
         if language == MAIN_LANG:
             reader.jp_sid = sid
@@ -249,12 +254,14 @@ def on_primary_changed(reader: Reader, sid) -> None:
         release_secondary(reader)
 
 
-def _primary_role(reader: Reader, sid) -> Language:
-    tracks = SubtitleTracks(reader.jp_sid, reader.en_sid)
-    lang = next((t.get("lang") for t in sub_tracks(reader.ipc) if t.get("id") == sid), None)
-    return _primary_role_for(
-        sid, tracks, track_lang=lang, sample=_sample_cue_text(reader._sub_index, reader.sub_text)
-    )
+def _primary_role(ipc, sid, tracks: SubtitleTracks, sample: str) -> Language:
+    """Which role a newly-primary track plays, from its tag or its content.
+
+    Takes the facts, like `_sample_cue_text` beside it. `ipc` stays because the track list is a
+    query, not a fact the caller holds — it is the mpv-read contract, not the host.
+    """
+    lang = next((t.get("lang") for t in sub_tracks(ipc) if t.get("id") == sid), None)
+    return _primary_role_for(sid, tracks, track_lang=lang, sample=sample)
 
 
 def _sample_cue_text(sub_index, sub_text: str, limit: int = 20) -> str:

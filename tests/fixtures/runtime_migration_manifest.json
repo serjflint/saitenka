@@ -270,10 +270,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_lookahead_items"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::_warm_episode_loop"
     ],
     [
@@ -407,10 +403,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::_add_background_japanese"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_primary_role"
     ],
     [
       "reader-parameter",
