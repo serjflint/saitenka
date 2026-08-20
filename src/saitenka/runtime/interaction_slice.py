@@ -1,6 +1,6 @@
 """`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, the picker, the
 sidebar, the tooltip's link-navigation back-stack, its copy-flash pulse, its claim on the playback
-pause, and what it resolved about the hovered word.
+pause, what it resolved about the hovered word, and the mined-card preview.
 
 The third slice, and the first whose events are *observations* rather than declarations. SUBTITLE
 needs no outbox because the sender has already done the thing it is declaring; here the reducer is
@@ -12,7 +12,7 @@ where it was.
 reactor ignores an event while closing) leaves the previous turn's outbox in place, and slice
 identity is the only thing that answers whether this turn is the one that filled it.
 
-Eight features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
+Nine features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
 reducer and an initial state, with nothing in the others changing. Dispatch inside the slice is a
 broadcast, so each feature clears its own outbox on an event it does not own — a stale outbox reads
 to its caller as a decision this turn made.
@@ -24,7 +24,16 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime import hover_pause, hovered_word, picker, pulse, sidebar, tipnav
+from saitenka.runtime import (
+    card_preview,
+    hover_pause,
+    hovered_word,
+    picker,
+    pulse,
+    sidebar,
+    tipnav,
+)
+from saitenka.runtime.card_preview import CardPreview
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     CopyPulsed,
@@ -49,6 +58,9 @@ from saitenka.runtime.events import (
     PickerListed,
     PickerOpened,
     PickerScrolled,
+    PreviewDismissed,
+    PreviewShown,
+    PreviewZoomToggled,
     SidebarFollowed,
     SidebarHidden,
     SidebarHoldReleased,
@@ -354,6 +366,33 @@ class HoveredWordReducer:
         return ReduceResult(self.reduce(state, event))
 
 
+@dataclass(frozen=True, slots=True)
+class PreviewFeature:
+    """The slice: what the card preview is showing. Declarations only, so no outbox."""
+
+    preview: CardPreview = field(default_factory=CardPreview)
+
+
+class PreviewReducer:
+    """Reduce one card-preview event. Pure: no blit, no media, no process."""
+
+    def reduce(self, state: PreviewFeature, event: RuntimeEvent) -> PreviewFeature:
+        match event:
+            case PreviewShown(content=content, audio=audio):
+                turn = card_preview.shown(content, audio)
+            case PreviewDismissed():
+                turn = card_preview.dismissed()
+            case PreviewZoomToggled():
+                turn = card_preview.zoom_toggled(state.preview)
+            case _:
+                return state
+        return PreviewFeature(turn.state)
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, PreviewFeature)
+        return ReduceResult(self.reduce(state, event))
+
+
 #: `Owner.INTERACTION`'s features, named once so a reader of the slot never spells a key itself.
 INTERACTION_FEATURE = "hover"
 HELP_FEATURE = "help"
@@ -363,6 +402,7 @@ TIP_NAV_FEATURE = "tip-nav"
 PULSE_FEATURE = "copy-pulse"
 HOVER_PAUSE_FEATURE = "hover-pause"
 HOVERED_WORD_FEATURE = "hovered-word"
+PREVIEW_FEATURE = "card-preview"
 
 
 def interaction_slice_reducer() -> SliceReducer:
@@ -376,6 +416,7 @@ def interaction_slice_reducer() -> SliceReducer:
             PULSE_FEATURE: PulseReducer(),
             HOVER_PAUSE_FEATURE: HoverPauseReducer(),
             HOVERED_WORD_FEATURE: HoveredWordReducer(),
+            PREVIEW_FEATURE: PreviewReducer(),
         }
     )
 
@@ -433,6 +474,13 @@ def hovered_word_slice_of(slot: object) -> HoveredWordFeature:
     assert isinstance(slot, OwnerSlice)
     state = slot.get(HOVERED_WORD_FEATURE)
     assert isinstance(state, HoveredWordFeature)
+    return state
+
+
+def preview_slice_of(slot: object) -> PreviewFeature:
+    assert isinstance(slot, OwnerSlice)
+    state = slot.get(PREVIEW_FEATURE)
+    assert isinstance(state, PreviewFeature)
     return state
 
 
@@ -674,6 +722,34 @@ class HoveredWordStore:
         if self._port is None:
             return self._state.word
         return hovered_word_slice_of(self._port.route_session_interaction(None)).word
+
+    def dispatch(self, event: InteractionSliceEvent) -> None:
+        if self._port is None:
+            self._state = self._reducer.reduce(self._state, event)
+            return
+        self._port.route_session_interaction(_envelope(event))
+
+
+class PreviewStore:
+    """Where the card preview's slice is kept, chosen once — same rule as the others.
+
+    Declares rather than decides, so `dispatch` hands nothing back.
+    """
+
+    def __init__(
+        self, port: InteractionRoutePort, *, reducer: PreviewReducer | None = None
+    ) -> None:
+        self._reducer = reducer if reducer is not None else PreviewReducer()
+        self._state = PreviewFeature()
+        self._port: InteractionRoutePort | None = (
+            port if port.route_session_interaction(None) is not None else None
+        )
+
+    @property
+    def current(self) -> CardPreview:
+        if self._port is None:
+            return self._state.preview
+        return preview_slice_of(self._port.route_session_interaction(None)).preview
 
     def dispatch(self, event: InteractionSliceEvent) -> None:
         if self._port is None:

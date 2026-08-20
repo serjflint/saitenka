@@ -2290,7 +2290,7 @@ def test_preview_audio_button_plays_on_click(monkeypatch):
     monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    _point_at(ipc, r.preview.audio_rect)
+    _point_at(ipc, r.interaction.preview_panel.audio_rect)
     r.on_click()
     assert played == ["/tmp/a.mp3"]  # ▶ button plays the mined clip
 
@@ -2300,7 +2300,7 @@ def test_preview_empty_click_plays_nothing(monkeypatch):
     monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    px, py, _pw, ph = r.preview.rect
+    px, py, _pw, ph = r.interaction.preview_panel.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": px + 6, "y": py + ph - 6}  # empty body
     r.on_click()
     assert played == []
@@ -2309,21 +2309,23 @@ def test_preview_empty_click_plays_nothing(monkeypatch):
 def test_preview_image_click_toggles_zoom():
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    assert not r.preview.zoom
-    _point_at(ipc, r.preview.image_rect)
+    assert not r.interaction.preview.zoom
+    _point_at(ipc, r.interaction.preview_panel.image_rect)
     r.on_click()
-    assert r.preview.zoom  # click screenshot → enlarge
-    _point_at(ipc, r.preview.image_rect)  # the (bigger) image moved — re-read its rect
+    assert r.interaction.preview.zoom  # click screenshot → enlarge
+    _point_at(
+        ipc, r.interaction.preview_panel.image_rect
+    )  # the (bigger) image moved — re-read its rect
     r.on_click()
-    assert not r.preview.zoom  # click again → back
+    assert not r.interaction.preview.zoom  # click again → back
 
 
 def test_preview_close_button_dismisses():
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    _point_at(ipc, r.preview.close_rect)
+    _point_at(ipc, r.interaction.preview_panel.close_rect)
     r.on_click()
-    assert r.preview.rect is None and r.preview.last_preview is None
+    assert r.interaction.preview_panel.rect is None and not r.interaction.preview.open
 
 
 def test_new_cue_dismisses_preview(monkeypatch):
@@ -2331,7 +2333,7 @@ def test_new_cue_dismisses_preview(monkeypatch):
     r = _preview_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")  # a new subtitle cue
-    assert r.preview.rect is None
+    assert r.interaction.preview_panel.rect is None
 
 
 def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):

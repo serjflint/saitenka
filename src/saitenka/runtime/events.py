@@ -593,6 +593,24 @@ class HoverKanjiAdvanced:
     """`k` opened one of the hovered word's kanji."""
 
 
+@dataclass(frozen=True, slots=True)
+class PreviewShown:
+    """A mined card's preview went up. Both payloads are opaque — see `runtime/card_preview.py`."""
+
+    content: object
+    audio: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewDismissed:
+    """✕, Esc, or a new cue took the preview down."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewZoomToggled:
+    """The screenshot was clicked."""
+
+
 type InteractionEvent = (
     HoverConfigured
     | HoverObserved
@@ -623,6 +641,9 @@ type InteractionEvent = (
     | HoverWordRead
     | HoverWordForgotten
     | HoverKanjiAdvanced
+    | PreviewShown
+    | PreviewDismissed
+    | PreviewZoomToggled
 )
 
 INTERACTION_EVENTS = (
@@ -655,6 +676,9 @@ INTERACTION_EVENTS = (
     HoverWordRead,
     HoverWordForgotten,
     HoverKanjiAdvanced,
+    PreviewShown,
+    PreviewDismissed,
+    PreviewZoomToggled,
 )
 
 

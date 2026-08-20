@@ -64,6 +64,7 @@ from saitenka.runtime.interaction_slice import (
     HOVERED_WORD_FEATURE,
     INTERACTION_FEATURE,
     PICKER_FEATURE,
+    PREVIEW_FEATURE,
     PULSE_FEATURE,
     SIDEBAR_FEATURE,
     TIP_NAV_FEATURE,
@@ -72,6 +73,7 @@ from saitenka.runtime.interaction_slice import (
     HoverFeature,
     HoverPauseFeature,
     PickerFeature,
+    PreviewFeature,
     PulseFeature,
     SidebarFeature,
     TipNavFeature,
@@ -438,6 +440,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
                     PULSE_FEATURE: PulseFeature(),
                     HOVER_PAUSE_FEATURE: HoverPauseFeature(),
                     HOVERED_WORD_FEATURE: HoveredWordFeature(),
+                    PREVIEW_FEATURE: PreviewFeature(),
                 }
             ),
             presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),

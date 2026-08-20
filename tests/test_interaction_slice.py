@@ -7,7 +7,7 @@ takes and the other is the one almost every test takes.
 The outbox is what is new here. SUBTITLE declares, so its turns hand back nothing; INTERACTION
 observes, so the reducer is what decides and the decisions have to come back.
 
-Eight features share this slot, so the second thing the file pins is that they are independent: one
+Nine features share this slot, so the second thing the file pins is that they are independent: one
 feature's events reach the others by broadcast, and each has to leave the others' state alone.
 """
 
@@ -36,6 +36,9 @@ from saitenka.runtime.events import (
     PickerListed,
     PickerOpened,
     PickerScrolled,
+    PreviewDismissed,
+    PreviewShown,
+    PreviewZoomToggled,
     SidebarFollowed,
     SidebarHoldReleased,
     SidebarScrolled,
@@ -65,6 +68,7 @@ from saitenka.runtime.interaction_slice import (
     HoverReducer,
     HoverStore,
     PickerStore,
+    PreviewStore,
     PulseStore,
     SidebarStore,
     TipNavStore,
@@ -673,6 +677,51 @@ def test_the_same_word_events_decide_the_same_slice_with_or_without_a_reactor(re
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = HoveredWordStore(ipc)
+
+    for event in stream:
+        local.dispatch(event)
+        routed.dispatch(event)
+    assert local.current == routed.current
+
+
+# --- the slot's ninth feature -------------------------------------------------------------------
+
+
+def test_the_preview_slice_and_its_panel_are_cut_by_lifetime(request) -> None:
+    """The slice says what is composed and at what magnification; the rects and the clip's live
+    process stay app-side, because a reducer can hold neither one paint's geometry nor a `Popen`."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = PreviewStore(ipc)
+
+    assert store.dispatch(PreviewShown("card", "clip.opus")) is None
+    assert store.current.open is True
+
+    store.dispatch(PreviewZoomToggled())
+    assert store.current.zoom is True
+
+    store.dispatch(PreviewShown("next", None))
+    assert store.current.zoom is False, "a new card does not inherit the last one's magnification"
+
+
+def test_the_same_preview_events_decide_the_same_slice_with_or_without_a_reactor(request) -> None:
+    stream = (
+        PreviewZoomToggled(),
+        PreviewShown("card", "clip.opus"),
+        PreviewZoomToggled(),
+        PreviewDismissed(),
+        PreviewZoomToggled(),
+        PreviewShown("next", None),
+    )
+    local = PreviewStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = PreviewStore(ipc)
 
     for event in stream:
         local.dispatch(event)

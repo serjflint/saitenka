@@ -171,7 +171,7 @@ class Miner:
         want_animated = bool(r.mine_cfg) and (
             r.mine_cfg.animated.enabled if animated is None else animated
         )
-        r.preview.last_jpg = r.preview.last_audio = None
+        r.interaction.preview_panel.last_jpg = r.interaction.preview_panel.last_audio = None
         try:
             span = current_timespan(
                 r.ipc
@@ -193,7 +193,7 @@ class Miner:
         try:
             jpg = r._tmp / f"{base}.jpg"
             screenshot(r.ipc, jpg)
-            r.preview.last_jpg = (
+            r.interaction.preview_panel.last_jpg = (
                 jpg  # local still — drives the preview and is the fallback (may not be uploaded)
             )
             if animated and video and span:
@@ -230,7 +230,7 @@ class Miner:
             if video and span:
                 aud = r._tmp / f"{base}.m4a"
                 clip_audio(video, span, aud, normalize=r.mine_cfg.normalize_audio)
-                r.preview.last_audio = aud
+                r.interaction.preview_panel.last_audio = aud
                 return r.anki.store_media(f"{base}.m4a", aud), None
         except (OSError, subprocess.CalledProcessError, AnkiError, json.JSONDecodeError) as e:
             log.debug("audio capture failed", exc_info=True)
@@ -327,7 +327,7 @@ class Miner:
                     from saitenka.app import sidebar
 
                     sidebar.mine_active(r.sidebar_view)
-                    r.preview.dup_tok = tok  # remember for an explicit "add anyway"
+                    r.interaction.preview_panel.dup_tok = tok  # for an explicit "add anyway"
                     r._preview_existing(existing[0], card, "exists")
                     return
             video = r._get("path")

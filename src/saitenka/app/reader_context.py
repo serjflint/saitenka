@@ -24,7 +24,7 @@ _MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
 
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
-    from saitenka.app.card_preview import PreviewState
+    from saitenka.app.card_preview import PreviewPanel
     from saitenka.app.mined_store import MinedCardStore
     from saitenka.app.popups import HoverMetadata, TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
+    from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.help import HelpState
     from saitenka.runtime.hover_pause import PauseClaim
     from saitenka.runtime.interaction_slice import (
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
         HoveredWordStore,
         HoverPauseStore,
         PickerStore,
+        PreviewStore,
         PulseStore,
         SidebarStore,
         TipNavStore,
@@ -127,7 +129,6 @@ class InteractionContext:
     #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the four need
     #: constructor arguments this container has no business knowing. Declared here so the container
     #: states its own shape rather than acquiring it from whoever writes first.
-    preview: PreviewState
     tip: TooltipState
 
     #: The surfaces that have become slice features ask for their state rather than holding it.
@@ -143,6 +144,8 @@ class InteractionContext:
     pulse_store: PulseStore
     pause_store: HoverPauseStore
     word_store: HoveredWordStore
+    preview_store: PreviewStore
+    preview_panel: PreviewPanel
     #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
     #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
     picker_panel: PickerPanel
@@ -175,6 +178,10 @@ class InteractionContext:
     @property
     def hovered_word_meta(self) -> HoverMetadata:
         return hovered_meta(self.word_store)
+
+    @property
+    def preview(self) -> CardPreview:
+        return self.preview_store.current
 
 
 class RenderCacheState:

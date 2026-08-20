@@ -181,13 +181,18 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     for it. Gathering the five surface states onto `InteractionContext` converted all of them at once.
     Constructing the context directly is the proof: if any hook still reached past it, this cannot run.
     """
-    from saitenka.app.card_preview import PreviewState
+    from saitenka.app.card_preview import PreviewPanel
     from saitenka.app.popups import TooltipState
     from saitenka.app.reader_context import InteractionContext
     from saitenka.app.sidebar import SidebarPanel
     from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.surfaces import wants_mouse_capture
-    from saitenka.runtime.interaction_slice import HelpStore, PickerStore, SidebarStore
+    from saitenka.runtime.interaction_slice import (
+        HelpStore,
+        PickerStore,
+        PreviewStore,
+        SidebarStore,
+    )
     from saitenka.runtime.jobs import NoSessionRuntime
 
     interaction = InteractionContext()
@@ -198,7 +203,8 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     interaction.picker_panel = PickerPanel()
     interaction.sidebar_store = SidebarStore(NoSessionRuntime())
     interaction.sidebar_panel = SidebarPanel()
-    interaction.preview = PreviewState()
+    interaction.preview_store = PreviewStore(NoSessionRuntime())
+    interaction.preview_panel = PreviewPanel()
     interaction.tip = TooltipState()
 
     assert wants_mouse_capture(interaction) is False

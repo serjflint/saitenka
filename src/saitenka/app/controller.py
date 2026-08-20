@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
+    from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
 
@@ -189,6 +190,7 @@ from saitenka.runtime.interaction_slice import (
     HoverPauseStore,
     HoverStore,
     PickerStore,
+    PreviewStore,
     PulseStore,
     SidebarStore,
     TipNavStore,
@@ -295,7 +297,6 @@ class Reader:
     # what lets a hook reach one without the host. Every other flat alias is gone: the lifetime
     # containers are addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`),
     # because an alias per field made one object look like N host members to every ratchet.
-    preview = Delegated[card_preview.PreviewState]("interaction", "preview")
     tip = Delegated[popups.TooltipState]("interaction", "tip")
 
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
@@ -582,9 +583,9 @@ class Reader:
         self.auto_translate = o.translation.auto_translate
         self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
-        # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
+        # Last-mined card's media + where its panel landed (app/card_preview.py PreviewPanel); the
         # Delegated shims below keep the historical ``reader._last_*``/``_preview_*`` names working.
-        self.preview = card_preview.PreviewState()
+        self.interaction.preview_panel = card_preview.PreviewPanel()
         # INTERACTION's claim on mpv's clicks and wheel, as a resource with a lifetime: the
         # runtime retires it at `PARTICIPANTS`, and an effect can only retire what it can find.
         from saitenka.app.session_routes import INPUT_CAPTURE_RESOURCE
@@ -725,6 +726,10 @@ class Reader:
         # new answer is the restart now, so a site that forgets cannot exist.
         self._word_store = HoveredWordStore(self.ipc)
         self.interaction.word_store = self._word_store
+        # …and its ninth: the mined-card preview. Its rects and the clip's live `Popen` stay on the
+        # panel beside it — a reducer can hold neither one paint's geometry nor a process.
+        self._preview_store = PreviewStore(self.ipc)
+        self.interaction.preview_store = self._preview_store
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self._translation = TranslationStore(self.ipc)
@@ -2841,8 +2846,9 @@ class Reader:
     def _add_duplicate(self) -> None:
         """The preview's ＋ button: mine a second card for the current scene even though the
         expression is already in the deck (a different line/episode/anime)."""
-        if self.preview.dup_tok is not None:
-            self._miner.mine_token(self.preview.dup_tok, force=True)
+        duplicate = self.interaction.preview_panel.dup_tok
+        if duplicate is not None:
+            self._miner.mine_token(duplicate, force=True)
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         if not self.show_preview:
@@ -2861,7 +2867,7 @@ class Reader:
 
     def _render_preview(self) -> None:
         miner_ui.render_preview(
-            self.preview, self.lifecycle_surfaces, self.osd, self.tip_scale.width
+            self.interaction, self.lifecycle_surfaces, self.osd, self.tip_scale.width
         )
 
     def _hide_preview(self) -> None:
@@ -3081,6 +3087,11 @@ class Reader:
     def sub_picker(self) -> PickerState:
         """What the picker is showing. Read-only for the same reason `help` is: the slice owns it."""
         return self.interaction.sub_picker
+
+    @property
+    def preview(self) -> CardPreview:
+        """What the card preview is showing. Read-only, like the other three."""
+        return self.interaction.preview
 
     def redraw_sub_picker(self) -> None:
         """Lay the picker out for this screen and present it, storing the geometry hit-testing uses."""
