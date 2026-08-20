@@ -521,6 +521,25 @@ class SidebarHoldReleased:
     """The manual-scroll hold's deadline landed."""
 
 
+@dataclass(frozen=True, slots=True)
+class TipNavPushed:
+    """A cross-reference is being navigated to. `view` is what it replaces, carried opaquely —
+    see `runtime/tipnav.py`."""
+
+    view: object
+
+
+@dataclass(frozen=True, slots=True)
+class TipNavPopped:
+    """Esc, or a back click. Whether there is anything to go back to is the reducer's answer."""
+
+
+@dataclass(frozen=True, slots=True)
+class TipNavCleared:
+    """The tooltip went away, or moved to a new word — either way its back-history describes
+    content nobody can navigate to any more."""
+
+
 type InteractionEvent = (
     HoverConfigured
     | HoverObserved
@@ -540,6 +559,9 @@ type InteractionEvent = (
     | SidebarScrolled
     | SidebarFollowed
     | SidebarHoldReleased
+    | TipNavPushed
+    | TipNavPopped
+    | TipNavCleared
 )
 
 INTERACTION_EVENTS = (
@@ -561,6 +583,9 @@ INTERACTION_EVENTS = (
     SidebarScrolled,
     SidebarFollowed,
     SidebarHoldReleased,
+    TipNavPushed,
+    TipNavPopped,
+    TipNavCleared,
 )
 
 

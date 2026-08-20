@@ -1,4 +1,5 @@
-"""`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, the picker, the sidebar.
+"""`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, the picker, the
+sidebar, and the tooltip's link-navigation back-stack.
 
 The third slice, and the first whose events are *observations* rather than declarations. SUBTITLE
 needs no outbox because the sender has already done the thing it is declaring; here the reducer is
@@ -10,7 +11,7 @@ where it was.
 reactor ignores an event while closing) leaves the previous turn's outbox in place, and slice
 identity is the only thing that answers whether this turn is the one that filled it.
 
-Four features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
+Five features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
 reducer and an initial state, with nothing in the others changing. Dispatch inside the slice is a
 broadcast, so each feature clears its own outbox on an event it does not own — a stale outbox reads
 to its caller as a decision this turn made.
@@ -22,7 +23,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime import picker, sidebar
+from saitenka.runtime import picker, sidebar, tipnav
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     EpisodeRetired,
@@ -46,6 +47,9 @@ from saitenka.runtime.events import (
     SidebarScrolled,
     SidebarShown,
     SidebarViewSelected,
+    TipNavCleared,
+    TipNavPopped,
+    TipNavPushed,
 )
 from saitenka.runtime.help import HelpCommand, HelpState, repaginate
 from saitenka.runtime.help import decide as decide_help
@@ -53,12 +57,14 @@ from saitenka.runtime.hover import HoverDelays, HoverState, decide, elapsed, ref
 from saitenka.runtime.picker import PickerState
 from saitenka.runtime.sidebar import Redraw, SidebarState
 from saitenka.runtime.state import OwnerSlice, ReduceResult, SliceReducer
+from saitenka.runtime.tipnav import TipNavState
 
 if TYPE_CHECKING:
     from saitenka.runtime.events import InteractionEvent, RuntimeEvent
     from saitenka.runtime.help import HelpEffect
     from saitenka.runtime.hover import Decision
     from saitenka.runtime.picker import ListingAdopted, PickerRetired
+    from saitenka.runtime.tipnav import TipViewRestored
 
 #: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
 type InteractionSliceEvent = InteractionEvent | EpisodeRetired
@@ -213,11 +219,43 @@ class SidebarReducer:
         return ReduceResult(self.reduce(state, event))
 
 
+@dataclass(frozen=True, slots=True)
+class TipNavFeature:
+    """The slice: the tooltip's back-stack, and the turn's outbox."""
+
+    nav: TipNavState = field(default_factory=TipNavState)
+    published: tuple[TipViewRestored, ...] = ()
+
+
+class TipNavReducer:
+    """Reduce one back-stack event. Pure: it never looks inside a captured view."""
+
+    def reduce(self, state: TipNavFeature, event: RuntimeEvent) -> TipNavFeature:
+        match event:
+            case TipNavPushed(view=view):
+                turn = tipnav.pushed(state.nav, view)
+            case TipNavPopped():
+                turn = tipnav.popped(state.nav)
+            case TipNavCleared():
+                turn = tipnav.cleared(state.nav)
+            # An episode's tooltip cannot outlive it — the cue change tears the tooltip down and
+            # that teardown clears the stack. Retiring here as well would drop views a second time
+            # from an event with no order against the first.
+            case _:
+                return replace(state, published=())
+        return TipNavFeature(turn.state, turn.decisions)
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, TipNavFeature)
+        return ReduceResult(self.reduce(state, event))
+
+
 #: `Owner.INTERACTION`'s features, named once so a reader of the slot never spells a key itself.
 INTERACTION_FEATURE = "hover"
 HELP_FEATURE = "help"
 PICKER_FEATURE = "picker"
 SIDEBAR_FEATURE = "sidebar"
+TIP_NAV_FEATURE = "tip-nav"
 
 
 def interaction_slice_reducer() -> SliceReducer:
@@ -227,6 +265,7 @@ def interaction_slice_reducer() -> SliceReducer:
             HELP_FEATURE: HelpReducer(),
             PICKER_FEATURE: PickerReducer(),
             SIDEBAR_FEATURE: SidebarReducer(),
+            TIP_NAV_FEATURE: TipNavReducer(),
         }
     )
 
@@ -256,6 +295,13 @@ def sidebar_slice_of(slot: object) -> SidebarFeature:
     assert isinstance(slot, OwnerSlice)
     state = slot.get(SIDEBAR_FEATURE)
     assert isinstance(state, SidebarFeature)
+    return state
+
+
+def tip_nav_slice_of(slot: object) -> TipNavFeature:
+    assert isinstance(slot, OwnerSlice)
+    state = slot.get(TIP_NAV_FEATURE)
+    assert isinstance(state, TipNavFeature)
     return state
 
 
@@ -397,6 +443,31 @@ class SidebarStore:
             self._state = self._reducer.reduce(self._state, event)
             return self._state.published
         return sidebar_slice_of(self._port.route_session_interaction(_envelope(event))).published
+
+
+class TipNavStore:
+    """Where the tooltip's back-stack is kept, chosen once — same rule as the other four."""
+
+    def __init__(self, port: InteractionRoutePort, *, reducer: TipNavReducer | None = None) -> None:
+        self._reducer = reducer if reducer is not None else TipNavReducer()
+        self._state = TipNavFeature()
+        self._port: InteractionRoutePort | None = (
+            port if port.route_session_interaction(None) is not None else None
+        )
+
+    @property
+    def current(self) -> TipNavState:
+        """The stack right now. Frozen: pushing and popping are events."""
+        if self._port is None:
+            return self._state.nav
+        return tip_nav_slice_of(self._port.route_session_interaction(None)).nav
+
+    def dispatch(self, event: InteractionSliceEvent) -> tuple[TipViewRestored, ...]:
+        """Reduce one back-stack event and drain the turn's outbox."""
+        if self._port is None:
+            self._state = self._reducer.reduce(self._state, event)
+            return self._state.published
+        return tip_nav_slice_of(self._port.route_session_interaction(_envelope(event))).published
 
 
 def _envelope(event: InteractionSliceEvent) -> EventEnvelope:

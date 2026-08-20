@@ -1054,7 +1054,7 @@ def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     request = submitter.calls[-1]["request"].request
     assert isinstance(request, tooltip_engaged.NavigateRequest) and request.query == tok.surface
-    assert r.tip.tip_nav == []  # nothing pushed / swapped yet
+    assert r.interaction.tip_nav.back == ()  # nothing pushed / swapped yet
 
 
 def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
@@ -1065,7 +1065,7 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     assert r._engaged_tooltip.inflight is None
-    assert len(r.tip.tip_nav) == 1  # synchronous swap pushed the previous view
+    assert len(r.interaction.tip_nav.back) == 1  # synchronous swap pushed the previous view
 
 
 def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
@@ -1078,7 +1078,7 @@ def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)  # defer
     submitter.finish()
     assert r.tip.view.state is not None and r.tip.view.state is not old  # navigated panel installed
-    assert len(r.tip.tip_nav) == 1  # previous view pushed for Esc/back
+    assert len(r.interaction.tip_nav.back) == 1  # previous view pushed for Esc/back
     assert r.tip.view.key is None  # a navigated view is keyless
 
 
@@ -1094,7 +1094,7 @@ def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, 
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert r.tip.view.state is not None and r.tip.view.state is not old
-    assert len(r.tip.tip_nav) == 1
+    assert len(r.interaction.tip_nav.back) == 1
 
 
 def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatch):
@@ -1115,7 +1115,7 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert r.tip.view.state is not None and r.tip.view.state is not old
-    assert len(r.tip.tip_nav) == 1
+    assert len(r.interaction.tip_nav.back) == 1
 
 
 def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
@@ -1139,7 +1139,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
             EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
         )
     )
-    assert r.tip.tip_nav == []  # not swapped — origin mismatch
+    assert r.interaction.tip_nav.back == ()  # not swapped — origin mismatch
 
 
 def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
@@ -1158,7 +1158,7 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
 
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert rebuilt == [] and r.tip.tip_nav == []
+    assert rebuilt == [] and r.interaction.tip_nav.back == ()
 
 
 def test_the_panel_cache_evicts_the_least_recently_used_entry_at_the_cap():

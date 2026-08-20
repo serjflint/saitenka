@@ -1944,7 +1944,7 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     r.on_click()
     # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
     assert r.hover_view().nested.state is None
-    assert len(r.tip.tip_nav) == 1
+    assert len(r.interaction.tip_nav.back) == 1
     results = [
         b for b in r.tip.view.state.windowed.link_boxes() if not b.query.startswith("kanji:")
     ]
@@ -2064,7 +2064,7 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     r._update_hover()
     assert r.hover_view().nested.state is None  # hover did NOT open a scan popup over the link
     r.on_click()  # …a click navigates the base in place (no floating popup)
-    assert r.hover_view().nested.state is None and len(r.tip.tip_nav) == 1
+    assert r.hover_view().nested.state is None and len(r.interaction.tip_nav.back) == 1
 
 
 def test_scroll_resets_scan_dwell(monkeypatch):
@@ -2094,7 +2094,9 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_link(r, ipc)
     r.on_click()
-    assert events == [] and len(r.tip.tip_nav) == 1  # navigated the base, no mine/speak fallthrough
+    assert (
+        events == [] and len(r.interaction.tip_nav.back) == 1
+    )  # navigated the base, no mine/speak fallthrough
 
 
 # --- copy: Shift+C (whole line) and right-click (word under cursor) + highlight flash ---------------

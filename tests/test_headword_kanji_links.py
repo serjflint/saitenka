@@ -88,7 +88,7 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     # Content swapped to 読's kanji entry, previous view pushed for back. len==1 is only reached when
     # kanji_for('読') resolved and installed — a dead/missing kanji would leave the stack empty.
     assert r.tip.view.state is not None and r.tip.view.state is not base
-    assert len(r.tip.tip_nav) == 1
+    assert len(r.interaction.tip_nav.back) == 1
     # A navigated view is keyless — not a subtitle token, so scroll won't rebuild it from a token.
     assert r.tip.view.key is None and r.tip.tip_tok is None
     # Reversible: back restores the base 読む tooltip.

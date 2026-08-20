@@ -33,9 +33,15 @@ if TYPE_CHECKING:
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
     from saitenka.runtime.help import HelpState
-    from saitenka.runtime.interaction_slice import HelpStore, PickerStore, SidebarStore
+    from saitenka.runtime.interaction_slice import (
+        HelpStore,
+        PickerStore,
+        SidebarStore,
+        TipNavStore,
+    )
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
+    from saitenka.runtime.tipnav import TipNavState
     from saitenka.subtitles import Cue, CueIndex
 
 
@@ -124,6 +130,10 @@ class InteractionContext:
     help_store: HelpStore
     picker_store: PickerStore
     sidebar_store: SidebarStore
+    #: The tooltip's back-stack is a slice feature while the rest of `tip` is not, so this store
+    #: sits beside `tip` rather than on it — a mutable container holding a frozen fact would read
+    #: as writable at every call site that already writes its neighbours.
+    nav_store: TipNavStore
     #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
     #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
     picker_panel: PickerPanel
@@ -140,6 +150,10 @@ class InteractionContext:
     @property
     def sidebar(self) -> SidebarState:
         return self.sidebar_store.current
+
+    @property
+    def tip_nav(self) -> TipNavState:
+        return self.nav_store.current
 
 
 class RenderCacheState:

@@ -189,6 +189,7 @@ from saitenka.runtime.interaction_slice import (
     HoverStore,
     PickerStore,
     SidebarStore,
+    TipNavStore,
 )
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.presentation_slice import TranslationStore
@@ -705,6 +706,10 @@ class Reader:
         self._sidebar_store = SidebarStore(self.ipc)
         self.interaction.sidebar_store = self._sidebar_store
         self.interaction.sidebar_panel = sidebar.SidebarPanel()
+        # …and its fifth: the tooltip's link-navigation back-stack. What it stacks are captured
+        # views the slice never looks inside — it decides only whether there is a step to pop.
+        self._nav_store = TipNavStore(self.ipc)
+        self.interaction.nav_store = self._nav_store
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self._translation = TranslationStore(self.ipc)
@@ -1282,7 +1287,7 @@ class Reader:
         self.tip.view.state = None
         self.tip.view.key = None
         self.tip.tip_tok = self.tip.tip_inflected = None
-        self.tip.tip_nav = []  # drop any link-navigation history with the tooltip
+        self._nav_store.dispatch(events.TipNavCleared())
         self.tip.hover_reading = ""
         self.tip.hover = NO_HOVER_METADATA
         self.tip.kanji_index = 0
@@ -2265,6 +2270,7 @@ class Reader:
             scale=self.tip_scale,
             surfaces=self.interaction_surfaces,
             hover_store=self._hover_store,
+            nav_store=self._nav_store,
             request_render_ahead=self._request_render_ahead,
             osd=self.osd,
             nested_max_frac=self.nested_max_frac,
@@ -2625,7 +2631,7 @@ class Reader:
     @property
     def tip_can_go_back(self) -> bool:
         """A link-navigation step is available to pop — the fact, split from the act."""
-        return bool(self.tip.tip_nav)
+        return self.interaction.tip_nav.can_go_back
 
     def _run_interaction_command(self, command: interaction_intents.InteractionCommand) -> None:
         inputs = interaction_intents.InteractionInputs(

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend
     from saitenka.runtime.hover import Intent
+    from saitenka.runtime.interaction_slice import TipNavStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +56,9 @@ class TipPorts:
     scale: TipScale
     surfaces: InteractionSurfaces
     hover_store: HoverStore
+    #: The link-navigation back-stack, a slice feature of its own. Beside `tip` rather than on it:
+    #: the stack is frozen and `tip` is not, and a frozen fact inside a mutable bag invites a write.
+    nav_store: TipNavStore
     request_render_ahead: Callable[[PopupView, int], bool]
     osd: tuple[int, int]
     nested_max_frac: float
@@ -521,8 +525,6 @@ class TooltipState:
         # PopupView type + blit machinery as the nested popup. The historical flat names (_tip_state,
         # _tip_scroll, …) keep resolving here through the Reader's Delegated("tip.view", …) shims.
         self.view = PopupView(OverlayId.TIP)
-        # Yomitan-style in-place link nav: a clicked cross-reference pushes the prior view here; Esc pops.
-        self.tip_nav: list = []
         self.nest = PopupView(
             OverlayId.NESTED
         )  # nested scan popup (hover a word inside the tooltip)

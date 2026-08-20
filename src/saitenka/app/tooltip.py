@@ -340,7 +340,7 @@ def set_hover(
         # Retire the previous tooltip's logical identity immediately. Its acknowledged pixels may stay
         # until the replacement paints, but stale nested/open results can no longer attach to it.
         nested_popup.hide_nested(ports)
-        ports.tip.tip_nav = []
+        ports.nav_store.dispatch(events.TipNavCleared())
         ports.tip.view.state = None
         ports.tip.view.rect = None
         ports.tip.hover = NO_HOVER_METADATA
@@ -704,7 +704,7 @@ def show_tooltip_impl(
     tip = ports.tip
     view = tip.view
     nested_popup.hide_nested(ports)  # switching the base word drops any stale scan popup
-    tip.tip_nav = []  # a newly hovered word abandons any link-navigation back-history
+    ports.nav_store.dispatch(events.TipNavCleared())  # a new word abandons the back-history
     tip.kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = inputs.tokens[index]
     b = box_for_token(inputs.boxes, index)
@@ -837,7 +837,7 @@ def _paint_from_cache(ports: TipPorts, key, cap: int, anchor) -> bool:
     with otel_metrics.traced(
         "tip_compose",
         cached="1",
-        kind=compose_kind(OverlayId.TIP, navigated=bool(tip.tip_nav)),
+        kind=compose_kind(OverlayId.TIP, navigated=ports.nav_store.current.can_go_back),
     ):
         pixels = loaded.array.copy()
     tip.view.rect = decorate_and_upload(ports, pixels, 0, full_h, xy, OverlayId.TIP)
@@ -1029,7 +1029,7 @@ def _install_navigated(ports: TipPorts, st: Panel) -> None:
     """Swap ``st`` in as the base tooltip's content: hide the stale scan popup, push the current view
     onto the back-stack, and blit. Shared by the synchronous nav and the deferred (worker-built) swap."""
     nested_popup.hide_nested(ports)  # the old content's scan popup is stale
-    ports.tip.tip_nav.append(_capture_tip_view(ports.tip))
+    ports.nav_store.dispatch(events.TipNavPushed(_capture_tip_view(ports.tip)))
     ports.tip.view.state = st
     # A navigated view is keyless (not a subtitle token) — the one panel composites native from its own
     # reference panel, so no synthetic key is needed. _tip_tok=None so scroll won't rebuild from a token.
@@ -1048,9 +1048,12 @@ def tip_back(ports: TipPorts) -> bool:
     Returns False when there is no history. `interaction_intents` makes that decision from
     `Reader.tip_can_go_back` now, so the return is for callers that still ask-and-act in one go.
     """
-    if not ports.tip.tip_nav:
+    restored = ports.nav_store.dispatch(events.TipNavPopped())
+    if not restored:
         return False
-    _restore_tip_view(ports.tip, ports.tip.tip_nav.pop())
+    captured = restored[0].view
+    assert isinstance(captured, tuple)  # opaque to the slice; narrowed once, here, on the way back
+    _restore_tip_view(ports.tip, captured)
     render_view(ports, ports.tip.view)
     return True
 

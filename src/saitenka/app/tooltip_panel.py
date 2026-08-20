@@ -463,7 +463,7 @@ def blit_panel(
         "tip_compose",
         soft_reason=soft_reason or "n/a",
         scale=f"{ports.scale.display:.4f}",
-        kind=compose_kind(oid, navigated=bool(ports.tip.tip_nav)),
+        kind=compose_kind(oid, navigated=ports.nav_store.current.can_go_back),
     ):
         view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
     return decorate_and_upload(ports, view, y0, full_h, xy, oid)
@@ -631,7 +631,7 @@ def _blit_native(ports: TipPorts, view: PopupView, st: Panel):
             "tip_compose",
             soft_reason="",
             scale=f"{scale:.4f}",
-            kind=compose_kind(oid, navigated=bool(ports.tip.tip_nav)),
+            kind=compose_kind(oid, navigated=ports.nav_store.current.can_go_back),
         ):
             arr = st.viewport(y0, vh, overscan=vh, scale=scale, warm_only=True)  # native, no raster
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)

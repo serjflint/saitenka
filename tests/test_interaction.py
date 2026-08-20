@@ -383,11 +383,11 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
 
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")  # what _click_tip routes a link to
     assert r.tip.view.state is not None and r.tip.view.state is not base
-    assert len(r.tip.tip_nav) == 1, "the previous view is pushed for back"
+    assert len(r.interaction.tip_nav.back) == 1, "the previous view is pushed for back"
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
 
     assert tooltip.tip_back(r.tip_ports) is True
-    assert r.tip.view.state is base and r.tip.tip_nav == []
+    assert r.tip.view.state is base and r.interaction.tip_nav.back == ()
     assert tooltip.tip_back(r.tip_ports) is False, "no history left → caller falls through to close"
 
 
@@ -399,11 +399,11 @@ def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
     i = _content_word(r)
     ui.move_to_word(i)
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
-    assert r.tip.tip_nav
+    assert r.interaction.tip_nav.back
 
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
     ui.move_to_word(j)  # a newly hovered word abandons the link-navigation
-    assert r.tip.tip_nav == []
+    assert r.interaction.tip_nav.back == ()
 
 
 def test_esc_steps_back_through_navigation_then_closes():
@@ -414,12 +414,12 @@ def test_esc_steps_back_through_navigation_then_closes():
 
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
-    assert len(r.tip.tip_nav) == 2
+    assert len(r.interaction.tip_nav.back) == 2
 
     r._tip_close_or_back()
-    assert len(r.tip.tip_nav) == 1 and ui.tip_shown
+    assert len(r.interaction.tip_nav.back) == 1 and ui.tip_shown
     r._tip_close_or_back()
-    assert r.tip.tip_nav == [] and ui.tip_shown
+    assert r.interaction.tip_nav.back == () and ui.tip_shown
     r._tip_close_or_back()  # at the root → close
     assert not ui.tip_shown
 

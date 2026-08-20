@@ -7,7 +7,7 @@ takes and the other is the one almost every test takes.
 The outbox is what is new here. SUBTITLE declares, so its turns hand back nothing; INTERACTION
 observes, so the reducer is what decides and the decisions have to come back.
 
-Four features share this slot, so the second thing the file pins is that they are independent: one
+Five features share this slot, so the second thing the file pins is that they are independent: one
 feature's events reach the others by broadcast, and each has to leave the others' state alone.
 """
 
@@ -33,6 +33,9 @@ from saitenka.runtime.events import (
     SidebarHoldReleased,
     SidebarScrolled,
     SidebarShown,
+    TipNavCleared,
+    TipNavPopped,
+    TipNavPushed,
 )
 from saitenka.runtime.help import HelpCommand, HelpState, OpenHelp, ShowHelpPage
 from saitenka.runtime.hover import (
@@ -54,6 +57,7 @@ from saitenka.runtime.interaction_slice import (
     HoverStore,
     PickerStore,
     SidebarStore,
+    TipNavStore,
 )
 
 DELAYS = HoverDelays(scan=0.1, hide=0.2, switch=0.3)
@@ -445,6 +449,88 @@ def test_the_same_sidebar_events_decide_the_same_state_with_or_without_a_reactor
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = SidebarStore(ipc)
+
+    assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
+    assert local.current == routed.current
+
+
+# --- the slot's fifth feature -----------------------------------------------------------------
+
+
+def test_a_pop_with_nothing_stacked_hands_back_no_decision(request) -> None:
+    """Esc has to fall through to closing the tooltip, so "there is nothing to go back to" is an
+    answer the slice gives rather than a check the caller makes before asking."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = TipNavStore(ipc)
+
+    assert store.dispatch(TipNavPopped()) == ()
+    assert store.current.can_go_back is False
+
+
+def test_the_stack_round_trips_a_view_the_slice_never_reads(request) -> None:
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = TipNavStore(ipc)
+    captured = ("panel", "key", "reading")
+
+    store.dispatch(TipNavPushed(captured))
+    assert store.current.can_go_back is True
+
+    restored = store.dispatch(TipNavPopped())
+    assert [decision.view for decision in restored] == [captured]
+    assert store.current.can_go_back is False
+
+
+def test_clearing_leaves_nothing_to_restore(request) -> None:
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = TipNavStore(ipc)
+    store.dispatch(TipNavPushed("base"))
+
+    assert store.dispatch(TipNavCleared()) == ()
+    assert store.dispatch(TipNavPopped()) == ()
+
+
+def test_the_back_stack_is_untouched_by_the_slot_s_other_features(request) -> None:
+    """Broadcast: a hover observation reaches this reducer too. It must leave the stack alone and
+    still clear its own outbox, or the next drain replays a restore that was decided a turn ago."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    nav = TipNavStore(ipc)
+    hover = HoverStore(ipc)
+    nav.dispatch(TipNavPushed("base"))
+
+    hover.dispatch(HoverObserved(HoverObservation(hover=-1, word=0)))
+
+    assert nav.current.can_go_back is True
+    assert nav.dispatch(TipNavCleared()) == ()
+
+
+def test_the_same_nav_events_decide_the_same_stack_with_or_without_a_reactor(request) -> None:
+    stream = (
+        TipNavPopped(),
+        TipNavPushed("base"),
+        TipNavPushed("first"),
+        TipNavPopped(),
+        TipNavCleared(),
+        TipNavPopped(),
+    )
+    local = TipNavStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = TipNavStore(ipc)
 
     assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
     assert local.current == routed.current

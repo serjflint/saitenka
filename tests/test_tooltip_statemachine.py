@@ -3,7 +3,7 @@
 This drives the REAL controller through arbitrary hover/scroll/navigate/back/open_nested/resize sequences
 and asserts, after every step, three things:
 
-  * the model matches the impl — base shown ⇔ `_tip_state`, nav-depth ⇔ `len(_tip_nav)`, nested ⇔ `_nest`;
+  * the model matches the impl — base shown ⇔ `_tip_state`, nav-depth ⇔ the back-stack's depth, nested ⇔ `_nest`;
   * the ONE-PANEL invariant — `hit_target`'s panel IS the panel the blit composites from
     (`_tip_state` / `_nest.state`); a reintroduced second draw-panel (the Session5b two-geometry split)
     would make these diverge and fail this assertion;
@@ -131,9 +131,11 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule()
     def navigate(self) -> None:
-        before = len(self.r.tip.tip_nav)
+        before = len(self.r.interaction.tip_nav.back)
         tooltip.navigate_tip(self.r.tip_ports, self.r.panel_ports, _NAV_QUERY)
-        assert len(self.r.tip.tip_nav) == before + 1  # the wildcard target always resolves
+        assert (
+            len(self.r.interaction.tip_nav.back) == before + 1
+        )  # the wildcard target always resolves
         assert (
             self.r.tip.view.key is None
         )  # a navigated view is keyless (one panel, no synthetic key)
@@ -176,7 +178,7 @@ class TooltipSession(RuleBasedStateMachine):
     @invariant()
     def model_matches_impl(self) -> None:
         assert (self.r.tip.view.state is not None) == self.shown
-        assert len(self.r.tip.tip_nav) == self.nav_depth
+        assert len(self.r.interaction.tip_nav.back) == self.nav_depth
         assert (self.r.tip.nest.state is not None) == self.nested_open
 
     def _check(self, action: str) -> None:
