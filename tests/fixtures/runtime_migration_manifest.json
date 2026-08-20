@@ -814,10 +814,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::scan_hit"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::scroll_tip"
     ],
     [

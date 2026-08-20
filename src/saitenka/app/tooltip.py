@@ -153,7 +153,9 @@ def _update_nested_hover(
     """Scan a word inside the tooltip; keep its popup alive while engaged. A cross-reference LINK is
     click-to-open, NOT hover-scan — so scrolling past / reading a link doesn't spawn scan popups
     that clutter the panel."""
-    scan = scan_hit(reader, mx, my) if (over_tip and not over_nest) else None
+    scan = (
+        scan_hit(reader.tip, reader._raster_scale, mx, my) if (over_tip and not over_nest) else None
+    )
     if scan is not None and reader._tip_link_hit(mx, my):
         scan = None
     if scan is not None:
@@ -1382,7 +1384,7 @@ def _apply_engaged_nested(reader: Reader, tail: str) -> None:
     a cache hit whose bands the worker already rastered, so no getmask2 lands on this tick."""
     if reader._nest.state is not None:
         return  # a nested popup already showing
-    sb = scan_hit(reader, *reader._last_mouse)
+    sb = scan_hit(reader.tip, reader._raster_scale, *reader._last_mouse)
     if sb is None or sb.text != tail:
         return  # cursor left the inner word — never flash a stale nested popup
     key, token = reader._nest.key, reader._nest.token
@@ -1663,18 +1665,21 @@ def scroll_tip(reader: Reader, delta: int) -> None:
 # --- nested scanning: hover a word INSIDE the tooltip → its own popup ---------------------------
 
 
-def scan_hit(reader: Reader, mx: float, my: float):
+def scan_hit(tip: TooltipState, raster_scale: float, mx: float, my: float):
     """Which per-character scan cell of the base tooltip is under (mx, my)? Maps screen → panel
     coords (accounting for scroll) and returns the :class:`~saitenka.model.ScanBox`, or None. Hit-tests the
-    panel actually DRAWN (crisp native when shown, else reference) so a hover lands on the right cell."""
-    if reader._tip_state is None or reader._tip_rect is None:
+    panel actually DRAWN (crisp native when shown, else reference) so a hover lands on the right cell.
+
+    Five of the six things this needed live on the tooltip state; only the raster scale does not.
+    """
+    if tip.view.state is None or tip.view.rect is None:
         return None
     panel, s, scroll = hit_target(  # the on-screen panel + its scale/scroll
-        reader._nest, reader._tip_state, reader._tip_scroll, reader._raster_scale, nested=False
+        tip.nest, tip.view.state, tip.view.scroll, raster_scale, nested=False
     )
     if panel is None:
         return None
-    sx, sy = reader._tip_xy
+    sx, sy = tip.view.xy
     px = (mx - sx) / s
     py = (my - sy) / s + scroll
     return panel.windowed.scan_hit(

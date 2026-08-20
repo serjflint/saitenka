@@ -2100,7 +2100,7 @@ class Reader:
 
     # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
     def _scan_hit(self, mx: float, my: float):
-        return tooltip.scan_hit(self, mx, my)
+        return tooltip.scan_hit(self.tip, self._raster_scale, mx, my)
 
     def _show_nested(self, sb) -> None:
         nested_popup.show_nested(self, sb)

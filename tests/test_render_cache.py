@@ -929,7 +929,7 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     r._tip_xy, r._tip_scroll = (0, 0), 0
     sb = SimpleNamespace(text=tok.surface, x=10, y=10, h=20)
     monkeypatch.setattr(
-        tooltip, "scan_hit", lambda _reader, _mx, _my: sb
+        tooltip, "scan_hit", lambda _tip, _scale, _mx, _my: sb
     )  # re-derive lands on the cell
 
     r._panel_cache.clear()
