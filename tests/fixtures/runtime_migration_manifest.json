@@ -150,14 +150,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._consume_failure"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._degrade_geometry"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._observation_key"
     ],
     [

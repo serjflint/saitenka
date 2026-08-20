@@ -417,6 +417,14 @@ class Reader:
                     cache_max=o.subtitle_geometry.cache_max,
                     submit=configure_geometry_lane(ipc),
                 ),
+                native_subtitles.GeometryPorts(
+                    pipeline=self.subtitle_pipeline,
+                    degrade=self._degrade_native_subtitle_geometry,
+                    clear_interaction=self._clear_native_interaction,
+                    use_native=self._use_native_subtitle_renderer,
+                    ownership_undecided=self._native_ownership_undecided,
+                    redraw=self._draw_subtitle,
+                ),
                 lookahead=o.subtitle_geometry.lookahead,
             )
         self.sub_size_override = o.tooltip.sub_size

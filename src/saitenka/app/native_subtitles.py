@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
+    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.token_cache import TokenizedCue
     from saitenka.app.tokenize import Token
     from saitenka.subtitles.geometry import GeometrySnapshot
@@ -287,11 +288,32 @@ class _ScheduleInputs:
     observation_key: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class GeometryPorts:
+    """What the geometry owner asks the session to do, and the pipeline it defers to.
+
+    Bound once, at construction, rather than reached for per call: the geometry owner is a
+    session-lived collaborator, so a port that could change between calls would mean a different
+    session, not a different frame. That is what separates it from `SubtitleTarget`, whose members
+    are live facts and must be snapshotted per operation.
+    """
+
+    pipeline: SubtitleModeCoordinator
+    degrade: Callable[[], None]
+    clear_interaction: Callable[[], None]
+    use_native: Callable[[], bool]
+    ownership_undecided: Callable[[], bool]
+    redraw: Callable[[], None]
+
+
 class NativeSubtitleGeometry:
-    def __init__(self, worker: SubtitleGeometryWorker, *, lookahead: int = 2) -> None:
+    def __init__(
+        self, worker: SubtitleGeometryWorker, ports: GeometryPorts, *, lookahead: int = 2
+    ) -> None:
         if lookahead < 0:
             raise ValueError("subtitle geometry lookahead must be non-negative")
         self.worker = worker
+        self._ports = ports
         self.lookahead = lookahead
         self.source_path: Path | None = None
         self._source_bytes: bytes | None = None
@@ -495,11 +517,9 @@ class NativeSubtitleGeometry:
             owner=self._owner,
         )
 
-    def _degrade_geometry(
-        self, reader: Reader, reason: str, *, error_code: str | None = None
-    ) -> None:
-        reader._degrade_native_subtitle_geometry()
-        renderer = reader.subtitle_pipeline.renderer
+    def _degrade_geometry(self, reason: str, *, error_code: str | None = None) -> None:
+        self._ports.degrade()
+        renderer = self._ports.pipeline.renderer
         ownership = getattr(renderer, "ownership_state", None)
         owner = getattr(getattr(ownership, "owner", None), "value", self._owner)
         self._set_fallback(reason, error_code=error_code)
@@ -534,7 +554,7 @@ class NativeSubtitleGeometry:
 
     def set_source(self, path: Path | None, *, reader: Reader | None = None) -> None:
         if reader is not None:
-            self._consume_failure(reader)
+            self._consume_failure()
         self._source_epoch += 1
         self.worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
         self.source_path = None
@@ -548,8 +568,8 @@ class NativeSubtitleGeometry:
         self._last_render_inputs = None
         self._failure_diagnostic = None
         if reader is not None:
-            reader._clear_native_interaction()
-            reader._degrade_native_subtitle_geometry()
+            self._ports.clear_interaction()
+            self._ports.degrade()
         if path is None:
             self._set_fallback("subtitle-source-unavailable")
         elif path.suffix.casefold() != ".ass":
@@ -575,18 +595,18 @@ class NativeSubtitleGeometry:
         cause: GeometryCacheReason = GeometryCacheReason.RENDER_INPUT_CHANGED,
     ) -> None:
         if reader is not None:
-            self._consume_failure(reader)
+            self._consume_failure()
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
         self._published_key = None
         self.worker.invalidate(cause=cause)
         if reader is not None:
-            reader._clear_native_interaction()
+            self._ports.clear_interaction()
 
     def refresh(self, reader: Reader) -> None:
         identity = self._observation_key(reader)
-        snapshot = reader.subtitle_pipeline.current
+        snapshot = self._ports.pipeline.current
         if (
             identity is not None
             and identity == self._published_key
@@ -870,7 +890,6 @@ class NativeSubtitleGeometry:
             self.worker.mark_not_ready()
             reason, code = geometry_failure_reason(error)
             self._degrade_geometry(
-                reader,
                 reason,
                 error_code=code,
             )
@@ -890,18 +909,18 @@ class NativeSubtitleGeometry:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
             if semantic_text != reader._cue_norm(reader.sub_text):
-                self._degrade_geometry(reader, "subtitle-observation-pending")
+                self._degrade_geometry("subtitle-observation-pending")
                 return None
             return hint.start, hint.end, timestamp_ms, rows
         if not isinstance(active_rows, str) or not active_rows.strip():
-            self._degrade_geometry(reader, "subtitle-ass-full-unavailable")
+            self._degrade_geometry("subtitle-ass-full-unavailable")
             return None
         try:
             _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
                 reader._prop("time-pos"), reader._prop("sub-delay"), start
             )
         except (TypeError, ValueError):
-            self._degrade_geometry(reader, "subtitle-timing-unavailable")
+            self._degrade_geometry("subtitle-timing-unavailable")
             return None
         if reader._sub_index is not None:
             position = reader._sub_index.locate(
@@ -950,14 +969,14 @@ class NativeSubtitleGeometry:
             self._trace_unscheduled(unassembled or "no-source-path", reader.cue_revision)
             return None
         if self.ass_full_capability == AssFullCapability.UNSUPPORTED:
-            self._degrade_geometry(reader, "subtitle-ass-full-unsupported")
+            self._degrade_geometry("subtitle-ass-full-unsupported")
             return None
         try:
             render = self._render_inputs(reader._prop, reader.osd)
         except (TypeError, ValueError) as error:
             self.worker.mark_not_ready()
             self._set_fallback("subtitle-render-input-unsupported", log_detail=str(error))
-            reader._degrade_native_subtitle_geometry()
+            self._ports.degrade()
             return None
         self._last_render_inputs = render
         active_rows = reader._prop("sub-text/ass-full")
@@ -966,9 +985,9 @@ class NativeSubtitleGeometry:
         start = reader._prop("sub-start")
         end = reader._prop("sub-end")
         if start is None or end is None:
-            self._degrade_geometry(reader, "subtitle-observation-pending")
+            self._degrade_geometry("subtitle-observation-pending")
             return None
-        generation = reader.subtitle_pipeline.generation
+        generation = self._ports.pipeline.generation
         track_id = SubtitleTrackId(f"sid:{reader._prop('sid')}:{path.resolve()}")
         active = self._active_observation(
             reader, source, track_id, float(start), float(end), active_rows
@@ -1008,10 +1027,10 @@ class NativeSubtitleGeometry:
             self._pending_key = (inputs.generation, inputs.observation_key)
         self._eligible_tokens = len(cached.palette)
         self.worker.mark_presented(cached)
-        if not reader._use_native_subtitle_renderer():
-            if reader._native_ownership_undecided():
+        if not self._ports.use_native():
+            if self._ports.ownership_undecided():
                 return True  # the assertion's terminal re-drives the refresh
-            self._degrade_geometry(reader, "mpv-sub-visibility-rejected")
+            self._degrade_geometry("mpv-sub-visibility-rejected")
             return True
         self._set_ready(active_events=len(cached.frame_id.active_event_ids))
         self._prefetch(
@@ -1053,20 +1072,20 @@ class NativeSubtitleGeometry:
             )
         except ValueError:
             self.worker.mark_not_ready()
-            self._degrade_geometry(reader, "subtitle-token-annotation-invalid")
+            self._degrade_geometry("subtitle-token-annotation-invalid")
             return False
         self._last_selection = selection
         self._eligible_tokens = len(selection.annotations)
         if not selection.annotations:
             reader.boxes = []
             self.worker.mark_not_ready()
-            if reader._use_native_subtitle_renderer():
+            if self._ports.use_native():
                 self._published_key = inputs.observation_key
                 self._set_ready()
                 return True
-            if reader._native_ownership_undecided():
+            if self._ports.ownership_undecided():
                 return False  # the assertion's terminal re-drives the refresh
-            self._degrade_geometry(reader, "mpv-sub-visibility-rejected")
+            self._degrade_geometry("mpv-sub-visibility-rejected")
             return False
 
         def build() -> GeometryRequest:
@@ -1090,7 +1109,7 @@ class NativeSubtitleGeometry:
             self._pending_key = (inputs.generation, inputs.observation_key)
         self._submitted_at = (inputs.generation, time.perf_counter())
         self.worker.mark_not_ready()
-        self._degrade_geometry(reader, "subtitle-geometry-cache-miss")
+        self._degrade_geometry("subtitle-geometry-cache-miss")
         accepted = self.worker.submit_job(
             inputs.generation, build, work_key=inputs.key, on_settled=settled
         )
@@ -1111,21 +1130,19 @@ class NativeSubtitleGeometry:
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
             reason, code = geometry_failure_reason(error)
             self._degrade_geometry(
-                reader,
                 reason,
                 error_code=code,
             )
             return False
 
-    def _consume_failure(self, reader: Reader) -> None:
-        error = reader.subtitle_pipeline.consume_error()
+    def _consume_failure(self) -> None:
+        error = self._ports.pipeline.consume_error()
         if error is None:
             return
         reason, code = geometry_failure_reason(error)
         if error.startswith("subtitle-source-"):
             reason = error
         self._degrade_geometry(
-            reader,
             reason,
             error_code=code if not reason.startswith("subtitle-source-") else None,
         )
@@ -1184,25 +1201,25 @@ class NativeSubtitleGeometry:
         self._submitted_at = None
 
     def _apply(self, reader: Reader) -> bool:
-        snapshot = reader.subtitle_pipeline.current
+        snapshot = self._ports.pipeline.current
         if snapshot is None:
-            self._consume_failure(reader)
+            self._consume_failure()
             return False
         if snapshot is self._last_snapshot:
             return False
         if not self._snapshot_identities_are_valid(snapshot, len(reader.tokens)):
-            self._degrade_geometry(reader, "geometry-token-identity-invalid")
+            self._degrade_geometry("geometry-token-identity-invalid")
             return False
         reader.boxes = self._install_snapshot(snapshot)
         reader.sub_origin = (0, 0)
         self._record_ready_latency(snapshot.generation)
-        if not reader._use_native_subtitle_renderer():
-            if reader._native_ownership_undecided():
+        if not self._ports.use_native():
+            if self._ports.ownership_undecided():
                 return False  # the assertion's terminal re-drives the refresh
             self._set_fallback("mpv-sub-visibility-rejected")
             return False
         self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
-        reader._draw_subtitle()
+        self._ports.redraw()
         return True
 
     def close(self) -> None:
