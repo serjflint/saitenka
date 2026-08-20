@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, cast
 
 from saitenka.app.tokenize import Token
 from saitenka.mask_atlas import REFERENCE_SCALE
-from saitenka.runtime.jobs import RefusesJobLanes
+from saitenka.runtime.jobs import NoSessionRuntime
 
 if TYPE_CHECKING:
     from saitenka.app.render_cache import RenderCache
@@ -35,7 +35,7 @@ _CHECKPOINT_EVERY = 2000  # rastered words between heartbeats (WAL truncate + pr
 _PLATEAU_MIN_NEW = 64  # a checkpoint adding fewer new masks than this counts as "dry"
 
 
-class _PrewarmIPC(RefusesJobLanes):
+class _PrewarmIPC(NoSessionRuntime):
     """A no-socket mpv stand-in: a fixed OSD and inert commands, so a headless Reader can build panels
     without a running mpv (mirrors the benchmark's FakeIPC).
 

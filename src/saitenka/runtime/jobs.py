@@ -68,12 +68,16 @@ class RuntimeJobPort(Protocol):
     def close_session_runtime(self) -> bool: ...
 
 
-class RefusesJobLanes:
-    """For a headless stand-in with no session behind it: the job port answers, and says no.
+class NoSessionRuntime:
+    """For a headless stand-in with no session behind it: the runtime ports answer, and say no.
 
     Inherit it to mean it. Shared rather than repeated, because "there is no runtime here" is one
     decision, and the same refusal a live `MpvIPC` gives before its gateway is installed — so every
     feature already has a path for it.
+
+    Covers both ports a stand-in gets asked about: job lanes and lifecycle timers. It grew the timer
+    half the same way it grew the first — a probe was replaced by a call, and the call found a fake
+    that had never declared the port.
     """
 
     def register_runtime_job_lane(self, _name: str, _policy: JobLanePolicy, _handler) -> bool:
@@ -86,6 +90,12 @@ class RefusesJobLanes:
         return False
 
     def close_session_runtime(self) -> bool:
+        return False
+
+    def schedule_runtime_timer(self, **_kwargs) -> bool:
+        return False
+
+    def cancel_runtime_timer(self, _timer: str) -> bool:
         return False
 
 

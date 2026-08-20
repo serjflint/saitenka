@@ -380,5 +380,8 @@ def test_every_headless_stand_in_answers_the_job_port() -> None:
         assert stand_in.register_runtime_job_lane("any", JobLanePolicy(capacity=1), None) is False
         assert stand_in.submit_runtime_job() is False
         assert stand_in.close_runtime_job_lane("any") is False
+        # The timer port too: a probe there disarmed every lifecycle deadline just as silently.
+        assert stand_in.schedule_runtime_timer(timer="any") is False
+        assert stand_in.cancel_runtime_timer("any") is False
         # A refusal is a declared answer, so the feature gets None and takes its no-lane path.
         assert configure_lane(stand_in, "any", JobLanePolicy(capacity=1), None) is None

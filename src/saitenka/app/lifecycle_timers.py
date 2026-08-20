@@ -53,6 +53,14 @@ class LifecycleTimerIdentity:
 
 
 class RuntimeTimerPort(Protocol):
+    """The timer ingress. Asked for, not probed for.
+
+    Both calls used to go through `getattr(port, name, None)` with a False fallback, which cannot
+    tell a port that does not schedule timers from one whose method was renamed — the second reads
+    as "this session has no timers" and silently disarms every lifecycle deadline in the process.
+    Every implementor, production and fake, already answers both.
+    """
+
     def schedule_runtime_timer(self, **kwargs) -> bool: ...
 
     def cancel_runtime_timer(self, timer: str) -> bool: ...
@@ -98,10 +106,7 @@ class LifecycleTimers:
                         return
                 callback()
 
-            schedule = getattr(self._port, "schedule_runtime_timer", None)
-            if schedule is None:
-                return False
-            return schedule(
+            return self._port.schedule_runtime_timer(
                 owner=_OWNERS.get(kind, Owner.SESSION),
                 identity=identity,
                 timer=self._name(kind),
@@ -115,8 +120,7 @@ class LifecycleTimers:
                 if self._closed:
                     return False
                 self._revisions[kind] += 1
-            cancel = getattr(self._port, "cancel_runtime_timer", None)
-            return False if cancel is None else cancel(self._name(kind))
+            return self._port.cancel_runtime_timer(self._name(kind))
 
     def close(self) -> None:
         with self._admission_lock:

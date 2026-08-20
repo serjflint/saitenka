@@ -34,7 +34,7 @@ from saitenka.app.popups import NO_HOVER_METADATA
 from saitenka.app.tokenize import Token, tokenize
 from saitenka.mpvio.osd import to_bgra, to_bgra_array
 from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
-from saitenka.runtime.jobs import RefusesJobLanes
+from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
@@ -64,7 +64,7 @@ HAND_PICKED: list[tuple[str, str]] = [
 ]
 
 
-class FakeIPC(RefusesJobLanes):
+class FakeIPC(NoSessionRuntime):
     """Minimal mpv stand-in: fixed osd, no socket. overlay-add just writes a temp file (as mpv wants).
 
     Refuses job lanes rather than lacking the port: the bench drives the Reader synchronously and

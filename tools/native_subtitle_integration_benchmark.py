@@ -22,7 +22,7 @@ import psutil
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.panel import Definition, Entry
-from saitenka.runtime.jobs import RefusesJobLanes
+from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import (
     Cue,
     CueIndex,
@@ -273,7 +273,7 @@ def execute_trials(manifest: dict, library_path: Path | None, output: Path) -> d
     return summarize_trial_records(records, manifest)
 
 
-class _IPC(RefusesJobLanes):
+class _IPC(NoSessionRuntime):
     """Headless stand-in: no gateway behind it, so it refuses lanes rather than lacking the port."""
 
     def __init__(self) -> None:
