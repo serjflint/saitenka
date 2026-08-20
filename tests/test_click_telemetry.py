@@ -10,7 +10,7 @@ from __future__ import annotations
 import util
 from util import record_spans
 
-from saitenka.app import backlog, sidebar
+from saitenka.app import backlog, sidebar, surfaces
 from saitenka.app.controller import Reader
 from saitenka.app.subtitles import SidebarHitBox
 
@@ -52,7 +52,9 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     reader.sidebar.rect = (0, 0, 100, 100)
     reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),)
 
-    assert sidebar.on_click(reader, 50, 50) is True  # inside the panel, off every hitbox
+    assert (
+        sidebar.on_click(surfaces.click_target(reader), 50, 50) is True
+    )  # inside the panel, off every hitbox
     assert _named(spans, "sidebar_click") == []
 
 

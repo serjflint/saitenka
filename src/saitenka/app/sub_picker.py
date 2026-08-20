@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from saitenka.app.controller import Reader
     from saitenka.app.subselect import SubtitleCandidate
     from saitenka.app.subtitle_modes import FetchSubmitter
-    from saitenka.app.surfaces import HoverSuppression
+    from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
 
 log = logging.getLogger(__name__)
 
@@ -318,14 +318,14 @@ def suppress_hover(suppression: HoverSuppression) -> bool:
     return True
 
 
-def scroll(reader: Reader, steps: int) -> bool:
-    state = reader.sub_picker
+def scroll(wheel: WheelStep, steps: int) -> bool:
+    state = wheel.interaction.sub_picker
     if not state.open:
         return False
-    if not claims_pointer(state.rect, reader._prop("mouse-pos"), open_=state.open):
+    if not claims_pointer(state.rect, wheel.pointer, open_=state.open):
         return False
     state.scroll = clamp_scroll(state.scroll, steps, len(state.candidates))
-    reader.redraw_sub_picker()
+    wheel.redraw_picker()
     return True
 
 
@@ -371,21 +371,12 @@ def _download(state: PickerState, index: int, ports: DownloadPorts) -> None:
     close_picker(state, ports.surfaces)
 
 
-def on_click(reader: Reader, x: float, y: float) -> bool:
-    state = reader.sub_picker
+def on_click(target: ClickTarget, x: float, y: float) -> bool:
+    state = target.interaction.sub_picker
     if not contains(state, x, y) or state.rect is None:
         return False
     local_x, local_y = x - state.rect[0], y - state.rect[1]
     hit = next((box for box in state.hits if box.contains(local_x, local_y)), None)
     if hit is not None and hit.kind == "picker-download":
-        _download(
-            reader.sub_picker,
-            hit.value,
-            DownloadPorts(
-                reader._toast,
-                reader._submit_subtitle_fetch,
-                reader._get,
-                reader.lifecycle_surfaces,
-            ),
-        )
+        _download(state, hit.value, target.download)
     return True

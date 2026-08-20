@@ -1719,7 +1719,9 @@ class Reader:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
-        if not getattr(self.ov, "visible", True) or surfaces.suppress_hover(self):
+        if not getattr(self.ov, "visible", True) or surfaces.suppress_hover(
+            surfaces.hover_suppression(self)
+        ):
             return
         tooltip.update_hover(self.tip_ports, self.hover_actions, self.hover_inputs)
 
@@ -1790,7 +1792,7 @@ class Reader:
         if not self.ov.visible:
             return
         mp = self._get("mouse-pos") or {}
-        surfaces.route_click(self, mp.get("x", -1), mp.get("y", -1))
+        surfaces.route_click(surfaces.click_target(self), mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
         self,
@@ -2330,7 +2332,7 @@ class Reader:
 
     def _apply_interaction_effect(self, effect: interaction_intents.InteractionEffect) -> None:
         if isinstance(effect, interaction_intents.RouteWheel):
-            surfaces.route_scroll(self, effect.steps)
+            surfaces.route_scroll(surfaces.wheel_step(self), effect.steps)
         elif isinstance(effect, interaction_intents.ScrollTooltip):
             self._scroll_tip(effect.pixels)
         elif isinstance(effect, interaction_intents.NavigateBack):

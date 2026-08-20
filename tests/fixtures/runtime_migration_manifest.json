@@ -78,10 +78,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/help_overlay.py::scroll"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/launch/run.py::_execute_reader_session"
     ],
     [
@@ -182,27 +178,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::on_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::scroll"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::view_of"
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sub_picker.py::on_click"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sub_picker.py::open_picker"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::scroll"
     ],
     [
       "reader-parameter",
@@ -214,19 +194,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/surfaces.py::_no_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_no_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_tip_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_tip_scroll"
+      "src/saitenka/app/surfaces.py::click_target"
     ],
     [
       "reader-parameter",
@@ -234,15 +202,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/surfaces.py::route_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::route_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::suppress_hover"
+      "src/saitenka/app/surfaces.py::wheel_step"
     ]
   ],
   "startup": [

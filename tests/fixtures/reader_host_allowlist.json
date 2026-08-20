@@ -1,7 +1,6 @@
 {
   "saitenka.app.backlog": 1,
   "saitenka.app.commands.attach": 3,
-  "saitenka.app.help_overlay": 1,
   "saitenka.app.launch.run": 4,
   "saitenka.app.mined_feedback": 1,
   "saitenka.app.miner": 1,
@@ -11,8 +10,8 @@
   "saitenka.app.reader_deps": 2,
   "saitenka.app.session_runtime": 1,
   "saitenka.app.session_stats": 1,
-  "saitenka.app.sidebar": 5,
-  "saitenka.app.sub_picker": 3,
+  "saitenka.app.sidebar": 3,
+  "saitenka.app.sub_picker": 1,
   "saitenka.app.subtitle_render": 2,
-  "saitenka.app.surfaces": 8
+  "saitenka.app.surfaces": 3
 }

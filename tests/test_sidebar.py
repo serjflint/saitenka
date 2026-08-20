@@ -6,7 +6,7 @@ import pytest
 import util
 from PIL import Image
 
-from saitenka.app import sidebar
+from saitenka.app import sidebar, surfaces
 from saitenka.app.backlog import BacklogStore, Capture
 from saitenka.app.controller import Reader
 from saitenka.app.episode_analysis import analyze_cues
@@ -103,7 +103,7 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     (sidebar.hide if reader.sidebar.open else sidebar.show)(reader.sidebar_view)
     reader.sidebar.rect = (900, 50, 360, 600)
 
-    assert sidebar.scroll(reader, -3) is True
+    assert sidebar.scroll(surfaces.wheel_step(reader), -3) is True
     held_scroll = reader.sidebar.scroll
     reader.sub_text = "cue 18"
     sidebar.follow(reader.sidebar_view)
@@ -123,7 +123,7 @@ def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
     reader.sidebar.rect = (100, 100, 400, 500)
     reader.sidebar.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
 
-    assert sidebar.on_click(reader, 110, 110) is True
+    assert sidebar.on_click(surfaces.click_target(reader), 110, 110) is True
     assert ("set_property", "time-pos", 7.0) in ipc.commands
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
@@ -140,7 +140,7 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
     reader.sidebar.rect = (100, 100, 400, 500)
     reader.sidebar.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
 
-    sidebar.on_click(reader, 110, 110)
+    sidebar.on_click(surfaces.click_target(reader), 110, 110)
 
     assert invoked == [method]
 
@@ -160,7 +160,7 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method,
     reader.sidebar.rect = (100, 100, 400, 500)
     reader.sidebar.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)  # row 3, no longer active
 
-    sidebar.on_click(reader, 110, 110)
+    sidebar.on_click(surfaces.click_target(reader), 110, 110)
 
     assert invoked == [method]  # not the old silent no-op
 
@@ -179,7 +179,7 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
     reader.sidebar.open = True
     reader.sidebar.rect = (100, 100, 400, 500)
     reader.sidebar.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
-    sidebar.on_click(reader, 110, 110)  # the sidebar-button path
+    sidebar.on_click(surfaces.click_target(reader), 110, 110)  # the sidebar-button path
 
     assert invoked == ["toggle", "toggle"]  # one flow, two entry points
 
@@ -269,7 +269,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     reader.sidebar.open = True
     reader.sidebar.rect = (0, 0, 400, 500)
     reader.sidebar.hits = (SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),)
-    sidebar.on_click(reader, 10, 10)
+    sidebar.on_click(surfaces.click_target(reader), 10, 10)
 
     assert store.entries_for_path(renamed) == [entry]
     assert store.media(entry.media_id).original_basename == original.name
@@ -279,7 +279,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
 
     reader.sidebar.rect = (0, 0, 400, 500)
     reader.sidebar.hits = (SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),)
-    sidebar.on_click(reader, 10, 10)
+    sidebar.on_click(surfaces.click_target(reader), 10, 10)
     assert ("set_property", "time-pos", 0.0) in reader.ipc.commands
 
 
@@ -372,7 +372,7 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
     reader.sidebar.rect = (0, 0, 400, 500)
     reader.sidebar.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
 
-    sidebar.on_click(reader, 10, 10)
+    sidebar.on_click(surfaces.click_target(reader), 10, 10)
 
     assert ("set_property", "time-pos", 0.0) in ipc.commands  # seeks even with Anki down
 

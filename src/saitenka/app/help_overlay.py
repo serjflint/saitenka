@@ -2,8 +2,8 @@
 
 Building the document and rendering a page are functions of the bindings and the screen, so they
 live here and can be checked at any size without a Reader. Deciding whether the overlay is open and
-which page it shows is `help_intents`; doing it is the Reader. What is left taking a `reader` is the
-`SurfaceSpec` protocol's two hooks, which the surface registry calls positionally.
+which page it shows is `help_intents`; doing it is the Reader. The `SurfaceSpec` hooks take the
+registry's own ports, so nothing here holds the host.
 """
 
 from __future__ import annotations
@@ -17,8 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from saitenka.app.bindings import ActiveBinding
-    from saitenka.app.controller import Reader
-    from saitenka.app.surfaces import HoverSuppression
+    from saitenka.app.surfaces import HoverSuppression, WheelStep
 
 
 @dataclass
@@ -72,12 +71,12 @@ def page_image(document, index: int):
 # --- SurfaceSpec hooks: the surface registry calls these with the host, positionally ------------
 
 
-def scroll(reader: Reader, steps: int) -> bool:
+def scroll(wheel: WheelStep, steps: int) -> bool:
     """Help captures the wheel whenever it is open, whether or not it pages."""
-    if not reader.help.open:
+    if not wheel.interaction.help.open:
         return False
     if steps:
-        reader._run_help_command(reader.help_page_command(steps))
+        wheel.page_help(steps)
     return True
 
 

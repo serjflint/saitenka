@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.mined_store import MinedCard
     from saitenka.app.reader_context import SessionContext
-    from saitenka.app.surfaces import HoverSuppression
+    from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
     from saitenka.subtitles import Cue, CueIndex
 
 SIDEBAR_ID = OverlayId.SIDEBAR
@@ -519,13 +519,8 @@ def wheel(view: SidebarView, steps: int, pointer, *, hold: Callable[[float], boo
     return True
 
 
-def scroll(reader: Reader, steps: int) -> bool:
-    return wheel(
-        reader.sidebar_view,
-        steps,
-        reader._prop("mouse-pos"),
-        hold=reader.hold_sidebar_scroll,
-    )
+def scroll(step: WheelStep, steps: int) -> bool:
+    return wheel(step.sidebar, steps, step.pointer, hold=step.hold_sidebar)
 
 
 def follow(view: SidebarView) -> None:
@@ -624,8 +619,8 @@ def click(view: SidebarView, actions: SidebarActions, x: float, y: float) -> boo
     return True
 
 
-def on_click(reader: Reader, x: float, y: float) -> bool:
-    return click(reader.sidebar_view, reader.sidebar_actions, x, y)
+def on_click(target: ClickTarget, x: float, y: float) -> bool:
+    return click(target.sidebar, target.sidebar_acts, x, y)
 
 
 def mine_active(view: SidebarView) -> None:
