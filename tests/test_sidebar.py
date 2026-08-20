@@ -1,5 +1,7 @@
 """Whole-episode subtitle sidebar behavior at the Reader seam."""
 
+import dataclasses
+
 import pytest
 import util
 from PIL import Image
@@ -46,6 +48,11 @@ def _reader(cue_count=20, *, active=0, props=None):
     reader._sub_index = CueIndex(cues)
     reader.sub_text = f"cue {active}"
     return reader, ipc
+
+
+def _view(reader, **overrides):
+    """The value production draws from, with the row-level facts a test pins stated explicitly."""
+    return dataclasses.replace(sidebar.view_of(reader), **overrides)
 
 
 def _capture_render(monkeypatch):
@@ -175,7 +182,7 @@ def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
         reader.tokenizer, "tokenize", lambda _text: (_ for _ in ()).throw(AssertionError)
     )
 
-    rows, total = sidebar._track_rows(reader, 0, 1, 0)
+    rows, total = sidebar._track_rows(_view(reader, active=0), 0, 1)
 
     assert total == 1
     assert rows[0].parts == (("cue 0", sidebar.PLAIN),)
@@ -190,7 +197,7 @@ def test_rows_use_shared_episode_analysis_when_ready():
         list(reader._sub_index.cues), reader.scorer, reader.tokenizer
     )
 
-    rows, _total = sidebar._track_rows(reader, 0, 1, 0)
+    rows, _total = sidebar._track_rows(_view(reader, active=0), 0, 1)
 
     assert rows[0].status == "N+1"
 
@@ -241,7 +248,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     )
     reader._backlog_store = store
 
-    rows = sidebar._summary_rows(reader)
+    rows = sidebar._summary_rows(sidebar.view_of(reader))
 
     candidate = next(row for row in rows if row.actions)
     assert candidate.actions == (SidebarAction("✓", "relink", entry.media_id),)
@@ -256,7 +263,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
 
     assert store.entries_for_path(renamed) == [entry]
     assert store.media(entry.media_id).original_basename == original.name
-    matched_rows = sidebar._summary_rows(reader)
+    matched_rows = sidebar._summary_rows(sidebar.view_of(reader))
     expanded = next(row for row in matched_rows if row.click_kind == "backlog-seek")
     assert (expanded.text, expanded.status) == ("秘密の字幕", "open")
 
@@ -312,7 +319,7 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path):
     )
     reader._mined_store = store
 
-    rows = sidebar._mine_rows(reader)
+    rows = sidebar._mine_rows(sidebar.view_of(reader))
 
     assert [(row.value, row.click_kind, row.status) for row in rows] == [
         (111, "mine-open", "mined"),
@@ -329,7 +336,7 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "absent.sqlite")
 
-    assert sidebar._mine_rows(reader) == []
+    assert sidebar._mine_rows(sidebar.view_of(reader)) == []
     assert reader._mined_store is None
     assert not (tmp_path / "absent.sqlite").exists()
 

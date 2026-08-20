@@ -18,7 +18,10 @@ from saitenka.model import claims_pointer, in_rect
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.controller import Reader
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.mined_store import MinedCard
     from saitenka.app.surfaces import HoverSuppression
     from saitenka.subtitles import Cue, CueIndex
@@ -58,6 +61,50 @@ def _capacity(osd: tuple[int, int], scale: float) -> int:
     return max(1, (height - round(52 * scale) - round(28 * scale)) // round(54 * scale))
 
 
+@dataclass(frozen=True, slots=True)
+class SidebarView:
+    """Everything the sidebar renders from, cut by contract rather than by call chain.
+
+    The groups are the sanctioned contracts and nothing else: the surface's own state, the cue
+    identity it highlights, presentation, the media path, mining, and the dictionary. No member
+    reaches a sixth thing, which is what keeps this from being the host under a new name.
+
+    `backlog` and `mined` are factories rather than stores because drawing must not materialise a
+    database — two of the three views guard on the file existing first, and building the stores
+    when the view is built would defeat both guards.
+
+    `active` is located once per operation instead of per call. `update` used to compare against
+    one `_active_index` and then redraw against a second, freshly read one; a redraw that drew a
+    different cue than the comparison decided on is a bug shape, not a feature.
+    """
+
+    state: SidebarState
+    active: int
+    index: CueIndex | None
+    language: str
+    osd: tuple[int, int]
+    chrome_scale: float
+    surfaces: LifecycleSurfaces
+    video: str | None
+    backlog: Callable[[], BacklogStore]
+    mined: Callable[[], mined_store.MinedCardStore]
+    mined_exists: bool
+    scorer: object
+    tokenizer: object
+    analysis: object
+    can_mine: bool
+
+    @property
+    def capacity(self) -> int:
+        return _capacity(self.osd, self.chrome_scale)
+
+    @property
+    def active_cue(self) -> Cue | None:
+        if self.index is None or self.active < 0:
+            return None
+        return self.index.cues[self.active]
+
+
 def _active_index(reader: Reader) -> int:
     index = reader._sub_index
     if index is None:
@@ -67,6 +114,32 @@ def _active_index(reader: Reader) -> int:
         sub_start=reader._get("sub-start"),
         time_pos=reader._get("time-pos"),
         preferred=reader._nav_idx,
+    )
+
+
+def view_of(reader: Reader) -> SidebarView:
+    """Snapshot the host into the value the sidebar draws from.
+
+    The one host-taking row in this chain, deliberately, exactly as `hover_suppression` is for the
+    hover chain: a hook's own test needs to build what production builds, and a test that
+    assembles the value by hand is a second definition of it.
+    """
+    return SidebarView(
+        state=reader.sidebar,
+        active=_active_index(reader),
+        index=reader._sub_index,
+        language=reader.subtitle_language,
+        osd=reader.osd,
+        chrome_scale=reader.chrome_scale,
+        surfaces=reader.lifecycle_surfaces,
+        video=reader._get("path"),
+        backlog=lambda: _ensure_store(reader),
+        mined=lambda: reader.mined_store,
+        mined_exists=reader._mined_store is not None or mined_store.db_path().exists(),
+        scorer=reader.scorer,
+        tokenizer=reader.tokenizer,
+        analysis=reader.analysis.current,
+        can_mine=bool(reader.anki and reader.mine_cfg),
     )
 
 
@@ -130,28 +203,24 @@ def _analysis_status(analysis, cue_index: int) -> str | None:
     return " · ".join(labels) or None
 
 
-def _track_rows(
-    reader: Reader, first: int, capacity: int, active: int
-) -> tuple[list[SidebarRow], int]:
-    index = reader._sub_index
+def _track_rows(view: SidebarView, first: int, capacity: int) -> tuple[list[SidebarRow], int]:
+    index = view.index
     if index is None:
         return [], 0
-    video = reader._get("path")
-    statuses = _cue_statuses(index, video, _ensure_store(reader)) if video else {}
+    video = view.video
+    statuses = _cue_statuses(index, video, view.backlog()) if video else {}
+    active = view.active
     rows: list[SidebarRow] = []
     for cue_index in range(first, min(len(index), first + capacity)):
         cue = index.cues[cue_index]
         actions: tuple[SidebarAction, ...] = ()
         if cue_index == active:
             actions = (SidebarAction("B", "bookmark", cue_index),)
-            if reader.anki and reader.mine_cfg:
+            if view.can_mine:
                 actions += (SidebarAction("+", "mine", cue_index),)
         status = " · ".join(
             label
-            for label in (
-                statuses.get(cue_index),
-                _analysis_status(reader.analysis.current, cue_index),
-            )
+            for label in (statuses.get(cue_index), _analysis_status(view.analysis, cue_index))
             if label
         )
         rows.append(
@@ -160,12 +229,12 @@ def _track_rows(
                 timestamp=_format_time(cue.start),
                 text=cue.text,
                 parts=_cue_parts(
-                    reader.sidebar.style_cache,
+                    view.state.style_cache,
                     cue_index,
                     cue,
-                    language=reader.subtitle_language,
-                    scorer=reader.scorer,
-                    tokenizer=reader.tokenizer,
+                    language=view.language,
+                    scorer=view.scorer,
+                    tokenizer=view.tokenizer,
                 ),
                 status=status or None,
                 active=cue_index == active,
@@ -255,14 +324,12 @@ def _matched_entry_rows(
     ]
 
 
-def _summary_rows(reader: Reader) -> list[SidebarRow]:
-    store = _ensure_store(reader)
+def _summary_rows(view: SidebarView) -> list[SidebarRow]:
+    store = view.backlog()
     grouped = _status_groups(store)
-    video = reader._get("path")
+    video = view.video
     candidates = _candidate_rows(store, video)
-    matched = _matched_entry_rows(
-        _active_index(reader), reader._sub_index, reader.subtitle_language, store, video
-    )
+    matched = _matched_entry_rows(view.active, view.index, view.language, store, video)
     return (
         candidates
         + matched
@@ -288,19 +355,13 @@ def _mined_row(card: MinedCard, active_cue: Cue | None) -> SidebarRow:
     )
 
 
-def _mine_rows(reader: Reader) -> list[SidebarRow]:
+def _mine_rows(view: SidebarView) -> list[SidebarRow]:
     """This episode's mined cards (#253), newest cue order, each openable in the card preview. Never
     materialises an empty store just by opening the tab (mirrors ``mark_active_mined``'s guard)."""
-    video = reader._get("path")
-    if not video:
+    if not view.video or not view.mined_exists:
         return []
-    if reader._mined_store is None and not mined_store.db_path().exists():
-        return []
-    index: CueIndex | None = reader._sub_index
-    active = _active_index(reader)
-    active_cue = index.cues[active] if index is not None and active >= 0 else None
-    store = reader.mined_store
-    return [_mined_row(card, active_cue) for card in store.for_path(video)]
+    store = view.mined()
+    return [_mined_row(card, view.active_cue) for card in store.for_path(view.video)]
 
 
 def _open_mined(reader: Reader, note_id: int) -> None:
@@ -336,75 +397,90 @@ class _MinedPreviewCard:
     glosses: tuple[str, ...] = ()
 
 
-def redraw(reader: Reader) -> None:
-    if not reader.sidebar.open:
+def draw(view: SidebarView) -> None:
+    state = view.state
+    if not state.open:
         return
-    scale = reader.chrome_scale
+    scale = view.chrome_scale
     margin = round(18 * scale)
     target_width = min(
         round(620 * scale),
-        max(round(360 * scale), round(reader.osd[0] * 0.4 * scale)),
+        max(round(360 * scale), round(view.osd[0] * 0.4 * scale)),
     )
-    width = max(320, min(target_width, reader.osd[0] - margin * 2))
-    height = max(180, round(reader.osd[1] * 0.84))
-    x, y = reader.osd[0] - width - margin, round(reader.osd[1] * 0.08)
-    capacity = _capacity(reader.osd, reader.chrome_scale)
+    width = max(320, min(target_width, view.osd[0] - margin * 2))
+    height = max(180, round(view.osd[1] * 0.84))
+    x, y = view.osd[0] - width - margin, round(view.osd[1] * 0.08)
+    capacity = view.capacity
     unavailable = None
     try:
-        if reader.sidebar.view == "track":
-            active = _active_index(reader)
-            rows, total = _track_rows(reader, reader.sidebar.scroll, capacity, active)
-            if reader._sub_index is None or len(reader._sub_index) == 0:
+        if state.view == "track":
+            rows, total = _track_rows(view, state.scroll, capacity)
+            if view.index is None or len(view.index) == 0:
                 unavailable = "Subtitle cue index unavailable"
-        elif reader.sidebar.view == "mine":
-            all_rows = _mine_rows(reader)
+        elif state.view == "mine":
+            all_rows = _mine_rows(view)
             total = len(all_rows)
-            rows = all_rows[reader.sidebar.scroll : reader.sidebar.scroll + capacity]
+            rows = all_rows[state.scroll : state.scroll + capacity]
             if not rows:
                 unavailable = "No mined cards for this episode"
         else:
-            all_rows = _summary_rows(reader)
+            all_rows = _summary_rows(view)
             total = len(all_rows)
-            rows = all_rows[reader.sidebar.scroll : reader.sidebar.scroll + capacity]
+            rows = all_rows[state.scroll : state.scroll + capacity]
             if not rows:
                 unavailable = "Backlog is empty"
     except (OSError, sqlite3.Error, ValueError) as exc:
-        rows, total, unavailable = [], 0, f"{reader.sidebar.view.title()} unavailable: {exc}"
+        rows, total, unavailable = [], 0, f"{state.view.title()} unavailable: {exc}"
     rendered = render_sidebar(
         rows,
         width=width,
         height=height,
-        view=reader.sidebar.view,
+        view=state.view,
         total=total,
-        first=reader.sidebar.scroll,
+        first=state.scroll,
         unavailable=unavailable,
         scale=scale,
     )
-    reader.sidebar.rect = (x, y, width, height)
-    reader.sidebar.hits = rendered.hitboxes
-    reader.sidebar.total = total
-    reader.lifecycle_surfaces.present(rendered.image, x, y, oid=SIDEBAR_ID)
+    state.rect = (x, y, width, height)
+    state.hits = rendered.hitboxes
+    state.total = total
+    view.surfaces.present(rendered.image, x, y, oid=SIDEBAR_ID)
+
+
+def redraw(reader: Reader) -> None:
+    """Draw from a freshly snapshotted view. The seam, kept for the callers that hold a host."""
+    draw(view_of(reader))
+
+
+def show(view: SidebarView) -> None:
+    """Open the sidebar, centred on the active row."""
+    view.state.open = True
+    view.state.scroll = max(0, view.active - view.capacity // 2)
+    view.state.last_active = view.active
+    draw(view)
+
+
+def hide(view: SidebarView) -> None:
+    view.state.open = False
+    view.surfaces.remove(SIDEBAR_ID)
+    view.state.rect = None
+    view.state.hits = ()
 
 
 def set_open(reader: Reader, *, open: bool) -> None:  # noqa: A002
     """Show or hide the sidebar. The caller decides which — `panel_intents` owns the toggle."""
-    reader.sidebar.open = open
-    if reader.sidebar.open:
-        active = _active_index(reader)
-        reader.sidebar.scroll = max(0, active - _capacity(reader.osd, reader.chrome_scale) // 2)
-        reader.sidebar.last_active = active
-        redraw(reader)
-    else:
-        reader.lifecycle_surfaces.remove(SIDEBAR_ID)
-        reader.sidebar.rect = None
-        reader.sidebar.hits = ()
+    (show if open else hide)(view_of(reader))
+
+
+def index_changed(view: SidebarView) -> None:
+    view.state.style_cache.clear()
+    view.state.scroll = 0
+    view.state.last_active = -1
+    draw(view)
 
 
 def on_index_changed(reader: Reader) -> None:
-    reader.sidebar.style_cache.clear()
-    reader.sidebar.scroll = 0
-    reader.sidebar.last_active = -1
-    redraw(reader)
+    index_changed(view_of(reader))
 
 
 def contains(state: SidebarState, x: float, y: float) -> bool:
@@ -442,26 +518,30 @@ def scroll(reader: Reader, steps: int) -> bool:
     return True
 
 
+def follow(view: SidebarView) -> None:
+    """Re-centre the track view on the active row unless the user's manual hold says otherwise."""
+    state = view.state
+    if not state.open or state.view != "track":
+        return
+    active = view.active
+    geometry = (view.osd, id(view.index), view.language, id(view.scorer))
+    changed = active != state.last_active or geometry != state.geometry
+    if not changed and state.manual_hold:
+        return
+    capacity = view.capacity
+    old_scroll = state.scroll
+    visible = state.scroll <= active < state.scroll + capacity
+    if active >= 0 and (not state.manual_hold or visible):
+        state.scroll = max(0, active - capacity // 2)
+        state.manual_hold = False
+    state.last_active = active
+    state.geometry = geometry
+    if changed or old_scroll != state.scroll:
+        draw(view)
+
+
 def update(reader: Reader) -> None:
-    if not reader.sidebar.open:
-        return
-    if reader.sidebar.view != "track":
-        return
-    active = _active_index(reader)
-    geometry = (reader.osd, id(reader._sub_index), reader.subtitle_language, id(reader.scorer))
-    changed = active != reader.sidebar.last_active or geometry != reader.sidebar.geometry
-    if not changed and reader.sidebar.manual_hold:
-        return
-    capacity = _capacity(reader.osd, reader.chrome_scale)
-    old_scroll = reader.sidebar.scroll
-    visible = reader.sidebar.scroll <= active < reader.sidebar.scroll + capacity
-    if active >= 0 and (not reader.sidebar.manual_hold or visible):
-        reader.sidebar.scroll = max(0, active - capacity // 2)
-        reader.sidebar.manual_hold = False
-    reader.sidebar.last_active = active
-    reader.sidebar.geometry = geometry
-    if changed or old_scroll != reader.sidebar.scroll:
-        redraw(reader)
+    follow(view_of(reader))
 
 
 def _seek_hit(reader: Reader, hit) -> bool:

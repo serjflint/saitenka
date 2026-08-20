@@ -310,23 +310,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::_mine_rows"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::_open_mined"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/sidebar.py::_seek_hit"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_summary_rows"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_track_rows"
     ],
     [
       "reader-parameter",
@@ -355,6 +343,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/sidebar.py::update"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/sidebar.py::view_of"
     ],
     [
       "reader-parameter",
