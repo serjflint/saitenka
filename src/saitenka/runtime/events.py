@@ -188,18 +188,6 @@ class EffectFinished:
             raise ValueError("only failed or rejected effects carry an error code")
 
 
-@dataclass(frozen=True, slots=True)
-class EffectOutcomeEvent:
-    """Ledger-validated completion delivered to its recorded feature owner."""
-
-    effect_id: EffectId
-    owner: Owner
-    identity: object
-    outcome: EffectOutcome
-    result: object = None
-    error: EffectError | None = None
-
-
 type RuntimeEvent = (
     ConnectionLost
     | ConnectionReady
@@ -212,7 +200,6 @@ type RuntimeEvent = (
     | UserCommand
     | CommandHandled
     | EffectFinished
-    | EffectOutcomeEvent
 )
 
 

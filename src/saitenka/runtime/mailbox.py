@@ -20,6 +20,7 @@ from saitenka.runtime.events import (
     RawMpvEvent,
     UserCommand,
 )
+from saitenka.runtime.limits import DEFAULT_RUNTIME_LIMITS
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,9 +57,9 @@ class SessionMailbox:
     def __init__(
         self,
         *,
-        normal_capacity: int = 256,
-        lifecycle_capacity: int = 8,
-        terminal_capacity: int = 64,
+        normal_capacity: int = DEFAULT_RUNTIME_LIMITS.mailbox_normal,
+        lifecycle_capacity: int = DEFAULT_RUNTIME_LIMITS.mailbox_lifecycle,
+        terminal_capacity: int = DEFAULT_RUNTIME_LIMITS.mailbox_terminal,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if min(normal_capacity, lifecycle_capacity, terminal_capacity) <= 0:
@@ -249,7 +250,7 @@ class SessionMailbox:
     def receive_ready(
         self,
         *,
-        limit: int = 64,
+        limit: int = DEFAULT_RUNTIME_LIMITS.mailbox_turn,
         start: EventEnvelope | None = None,
     ) -> tuple[EventEnvelope, ...]:
         if limit <= 0:

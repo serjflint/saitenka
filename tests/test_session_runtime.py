@@ -7,6 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from saitenka.runtime import (
+    DEFAULT_RUNTIME_LIMITS,
     CancelEffect,
     CloseRequested,
     CommandHandled,
@@ -435,6 +436,33 @@ def test_composed_reducer_fails_closed_on_internal_event_cycle() -> None:
         assert str(error) == "runtime internal-event limit exceeded"
     else:  # pragma: no cover - quiescence contract
         raise AssertionError("internal event cycle was not bounded")
+
+
+def test_the_declared_lifecycle_bound_is_the_one_the_mailbox_enforces() -> None:
+    """`RuntimeLimits` has to be load-bearing, not decorative.
+
+    It used to declare twelve bounds and enforce none, and one had already drifted — `mailbox_terminal`
+    said 128 while the mailbox ran at 64 — which nothing could detect, because a limit nobody applies
+    cannot disagree with anything. This fails if the policy and the lane ever separate again.
+    """
+    mailbox = SessionMailbox()
+
+    for _ in range(DEFAULT_RUNTIME_LIMITS.mailbox_lifecycle):
+        mailbox.publish(
+            RawMpvEvent("lifecycle"), origin=EventOrigin.LIFECYCLE, traffic=TrafficClass.LIFECYCLE
+        )
+
+    assert mailbox.snapshot.lifecycle == DEFAULT_RUNTIME_LIMITS.mailbox_lifecycle
+    try:
+        mailbox.publish(
+            RawMpvEvent("one too many"),
+            origin=EventOrigin.LIFECYCLE,
+            traffic=TrafficClass.LIFECYCLE,
+        )
+    except MailboxFull:
+        pass
+    else:  # pragma: no cover - the lane bound is the contract
+        raise AssertionError("the lifecycle lane admitted more than the declared policy")
 
 
 def test_runtime_limits_reject_nonpositive_resource_bound() -> None:

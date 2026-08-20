@@ -1,4 +1,10 @@
-"""Closed resource policy for the session runtime."""
+"""The session runtime's bounded-work policy: one place, and every field has an enforcer.
+
+Only bounds something actually reads live here. This file used to declare twelve and enforce none,
+which is worse than no policy at all: `mailbox_terminal` said 128 while the mailbox ran at 64 and
+nothing could notice, because a limit nobody applies cannot disagree with anything. The mailbox's
+value won — it was the one in force. A field arrives here when its enforcer does, not before.
+"""
 
 from __future__ import annotations
 
@@ -9,16 +15,8 @@ from dataclasses import dataclass
 class RuntimeLimits:
     mailbox_normal: int = 256
     mailbox_lifecycle: int = 8
-    mailbox_terminal: int = 128
+    mailbox_terminal: int = 64
     mailbox_turn: int = 64
-    internal_events_per_turn: int = 256
-    effects_per_turn: int = 256
-    outbound_mpv_commands: int = 64
-    close_effects: int = 32
-    close_deadline_ms: int = 5_000
-    adapter_timeout_ms: int = 10_000
-    reconnect_attempts: int = 3
-    payload_bytes: int = 16 * 1024 * 1024
 
     def __post_init__(self) -> None:
         values = tuple(getattr(self, field) for field in self.__dataclass_fields__)
