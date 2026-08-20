@@ -184,6 +184,36 @@ def test_closing_a_session_detaches_the_diagnostic_gauges_through_the_runtime() 
     assert ledger.report() is None
 
 
+def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runtime() -> None:
+    """The duty's oracle: the section is disabled with the Reader's own fallback step skipped.
+
+    Skipped, not absent — a Reader with no runtime still forced the section, so somebody has to
+    hand it back. The two must not both run: the second `disable-section` would be a write to a
+    transport the close is already tearing down.
+    """
+    from util import runtime_gateway
+
+    from saitenka.app import bindings
+    from saitenka.app.session_routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader._register_keybinds()
+    reader._tip_rect = (0, 0, 10, 10)
+    reader._sync_mouse_capture()
+    try:
+        assert reader._mouse_captured  # negative control: there is a capture to hand back
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    released = [c for c in ipc.commands if c == ("disable-section", bindings.MOUSE_SECTION)]
+    assert len(released) == 1  # released once — not twice, and not zero
+    assert ledger.report() is None
+
+
 def test_a_session_without_a_runtime_still_closes_cleanly() -> None:
     """`deliver_runtime_event` returns False rather than raising when no gateway owns the session —
     a screenshot capture and most unit tests are exactly that, and close must not care."""
@@ -204,7 +234,7 @@ def test_a_second_close_announcement_does_not_re_detach() -> None:
     first = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing())
     second = reduce_lifecycle_close(first.state, SessionClosing())
 
-    assert len(first.effects) == 1
+    assert first.effects  # negative control: the phase does retire something the first time
     assert second.effects == ()
 
 
@@ -260,7 +290,8 @@ def test_the_artifacts_phase_is_separate_from_the_participants_phase() -> None:
         participants.state, SessionClosing(ClosePhase.ARTIFACTS, "/tmp/scratch")
     )
 
-    assert [type(effect) for effect in participants.effects] == [DetachDiagnostics]
+    assert RemoveSessionArtifacts not in [type(e) for e in participants.effects]
+    assert DetachDiagnostics in [type(e) for e in participants.effects]
     assert artifacts.effects == (RemoveSessionArtifacts("/tmp/scratch"),)
     # Latched per phase, not globally: a re-announced phase is a no-op, a new one is not.
     assert reduce_lifecycle_close(artifacts.state, SessionClosing()).effects == ()
@@ -441,3 +472,54 @@ def test_the_artifacts_effect_carries_its_path_instead_of_looking_one_up() -> No
         "RemoveSessionArtifacts now looks up a resource, so `_retire_artifacts` must gate on the "
         "registration the way `_retire_surfaces` does"
     )
+
+
+def test_the_participants_phase_retires_the_input_capture_and_nothing_else_does() -> None:
+    """Which phase owns the duty, asserted where a reordering would be invisible in a close run.
+
+    The capture is a write to mpv, so it has to go while the transport still works — before the
+    surfaces phase closes it, and before diagnostics detach in the same tuple.
+    """
+    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+    from saitenka.runtime.effects import ReleaseInputCapture
+    from saitenka.runtime.events import ClosePhase, SessionClosing
+
+    state = LifecycleCloseState()
+    seen = {}
+    for phase in ClosePhase:
+        result = reduce_lifecycle_close(state, SessionClosing(phase))
+        state = result.state
+        seen[phase] = [type(effect) for effect in result.effects]
+
+    assert seen[ClosePhase.PARTICIPANTS][0] is ReleaseInputCapture
+    assert [p for p, kinds in seen.items() if ReleaseInputCapture in kinds] == [
+        ClosePhase.PARTICIPANTS
+    ]
+
+
+def test_the_dispatcher_retires_the_input_capture_through_its_registered_resource() -> None:
+    """The link the close run cannot show: the effect finds the capture, not the Reader's step."""
+    from util import runtime_gateway
+
+    from saitenka.app.session_routes import INPUT_CAPTURE_RESOURCE, _dispatcher
+    from saitenka.runtime.diagnostics import RuntimeLedger
+    from saitenka.runtime.effects import ReleaseInputCapture
+
+    class _Capture:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def close(self) -> None:
+            self.closed += 1
+
+    gateway = runtime_gateway(FakeIPC())
+    capture = _Capture()
+    try:
+        gateway.session_resources[INPUT_CAPTURE_RESOURCE] = capture
+        dispatch = _dispatcher(gateway, RuntimeLedger())
+
+        assert dispatch(ReleaseInputCapture()) is True
+    finally:
+        gateway.close()
+
+    assert capture.closed == 1

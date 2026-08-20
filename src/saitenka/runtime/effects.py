@@ -161,6 +161,15 @@ class CloseSessionOverlay:
 
 
 @dataclass(frozen=True, slots=True)
+class ReleaseInputCapture:
+    """Hand mpv's forced input section back, while the transport still works.
+
+    Carries no handle, for `CloseSessionSurfaces`' reason: the capture is a session resource the
+    runtime owns, so the dispatcher already knows where it is.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class RemoveSessionArtifacts:
     """Delete the session's scratch directory, once nothing can still write to it."""
 
@@ -170,6 +179,7 @@ class RemoveSessionArtifacts:
 type LifecycleEffect = (
     StopSession
     | DetachDiagnostics
+    | ReleaseInputCapture
     | CloseSessionSurfaces
     | CloseSessionOverlay
     | RemoveSessionArtifacts
@@ -179,7 +189,11 @@ type LifecycleEffect = (
 #: terminal and no completion: nothing correlates to them, and a reservation raised during close
 #: is one nothing would ever retire.
 type FireAndForget = (
-    DetachDiagnostics | CloseSessionSurfaces | CloseSessionOverlay | RemoveSessionArtifacts
+    DetachDiagnostics
+    | ReleaseInputCapture
+    | CloseSessionSurfaces
+    | CloseSessionOverlay
+    | RemoveSessionArtifacts
 )
 
 #: What leaves the runtime through the effect dispatcher. `StopSession` is absent because the

@@ -737,15 +737,16 @@
     },
     {
       "id": "input-capture",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/app/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self._release_mouse_capture"
+        "call:ReleaseInputCapture",
+        "ref:event.phase"
       ],
       "target": "interaction-close",
       "work_package": "5,6",
       "replacement": "ReleaseInputCapture -> MpvCommandOutcome",
       "test": "close releases keys and mouse before gateway shutdown",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "subtitle-and-ownership",

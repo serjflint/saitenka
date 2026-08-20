@@ -56,7 +56,7 @@ _NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
 _SYNCHRONOUS_BY_CONTRACT = {
     # Runs from `close`: a queued command is never drained, and the forced section would outlive us
     # still holding the mouse away from a detached mpv.
-    "src/saitenka/app/controller.py::Reader._release_mouse_capture",
+    "src/saitenka/app/mouse_capture.py::MouseCapture.release",
     # The caller reads the file mpv writes, so this one genuinely must be awaited.
     "src/saitenka/app/media.py::screenshot",
     # Same: the reply IS the capture's result, and the file must exist when it returns.

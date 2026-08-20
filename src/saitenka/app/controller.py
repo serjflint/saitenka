@@ -36,6 +36,7 @@ from saitenka.app import (
     mined_seed,
     mined_store,
     miner_ui,
+    mouse_capture,
     native_subtitles,
     nested_popup,
     panel_intents,
@@ -77,7 +78,6 @@ from saitenka.app.bindings import (
     MINE_ALL_MSG,
     MINE_MSG,
     MINE_VIDEO_MSG,
-    MOUSE_SECTION,
     OVERLAY_TOGGLE_MSG,
     PREVIEW_CLOSE_MSG,
     PREVIEW_MSG,
@@ -648,9 +648,16 @@ class Reader:
         # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
         # Delegated shims below keep the historical ``reader._last_*``/``_preview_*`` names working.
         self.preview = card_preview.PreviewState()
-        # Forced mouse-section state (see _sync_mouse_capture).
-        self._mouse_section_defined = False
-        self._mouse_captured = False
+        # INTERACTION's claim on mpv's clicks and wheel, as a resource with a lifetime: the
+        # runtime retires it at `PARTICIPANTS`, and an effect can only retire what it can find.
+        from saitenka.app.session_routes import INPUT_CAPTURE_RESOURCE
+
+        self._mouse = mouse_capture.MouseCapture(
+            ipc, self.lifecycle_timers, self._wants_mouse_capture
+        )
+        self._runtime_owns_input_capture = ipc.register_session_resource(
+            INPUT_CAPTURE_RESOURCE, self._mouse
+        )
         # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
         self.scan_delay = o.tooltip.scan_delay
         self.hover_switch_delay = o.tooltip.hover_switch_delay
@@ -2072,82 +2079,27 @@ class Reader:
             submit("keybind", binding.key, "ignore")
 
     def _define_mouse_section(self) -> None:
-        """Define (once) the FORCED mpv section for the ``mouse``-scoped bindings; once enabled it
-        outranks other scripts' forced MBTN_LEFT (uosc/inputevent). Enabled per _sync_mouse_capture."""
-        lines = [f"{b.key} script-message {b.spec.message}" for b in active_bindings(self, "mouse")]
-        self._mouse_section_defined = bool(lines)
-        if lines:
-            send_correlated(
-                self.ipc,
-                "define-mouse-section",
-                "define-section",
-                MOUSE_SECTION,
-                "\n".join(lines) + "\n",
-                "force",
-                owner=Owner.INTERACTION,
-            )
+        self._mouse.define(active_bindings(self, "mouse"))
 
     def _wants_mouse_capture(self) -> bool:
         return surfaces.wants_mouse_capture(self.interaction)
 
     def _sync_mouse_capture(self) -> None:
-        """Own clicks/wheel while a saitenka surface is up, release it otherwise.
-
-        The re-assertion that keeps another script from reclaiming the forced section is a repeating
-        named deadline now, not a timestamp this compares against.
-        """
-        if not self._mouse_section_defined:
-            return
-        try:
-            if self._wants_mouse_capture():
-                if not self._mouse_captured:
-                    self._assert_mouse_capture()
-            elif self._mouse_captured:
-                self._release_mouse_capture()
-        except (OSError, ValueError):
-            pass  # mpv went away mid-tick — poll_once will notice
+        self._mouse.sync()
 
     def _assert_mouse_capture(self) -> None:
-        """Force the section and arm its re-assertion.
-
-        Fails open: with no timer the section is forced once and never refreshed, so capture still
-        works and only the defence against a script reclaiming it is lost.
-        """
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
-
-        send_correlated(
-            self.ipc,
-            "enable-mouse-section",
-            "enable-section",
-            MOUSE_SECTION,
-            "allow-hide-cursor+allow-vo-dragging",
-            owner=Owner.INTERACTION,
-        )
-        self._mouse_captured = True
-
-        def due() -> None:
-            # Re-check rather than trust the arm: the surface may have gone down since, and a
-            # re-assert then would take the mouse back from mpv for nothing.
-            if self._mouse_captured and self._wants_mouse_capture():
-                self._assert_mouse_capture()
-
-        self.lifecycle_timers.schedule(LifecycleTimerKind.MOUSE_CAPTURE_REASSERT, 0.5, due)
+        self._mouse.take()
 
     def _release_mouse_capture(self) -> None:
-        """Drop the forced section so a detached mpv can't route clicks to a dead saitenka."""
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+        self._mouse.release()
 
-        if not self._mouse_captured:
-            return
-        self.lifecycle_timers.cancel(LifecycleTimerKind.MOUSE_CAPTURE_REASSERT)
-        # Stays a direct write: this also runs from `close`, where the reactor is stopping — a
-        # correlated command queued there may never be drained, and the forced section would outlive
-        # us still holding the mouse. Tolerates a dead socket for the same reason.
-        try:
-            self.ipc.command("disable-section", MOUSE_SECTION)
-        except (OSError, ValueError):
-            pass
-        self._mouse_captured = False
+    @property
+    def _mouse_captured(self) -> bool:
+        return self._mouse.held
+
+    @property
+    def _mouse_section_defined(self) -> bool:
+        return self._mouse.defined
 
     def _render_tip_view(self) -> None:
         tooltip.render_view(self, self.tip.view)
@@ -3847,8 +3799,16 @@ class Reader:
                 CloseStep(
                     "hover-metadata", lambda: hover_metadata.close(self._interaction_metadata)
                 ),
-                # Hand the mouse back before a detached mpv outlives us.
-                CloseStep("mouse-capture", lambda: self._release_mouse_capture()),
+                # Handed back by the `PARTICIPANTS` phase below when a runtime owns the capture;
+                # this is the fallback for a Reader that has none, and must stay ahead of it so a
+                # detached mpv never outlives us still routing clicks here.
+                CloseStep(
+                    "mouse-capture",
+                    lambda: self._mouse.release(),
+                    # `present` skips on None, not on falsy — a `not owns` bool would keep the
+                    # fallback running beside the effect, which is the thing it is a fallback for.
+                    lambda: None if self._runtime_owns_input_capture else self._mouse,
+                ),
                 # The runtime's own close participants, in the position the Reader used to run
                 # them: it announces, the session reducer emits their effects. Delivered rather
                 # than published — the session loop has stopped, and draining here would run a
@@ -3947,7 +3907,7 @@ class Reader:
                 CloseStep(
                     "transport",
                     lambda: self.ov.close(),
-                    lambda: not self._runtime_owns_surfaces,
+                    lambda: None if self._runtime_owns_surfaces else self.ov,
                 ),
                 # Per-session scratch dir, once nothing can still write to it.
                 CloseStep("temporary-artifacts", lambda: self._retire_artifacts()),

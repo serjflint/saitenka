@@ -18,6 +18,7 @@ from saitenka.runtime.effects import (
     CloseSessionOverlay,
     CloseSessionSurfaces,
     DetachDiagnostics,
+    ReleaseInputCapture,
     RemoveSessionArtifacts,
 )
 from saitenka.runtime.events import ClosePhase, SessionClosing
@@ -36,7 +37,9 @@ class LifecycleCloseState:
 def _effects(event: SessionClosing) -> tuple[Effect, ...]:
     """What this phase retires. Empty is legitimate — a phase nobody has migrated into yet."""
     if event.phase is ClosePhase.PARTICIPANTS:
-        return (DetachDiagnostics(),)
+        # The capture goes first and while the transport still works: it is a write to mpv, and
+        # detaching diagnostics is the point past which the session stops being observable.
+        return (ReleaseInputCapture(), DetachDiagnostics())
     if event.phase is ClosePhase.SURFACES:
         # Order is the contract here, not a tuple's incidental shape: the removes go out through
         # the transport the second effect closes.

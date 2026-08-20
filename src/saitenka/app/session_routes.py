@@ -27,6 +27,7 @@ from saitenka.runtime.effects import (
     EffectOutcome,
     ExpireEffect,
     Owner,
+    ReleaseInputCapture,
     RemoveSessionArtifacts,
 )
 from saitenka.runtime.events import (
@@ -92,6 +93,7 @@ LIFECYCLE_CLOSE = "lifecycle-close"
 #: the owner that registers and the dispatcher that closes must not drift apart.
 SURFACES_RESOURCE = "lifecycle-surfaces"
 OVERLAY_RESOURCE = "overlay-transport"
+INPUT_CAPTURE_RESOURCE = "input-capture"
 
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
@@ -112,6 +114,15 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
     return None
 
 
+#: Which registered resource each retiring effect closes. A table rather than a chain of
+#: `isinstance`, so adding a duty is a row and cannot pick the wrong branch by falling through.
+_RESOURCE_OF = {
+    CloseSessionSurfaces: SURFACES_RESOURCE,
+    CloseSessionOverlay: OVERLAY_RESOURCE,
+    ReleaseInputCapture: INPUT_CAPTURE_RESOURCE,
+}
+
+
 def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect], bool]:
     """Perform an effect, app-side kinds first and the gateway's own kinds after.
 
@@ -127,10 +138,8 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
             # here or nowhere.
             log.debug("runtime census: %s", ledger.counts)
             return True
-        if isinstance(effect, CloseSessionSurfaces | CloseSessionOverlay):
-            name = (
-                SURFACES_RESOURCE if isinstance(effect, CloseSessionSurfaces) else OVERLAY_RESOURCE
-            )
+        if isinstance(effect, CloseSessionSurfaces | CloseSessionOverlay | ReleaseInputCapture):
+            name = _RESOURCE_OF[type(effect)]
             resource = gateway.session_resources.get(name)
             # False, not an exception: an unregistered resource means this session's owner never
             # handed it over, so its own teardown still runs. The ledger records the difference.

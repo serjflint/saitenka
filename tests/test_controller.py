@@ -13,7 +13,7 @@ from util import FakeIPC as RuntimeFakeIPC
 from util import keybind_registry, runtime_gateway
 
 import saitenka.app.controller as C
-from saitenka.app import miner_ui, nested_popup, tooltip
+from saitenka.app import bindings, miner_ui, nested_popup, tooltip
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_render import NullRenderer
@@ -116,8 +116,8 @@ def test_mouse_controls_live_in_a_separate_forced_section():
     ipc = FakeIPC()
     r = Reader(ipc)
     r._register_keybinds()
-    contents, flags = _section(ipc, C.MOUSE_SECTION)
-    name = C.MOUSE_SECTION
+    contents, flags = _section(ipc, bindings.MOUSE_SECTION)
+    name = bindings.MOUSE_SECTION
     assert flags == "force"
     assert "MBTN_LEFT script-message saitenka-click" in contents
     assert "WHEEL_UP script-message saitenka-scroll-up" in contents
@@ -167,13 +167,13 @@ def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
     r._tip_rect = (0, 0, 10, 10)
     r._sync_mouse_capture()
     forced = ipc.commands.count(
-        ("enable-section", C.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
+        ("enable-section", bindings.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
     )
 
     assert ipc.fire_runtime_timer("lifecycle:mouse-capture-reassert")  # a rival may have taken it
     assert (
         ipc.commands.count(
-            ("enable-section", C.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
+            ("enable-section", bindings.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
         )
         == forced + 1
     )
@@ -183,13 +183,13 @@ def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
     identity, due = ipc.timers["lifecycle:mouse-capture-reassert"]  # captured in flight
     r._tip_rect = None
     r._sync_mouse_capture()  # surface down → released, and the re-assertion retired with it
-    assert ipc.commands[-1] == ("disable-section", C.MOUSE_SECTION)
+    assert ipc.commands[-1] == ("disable-section", bindings.MOUSE_SECTION)
 
     due(EffectFinished(EffectId(0), Owner.SESSION, identity, EffectOutcome.SUCCEEDED))
 
     assert ipc.commands[-1] == (
         "disable-section",
-        C.MOUSE_SECTION,
+        bindings.MOUSE_SECTION,
     )  # the late one took nothing back
 
 
