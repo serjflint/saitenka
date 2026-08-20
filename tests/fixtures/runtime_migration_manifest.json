@@ -358,10 +358,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_download"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sub_picker.py::_start_listing"
     ],
     [

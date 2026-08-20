@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.subselect import SubtitleCandidate
+    from saitenka.app.subtitle_modes import FetchSubmitter
     from saitenka.app.surfaces import HoverSuppression
 
 log = logging.getLogger(__name__)
@@ -312,25 +313,40 @@ def clamp_scroll(scroll: int, steps: int, count: int) -> int:
     return max(0, min(max(0, count - 1), scroll + steps * ROWS_PER_WHEEL_STEP))
 
 
-def _download(reader: Reader, index: int) -> None:
-    state = reader.sub_picker
+@dataclass(frozen=True, slots=True)
+class DownloadPorts:
+    """What fetching a chosen subtitle needs from the session: how to say so, how to submit the
+    fetch, how to read a property, and where the panel lives."""
+
+    toast: Callable[..., object]
+    submit_fetch: FetchSubmitter
+    get_property: Callable[[str], int | str | None]
+    surfaces: object
+
+
+def _download(state: PickerState, index: int, ports: DownloadPorts) -> None:
+    """Fetch the chosen candidate and close the panel.
+
+    Everything this needs is already a value or a port — `start_fetch` and `close_picker` both take
+    facts, so the host was only being carried through to reach them.
+    """
     if not (0 <= index < len(state.candidates)):
         return
     candidate = state.candidates[index]
     from saitenka.app.subtitle_modes import start_fetch
 
-    reader._toast(f"Downloading {candidate.name}…")
+    ports.toast(f"Downloading {candidate.name}…")
     # force_select: the user explicitly chose this source in the picker, so select it NOW even if the
     # current track is English (the keep-current background contract is for unattended fetches, not this).
     start_fetch(
-        reader._submit_subtitle_fetch,
-        reader._get,
+        ports.submit_fetch,
+        ports.get_property,
         candidate.download,
         name="sub-picker-download",
         force_select=True,
     )
     # panel closes; the swap lands from the broker completion when the file arrives
-    close_picker(reader.sub_picker, reader.lifecycle_surfaces)
+    close_picker(state, ports.surfaces)
 
 
 def on_click(reader: Reader, x: float, y: float) -> bool:
@@ -340,5 +356,14 @@ def on_click(reader: Reader, x: float, y: float) -> bool:
     local_x, local_y = x - state.rect[0], y - state.rect[1]
     hit = next((box for box in state.hits if box.contains(local_x, local_y)), None)
     if hit is not None and hit.kind == "picker-download":
-        _download(reader, hit.value)
+        _download(
+            reader.sub_picker,
+            hit.value,
+            DownloadPorts(
+                reader._toast,
+                reader._submit_subtitle_fetch,
+                reader._get,
+                reader.lifecycle_surfaces,
+            ),
+        )
     return True
