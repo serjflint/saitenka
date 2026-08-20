@@ -13,6 +13,7 @@ import`` builds once — not file paths.
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field, fields, replace
@@ -20,6 +21,8 @@ from pathlib import Path
 from typing import Literal
 
 from saitenka.app import paths
+
+log = logging.getLogger(__name__)
 
 CONFIG_HOME = paths.config_dir()
 DEFAULT_PATH = CONFIG_HOME / "overlay.toml"
@@ -31,6 +34,16 @@ def config_path(override: str | os.PathLike | None = None) -> Path:
     return Path(p).expanduser()
 
 
+#: Keys a config may still carry that no longer do anything, and what replaced them. Warned about
+#: rather than dropped in silence: a key that stops working without saying so reads as the setting
+#: having no effect on this machine, which is the one diagnosis nothing in `doctor` can correct.
+RETIRED_KEYS = {
+    "poll_interval": (
+        "the session blocks on its transport under the earliest armed timer; there is no tick"
+    ),
+}
+
+
 def load_config(override: str | os.PathLike | None = None) -> dict:
     """Parse the TOML config, or return ``{}`` if it doesn't exist / can't be read."""
     p = config_path(override)
@@ -38,9 +51,24 @@ def load_config(override: str | os.PathLike | None = None) -> dict:
         return {}
     try:
         with p.open("rb") as f:
-            return tomllib.load(f)
+            cfg = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
+    warn_retired(cfg)
+    return cfg
+
+
+def warn_retired(cfg: dict) -> list[str]:
+    """Log every retired key the config still sets, and return their names."""
+    found = [key for key in RETIRED_KEYS if _holds(cfg, key)]
+    for key in found:
+        log.warning("config key %r is retired and ignored: %s", key, RETIRED_KEYS[key])
+    return found
+
+
+def _holds(cfg: dict, key: str) -> bool:
+    """Whether ``key`` is set at the top level or in any one section."""
+    return key in cfg or any(key in v for v in cfg.values() if isinstance(v, dict))
 
 
 def expand_paths(items) -> list[str]:
@@ -265,11 +293,12 @@ class PanelOptions:
 
 @dataclass(frozen=True)
 class PerfOptions:
-    """Background-work tuning: poll cadence, prefetch parallelism, and speculative line lookahead."""
+    """Background-work tuning: prefetch parallelism and speculative line lookahead.
 
-    poll_interval: float = field(
-        default=0.025, metadata={"help": "Main-loop tick (seconds) — CPU usage vs input latency."}
-    )
+    No poll cadence: the session blocks on its transport under the earliest armed timer, so there is
+    no tick left to tune. `[perf] poll_interval` is accepted and ignored — see `RETIRED_KEYS`.
+    """
+
     # Tooltip-warming worker threads (persistent, whole session). Mostly a RAM knob: each holds its own
     # per-thread SQLite page cache (~[dictdb].cache_size_kib, 32 MiB default) + a per-thread FreeType
     # face cache + (free-threaded) its own allocator arena, so RSS scales ~linearly with the count.

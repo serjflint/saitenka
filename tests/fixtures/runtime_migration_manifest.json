@@ -612,8 +612,7 @@
       "source": "src/saitenka/app/controller.py::Reader.run",
       "evidence": [
         "call:SessionRunner",
-        "src/saitenka/app/controller.py::Reader.run.step|call:self.pump",
-        "ref:self.poll_interval"
+        "src/saitenka/app/controller.py::Reader.run.step|call:self.pump"
       ],
       "target": "session-runner",
       "work_package": "6",

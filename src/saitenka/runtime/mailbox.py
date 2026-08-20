@@ -291,11 +291,11 @@ class SessionMailbox:
     def wake(self) -> None:
         """Release every blocked `receive` without closing or publishing anything.
 
-        The loop's stop flag is set from another thread, and a blocked receiver cannot observe it —
-        today `poll_interval` bounds the wait so the flag is noticed within a tick. That bound is
-        what item 10 retires, and retiring it without this would turn "stop" into "stop after the
-        next event, whenever that is". `close` cannot serve: it is terminal, and a stop has to be
-        observable while the mailbox is still live enough to drain.
+        A blocked receiver cannot observe a flag another thread set, and with no tick left the
+        wait is bounded only by the earliest armed timer — so without this, "stop" would mean "stop
+        after the next event, whenever that is". Also how a newly armed timer reaches a receiver
+        already blocked under a later bound. `close` cannot serve either: it is terminal, and a stop
+        has to be observable while the mailbox is still live enough to drain.
         """
         with self._condition:
             self._wakes += 1

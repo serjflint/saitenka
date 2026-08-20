@@ -497,7 +497,6 @@ class Reader:
         # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
         # CPU-only work (lookup + render + BGRA), NEVER touches the mpv IPC socket (main thread only).
         self.prefetch = o.prefetch
-        self.poll_interval = o.perf.poll_interval  # main loop tick
         self.prefetch_workers = (
             o.perf.prefetch_workers
         )  # constrained-parallel (GIL build) worker count
@@ -3795,7 +3794,7 @@ class Reader:
         )
         log.info("runtime: %s, %d prefetch worker(s)", mode, self.prefetch_state.workers)
 
-    def run(self, interval: float | None = None) -> None:
+    def run(self) -> None:
         """Bring the session up phase by phase, then hand the thread to the loop.
 
         Announced rather than performed here: each phase's steps are the runtime's, registered as
@@ -3804,7 +3803,6 @@ class Reader:
         and the fallback for a session with no runtime, which is what a screenshot capture and most
         unit tests are.
         """
-        interval = interval if interval is not None else self.poll_interval
         with otel_metrics.traced("startup.reader_setup"):
             for phase in events.StartPhase:
                 self._announce_start(phase)
@@ -3814,14 +3812,15 @@ class Reader:
         # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
         if self.dict_set is not None:
             self._announce_runtime()
-        # The session blocks on its transport instead of waking `1/interval` times a second to
-        # ask whether anything happened. `interval` survives only as the wake bound, so a runtime
-        # timer that fires without producing an event is still noticed promptly.
+        # No interval and no tick: the session blocks on its transport until something happens. The
+        # transport bounds the wait by the earliest armed timer, so a deadline that produces no mpv
+        # event comes due on time rather than within a tick of it, and an idle session with nothing
+        # armed blocks indefinitely instead of waking 40 times a second to find nothing.
         alive = True
 
         def step(timeout: float | None) -> None:
             nonlocal alive
-            alive = self.pump(interval if timeout is None else min(interval, timeout))
+            alive = self.pump(timeout)
 
         SessionRunner(step).run_until(lambda: not alive or self._stop.is_set())
 
@@ -3829,8 +3828,7 @@ class Reader:
         """Ask the loop to finish, from any thread.
 
         Setting the flag is not enough on its own: the loop observes it between steps, and a step
-        blocks. `poll_interval` bounds that today, which is why a bare `set()` has looked sufficient
-        — the wake is what makes the flag observable once that bound goes.
+        blocks — with nothing armed, indefinitely. The wake is what makes the flag observable.
         """
         self._stop.set()  # the workers do no IPC, so signalling them is race-free
         self.ipc.wake_session_runtime()

@@ -202,6 +202,10 @@ class LegacyRuntimeBridge:
         with self._lock:
             self._timer_callbacks[effect_id] = on_finished
             replaced = self._timers.schedule(effect)
+        # The loop blocks under `next_deadline`, which this may have just moved earlier. A receiver
+        # already blocked under the old one would sleep past the new timer, so it is released to
+        # recompute. Armed from inside a turn — the usual case — nobody is blocked and this is free.
+        self._mailbox.wake()
         if replaced is not None:
             self._mailbox.publish_terminal(
                 replaced,
@@ -221,6 +225,16 @@ class LegacyRuntimeBridge:
             connection_epoch=None,
         )
         return True
+
+    @property
+    def next_deadline(self) -> float | None:
+        """When the earliest pending timer is due, or ``None`` when none is armed.
+
+        The bound a blocked receiver waits under. Without it the loop has to guess an interval and
+        wake that often to ask whether a timer has come due — the tick this migration removes.
+        """
+        with self._lock:
+            return self._timers.next_deadline
 
     def publish_due(self) -> None:
         with self._lock:

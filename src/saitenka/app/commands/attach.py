@@ -83,7 +83,6 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
         ),
         panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),
         perf=PerfOptions(
-            poll_interval=cfg.get("poll_interval", po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", po.prefetch_workers),
             prefetch_lookahead=cfg.get("prefetch_lookahead", po.prefetch_lookahead),
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", po.head_prefetch_lookahead),

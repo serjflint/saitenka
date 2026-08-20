@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, cast
 
@@ -19,6 +20,21 @@ class Clock:
 
     def __call__(self) -> float:
         return self.now
+
+
+class _RecordingMailbox(SessionMailbox):
+    """A mailbox that records what each `receive` was told to wait for.
+
+    The bound is not observable from outside without a real clock to measure against, and a real
+    clock in a test is the flake this suite avoids everywhere else.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float | None] = []
+
+    def receive(self, *, timeout: float | None = None):
+        self.waits.append(timeout)
 
 
 class FakeIPC:
@@ -125,6 +141,79 @@ def test_named_timer_delivers_only_after_its_due_turn() -> None:
     clock.now = 2.0
     assert ipc.legacy_source() == []
     assert [item.outcome for item in completed] == [EffectOutcome.SUCCEEDED]
+
+
+def test_the_drain_never_blocks_past_the_earliest_armed_timer() -> None:
+    """The wake bound the retired poll interval used to supply, from the thing that knows it.
+
+    A timer that produces no mpv event is invisible to the mailbox, so a drain bounded only by its
+    caller's timeout sleeps straight through the deadline. With no tick left to hide that, the
+    earliest armed timer is the bound.
+    """
+    clock = Clock()
+    clock.now = 10.0
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), _RecordingMailbox(), clock=clock)
+    waits = gateway.mailbox.waits
+
+    assert gateway.legacy.schedule_timer(
+        owner=Owner.SESSION,
+        identity="toast:1",
+        timer="lifecycle:toast",
+        due_at=10.25,
+        on_finished=lambda _result: None,
+    )
+    ipc.legacy_source(30.0)
+
+    assert waits == [0.25]  # the timer, not the caller's thirty seconds
+
+
+def test_the_drain_blocks_for_as_long_as_asked_when_nothing_is_armed() -> None:
+    """The negative control: bounding unconditionally would turn every idle wait into a spin."""
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), _RecordingMailbox(), clock=Clock())
+    waits = gateway.mailbox.waits
+
+    ipc.legacy_source(30.0)
+    ipc.legacy_source(None)
+
+    assert waits == [30.0, None]  # unbounded stays unbounded
+
+
+def test_arming_a_timer_releases_a_receiver_already_blocked_under_a_later_bound() -> None:
+    """Arming from another thread has to reach a wait that was bounded before it existed.
+
+    Otherwise the new deadline is only honoured from the next turn, which for a session blocked
+    with nothing else armed is never — the same hang the stop flag needed the wake for.
+    """
+    clock = Clock()
+    ipc = FakeIPC()
+    mailbox = SessionMailbox()
+    gateway = MpvGateway(cast("MpvIPC", ipc), mailbox, clock=clock)
+    released = threading.Event()
+
+    def receiver() -> None:
+        mailbox.receive(timeout=5.0)
+        released.set()
+
+    thread = threading.Thread(target=receiver)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 2.0
+        while not released.is_set() and time.monotonic() < deadline:
+            # Re-armed against a deadline for the reason the stop wake is: the release is
+            # un-latched, so one sent before the thread blocks is correctly a no-op.
+            gateway.legacy.schedule_timer(
+                owner=Owner.SESSION,
+                identity="late",
+                timer="lifecycle:late",
+                due_at=1.0,
+                on_finished=lambda _result: None,
+            )
+            released.wait(0.01)
+        assert released.is_set()
+    finally:
+        thread.join(2.0)
 
 
 def test_replacing_named_timer_terminally_cancels_old_revision() -> None:

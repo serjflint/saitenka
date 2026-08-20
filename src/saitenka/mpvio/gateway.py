@@ -70,8 +70,11 @@ _CANDIDATE_EVENT_LIMIT = 256
 class LegacyEventRouter:
     """Temporary sole consumer that presents mailbox observations to Reader unchanged."""
 
-    def __init__(self, mailbox: SessionMailbox) -> None:
+    def __init__(
+        self, mailbox: SessionMailbox, *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self._mailbox = mailbox
+        self._clock = clock
         self._runtime_bridge: LegacyRuntimeBridge | None = None
         self._reactor: SessionReactor | None = None
         self._claims: Callable[[RuntimeEvent], bool] = lambda _payload: False
@@ -127,6 +130,7 @@ class LegacyEventRouter:
         """
         if self._runtime_bridge is not None:
             self._runtime_bridge.publish_due()
+            timeout = self._bounded_by_deadline(timeout)
         events: list[object] = []
         if timeout is None or timeout > 0:
             envelope = self._mailbox.receive(timeout=timeout)
@@ -135,6 +139,21 @@ class LegacyEventRouter:
         for envelope in self._mailbox.receive_ready():
             self._turn(envelope, events, ordered_terminals=ordered_terminals)
         return events
+
+    def _bounded_by_deadline(self, timeout: float | None) -> float | None:
+        """Never block past the earliest armed timer.
+
+        A timer that fires without producing an mpv event is otherwise invisible until something
+        else arrives, which for an idle session is never — the job the retired poll interval was
+        doing. `publish_due` has already run, so anything due now is in the mailbox and this only
+        ever looks forward.
+        """
+        assert self._runtime_bridge is not None
+        due_at = self._runtime_bridge.next_deadline
+        if due_at is None:
+            return timeout
+        remaining = max(0.0, due_at - self._clock())
+        return remaining if timeout is None else min(timeout, remaining)
 
     def _turn(
         self, envelope: EventEnvelope, events: list[object], *, ordered_terminals: bool
@@ -232,7 +251,7 @@ class MpvGateway:
         #: and a handle nobody keeps is a transition nothing can reach — which is why that path has
         #: been implemented and unreachable since it landed.
         self.session_reactor: object | None = None
-        self._router = router = LegacyEventRouter(mailbox)
+        self._router = router = LegacyEventRouter(mailbox, clock=clock)
         ipc.install_runtime_ingress(
             self._publish_observation,
             self._publish_connection,

@@ -81,7 +81,7 @@ def test_a_raising_step_is_not_swallowed() -> None:
 
 
 def test_a_stop_releases_a_receiver_blocked_with_no_events_pending() -> None:
-    """The bound `poll_interval` currently provides, stated as a property of the mailbox instead.
+    """A stop reaches a receiver that is already blocked.
 
     Without this a stop is only observed when the next event happens to arrive, which for an idle
     session is never — the failure mode is a hang, so the negative control is the timeout itself.

@@ -543,7 +543,6 @@ def _build_run_options(cfg: dict, flags: RunFlags):
         ),
         panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),
         perf=PerfOptions(
-            poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
             prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
