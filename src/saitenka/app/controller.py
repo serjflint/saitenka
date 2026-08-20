@@ -57,6 +57,8 @@ from saitenka.app import (
     tooltip_raster,
     translation,
 )
+from saitenka.app import sidebar as sidebar_module
+from saitenka.app import sub_picker as sub_picker_module
 from saitenka.app.bindings import (
     ANALYSIS_MSG,
     ANNOTATION_MSG,
@@ -280,6 +282,15 @@ class Reader:
     # Interaction-tier state (app/reader_context.py InteractionContext) under historical flat names.
     _translate_on = Delegated[bool]("interaction", "translate_on")
     _trans_text = Delegated[str | None]("interaction", "trans_text")
+    # The five OSD surfaces. They are the INTERACTION owner's state, and `surfaces.SURFACES` is a
+    # registry over exactly these — so a hook can stop taking the host once they live in one place
+    # rather than five bare attributes. `Delegated` writes as well as reads, so the constructor
+    # assignments below thread through unchanged and the ~137 `reader.<surface>` call sites do not move.
+    help = Delegated[help_overlay.HelpState]("interaction", "help")
+    sub_picker = Delegated[sub_picker_module.PickerState]("interaction", "sub_picker")
+    sidebar = Delegated[sidebar_module.SidebarState]("interaction", "sidebar")
+    preview = Delegated[card_preview.PreviewState]("interaction", "preview")
+    tip = Delegated[popups.TooltipState]("interaction", "tip")
     _translation_secondary_sid = Delegated[int | None](
         "episode.subtitle", "translation_secondary_sid"
     )
@@ -1996,7 +2007,7 @@ class Reader:
             )
 
     def _wants_mouse_capture(self) -> bool:
-        return surfaces.wants_mouse_capture(self)
+        return surfaces.wants_mouse_capture(self.interaction)
 
     def _sync_mouse_capture(self) -> None:
         """Own clicks/wheel while a saitenka surface is up, release it otherwise.

@@ -163,3 +163,32 @@ def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
     assert reader.sidebar.scroll == sidebar.ROWS_PER_WHEEL_STEP
+
+
+def test_the_registry_reads_shown_ness_without_a_reader() -> None:
+    """Occlusion is answerable from the INTERACTION context alone — no host anywhere in the chain.
+
+    `state_of` used to take the whole `Reader` to return one field, and because `SurfaceSpec` is one
+    shared signature, every accessor plus `captures` and `wants_mouse_capture` was a host-taking row
+    for it. Gathering the five surface states onto `InteractionContext` converted all of them at once.
+    Constructing the context directly is the proof: if any hook still reached past it, this cannot run.
+    """
+    from saitenka.app.card_preview import PreviewState
+    from saitenka.app.help_overlay import HelpState
+    from saitenka.app.popups import TooltipState
+    from saitenka.app.reader_context import InteractionContext
+    from saitenka.app.sidebar import SidebarState
+    from saitenka.app.sub_picker import PickerState
+    from saitenka.app.surfaces import wants_mouse_capture
+
+    interaction = InteractionContext()
+    interaction.help = HelpState()
+    interaction.sub_picker = PickerState()
+    interaction.sidebar = SidebarState()
+    interaction.preview = PreviewState()
+    interaction.tip = TooltipState()
+
+    assert wants_mouse_capture(interaction) is False
+
+    interaction.sidebar.open = True
+    assert wants_mouse_capture(interaction) is True

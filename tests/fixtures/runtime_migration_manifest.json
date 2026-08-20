@@ -646,14 +646,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/surfaces.py::SurfaceSpec.captures"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_help_state"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/surfaces.py::_never"
     ],
     [
@@ -666,27 +658,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/surfaces.py::_picker_state"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_preview_state"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_sidebar_state"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/surfaces.py::_tip_click"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/surfaces.py::_tip_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_tip_state"
     ],
     [
       "reader-parameter",
@@ -699,10 +675,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/surfaces.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::wants_mouse_capture"
     ],
     [
       "reader-parameter",

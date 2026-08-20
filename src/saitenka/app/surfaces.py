@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.controller import Reader
+    from saitenka.app.reader_context import InteractionContext
 
 
 class SurfaceState(Protocol):
@@ -60,38 +61,36 @@ class SurfaceSpec:
     (``help``) states only what it handles."""
 
     name: str
-    state_of: Callable[[Reader], SurfaceState]  # the surface's state object (has .open)
+    #: The surface's state object (has `.open`), reached from the INTERACTION context that owns all
+    #: five — not from the host. This is the member that made every accessor a host-taking row.
+    state_of: Callable[[InteractionContext], SurfaceState]
     suppress_hover: Callable[[Reader], bool] = _never
     scroll: Callable[[Reader, int], bool] = _no_scroll
     on_click: Callable[[Reader, float, float], bool] = _no_click
 
-    def captures(self, reader: Reader) -> bool:
-        """Shown → owns the forced mouse section this tick (_wants_mouse_capture).
-
-        Still takes the host because `state_of` does: the whole family is one signature, and it
-        converts with the surface registry rather than one member at a time.
-        """
-        return self.state_of(reader).open
+    def captures(self, interaction: InteractionContext) -> bool:
+        """Shown → owns the forced mouse section this tick (_wants_mouse_capture)."""
+        return self.state_of(interaction).open
 
 
-def _help_state(reader: Reader) -> SurfaceState:
-    return reader.help
+def _help_state(interaction: InteractionContext) -> SurfaceState:
+    return interaction.help
 
 
-def _picker_state(reader: Reader) -> SurfaceState:
-    return reader.sub_picker
+def _picker_state(interaction: InteractionContext) -> SurfaceState:
+    return interaction.sub_picker
 
 
-def _sidebar_state(reader: Reader) -> SurfaceState:
-    return reader.sidebar
+def _sidebar_state(interaction: InteractionContext) -> SurfaceState:
+    return interaction.sidebar
 
 
-def _preview_state(reader: Reader) -> SurfaceState:
-    return reader.preview
+def _preview_state(interaction: InteractionContext) -> SurfaceState:
+    return interaction.preview
 
 
-def _tip_state(reader: Reader) -> SurfaceState:
-    return reader.tip
+def _tip_state(interaction: InteractionContext) -> SurfaceState:
+    return interaction.tip
 
 
 def _tip_click(reader: Reader, _x: float, _y: float) -> bool:
@@ -140,9 +139,9 @@ SURFACES: tuple[SurfaceSpec, ...] = (
 )
 
 
-def wants_mouse_capture(reader: Reader) -> bool:
+def wants_mouse_capture(interaction: InteractionContext) -> bool:
     """Any surface shown → own the forced mouse section this tick (occlusion)."""
-    return any(s.captures(reader) for s in SURFACES)
+    return any(s.captures(interaction) for s in SURFACES)
 
 
 def suppress_hover(reader: Reader) -> bool:

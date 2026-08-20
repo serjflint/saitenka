@@ -24,10 +24,15 @@ _MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
 
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
+    from saitenka.app.card_preview import PreviewState
+    from saitenka.app.help_overlay import HelpState
     from saitenka.app.languages import Language
     from saitenka.app.mined_store import MinedCardStore
+    from saitenka.app.popups import TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
+    from saitenka.app.sidebar import SidebarState
+    from saitenka.app.sub_picker import PickerState
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
     from saitenka.subtitles import CueIndex
@@ -98,8 +103,22 @@ class EpisodeContext:
 
 
 class InteractionContext:
-    """State scoped to the current on-screen interaction (hover/tooltip/reveal). Grows with the tooltip
-    cluster; for now it owns the EN-translation reveal toggle."""
+    """State scoped to the current on-screen interaction (hover/tooltip/reveal).
+
+    Owns the five OSD surface states — help, sub_picker, sidebar, preview, tip — which `Reader`
+    assigns during construction through their `Delegated` descriptors, and which `app/surfaces.py`
+    keeps a registry over. They are the INTERACTION owner's state; gathering them here is what lets a
+    surface hook stop taking the whole host to reach one of them.
+    """
+
+    #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the five need
+    #: constructor arguments this container has no business knowing. Declared here so the container
+    #: states its own shape rather than acquiring it from whoever writes first.
+    help: HelpState
+    sub_picker: PickerState
+    sidebar: SidebarState
+    preview: PreviewState
+    tip: TooltipState
 
     def __init__(self) -> None:
         self.translate_on = False
