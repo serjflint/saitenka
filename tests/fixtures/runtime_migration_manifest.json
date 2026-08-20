@@ -765,17 +765,16 @@
     },
     {
       "id": "session-and-stores",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/app/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self.finish_session_stats",
-        "call:self._backlog_store.close",
-        "call:self._mined_store.close"
+        "call:CloseSessionStores",
+        "ref:event.phase"
       ],
       "target": "session-data-close",
       "work_package": "5,6",
       "replacement": "PersistSession -> DataCloseOutcome",
       "test": "final accrual and stores close exactly once",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "surfaces",

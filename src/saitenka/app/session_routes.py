@@ -22,6 +22,7 @@ from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
     CloseSessionOverlay,
+    CloseSessionStores,
     CloseSessionSurfaces,
     DetachDiagnostics,
     EffectOutcome,
@@ -94,6 +95,9 @@ LIFECYCLE_CLOSE = "lifecycle-close"
 SURFACES_RESOURCE = "lifecycle-surfaces"
 OVERLAY_RESOURCE = "overlay-transport"
 INPUT_CAPTURE_RESOURCE = "input-capture"
+SESSION_SUMMARY_RESOURCE = "session-summary"
+BACKLOG_RESOURCE = "backlog-store"
+MINED_RESOURCE = "mined-store"
 
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
@@ -116,11 +120,35 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
 
 #: Which registered resource each retiring effect closes. A table rather than a chain of
 #: `isinstance`, so adding a duty is a row and cannot pick the wrong branch by falling through.
-_RESOURCE_OF = {
-    CloseSessionSurfaces: SURFACES_RESOURCE,
-    CloseSessionOverlay: OVERLAY_RESOURCE,
-    ReleaseInputCapture: INPUT_CAPTURE_RESOURCE,
+#: The names are a tuple because a duty can have several participants that retire together; the
+#: order inside one is the contract, exactly as it is between two effects in one phase.
+_RESOURCE_OF: dict[type, tuple[str, ...]] = {
+    CloseSessionSurfaces: (SURFACES_RESOURCE,),
+    CloseSessionOverlay: (OVERLAY_RESOURCE,),
+    ReleaseInputCapture: (INPUT_CAPTURE_RESOURCE,),
+    CloseSessionStores: (SESSION_SUMMARY_RESOURCE, BACKLOG_RESOURCE, MINED_RESOURCE),
 }
+
+
+def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
+    """Close each named resource in order, isolating them, and say whether all of them were there.
+
+    False, not an exception, for an unregistered one: it means this session's owner never handed
+    it over, so its own teardown still runs. Isolation is what `CloseLedger` gives a step it owns —
+    a phase that retires three participants must not lose it by being one announcement.
+    """
+    retired = True
+    for name in names:
+        resource = gateway.session_resources.get(name)
+        if resource is None:
+            retired = False
+            continue
+        try:
+            resource.close()  # type: ignore[attr-defined]  # registered by the owner that made it
+        except Exception:  # teardown continues; the owner's own close still ran
+            log.warning("session resource %s failed to close", name, exc_info=True)
+            retired = False
+    return retired
 
 
 def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect], bool]:
@@ -138,15 +166,9 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
             # here or nowhere.
             log.debug("runtime census: %s", ledger.counts)
             return True
-        if isinstance(effect, CloseSessionSurfaces | CloseSessionOverlay | ReleaseInputCapture):
-            name = _RESOURCE_OF[type(effect)]
-            resource = gateway.session_resources.get(name)
-            # False, not an exception: an unregistered resource means this session's owner never
-            # handed it over, so its own teardown still runs. The ledger records the difference.
-            if resource is None:
-                return False
-            resource.close()  # type: ignore[attr-defined]  # registered by the owner that made it
-            return True
+        names = _RESOURCE_OF.get(type(effect))
+        if names is not None:
+            return _retire(gateway, names)
         if isinstance(effect, RemoveSessionArtifacts):
             shutil.rmtree(effect.path, ignore_errors=True)
             return True

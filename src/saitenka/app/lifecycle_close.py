@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.runtime.effects import (
     CloseSessionOverlay,
+    CloseSessionStores,
     CloseSessionSurfaces,
     DetachDiagnostics,
     ReleaseInputCapture,
@@ -40,6 +41,8 @@ def _effects(event: SessionClosing) -> tuple[Effect, ...]:
         # The capture goes first and while the transport still works: it is a write to mpv, and
         # detaching diagnostics is the point past which the session stops being observable.
         return (ReleaseInputCapture(), DetachDiagnostics())
+    if event.phase is ClosePhase.STORES:
+        return (CloseSessionStores(),)
     if event.phase is ClosePhase.SURFACES:
         # Order is the contract here, not a tuple's incidental shape: the removes go out through
         # the transport the second effect closes.

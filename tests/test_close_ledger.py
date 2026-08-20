@@ -523,3 +523,63 @@ def test_the_dispatcher_retires_the_input_capture_through_its_registered_resourc
         gateway.close()
 
     assert capture.closed == 1
+
+
+def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> None:
+    """One announcement, three participants — and a failing one must not strand the rest.
+
+    `CloseLedger` gives that isolation to a step it owns. A duty that moves into the runtime is one
+    announcement, so the isolation has to move with it or the migration quietly loses it.
+    """
+    from util import runtime_gateway
+
+    from saitenka.app.session_resources import Retiring
+    from saitenka.app.session_routes import (
+        BACKLOG_RESOURCE,
+        MINED_RESOURCE,
+        SESSION_SUMMARY_RESOURCE,
+        _dispatcher,
+    )
+    from saitenka.runtime.diagnostics import RuntimeLedger
+    from saitenka.runtime.effects import CloseSessionStores
+
+    def boom() -> None:
+        raise RuntimeError("the backlog store is wedged")
+
+    retired: list[str] = []
+    gateway = runtime_gateway(FakeIPC())
+    try:
+        gateway.session_resources[SESSION_SUMMARY_RESOURCE] = Retiring(
+            lambda: retired.append("summary")
+        )
+        gateway.session_resources[BACKLOG_RESOURCE] = Retiring(boom)
+        gateway.session_resources[MINED_RESOURCE] = Retiring(lambda: retired.append("mined"))
+        dispatch = _dispatcher(gateway, RuntimeLedger())
+
+        assert dispatch(CloseSessionStores()) is False  # one of them did not retire
+    finally:
+        gateway.close()
+
+    assert retired == ["summary", "mined"]  # the one behind the failure still ran
+
+
+def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
+    """The Reader keeps the three steps as the no-runtime fallback; both paths must not run."""
+    from util import runtime_gateway
+
+    from saitenka.app.session_routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    closed: list[str] = []
+    reader._close_backlog_store = lambda: closed.append("backlog")  # type: ignore[method-assign]
+    reader._close_mined_store = lambda: closed.append("mined")  # type: ignore[method-assign]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert closed == ["backlog", "mined"]
+    assert ledger.report() is None

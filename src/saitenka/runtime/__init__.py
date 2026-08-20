@@ -5,6 +5,7 @@ from saitenka.runtime.diagnostics import DiagnosticKind, DiagnosticRecord, Runti
 from saitenka.runtime.effects import (
     AsyncEffect,
     CancelEffect,
+    CloseSessionStores,
     CoreControl,
     DetachDiagnostics,
     Effect,
@@ -93,6 +94,7 @@ __all__ = [
     "CancelEffect",
     "ClosePhase",
     "CloseRequested",
+    "CloseSessionStores",
     "CommandHandled",
     "CommandOutcome",
     "CommandReason",

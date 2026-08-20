@@ -44,6 +44,7 @@ from saitenka.app import (
     prefetch,
     reader_deps,
     session_intents,
+    session_resources,
     session_stats,
     sidebar,
     sub_picker,
@@ -657,6 +658,32 @@ class Reader:
         )
         self._runtime_owns_input_capture = ipc.register_session_resource(
             INPUT_CAPTURE_RESOURCE, self._mouse
+        )
+        # The session's persistent writers, retired at `STORES`. Wrapped rather than registered
+        # directly: the recorder is per-episode and both stores open lazily, so the resource has
+        # to resolve them when it closes, not when it registers.
+        from saitenka.app.session_routes import (
+            BACKLOG_RESOURCE,
+            MINED_RESOURCE,
+            SESSION_SUMMARY_RESOURCE,
+        )
+
+        self._runtime_owns_stores = all(
+            (
+                ipc.register_session_resource(
+                    SESSION_SUMMARY_RESOURCE,
+                    session_resources.Retiring(
+                        lambda: self._report_session(self.finish_session_stats())
+                    ),
+                ),
+                ipc.register_session_resource(
+                    BACKLOG_RESOURCE,
+                    session_resources.Retiring(lambda: self._close_backlog_store()),
+                ),
+                ipc.register_session_resource(
+                    MINED_RESOURCE, session_resources.Retiring(lambda: self._close_mined_store())
+                ),
+            )
         )
         # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
         self.scan_delay = o.tooltip.scan_delay
@@ -3882,18 +3909,23 @@ class Reader:
                     ),
                 ),
                 CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
+                # Retired by the `STORES` phase below when a runtime owns them; these three are
+                # the fallback for a Reader that has none, and must stay ahead of the announcement
+                # so the ordering is the same either way.
                 CloseStep(
-                    "session-stats", lambda: self._report_session(self.finish_session_stats())
+                    "session-stats",
+                    lambda: self._report_session(self.finish_session_stats()),
+                    lambda: None if self._runtime_owns_stores else self.session,
                 ),
                 CloseStep(
                     "backlog-store",
-                    lambda: self._backlog_store.close(),  # type: ignore[union-attr]  # `present` below
-                    lambda: self._backlog_store,
+                    self._close_backlog_store,
+                    lambda: None if self._runtime_owns_stores else self._backlog_store,
                 ),
                 CloseStep(
                     "mined-store",
-                    lambda: self._mined_store.close(),  # type: ignore[union-attr]  # `present` below
-                    lambda: self._mined_store,
+                    self._close_mined_store,
+                    lambda: None if self._runtime_owns_stores else self._mined_store,
                 ),
                 CloseStep("phase:stores", lambda: self._announce_close(ClosePhase.STORES)),
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
@@ -3976,6 +4008,14 @@ class Reader:
         """Close the current episode's row and retire the recorder. Idempotent."""
         recorder, self._session_recorder = self._session_recorder, None
         return session_stats.finish(recorder, self.analysis.current)
+
+    def _close_backlog_store(self) -> None:
+        if self._backlog_store is not None:
+            self._backlog_store.close()
+
+    def _close_mined_store(self) -> None:
+        if self._mined_store is not None:
+            self._mined_store.close()
 
     def _report_session(self, summary: str | None) -> None:
         if summary and self.options.stats.summary:

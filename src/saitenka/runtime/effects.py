@@ -170,6 +170,13 @@ class ReleaseInputCapture:
 
 
 @dataclass(frozen=True, slots=True)
+class CloseSessionStores:
+    """Flush and close the session's persistent writers, after nothing renders and before the
+    surfaces go. One effect for the three of them because they retire together — the dispatcher
+    isolates each, so a store that fails cannot strand the ones behind it."""
+
+
+@dataclass(frozen=True, slots=True)
 class RemoveSessionArtifacts:
     """Delete the session's scratch directory, once nothing can still write to it."""
 
@@ -180,6 +187,8 @@ type LifecycleEffect = (
     StopSession
     | DetachDiagnostics
     | ReleaseInputCapture
+    | CloseSessionStores
+    | CloseSessionStores
     | CloseSessionSurfaces
     | CloseSessionOverlay
     | RemoveSessionArtifacts
@@ -191,6 +200,8 @@ type LifecycleEffect = (
 type FireAndForget = (
     DetachDiagnostics
     | ReleaseInputCapture
+    | CloseSessionStores
+    | CloseSessionStores
     | CloseSessionSurfaces
     | CloseSessionOverlay
     | RemoveSessionArtifacts
