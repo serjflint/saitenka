@@ -29,8 +29,9 @@ if TYPE_CHECKING:
 
 class SurfaceState(Protocol):
     """What every surface's state object exposes to the registry: ``open`` — is it shown right now.
-    Each state (``HelpState``/``PickerState``/``SidebarState`` as a field, ``PreviewState``/
-    ``TooltipState`` as a derived property) satisfies this, so mouse-capture reads one uniform predicate."""
+    Every surface's state is now a slice feature reached through `InteractionContext`, and each
+    answers this the same way — as a field or as a derived property — so mouse-capture reads one
+    uniform predicate and cannot tell them apart."""
 
     @property
     def open(self) -> bool:

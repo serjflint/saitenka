@@ -292,11 +292,11 @@ class Reader:
     # Episode-tier state (app/reader_context.py) exposed under its historical field names so the ~15
     # call-site modules keep working while they migrate onto ``reader.episode.*`` (#30 lifetime split);
     # rebinding ``self.episode`` (#100 re-slot) resets all of it in one move, leak-free by construction.
-    # The five OSD surfaces, and the only `Delegated` left. They stay because these names are the
-    # container's own — `surfaces.SURFACES` is a registry over exactly these, and the descriptor is
-    # what lets a hook reach one without the host. Every other flat alias is gone: the lifetime
-    # containers are addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`),
-    # because an alias per field made one object look like N host members to every ratchet.
+    # The last `Delegated`. All five OSD surfaces are slice features now, so what is left here is
+    # the tooltip's *panel* — two rendered popups, their cache and their build lanes — which is a
+    # mutable object no reducer can hold. Every flat alias is gone: the lifetime containers are
+    # addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`), because an alias
+    # per field made one object look like N host members to every ratchet.
     tip = Delegated[popups.TooltipState]("interaction", "tip")
 
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
@@ -483,9 +483,9 @@ class Reader:
         # (native glyph masks over 1× geometry). ``crisp_upscale`` off → soft-only (never native).
         self._crisp_on = o.tooltip.crisp_upscale
         self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes TipScale.display (see config)
-        # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState). The Delegated shims below
-        # keep the historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/
-        # ``_panel_cache`` names so the hover FSM and its tests are untouched (#30 lifetime split).
+        # What one paint of the tooltip stack produced, plus the machinery producing it
+        # (app/popups.py TooltipState). Everything it once held that was *decided* — the hysteresis,
+        # the back-stack, the pulse, the pause claim, the hovered word — is INTERACTION's slice.
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
@@ -583,8 +583,8 @@ class Reader:
         self.auto_translate = o.translation.auto_translate
         self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
-        # Last-mined card's media + where its panel landed (app/card_preview.py PreviewPanel); the
-        # Delegated shims below keep the historical ``reader._last_*``/``_preview_*`` names working.
+        # Where the preview's last paint landed, plus the media the mine captured for it
+        # (app/card_preview.py PreviewPanel). What is composed is the slice's.
         self.interaction.preview_panel = card_preview.PreviewPanel()
         # INTERACTION's claim on mpv's clicks and wheel, as a resource with a lifetime: the
         # runtime retires it at `PARTICIPANTS`, and an effect can only retire what it can find.
