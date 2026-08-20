@@ -670,10 +670,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_capture_tip_view"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_click_nested"
     ],
     [

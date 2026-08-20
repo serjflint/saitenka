@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Collection
 
     from saitenka.app.controller import Reader
+    from saitenka.app.popups import TooltipState
     from saitenka.render.layout_backend import LayoutBackend
 
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed,
@@ -1487,18 +1488,23 @@ def _blit_crisp_or_soft(reader: Reader, view: PopupView, st: Panel):
     return _blit_native(reader, view, st)
 
 
-def _capture_tip_view(reader: Reader) -> tuple:
+def _capture_tip_view(tip: TooltipState) -> tuple:
     """Snapshot the base tooltip's renderable view for the link-navigation back-stack. Includes the
-    source token so a restored HOVERED view can still re-request crisp band-warming on scroll."""
+    source token so a restored HOVERED view can still re-request crisp band-warming on scroll.
+
+    Takes the tooltip state, not the host: all eight fields live on it, six of them on its view.
+    Eight `Delegated` reads through a Reader was the flat-name layer showing through — the snapshot
+    is of one object and now says so.
+    """
     return (
-        reader._tip_state,
-        reader._tip_key,
-        reader._hover_reading,
-        reader._tip_view_h,
-        reader._tip_xy,
-        reader._tip_scroll,
-        reader._tip_tok,
-        reader._tip_inflected,
+        tip.view.state,
+        tip.view.key,
+        tip.hover_reading,
+        tip.view.view_h,
+        tip.view.xy,
+        tip.view.scroll,
+        tip.tip_tok,
+        tip.tip_inflected,
     )
 
 
@@ -1578,7 +1584,7 @@ def _install_navigated(reader: Reader, st: Panel) -> None:
     """Swap ``st`` in as the base tooltip's content: hide the stale scan popup, push the current view
     onto the back-stack, and blit. Shared by the synchronous nav and the deferred (worker-built) swap."""
     reader._hide_nested()  # the old content's scan popup is stale
-    reader._tip_nav.append(_capture_tip_view(reader))
+    reader._tip_nav.append(_capture_tip_view(reader.tip))
     reader._tip_state = st
     # A navigated view is keyless (not a subtitle token) — the one panel composites native from its own
     # reference panel, so no synthetic key is needed. _tip_tok=None so scroll won't rebuild from a token.
