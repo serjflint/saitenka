@@ -17,12 +17,26 @@ fields on ``TooltipState`` are its storage; the machine never reads them.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from typing import TYPE_CHECKING
-
-from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
 if TYPE_CHECKING:
     from saitenka.model import ScanBox
+
+
+class Dwell(StrEnum):
+    """The four dwells, named by the machine rather than by the timer service.
+
+    The intent types already identify a dwell one for one, but a cancel has no intent instance to
+    identify it with — and naming them here is what keeps the machine free of the app's timer
+    vocabulary, so the mapping onto named deadlines is one table at the seam.
+    """
+
+    SWITCH = "switch"
+    HIDE_TIP = "hide-tip"
+    OPEN_SCAN = "open-scan"
+    HIDE_NESTED = "hide-nested"
+
 
 # --- what a dwell means when it elapses ---------------------------------------------------------
 
@@ -59,14 +73,14 @@ Intent = OpenScan | SwitchTo | HideTip | HideNested
 
 @dataclass(frozen=True, slots=True)
 class Arm:
-    kind: LifecycleTimerKind
+    dwell: Dwell
     delay: float
     intent: Intent
 
 
 @dataclass(frozen=True, slots=True)
 class Cancel:
-    kind: LifecycleTimerKind
+    dwell: Dwell
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +180,22 @@ def elapsed(state: HoverState, intent: Intent, *, nest_tail: str | None = None) 
             return HoverTurn(replace(state, nest_hide_pending=False), (CloseNested(),))
 
 
+def scrolled(state: HoverState, *, nested: bool) -> HoverTurn:
+    """A popup was scrolled. Scrolling counts as interacting, so its linger is no longer pending.
+
+    Here rather than as a field write at the scroll site because the hysteresis has one writer:
+    a second one leaves the machine deciding against a state it does not hold, and the next tick
+    silently re-arms — or fails to — against the stale half.
+    """
+    if nested:
+        return HoverTurn(replace(state, nest_hide_pending=False))
+    # The base tooltip also restarts the scan dwell: content moved under a stationary cursor, so
+    # the cell it was resting on is not the cell it is on now.
+    return HoverTurn(
+        replace(state, tip_hide_pending=False, scan_target=None), (Cancel(Dwell.HIDE_TIP),)
+    )
+
+
 def refused(state: HoverState, intent: Intent) -> HoverTurn:
     """No timer could be armed. The whole fail-open/fail-closed policy, in one line.
 
@@ -184,23 +214,23 @@ def _nested(
 ) -> tuple[HoverState, tuple[Decision, ...]]:
     if obs.scan is not None:
         state = replace(state, nest_hide_pending=False)
-        out: tuple[Decision, ...] = (Cancel(LifecycleTimerKind.NESTED_HIDE),)
+        out: tuple[Decision, ...] = (Cancel(Dwell.HIDE_NESTED),)
         text = obs.scan.text
         if text == state.scan_target:
             return state, out  # this cell's dwell is already armed, or already resolved
         state = replace(state, scan_target=text)
         if obs.nest_tail == text:
             return state, out  # already shown
-        return state, (*out, Arm(LifecycleTimerKind.SCAN_OPEN, delays.scan, OpenScan(obs.scan)))
+        return state, (*out, Arm(Dwell.OPEN_SCAN, delays.scan, OpenScan(obs.scan)))
     if obs.over_nest:
         state = replace(state, scan_target=None, nest_hide_pending=False)
-        return state, (Cancel(LifecycleTimerKind.NESTED_HIDE),)
+        return state, (Cancel(Dwell.HIDE_NESTED),)
     state = replace(state, scan_target=None)
-    out = (Cancel(LifecycleTimerKind.SCAN_OPEN),)
+    out = (Cancel(Dwell.OPEN_SCAN),)
     if not obs.nest_open or state.nest_hide_pending:
         return state, out
     state = replace(state, nest_hide_pending=True)
-    return state, (*out, Arm(LifecycleTimerKind.NESTED_HIDE, delays.hide, HideNested()))
+    return state, (*out, Arm(Dwell.HIDE_NESTED, delays.hide, HideNested()))
 
 
 def _word(
@@ -209,28 +239,28 @@ def _word(
     if obs.word >= 0:
         state, out = _switch(state, obs, delays)
         state = replace(state, tip_hide_pending=False)
-        return state, (*out, Cancel(LifecycleTimerKind.TOOLTIP_HIDE))
+        return state, (*out, Cancel(Dwell.HIDE_TIP))
     if obs.over_tip or obs.over_nest:  # kept alive while the cursor is on either popup
         state = replace(state, word_target=None, tip_hide_pending=False)
-        return state, (Cancel(LifecycleTimerKind.TOOLTIP_HIDE),)
+        return state, (Cancel(Dwell.HIDE_TIP),)
     if obs.hover == -1:
         return state, ()
     state = replace(state, word_target=None)
-    cancel: tuple[Decision, ...] = (Cancel(LifecycleTimerKind.HOVER_SWITCH),)
+    cancel: tuple[Decision, ...] = (Cancel(Dwell.SWITCH),)
     if state.tip_hide_pending:
         return state, cancel
     state = replace(state, tip_hide_pending=True)
-    return state, (*cancel, Arm(LifecycleTimerKind.TOOLTIP_HIDE, delays.hide, HideTip()))
+    return state, (*cancel, Arm(Dwell.HIDE_TIP, delays.hide, HideTip()))
 
 
 def _switch(
     state: HoverState, obs: HoverObservation, delays: HoverDelays
 ) -> tuple[HoverState, tuple[Decision, ...]]:
     if obs.word == obs.hover:
-        return replace(state, word_target=None), (Cancel(LifecycleTimerKind.HOVER_SWITCH),)
+        return replace(state, word_target=None), (Cancel(Dwell.SWITCH),)
     if obs.hover < 0:  # nothing open yet: no hijack to guard against, so open instantly
         return replace(state, word_target=None), (ShowWord(obs.word),)
     if obs.word == state.word_target:
         return state, ()  # this word's dwell is already armed
     state = replace(state, word_target=obs.word)
-    return state, (Arm(LifecycleTimerKind.HOVER_SWITCH, delays.switch, SwitchTo(obs.word)),)
+    return state, (Arm(Dwell.SWITCH, delays.switch, SwitchTo(obs.word)),)

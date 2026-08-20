@@ -175,6 +175,8 @@ from saitenka.runtime import (
     playback,
 )
 from saitenka.runtime import subtitle as subtitle_state
+from saitenka.runtime.hover import HoverDelays
+from saitenka.runtime.interaction_slice import HoverStore
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.runner import SessionRunner
 from saitenka.runtime.subtitle_slice import SubtitleTrackStore
@@ -755,6 +757,17 @@ class Reader:
         # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
         # whose event resets the whole state.
         self._subtitle_tracks = SubtitleTrackStore(self.ipc)
+        # `Owner.INTERACTION`'s slice: the hover hysteresis. Its dwell lengths are configuration,
+        # so they arrive as a declaration rather than being read in the turn — a reducer that read
+        # them off the host would not be pure.
+        self._hover_store = HoverStore(self.ipc)
+        self._hover_store.dispatch(
+            events.HoverConfigured(
+                HoverDelays(
+                    scan=self.scan_delay, hide=self.hide_delay, switch=self.hover_switch_delay
+                )
+            )
+        )
         self._geometry_refresh = geometry_refresh.RefreshWindow()
         #: Latest cue identity observed this drain, reconciled once at the batch boundary.
         self._pending_cue: playback.ObservedCue | None = None

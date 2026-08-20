@@ -108,6 +108,9 @@ class NoSessionRuntime:
     def route_session_subtitle(self, _envelope: object | None) -> object | None:
         return None
 
+    def route_session_interaction(self, _envelope: object | None) -> object | None:
+        return None
+
 
 def configure_lane(
     ipc: RuntimeJobPort, name: str, policy: JobLanePolicy, handler

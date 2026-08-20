@@ -410,10 +410,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_delays"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_dwell_elapsed"
     ],
     [
@@ -462,10 +458,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_hover_turn"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::chrome_for"
     ],
     [
@@ -499,6 +491,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::retire_hover"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::route_hover"
     ],
     [
       "reader-parameter",
@@ -555,6 +551,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip_panel.py::decorate_and_upload"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip_panel.py::dispatch_hover"
     ],
     [
       "reader-parameter",

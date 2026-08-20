@@ -24,6 +24,7 @@ from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.popups import Panel, PopupView
 from saitenka.panel import Freq, panel_rows
+from saitenka.runtime import events, hover
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -470,6 +471,30 @@ def decorate_and_upload(
     return (tx, ty, view.shape[1], view.shape[0])
 
 
+def project_hysteresis(tip: TooltipState, state: hover.HoverState) -> None:
+    """Mirror the slice onto the four historical `TooltipState` fields.
+
+    A projection, not storage: `Owner.INTERACTION`'s slot is the source of truth and this is its
+    only writer, so `hover_view()` and everything reading `reader._scan_target` keep working
+    without a second copy that can disagree.
+    """
+    tip.word_target = state.word_target
+    tip.scan_target = state.scan_target
+    tip.hide_pending = state.tip_hide_pending
+    tip.nest.hide_pending = state.nest_hide_pending
+
+
+def dispatch_hover(reader: Reader, event) -> tuple[hover.Decision, ...]:
+    """Route one interaction observation to `Owner.INTERACTION` and drain the turn's outbox.
+
+    Here rather than beside the applier because the blit layer declares a scroll and must not
+    import the module that performs a hover — that edge is the app-package cycle.
+    """
+    decisions = reader._hover_store.dispatch(event)
+    project_hysteresis(reader.tip, reader._hover_store.current.hysteresis)
+    return decisions
+
+
 def hit_target(nest, tip_state, tip_scroll: int, raster_scale: float, *, nested: bool):
     """The ``(panel, scale, scroll)`` to hit-test a popup against — the ONE reference panel, always. It's
     composited natively (glyph masks over 1× geometry), so the DRAWN panel IS the hit-tested panel and the
@@ -582,7 +607,12 @@ def scroll_view(reader: Reader, view: PopupView, delta: int) -> bool:
     view.job_id = reader._interaction_jobs.begin("scroll")
     view.job_kind = "scroll"
     view.desired_scroll = ns
-    view.hide_pending = False  # scrolling counts as interacting → keep this popup up
+    if view.oid == OverlayId.NESTED:
+        # The nested popup's linger is the machine's fact, so it is declared, not assigned. It
+        # publishes no decision, which is why the panel layer can declare it without an applier.
+        dispatch_hover(reader, events.HoverScrolled(nested=True))
+    else:
+        view.hide_pending = False  # scrolling counts as interacting → keep this popup up
     deferred = reader._request_render_ahead(view, 1 if delta > 0 else -1)
     if not deferred:
         view.scroll = ns

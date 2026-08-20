@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, Owner
 
 if TYPE_CHECKING:
+    from saitenka.runtime.hover import HoverDelays, HoverObservation
+    from saitenka.runtime.hover import Intent as HoverIntent
     from saitenka.runtime.playback import RetireReason
 
 
@@ -357,6 +359,64 @@ SUBTITLE_EVENTS = (
 )
 
 
+#: `Owner.INTERACTION`'s vocabulary. Unlike SUBTITLE's, these are *observations* — what the cursor
+#: is over, and what a dwell did — so the reducer's answer is a set of decisions the sender then
+#: performs. That is why this slice has an outbox and SUBTITLE's does not.
+
+
+@dataclass(frozen=True, slots=True)
+class HoverConfigured:
+    """The dwell lengths for this session. Configuration, not a hover fact — but it is state the
+    reducer reads in the turn, and a reducer that read a clock or a config object would not be
+    pure. It arrives as an event for the same reason the track selection does."""
+
+    delays: HoverDelays
+
+
+@dataclass(frozen=True, slots=True)
+class HoverObserved:
+    """One hover tick: what the cursor is over, already hit-tested and link-filtered."""
+
+    observation: HoverObservation
+
+
+@dataclass(frozen=True, slots=True)
+class HoverDwellElapsed:
+    """A dwell fired. `nest_tail` is the popup showing right now — a scan dwell that outlived what
+    armed it must open nothing, and only the current tail can say so."""
+
+    intent: HoverIntent
+    nest_tail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HoverScrolled:
+    """A popup was scrolled — an interaction, so its linger stops being pending."""
+
+    nested: bool
+
+
+@dataclass(frozen=True, slots=True)
+class HoverDwellRefused:
+    """No deadline could be armed. Its own event, not a flag on the arm: the fail-open/fail-closed
+    answer is per intent, and it is a decision the reducer owns rather than the caller."""
+
+    intent: HoverIntent
+
+
+type InteractionEvent = (
+    HoverConfigured | HoverObserved | HoverScrolled | HoverDwellElapsed | HoverDwellRefused
+)
+
+INTERACTION_EVENTS = (
+    HoverConfigured,
+    HoverObserved,
+    HoverScrolled,
+    HoverDwellElapsed,
+    HoverDwellRefused,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class EffectFinished:
     effect_id: EffectId
@@ -391,6 +451,7 @@ type RuntimeEvent = (
     | EffectFinished
     | PlaybackEvent
     | SubtitleEvent
+    | InteractionEvent
 )
 
 

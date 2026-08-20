@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
-from saitenka.app import hover_machine, nested_popup, tooltip_engaged
+from saitenka.app import nested_popup, tooltip_engaged
 from saitenka.app.hover_metadata import HoverMetadataKey
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.media import copy_clipboard, speak
@@ -28,6 +28,7 @@ from saitenka.app.tooltip_panel import (
     anki_ok,
     compose_kind,
     decorate_and_upload,
+    dispatch_hover,
     entry_for_tok,
     group_mined_of,
     is_mined,
@@ -40,7 +41,8 @@ from saitenka.app.tooltip_panel import (
 )
 from saitenka.model import in_rect
 from saitenka.panel import header_add_rect, header_speaker_rect, panel_rows
-from saitenka.runtime import Owner
+from saitenka.runtime import Owner, events
+from saitenka.runtime import hover as hover_machine
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -86,38 +88,34 @@ def _hover_targets(mx: float, my: float, *, inside: bool, tip_rect, nest_rect, h
     return over_word, over_tip, over_nest
 
 
-def hysteresis_of(tip: TooltipState) -> hover_machine.HoverState:
-    """The hysteresis the machine owns, read off its storage. Four mutable fields, one value."""
-    return hover_machine.HoverState(
-        word_target=tip.word_target,
-        scan_target=tip.scan_target,
-        tip_hide_pending=tip.hide_pending,
-        nest_hide_pending=tip.nest.hide_pending,
-    )
+def route_hover(reader: Reader, event) -> None:
+    """Route one interaction observation to `Owner.INTERACTION` and perform what it decided.
 
-
-def _store(tip: TooltipState, state: hover_machine.HoverState) -> None:
-    tip.word_target = state.word_target
-    tip.scan_target = state.scan_target
-    tip.hide_pending = state.tip_hide_pending
-    tip.nest.hide_pending = state.nest_hide_pending
-
-
-def apply_hover_turn(reader: Reader, turn: hover_machine.HoverTurn) -> None:
-    """Store the turn's state, then perform its decisions — in that order, because a decision reads
-    the state it was decided from (an armed dwell re-checks the target it was armed for)."""
-    _store(reader.tip, turn.state)
-    for decision in turn.decisions:
+    The decisions are drained and performed immediately, in order, where the call was — the outbox
+    pattern, for the same reason playback's deltas use it: a hover decision that arrived a turn
+    later would act on a cursor position that has moved.
+    """
+    for decision in dispatch_hover(reader, event):
         _perform(reader, decision)
+
+
+#: The machine names its own dwells; this is the one place they meet the session's named deadlines.
+_TIMER_OF = {
+    hover_machine.Dwell.SWITCH: LifecycleTimerKind.HOVER_SWITCH,
+    hover_machine.Dwell.HIDE_TIP: LifecycleTimerKind.TOOLTIP_HIDE,
+    hover_machine.Dwell.OPEN_SCAN: LifecycleTimerKind.SCAN_OPEN,
+    hover_machine.Dwell.HIDE_NESTED: LifecycleTimerKind.NESTED_HIDE,
+}
 
 
 def _perform(reader: Reader, decision: hover_machine.Decision) -> None:
     match decision:
-        case hover_machine.Cancel(kind):
-            reader.cancel_hover_deadline(kind)
-        case hover_machine.Arm(kind, delay, intent):
+        case hover_machine.Cancel(dwell):
+            reader.cancel_hover_deadline(_TIMER_OF[dwell])
+        case hover_machine.Arm(dwell, delay, intent):
+            kind = _TIMER_OF[dwell]
             if not reader.arm_hover_deadline(kind, delay, lambda: _dwell_elapsed(reader, intent)):
-                apply_hover_turn(reader, hover_machine.refused(hysteresis_of(reader.tip), intent))
+                route_hover(reader, events.HoverDwellRefused(intent))
         case hover_machine.ShowWord(index):
             reader.set_hover(index)
         case hover_machine.RetireWord():
@@ -129,10 +127,7 @@ def _perform(reader: Reader, decision: hover_machine.Decision) -> None:
 
 
 def _dwell_elapsed(reader: Reader, intent: hover_machine.Intent) -> None:
-    apply_hover_turn(
-        reader,
-        hover_machine.elapsed(hysteresis_of(reader.tip), intent, nest_tail=reader._nest.tail),
-    )
+    route_hover(reader, events.HoverDwellElapsed(intent, reader._nest.tail))
 
 
 def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
@@ -169,12 +164,6 @@ def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
     )
 
 
-def _delays(reader: Reader) -> hover_machine.HoverDelays:
-    return hover_machine.HoverDelays(
-        scan=reader.scan_delay, hide=reader.hide_delay, switch=reader.hover_switch_delay
-    )
-
-
 def _read_mouse(reader: Reader) -> tuple[float, float, bool]:
     mp = reader._prop("mouse-pos") or {}
     inside = bool(mp.get("hover"))
@@ -188,7 +177,7 @@ def update_hover_impl(reader: Reader) -> None:
     mx, my, inside = _read_mouse(reader)
     obs, (over_word, _tip, _nest) = observe_hover(reader, mx, my, inside=inside)
     reader.set_annotation_hover(revealed=over_word >= 0)
-    apply_hover_turn(reader, hover_machine.decide(hysteresis_of(reader.tip), obs, _delays(reader)))
+    route_hover(reader, events.HoverObserved(obs))
 
 
 def update_hover_instrumented(reader: Reader) -> None:
@@ -211,9 +200,7 @@ def update_hover_instrumented(reader: Reader) -> None:
     with otel_metrics.traced("hover_transition") as transition:
         previous = reader.hover
         reader.set_annotation_hover(revealed=over_word >= 0)
-        apply_hover_turn(
-            reader, hover_machine.decide(hysteresis_of(reader.tip), obs, _delays(reader))
-        )
+        route_hover(reader, events.HoverObserved(obs))
         transition.set("changed", previous != reader.hover)
         transition.set(
             "cue_state",
@@ -1048,9 +1035,10 @@ def scroll_tip(reader: Reader, delta: int) -> None:
         scroll_view(reader, reader._nest, delta)
         return
     if scroll_view(reader, reader._tip_view, delta):
-        reader.cancel_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE)  # scrolling keeps it up
-        reader._hide_pending = False
-        reader._scan_target = None  # content moved under the cursor → restart the scan dwell
+        # Scrolling counts as interacting. Through the machine, not as a field write: the
+        # hysteresis has one writer, and a second one leaves the next tick deciding against a state
+        # it does not hold.
+        route_hover(reader, events.HoverScrolled(nested=False))
 
 
 # --- nested scanning: hover a word INSIDE the tooltip → its own popup ---------------------------

@@ -14,10 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from saitenka.app.hover_machine import (
+from saitenka.runtime.hover import (
     Arm,
     Cancel,
     CloseNested,
+    Dwell,
     HideNested,
     HideTip,
     HoverDelays,
@@ -32,7 +33,6 @@ from saitenka.app.hover_machine import (
     elapsed,
     refused,
 )
-from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
 DELAYS = HoverDelays(scan=0.2, hide=0.4, switch=0.3)
 
@@ -68,7 +68,7 @@ def test_switching_to_another_word_arms_a_dwell_instead_of_switching() -> None:
     result = turn(hover=0, word=1)
 
     assert not kinds(result.decisions, ShowWord)
-    assert kinds(result.decisions, Arm) == [Arm(LifecycleTimerKind.HOVER_SWITCH, 0.3, SwitchTo(1))]
+    assert kinds(result.decisions, Arm) == [Arm(Dwell.SWITCH, 0.3, SwitchTo(1))]
     assert result.state.word_target == 1
 
 
@@ -106,7 +106,7 @@ def test_returning_to_the_shown_word_cancels_the_pending_switch() -> None:
     result = decide(armed, HoverObservation(hover=0, word=0), DELAYS)
 
     assert result.state.word_target is None
-    assert Cancel(LifecycleTimerKind.HOVER_SWITCH) in result.decisions
+    assert Cancel(Dwell.SWITCH) in result.decisions
 
 
 # --- lingering -----------------------------------------------------------------------------------
@@ -116,7 +116,7 @@ def test_leaving_the_word_lingers_rather_than_hiding_at_once() -> None:
     result = turn(hover=0, word=-1)
 
     assert not kinds(result.decisions, RetireWord)
-    assert kinds(result.decisions, Arm) == [Arm(LifecycleTimerKind.TOOLTIP_HIDE, 0.4, HideTip())]
+    assert kinds(result.decisions, Arm) == [Arm(Dwell.HIDE_TIP, 0.4, HideTip())]
     assert result.state.tip_hide_pending
 
 
@@ -137,11 +137,11 @@ def test_the_cursor_on_either_popup_keeps_the_tooltip_alive(region: str) -> None
     result = decide(pending, HoverObservation(hover=0, word=-1, **{region: True}), DELAYS)
 
     assert not result.state.tip_hide_pending
-    assert Cancel(LifecycleTimerKind.TOOLTIP_HIDE) in result.decisions
+    assert Cancel(Dwell.HIDE_TIP) in result.decisions
 
 
 def test_nothing_hovered_decides_nothing() -> None:
-    assert turn(hover=-1, word=-1).decisions == (Cancel(LifecycleTimerKind.SCAN_OPEN),)
+    assert turn(hover=-1, word=-1).decisions == (Cancel(Dwell.OPEN_SCAN),)
 
 
 def test_an_elapsed_linger_retires_the_hover() -> None:
@@ -160,7 +160,7 @@ def test_resting_on_a_scan_cell_arms_its_open_dwell() -> None:
     scan = cell("本")
     result = turn(hover=0, word=-1, over_tip=True, scan=scan)
 
-    assert kinds(result.decisions, Arm) == [Arm(LifecycleTimerKind.SCAN_OPEN, 0.2, OpenScan(scan))]
+    assert kinds(result.decisions, Arm) == [Arm(Dwell.OPEN_SCAN, 0.2, OpenScan(scan))]
     assert result.state.scan_target == "本"
 
 
@@ -183,7 +183,7 @@ def test_an_elapsed_scan_dwell_opens_the_popup_for_the_cell_it_was_armed_on() ->
 def test_leaving_the_cells_lingers_the_nested_popup_then_hides_it() -> None:
     result = turn(hover=0, word=-1, over_tip=True, nest_open=True)
 
-    assert kinds(result.decisions, Arm) == [Arm(LifecycleTimerKind.NESTED_HIDE, 0.4, HideNested())]
+    assert kinds(result.decisions, Arm) == [Arm(Dwell.HIDE_NESTED, 0.4, HideNested())]
     assert result.state.nest_hide_pending
     assert elapsed(result.state, HideNested()).decisions == (CloseNested(),)
 
@@ -194,7 +194,7 @@ def test_the_cursor_on_the_nested_popup_keeps_it_alive() -> None:
     result = decide(pending, HoverObservation(hover=0, over_nest=True, nest_open=True), DELAYS)
 
     assert not result.state.nest_hide_pending
-    assert Cancel(LifecycleTimerKind.NESTED_HIDE) in result.decisions
+    assert Cancel(Dwell.HIDE_NESTED) in result.decisions
     assert result.state.scan_target is None
 
 

@@ -470,6 +470,15 @@ class FakeIPC:
             reactor.handle(envelope)
         return reactor.state.subtitle
 
+    def route_session_interaction(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.INTERACTION` port, refusal included — as above."""
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.interaction
+
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
     """The ``{key: message}`` map mpv would hold after registration, reconstructed from the recorded
