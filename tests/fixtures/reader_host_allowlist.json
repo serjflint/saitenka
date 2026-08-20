@@ -1,6 +1,5 @@
 {
-  "saitenka.app.commands.attach": 3,
-  "saitenka.app.launch.run": 4,
+  "saitenka.app.launch.run": 1,
   "saitenka.app.miner": 1,
   "saitenka.app.reader_deps": 2,
   "saitenka.app.session_runtime": 1

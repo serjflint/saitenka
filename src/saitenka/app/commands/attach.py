@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from saitenka.app.config import ReaderOptions
+    from saitenka.app.episode_reslot import ReslotPorts, WatchPorts
 
 
 def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
@@ -95,17 +96,17 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
 
 
 def _finish_attach_subtitle_startup(
-    reader, ipc, startup, cfg: ProviderConfig, *, fetch_in_background: tuple[str, ...]
+    ports: ReslotPorts, ipc, startup, cfg: ProviderConfig, *, fetch_in_background: tuple[str, ...]
 ) -> None:
     if startup is not None:
         with otel_metrics.traced("startup.subtitle_mode_configure"):
-            reader.configure_subtitle_mode(startup, slang=cfg.slang)
+            ports.configure_mode(startup, slang=cfg.slang)
     with otel_metrics.traced("startup.subtitle_index"):
-        reader.rebuild_sub_index()
+        ports.rebuild_index()
     from saitenka.app.subselect import configure_providers, provider_fetch_factory
 
     configure_providers(
-        reader.configure_subtitle_retry, reader.configure_sub_picker, cfg
+        ports.configure_retry, ports.configure_picker, cfg
     )  # shared with run: manual re-sync retry + Ctrl+J source picker
     if not fetch_in_background:
         return
@@ -113,10 +114,10 @@ def _finish_attach_subtitle_startup(
     if not video_path:
         return
     background_fetch = provider_fetch_factory(fetch_in_background, cfg)
-    reader.fetch_japanese_subs_async(background_fetch(str(video_path)))
+    ports.fetch_japanese(background_fetch(str(video_path)))
 
 
-def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
+def _attach_reslot(ports: ReslotPorts, ipc, path: Path, cfg: ProviderConfig) -> None:
     """Re-establish Japanese subs when the user's mpv advances to the next episode in ATTACH mode
     (#100). Reactive only — fired from mpv's ``file-loaded`` (attach never sets ``advance_hook``; the
     user/SyncPlay owns playback, the #62 gate). Closes the finished stats row, rebinds the leak-free
@@ -126,7 +127,6 @@ def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
     from dataclasses import replace
 
     from saitenka import otel_metrics
-    from saitenka.app import session_stats
     from saitenka.app.jimaku import parse_filename
     from saitenka.app.subselect import (
         AttachSubtitleOptions,
@@ -143,8 +143,8 @@ def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
     fetch_background: tuple[str, ...] = ()
     with otel_metrics.traced("subtitle.reslot") as span:
         span.set("mode", "attach")
-        reader.finish_session_stats()  # close the finished episode's row before the recorder resets
-        reader.rebind_episode()
+        ports.finish_stats()  # close the finished episode's row before the recorder resets
+        ports.rebind_episode()
         span.set("externals_dropped", remove_external_sub_tracks(ipc))
         try:
             startup, status, fetch_background = prepare_attach_startup(
@@ -163,20 +163,17 @@ def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
         except Exception:  # never let sub selection break following the advance
             log.warning("attach re-slot sub selection failed", exc_info=True)
         _finish_attach_subtitle_startup(
-            reader, ipc, startup, ep_cfg, fetch_in_background=fetch_background
+            ports, ipc, startup, ep_cfg, fetch_in_background=fetch_background
         )
-        session_stats.start(
-            reader.episode,
-            enabled=reader.options.stats.enabled,
-            path=lambda: reader._prop("path"),
-            arm=reader.arm_session_persist,
-        )  # fresh row; identity read from mpv's now-current path
-        reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
+        ports.start_stats()  # fresh row; identity read from mpv's now-current path
+        ports.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
         span.set("active", (startup.active if startup else None) or "none")
     log.info("attach re-slot onto %s: %s", path.name, status or "no subtitle selection")
 
 
-def _install_attach_reslot_hook(reader, ipc, cfg: ProviderConfig) -> None:
+def _install_attach_reslot_hook(
+    ports: ReslotPorts, watch: WatchPorts, ipc, cfg: ProviderConfig
+) -> None:
     """#100 in attach: follow the user's mpv to the next episode (native autoload/playlist advance) and
     re-establish JP subs via :func:`_attach_reslot`, so watching continues in Japanese without a manual
     re-attach. Reactive only (``reslot_hook`` on ``file-loaded``) — attach never sets ``advance_hook``;
@@ -186,9 +183,9 @@ def _install_attach_reslot_hook(reader, ipc, cfg: ProviderConfig) -> None:
         return
 
     def _hook(loaded_path: Path) -> None:
-        _attach_reslot(reader, ipc, loaded_path, cfg)
+        _attach_reslot(ports, ipc, loaded_path, cfg)
 
-    reader.install_reslot_hook(_hook, initial=Path(str(current_path)))
+    watch.install_reslot_hook(_hook, initial=Path(str(current_path)))
 
 
 def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay an individual parameter
@@ -373,9 +370,13 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         tsukihime=bool(th.get("enabled", False)),
     )
     _finish_attach_subtitle_startup(
-        reader, ipc, subtitle_startup, provider_cfg, fetch_in_background=fetch_jimaku_in_background
+        reader.reslot_ports,
+        ipc,
+        subtitle_startup,
+        provider_cfg,
+        fetch_in_background=fetch_jimaku_in_background,
     )
-    _install_attach_reslot_hook(reader, ipc, provider_cfg)
+    _install_attach_reslot_hook(reader.reslot_ports, reader.watch_ports, ipc, provider_cfg)
     reader.load_deps_async(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "

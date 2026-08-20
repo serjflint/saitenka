@@ -23,6 +23,7 @@ from saitenka.app import (
     backlog,
     card_preview,
     cue_annotation,
+    episode_reslot,
     geometry_refresh,
     help_intents,
     help_overlay,
@@ -2205,6 +2206,33 @@ class Reader:
     def _record_capture(self) -> None:
         if self.episode.session_recorder is not None:
             self.episode.session_recorder.record_capture()
+
+    @property
+    def reslot_ports(self) -> episode_reslot.ReslotPorts:
+        """What re-slotting the overlay onto a newly loaded episode does."""
+        return episode_reslot.ReslotPorts(
+            ipc=self.ipc,
+            finish_stats=self.finish_session_stats,
+            start_stats=self._open_session_history,
+            rebind_episode=self.rebind_episode,
+            rebuild_index=self.rebuild_sub_index,
+            configure_mode=self.configure_subtitle_mode,
+            configure_retry=self.configure_subtitle_retry,
+            configure_picker=self.configure_sub_picker,
+            fetch_japanese=self.fetch_japanese_subs_async,
+            start_prefetch=self.start_prefetch,
+            toast=self._toast,
+        )
+
+    @property
+    def watch_ports(self) -> episode_reslot.WatchPorts:
+        """What wiring the follow-mpv-onto-the-next-episode hooks needs."""
+        return episode_reslot.WatchPorts(
+            install_reslot_hook=self.install_reslot_hook,
+            set_advance_hook=lambda hook: setattr(self, "advance_hook", hook),
+            prop=self._prop,
+            current_media_path=self.current_media_path,
+        )
 
     @property
     def tip_ports(self) -> TipPorts:

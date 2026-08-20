@@ -58,35 +58,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/commands/attach.py::_attach_reslot"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/commands/attach.py::_finish_attach_subtitle_startup"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/commands/attach.py::_install_attach_reslot_hook"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/controller.py::Reader.__init__"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/launch/run.py::_execute_reader_session"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_install_watch_hooks"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_start_run_provider_fetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::reslot_to_current"
     ],
     [
       "reader-parameter",

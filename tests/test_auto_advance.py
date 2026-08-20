@@ -103,7 +103,14 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
         session_stats, "start", lambda _episode, *, path, **_kw: started.append(str(path()))
     )
 
-    cli_run.reslot_to_current(reader, {}, cur, tmp_path, 0, cli_run.RunSubtitleOptions(slang="ja"))
+    cli_run.reslot_to_current(
+        reader.reslot_ports,
+        {},
+        cur,
+        tmp_path,
+        0,
+        cli_run.RunSubtitleOptions(slang="ja"),
+    )
 
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)  # mpv already loaded it
     assert reader.episode is not episode_before  # a fresh EpisodeContext…
@@ -140,7 +147,7 @@ def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
     monkeypatch.setattr(session_stats, "start", lambda *_a, **_kw: None)
 
     cli_run.reslot_to_current(
-        reader,
+        reader.reslot_ports,
         {},
         cur,
         tmp_path,
@@ -299,7 +306,8 @@ def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path):
     ipc = FakeIPC()
     reader = Reader(ipc)
     cli_run._install_watch_hooks(
-        reader,
+        reader.reslot_ports,
+        reader.watch_ports,
         {},
         tmp_path / "Show 01.mkv",
         tmp_path,
@@ -316,7 +324,8 @@ def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path):
     ipc = FakeIPC()
     reader = Reader(ipc)
     cli_run._install_watch_hooks(
-        reader,
+        reader.reslot_ports,
+        reader.watch_ports,
         {},
         tmp_path / "Show 01.mkv",
         tmp_path,

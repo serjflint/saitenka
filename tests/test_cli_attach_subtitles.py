@@ -4,6 +4,7 @@ import util
 
 from saitenka.app import subselect
 from saitenka.app.commands import attach as attach_commands
+from saitenka.app.episode_reslot import ReslotPorts
 from saitenka.app.subtitle_modes import SubtitleStartup, SubtitleTracks
 from saitenka.runtime.events import SubtitleTracksDiscovered
 
@@ -32,6 +33,23 @@ class Reader:
     def rebuild_sub_index(self):
         self.rebuilt = True
 
+    @property
+    def reslot_ports(self):
+        """The same shape `Reader.reslot_ports` builds — the seam these hooks are driven through."""
+        return ReslotPorts(
+            ipc=None,
+            finish_stats=lambda: None,
+            start_stats=lambda: None,
+            rebind_episode=lambda: None,
+            rebuild_index=self.rebuild_sub_index,
+            configure_mode=lambda *_a, **_kw: None,
+            configure_retry=self.configure_subtitle_retry,
+            configure_picker=self.configure_sub_picker,
+            fetch_japanese=self.fetch_japanese_subs_async,
+            start_prefetch=lambda: None,
+            toast=lambda *_a, **_kw: None,
+        )
+
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):
     reader, ipc = Reader(), IPC()
@@ -44,7 +62,7 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
     monkeypatch.setattr(subselect, "fetch_provider_path", fetch)
 
     attach_commands._finish_attach_subtitle_startup(
-        reader,
+        reader.reslot_ports,
         ipc,
         None,
         subselect.ProviderConfig(
@@ -71,7 +89,7 @@ def test_attach_configures_retry_even_when_startup_fetch_is_unneeded():
     reader, ipc = Reader(), IPC()
 
     attach_commands._finish_attach_subtitle_startup(
-        reader,
+        reader.reslot_ports,
         ipc,
         None,
         subselect.ProviderConfig(enabled_providers=("tsukihime",), resync=False),
@@ -144,7 +162,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     monkeypatch.setattr(reader, "fetch_japanese_subs_async", lambda fetch: background.append(fetch))
 
     attach_commands._attach_reslot(
-        reader,
+        reader.reslot_ports,
         ipc,
         Path("/videos/Show - 03.mkv"),
         subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={}, jimaku=True),

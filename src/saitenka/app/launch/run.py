@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from saitenka import otel_metrics
-from saitenka.app import player_supervisor, session_stats
+from saitenka.app import player_supervisor
 from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config, subtitle_geometry_options
 from saitenka.app.continuity import resolve_sibling
@@ -29,6 +29,8 @@ from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from saitenka.app.episode_reslot import ReslotPorts, WatchPorts
 
 log = logging.getLogger(__name__)
 
@@ -554,7 +556,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
 
 
 def _start_run_provider_fetch(
-    reader,
+    ports: ReslotPorts,
     cfg: dict,
     video_path: Path,
     subs: RunSubtitleOptions,
@@ -579,10 +581,10 @@ def _start_run_provider_fetch(
         tsukihime_config=tsukihime_cfg,
     )
     configure_providers(
-        reader.configure_subtitle_retry, reader.configure_sub_picker, pcfg
+        ports.configure_retry, ports.configure_picker, pcfg
     )  # shared with attach: manual re-sync retry + Ctrl+J picker
     if providers:
-        reader.fetch_japanese_subs_async(provider_fetch_factory(providers, pcfg)(str(video_path)))
+        ports.fetch_japanese(provider_fetch_factory(providers, pcfg)(str(video_path)))
 
 
 def _prefetch_sibling_subs(
@@ -672,8 +674,9 @@ def _advance_at_eof(
     return True
 
 
-def _install_watch_hooks(
-    reader,
+def _install_watch_hooks(  # noqa: PLR0913 -- the session's ports plus the run's own options
+    ports: ReslotPorts,
+    watch: WatchPorts,
     cfg: dict,
     video_path: Path,
     tmp: Path,
@@ -693,12 +696,12 @@ def _install_watch_hooks(
         return
 
     def _reslot(path: Path) -> None:
-        reslot_to_current(reader, cfg, path, tmp, dur, subs)
+        reslot_to_current(ports, cfg, path, tmp, dur, subs)
 
-    reader.install_reslot_hook(_reslot, initial=video_path)
+    watch.install_reslot_hook(_reslot, initial=video_path)
     if auto_advance:
-        reader.advance_hook = lambda: _advance_at_eof(
-            reader._prop, reader.current_media_path, reader.ipc
+        watch.set_advance_hook(
+            lambda: _advance_at_eof(watch.prop, watch.current_media_path, ports.ipc)
         )
     # Warm episode 2's subs while episode 1 plays, so the first advance re-slots cache-warm (no cold gap).
     _prefetch_sibling_subs(
@@ -707,7 +710,12 @@ def _install_watch_hooks(
 
 
 def reslot_to_current(
-    reader, cfg: dict, video_path: Path, tmp: Path, dur: int, subs: RunSubtitleOptions
+    ports: ReslotPorts,
+    cfg: dict,
+    video_path: Path,
+    tmp: Path,
+    dur: int,
+    subs: RunSubtitleOptions,
 ) -> None:
     """Re-index the overlay onto mpv's CURRENT (already-loaded) file — the reactive #100 re-slot fired
     from ``file-loaded``, so it covers a native autoload/playlist advance and our own eof loadfile
@@ -721,7 +729,7 @@ def reslot_to_current(
     from saitenka.app.subselect import remove_external_sub_tracks
     from saitenka.app.subtitle_modes import select_initial
 
-    ipc = reader.ipc
+    ipc = ports.ipc
     title, parsed_episode = parse_filename(video_path)
     # One span over the whole re-slot: it's a discrete, non-trivial cost on the reader thread (a cold
     # re-slot resolves+ffsubsync-resyncs subs, ~1.3s live), and its attributes make a wrong-track
@@ -738,8 +746,8 @@ def reslot_to_current(
             episode=parsed_episode,
         )
         # write the just-finished episode complete BEFORE the recorder resets
-        reader.finish_session_stats()
-        reader.rebind_episode()
+        ports.finish_stats()
+        ports.rebind_episode()
         # drop the carried-over launch --sub-file (a prior episode's srt); a nonzero count each advance
         # is the carried-over-sub signature
         span.set("externals_dropped", remove_external_sub_tracks(ipc))
@@ -771,20 +779,14 @@ def reslot_to_current(
             startup.tracks.jp_sid,
             startup.tracks.en_sid,
         )
-        reader.rebuild_sub_index()
-        reader.configure_subtitle_mode(startup, slang=subs.slang)
-        session_stats.start(
-            reader.episode,
-            enabled=reader.options.stats.enabled,
-            path=lambda: reader._prop("path"),
-            arm=reader.arm_session_persist,
-        )  # fresh row; identity read from mpv's now-current path
+        ports.rebuild_index()
+        ports.configure_mode(startup, slang=subs.slang)
+        ports.start_stats()  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
-            reader._toast(
-                "Fetching Japanese subtitles…"
-            )  # background fetch below; tell the user to wait
+            # background fetch below; tell the user to wait
+            ports.toast("Fetching Japanese subtitles…")
         _start_run_provider_fetch(
-            reader,
+            ports,
             cfg,
             video_path,
             subs,
@@ -793,7 +795,7 @@ def reslot_to_current(
             jimaku_title=title,
             episode=parsed_episode,
         )
-        reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
+        ports.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
         _prefetch_sibling_subs(  # warm episode N+1 so the next re-slot is cache-warm, not a cold fetch
             cfg, video_path, enabled=True, jimaku_key=subs.jimaku_key, resync=subs.resync
         )
@@ -1176,7 +1178,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     with otel_metrics.traced("startup.subtitle_mode_configure"):
         reader.configure_subtitle_mode(subtitle_startup, slang=slang)
     _start_run_provider_fetch(
-        reader,
+        reader.reslot_ports,
         cfg,
         video_path,
         subs,
@@ -1187,7 +1189,8 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     )
 
     _install_watch_hooks(
-        reader,
+        reader.reslot_ports,
+        reader.watch_ports,
         cfg,
         video_path,
         tmp,
