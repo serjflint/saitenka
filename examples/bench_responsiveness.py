@@ -1120,10 +1120,10 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     reader = Reader(cast("MpvIPC", ipc))
     reader.osd = OSD
     cues = [Cue(i * 2.0, i * 2.0 + 1.8, f"これは{i}番目の字幕です") for i in range(60)]
-    reader._sub_index = CueIndex(cues)
+    reader.episode.sub_index = CueIndex(cues)
     reader.sub_text = cues[0].text
-    reader._backlog_store = backlog.BacklogStore(tmp / "backlog.sqlite")
-    reader._mined_store = mined_store.MinedCardStore(tmp / "mined.sqlite")
+    reader.session.backlog_store = backlog.BacklogStore(tmp / "backlog.sqlite")
+    reader.session.mined_store = mined_store.MinedCardStore(tmp / "mined.sqlite")
     reader.mine_cfg = SimpleNamespace(deck="Mining")
     miner = Miner(reader)
 
@@ -1522,7 +1522,7 @@ def run_timeline(
         head_prefetch_lookahead=head_prefetch,
     )
     reader.osd = OSD
-    reader._sub_index = CueIndex(cues)
+    reader.episode.sub_index = CueIndex(cues)
     reader.start_prefetch()
 
     from saitenka.app.tokenize import SKIP_POS
@@ -1641,7 +1641,7 @@ def run_timeline(
         rss_growth = rss_peak - rss_base
         print(
             f"head-prefetch lookahead: {head_prefetch} cues   speculative heads built: "
-            f"{reader._head_built}   RSS: base {rss_base:.0f}MB -> peak {rss_peak:.0f}MB "
+            f"{reader.prefetch_state.head_built}   RSS: base {rss_base:.0f}MB -> peak {rss_peak:.0f}MB "
             f"(+{rss_growth:.0f}MB)"
         )
         print(
@@ -1655,7 +1655,7 @@ def run_timeline(
         )
         head_json = {
             "head_prefetch_lookahead": head_prefetch,
-            "heads_built": reader._head_built,
+            "heads_built": reader.prefetch_state.head_built,
             "render_warm": m_render_warm,
             "render_cold": m_render_cold,
             "rss_base_mb": rss_base,
@@ -1784,7 +1784,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
         head_prefetch_lookahead=head_prefetch,
     )
     reader.osd = OSD
-    reader._sub_index = CueIndex(cues)
+    reader.episode.sub_index = CueIndex(cues)
     if (
         workers > 0
     ):  # >0 pins the worker count (sweep the idle-warm capacity lever); 0 = per-build auto
@@ -1909,7 +1909,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
         print("no scroll frames")
     rss_growth = rss_peak - rss_base
     print(
-        f"speculative heads built: {reader._head_built}   "
+        f"speculative heads built: {reader.prefetch_state.head_built}   "
         f"RSS: base {rss_base:.0f}MB → peak {rss_peak:.0f}MB (+{rss_growth:.0f}MB)"
     )
     print(
@@ -1945,7 +1945,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
                     "scroll": m_sc,
                     "scroll_jank": len(jank),
                     "scroll_total": total_scroll,
-                    "heads_built": reader._head_built,
+                    "heads_built": reader.prefetch_state.head_built,
                     "rss_base_mb": rss_base,
                     "rss_peak_mb": rss_peak,
                 },

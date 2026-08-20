@@ -389,7 +389,7 @@ def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
     monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
-    reader._help_open = True
+    reader.help.open = True
     ipc.events = [
         {"event": "client-message", "args": [SUB_PICKER_MSG]},
         {"event": "client-message", "args": [HELP_CLOSE_MSG]},
@@ -398,7 +398,7 @@ def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
 
     reader._drain_events()
 
-    assert not reader._help_open
+    assert not reader.help.open
     assert reader.sub_picker.open
 
 

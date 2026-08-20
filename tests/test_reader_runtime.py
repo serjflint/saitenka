@@ -153,7 +153,7 @@ def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request
     ipc = FakeIPC()
     reader = create_reader(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
-    reader._help_open = True
+    reader.help.open = True
     calls: list[int] = []
     monkeypatch.setattr(
         "saitenka.app.surfaces.route_scroll", lambda _reader, steps: calls.append(steps)

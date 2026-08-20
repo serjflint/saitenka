@@ -207,7 +207,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
-    assert anki.added == [] and "読む" in r._mined  # deduped, not added; ⊕→✓ flipped
+    assert anki.added == [] and "読む" in r.session.mined  # deduped, not added; ⊕→✓ flipped
 
 
 def test_build_note_card_format_uses_passed_markers():
@@ -516,7 +516,7 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     r._mine_token(tok)
     assert anki.added == []  # dedupe: nothing added
     assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r._mined  # ⊕ flips to ✓
+    assert "読む" in r.session.mined  # ⊕ flips to ✓
 
 
 def test_preview_replay_key_is_tooltip_scoped():
@@ -858,10 +858,10 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     r = Reader(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
-        tooltip_panel.group_mined_of(tok, r._mined, r.dict_set) == ()
+        tooltip_panel.group_mined_of(tok, r.session.mined, r.dict_set) == ()
     )  # nothing mined yet → no per-group flags
-    r._mined.add("退く")
-    assert tooltip_panel.group_mined_of(tok, r._mined, r.dict_set) == (
+    r.session.mined.add("退く")
+    assert tooltip_panel.group_mined_of(tok, r.session.mined, r.dict_set) == (
         True,
         True,
     )  # both entries share expression 退く

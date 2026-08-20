@@ -442,7 +442,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         assert native.native_geometry is not None
         native.native_geometry.set_source(source_path, live=True)
         index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
-        native._sub_index = index
+        native.episode.sub_index = index
         latencies: list[float] = []
         baseline_latencies: list[float] = []
         cpu_latencies: list[float] = []

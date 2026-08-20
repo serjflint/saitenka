@@ -381,9 +381,9 @@ def update_prefetch(reader: Reader) -> None:
         return
     engaged = bool(reader._prop("pause")) or reader._mouse_in
     key = (reader.sub_text, engaged)
-    if key == reader._prefetch_key:
+    if key == reader.prefetch_state.key:
         return
-    reader._prefetch_key = key
+    reader.prefetch_state.key = key
     state = reader.prefetch_state
     gen = state.cancel()
     cands = _candidates(reader.tokens, reader.styles, reader.tokenizer)
@@ -399,7 +399,10 @@ def update_prefetch(reader: Reader) -> None:
         jobs.extend(
             _lookahead_items(
                 LookaheadCues(
-                    reader._sub_index, reader.sub_text, reader._nav_idx, reader.prefetch_lookahead
+                    reader.episode.sub_index,
+                    reader.sub_text,
+                    reader.episode.nav_idx,
+                    reader.prefetch_lookahead,
                 ),
                 reader.tokenizer,
                 gen,
@@ -526,7 +529,7 @@ def _head_prefetch_items(
     probe_budget = _MAX_HEAD_TOKEN_PROBES
     cue_limit = min(max(0, reader.head_prefetch_lookahead), reader.prefetch_state.head_queue_max)
     for text in upcoming_cue_texts(
-        reader._sub_index, cue_limit, text=reader.sub_text, preferred=reader._nav_idx
+        reader.episode.sub_index, cue_limit, text=reader.sub_text, preferred=reader.episode.nav_idx
     ):
         found, probes = _head_candidates_for_text(
             text,
@@ -566,7 +569,7 @@ def warm_episode_tokens(reader: Reader) -> None:
     of playback, not just a short window). Best-effort — a key mismatch (mpv re-wrapping a line) just
     re-tokenizes that cue on demand; a track switch (new index object) supersedes a stale warm. No-op
     without prefetch, a dictionary, or an index; skips an index already warmed."""
-    idx = reader._sub_index
+    idx = reader.episode.sub_index
     if not reader.prefetch or reader.dict_set is None or idx is None or reader._warmed_index is idx:
         return
     reader._warmed_index = idx
@@ -600,7 +603,7 @@ def episode_warm_ports(reader: Reader) -> EpisodeWarmPorts:
     return EpisodeWarmPorts(
         stop=reader._stop,
         token_cache=reader.token_cache,
-        current_index=lambda: reader._sub_index,
+        current_index=lambda: reader.episode.sub_index,
         normalise=reader._cue_norm,
         tokenize=reader._tokenize_cue,
     )

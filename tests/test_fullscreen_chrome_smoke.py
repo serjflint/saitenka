@@ -78,13 +78,13 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> Reader:
     r.lifecycle_surfaces = LifecycleSurfaces(r.ov)  # the fenced path the chrome presents through
     r.osd = osd
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(12)]
-    r._sub_index = CueIndex(cues)
+    r.episode.sub_index = CueIndex(cues)
     r.sub_text = "cue 0"
     return r
 
 
 def _draw_help(r: Reader) -> None:
-    r._help_open = True
+    r.help.open = True
     r._redraw_help()
 
 

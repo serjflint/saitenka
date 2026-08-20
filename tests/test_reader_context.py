@@ -41,23 +41,23 @@ def test_reader_delegates_episode_fields_to_the_context():
     r = Reader(FakeIPC())
     # a nested field (episode.subtitle) and a direct one (episode) both read through…
     assert r.episode.subtitle.retry_active is False
-    assert r._nav_idx == r.episode.nav_idx == -1
+    assert r.episode.nav_idx == r.episode.nav_idx == -1
     # …and writes land on the owning context, under both the public and historical private names
     r.episode.subtitle.retry_active = True
-    r._nav_idx = 7
+    r.episode.nav_idx = 7
     assert (r.episode.subtitle.retry_active, r.episode.nav_idx) == (True, 7)
 
 
 def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     r = Reader(FakeIPC())
-    r._nav_idx = 9
-    r._sub_settle = r._sub_settle.begin()
+    r.episode.nav_idx = 9
+    r.episode.sub_settle = r.episode.sub_settle.begin()
     r.episode.subtitle.retry_active = True  # a nested-cluster field, migrated fully off the Reader
 
     r.episode = EpisodeContext()  # the re-slot move: one rebind resets every episode field
 
-    assert r._nav_idx == -1
-    assert r._sub_settle.open is False
+    assert r.episode.nav_idx == -1
+    assert r.episode.sub_settle.open is False
     assert r.episode.subtitle.retry_active is False
 
 
@@ -122,12 +122,12 @@ def test_session_state_survives_an_episode_reslot():
     reachability cache, the backlog handle) is durable — an episode swap must NOT reset it, or #100's
     re-slot would forget what's already in the deck on every file change."""
     r = Reader(FakeIPC())
-    r._mined.add("読む")
-    r._anki_cache = (123.0, True)
+    r.session.mined.add("読む")
+    r.session.anki_cache = (123.0, True)
     session_before = r.session
 
     r.episode = EpisodeContext()  # advance to the next file
 
     assert r.session is session_before  # same session object — not rebound
-    assert "読む" in r._mined  # deck knowledge carried across the episode boundary
-    assert r._anki_cache == (123.0, True)
+    assert "読む" in r.session.mined  # deck knowledge carried across the episode boundary
+    assert r.session.anki_cache == (123.0, True)

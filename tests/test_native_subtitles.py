@@ -635,7 +635,7 @@ def test_navigation_lands_on_the_target_cue_under_either_renderer(
     every test written against the other.
     """
     result, ipc, _backend = reader(tmp_path, native_visible=native_visible)
-    result._sub_index = CueIndex([Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")])
+    result.episode.sub_index = CueIndex([Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")])
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     result.hover = 0
@@ -1015,7 +1015,7 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     source.write_bytes(ASS_TWO)
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -1060,7 +1060,7 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     source.write_bytes(ASS_TWO)
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -1111,7 +1111,7 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
     )
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 5.0, "猫を見る"), Cue(3.0, 7.0, "犬も見る")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 5.0, "猫を見る"), Cue(3.0, 7.0, "犬も見る")))
     first = "Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0000,0000,0000,,猫を見る"
     second = "Dialogue: 1,0:00:03.00,0:00:07.00,Default,,0000,0000,0000,,犬も見る"
     ipc.props.update({"sub-text/ass-full": first, "sub-end": 5.0})
@@ -1151,7 +1151,7 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
 def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在")))
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -1176,7 +1176,7 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     )
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
 
     def submit(**kwargs) -> bool:
         completion = result._annotation_executor.run(kwargs["request"], threading.Event())

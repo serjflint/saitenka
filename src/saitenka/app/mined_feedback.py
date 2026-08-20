@@ -25,7 +25,7 @@ def mark_mined(reader: Reader, expression: str) -> None:
     """
     if not expression:
         return
-    reader._mined.add(expression)
+    reader.session.mined.add(expression)
     if reader.hover >= 0 and reader.tip.view.state is not None:
         token = reader.tokens[reader.hover]
         if expression in {token.lemma, token.surface}:

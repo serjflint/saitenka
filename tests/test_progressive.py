@@ -62,10 +62,12 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
     r.mine_cfg = object()
     try:
         r._request_mined_seed()
-        await_ready(lambda: bool(r._mined), "mined seed never published", pump=r._drain_events)
+        await_ready(
+            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+        )
 
-        assert r._mined == {"猫"}
-        assert r._mined.generation == 1
+        assert r.session.mined == {"猫"}
+        assert r.session.mined.generation == 1
         assert r._mined_seed_inflight is False
     finally:
         r.close()
@@ -98,10 +100,12 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
         r._mined_seed_inflight = False
         r.anki = new_anki
         r._request_mined_seed()
-        await_ready(lambda: bool(r._mined), "mined seed never published", pump=r._drain_events)
+        await_ready(
+            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+        )
 
-        assert r._mined == {"新しい"}
-        assert r._mined.generation == 1
+        assert r.session.mined == {"新しい"}
+        assert r.session.mined.generation == 1
         release.set()
         # Not a wait: drain repeatedly to give a late result the chance to arrive, then prove it
         # did not. A deadline helper would return on the first pass and assert nothing.
@@ -109,8 +113,8 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
             r._drain_events()
             time.sleep(0.001)
 
-        assert r._mined == {"新しい"}
-        assert r._mined.generation == 1
+        assert r.session.mined == {"新しい"}
+        assert r.session.mined.generation == 1
     finally:
         r.close()
         gateway.close()
@@ -139,14 +143,16 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
             "the failed seed never settled",
             pump=r._drain_events,
         )
-        assert r._mined == set()
+        assert r.session.mined == set()
 
         # The backoff is a named deadline now, so firing it *is* the retry — and asserting it was
         # armed proves the failure path scheduled one rather than silently giving up.
         assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
-        await_ready(lambda: bool(r._mined), "mined seed never published", pump=r._drain_events)
+        await_ready(
+            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+        )
 
-        assert attempts == 2 and r._mined == {"猫"}
+        assert attempts == 2 and r.session.mined == {"猫"}
     finally:
         r.close()
         gateway.close()

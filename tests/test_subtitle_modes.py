@@ -744,7 +744,7 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
         "jpn",
     ) in ipc.commands  # re-timed file re-selected
     assert reader.jp_sid == 9 and reader.subtitle_language == "jp"
-    assert reader._sub_index is not None  # rebuilt against the re-timed cues
+    assert reader.episode.sub_index is not None  # rebuilt against the re-timed cues
     # single-cue sub → window too small → falls back to a whole-file re-sync (still no provider query)
     assert "Re-timing subtitles from here…" in messages
 
@@ -818,7 +818,7 @@ def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path):
 
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 2
-    assert reader._sub_index is not None  # indexed from the dropped file
+    assert reader.episode.sub_index is not None  # indexed from the dropped file
 
 
 @pytest.mark.parametrize(
@@ -921,7 +921,7 @@ def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatc
 
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 2
-    assert reader._sub_index is not None
+    assert reader.episode.sub_index is not None
     assert messages == ["Marked current subtitles as Japanese"]
 
 
@@ -969,7 +969,7 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, m
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     old = _one_cue_index()
-    reader._sub_index = old
+    reader.episode.sub_index = old
     monkeypatch.setattr(reader, "_toast", lambda *_a: None)
     monkeypatch.setattr(  # the new track isn't resolvable at this instant
         "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
@@ -979,17 +979,17 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, m
 
     subtitle_modes._replace_japanese_track(reader.track_ports, path, "resynced")
 
-    assert reader._sub_index is old  # cues retained across the unresolved switch
+    assert reader.episode.sub_index is old  # cues retained across the unresolved switch
 
 
 def test_load_sub_index_retains_prior_cues_on_parse_failure(tmp_path):
     reader = Reader(FakeIPC())
     old = _one_cue_index()
-    reader._sub_index = old
+    reader.episode.sub_index = old
 
     reader.load_sub_index(tmp_path / "missing.srt")  # unreadable → load_index returns None
 
-    assert reader._sub_index is old  # a failed parse never blanks a good index
+    assert reader.episode.sub_index is old  # a failed parse never blanks a good index
 
 
 def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_path, monkeypatch):

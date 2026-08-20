@@ -965,7 +965,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
     tooltip._request_hover_metadata(r, index)
     original = requests[-1]
-    r._mined.add("__newly-mined__")  # bumps the generation because membership actually moved
+    r.session.mined.add("__newly-mined__")  # bumps the generation because membership actually moved
     tooltip.apply_hover_metadata(
         r,
         HoverMetadata(
@@ -977,7 +977,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
         ),
     )
 
-    assert requests[-1].key.mined_generation == r._mined.generation
+    assert requests[-1].key.mined_generation == r.session.mined.generation
     assert requests[-1].key.job_id == r.tip.view.job_id
 
 
@@ -1065,7 +1065,7 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(tok, tok.surface, mined=False, key=("old",), cap=r._tip_cap())
     )
-    r._prefetch_gen += 1
+    r.prefetch_state.gen += 1
     r._cancel_engaged_tooltip()
     assert r._request_engaged_tooltip(tooltip_engaged.NavigateRequest(tok.surface, id(old)))
     submitter.reject_next = True

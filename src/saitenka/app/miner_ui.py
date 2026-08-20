@@ -227,7 +227,7 @@ def hide_preview(reader: Reader) -> None:
     _release_preview_keys(
         reader.ipc,
         active_bindings(reader.keys, "preview"),
-        help_open=reader._help_open,
+        help_open=reader.help.open,
         tip_keys_bound=reader.tip.tip_keys_bound,
     )
 

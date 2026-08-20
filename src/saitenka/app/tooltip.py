@@ -232,9 +232,9 @@ def resolve_hover(reader: Reader, index: int) -> None:
     reader.tip.hover = HoverMetadata(
         terms=terms,
         span=span,
-        mined=is_mined(reader.tokens[index], reader._mined),
+        mined=is_mined(reader.tokens[index], reader.session.mined),
         group_mined=group_mined_of(
-            reader.tokens[index], reader._mined, reader.dict_set, extra_terms=terms
+            reader.tokens[index], reader.session.mined, reader.dict_set, extra_terms=terms
         ),
     )
 
@@ -247,9 +247,9 @@ def hover_key(reader: Reader, index: int) -> HoverMetadataKey:
     tooltip, with nothing failing at the seam.
     """
     return HoverMetadataKey(
-        reader._prefetch_gen,
+        reader.prefetch_state.gen,
         reader._dependency_generation,
-        reader._mined.generation,
+        reader.session.mined.generation,
         reader._current_cue_identity,
         index,
         reader.tip.view.job_id,
@@ -265,7 +265,7 @@ def _request_hover_metadata(reader: Reader, index: int) -> None:
             reader.tokenizer.name,
             tuple(reader.tokens),
             reader.dict_set,
-            reader._mined.snapshot(),
+            reader.session.mined.snapshot(),
         )
     )
 
@@ -288,8 +288,8 @@ def apply_hover_metadata(reader: Reader, result) -> None:
     )
     reader._draw_subtitle()
     if show_tooltip(reader, key.index):
-        if reader._session_recorder is not None:
-            reader._session_recorder.record_lookup()
+        if reader.episode.session_recorder is not None:
+            reader.episode.session_recorder.record_lookup()
         reader._sync_auto_translation()
 
 
@@ -333,8 +333,8 @@ def set_hover(reader: Reader, index: int) -> None:
     reader._draw_subtitle()
     if not show_tooltip(reader, index):
         return
-    if reader._session_recorder is not None:
-        reader._session_recorder.record_lookup()
+    if reader.episode.session_recorder is not None:
+        reader.episode.session_recorder.record_lookup()
     reader._sync_auto_translation()  # hovering a word → auto-reveal the translation
 
 

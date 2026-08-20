@@ -106,14 +106,14 @@ class SidebarView:
 
 
 def _active_index(reader: Reader) -> int:
-    index = reader._sub_index
+    index = reader.episode.sub_index
     if index is None:
         return -1
     return index.locate(
         text=reader.sub_text,
         sub_start=reader._get("sub-start"),
         time_pos=reader._get("time-pos"),
-        preferred=reader._nav_idx,
+        preferred=reader.episode.nav_idx,
     )
 
 
@@ -127,7 +127,7 @@ def view_of(reader: Reader) -> SidebarView:
     return SidebarView(
         state=reader.sidebar,
         active=_active_index(reader),
-        index=reader._sub_index,
+        index=reader.episode.sub_index,
         language=reader.subtitle_language,
         osd=reader.osd,
         chrome_scale=reader.chrome_scale,
@@ -135,7 +135,7 @@ def view_of(reader: Reader) -> SidebarView:
         video=reader._get("path"),
         backlog=lambda: _ensure_store(reader),
         mined=lambda: reader.mined_store,
-        mined_exists=reader._mined_store is not None or mined_store.db_path().exists(),
+        mined_exists=reader.session.mined_store is not None or mined_store.db_path().exists(),
         scorer=reader.scorer,
         tokenizer=reader.tokenizer,
         analysis=reader.analysis.current,
@@ -144,9 +144,11 @@ def view_of(reader: Reader) -> SidebarView:
 
 
 def _ensure_store(reader: Reader) -> BacklogStore:
-    store = reader._backlog_store  # local narrows cleanly (the shim's __get__ re-widens each read)
+    store = (
+        reader.session.backlog_store
+    )  # local narrows cleanly (the shim's __get__ re-widens each read)
     if store is None:
-        store = reader._backlog_store = BacklogStore()
+        store = reader.session.backlog_store = BacklogStore()
     return store
 
 
@@ -654,5 +656,5 @@ def mine_active(view: SidebarView, *, backlog_exists: bool) -> None:
 def mark_active_mined(reader: Reader) -> None:
     mine_active(
         view_of(reader),
-        backlog_exists=reader._backlog_store is not None or db_path().exists(),
+        backlog_exists=reader.session.backlog_store is not None or db_path().exists(),
     )

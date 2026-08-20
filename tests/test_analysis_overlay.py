@@ -36,7 +36,7 @@ def reader():
     gateway = runtime_gateway(ipc)
     reader = Reader(ipc, scorer=Scorer(known=KnownWords.from_set(["本"])))
     reader.declare_subtitle(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
-    reader._sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
     yield reader
     reader.close()
     gateway.close()
@@ -80,7 +80,7 @@ def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
 
 
 def test_no_index_reports_unavailable(reader):
-    reader._sub_index = None  # the real SSOT for "no analysable JP cues"
+    reader.episode.sub_index = None  # the real SSOT for "no analysable JP cues"
 
     reader._handle(ANALYSIS_MSG)
     assert reader.analysis.status == "Japanese track unavailable"
@@ -129,7 +129,7 @@ def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
     assert reader.analysis.generation == 3
     _finish(reader)
 
-    reader._sub_index = CueIndex([Cue(0, 1, "彼は映画を見る。")])
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "彼は映画を見る。")])
     reader.invalidate_analysis()
     assert reader.analysis.generation == 5
     _finish(reader)
@@ -152,15 +152,15 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
         return analyze_cues(cues, scorer, tokenizer)
 
     monkeypatch.setattr(analysis_overlay, "analyze_cues", analyze)
-    reader._sub_index = CueIndex([Cue(0, 1, "古い一")])
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "古い一")])
     _toggle_analysis(reader)
     assert old_started[0].wait(1)
 
-    reader._sub_index = CueIndex([Cue(0, 1, "古い二")])
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "古い二")])
     reader.invalidate_analysis()
     assert old_started[1].wait(1)
 
-    reader._sub_index = CueIndex([Cue(0, 1, "新しい")])
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "新しい")])
     reader.invalidate_analysis()
     assert reader.analysis.status == "Analyzing…"
 

@@ -356,8 +356,8 @@ class Miner:
             # --- mine-time add_note seam (shared by #253 note-id retention + #93 word-audio) -------
             note_id = r.anki.add_note(note)
             self._persist_mined(note_id, card, video)
-            if r._session_recorder is not None:
-                r._session_recorder.record_mined()
+            if r.episode.session_recorder is not None:
+                r.episode.session_recorder.record_mined()
             r._mark_mined(card.expression)
             from saitenka.app import sidebar
 
@@ -411,8 +411,8 @@ class Miner:
                 else:
                     dup += 1
             r._toast(f"mined {mined} · {dup} dup", "ok" if mined else "warn")
-            if r._session_recorder is not None:
-                r._session_recorder.record_mined(mined)
+            if r.episode.session_recorder is not None:
+                r.episode.session_recorder.record_mined(mined)
         except AnkiError as e:
             r._toast(f"bulk failed: {e}", "err")
 
@@ -439,4 +439,4 @@ class Miner:
 
     def seed_mined(self) -> None:
         """Pre-load already-mined expressions from the mining deck."""
-        self.r._mined.update(self.mined_expressions(self.r.anki, self.r.mine_cfg) or ())
+        self.r.session.mined.update(self.mined_expressions(self.r.anki, self.r.mine_cfg) or ())

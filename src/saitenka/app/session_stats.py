@@ -328,10 +328,10 @@ class SessionRecorder:
 
 
 def start(reader: Reader) -> None:
-    if reader._session_recorder is not None or not reader.options.stats.enabled:
+    if reader.episode.session_recorder is not None or not reader.options.stats.enabled:
         return
     try:
-        reader._session_recorder = SessionRecorder(str(reader._prop("path") or ""))
+        reader.episode.session_recorder = SessionRecorder(str(reader._prop("path") or ""))
     except (OSError, sqlite3.Error):
         log.warning("session history unavailable", exc_info=True)
         return

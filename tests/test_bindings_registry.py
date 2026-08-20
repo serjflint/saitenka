@@ -150,11 +150,11 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.osd = (1920, 1080)
     r._register_keybinds()
-    assert not r._help_open
+    assert not r.help.open
 
     press(r, ipc, r.keys.help_key)
 
-    assert r._help_open  # the keypress drove the real handler to mutate real state
+    assert r.help.open  # the keypress drove the real handler to mutate real state
 
 
 def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypatch):

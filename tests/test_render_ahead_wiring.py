@@ -143,7 +143,7 @@ def test_stale_completion_from_a_word_switch_is_not_published():
     panel = _RecordingPanel()
     r.tip.view.state = panel  # type: ignore[assignment]
     r._request_render_ahead(r.tip.view, 1)
-    r._prefetch_gen += 1
+    r.prefetch_state.gen += 1
     r._cancel_render_ahead()
     before = r.tip.view.scroll
     r._render_ahead_submit.finish()

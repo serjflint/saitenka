@@ -126,7 +126,7 @@ def test_every_surface_state_exposes_open(spec):
 
 def test_scroll_command_routes_to_open_help(monkeypatch):
     reader = Reader(_FakeIPC())
-    reader._help_open = True
+    reader.help.open = True
     steps: list[int] = []
     # The help surface routes the wheel into the help *command*; paging is `help_intents`' call.
     monkeypatch.setattr(reader, "_run_help_command", lambda command: steps.append(command))

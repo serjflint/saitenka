@@ -87,7 +87,7 @@ def panel_key(
         anki_ok(reader.anki, reader._anki_capability),
         mined,
         reader._tts_ok,
-        group_mined_of(tok, reader._mined, reader.dict_set, extra_terms=phrase)
+        group_mined_of(tok, reader.session.mined, reader.dict_set, extra_terms=phrase)
         if group_mined is None
         else group_mined,
         # the stacked phrase terms are part of the base panel's identity (数 alone vs 数 under 数ある)
@@ -310,7 +310,7 @@ def panel_for(
     OrderedDict.get() is NOT atomic, so cache hits also acquire the lock briefly to move_to_end.
     Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
     if mined is None:
-        mined = is_mined(tok, reader._mined)
+        mined = is_mined(tok, reader.session.mined)
     key = panel_key(
         reader,
         tok,

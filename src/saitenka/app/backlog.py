@@ -494,16 +494,16 @@ def capture_current(reader) -> BacklogEntry | None:
         hovered_lemma=hovered.lemma if hovered else None,
     )
     try:
-        store = reader._backlog_store
+        store = reader.session.backlog_store
         if store is None:
-            store = reader._backlog_store = BacklogStore()
+            store = reader.session.backlog_store = BacklogStore()
         with otel_metrics.traced("backlog_write", op="toggle"):  # main-thread SQLite on a bookmark
             entry, created = store.toggle_capture_result(capture)
     except (OSError, sqlite3.Error, ValueError) as exc:
         reader._toast(f"bookmark failed: {exc}", "err")
         return None
     state = "saved" if entry.status == "open" else entry.status
-    if created and reader._session_recorder is not None:
-        reader._session_recorder.record_capture()
+    if created and reader.episode.session_recorder is not None:
+        reader.episode.session_recorder.record_capture()
     reader._toast(f"bookmark {state}")
     return entry

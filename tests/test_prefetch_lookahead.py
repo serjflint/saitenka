@@ -40,7 +40,7 @@ def _reader(monkeypatch, *, lookahead, props=None):
     r = Reader(ipc, dict_set=_FakeDS())
     r.osd = (1280, 720)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r._sub_index = CueIndex(parse_srt(_SRT))
+    r.episode.sub_index = CueIndex(parse_srt(_SRT))
     r.prefetch_lookahead = lookahead
     return r
 
@@ -190,7 +190,7 @@ def test_upcoming_cue_texts_bounds_at_the_tail(monkeypatch):
 
 def test_upcoming_cue_texts_is_empty_without_an_index(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
-    r._sub_index = None
+    r.episode.sub_index = None
     r.set_subtitle("本を読む")
     assert r._upcoming_cue_texts(2) == []
 

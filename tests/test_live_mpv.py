@@ -253,10 +253,10 @@ def test_live_help_key_draws_and_escape_closes_shortcut_reference():
         closed = _screenshot(ipc, tmp / "help-closed.png")
 
         ipc.command("keypress", "F1")
-        _poll_until(reader, lambda: reader._help_open, "F1 did not open shortcut help")
+        _poll_until(reader, lambda: reader.help.open, "F1 did not open shortcut help")
         opened = _screenshot(ipc, tmp / "help-open.png")
 
         ipc.command("keypress", "ESC")
-        _poll_until(reader, lambda: not reader._help_open, "Esc did not close shortcut help")
+        _poll_until(reader, lambda: not reader.help.open, "Esc did not close shortcut help")
 
         assert ImageChops.difference(opened, closed).getbbox() is not None

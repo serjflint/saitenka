@@ -112,7 +112,6 @@ from saitenka.app.media import (
     copy_clipboard,
     tts_available,
 )
-from saitenka.app.mined_set import MinedSet
 from saitenka.app.miner import Miner, tag_slug
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
@@ -178,7 +177,6 @@ from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, Play
 from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.runner import SessionRunner
 from saitenka.runtime.subtitle_slice import SubtitleTrackStore
-from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -189,7 +187,7 @@ if TYPE_CHECKING:
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.panel import Freq
-    from saitenka.subtitles import GeometryBackend
+    from saitenka.subtitles import Cue, CueIndex, GeometryBackend
 
 log = logging.getLogger(__name__)
 
@@ -276,41 +274,16 @@ class Reader:
     # Episode-tier state (app/reader_context.py) exposed under its historical field names so the ~15
     # call-site modules keep working while they migrate onto ``reader.episode.*`` (#30 lifetime split);
     # rebinding ``self.episode`` (#100 re-slot) resets all of it in one move, leak-free by construction.
-    _sub_index = Delegated[CueIndex | None]("episode", "sub_index")
-    _nav_idx = Delegated[int]("episode", "nav_idx")
-    _sub_settle = Delegated[subnav_settle.SettleWindow]("episode", "sub_settle")
-    _nav_prev_text = Delegated[str]("episode", "nav_prev_text")
-    _nav_provisional_cue_counted = Delegated[bool]("episode", "nav_provisional_cue_counted")
-    _session_recorder = Delegated[session_stats.SessionRecorder | None](
-        "episode", "session_recorder"
-    )
-    # Help overlay state (app/help_overlay.py HelpState) under its historical flat names.
-    _help_open = Delegated[bool]("help", "open")
-    _help_page = Delegated[int]("help", "page")
-    # Interaction-tier state (app/reader_context.py InteractionContext) under historical flat names.
-    # The five OSD surfaces. They are the INTERACTION owner's state, and `surfaces.SURFACES` is a
-    # registry over exactly these — so a hook can stop taking the host once they live in one place
-    # rather than five bare attributes. `Delegated` writes as well as reads, so the constructor
-    # assignments below thread through unchanged and the ~137 `reader.<surface>` call sites do not move.
+    # The five OSD surfaces, and the only `Delegated` left. They stay because these names are the
+    # container's own — `surfaces.SURFACES` is a registry over exactly these, and the descriptor is
+    # what lets a hook reach one without the host. Every other flat alias is gone: the lifetime
+    # containers are addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`),
+    # because an alias per field made one object look like N host members to every ratchet.
     help = Delegated[help_overlay.HelpState]("interaction", "help")
     sub_picker = Delegated[sub_picker_module.PickerState]("interaction", "sub_picker")
     sidebar = Delegated[sidebar_module.SidebarState]("interaction", "sidebar")
     preview = Delegated[card_preview.PreviewState]("interaction", "preview")
     tip = Delegated[popups.TooltipState]("interaction", "tip")
-    # Prefetch runtime state (app/prefetch.py PrefetchState) under its historical flat names.
-    _head_built = Delegated[int]("prefetch_state", "head_built")
-    _prefetch_gen = Delegated[int]("prefetch_state", "gen")
-    _prefetch_key = Delegated[tuple[str, bool] | None]("prefetch_state", "key")
-    # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
-    # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
-    _mined = Delegated[MinedSet]("session", "mined")
-    _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
-    _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
-    _mined_store = Delegated[mined_store.MinedCardStore | None]("session", "mined_store")
-    # The base tooltip's own state (`app/popups.py` TooltipState) is reached through `tip`, not
-    # through twenty-five flat aliases. The aliases were not merely indirection: eight reads of one
-    # object looked like eight host members to every ratchet, so the arity census read this cluster
-    # as far more coupled than it is.
 
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
         self,
@@ -786,7 +759,7 @@ class Reader:
                 hide_pending=self.tip.hide_pending,
             ),
             paused=self.tip.paused_by_tip,
-            nav_idx=self._nav_idx,
+            nav_idx=self.episode.nav_idx,
             scan_target=self.tip.scan_target,
         )
 
@@ -950,7 +923,7 @@ class Reader:
         )
 
     def _drop_sub_index(self) -> None:
-        self._sub_index = None
+        self.episode.sub_index = None
 
     def rebuild_sub_index(self) -> None:
         """Re-index whichever track mpv has selected. The one place the four facts are bound."""
@@ -961,7 +934,7 @@ class Reader:
         )
 
     def _sample_cue_text(self) -> str:
-        return subtitle_modes._sample_cue_text(self._sub_index, self.sub_text)
+        return subtitle_modes._sample_cue_text(self.episode.sub_index, self.sub_text)
 
     def declare_subtitle(self, event: events.SubtitleEvent) -> subtitle_state.SubtitleTrackState:
         """Advance `Owner.SUBTITLE`'s slice by one declaration and hand back what it now holds.
@@ -1077,7 +1050,7 @@ class Reader:
             # Watch time is accrued at the transition, not sampled by a tick: the segment that
             # just ended is exactly what the change delimits, and an idle runtime does no work.
             session_stats.accrue(
-                self._session_recorder,
+                self.episode.session_recorder,
                 paused=bool(self._prop("pause")),
                 language=self.subtitle_language,
             )
@@ -1147,8 +1120,8 @@ class Reader:
     # --- subtitle navigation settle window (WP4.5) --------------------------------------------
     def open_settle_window(self) -> None:
         """Absorb mpv's mid-seek transients until the seek lands or the named deadline is due."""
-        window = self._sub_settle.begin()
-        self._sub_settle = window
+        window = self.episode.sub_settle.begin()
+        self.episode.sub_settle = window
         identity = window.identity
 
         def due(completion: EffectFinished) -> None:
@@ -1158,7 +1131,7 @@ class Reader:
         schedule = getattr(self.ipc, "schedule_runtime_timer", None)
         if schedule is None:
             # No runtime timer port (tests, pre-run): never open a window we cannot retire.
-            self._sub_settle = window.retire()
+            self.episode.sub_settle = window.retire()
             return
         if not schedule(
             owner=Owner.SUBTITLE,
@@ -1167,16 +1140,16 @@ class Reader:
             due_at=time.monotonic() + subnav_settle.SETTLE_SECONDS,
             on_finished=due,
         ):
-            self._sub_settle = window.retire()
+            self.episode.sub_settle = window.retire()
 
     def _settle_due(self, identity: subnav_settle.NavigationSettleDue) -> None:
-        self._sub_settle = self._sub_settle.due(identity)
+        self.episode.sub_settle = self.episode.sub_settle.due(identity)
 
     def retire_settle_window(self) -> None:
         """Close the window and cancel its deadline; safe to call when none is open."""
-        if not self._sub_settle.open:
+        if not self.episode.sub_settle.open:
             return
-        self._sub_settle = self._sub_settle.retire()
+        self.episode.sub_settle = self.episode.sub_settle.retire()
         cancel = getattr(self.ipc, "cancel_runtime_timer", None)
         if cancel is not None:
             cancel(_SETTLE_TIMER)
@@ -1280,7 +1253,7 @@ class Reader:
         provisional_navigation: bool = False,
     ) -> None:
         if provisional_navigation:
-            self._nav_provisional_cue_counted = False
+            self.episode.nav_provisional_cue_counted = False
         # Per-cue breadcrumb (low frequency): correlates mpv's sub-text change with the overlay draw +
         # paused-state in the report — the mpv-log-vs-overlay-log gap the paused-OSD bug lives in.
         log.debug("sub-text change: %d chars, paused=%s", len(text.strip()), self._prop("pause"))
@@ -1321,7 +1294,9 @@ class Reader:
         self._clear_cue_identity()
         self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
         self._annotation_degraded = False
-        self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
+        self.episode.nav_idx = (
+            -1
+        )  # any external cause of a cue change invalidates the nav chaining hint
         with otel_metrics.traced("hide_preview"):
             self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
@@ -1371,7 +1346,7 @@ class Reader:
         self._draw_subtitle()
 
     def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
-        recorder = self._session_recorder
+        recorder = self.episode.session_recorder
         if recorder is None:
             return
         identity = (
@@ -1385,7 +1360,7 @@ class Reader:
             return
         counted = recorder.record_cue(identity)
         if provisional_navigation:
-            self._nav_provisional_cue_counted = counted
+            self.episode.nav_provisional_cue_counted = counted
 
     def _enable_async_annotation(self) -> None:
         self._annotation_async = True
@@ -1432,7 +1407,7 @@ class Reader:
             norm,
             self._prop("sub-start"),
             self._prop("sub-end"),
-            self._nav_idx if self._nav_idx >= 0 else None,
+            self.episode.nav_idx if self.episode.nav_idx >= 0 else None,
         )
 
     def _annotation_key(self, norm: str) -> cue_annotation.AnnotationWorkKey:
@@ -1563,7 +1538,7 @@ class Reader:
     def _feed_episode_annotation(self) -> None:
         coordinator = self._annotation
         index = self._annotation_episode_index
-        if coordinator is None or index is None or self._sub_index is not index:
+        if coordinator is None or index is None or self.episode.sub_index is not index:
             return
         while coordinator.pending_count() < 4 and self._annotation_episode_cursor < len(index.cues):
             cue = index.cues[self._annotation_episode_cursor]
@@ -1699,7 +1674,9 @@ class Reader:
             return False
         startup = subtitle_modes.select_initial(self.ipc, new_slang)
         self.configure_subtitle_mode(startup, slang=new_slang)
-        self._sub_index = None  # the old track's index is wrong for the new one; rebuild from disk
+        self.episode.sub_index = (
+            None  # the old track's index is wrong for the new one; rebuild from disk
+        )
         self.rebuild_sub_index()
         return True
 
@@ -1868,7 +1845,7 @@ class Reader:
         )
 
     def _is_mined(self, tok) -> bool:
-        return tooltip_panel.is_mined(tok, self._mined)
+        return tooltip_panel.is_mined(tok, self.session.mined)
 
     def _anki_ok(self) -> bool:
         return tooltip_panel.anki_ok(self.anki, self._anki_capability)
@@ -2069,9 +2046,9 @@ class Reader:
         )
 
     def _update_prefetch(self) -> None:
-        generation = self._prefetch_gen
+        generation = self.prefetch_state.gen
         prefetch.update_prefetch(self)
-        if self._prefetch_gen != generation:
+        if self.prefetch_state.gen != generation:
             self._cancel_engaged_tooltip()
             self._cancel_render_ahead()
 
@@ -2080,7 +2057,7 @@ class Reader:
 
     def _upcoming_cue_texts(self, n: int) -> list[str]:
         return prefetch.upcoming_cue_texts(
-            self._sub_index, n, text=self.sub_text, preferred=self._nav_idx
+            self.episode.sub_index, n, text=self.sub_text, preferred=self.episode.nav_idx
         )
 
     def _inflected_surface(self, index: int) -> str:
@@ -2144,7 +2121,7 @@ class Reader:
         if self.tip.tip_keys_bound:
             return
         self.tip.tip_keys_bound = True
-        if self._help_open:
+        if self.help.open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
             submit = getattr(self.ipc, "command_async", self.ipc.command)
@@ -2159,7 +2136,7 @@ class Reader:
         if not self.tip.tip_keys_bound:
             return
         self.tip.tip_keys_bound = False
-        if self._help_open:
+        if self.help.open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
             submit = getattr(self.ipc, "command_async", self.ipc.command)
@@ -2603,7 +2580,7 @@ class Reader:
         """Read every fact the subtitle commands decide from, once, before deciding."""
         from saitenka.app.subtitle_modes import _current_external_sub
 
-        index = self._sub_index
+        index = self.episode.sub_index
         playhead = self._prop("time-pos")
         return subtitle_intents.SubtitleInputs(
             tracks=subtitle_modes.discover_tracks(self.ipc, self.subtitle_slang),
@@ -2721,7 +2698,7 @@ class Reader:
         analysis_overlay.request(
             self.analysis,
             language=self.subtitle_language,
-            index=self._sub_index,
+            index=self.episode.sub_index,
             loading=self._loading,
             scorer=self.scorer,
             tokenizer=self.tokenizer,
@@ -2763,11 +2740,11 @@ class Reader:
     def _redraw_help(self) -> None:
         from saitenka.app import help_overlay
 
-        if not self._help_open:
+        if not self.help.open:
             return
         document = self._help_document()
-        self._help_page = min(self._help_page, len(document.pages) - 1)
-        image = help_overlay.page_image(document, self._help_page)
+        self.help.page = min(self.help.page, len(document.pages) - 1)
+        image = help_overlay.page_image(document, self.help.page)
         x = (self.osd[0] - document.width) // 2
         y = (self.osd[1] - document.height) // 2
         self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.HELP)
@@ -2813,14 +2790,14 @@ class Reader:
     def _run_help_command(self, command) -> None:
         from saitenka.app import help_intents
 
-        if not self._help_open:
+        if not self.help.open:
             inputs = help_intents.HelpInputs(open=False)
         else:
             # The page count means rendering the document, so only the open case pays for it: a
             # keypress the closed arm discards should not build a document to be told so.
             inputs = help_intents.HelpInputs(
                 open=True,
-                page=self._help_page,
+                page=self.help.page,
                 page_count=len(self._help_document().pages),
             )
         for effect in help_intents.reduce(command, inputs):
@@ -2830,17 +2807,17 @@ class Reader:
         from saitenka.app import help_intents
 
         if isinstance(effect, help_intents.OpenHelp):
-            self._help_open = True
-            self._help_page = effect.page
+            self.help.open = True
+            self.help.page = effect.page
             self._bind_help_keys()
             self._redraw_help()
         elif isinstance(effect, help_intents.CloseHelp):
-            self._help_open = False
+            self.help.open = False
             self.lifecycle_surfaces.remove(OverlayId.HELP)
             self._restore_help_context_keys()
-            self._help_page = 0
+            self.help.page = 0
         elif isinstance(effect, help_intents.ShowHelpPage):
-            self._help_page = effect.index
+            self.help.page = effect.index
             self._redraw_help()
 
     def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
@@ -3103,7 +3080,7 @@ class Reader:
         result = self.commands.dispatch(
             command,
             cue_state=self._command_cue_state(),
-            help_open=self._help_open,
+            help_open=self.help.open,
         )
         self._publish_command_outcome(result)
         for coalesced in result.coalesced_events(command.coalesced_ids):
@@ -3192,7 +3169,7 @@ class Reader:
             return
         self._mined_seed_done = True
         self._mined_seed_failures = 0
-        self._mined.update(values)
+        self.session.mined.update(values)
 
     def _finish_analysis(self, completion: EffectFinished) -> None:
         changed = analysis_overlay.finish(self.analysis, completion)
@@ -3240,7 +3217,7 @@ class Reader:
                 self._raster_scale,
                 threading.Event(),
             ),
-            generation=self._prefetch_gen,
+            generation=self.prefetch_state.gen,
             job_id=view.job_id,
             submit=self._render_ahead_submit,
             on_finished=self._finish_render_ahead,
@@ -3250,7 +3227,7 @@ class Reader:
         return tooltip_engaged.submit(
             self._engaged_tooltip,
             request,
-            generation=self._prefetch_gen,
+            generation=self.prefetch_state.gen,
             submitter=self._engaged_tooltip_submit,
             on_finished=self._finish_engaged_tooltip,
         )
@@ -3267,9 +3244,9 @@ class Reader:
         identity, request, result, succeeded, superseded, rejected = finished
         if rejected is not None:
             rejected_identity, rejected_request = rejected
-            if rejected_identity.generation == self._prefetch_gen:
+            if rejected_identity.generation == self.prefetch_state.gen:
                 self._fallback_engaged_tooltip(rejected_request)
-        if identity.generation != self._prefetch_gen:
+        if identity.generation != self.prefetch_state.gen:
             return
         if superseded:
             return
@@ -3320,7 +3297,7 @@ class Reader:
         if finished is None:
             return
         identity, request, succeeded = finished
-        if identity.generation != self._prefetch_gen:
+        if identity.generation != self.prefetch_state.gen:
             return
         for view in (self.tip.view, self.tip.nest):
             if (
@@ -3649,7 +3626,7 @@ class Reader:
 
         def due() -> None:
             session_stats.accrue(
-                self._session_recorder,
+                self.episode.session_recorder,
                 paused=bool(self._prop("pause")),
                 language=self.subtitle_language,
             )
@@ -3992,7 +3969,7 @@ class Reader:
                     self._close_backlog_store,
                     fallback_after(
                         lambda: self._phase_performed(ClosePhase.STORES),
-                        lambda: self._backlog_store,
+                        lambda: self.session.backlog_store,
                     ),
                 ),
                 CloseStep(
@@ -4000,7 +3977,7 @@ class Reader:
                     self._close_mined_store,
                     fallback_after(
                         lambda: self._phase_performed(ClosePhase.STORES),
-                        lambda: self._mined_store,
+                        lambda: self.session.mined_store,
                     ),
                 ),
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
@@ -4235,14 +4212,14 @@ class Reader:
         own field is the host's business, and both callers (the mine-time writer and the Mine tab)
         want the store, not a seam.
         """
-        store = self._mined_store
+        store = self.session.mined_store
         if store is None:
-            store = self._mined_store = mined_store.MinedCardStore()
+            store = self.session.mined_store = mined_store.MinedCardStore()
         return store
 
     def finish_session_stats(self) -> str | None:
         """Close the current episode's row and retire the recorder. Idempotent."""
-        recorder, self._session_recorder = self._session_recorder, None
+        recorder, self.episode.session_recorder = self.episode.session_recorder, None
         return session_stats.finish(recorder, self.analysis.current)
 
     def _clear_subtitle_pixels(self) -> None:
@@ -4258,12 +4235,12 @@ class Reader:
             self.subtitle_pipeline.close()
 
     def _close_backlog_store(self) -> None:
-        if self._backlog_store is not None:
-            self._backlog_store.close()
+        if self.session.backlog_store is not None:
+            self.session.backlog_store.close()
 
     def _close_mined_store(self) -> None:
-        if self._mined_store is not None:
-            self._mined_store.close()
+        if self.session.mined_store is not None:
+            self.session.mined_store.close()
 
     def _report_session(self, summary: str | None) -> None:
         if summary and self.options.stats.summary:

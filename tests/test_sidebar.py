@@ -46,7 +46,7 @@ def _reader(cue_count=20, *, active=0, props=None):
     reader = Reader(ipc)
     reader.ov = FakeOverlay()
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(cue_count)]
-    reader._sub_index = CueIndex(cues)
+    reader.episode.sub_index = CueIndex(cues)
     reader.sub_text = f"cue {active}"
     return reader, ipc
 
@@ -80,7 +80,7 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
 
 def test_active_row_uses_timing_to_disambiguate_repeated_text():
     reader, _ipc = _reader(props={"sub-start": 5.2, "time-pos": 5.3})
-    reader._sub_index = CueIndex([Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")])
+    reader.episode.sub_index = CueIndex([Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")])
     reader.sub_text = "same line"
 
     assert sidebar._active_index(reader) == 1
@@ -191,11 +191,11 @@ def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
 
 def test_rows_use_shared_episode_analysis_when_ready():
     reader, _ipc = _reader(cue_count=1)
-    reader._sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
+    reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
     reader.sub_text = "私は本を読む。"
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader.analysis.current = analyze_cues(
-        list(reader._sub_index.cues), reader.scorer, reader.tokenizer
+        list(reader.episode.sub_index.cues), reader.scorer, reader.tokenizer
     )
 
     rows, _total = sidebar._track_rows(_view(reader, active=0), 0, 1)
@@ -207,9 +207,9 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
     reader.declare_subtitle(SubtitleTracksDiscovered(1, reader.en_sid))
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
-    reader._sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
+    reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
     reader.analysis.current = analyze_cues(
-        list(reader._sub_index.cues), reader.scorer, reader.tokenizer
+        list(reader.episode.sub_index.cues), reader.scorer, reader.tokenizer
     )
     reader.sidebar.open = True
     reader._loading = True
@@ -247,7 +247,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     entry = store.toggle_capture(
         Capture(str(original), 0.0, 0.8, jp_text="秘密の字幕", en_text="secret subtitle")
     )
-    reader._backlog_store = store
+    reader.session.backlog_store = store
 
     rows = sidebar._summary_rows(sidebar.view_of(reader))
 
@@ -280,7 +280,7 @@ def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, mo
     reader.sidebar.open = True
     store = BacklogStore(tmp_path / "backlog.sqlite")
     entry = store.toggle_capture(Capture(str(video), 0.0, 0.8, jp_text="cue 0"))
-    reader._backlog_store = store
+    reader.session.backlog_store = store
     _capture_render(monkeypatch)
 
     sidebar.mark_active_mined(reader)
@@ -318,7 +318,7 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path):
         expression="犬",
         reading="いぬ",
     )
-    reader._mined_store = store
+    reader.session.mined_store = store
 
     rows = sidebar._mine_rows(sidebar.view_of(reader))
 
@@ -338,7 +338,7 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "absent.sqlite")
 
     assert sidebar._mine_rows(sidebar.view_of(reader)) == []
-    assert reader._mined_store is None
+    assert reader.session.mined_store is None
     assert not (tmp_path / "absent.sqlite").exists()
 
 
@@ -356,7 +356,7 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
         expression="本",
         reading="ほん",
     )
-    reader._mined_store = store
+    reader.session.mined_store = store
     _capture_render(monkeypatch)
     reader.sidebar.open = True
     reader.sidebar.view = "mine"
@@ -383,7 +383,7 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
         expression="本",
         reading="ほん",
     )
-    reader._mined_store = store
+    reader.session.mined_store = store
     reader.anki = object()
     reader.mine_cfg = object()
     opened = []
@@ -512,4 +512,4 @@ def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> 
 
     sidebar.redraw(reader)
 
-    assert reader._backlog_store is None
+    assert reader.session.backlog_store is None

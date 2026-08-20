@@ -188,9 +188,9 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     reader.tokens = [SimpleNamespace(surface="日本", lemma="日本")]
     reader.hover = 0
     store = BacklogStore(tmp_path / "reader.sqlite", clock=lambda: 10.0)
-    reader._backlog_store = store
+    reader.session.backlog_store = store
     captures = []
-    reader._session_recorder = SimpleNamespace(record_capture=lambda: captures.append(True))
+    reader.episode.session_recorder = SimpleNamespace(record_capture=lambda: captures.append(True))
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
 
     reader.toggle_bookmark()
@@ -223,7 +223,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     assert captures == [True]
     forbidden = {"seek", "sub-seek", "set_property", "screenshot-to-file"}
     assert not any(command[0] in forbidden for command in ipc.commands)
-    reader._session_recorder = None
+    reader.episode.session_recorder = None
     reader.close()
 
 
@@ -242,7 +242,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
     reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.sub_text = "English line"
     store = BacklogStore(tmp_path / "reader.sqlite")
-    reader._backlog_store = store
+    reader.session.backlog_store = store
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
 
     reader.toggle_bookmark()
@@ -260,7 +260,7 @@ def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
 
     reader.toggle_bookmark()
 
-    assert reader._backlog_store is None
+    assert reader.session.backlog_store is None
     assert shown == [("no active cue to bookmark", "warn")]
 
 

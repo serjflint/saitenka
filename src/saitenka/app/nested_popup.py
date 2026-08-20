@@ -70,15 +70,15 @@ def show_nested(reader: Reader, sb) -> None:
         reader._request_interaction_metadata(
             NestedMetadataRequest(
                 NestedMetadataKey(
-                    reader._prefetch_gen,
+                    reader.prefetch_state.gen,
                     reader._dependency_generation,
-                    reader._mined.generation,
+                    reader.session.mined.generation,
                     id(reader.tip.view.state),
                     sb.text,
                 ),
                 reader.tokenizer.name,
                 reader.dict_set,
-                reader._mined.snapshot(),
+                reader.session.mined.snapshot(),
             )
         )
         return
@@ -106,9 +106,9 @@ def apply_nested_metadata(reader: Reader, result) -> None:
     if (
         result.error
         or result.token is None
-        or key.generation != reader._prefetch_gen
+        or key.generation != reader.prefetch_state.gen
         or key.dependency_generation != reader._dependency_generation
-        or key.mined_generation != reader._mined.generation
+        or key.mined_generation != reader.session.mined.generation
         or key.tooltip_origin != id(reader.tip.view.state)
     ):
         return
@@ -161,7 +161,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
     clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
     if mined is None:
-        mined = is_mined(tok, reader._mined)
+        mined = is_mined(tok, reader.session.mined)
     key = panel_key(
         reader,
         tok,
@@ -233,7 +233,7 @@ def rerender_with_mined_state(reader: Reader) -> None:
     tok = reader.tip.nest.token
     if tok is None:
         return
-    mined = is_mined(tok, reader._mined)
+    mined = is_mined(tok, reader.session.mined)
     st = panel_for(reader, tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
     reader.tip.nest.state = st
     reader.tip.nest.key = panel_key(reader, tok, tok.surface, mined=mined)
@@ -294,7 +294,7 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
     if tok is None:
         return None
     if mined is None:  # main-thread only — jamdict (card_for) is not worker-safe
-        mined = is_mined(tok, reader._mined)
+        mined = is_mined(tok, reader.session.mined)
     key = panel_key(reader, tok, tok.surface, mined=mined)
     st = panel_for(reader, tok, tok.surface, min_h=reader._tip_cap(), mined=mined, nested=True)
     return st, key, tok, tok.surface, mined

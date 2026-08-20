@@ -38,7 +38,7 @@ class FakeIPC(RuntimeFakeIPC):
 def test_hover_view_snapshots_the_hover_stack():
     r = Reader(FakeIPC())
     r.tip.paused_by_tip = True
-    r._nav_idx = 4
+    r.episode.nav_idx = 4
     r.tip.scan_target = "本"
     r.tip.nest.word = "読"
     view = r.hover_view()
@@ -327,7 +327,7 @@ def _reader_with_index(monkeypatch):
     r = Reader(ipc)
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     monkeypatch.setattr(r, "renderer", NullRenderer())  # skip the raster; assert state only
-    r._sub_index = CueIndex(parse_srt(_NAV_SRT))
+    r.episode.sub_index = CueIndex(parse_srt(_NAV_SRT))
     r._register_keybinds()
     return r, ipc
 
@@ -369,7 +369,7 @@ def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch):
     r = Reader(ipc)
     messages: list[str] = []
     monkeypatch.setattr(r, "_toast", lambda text, *_a: messages.append(text))
-    r._sub_index = None
+    r.episode.sub_index = None
 
     r._anchor_subtitles()
 
@@ -394,7 +394,7 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
     ipc = FakeIPC()
     r = Reader(ipc)
     r._toast = lambda *_a, **_k: None  # instance-shadow the toast; assert the delay, not the OSD
-    r._sub_index = CueIndex([Cue(s / 1000, s / 1000 + 1.0, "x") for s in sorted(starts_ms)])
+    r.episode.sub_index = CueIndex([Cue(s / 1000, s / 1000 + 1.0, "x") for s in sorted(starts_ms)])
     playhead, delay = playhead_ms / 1000, delay_ms / 1000
     ipc.props["time-pos"] = playhead
     ipc.props["sub-delay"] = delay
@@ -404,7 +404,7 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
     emitted = [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
     assert emitted, "anchor must set sub-delay"
     new_delay = float(emitted[-1][2])
-    nearest = min(r._sub_index.cues, key=lambda c: abs((c.start + delay) - playhead))
+    nearest = min(r.episode.sub_index.cues, key=lambda c: abs((c.start + delay) - playhead))
     assert abs((nearest.start + new_delay) - playhead) < 1e-3  # ±the 3-decimal delay quantisation
 
 
@@ -701,7 +701,7 @@ def _navigated(monkeypatch):
     r.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r._sub_settle.open
+    assert r.episode.sub_settle.open
     assert ipc.timer_calls(_SETTLE) == ["schedule"]
     return r, ipc
 
@@ -713,7 +713,7 @@ def test_a_reconcile_cancels_the_settle_timer_exactly_once(monkeypatch):
     r._reconcile_sub_text("よん")  # a second reconcile must not cancel a window that is gone
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
-    assert not r._sub_settle.open
+    assert not r.episode.sub_settle.open
 
 
 def test_a_source_replacement_cancels_the_settle_timer_exactly_once(monkeypatch):
@@ -732,7 +732,7 @@ def test_close_cancels_the_settle_timer(monkeypatch):
     r.close()
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
-    assert not r._sub_settle.open
+    assert not r.episode.sub_settle.open
 
 
 def test_a_late_due_from_a_superseded_navigation_leaves_the_new_window_open(monkeypatch):
@@ -743,7 +743,7 @@ def test_a_late_due_from_a_superseded_navigation_leaves_the_new_window_open(monk
 
     r._settle_due(stale)
 
-    assert r._sub_settle.open
+    assert r.episode.sub_settle.open
 
 
 def test_the_matching_due_closes_the_window_without_a_cancel(monkeypatch):
@@ -752,7 +752,7 @@ def test_the_matching_due_closes_the_window_without_a_cancel(monkeypatch):
 
     assert ipc.fire_runtime_timer(_SETTLE)
 
-    assert not r._sub_settle.open
+    assert not r.episode.sub_settle.open
     assert ipc.timer_calls(_SETTLE) == ["schedule"]
 
 
@@ -811,12 +811,12 @@ def test_the_settle_deadline_retires_the_window_exactly_once(monkeypatch):
     r.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r._sub_settle.open
+    assert r.episode.sub_settle.open
     assert "subtitle:navigation-settle" in ipc.timers
 
     assert ipc.fire_runtime_timer("subtitle:navigation-settle")
 
-    assert r._sub_settle.open is False
+    assert r.episode.sub_settle.open is False
     r._reconcile_sub_text("")  # no longer guarded: a real gap now clears the overlay
     assert r.sub_text == ""
 
@@ -826,12 +826,12 @@ def test_a_superseded_navigation_deadline_cannot_close_the_current_window(monkey
     r.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
-    stale = r._sub_settle.identity
+    stale = r.episode.sub_settle.identity
     r._handle(_msg_for(ipc, "Alt+RIGHT"))  # a second nav opens its own window
 
     r._settle_due(stale)
 
-    assert r._sub_settle.open
+    assert r.episode.sub_settle.open
 
 
 def test_replacing_the_subtitle_source_retires_the_settle_window(monkeypatch):
@@ -839,11 +839,11 @@ def test_replacing_the_subtitle_source_retires_the_settle_window(monkeypatch):
     r.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r._sub_settle.open
+    assert r.episode.sub_settle.open
 
     r._replace_subtitle_source("/media/next.mkv", reason="test")
 
-    assert r._sub_settle.open is False
+    assert r.episode.sub_settle.open is False
     assert "subtitle:navigation-settle" not in ipc.timers
 
 
@@ -852,9 +852,9 @@ def test_settle_guard_reinstalls_retired_identity_for_same_text():
     ipc.props.update({"sid": 1, "sub-start": 1.0, "sub-end": 2.0})
     reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
     reader.set_subtitle("同じ字幕")
-    reader._nav_prev_text = "同じ字幕"
-    reader._nav_idx = 1
-    reader._sub_settle = reader._sub_settle.begin()
+    reader.episode.nav_prev_text = "同じ字幕"
+    reader.episode.nav_idx = 1
+    reader.episode.sub_settle = reader.episode.sub_settle.begin()
     reader._retire_cue_identity("sub-start")
 
     reader._reconcile_sub_text("同じ字幕")
@@ -875,7 +875,7 @@ def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch)
             pass
 
     reader, ipc = _reader_with_index(monkeypatch)
-    reader._session_recorder = SessionRecorder(
+    reader.episode.session_recorder = SessionRecorder(
         "/anime/Show 01.mkv",
         clock=lambda: 0.0,
         wall_clock=lambda: 0.0,
@@ -884,12 +884,12 @@ def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch)
     reader.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     reader._handle(_msg_for(ipc, "Alt+RIGHT"))
-    count_after_instant_render = reader._session_recorder.snapshot.cue_count
+    count_after_instant_render = reader.episode.session_recorder.snapshot.cue_count
     reader._retire_cue_identity("sub-start")
 
     reader._reconcile_sub_text("に")
 
-    assert reader._session_recorder.snapshot.cue_count == count_after_instant_render
+    assert reader.episode.session_recorder.snapshot.cue_count == count_after_instant_render
 
 
 def test_identical_text_navigation_counts_the_landed_cue():
@@ -906,8 +906,8 @@ def test_identical_text_navigation_counts_the_landed_cue():
     ipc = FakeIPC()
     ipc.props.update({"sub-start": 1.0, "sub-end": 2.0})
     reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
-    reader._sub_index = CueIndex([Cue(1.0, 2.0, "同じ"), Cue(3.0, 4.0, "同じ")])
-    reader._session_recorder = SessionRecorder(
+    reader.episode.sub_index = CueIndex([Cue(1.0, 2.0, "同じ"), Cue(3.0, 4.0, "同じ")])
+    reader.episode.session_recorder = SessionRecorder(
         "/anime/Show 01.mkv",
         clock=lambda: 0.0,
         wall_clock=lambda: 0.0,
@@ -915,13 +915,13 @@ def test_identical_text_navigation_counts_the_landed_cue():
     )
     reader.set_subtitle("同じ")
     reader._sub_nav(1)
-    assert reader._session_recorder.snapshot.cue_count == 1
+    assert reader.episode.session_recorder.snapshot.cue_count == 1
     ipc.props.update({"sub-start": 3.0, "sub-end": 4.0})
     reader._retire_cue_identity("sub-start")
 
     reader._reconcile_sub_text("同じ")
 
-    assert reader._session_recorder.snapshot.cue_count == 2
+    assert reader.episode.session_recorder.snapshot.cue_count == 2
 
 
 def test_reader_has_subtitle_state_before_any_cue():
@@ -1363,9 +1363,9 @@ def test_prefetch_queues_cheap_warm_while_just_playing():
     submitted = []
     r.prefetch_state.workers = 8
     r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
-    g0 = r._prefetch_gen
+    g0 = r.prefetch_state.gen
     r._update_prefetch()
-    assert r._prefetch_gen == g0 + 1  # bumped → in-flight work is invalidated
+    assert r.prefetch_state.gen == g0 + 1  # bumped → in-flight work is invalidated
     item = submitted[0]["request"].item
     assert item.token.surface == "本命"
     assert item.full is False  # idle-time warm only, no layout/drawing
@@ -2340,7 +2340,7 @@ def test_seed_mined_preloads_deck_expressions():
 
     r = Reader(FakeIPC(), anki=FakeAnki(), mine_cfg=MineConfig())
     r._seed_mined()
-    assert r._mined == {"奉書", "通り"}  # HTML stripped; both pre-marked
+    assert r.session.mined == {"奉書", "通り"}  # HTML stripped; both pre-marked
 
 
 # --- N4: auto-reveal the translation on hover (opt-in) ---------------------------------------------
