@@ -91,7 +91,7 @@ def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
         def cancel_all(self) -> None:
             raise RuntimeError("wedged")
 
-    reader._interaction_jobs = Wedged()  # type: ignore[assignment]
+    reader.tip.jobs = Wedged()  # type: ignore[assignment]
     ledger = reader.close()
 
     report = ledger.report()

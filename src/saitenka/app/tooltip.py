@@ -282,7 +282,7 @@ def apply_hover_metadata(reader: Reader, result) -> None:
             _request_hover_metadata(reader, key.index)
         return
     if result.error:
-        reader._interaction_jobs.finish("tooltip", "failed")
+        reader.tip.jobs.finish("tooltip", "failed")
         return
     reader.tip.hover = HoverMetadata(
         terms=result.phrase_terms,
@@ -320,7 +320,7 @@ def set_hover(reader: Reader, index: int) -> None:
     if index == reader.hover:
         return
     reader.hover = index
-    reader.tip.view.job_id = reader._interaction_jobs.begin("tooltip")
+    reader.tip.view.job_id = reader.tip.jobs.begin("tooltip")
     reader.tip.view.job_kind = "tooltip"
     if reader._interaction_metadata_submit is not None:
         # Retire the previous tooltip's logical identity immediately. Its acknowledged pixels may stay
@@ -692,7 +692,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         log.debug("tooltip anchor disappeared for token index %d", index)
         reader.hover = -1
         tip.hover = NO_HOVER_METADATA
-        reader._interaction_jobs.finish("tooltip", "failed")
+        reader.tip.jobs.finish("tooltip", "failed")
         reader._teardown_tip()
         return False
     inflected = reader._inflected_surface(index)

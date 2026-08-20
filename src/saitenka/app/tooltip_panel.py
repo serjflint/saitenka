@@ -484,7 +484,7 @@ def decorate_and_upload(
     def settled(*, painted: bool) -> None:
         if job_id is None:
             return
-        reader._interaction_jobs.finish(kind, "painted" if painted else "failed", job_id=job_id)
+        reader.tip.jobs.finish(kind, "painted" if painted else "failed", job_id=job_id)
 
     # Fenced: a paint acknowledged after a newer paint or a hide settles nobody, so the intent's
     # latency is never closed out against pixels something else has already replaced.
@@ -649,7 +649,7 @@ def scroll_view(reader: Reader, view: PopupView, delta: int) -> bool:
     ns = min(maxs, max(0, view.desired_scroll + delta))
     if ns == view.desired_scroll:
         return False
-    view.job_id = reader._interaction_jobs.begin("scroll")
+    view.job_id = reader.tip.jobs.begin("scroll")
     view.job_kind = "scroll"
     view.desired_scroll = ns
     if view.oid == OverlayId.NESTED:

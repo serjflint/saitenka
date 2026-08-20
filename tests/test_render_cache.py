@@ -780,7 +780,7 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
     submitter = _enable_engaged(r)
-    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r.tip.jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
             tok, inflected, mined, tuple(key), r.tip_scale.cap, job_id=r.tip.view.job_id
@@ -799,7 +799,7 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
     old_key = tooltip_panel.panel_key(r, tok, inflected, mined=mined)
-    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r.tip.jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
             tok, inflected, mined, tuple(old_key), r.tip_scale.cap, job_id=r.tip.view.job_id
@@ -836,9 +836,9 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     i, _tok, _inflected, _mined = _first_content(r)
-    old_job = r._interaction_jobs.begin("tooltip")
+    old_job = r.tip.jobs.begin("tooltip")
     r.hover = i
-    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r.tip.jobs.begin("tooltip")
 
     tooltip.apply_engaged_hover(
         r, tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=old_job)
@@ -964,7 +964,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     requests = []
     monkeypatch.setattr(r, "_request_interaction_metadata", requests.append)
     r.hover = index
-    r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
+    r.tip.view.job_id = r.tip.jobs.begin("tooltip")
     tooltip._request_hover_metadata(r, index)
     original = requests[-1]
     r.session.mined.add("__newly-mined__")  # bumps the generation because membership actually moved

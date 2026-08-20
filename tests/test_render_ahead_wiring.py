@@ -187,7 +187,7 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
     r = _reader()
     panel = BrokenPanel()
     r.tip.view.state = panel  # type: ignore[assignment]
-    r.tip.view.job_id = r._interaction_jobs.begin("scroll")
+    r.tip.view.job_id = r.tip.jobs.begin("scroll")
     r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
@@ -201,14 +201,14 @@ def test_old_failure_cannot_roll_back_a_new_scroll_to_the_same_coordinate() -> N
     panel = _RecordingPanel()
     r.tip.view.state = panel  # type: ignore[assignment]
     r.tip.view.desired_scroll = 100
-    old_job = r._interaction_jobs.begin("scroll")
+    old_job = r.tip.jobs.begin("scroll")
     r.tip.view.job_id = old_job
     r._request_render_ahead(r.tip.view, -1)
 
     r.tip.view.desired_scroll = 200
-    r.tip.view.job_id = r._interaction_jobs.begin("scroll")
+    r.tip.view.job_id = r.tip.jobs.begin("scroll")
     r.tip.view.desired_scroll = 100
-    current_job = r._interaction_jobs.begin("scroll")
+    current_job = r.tip.jobs.begin("scroll")
     r.tip.view.job_id = current_job
     r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 

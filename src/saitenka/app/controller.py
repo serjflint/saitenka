@@ -394,9 +394,6 @@ class Reader:
         self._mined_seed_done = False
         self._mined_seed_failures = 0
         self._mined_seed_retry_pending = False
-        from saitenka.app.interaction_jobs import InteractionJobs
-
-        self._interaction_jobs = InteractionJobs()
         self._interaction_metadata = hover_metadata.InteractionMetadataState()
         self._interaction_metadata_submit = hover_metadata.configure_runtime_job(ipc)
         self._loading = False
@@ -1199,7 +1196,7 @@ class Reader:
         a cue change while a tooltip is showing always clears it via the real path — avoiding the
         early-return in set_hover (index == self.hover) that would otherwise short-circuit teardown
         when hover is already -1 but the tip is still on screen."""
-        self._interaction_jobs.cancel_all()
+        self.tip.jobs.cancel_all()
         hide = getattr(self.ov, "hide_interactive", self.ov.hide)
         hide(TIP_ID)
         self._hide_nested()
@@ -3242,7 +3239,7 @@ class Reader:
         if superseded:
             return
         if isinstance(request, tooltip_engaged.HoverRequest) and not succeeded:
-            self._interaction_jobs.finish("tooltip", "failed", job_id=request.job_id)
+            self.tip.jobs.finish("tooltip", "failed", job_id=request.job_id)
             return
         if not succeeded:
             self._fallback_engaged_tooltip(request)
@@ -3300,7 +3297,7 @@ class Reader:
                     tooltip_panel.apply_pending_scroll(self, view)
                 else:
                     view.desired_scroll = view.scroll
-                    self._interaction_jobs.finish("scroll", "failed", job_id=identity.job_id)
+                    self.tip.jobs.finish("scroll", "failed", job_id=identity.job_id)
                 break
         if not succeeded:
             return
@@ -4135,7 +4132,7 @@ class Reader:
                 (
                     self._close_tts_capability,
                     self._close_anki_capability,
-                    lambda: self._interaction_jobs.cancel_all(),
+                    lambda: self.tip.jobs.cancel_all(),
                     lambda: hover_metadata.close(self._interaction_metadata),
                     start_lane_budget,
                     lane("subtitle-fetch"),

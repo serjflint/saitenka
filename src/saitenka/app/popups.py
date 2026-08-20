@@ -15,6 +15,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka.app.interaction_jobs import InteractionJobs
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
@@ -384,6 +385,10 @@ class TooltipState:
         # LRU cache (OrderedDict keyed by PanelKey), bounded at panel_cache_max; each Panel keeps only its
         # windowed blocks (compressed) so the whole cache stays small. Evict LRU on overflow, not clear.
         self.panel_cache = PanelCache(panel_cache_max, cache_lock or threading.Lock())
+        # The tooltip's own bounded background work — the panel build and the scroll-ahead raster.
+        # Both lanes are speculative work for the panel this state describes, which is why a hover
+        # that supersedes cancels them together; on the Reader it read as session infrastructure.
+        self.jobs = InteractionJobs()
 
     @property
     def open(self) -> bool:
