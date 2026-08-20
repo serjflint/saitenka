@@ -41,10 +41,9 @@ def test_hover_view_snapshots_the_hover_stack():
     r = Reader(FakeIPC())
     r._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     r.episode.nav_idx = 4
-    r.tip.scan_target = "本"
     r.tip.nest.word = "読"
     view = r.hover_view()
-    assert (view.paused, view.nav_idx, view.scan_target) == (True, 4, "本")
+    assert (view.paused, view.nav_idx) == (True, 4)
     assert view.nested.word == "読"
     # a frozen point-in-time copy: later mutation of the reader must not leak into a taken snapshot
     r._pause_store.dispatch(events.HoverPauseReleased())
@@ -1810,7 +1809,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     assert r.hover_view().nested.state is not None
     ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave the whole stack
     r._update_hover()
-    assert r.tip.nest.hide_pending  # scheduled, not instant
+    assert r._hover_store.current.hysteresis.nest_hide_pending  # scheduled, not instant
 
     assert _fire_dwell(ipc, "nested-hide")
 
@@ -3158,7 +3157,7 @@ def test_popups_module_unifies_popup_view_state():
 
     pv = PopupView()
     # the unified per-popup view state (nested popup; base tip keeps its own exploded state)
-    assert pv.state is None and pv.scroll == 0 and pv.rect is None and not pv.hide_pending
+    assert pv.state is None and pv.scroll == 0 and pv.rect is None
     assert C._Nested is PopupView
     r = Reader(FakeIPC())
     assert isinstance(r.tip.nest, PopupView)

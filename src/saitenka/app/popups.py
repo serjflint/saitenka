@@ -411,7 +411,6 @@ class PopupView:
         self.job_id: int | None = None
         self.job_kind = "tooltip"
         self.rect: tuple[int, int, int, int] | None = None  # screen rect, for hit-testing
-        self.hide_pending = False  # a linger deadline is armed to hide this popup
         self.crisp_miss = ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
         self.crisp_pending = (
             False  # a soft first paint is up; poll upgrades to crisp once bands warm
@@ -524,7 +523,6 @@ class TooltipState:
 
     def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
         """`cache_lock` is shared with the Reader's other cache accounting, so it is injected."""
-        self.hide_pending = False  # a linger deadline is armed to hide the tooltip
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
         # PopupView type + blit machinery as the nested popup. The historical flat names (_tip_state,
         # _tip_scroll, …) keep resolving here through the Reader's Delegated("tip.view", …) shims.
@@ -532,10 +530,6 @@ class TooltipState:
         self.nest = PopupView(
             OverlayId.NESTED
         )  # nested scan popup (hover a word inside the tooltip)
-        self.scan_target: str | None = None  # scan-cell tail the cursor is settling on (dwell)
-        self.word_target: int | None = (
-            None  # subtitle word the cursor is settling on (switch dwell)
-        )
         self.last_mouse = (-1.0, -1.0)  # latest cursor pos — routes the wheel to the popup under it
         self.hover_reading = ""  # dict-form reading of the hovered word, for TTS
         #: What a metadata lookup resolved about the hovered word. Replaced wholesale, never field

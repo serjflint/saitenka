@@ -780,17 +780,18 @@ class Reader:
     def hover_view(self) -> hover_snapshot.HoverView:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
         the public seam tests observe instead of the private ``_nest`` / ``_tip_*`` fields (#43)."""
+        hysteresis = self._hover_store.current.hysteresis
         return hover_snapshot.snapshot(
             self.tip.nest,
             hover_snapshot.TipView(
                 state=self.tip.view.state,
                 key=self.tip.view.key,
                 rect=self.tip.view.rect,
-                hide_pending=self.tip.hide_pending,
+                hide_pending=hysteresis.tip_hide_pending,
             ),
             paused=self.interaction.hover_pause.held,
             nav_idx=self.episode.nav_idx,
-            scan_target=self.tip.scan_target,
+            scan_target=hysteresis.scan_target,
         )
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
