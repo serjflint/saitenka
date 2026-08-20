@@ -897,7 +897,7 @@ class Reader:
         elif isinstance(delta, playback.SubtitleSelectionChanged):
             self.retire_geometry_refresh()  # the track it was armed for is gone
             if self.native_geometry is not None:
-                self.native_geometry.set_source(None, reader=self)
+                self.native_geometry.set_source(None, live=True)
             else:
                 self.subtitle_pipeline.invalidate()
             subtitle_modes.on_primary_changed(self, delta.sid)
@@ -1333,7 +1333,7 @@ class Reader:
         norm = self._cue_norm(self.sub_text)
         self._sub_pending = norm
         if self.native_geometry is not None:
-            self.native_geometry.invalidate(self)
+            self.native_geometry.invalidate(live=True)
         self._schedule_current_annotation(norm)
         self._draw_subtitle()
 
@@ -1456,7 +1456,7 @@ class Reader:
         segmentation into the new profile."""
         self.tokenizer = tokenizer
         if self.native_geometry is not None:
-            self.native_geometry.invalidate(self)
+            self.native_geometry.invalidate(live=True)
         else:
             self.subtitle_pipeline.invalidate()
         self.token_cache.clear()

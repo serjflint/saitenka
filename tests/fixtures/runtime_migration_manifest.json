@@ -174,19 +174,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.invalidate"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.refresh"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.schedule"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.set_source"
     ],
     [
       "reader-parameter",

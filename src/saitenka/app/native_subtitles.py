@@ -552,8 +552,14 @@ class NativeSubtitleGeometry:
         elif error in {"property not found", "unknown property"}:
             self.ass_full_capability = AssFullCapability.UNSUPPORTED
 
-    def set_source(self, path: Path | None, *, reader: Reader | None = None) -> None:
-        if reader is not None:
+    def set_source(self, path: Path | None, *, live: bool = False) -> None:
+        """Point at a new authored source.
+
+        `live` says a running session is switching, so whatever the old source left on screen has
+        to be retired. It used to be spelled by passing the host and testing it for `None` — a
+        parameter whose only use was its own presence, which reads as a dependency and is a flag.
+        """
+        if live:
             self._consume_failure()
         self._source_epoch += 1
         self.worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
@@ -567,7 +573,7 @@ class NativeSubtitleGeometry:
         self._eligible_tokens = 0
         self._last_render_inputs = None
         self._failure_diagnostic = None
-        if reader is not None:
+        if live:
             self._ports.clear_interaction()
             self._ports.degrade()
         if path is None:
@@ -590,18 +596,20 @@ class NativeSubtitleGeometry:
 
     def invalidate(
         self,
-        reader: Reader | None = None,
         *,
+        live: bool = False,
         cause: GeometryCacheReason = GeometryCacheReason.RENDER_INPUT_CHANGED,
     ) -> None:
-        if reader is not None:
+        """Drop the cached geometry. `live` retires the interaction it was backing — see
+        `set_source`."""
+        if live:
             self._consume_failure()
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
         self._published_key = None
         self.worker.invalidate(cause=cause)
-        if reader is not None:
+        if live:
             self._ports.clear_interaction()
 
     def refresh(self, reader: Reader) -> None:
@@ -619,7 +627,7 @@ class NativeSubtitleGeometry:
             else:
                 self._set_ready(active_events=active_events)
             return
-        self.invalidate(reader)
+        self.invalidate(live=True)
         if reader.sub_text.strip():
             self.schedule(reader)
 

@@ -31,7 +31,7 @@ def load_sub_index(reader: Reader, path) -> None:
     reader._sub_index = idx
     native_geometry = getattr(reader, "native_geometry", None)
     if native_geometry is not None:
-        native_geometry.set_source(Path(path), reader=reader)
+        native_geometry.set_source(Path(path), live=True)
 
     reader.invalidate_analysis()
     # Reinstall the cue that is still on screen under the new source. `_replace_subtitle_source`

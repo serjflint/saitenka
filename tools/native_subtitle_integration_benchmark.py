@@ -439,7 +439,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         baseline.dict_set = _TallDictionary()
         native.dict_set = _TallDictionary()
         assert native.native_geometry is not None
-        native.native_geometry.set_source(source_path, reader=native)
+        native.native_geometry.set_source(source_path, live=True)
         index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
         native._sub_index = index
         latencies: list[float] = []
@@ -540,7 +540,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             )
         )
         rss_after_profile_switch = process.memory_info().rss
-        native.native_geometry.set_source(None, reader=native)
+        native.native_geometry.set_source(None, live=True)
         source_clear_current = native.subtitle_pipeline.current is not None
         source_clear_hit_count = len(native.boxes)
     close_completed = backend.closed

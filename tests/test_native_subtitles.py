@@ -674,7 +674,7 @@ def test_every_geometry_cache_miss_reports_a_bounded_text_free_reason(
     settle_jobs(result, ipc)
     result.native_geometry.schedule(result)  # same epoch, key never cached
     settle_jobs(result, ipc)
-    result.native_geometry.invalidate(result)  # a render input moved
+    result.native_geometry.invalidate(live=True)  # a render input moved
     result.native_geometry.schedule(result)
     settle_jobs(result, ipc)
     second = tmp_path / "other.ass"
@@ -913,7 +913,7 @@ def test_non_ass_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
-    result.native_geometry.set_source(tmp_path / "episode.srt", reader=result)
+    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
@@ -940,8 +940,8 @@ def test_unsupported_transition_is_not_counted_as_provider_failure(tmp_path: Pat
     try:
         assert result.native_geometry is not None
         source = tmp_path / "episode.srt"
-        result.native_geometry.set_source(source, reader=result)
-        result.native_geometry.set_source(source, reader=result)
+        result.native_geometry.set_source(source, live=True)
+        result.native_geometry.set_source(source, live=True)
 
         failures = otel_metrics.snapshot().get("saitenka.subtitle_geometry.failures")
         assert failures is None or failures["value"] == 0
@@ -989,7 +989,7 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
 def test_ass_geometry_restores_hits_after_noninteractive_source_switch(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
-    result.native_geometry.set_source(tmp_path / "episode.srt", reader=result)
+    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
     result._sub_pending = None
     result._draw_subtitle()
@@ -997,7 +997,7 @@ def test_ass_geometry_restores_hits_after_noninteractive_source_switch(tmp_path:
 
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
-    result.native_geometry.set_source(source, reader=result)
+    result.native_geometry.set_source(source, live=True)
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
@@ -1325,7 +1325,7 @@ def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path:
     old_generation = result.subtitle_pipeline.generation
     ipc.commands.clear()
 
-    result.native_geometry.set_source(None, reader=result)
+    result.native_geometry.set_source(None, live=True)
 
     assert result.subtitle_pipeline.generation == old_generation + 1
     assert result.subtitle_pipeline.current is None
@@ -1496,7 +1496,7 @@ def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: 
     assert not result.native_geometry.apply(result)
     assert ipc.commands.count(("osd-overlay", 1001, "none", "")) == clears
 
-    result.native_geometry.set_source(None, reader=result)
+    result.native_geometry.set_source(None, live=True)
     assert result.subtitle_pipeline.last_error is None
     assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
     result.close()
@@ -2030,7 +2030,7 @@ def test_non_utf8_ass_has_stable_fallback_reason(tmp_path: Path) -> None:
     source = tmp_path / "legacy.ass"
     source.write_bytes(ASS + b"\xff")
     assert result.native_geometry is not None
-    result.native_geometry.set_source(source, reader=result)
+    result.native_geometry.set_source(source, live=True)
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)

@@ -82,7 +82,7 @@ def build_sub_index_for_current_track(reader: Reader) -> None:
     leaves ``_sub_index`` unset."""
     native_geometry = getattr(reader, "native_geometry", None)
     if native_geometry is not None:
-        native_geometry.set_source(None, reader=reader)
+        native_geometry.set_source(None, live=True)
     artifact = subtitle_artifact.resolve(
         _selected_sub_track(reader.ipc), media_path=reader._get("path")
     )
