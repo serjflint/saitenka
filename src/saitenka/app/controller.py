@@ -1859,7 +1859,9 @@ class Reader:
             cancel=self.cancel_hover_deadline,
             show_word=self.set_hover,
             retire_word=self.retire_hover,
-            open_nested=lambda scan: nested_popup.show_nested(self, scan),
+            open_nested=lambda scan: nested_popup.show_nested(
+                self.tip_ports, self.panel_ports, self.word_lookup, scan
+            ),
             reveal_annotation=lambda revealed: self.set_annotation_hover(revealed=revealed),
             publish_engagement=lambda inside: setattr(self, "_mouse_in", inside),
         )
@@ -3267,7 +3269,9 @@ class Reader:
                     result,
                 )
             elif isinstance(result, hover_metadata.NestedMetadata):
-                nested_popup.apply_nested_metadata(self, result)
+                nested_popup.apply_nested_metadata(
+                    self.tip_ports, self.panel_ports, self.word_lookup, result
+                )
         finally:
             hover_metadata.finish_publication(self._interaction_metadata)
             hover_metadata.submit_pending(

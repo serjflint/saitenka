@@ -3,8 +3,8 @@ tooltip opens a depth-1 "quick look" popup for that inner word, anchored above/b
 Yomitan-style scan-inside-scan. Also home to kanji-lookup mode (``k``) and wildcard/prefix search
 results, both of which reuse the same nested-popup anchoring.
 
-Takes ``reader: Reader`` (the AGENTS.md seam pattern); the nested popup's own state
-(``reader._nest``, a :class:`~saitenka.app.popups.PopupView`) stays on the Reader.
+Host-free: every entry takes `TipPorts`, `PanelPorts`, `WordLookup` or `HoverInputs`. The nested
+popup's own state (``tip.nest``, a :class:`~saitenka.app.popups.PopupView`) lives on the tooltip.
 
 Builds and blits through :mod:`saitenka.app.tooltip_panel` — the leaf importing the panel
 machinery, which is the direction that does not cycle. Every one of those calls used to go back
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app import tooltip_engaged
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import HoverInputs, PopupView, TipPorts
+from saitenka.app.popups import HoverInputs, PopupView, TipPorts, WordLookup
 from saitenka.app.prefetch import cap_for
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
@@ -36,7 +36,6 @@ from saitenka.app.tooltip_panel import (
 from saitenka.model import is_ideograph
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
     from saitenka.app.popups import TooltipState
     from saitenka.app.tooltip_panel import PanelStyle
 
@@ -64,32 +63,31 @@ def nested_view_h(full_h: int, wy: float, *, osd_h: int, max_frac: float) -> int
     return view_h
 
 
-def show_nested(reader: Reader, sb) -> None:
+def show_nested(ports: TipPorts, panel: PanelPorts, lookup: WordLookup, sb) -> None:
     """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
     Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
     popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
-    ports = reader.tip_ports
-    if reader._interaction_metadata_submit is not None:
+    if lookup.deferred:
         from saitenka.app.hover_metadata import NestedMetadataKey, NestedMetadataRequest
 
-        reader._request_interaction_metadata(
+        lookup.submit(
             NestedMetadataRequest(
                 NestedMetadataKey(
-                    reader.prefetch_state.gen,
-                    reader._dependency_generation,
-                    reader.session.mined.generation,
+                    lookup.prefetch_gen,
+                    lookup.dependency_gen,
+                    lookup.mined.generation,
                     id(ports.tip.view.state),
                     sb.text,
                 ),
-                reader.tokenizer.name,
-                reader.dict_set,
-                reader.session.mined.snapshot(),
+                lookup.tokenizer.name,
+                lookup.dict_set,
+                lookup.mined.snapshot(),
             )
         )
         return
-    tokens = reader.tokenizer.tokenize(sb.text)
+    tokens = lookup.tokenizer.tokenize(sb.text)
     tok = tokens[0] if tokens else None
-    if tok is None or reader.tokenizer.is_skippable(tok):
+    if tok is None or lookup.tokenizer.is_skippable(tok):
         hide_nested(ports)
         return
     if tok.surface == ports.tip.nest.word and ports.tip.nest.state is not None:
@@ -98,14 +96,14 @@ def show_nested(reader: Reader, sb) -> None:
     # Longest-match, Yomitan-style: stack any multi-token dictionary term starting under the cursor
     # (コンサート over the over-split コン) — the same forward longest-match the base tooltip applies to a
     # hovered cue word, so an inner katakana/compound word opens whole instead of as its first morpheme.
-    extra = _phrase_extra_terms(tokens, dict_set=reader.dict_set, tokenizer=reader.tokenizer)
+    extra = _phrase_extra_terms(tokens, dict_set=lookup.dict_set, tokenizer=lookup.tokenizer)
     sx, sy = ports.tip.view.xy  # anchor to the inner word's screen cell
     anchor = Anchor(sx + sb.x, sy + (sb.y - ports.tip.view.scroll), sb.h)
     # defer=True: a cold inner word's head+bands raster off the main thread (tier-3), re-derived from the
     # scan cell when it lands — the hover-scan path, unlike a clicked link, is re-derivable via scan_hit.
     open_nested(
         ports,
-        reader.panel_ports,
+        panel,
         tok,
         tok.surface,
         anchor,
@@ -115,25 +113,25 @@ def show_nested(reader: Reader, sb) -> None:
     )
 
 
-def apply_nested_metadata(reader: Reader, result) -> None:
+def apply_nested_metadata(ports: TipPorts, panel: PanelPorts, lookup: WordLookup, result) -> None:
     key = result.key
     if (
         result.error
         or result.token is None
-        or key.generation != reader.prefetch_state.gen
-        or key.dependency_generation != reader._dependency_generation
-        or key.mined_generation != reader.session.mined.generation
-        or key.tooltip_origin != id(reader.tip.view.state)
+        or key.generation != lookup.prefetch_gen
+        or key.dependency_generation != lookup.dependency_gen
+        or key.mined_generation != lookup.mined.generation
+        or key.tooltip_origin != id(ports.tip.view.state)
     ):
         return
-    sb = scan_hit(reader.tip, reader.tip_scale.raster, *reader.tip.last_mouse)
+    sb = scan_hit(ports.tip, ports.scale.raster, *ports.tip.last_mouse)
     if sb is None or sb.text != key.tail:
         return
-    sx, sy = reader.tip.view.xy
-    anchor = Anchor(sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
+    sx, sy = ports.tip.view.xy
+    anchor = Anchor(sx + sb.x, sy + (sb.y - ports.tip.view.scroll), sb.h)
     open_nested(
-        reader.tip_ports,
-        reader.panel_ports,
+        ports,
+        panel,
         result.token,
         result.token.surface,
         anchor,

@@ -100,7 +100,12 @@ def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
     # Decouple from the live unidic split: the scan tail tokenises to コン + サート.
     monkeypatch.setattr(reader.tokenizer, "tokenize", lambda _s: _SPLIT)
 
-    nested_popup.show_nested(reader, ScanBox("コンサート", 0, 0, 20, 20))
+    nested_popup.show_nested(
+        reader.tip_ports,
+        reader.panel_ports,
+        reader.word_lookup,
+        ScanBox("コンサート", 0, 0, 20, 20),
+    )
 
     assert reader.tip.nest.state is not None, "a nested popup must open"
     # The longest match is stacked on the panel's identity — コンサート, not the bare コン.

@@ -742,7 +742,11 @@ def run_stress(
         boxes = st.windowed.scan_boxes() if st else []
         if boxes:
             sb = boxes[len(boxes) // 3]  # a deterministic cell well inside the body
-            timed(lambda: nested_popup.show_nested(reader, sb))
+            timed(
+                lambda: nested_popup.show_nested(
+                    reader.tip_ports, reader.panel_ports, reader.word_lookup, sb
+                )
+            )
             timed(lambda: reader._scroll_tip(step))  # scroll while the nested popup is up
             timed(reader._hide_nested)
         timed(lambda: reader.set_hover(-1))  # dismiss the whole stack
@@ -1449,11 +1453,11 @@ def _timeline_interact(reader) -> None:
     if boxes:
         sb = boxes[len(boxes) // 2]  # a cell well inside the body
         nested_popup.show_nested(
-            reader, sb
+            reader.tip_ports, reader.panel_ports, reader.word_lookup, sb
         )  # cold inner word → off-thread compose (kind=engaged_nested / nested)
         time.sleep(0.02)  # let the worker compose the nested head
         nested_popup.show_nested(
-            reader, sb
+            reader.tip_ports, reader.panel_ports, reader.word_lookup, sb
         )  # warm → synchronous nested show (tip_compose kind="nested")
         # scroll the nested popup so its render-ahead + crisp-poll are exercised (the base already is)
         tooltip_panel.scroll_view(reader.tip_ports, reader.tip.nest, round(reader.osd[1] * 0.1))
@@ -2317,7 +2321,7 @@ def main() -> int:
             reader.tip.panel_cache.discard(
                 reader._panel_key(tokenize(sb.text)[0], tokenize(sb.text)[0].surface)
             )
-            nested_popup.show_nested(reader, sb)
+            nested_popup.show_nested(reader.tip_ports, reader.panel_ports, reader.word_lookup, sb)
 
         rows.append(("nested popup first paint  (inner word)", measure(nested_cold, args.reps)))
 

@@ -134,14 +134,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/nested_popup.py::apply_nested_metadata"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::show_nested"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::_head_prefetch_candidate"
     ],
     [

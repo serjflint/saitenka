@@ -974,7 +974,9 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
         monkeypatch.setattr(module, "scan_hit", lambda _tip, _scale, _mx, _my: sb)
 
     r.tip.panel_cache.clear()
-    nested_popup.show_nested(r, sb)  # cold → defer (same phrase the worker will build under)
+    nested_popup.show_nested(
+        r.tip_ports, r.panel_ports, r.word_lookup, sb
+    )  # cold → defer (same phrase the worker will build under)
     deadline = time.monotonic() + 1
     while not submitter.calls and time.monotonic() < deadline:
         time.sleep(0.001)
