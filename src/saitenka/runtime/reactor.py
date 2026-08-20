@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime.effects import (
     AsyncEffect,
+    AttachSessionDiagnostics,
     CancelEffect,
     CloseSessionOverlay,
     CloseSessionStores,
@@ -21,9 +22,15 @@ from saitenka.runtime.effects import (
     EffectId,
     EffectOutcome,
     EmitDiagnostic,
+    EstablishRenderSpace,
     ExpireEffect,
+    GuardMainRender,
+    OpenSessionHistory,
+    RegisterInputBindings,
     ReleaseInputCapture,
     RemoveSessionArtifacts,
+    SeedOptionalCollaborators,
+    StartPropertyObservation,
     StopSession,
 )
 from saitenka.runtime.events import (
@@ -191,7 +198,14 @@ class SessionReactor[StateT]:
             return
         if isinstance(
             effect,
-            DetachDiagnostics
+            GuardMainRender
+            | EstablishRenderSpace
+            | StartPropertyObservation
+            | RegisterInputBindings
+            | SeedOptionalCollaborators
+            | OpenSessionHistory
+            | AttachSessionDiagnostics
+            | DetachDiagnostics
             | ReleaseInputCapture
             | CloseSubtitleRendering
             | CloseSessionStores

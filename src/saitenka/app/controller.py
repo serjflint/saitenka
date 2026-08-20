@@ -688,6 +688,38 @@ class Reader:
                 ),
             )
         )
+        # The setup steps, run phase by phase from `run`. Registered here so the runtime owns
+        # *what* each phase does; the Reader keeps only the order and the no-runtime fallback.
+        from saitenka.app.session_routes import (
+            COLLABORATORS_PARTICIPANT,
+            DIAGNOSTICS_PARTICIPANT,
+            HISTORY_PARTICIPANT,
+            INPUT_PARTICIPANT,
+            OBSERVERS_PARTICIPANT,
+            RENDER_GUARD_PARTICIPANT,
+            RENDER_SPACE_PARTICIPANT,
+        )
+
+        self._startup_steps: dict[events.StartPhase, Callable[[], object]] = {
+            events.StartPhase.PROCESS: self._guard_main_render,
+            events.StartPhase.RENDER_SPACE: self.refresh_osd,
+            events.StartPhase.OBSERVERS: self._start_observing_traced,
+            events.StartPhase.INPUT: self._register_keybinds_traced,
+            events.StartPhase.COLLABORATORS: self._seed_collaborators,
+            events.StartPhase.HISTORY: self._open_session_history,
+            events.StartPhase.DIAGNOSTICS: self._attach_diagnostics,
+        }
+        for name, step in (
+            (RENDER_GUARD_PARTICIPANT, events.StartPhase.PROCESS),
+            (RENDER_SPACE_PARTICIPANT, events.StartPhase.RENDER_SPACE),
+            (OBSERVERS_PARTICIPANT, events.StartPhase.OBSERVERS),
+            (INPUT_PARTICIPANT, events.StartPhase.INPUT),
+            (COLLABORATORS_PARTICIPANT, events.StartPhase.COLLABORATORS),
+            (HISTORY_PARTICIPANT, events.StartPhase.HISTORY),
+            (DIAGNOSTICS_PARTICIPANT, events.StartPhase.DIAGNOSTICS),
+        ):
+            # Late-bound: the step reads collaborators this constructor has not finished building.
+            ipc.register_session_resource(name, session_resources.Starting(self._step_for(step)))
         # The subtitle raster, retired at `RENDERING`. `native_geometry` is installed after this
         # point, so every one of these resolves it when it closes rather than now.
         self._runtime_owns_subtitle_rendering = all(
@@ -3760,42 +3792,24 @@ class Reader:
         log.info("runtime: %s, %d prefetch worker(s)", mode, self.prefetch_state.workers)
 
     def run(self, interval: float | None = None) -> None:
-        from saitenka.render.banded import guard_main_render
-        from saitenka.version import overlay_version
+        """Bring the session up phase by phase, then hand the thread to the loop.
 
-        # First line of every session's log: pins WHICH build actually drew (both run + attach reach
-        # here). `doctor` reads it back to catch a stale attach process — an mpv left open across an
-        # editable reinstall keeps its old modules until relaunched (see doctor.check_stale_overlay).
-        log.info("saitenka overlay %s starting", overlay_version())
-        guard_main_render(
-            on=True
-        )  # this IS the render loop — native rasterisation must run on a worker
+        Announced rather than performed here: each phase's steps are the runtime's, registered as
+        setup participants at construction. What survives on this side is the *order* — announcing
+        `OBSERVERS` before `RENDER_SPACE` would seed geometry against dimensions nobody has read —
+        and the fallback for a session with no runtime, which is what a screenshot capture and most
+        unit tests are.
+        """
         interval = interval if interval is not None else self.poll_interval
         with otel_metrics.traced("startup.reader_setup"):
-            self.refresh_osd()
-            with otel_metrics.traced("startup.reader_setup.observers"):
-                self.start_observing()  # event-driven property reads from here on
-            with otel_metrics.traced("startup.reader_setup.keybinds"):
-                self._register_keybinds()
-            self._seed_mined()
-            session_stats.start(self)
-            self.arm_capability_refresh()
-            telemetry.set_gauge_provider(
-                self._telemetry_gauges
-            )  # no-op unless telemetry is configured
+            for phase in events.StartPhase:
+                self._announce_start(phase)
         # In run/attach the deps (and thus the prefetch lane) load ASYNC — dict_set is still None here,
         # so construction-time start_prefetch was a no-op and the worker count is 0. Defer the banner to when
         # prefetch actually starts (apply_deps → _announce_runtime); only announce now on the sync path
         # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
         if self.dict_set is not None:
             self._announce_runtime()
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
-
-        self.lifecycle_timers.schedule(
-            LifecycleTimerKind.STARTUP_HEALTH,
-            8.0,
-            self._check_startup_health,
-        )
         # The session blocks on its transport instead of waking `1/interval` times a second to
         # ask whether anything happened. `interval` survives only as the wake bound, so a runtime
         # timer that fires without producing an event is still noticed promptly.
@@ -3969,6 +3983,11 @@ class Reader:
                     lambda: self.ov.close(),
                     fallback_for(lambda: self.ov, owned=self._runtime_owns_surfaces),
                 ),
+                # Disarm what `PROCESS` armed. Process-global and session-lived: `run` turns it on
+                # because *this* thread is the render loop, and a session that ends without turning
+                # it back off leaves the next one in the same interpreter tripping on a loop that
+                # is no longer anybody's. Last of the raster steps, so nothing above it is relaxed.
+                CloseStep("render-guard", self._release_main_render),
                 # Per-session scratch dir, once nothing can still write to it.
                 CloseStep("temporary-artifacts", lambda: self._retire_artifacts()),
                 # Last, because it is the session's terminal transition: the reactor rejects new
@@ -3982,6 +4001,63 @@ class Reader:
         if report is not None:
             log.warning("%s", report)
         return ledger
+
+    def _step_for(self, phase: events.StartPhase) -> Callable[[], None]:
+        """Bind one phase's step late: it reads collaborators the constructor is still building."""
+
+        def run() -> None:
+            self._startup_steps[phase]()
+
+        return run
+
+    def _announce_start(self, phase: events.StartPhase) -> None:
+        """Tell the runtime setup reached `phase`, or run that phase's steps ourselves.
+
+        Delivered rather than published for `_announce_close`'s reason inverted: the session loop
+        has not started, so a published event would sit in the mailbox until the first pump — after
+        the observers it is supposed to install.
+        """
+        if not self.ipc.deliver_runtime_event(events.SessionStarting(phase)):
+            self._startup_steps[phase]()
+
+    def _guard_main_render(self) -> None:
+        from saitenka.render.banded import guard_main_render
+        from saitenka.version import overlay_version
+
+        # First line of every session's log: pins WHICH build actually drew (both run + attach reach
+        # here). `doctor` reads it back to catch a stale attach process — an mpv left open across an
+        # editable reinstall keeps its old modules until relaunched (see doctor.check_stale_overlay).
+        log.info("saitenka overlay %s starting", overlay_version())
+        # this IS the render loop — native rasterisation must run on a worker
+        guard_main_render(on=True)
+
+    def _start_observing_traced(self) -> None:
+        with otel_metrics.traced("startup.reader_setup.observers"):
+            self.start_observing()  # event-driven property reads from here on
+
+    def _register_keybinds_traced(self) -> None:
+        with otel_metrics.traced("startup.reader_setup.keybinds"):
+            self._register_keybinds()
+
+    def _seed_collaborators(self) -> None:
+        self._seed_mined()
+        self.arm_capability_refresh()
+
+    def _open_session_history(self) -> None:
+        session_stats.start(self)
+
+    def _attach_diagnostics(self) -> None:
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
+        self.lifecycle_timers.schedule(
+            LifecycleTimerKind.STARTUP_HEALTH, 8.0, self._check_startup_health
+        )
+
+    def _release_main_render(self) -> None:
+        from saitenka.render.banded import guard_main_render
+
+        guard_main_render(on=False)
 
     def _announce_close(self, phase: ClosePhase, scratch: str | None = None) -> bool:
         """Tell the runtime the close sequence reached `phase`. False when no runtime owns us.

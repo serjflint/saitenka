@@ -92,6 +92,45 @@ class SessionClosing:
     scratch: str | None = None
 
 
+class StartPhase(StrEnum):
+    """How far setup has got — `ClosePhase`'s mirror, and for the same reason.
+
+    A phase is defined by what is already *up*, because that is the only thing a step can depend
+    on. `Reader.run` is a sequence, so this ordering is the contract: observing properties before
+    the render space is known would seed geometry against dimensions nobody has read.
+
+    Declared whole rather than one phase per migrated duty, exactly as the close half is — a duty
+    picks the phase matching where its step already sits instead of inventing one and serialising
+    behind the duty that invented the last.
+    """
+
+    #: Nothing session-specific yet; the process is what is being pinned.
+    PROCESS = "process"
+    #: The OSD dimensions are known, so anything can be placed.
+    RENDER_SPACE = "render-space"
+    #: Property observation is live; reads are event-driven from here on.
+    OBSERVERS = "observers"
+    #: Sections and keybinds are registered, so input routes to us.
+    INPUT = "input"
+    #: Optional collaborators are seeded and probed.
+    COLLABORATORS = "collaborators"
+    #: The session's history row is open.
+    HISTORY = "history"
+    #: Gauges are attached and the startup-health deadline is armed.
+    DIAGNOSTICS = "diagnostics"
+
+
+@dataclass(frozen=True, slots=True)
+class SessionStarting:
+    """The setup sequence has reached the runtime's steps for `phase`.
+
+    `SessionClosing`'s mirror. Not a claim on startup — the Reader still announces, and what has
+    moved is which side decides *what* the phase does.
+    """
+
+    phase: StartPhase = StartPhase.PROCESS
+
+
 @dataclass(frozen=True, slots=True)
 class StartupHintRequested:
     """IPC is up: post the one thing that can be seen before any overlay exists."""
@@ -343,6 +382,7 @@ type RuntimeEvent = (
     | ConnectionReplaced
     | CloseRequested
     | SessionClosing
+    | SessionStarting
     | RawMpvEvent
     | StartupHintRequested
     | StartupReady

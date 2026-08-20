@@ -15,6 +15,20 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
+class Starting:
+    """One setup step, as a session participant.
+
+    Deliberately not `Retiring` with a different name: `close()` meaning "start" would be a lie in
+    the one place the effect vocabulary has to stay readable, so the setup half keeps its own verb.
+    """
+
+    begin: Callable[[], None]
+
+    def start(self) -> None:
+        self.begin()
+
+
+@dataclass(frozen=True, slots=True)
 class Retiring:
     """One retirement step, wearing the resource contract.
 

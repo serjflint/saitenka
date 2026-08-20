@@ -580,93 +580,87 @@
   "startup": [
     {
       "id": "version-and-render-guard",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/lifecycle_start.py::_effects",
       "evidence": [
-        "call:overlay_version",
-        "call:guard_main_render"
+        "call:GuardMainRender"
       ],
       "target": "session-lifecycle",
       "work_package": "2",
       "replacement": "SessionStarted -> ValidateRenderContext",
       "test": "startup rejects unsupported render threads before readiness",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "initial-render-space",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self.refresh_osd"
+        "call:EstablishRenderSpace"
       ],
       "target": "mpv-gateway/playback-projection",
       "work_package": "1,4",
       "replacement": "RawMpvEvent -> PlaybackProjection",
       "test": "initial replay publishes one coherent render-space revision",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "observers-and-replay",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self.start_observing"
+        "call:StartPropertyObservation"
       ],
       "target": "mpv-gateway",
       "work_package": "1,2",
       "replacement": "RegisterObservers -> ObserverReplayCompleted",
       "test": "reconnect replays every observer once before feature events",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "bindings-and-input-sections",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self._register_keybinds"
+        "call:RegisterInputBindings"
       ],
       "target": "command-and-interaction-reducers",
       "work_package": "2,5",
       "replacement": "BindingIntent -> MpvCommand",
       "test": "first client message is accepted before readiness clears",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "mined-seed-and-capabilities",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self._seed_mined",
-        "src/saitenka/app/controller.py::Reader._apply_capabilities|call:self._tts_capability.request",
-        "src/saitenka/app/controller.py::Reader._apply_capabilities|call:self._anki_capability.request",
-        "src/saitenka/app/controller.py::Reader._request_mined_seed|call:self._mined_seed_submit"
+        "call:SeedOptionalCollaborators"
       ],
       "target": "external-io-lanes",
       "work_package": "3,5",
       "replacement": "StartCapabilityJobs -> JobOutcome",
       "test": "late capability results cannot mutate a retired episode",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "session-history",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/lifecycle_start.py::_effects",
       "evidence": [
-        "call:session_stats.start"
+        "call:OpenSessionHistory"
       ],
       "target": "session-reducer",
       "work_package": "5",
       "replacement": "SessionStarted -> SessionPersistDue",
       "test": "playback transitions accrue once and close persists the remainder",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "telemetry-and-startup-health",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/lifecycle_start.py::_effects",
       "evidence": [
-        "call:telemetry.set_gauge_provider",
-        "call:self._announce_runtime",
-        "call:self.lifecycle_timers.schedule"
+        "call:AttachSessionDiagnostics"
       ],
       "target": "lifecycle-diagnostics",
       "work_package": "2",
       "replacement": "RuntimeTurn -> DiagnosticEffect",
       "test": "telemetry sampling cannot wake or mutate an idle runtime",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "runtime-ready",

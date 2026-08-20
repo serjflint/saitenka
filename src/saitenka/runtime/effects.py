@@ -169,6 +169,70 @@ class ReleaseInputCapture:
     """
 
 
+#: The setup half's vocabulary. One effect per duty, like the close half's, so what a phase does is
+#: readable from the reducer rather than from a phase constant threaded into a generic step.
+#:
+#: They are NOT `close`-shaped and deliberately do not reuse the resource contract: a startup step
+#: *creates*, and an adapter whose `close()` meant "start" would be a lie in the one place the
+#: vocabulary has to stay readable.
+
+
+@dataclass(frozen=True, slots=True)
+class GuardMainRender:
+    """Pin the build in the log and forbid rasterisation on the render loop's own thread."""
+
+
+@dataclass(frozen=True, slots=True)
+class EstablishRenderSpace:
+    """Read the OSD dimensions, so anything placed afterwards has a space to be placed in."""
+
+
+@dataclass(frozen=True, slots=True)
+class StartPropertyObservation:
+    """Register the observer set and take its snapshot; reads are event-driven afterwards."""
+
+
+@dataclass(frozen=True, slots=True)
+class RegisterInputBindings:
+    """Define the sections and bind the keys, so input routes to this session at all."""
+
+
+@dataclass(frozen=True, slots=True)
+class SeedOptionalCollaborators:
+    """Seed the mined set and arm the capability probes — every one of them optional."""
+
+
+@dataclass(frozen=True, slots=True)
+class OpenSessionHistory:
+    """Open the session's history row for the file now playing."""
+
+
+@dataclass(frozen=True, slots=True)
+class AttachSessionDiagnostics:
+    """Attach the gauge provider and arm the startup-health deadline."""
+
+
+type StartupEffect = (
+    GuardMainRender
+    | EstablishRenderSpace
+    | StartPropertyObservation
+    | RegisterInputBindings
+    | SeedOptionalCollaborators
+    | OpenSessionHistory
+    | AttachSessionDiagnostics
+)
+
+STARTUP_EFFECTS = (
+    GuardMainRender,
+    EstablishRenderSpace,
+    StartPropertyObservation,
+    RegisterInputBindings,
+    SeedOptionalCollaborators,
+    OpenSessionHistory,
+    AttachSessionDiagnostics,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class CloseSubtitleRendering:
     """Give the subtitle pixels back and close the geometry provider, once no lane can render.
@@ -194,6 +258,7 @@ class RemoveSessionArtifacts:
 
 type LifecycleEffect = (
     StopSession
+    | StartupEffect
     | DetachDiagnostics
     | ReleaseInputCapture
     | CloseSubtitleRendering
@@ -209,7 +274,8 @@ type LifecycleEffect = (
 #: terminal and no completion: nothing correlates to them, and a reservation raised during close
 #: is one nothing would ever retire.
 type FireAndForget = (
-    DetachDiagnostics
+    StartupEffect
+    | DetachDiagnostics
     | ReleaseInputCapture
     | CloseSubtitleRendering
     | CloseSessionStores

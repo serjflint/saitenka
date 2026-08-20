@@ -260,7 +260,15 @@ def test_every_fire_and_forget_effect_reaches_the_dispatcher() -> None:
         lambda effect: bool(dispatched.append(effect)) or True,
     )
 
-    members = get_args(FireAndForget.__value__)
+    def flatten(alias) -> tuple[type, ...]:
+        # A member may itself be an alias (`StartupEffect`), and `get_args` stops at the first
+        # level — walking it is what keeps the pin honest as the vocabulary grows by group.
+        out: list[type] = []
+        for member in get_args(alias):
+            out.extend(flatten(member.__value__) if hasattr(member, "__value__") else [member])
+        return tuple(out)
+
+    members = flatten(FireAndForget.__value__)
     assert members  # negative control: an empty alias would make this vacuous
     for effect_type in members:
         # Placeholder values by field type, so a member with a payload needs no hand-written case.

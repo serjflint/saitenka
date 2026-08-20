@@ -18,19 +18,27 @@ from typing import TYPE_CHECKING
 
 from saitenka.app import telemetry
 from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+from saitenka.app.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
+    AttachSessionDiagnostics,
     CloseSessionOverlay,
     CloseSessionStores,
     CloseSessionSurfaces,
     CloseSubtitleRendering,
     DetachDiagnostics,
     EffectOutcome,
+    EstablishRenderSpace,
     ExpireEffect,
+    GuardMainRender,
+    OpenSessionHistory,
     Owner,
+    RegisterInputBindings,
     ReleaseInputCapture,
     RemoveSessionArtifacts,
+    SeedOptionalCollaborators,
+    StartPropertyObservation,
 )
 from saitenka.runtime.events import (
     PLAYBACK_EVENTS,
@@ -40,6 +48,7 @@ from saitenka.runtime.events import (
     EventEnvelope,
     EventOrigin,
     SessionClosing,
+    SessionStarting,
     StartupHintRequested,
     StartupReady,
 )
@@ -67,6 +76,7 @@ log = logging.getLogger(__name__)
 
 #: Events `Owner.SESSION` owns. Everything absent here routes to nobody and is counted.
 _SESSION_EVENTS = (
+    SessionStarting,
     StartupHintRequested,
     StartupReady,
     ConnectionReplaced,
@@ -90,6 +100,7 @@ _CLAIMED = (StartupHintRequested, StartupReady, SessionClosing)
 #: a key itself and drift from the registration.
 STARTUP_HINT = "startup-hint"
 LIFECYCLE_CLOSE = "lifecycle-close"
+LIFECYCLE_START = "lifecycle-start"
 
 #: Names in `gateway.session_resources`. Spelled once for the same reason the feature keys are:
 #: the owner that registers and the dispatcher that closes must not drift apart.
@@ -102,6 +113,16 @@ MINED_RESOURCE = "mined-store"
 SUBTITLE_DEACTIVATE_RESOURCE = "subtitle-deactivate"
 SUBTITLE_CLEAR_RESOURCE = "subtitle-clear"
 SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
+
+#: Setup participants. Prefixed because the two halves are separate contracts, not two uses of one:
+#: a startup participant answers `start()` and a close participant answers `close()`.
+RENDER_GUARD_PARTICIPANT = "start:render-guard"
+RENDER_SPACE_PARTICIPANT = "start:render-space"
+OBSERVERS_PARTICIPANT = "start:observers"
+INPUT_PARTICIPANT = "start:input"
+COLLABORATORS_PARTICIPANT = "start:collaborators"
+HISTORY_PARTICIPANT = "start:history"
+DIAGNOSTICS_PARTICIPANT = "start:diagnostics"
 
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
@@ -137,6 +158,33 @@ _RESOURCE_OF: dict[type, tuple[str, ...]] = {
         SUBTITLE_CLOSE_RESOURCE,
     ),
 }
+
+
+#: Which registered participant each setup effect brings up. Separate table from `_RESOURCE_OF`
+#: because the verbs differ; sharing one would be the widening this vocabulary avoids.
+_PARTICIPANT_OF: dict[type, str] = {
+    GuardMainRender: RENDER_GUARD_PARTICIPANT,
+    EstablishRenderSpace: RENDER_SPACE_PARTICIPANT,
+    StartPropertyObservation: OBSERVERS_PARTICIPANT,
+    RegisterInputBindings: INPUT_PARTICIPANT,
+    SeedOptionalCollaborators: COLLABORATORS_PARTICIPANT,
+    OpenSessionHistory: HISTORY_PARTICIPANT,
+    AttachSessionDiagnostics: DIAGNOSTICS_PARTICIPANT,
+}
+
+
+def _begin(gateway: MpvGateway, name: str) -> bool:
+    """Run one setup participant, or say it was never registered.
+
+    Not isolated, unlike `_retire`: a setup step that fails has not left the session half-torn-down
+    but half-*built*, and the phases behind it depend on it. Teardown must continue at all costs;
+    setup must not pretend it happened.
+    """
+    participant = gateway.session_resources.get(name)
+    if participant is None:
+        return False
+    participant.start()  # type: ignore[attr-defined]  # registered by the owner that made it
+    return True
 
 
 def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
@@ -175,6 +223,9 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
             # here or nowhere.
             log.debug("runtime census: %s", ledger.counts)
             return True
+        participant = _PARTICIPANT_OF.get(type(effect))
+        if participant is not None:
+            return _begin(gateway, participant)
         names = _RESOURCE_OF.get(type(effect))
         if names is not None:
             return _retire(gateway, names)
@@ -255,7 +306,13 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     )
     # One slot, several features: `Owner.SESSION` is a slice from the start, so the second session
     # feature is a registration rather than a rewrite of the hint's reducer.
-    session = SliceReducer({STARTUP_HINT: hint, LIFECYCLE_CLOSE: reduce_lifecycle_close})
+    session = SliceReducer(
+        {
+            STARTUP_HINT: hint,
+            LIFECYCLE_CLOSE: reduce_lifecycle_close,
+            LIFECYCLE_START: reduce_lifecycle_start,
+        }
+    )
     playback = playback_slice_reducer()
     subtitle = subtitle_slice_reducer()
     routes: dict[RouteKey, FeatureReducer] = {
@@ -275,7 +332,11 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     reactor = SessionReactor(
         SessionState(
             session=session.initial(
-                {STARTUP_HINT: StartupHintState(), LIFECYCLE_CLOSE: LifecycleCloseState()}
+                {
+                    STARTUP_HINT: StartupHintState(),
+                    LIFECYCLE_CLOSE: LifecycleCloseState(),
+                    LIFECYCLE_START: LifecycleStartState(),
+                }
             ),
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
             subtitle=subtitle.initial({SUBTITLE_FEATURE: SubtitleTrackState()}),
