@@ -3857,6 +3857,11 @@ class Reader:
                 ),
                 # Per-session scratch dir, once nothing can still write to it.
                 CloseStep("temporary-artifacts", lambda: self._retire_artifacts()),
+                # Last, because it is the session's terminal transition: the reactor rejects new
+                # work and closes the mailbox, so nothing above may still need to publish — including
+                # `_retire_artifacts`, which announces ARTIFACTS through it. A Reader with no runtime
+                # gets False and the step is a no-op.
+                CloseStep("session-runtime", lambda: self.ipc.close_session_runtime()),
             )
         )
         report = ledger.report()

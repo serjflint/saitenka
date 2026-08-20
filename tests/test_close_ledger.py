@@ -145,7 +145,11 @@ def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
     assert order.index("lane:geometry") < order.index("subtitle-close")
     assert order.index("mask-atlas-startup") < order.index("lane:mask-atlas-startup")
     assert order.index("lane:mask-atlas-startup") < order.index("mask-atlas-uninstall")
-    assert order[-1] == "temporary-artifacts"
+    # The scratch dir goes last of the participants — nothing above may still write to it — and the
+    # session runtime closes after even that, because its mailbox is what `_retire_artifacts`
+    # announces ARTIFACTS through. A reactor closed one step earlier would reject that announcement.
+    assert order[-1] == "session-runtime"
+    assert order[-2] == "temporary-artifacts"
 
 
 # --- close participants the runtime owns ---------------------------------------------------------
@@ -381,3 +385,28 @@ def test_close_announces_every_phase_in_teardown_order() -> None:
 
     assert seen == sorted(seen, key=list(ClosePhase).index)
     assert set(seen) == set(ClosePhase)
+
+
+def test_a_closed_session_reactor_rejects_further_work() -> None:
+    """Close is a state transition, and this is the first time the session actually performs it.
+
+    `SessionReactor.close()` and its reject-new-work latch shipped long ago, but nothing held a
+    reactor and nothing emitted `StopSession`, so the transition had never run in a real session.
+    The close table drives it now, as the terminal step: after it, the mailbox is closed and a
+    publish is refused rather than silently queued into a session that is gone.
+    """
+    from util import FakeIPC
+
+    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.runtime import EventOrigin, MailboxFull, RawMpvEvent, TrafficClass
+
+    ipc = FakeIPC()
+    gateway = install_session_runtime(ipc)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+
+    assert reader.close().report() is None
+
+    with pytest.raises(MailboxFull):
+        gateway.mailbox.publish(
+            RawMpvEvent("after-close"), origin=EventOrigin.MPV, traffic=TrafficClass.NORMAL
+        )

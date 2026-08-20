@@ -440,6 +440,13 @@ class FakeIPC:
             return False
         return self._runtime_gateway.close_job_lane(name, timeout)
 
+    def close_session_runtime(self) -> bool:
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return False
+        reactor.close()
+        return True
+
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
     """The ``{key: message}`` map mpv would hold after registration, reconstructed from the recorded

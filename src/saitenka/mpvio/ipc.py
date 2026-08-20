@@ -44,6 +44,11 @@ if TYPE_CHECKING:
 
         session_resources: dict[str, object]
 
+        #: The session's reactor once one is installed. `object` because the protocol describes what
+        #: the transport may ask of a gateway, and importing the reactor here would make the
+        #: transport depend on the runtime it is deliberately independent of.
+        session_reactor: object | None
+
         def submit_mpv(self, **kwargs) -> bool: ...
 
         def schedule_timer(self, **kwargs) -> bool: ...
@@ -641,6 +646,19 @@ class MpvIPC:
         if gateway is None:
             return False
         return gateway.close_job_lane(name, timeout)
+
+    def close_session_runtime(self) -> bool:
+        """Ask the session's reactor for the closed transition. False when there is no reactor.
+
+        Through the port, like every other runtime call, rather than by reaching into the gateway:
+        the reactor is the session's, and `Reader` knows the session only through this transport.
+        """
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return False
+        reactor.close()  # type: ignore[attr-defined]  # `object` by design — see RuntimeGateway
+        return True
 
     def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         gateway = self._runtime_gateway

@@ -65,6 +65,8 @@ class RuntimeJobPort(Protocol):
 
     def close_runtime_job_lane(self, name: str, timeout: float = 2.0) -> bool: ...
 
+    def close_session_runtime(self) -> bool: ...
+
 
 class RefusesJobLanes:
     """For a headless stand-in with no session behind it: the job port answers, and says no.
@@ -81,6 +83,9 @@ class RefusesJobLanes:
         return False
 
     def close_runtime_job_lane(self, _name: str, _timeout: float = 2.0) -> bool:
+        return False
+
+    def close_session_runtime(self) -> bool:
         return False
 
 
