@@ -1,6 +1,6 @@
 """`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, the picker, the
-sidebar, the tooltip's link-navigation back-stack, its copy-flash pulse, and its claim on the
-playback pause.
+sidebar, the tooltip's link-navigation back-stack, its copy-flash pulse, its claim on the playback
+pause, and what it resolved about the hovered word.
 
 The third slice, and the first whose events are *observations* rather than declarations. SUBTITLE
 needs no outbox because the sender has already done the thing it is declaring; here the reducer is
@@ -12,7 +12,7 @@ where it was.
 reactor ignores an event while closing) leaves the previous turn's outbox in place, and slice
 identity is the only thing that answers whether this turn is the one that filled it.
 
-Seven features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
+Eight features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
 reducer and an initial state, with nothing in the others changing. Dispatch inside the slice is a
 broadcast, so each feature clears its own outbox on an event it does not own — a stale outbox reads
 to its caller as a decision this turn made.
@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime import hover_pause, picker, pulse, sidebar, tipnav
+from saitenka.runtime import hover_pause, hovered_word, picker, pulse, sidebar, tipnav
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     CopyPulsed,
@@ -37,10 +37,14 @@ from saitenka.runtime.events import (
     HoverConfigured,
     HoverDwellElapsed,
     HoverDwellRefused,
+    HoverKanjiAdvanced,
     HoverObserved,
     HoverPauseClaimed,
     HoverPauseReleased,
     HoverScrolled,
+    HoverWordForgotten,
+    HoverWordRead,
+    HoverWordResolved,
     PickerClosed,
     PickerListed,
     PickerOpened,
@@ -60,6 +64,7 @@ from saitenka.runtime.help import HelpCommand, HelpState, repaginate
 from saitenka.runtime.help import decide as decide_help
 from saitenka.runtime.hover import HoverDelays, HoverState, decide, elapsed, refused, scrolled
 from saitenka.runtime.hover_pause import PauseClaim
+from saitenka.runtime.hovered_word import HoveredWord
 from saitenka.runtime.picker import PickerState
 from saitenka.runtime.pulse import PulseState
 from saitenka.runtime.sidebar import Redraw, SidebarState
@@ -314,6 +319,41 @@ class HoverPauseReducer:
         return ReduceResult(self.reduce(state, event))
 
 
+@dataclass(frozen=True, slots=True)
+class HoveredWordFeature:
+    """The slice: the hovered word's answer, reading and kanji cycle.
+
+    No outbox: every event here is a *declaration* — the lookup has already answered, the panel has
+    already named the reading — so there is nothing for the caller to perform on the way back.
+    """
+
+    word: HoveredWord = field(default_factory=HoveredWord)
+
+
+class HoveredWordReducer:
+    """Reduce one hovered-word declaration. Pure: it never looks inside the answer."""
+
+    def reduce(self, state: HoveredWordFeature, event: RuntimeEvent) -> HoveredWordFeature:
+        match event:
+            case HoverWordResolved(meta=meta, revised=True):
+                turn = hovered_word.revised(state.word, meta)
+            case HoverWordResolved(meta=meta):
+                turn = hovered_word.resolved(state.word, meta)
+            case HoverWordRead(reading=reading):
+                turn = hovered_word.read_as(state.word, reading)
+            case HoverWordForgotten():
+                turn = hovered_word.forgotten()
+            case HoverKanjiAdvanced():
+                turn = hovered_word.kanji_advanced(state.word)
+            case _:
+                return state
+        return HoveredWordFeature(turn.state)
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, HoveredWordFeature)
+        return ReduceResult(self.reduce(state, event))
+
+
 #: `Owner.INTERACTION`'s features, named once so a reader of the slot never spells a key itself.
 INTERACTION_FEATURE = "hover"
 HELP_FEATURE = "help"
@@ -322,6 +362,7 @@ SIDEBAR_FEATURE = "sidebar"
 TIP_NAV_FEATURE = "tip-nav"
 PULSE_FEATURE = "copy-pulse"
 HOVER_PAUSE_FEATURE = "hover-pause"
+HOVERED_WORD_FEATURE = "hovered-word"
 
 
 def interaction_slice_reducer() -> SliceReducer:
@@ -334,6 +375,7 @@ def interaction_slice_reducer() -> SliceReducer:
             TIP_NAV_FEATURE: TipNavReducer(),
             PULSE_FEATURE: PulseReducer(),
             HOVER_PAUSE_FEATURE: HoverPauseReducer(),
+            HOVERED_WORD_FEATURE: HoveredWordReducer(),
         }
     )
 
@@ -384,6 +426,13 @@ def hover_pause_slice_of(slot: object) -> HoverPauseFeature:
     assert isinstance(slot, OwnerSlice)
     state = slot.get(HOVER_PAUSE_FEATURE)
     assert isinstance(state, HoverPauseFeature)
+    return state
+
+
+def hovered_word_slice_of(slot: object) -> HoveredWordFeature:
+    assert isinstance(slot, OwnerSlice)
+    state = slot.get(HOVERED_WORD_FEATURE)
+    assert isinstance(state, HoveredWordFeature)
     return state
 
 
@@ -602,6 +651,35 @@ class HoverPauseStore:
         return hover_pause_slice_of(
             self._port.route_session_interaction(_envelope(event))
         ).published
+
+
+class HoveredWordStore:
+    """Where the hovered word's answer is kept, chosen once — same rule as the others.
+
+    `dispatch` returns nothing: this slice declares rather than decides, so there is no outbox to
+    drain and a caller that expected one would be waiting on a decision nobody makes.
+    """
+
+    def __init__(
+        self, port: InteractionRoutePort, *, reducer: HoveredWordReducer | None = None
+    ) -> None:
+        self._reducer = reducer if reducer is not None else HoveredWordReducer()
+        self._state = HoveredWordFeature()
+        self._port: InteractionRoutePort | None = (
+            port if port.route_session_interaction(None) is not None else None
+        )
+
+    @property
+    def current(self) -> HoveredWord:
+        if self._port is None:
+            return self._state.word
+        return hovered_word_slice_of(self._port.route_session_interaction(None)).word
+
+    def dispatch(self, event: InteractionSliceEvent) -> None:
+        if self._port is None:
+            self._state = self._reducer.reduce(self._state, event)
+            return
+        self._port.route_session_interaction(_envelope(event))
 
 
 def _envelope(event: InteractionSliceEvent) -> EventEnvelope:

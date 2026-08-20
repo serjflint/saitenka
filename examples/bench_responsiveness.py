@@ -31,10 +31,10 @@ from typing import TYPE_CHECKING, Any, cast
 from saitenka.app import nested_popup, tooltip, tooltip_panel
 from saitenka.app.config import load_config
 from saitenka.app.controller import Reader
-from saitenka.app.popups import NO_HOVER_METADATA
 from saitenka.app.tokenize import Token, tokenize
 from saitenka.mpvio.osd import to_bgra, to_bgra_array
 from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
+from saitenka.runtime import events
 from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import Cue, CueIndex
 
@@ -498,7 +498,7 @@ def run_render_cache(
         reader.tokens = [tok]
         reader.boxes = [WordBox(0, 400, 800, 60, 60)]
         reader.sub_origin = (0, 0)
-        reader.tip.hover = NO_HOVER_METADATA
+        reader.interaction.word_store.dispatch(events.HoverWordForgotten())
         key = reader._panel_key(tok, reader._inflected_surface(0), mined=False)
         if reader._peek_render_cache(key) is None:
             return None  # below the cost gate — not persisted

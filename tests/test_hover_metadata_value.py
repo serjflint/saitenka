@@ -15,6 +15,7 @@ from util import FakeIPC
 from saitenka.app.controller import Reader
 from saitenka.app.popups import NO_HOVER_METADATA, HoverMetadata
 from saitenka.app.subtitle_render import NullRenderer
+from saitenka.runtime import events
 
 
 def test_the_empty_metadata_is_every_field_empty() -> None:
@@ -30,28 +31,31 @@ def test_metadata_cannot_be_updated_field_by_field() -> None:
 
 
 def test_retiring_a_hover_clears_every_field_together() -> None:
-    """Against the real Reader, so the delegation to the tooltip state is exercised too."""
+    """Against the real Reader, so the route through the slice is exercised too."""
     reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
-        reader.tip.hover = HoverMetadata(
-            terms=("本命を",), span=(0, 2), mined=True, group_mined=(True, False)
+        reader.interaction.word_store.dispatch(
+            events.HoverWordResolved(
+                HoverMetadata(terms=("本命を",), span=(0, 2), mined=True, group_mined=(True, False))
+            )
         )
-        reader.tip.hover = NO_HOVER_METADATA
+        reader.interaction.word_store.dispatch(events.HoverWordForgotten())
 
-        meta = reader.tip.hover
+        meta = reader.interaction.hovered_word_meta
         assert (meta.terms, meta.span, meta.mined, meta.group_mined) == ((), None, False, ())
     finally:
         reader.close()
 
 
-def test_the_reader_shim_and_the_tooltip_state_are_the_same_value() -> None:
-    """Two write paths for one channel is the divergence that makes a fake lie; assert there is one."""
+def test_the_slice_hands_back_the_value_it_was_given() -> None:
+    """Two write paths for one channel is the divergence that makes a fake lie; assert there is one
+    — and that the answer round-trips by identity, so nothing rebuilds it field by field."""
     reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
         meta = HoverMetadata(terms=("読む",), span=(1, 2), mined=False, group_mined=(False,))
-        reader.tip.hover = meta
+        reader.interaction.word_store.dispatch(events.HoverWordResolved(meta))
 
-        assert reader.tip.hover is meta
-        assert reader.tip.hover is reader.tip.hover
+        assert reader.interaction.hovered_word_meta is meta
+        assert reader.interaction.hovered_word_meta is reader.interaction.hovered_word_meta
     finally:
         reader.close()

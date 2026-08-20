@@ -120,7 +120,6 @@ from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import (
-    NO_HOVER_METADATA,
     ClickPorts,
     HoverActions,
     HoverInputs,
@@ -186,6 +185,7 @@ from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import (
     HelpStore,
+    HoveredWordStore,
     HoverPauseStore,
     HoverStore,
     PickerStore,
@@ -720,6 +720,11 @@ class Reader:
         self.interaction.pulse_store = self._pulse_store
         self._pause_store = HoverPauseStore(self.ipc)
         self.interaction.pause_store = self._pause_store
+        # …and its eighth: what a lookup resolved about the hovered word, plus the `k` cycle over
+        # its kanji. The cycle restarting on a new word was three `= 0` writes at three sites; a
+        # new answer is the restart now, so a site that forgets cannot exist.
+        self._word_store = HoveredWordStore(self.ipc)
+        self.interaction.word_store = self._word_store
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self._translation = TranslationStore(self.ipc)
@@ -1025,7 +1030,7 @@ class Reader:
                 mode=self.annotation_mode, hover_annotation=self._annotation_hover
             ),
             hover=self.hover,
-            hover_span=self.tip.hover.span,
+            hover_span=self.interaction.hovered_word_meta.span,
             styles=self.styles,
             boxes=self.boxes,
         )
@@ -1299,9 +1304,7 @@ class Reader:
         self.tip.view.key = None
         self.tip.tip_tok = self.tip.tip_inflected = None
         self._nav_store.dispatch(events.TipNavCleared())
-        self.tip.hover_reading = ""
-        self.tip.hover = NO_HOVER_METADATA
-        self.tip.kanji_index = 0
+        self._word_store.dispatch(events.HoverWordForgotten())
         self._unbind_tip_keys()
         self._resume_after_hover_pause()
         self._sync_auto_translation()
@@ -1769,7 +1772,7 @@ class Reader:
     def _clear_native_interaction(self) -> None:
         self._teardown_tip()
         self.hover = -1
-        self.tip.hover = NO_HOVER_METADATA
+        self._word_store.dispatch(events.HoverWordForgotten())
         self.boxes = []
         self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
 
@@ -2279,6 +2282,7 @@ class Reader:
             tip=self.tip,
             pulse_store=self._pulse_store,
             pause_store=self._pause_store,
+            word_store=self._word_store,
             scale=self.tip_scale,
             surfaces=self.interaction_surfaces,
             hover_store=self._hover_store,
@@ -3015,10 +3019,10 @@ class Reader:
         return hover_intents.HoverInputs(
             hovered=True,
             surface=token.surface,
-            reading=self.tip.hover_reading,
+            reading=self._word_store.current.reading,
             token_reading=token.reading,
             kanji=tuple(char for char in token.surface if is_ideograph(char)),
-            kanji_index=self.tip.kanji_index,
+            kanji_index=self._word_store.current.kanji,
             has_dictionaries=self.dict_set is not None,
             anchored=box_for_token(self.boxes, self.hover) is not None,
             pause_on_tooltip=self.pause_on_tooltip,
@@ -3059,7 +3063,7 @@ class Reader:
             box = box_for_token(self.boxes, self.hover)
             assert box is not None  # the reducer only opens against an anchored token
             origin_x, origin_y = self.sub_origin
-            self.tip.kanji_index += 1
+            self._word_store.dispatch(events.HoverKanjiAdvanced())
             self._open_kanji(effect.char, origin_x + box.x, origin_y + box.y, box.h)
         elif isinstance(effect, hover_intents.SetHoverPause):
             self.pause_on_tooltip = effect.enabled

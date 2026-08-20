@@ -1431,7 +1431,7 @@ def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: 
     assert result.tip.view.state is None
     result.hover = 0
     kanji_current(result.tip_ports, result.panel_ports, result.hover_inputs)
-    assert result.tip.kanji_index == 0
+    assert result.interaction.word_store.current.kanji == 0
     result.close()
 
 

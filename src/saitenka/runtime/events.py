@@ -566,6 +566,33 @@ class HoverPauseReleased:
     """The tooltip that may have paused playback is going away."""
 
 
+@dataclass(frozen=True, slots=True)
+class HoverWordResolved:
+    """A lookup answered about the word now under the cursor. `meta` is opaque — see
+    `runtime/hovered_word.py`. `revised` is the same answer arriving about the *same* word, which
+    is the one case the kanji cycle must survive."""
+
+    meta: object
+    revised: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class HoverWordRead:
+    """The shown panel named the hovered word's dictionary reading."""
+
+    reading: str
+
+
+@dataclass(frozen=True, slots=True)
+class HoverWordForgotten:
+    """Nothing is hovered, or the hover moved and its answer has not arrived."""
+
+
+@dataclass(frozen=True, slots=True)
+class HoverKanjiAdvanced:
+    """`k` opened one of the hovered word's kanji."""
+
+
 type InteractionEvent = (
     HoverConfigured
     | HoverObserved
@@ -592,6 +619,10 @@ type InteractionEvent = (
     | CopyPulseExpired
     | HoverPauseClaimed
     | HoverPauseReleased
+    | HoverWordResolved
+    | HoverWordRead
+    | HoverWordForgotten
+    | HoverKanjiAdvanced
 )
 
 INTERACTION_EVENTS = (
@@ -620,6 +651,10 @@ INTERACTION_EVENTS = (
     CopyPulseExpired,
     HoverPauseClaimed,
     HoverPauseReleased,
+    HoverWordResolved,
+    HoverWordRead,
+    HoverWordForgotten,
+    HoverKanjiAdvanced,
 )
 
 

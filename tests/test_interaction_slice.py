@@ -7,7 +7,7 @@ takes and the other is the one almost every test takes.
 The outbox is what is new here. SUBTITLE declares, so its turns hand back nothing; INTERACTION
 observes, so the reducer is what decides and the decisions have to come back.
 
-Seven features share this slot, so the second thing the file pins is that they are independent: one
+Eight features share this slot, so the second thing the file pins is that they are independent: one
 feature's events reach the others by broadcast, and each has to leave the others' state alone.
 """
 
@@ -25,10 +25,13 @@ from saitenka.runtime.events import (
     HoverConfigured,
     HoverDwellElapsed,
     HoverDwellRefused,
+    HoverKanjiAdvanced,
     HoverObserved,
     HoverPauseClaimed,
     HoverPauseReleased,
     HoverScrolled,
+    HoverWordForgotten,
+    HoverWordResolved,
     PickerClosed,
     PickerListed,
     PickerOpened,
@@ -56,6 +59,7 @@ from saitenka.runtime.interaction_slice import (
     HelpFeature,
     HelpReducer,
     HelpStore,
+    HoveredWordStore,
     HoverFeature,
     HoverPauseStore,
     HoverReducer,
@@ -603,4 +607,74 @@ def test_the_same_claim_events_decide_the_same_slot_with_or_without_a_reactor(re
     routed = HoverPauseStore(ipc)
 
     assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
+    assert local.current == routed.current
+
+
+# --- the slot's eighth feature ------------------------------------------------------------------
+
+
+def test_the_hovered_word_slice_declares_and_hands_nothing_back(request) -> None:
+    """It observes nothing: the lookup has already answered by the time this is told. So there is
+    no outbox, and a caller waiting on one would be waiting on a decision nobody makes."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = HoveredWordStore(ipc)
+
+    assert store.dispatch(HoverWordResolved("answer")) is None
+    assert store.current.meta == "answer"
+
+
+def test_the_kanji_cycle_restarts_on_a_new_word_and_survives_a_revision(request) -> None:
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = HoveredWordStore(ipc)
+    store.dispatch(HoverWordResolved("cat"))
+    store.dispatch(HoverKanjiAdvanced())
+    store.dispatch(HoverKanjiAdvanced())
+
+    store.dispatch(HoverWordResolved("cat-mined", revised=True))
+    assert store.current.kanji == 2
+
+    store.dispatch(HoverWordResolved("dog"))
+    assert store.current.kanji == 0
+
+
+def test_the_hovered_word_is_untouched_by_the_slot_s_other_features(request) -> None:
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    word = HoveredWordStore(ipc)
+    hover = HoverStore(ipc)
+    word.dispatch(HoverWordResolved("cat"))
+
+    hover.dispatch(HoverObserved(HoverObservation(hover=-1, word=0)))
+
+    assert word.current.meta == "cat"
+
+
+def test_the_same_word_events_decide_the_same_slice_with_or_without_a_reactor(request) -> None:
+    stream = (
+        HoverWordResolved("cat"),
+        HoverKanjiAdvanced(),
+        HoverWordResolved("cat-mined", revised=True),
+        HoverWordForgotten(),
+        HoverKanjiAdvanced(),
+        HoverWordResolved("dog"),
+    )
+    local = HoveredWordStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = HoveredWordStore(ipc)
+
+    for event in stream:
+        local.dispatch(event)
+        routed.dispatch(event)
     assert local.current == routed.current

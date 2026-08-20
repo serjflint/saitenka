@@ -11,6 +11,8 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from saitenka.app import nested_popup, tooltip
+from saitenka.app.popups import hovered_meta
+from saitenka.runtime import events
 
 if TYPE_CHECKING:
     from saitenka.app.popups import HoverInputs, ShowActions, TipPorts, WordLookup
@@ -38,7 +40,8 @@ def mark_mined(
     if hovered >= 0 and ports.tip.view.state is not None:
         token = inputs.tokens[hovered]
         if expression in {token.lemma, token.surface}:
-            ports.tip.hover = replace(ports.tip.hover, mined=True)
+            revised = replace(hovered_meta(ports.word_store), mined=True)
+            ports.word_store.dispatch(events.HoverWordResolved(revised, revised=True))
         # Re-SHOW, not re-hover: the word did not change, and `set_hover` would return early.
         tooltip.show_tooltip(ports, panel, inputs, show, hovered)
     if ports.tip.nest.state is not None and ports.tip.nest.token is not None:

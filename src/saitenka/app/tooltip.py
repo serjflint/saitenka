@@ -24,7 +24,6 @@ from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import timed
 from saitenka.app.popups import (
-    NO_HOVER_METADATA,
     ClickPorts,
     HoverActions,
     HoverInputs,
@@ -34,6 +33,7 @@ from saitenka.app.popups import (
     ShowActions,
     TipPorts,
     WordLookup,
+    hovered_meta,
 )
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
@@ -61,7 +61,6 @@ from saitenka.runtime import hover as hover_machine
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.popups import TooltipState
     from saitenka.app.prefetch import TipScale
     from saitenka.app.tooltip_panel import PanelStyle
 
@@ -232,13 +231,17 @@ def resolve_hover(ports: TipPorts, lookup: WordLookup, inputs: HoverInputs, inde
         if got is not None:
             term_list, start, end = got
             terms, span = tuple(term_list), (start, end)
-    ports.tip.hover = HoverMetadata(
-        terms=terms,
-        span=span,
-        mined=is_mined(inputs.tokens[index], lookup.mined),
-        group_mined=group_mined_of(
-            inputs.tokens[index], lookup.mined, lookup.dict_set, extra_terms=terms
-        ),
+    ports.word_store.dispatch(
+        events.HoverWordResolved(
+            HoverMetadata(
+                terms=terms,
+                span=span,
+                mined=is_mined(inputs.tokens[index], lookup.mined),
+                group_mined=group_mined_of(
+                    inputs.tokens[index], lookup.mined, lookup.dict_set, extra_terms=terms
+                ),
+            )
+        )
     )
 
 
@@ -292,11 +295,15 @@ def apply_hover_metadata(
     if result.error:
         ports.tip.jobs.finish("tooltip", "failed")
         return
-    ports.tip.hover = HoverMetadata(
-        terms=result.phrase_terms,
-        span=result.phrase_span,
-        mined=result.mined,
-        group_mined=result.group_mined,
+    ports.word_store.dispatch(
+        events.HoverWordResolved(
+            HoverMetadata(
+                terms=result.phrase_terms,
+                span=result.phrase_span,
+                mined=result.mined,
+                group_mined=result.group_mined,
+            )
+        )
     )
     show.draw_cue()
     if show_tooltip(ports, panel, inputs, show, key.index):
@@ -315,7 +322,7 @@ def retire_hover(ports: TipPorts, inputs: HoverInputs, show: ShowActions) -> Non
     if inputs.hover() < 0:
         return
     show.select(-1)
-    ports.tip.hover = NO_HOVER_METADATA
+    ports.word_store.dispatch(events.HoverWordForgotten())
     show.draw_cue()
     show.teardown()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
 
@@ -343,7 +350,7 @@ def set_hover(
         ports.nav_store.dispatch(events.TipNavCleared())
         ports.tip.view.state = None
         ports.tip.view.rect = None
-        ports.tip.hover = NO_HOVER_METADATA
+        ports.word_store.dispatch(events.HoverWordForgotten())
         show.draw_cue()
         _request_hover_metadata(ports, lookup, inputs, index)
         return
@@ -539,7 +546,11 @@ def _click_nested(
     else:
         lb = link_hit_at(ports.tip, ports.scale.raster, x, y, nested=True)
         if lb is not None and not _mine_link(
-            panel.style.dict_set, ports.tip.hover.terms, click.mine_token, lb, nest.token
+            panel.style.dict_set,
+            hovered_meta(ports.word_store).terms,
+            click.mine_token,
+            lb,
+            nest.token,
         ):
             nested_popup.open_link(ports, panel, lb, nest.xy, nest.scroll)  # cross-ref → navigate
     return True
@@ -570,7 +581,8 @@ def _click_tip(
         hovered = inputs.hover()
         tok = inputs.tokens[hovered] if 0 <= hovered < len(inputs.tokens) else None
         # stacked entry ⊕ → mine that entry
-        if _mine_link(panel.style.dict_set, ports.tip.hover.terms, click.mine_token, lb, tok):
+        terms = hovered_meta(ports.word_store).terms
+        if _mine_link(panel.style.dict_set, terms, click.mine_token, lb, tok):
             log.debug("tip click → mine link %r", lb.query)
         else:
             # A headword kanji (``kanji:<ch>``) and a cross-reference both navigate the base tooltip IN
@@ -703,13 +715,12 @@ def show_tooltip_impl(
     view = tip.view
     nested_popup.hide_nested(ports)  # switching the base word drops any stale scan popup
     ports.nav_store.dispatch(events.TipNavCleared())  # a new word abandons the back-history
-    tip.kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = inputs.tokens[index]
     b = box_for_token(inputs.boxes, index)
     if b is None:
         log.debug("tooltip anchor disappeared for token index %d", index)
         show.select(-1)
-        tip.hover = NO_HOVER_METADATA
+        ports.word_store.dispatch(events.HoverWordForgotten())
         ports.tip.jobs.finish("tooltip", "failed")
         show.teardown()
         return False
@@ -724,7 +735,7 @@ def show_tooltip_impl(
     # windowed engine composites the rest on scroll with overscan look-ahead.
     # jamdict card_for on the main thread (not worker-safe) — untraced until now; a suspect for the
     # tooltip_show self-time under --mine, where reader._mined is populated so this actually looks up.
-    meta = tip.hover
+    meta = hovered_meta(ports.word_store)
     key = panel_key(
         panel,
         tok,
@@ -774,7 +785,7 @@ def show_tooltip_impl(
     if tip.tip_show_cold and st.windowed.first_view is None:
         show.seed_precomposed(st, key, cap)
     view.state, view.key = st, key
-    tip.hover_reading = st.reading
+    ports.word_store.dispatch(events.HoverWordRead(st.reading))
     log.debug(
         "tooltip shown: word=%r phrases=%r reading=%r mined=%s painted_from_cache=%s",
         tok.surface,
@@ -939,18 +950,19 @@ def apply_engaged_hover(
         _apply_engaged_base(ports, panel, inputs, show, result.key)
 
 
-def _capture_tip_view(tip: TooltipState) -> tuple:
+def _capture_tip_view(ports: TipPorts) -> tuple:
     """Snapshot the base tooltip's renderable view for the link-navigation back-stack. Includes the
     source token so a restored HOVERED view can still re-request crisp band-warming on scroll.
 
-    Takes the tooltip state, not the host: all eight fields live on it, six of them on its view.
-    Eight `Delegated` reads through a Reader was the flat-name layer showing through — the snapshot
-    is of one object and now says so.
+    Takes the port, not the host: seven of the eight fields live on the tooltip's own state and
+    the reading is the slice's. Eight `Delegated` reads through a Reader was the flat-name layer
+    showing through — the snapshot is of one feature and now says so.
     """
+    tip = ports.tip
     return (
         tip.view.state,
         tip.view.key,
-        tip.hover_reading,
+        ports.word_store.current.reading,
         tip.view.view_h,
         tip.view.xy,
         tip.view.scroll,
@@ -959,19 +971,22 @@ def _capture_tip_view(tip: TooltipState) -> tuple:
     )
 
 
-def _restore_tip_view(tip: TooltipState, view: tuple) -> None:
-    """Put back what `_capture_tip_view` took. Same object, same order, so the pair reads as one
-    round trip rather than two lists of names that have to be diffed to be trusted."""
+def _restore_tip_view(ports: TipPorts, view: tuple) -> None:
+    """Put back what `_capture_tip_view` took. Same order, so the pair reads as one round trip
+    rather than two lists of names that have to be diffed to be trusted."""
+    tip = ports.tip
+    reading: str
     (
         tip.view.state,
         tip.view.key,
-        tip.hover_reading,
+        reading,
         tip.view.view_h,
         tip.view.xy,
         tip.view.scroll,
         tip.tip_tok,
         tip.tip_inflected,
     ) = view
+    ports.word_store.dispatch(events.HoverWordRead(reading))
     tip.view.desired_scroll = tip.view.scroll
 
 
@@ -1029,13 +1044,13 @@ def _install_navigated(ports: TipPorts, st: Panel) -> None:
     """Swap ``st`` in as the base tooltip's content: hide the stale scan popup, push the current view
     onto the back-stack, and blit. Shared by the synchronous nav and the deferred (worker-built) swap."""
     nested_popup.hide_nested(ports)  # the old content's scan popup is stale
-    ports.nav_store.dispatch(events.TipNavPushed(_capture_tip_view(ports.tip)))
+    ports.nav_store.dispatch(events.TipNavPushed(_capture_tip_view(ports)))
     ports.tip.view.state = st
     # A navigated view is keyless (not a subtitle token) — the one panel composites native from its own
     # reference panel, so no synthetic key is needed. _tip_tok=None so scroll won't rebuild from a token.
     ports.tip.view.key = None
     ports.tip.tip_tok = ports.tip.tip_inflected = None
-    ports.tip.hover_reading = st.reading
+    ports.word_store.dispatch(events.HoverWordRead(st.reading))
     ports.tip.view.scroll = 0
     ports.tip.view.desired_scroll = 0
     ports.tip.view.view_h = min(st.full_height, ports.scale.cap)
@@ -1053,7 +1068,7 @@ def tip_back(ports: TipPorts) -> bool:
         return False
     captured = restored[0].view
     assert isinstance(captured, tuple)  # opaque to the slice; narrowed once, here, on the way back
-    _restore_tip_view(ports.tip, captured)
+    _restore_tip_view(ports, captured)
     render_view(ports, ports.tip.view)
     return True
 

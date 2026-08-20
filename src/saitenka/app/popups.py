@@ -13,7 +13,7 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from saitenka.app.interaction_jobs import InteractionJobs
 from saitenka.app.overlay_ids import OverlayId
@@ -36,7 +36,12 @@ if TYPE_CHECKING:
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend
     from saitenka.runtime.hover import Intent
-    from saitenka.runtime.interaction_slice import HoverPauseStore, PulseStore, TipNavStore
+    from saitenka.runtime.interaction_slice import (
+        HoveredWordStore,
+        HoverPauseStore,
+        PulseStore,
+        TipNavStore,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +69,9 @@ class TipPorts:
     #: tooltip is what paused — so both are slice features rather than flags anyone can set.
     pulse_store: PulseStore
     pause_store: HoverPauseStore
+    #: What was resolved about the word under the cursor. Read through, never snapshotted onto the
+    #: port: a mine landing on the hovered term revises the answer and re-shows within one call.
+    word_store: HoveredWordStore
     request_render_ahead: Callable[[PopupView, int], bool]
     osd: tuple[int, int]
     nested_max_frac: float
@@ -513,13 +521,25 @@ class HoverMetadata:
 NO_HOVER_METADATA = HoverMetadata()
 
 
+def hovered_meta(store: HoveredWordStore) -> HoverMetadata:
+    """The hovered word's answer, narrowed. The slice carries it as `object` because `runtime` must
+    not name a dictionary term, and `None` is how it spells "nothing resolved" — this is the one
+    place that turns that back into the empty answer every reader already expects."""
+    meta = store.current.meta
+    return NO_HOVER_METADATA if meta is None else cast("HoverMetadata", meta)
+
+
 class TooltipState:
-    """Runtime state of the base tooltip + its hover FSM — the big, hot interaction-scoped cluster:
-    the shown panel and its scroll/viewport/screen-rect, the in-place link-nav stack, the nested scan
-    popup, the scan/word dwell timers, the copy-flash pulse, the hovered word's reading/terms/kanji, and
-    the LRU panel cache. Grouped off the ``Reader`` god-object (#30); the ``Delegated`` shims keep every
-    historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/``_panel_cache`` name, so
-    the hover FSM woven through tooltip.py / nested_popup.py and its tests stay untouched."""
+    """What one paint of the tooltip stack produced, and the machinery that produces it.
+
+    The same cut the picker and the sidebar make: `Owner.INTERACTION`'s slice holds what was
+    *decided* — the hysteresis, the back-stack, the copy pulse, the pause claim, the hovered word's
+    answer — and this holds the two rendered popups, the source token the crisp pass re-renders
+    from, the LRU panel cache and the build lanes. None of those can live in a frozen slice: a
+    reducer carrying a cache makes the state differ from itself depending on what had been drawn,
+    and nothing here can release a job lane.
+
+    Grouped off the ``Reader`` god-object (#30)."""
 
     def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
         """`cache_lock` is shared with the Reader's other cache accounting, so it is injected."""
@@ -531,12 +551,6 @@ class TooltipState:
             OverlayId.NESTED
         )  # nested scan popup (hover a word inside the tooltip)
         self.last_mouse = (-1.0, -1.0)  # latest cursor pos — routes the wheel to the popup under it
-        self.hover_reading = ""  # dict-form reading of the hovered word, for TTS
-        #: What a metadata lookup resolved about the hovered word. Replaced wholesale, never field
-        #: by field: the four values are one lookup's answer, and four separate assignments is how a
-        #: half-updated hover (new terms, stale mined flags) reaches a draw.
-        self.hover = NO_HOVER_METADATA
-        self.kanji_index = 0  # `k` cycles the hovered word's kanji
         #: Samples the OTel hit-test histogram every `_HIT_TEST_SAMPLE_EVERY` poll ticks. Feature
         #: -private: nothing outside the hover path has ever read it.
         self.hit_test_tick = 0

@@ -10,7 +10,7 @@ from __future__ import annotations
 import util
 
 from saitenka.app.controller import Reader
-from saitenka.app.popups import HoverMetadata, PopupView, TooltipState
+from saitenka.app.popups import PopupView, TooltipState
 from saitenka.app.reader_context import EpisodeContext
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleStartupConfigured
 from saitenka.subtitles import Cue
@@ -98,20 +98,16 @@ def test_reader_delegates_tooltip_fields_to_tip_state():
 
 def test_rebinding_tip_resets_the_whole_hover_stack():
     """Tearing down / re-slotting the tooltip is one rebind: every hover-FSM field (shown panel, scroll,
-    hovered-word metadata) returns to its no-hover default in a single move,
+    panel and its caches) returns to its no-hover default in a single move,
     leak-free by construction — the same property the episode re-slot relies on, one tier down."""
     r = Reader(FakeIPC())
     r.tip.view.rect = (1, 2, 3, 4)
     r.tip.view.scroll = 9
-    r.tip.hover = HoverMetadata(terms=("数ある",))
-    r.tip.kanji_index = 3
 
     r.tip = TooltipState()  # the teardown/re-slot move
 
     assert r.tip.view.rect is None
     assert r.tip.view.scroll == 0
-    assert r.tip.hover.terms == ()
-    assert r.tip.kanji_index == 0
 
 
 def test_session_state_survives_an_episode_reslot():

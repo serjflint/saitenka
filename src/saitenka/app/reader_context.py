@@ -14,6 +14,7 @@ import threading
 from typing import TYPE_CHECKING, overload
 
 from saitenka.app.mined_set import MinedSet
+from saitenka.app.popups import hovered_meta
 from saitenka.app.subnav_settle import SettleWindow
 
 # In-RAM ceiling for the tier-2 compressed-head cache. Independent of the disk ceiling
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
     from saitenka.app.card_preview import PreviewState
     from saitenka.app.mined_store import MinedCardStore
-    from saitenka.app.popups import TooltipState
+    from saitenka.app.popups import HoverMetadata, TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
     from saitenka.app.sidebar import SidebarPanel
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from saitenka.runtime.hover_pause import PauseClaim
     from saitenka.runtime.interaction_slice import (
         HelpStore,
+        HoveredWordStore,
         HoverPauseStore,
         PickerStore,
         PulseStore,
@@ -140,6 +142,7 @@ class InteractionContext:
     nav_store: TipNavStore
     pulse_store: PulseStore
     pause_store: HoverPauseStore
+    word_store: HoveredWordStore
     #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
     #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
     picker_panel: PickerPanel
@@ -168,6 +171,10 @@ class InteractionContext:
     @property
     def hover_pause(self) -> PauseClaim:
         return self.pause_store.current
+
+    @property
+    def hovered_word_meta(self) -> HoverMetadata:
+        return hovered_meta(self.word_store)
 
 
 class RenderCacheState:

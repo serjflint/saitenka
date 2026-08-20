@@ -222,12 +222,14 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
     ui = Driver(r)
     ui.move_to_word(0)
-    assert r.tip.hover.terms == ("本命を",)
-    assert r.tip.hover.span == (0, 2), (
+    assert r.interaction.hovered_word_meta.terms == ("本命を",)
+    assert r.interaction.hovered_word_meta.span == (0, 2), (
         "the highlight must span the hovered token and its phrase partner"
     )
     ui.move_to_word(2)  # switch to 読む — a word with no following phrase term
-    assert r.tip.hover.span is None and r.tip.hover.terms == ()
+    assert (
+        r.interaction.hovered_word_meta.span is None and r.interaction.hovered_word_meta.terms == ()
+    )
 
 
 def test_phrase_reaches_panel_lookup(monkeypatch):

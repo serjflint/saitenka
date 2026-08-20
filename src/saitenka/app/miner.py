@@ -300,8 +300,8 @@ class Miner:
         # Mining the hovered word defaults to its longest stacked phrase (数ある over 数), matching the
         # tooltip's top entry; the explicit per-entry ⊕ still mines any specific stacked entry.
         cards = (
-            r.dict_set.cards_for(tok, extra_terms=r.tip.hover.terms)
-            if (r.dict_set and idx == r.hover and r.tip.hover.terms)
+            r.dict_set.cards_for(tok, extra_terms=r.interaction.hovered_word_meta.terms)
+            if (r.dict_set and idx == r.hover and r.interaction.hovered_word_meta.terms)
             else []
         )
         self.mine_token(tok, card=cards[0] if cards else None)

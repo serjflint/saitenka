@@ -34,6 +34,7 @@ from saitenka.app.tooltip_panel import (
     scan_hit,
 )
 from saitenka.model import is_ideograph
+from saitenka.runtime import events
 
 if TYPE_CHECKING:
     from saitenka.app.popups import TooltipState
@@ -357,12 +358,12 @@ def kanji_current(ports: TipPorts, panel: PanelPorts, inputs: HoverInputs) -> No
     if not chars:
         ports.toast("no kanji in this word", "warn", 1.2)
         return
-    ch = chars[ports.tip.kanji_index % len(chars)]
+    ch = chars[ports.word_store.current.kanji % len(chars)]
     ox, oy = inputs.sub_origin
     b = box_for_token(inputs.boxes, hovered)
     if b is None:
         return
-    ports.tip.kanji_index += 1
+    ports.word_store.dispatch(events.HoverKanjiAdvanced())
     open_kanji(ports, panel, ch, ox + b.x, oy + b.y, b.h)
 
 

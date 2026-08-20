@@ -680,7 +680,11 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
-        r.dict_set, r.tip.hover.terms, r._mine_token, LinkBox("mine:1", 0, 0, 10, 10), tok
+        r.dict_set,
+        r.interaction.hovered_word_meta.terms,
+        r._mine_token,
+        LinkBox("mine:1", 0, 0, 10, 10),
+        tok,
     )
     assert handled
     f = anki.added[0]["fields"]
