@@ -399,7 +399,11 @@ def _open_mined(reader: Reader, note_id: int) -> None:
         from saitenka.app import miner_ui
 
         miner_ui.preview_existing(
-            reader, note_id, _MinedPreviewCard(card.expression, card.reading), "exists"
+            reader.preview_ports,
+            reader.card_source,
+            note_id,
+            _MinedPreviewCard(card.expression, card.reading),
+            "exists",
         )
 
 

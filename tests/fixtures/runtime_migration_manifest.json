@@ -102,30 +102,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/miner_ui.py::click_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::hide_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::preview_existing"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::preview_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::replay_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::show_preview"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::observation_of"
     ],
     [

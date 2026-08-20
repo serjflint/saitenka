@@ -1949,6 +1949,33 @@ class Reader:
         return "pending" if self._sub_pending is not None else "ready"
 
     @property
+    def preview_ports(self) -> miner_ui.PreviewPorts:
+        """What the card-preview surface draws on and what a click on it does."""
+        return miner_ui.PreviewPorts(
+            interaction=self.interaction,
+            surfaces=self.lifecycle_surfaces,
+            osd=self.osd,
+            tip_width=self.tip_scale.width,
+            ipc=self.ipc,
+            keys=self.keys,
+            add_duplicate=self._add_duplicate,
+            play_audio=self.play_audio,
+        )
+
+    @property
+    def card_source(self) -> miner_ui.CardSource:
+        """Where a preview's content comes from. Paired with `preview_ports`."""
+        return miner_ui.CardSource(
+            anki=self.anki,
+            mine_cfg=self.mine_cfg,
+            lines=self.lines,
+            provenance=self._provenance,
+            video_path=lambda: self._get("path"),
+            tmp=self._tmp,
+            toast=self._toast,
+        )
+
+    @property
     def tip_ports(self) -> TipPorts:
         """What the popup blit/scroll/placement chain needs, as one member rather than the set.
 
@@ -2412,13 +2439,13 @@ class Reader:
                 else sub_picker.close_picker(self.sub_picker, self.lifecycle_surfaces)
             )
         elif panel is panel_intents.Panel.CARD_PREVIEW:
-            miner_ui.hide_preview(self)
+            miner_ui.hide_preview(self.preview_ports)
 
     def _apply_panel_effect(self, effect: panel_intents.PanelEffect) -> None:
         if isinstance(effect, DismissHover):
             self.retire_hover()
         elif isinstance(effect, panel_intents.ReplayCardPreview):
-            miner_ui.replay_preview(self)
+            miner_ui.replay_preview(self.preview_ports)
         elif isinstance(effect, panel_intents.OpenPanel):
             self._set_panel_open(effect.panel, opening=True)
         elif isinstance(effect, panel_intents.ClosePanel):
@@ -2499,7 +2526,7 @@ class Reader:
         if not self.show_preview:
             self._toast(f"mined {card.expression}")  # preview off → a terse confirmation instead
             return
-        miner_ui.preview_mined(self, card, tok, video, status)
+        miner_ui.preview_mined(self.preview_ports, self.card_source, card, tok, video, status)
 
     def _add_duplicate(self) -> None:
         """The preview's ＋ button: mine a second card for the current scene even though the
@@ -2511,7 +2538,7 @@ class Reader:
         if not self.show_preview:
             self._toast(f"already have {card.expression}")
             return
-        miner_ui.preview_existing(self, note_id, card, status)
+        miner_ui.preview_existing(self.preview_ports, self.card_source, note_id, card, status)
 
     def _media_image(self, name):
         return miner_ui.media_image(self.anki, name)
@@ -2520,7 +2547,7 @@ class Reader:
         return miner_ui.media_tempfile(self.anki, name, self._tmp)
 
     def _show_preview(self, pv: PreviewData, audio_path) -> None:
-        miner_ui.show_preview(self, pv, audio_path)
+        miner_ui.show_preview(self.preview_ports, pv, audio_path)
 
     def _render_preview(self) -> None:
         miner_ui.render_preview(
@@ -2531,7 +2558,7 @@ class Reader:
         self._run_panel_command(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)
 
     def _click_preview(self, x: float, y: float) -> bool:
-        return miner_ui.click_preview(self, x, y)
+        return miner_ui.click_preview(self.preview_ports, x, y)
 
     def replay_preview(self) -> None:
         self._run_panel_command(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)

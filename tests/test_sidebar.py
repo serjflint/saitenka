@@ -399,7 +399,7 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
     monkeypatch.setattr(
         miner_ui,
         "preview_existing",
-        lambda _r, nid, card, status: opened.append((nid, card.expression, status)),
+        lambda _ports, _src, nid, card, status: opened.append((nid, card.expression, status)),
     )
 
     sidebar._open_mined(reader, 111)

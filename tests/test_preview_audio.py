@@ -41,7 +41,7 @@ def reader_with_clip(tmp_path, monkeypatch):
     r.preview.rect = (0, 0, 200, 200)
     r.preview.audio_rect = (10, 10, 40, 40)
     r.preview.close_rect = (60, 10, 20, 20)
-    miner_ui.click_preview(r, 20, 20)  # ▶ → retains the handle
+    miner_ui.click_preview(r.preview_ports, 20, 20)  # ▶ → retains the handle
     assert r.preview.audio_proc is proc  # precondition: a clip is 'playing'
     return r, proc, killed
 
@@ -55,12 +55,12 @@ def test_second_play_press_replaces_the_clip_never_stacks(reader_with_clip, monk
     r, first, killed = reader_with_clip
     second = _FakeProc()
     monkeypatch.setattr(miner_ui, "play_audio", lambda _p: second)
-    miner_ui.click_preview(r, 20, 20)  # ▶ again while the first still plays
+    miner_ui.click_preview(r.preview_ports, 20, 20)  # ▶ again while the first still plays
     assert first in killed and r.preview.audio_proc is second
 
 
 def _close_button(r: Reader) -> None:
-    miner_ui.click_preview(r, 65, 15)  # ✕ → hide_preview
+    miner_ui.click_preview(r.preview_ports, 65, 15)  # ✕ → hide_preview
 
 
 def _esc(r: Reader) -> None:

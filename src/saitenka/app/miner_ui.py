@@ -5,8 +5,11 @@ Mining itself (Anki note creation, media capture, provenance/tags) lives in :cla
 — this module is the Reader-side glue for one INTERACTION surface: rendering the preview panel and
 handling clicks on it (dismiss / zoom / play). The ⊕→✓ feedback is
 :mod:`~saitenka.app.mined_feedback`; it writes a session fact and redraws the popups, which this
-surface is not one of. Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating
-methods on Reader itself.
+surface is not one of.
+
+Two ports: `PreviewPorts` is the surface (what it draws on and what a click can do), `CardSource`
+is where a preview's content comes from. They are separate because the second is Anki and the cue,
+neither of which the surface has any business reaching.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,8 +34,52 @@ from saitenka.model import in_rect
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path as PathType
+
+    from saitenka.app.anki import Anki, MineConfig
     from saitenka.app.card_preview import PreviewState
-    from saitenka.app.controller import Reader
+    from saitenka.app.config import KeyOptions
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+    from saitenka.app.reader_context import InteractionContext
+    from saitenka.app.tokenize import Token
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewPorts:
+    """What the card-preview surface draws on, and what a click on it can do.
+
+    Cut by owner like the surface registry's ports: the INTERACTION state (the preview itself, and
+    the help/tooltip whose key ownership a dismiss has to respect), the display it blits to, and
+    the one act a button performs.
+    """
+
+    interaction: InteractionContext
+    surfaces: LifecycleSurfaces
+    osd: tuple[int, int]
+    #: The tooltip's width, which the preview matches so the two read as one card at one size.
+    tip_width: int
+    ipc: object
+    keys: KeyOptions
+    add_duplicate: Callable[[], None]
+    play_audio: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CardSource:
+    """Where a preview's content comes from: the deck it may already be in, and the cue it was mined
+    from. Separate from `PreviewPorts` because a preview can be re-rendered — zoomed, replayed —
+    without any of this, and the surface must not be able to reach Anki to do it.
+    """
+
+    anki: Anki | None
+    mine_cfg: MineConfig | None
+    #: The cue's tokenized lines — `sentence_lines` rejoins them for the card's sentence field.
+    lines: list[list[Token]]
+    provenance: Callable[[object], str]
+    video_path: Callable[[], object]
+    tmp: PathType
+    toast: Callable[..., None]
 
 
 def _strip_tags(s: str) -> str:
@@ -63,43 +111,48 @@ def footer(mine_cfg, provenance: str) -> str:
     return f"{mine_cfg.deck} · {mine_cfg.model} · {provenance}"
 
 
-def preview_mined(reader: Reader, card, tok, video, status: str = "mined") -> None:
+def preview_mined(
+    ports: PreviewPorts, source: CardSource, card, tok, video, status: str = "mined"
+) -> None:
+    preview = ports.interaction.preview
     img = None
-    if reader.preview.last_jpg and Path(reader.preview.last_jpg).exists():
-        img = Image.open(reader.preview.last_jpg)
-    secs = audio_duration(reader.preview.last_audio) if reader.preview.last_audio else None
+    if preview.last_jpg and Path(preview.last_jpg).exists():
+        img = Image.open(preview.last_jpg)
+    secs = audio_duration(preview.last_audio) if preview.last_audio else None
     pv = PreviewData(
         status,
         card.expression,
         card.reading,
-        sentence_lines(reader.lines),
+        sentence_lines(source.lines),
         tok.surface,
         list(card.glosses),
         img,
         secs,
-        footer(reader.mine_cfg, reader._provenance(video)),
+        footer(source.mine_cfg, source.provenance(video)),
     )
-    show_preview(reader, pv, reader.preview.last_audio)
+    show_preview(ports, pv, preview.last_audio)
 
 
-def preview_existing(reader: Reader, note_id: int, card, status: str) -> None:
+def preview_existing(
+    ports: PreviewPorts, source: CardSource, note_id: int, card, status: str
+) -> None:
     from saitenka.app.anki import AnkiError
 
-    assert reader.anki is not None and reader.mine_cfg is not None  # duplicate path = mining on
+    assert source.anki is not None and source.mine_cfg is not None  # duplicate path = mining on
     try:
-        info = reader.anki.notes_info([note_id])
+        info = source.anki.notes_info([note_id])
     except AnkiError:
         info = []
     if not info:
-        reader._toast(f"already have {card.expression}", "warn")
+        source.toast(f"already have {card.expression}", "warn")
         return
-    f, fld = info[0]["fields"], reader.mine_cfg.fields
+    f, fld = info[0]["fields"], source.mine_cfg.fields
 
     def val(logical):
         return f.get(fld.get(logical, ""), {}).get("value", "")
 
-    img = media_image(reader.anki, _media_name(val("picture"), r'src="([^"]+)"'))
-    mp3 = media_tempfile(reader.anki, _media_name(val("audio"), r"\[sound:([^\]]+)\]"), reader._tmp)
+    img = media_image(source.anki, _media_name(val("picture"), r'src="([^"]+)"'))
+    mp3 = media_tempfile(source.anki, _media_name(val("audio"), r"\[sound:([^\]]+)\]"), source.tmp)
     secs = audio_duration(mp3) if mp3 else None
     pv = PreviewData(
         status,
@@ -110,9 +163,9 @@ def preview_existing(reader: Reader, note_id: int, card, status: str) -> None:
         _html_items(val("glossary")) or list(card.glosses),
         img,
         secs,
-        footer(reader.mine_cfg, reader._provenance(reader._get("path"))),
+        footer(source.mine_cfg, source.provenance(source.video_path())),
     )
-    show_preview(reader, pv, mp3)
+    show_preview(ports, pv, mp3)
 
 
 def media_image(anki, name):
@@ -185,13 +238,14 @@ def _stop_preview_audio(preview) -> None:
     kill_process_tree(proc)  # no-op on None / an already-exited process
 
 
-def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
+def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:
     # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
-    _stop_preview_audio(reader.preview)  # replay (P) / a new mine silences any clip still playing
-    reader.preview.last_preview, reader.preview.last_audio = pv, audio_path
-    reader.preview.zoom = False
-    render_preview(reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_scale.width)
-    _grab_preview_keys(reader.ipc, active_bindings(reader.keys, "preview"))
+    preview = ports.interaction.preview
+    _stop_preview_audio(preview)  # replay (P) / a new mine silences any clip still playing
+    preview.last_preview, preview.last_audio = pv, audio_path
+    preview.zoom = False
+    render_preview(preview, ports.surfaces, ports.osd, ports.tip_width)
+    _grab_preview_keys(ports.ipc, active_bindings(ports.keys, "preview"))
 
 
 def render_preview(preview: PreviewState, surfaces, osd: tuple[int, int], tip_width: int) -> None:
@@ -218,46 +272,45 @@ def render_preview(preview: PreviewState, surfaces, osd: tuple[int, int], tip_wi
     preview.dup_rect = _screen(pr.dup_rect)
 
 
-def hide_preview(reader: Reader) -> None:
-    _stop_preview_audio(
-        reader.preview
-    )  # every dismiss path (✕ / Esc / new-cue) funnels here → stop the clip
-    reader.lifecycle_surfaces.remove(OverlayId.PREVIEW)
-    reader.preview.clear()
+def hide_preview(ports: PreviewPorts) -> None:
+    preview = ports.interaction.preview
+    _stop_preview_audio(preview)  # every dismiss path (✕ / Esc / new-cue) funnels here
+    ports.surfaces.remove(OverlayId.PREVIEW)
+    preview.clear()
     _release_preview_keys(
-        reader.ipc,
-        active_bindings(reader.keys, "preview"),
-        help_open=reader.help.open,
-        tip_keys_bound=reader.tip.tip_keys_bound,
+        ports.ipc,
+        active_bindings(ports.keys, "preview"),
+        help_open=ports.interaction.help.open,
+        tip_keys_bound=ports.interaction.tip.tip_keys_bound,
     )
 
 
-def click_preview(reader: Reader, x: float, y: float) -> bool:
+def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:
     """Handle a click on the card preview: ✕ dismiss, screenshot → toggle enlarge, ▶ → play audio.
     An empty click does nothing. Returns True if the click landed on the preview."""
-    if reader.preview.rect is None or not in_rect(reader.preview.rect, x, y):
+    preview = ports.interaction.preview
+    if preview.rect is None or not in_rect(preview.rect, x, y):
         return False
-    if reader.preview.close_rect and in_rect(reader.preview.close_rect, x, y):
-        hide_preview(reader)
-    elif reader.preview.dup_rect and in_rect(reader.preview.dup_rect, x, y):
-        reader._add_duplicate()  # ＋ add anyway → mine a second card for this scene
-    elif reader.preview.image_rect and in_rect(reader.preview.image_rect, x, y):
-        reader.preview.zoom = not reader.preview.zoom
+    if preview.close_rect and in_rect(preview.close_rect, x, y):
+        hide_preview(ports)
+    elif preview.dup_rect and in_rect(preview.dup_rect, x, y):
+        ports.add_duplicate()  # ＋ add anyway → mine a second card for this scene
+    elif preview.image_rect and in_rect(preview.image_rect, x, y):
+        preview.zoom = not preview.zoom
         # enlarge to verify the frame / shrink back
-        render_preview(
-            reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_scale.width
-        )
+        render_preview(preview, ports.surfaces, ports.osd, ports.tip_width)
     elif (
-        reader.preview.audio_rect
-        and in_rect(reader.preview.audio_rect, x, y)
-        and reader.play_audio
-        and reader.preview.last_audio
+        preview.audio_rect
+        and in_rect(preview.audio_rect, x, y)
+        and ports.play_audio
+        and preview.last_audio
     ):
-        _stop_preview_audio(reader.preview)  # a second ▶ press replaces the clip, never stacks two
-        reader.preview.audio_proc = play_audio(reader.preview.last_audio)  # ▶ → play on demand
+        _stop_preview_audio(preview)  # a second ▶ press replaces the clip, never stacks two
+        preview.audio_proc = play_audio(preview.last_audio)  # ▶ → play on demand
     return True
 
 
-def replay_preview(reader: Reader) -> None:
-    if reader.preview.last_preview:
-        show_preview(reader, reader.preview.last_preview, reader.preview.last_audio)
+def replay_preview(ports: PreviewPorts) -> None:
+    preview = ports.interaction.preview
+    if preview.last_preview:
+        show_preview(ports, preview.last_preview, preview.last_audio)
