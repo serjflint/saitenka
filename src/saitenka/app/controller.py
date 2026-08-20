@@ -119,6 +119,7 @@ from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import (
     NO_HOVER_METADATA,
     HoverActions,
+    HoverInputs,
     Panel,
     PopupView,
     TipPorts,
@@ -555,7 +556,6 @@ class Reader:
         # by the profile's tokenizer name. A profile switch (#254) swaps it via use_tokenizer.
         self.tokenizer: Tokenizer = get_tokenizer(self.profile.tokenizer)
         self._mouse_in = False  # cursor over the video window — an engagement signal
-        self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
         # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
         self._runtime_announced = (
@@ -1718,7 +1718,7 @@ class Reader:
     def _update_hover(self) -> None:
         if not getattr(self.ov, "visible", True) or surfaces.suppress_hover(self):
             return
-        tooltip.update_hover(self)
+        tooltip.update_hover(self.tip_ports, self.hover_actions, self.hover_inputs)
 
     def set_hover(self, index: int) -> None:
         tooltip.set_hover(self, index)
@@ -1828,7 +1828,33 @@ class Reader:
             show_word=self.set_hover,
             retire_word=self.retire_hover,
             open_nested=lambda scan: nested_popup.show_nested(self, scan),
+            reveal_annotation=lambda revealed: self.set_annotation_hover(revealed=revealed),
+            publish_engagement=lambda inside: setattr(self, "_mouse_in", inside),
         )
+
+    @property
+    def hover_inputs(self) -> HoverInputs:
+        """What the hover observation reads. Paired with `tip_ports` and `hover_actions`.
+
+        `hover` and `cue_state` are callables because the sampled span reads them on both sides of
+        the routing turn, and the turn is what changes the first of them.
+        """
+        return HoverInputs(
+            mouse_pos=lambda: self._prop("mouse-pos"),
+            hit=self._hit,
+            hover=lambda: self.hover,
+            cue_state=self._cue_state,
+            tokens=self.tokens,
+            boxes=self.boxes,
+        )
+
+    def _cue_state(self) -> str:
+        """How far this cue has got, as one fact rather than three reads into other features."""
+        if not self.sub_text.strip():
+            return "empty"
+        if self._cue_retired:
+            return "retired"
+        return "pending" if self._sub_pending is not None else "ready"
 
     @property
     def tip_ports(self) -> TipPorts:

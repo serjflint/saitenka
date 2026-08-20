@@ -302,10 +302,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_read_mouse"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_request_hover_metadata"
     ],
     [
@@ -334,10 +330,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::observe_hover"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::on_click"
     ],
     [
@@ -359,18 +351,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::show_tooltip_impl"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::update_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::update_hover_impl"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::update_hover_instrumented"
     ],
     [
       "reader-parameter",

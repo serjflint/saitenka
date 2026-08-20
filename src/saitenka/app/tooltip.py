@@ -25,6 +25,7 @@ from saitenka.app.perf import timed
 from saitenka.app.popups import (
     NO_HOVER_METADATA,
     HoverActions,
+    HoverInputs,
     HoverMetadata,
     Panel,
     PopupView,
@@ -68,18 +69,18 @@ log = logging.getLogger(__name__)  # DEBUG lands in overlay.log → bundled by `
 # --- hover -----------------------------------------------------------------------------------------
 
 
-def update_hover(reader: Reader) -> None:
+def update_hover(ports: TipPorts, actions: HoverActions, inputs: HoverInputs) -> None:
     """Hover with hysteresis across the popup stack: keep each level alive while the cursor is on
     its trigger OR on the popup itself, lingering ``hide_delay`` after leaving both. Hovering a
     word *inside* the tooltip opens a nested scan popup."""
-
+    tip = ports.tip
     with timed("hover_hit_test"):
         # Sampled, not every tick: this runs at poll cadence (~40Hz).
-        reader._hit_test_tick = (reader._hit_test_tick + 1) % _HIT_TEST_SAMPLE_EVERY
-        if reader._hit_test_tick == 0:
-            update_hover_instrumented(reader)
+        tip.hit_test_tick = (tip.hit_test_tick + 1) % _HIT_TEST_SAMPLE_EVERY
+        if tip.hit_test_tick == 0:
+            update_hover_instrumented(ports, actions, inputs)
         else:
-            update_hover_impl(reader)
+            update_hover_impl(ports, actions, inputs)
 
 
 def _hover_targets(mx: float, my: float, *, inside: bool, tip_rect, nest_rect, hit):
@@ -139,7 +140,7 @@ def _dwell_elapsed(ports: TipPorts, actions: HoverActions, intent: hover_machine
     route_hover(ports, actions, events.HoverDwellElapsed(intent, ports.tip.nest.tail))
 
 
-def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
+def observe_hover(ports: TipPorts, inputs: HoverInputs, mx: float, my: float, *, inside: bool):
     """What the cursor is over, as the machine's input. Returns the observation and the raw target
     triple, which the instrumented path labels its span with.
 
@@ -150,52 +151,48 @@ def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
         mx,
         my,
         inside=inside,
-        tip_rect=reader.tip.view.rect,
-        nest_rect=reader.tip.nest.rect,
-        hit=lambda x, y: reader._hit(x, y) if reader.tokens else -1,
+        tip_rect=ports.tip.view.rect,
+        nest_rect=ports.tip.nest.rect,
+        hit=lambda x, y: inputs.hit(x, y) if inputs.tokens else -1,
     )
-    scan = (
-        scan_hit(reader.tip, reader.tip_scale.raster, mx, my)
-        if (over_tip and not over_nest)
-        else None
-    )
-    if scan is not None and link_hit_at(reader.tip, reader.tip_scale.raster, mx, my, nested=False):
+    scan = scan_hit(ports.tip, ports.scale.raster, mx, my) if (over_tip and not over_nest) else None
+    if scan is not None and link_hit_at(ports.tip, ports.scale.raster, mx, my, nested=False):
         scan = None
     return (
         hover_machine.HoverObservation(
-            hover=reader.hover,
+            hover=inputs.hover(),
             word=over_word,
             over_tip=over_tip,
             over_nest=over_nest,
             scan=scan,
-            nest_open=reader.tip.nest.state is not None,
-            nest_tail=reader.tip.nest.tail,
+            nest_open=ports.tip.nest.state is not None,
+            nest_tail=ports.tip.nest.tail,
         ),
         (over_word, over_tip, over_nest),
     )
 
 
-def _read_mouse(reader: Reader) -> tuple[float, float, bool]:
-    mp = reader._prop("mouse-pos") or {}
+def _read_mouse(ports: TipPorts, actions: HoverActions, inputs: HoverInputs):
+    mp = inputs.mouse_pos() or {}
     inside = bool(mp.get("hover"))
-    reader._mouse_in = inside  # engagement signal for prefetch
+    actions.publish_engagement(inside)
     mx, my = mp.get("x", -1), mp.get("y", -1)
-    reader.tip.last_mouse = (mx, my)
+    ports.tip.last_mouse = (mx, my)
     return mx, my, inside
 
 
-def update_hover_impl(reader: Reader) -> None:
-    mx, my, inside = _read_mouse(reader)
-    obs, (over_word, _tip, _nest) = observe_hover(reader, mx, my, inside=inside)
-    reader.set_annotation_hover(revealed=over_word >= 0)
-    route_hover(reader.tip_ports, reader.hover_actions, events.HoverObserved(obs))
+def update_hover_impl(ports: TipPorts, actions: HoverActions, inputs: HoverInputs) -> None:
+    mx, my, inside = _read_mouse(ports, actions, inputs)
+    obs, (over_word, _tip, _nest) = observe_hover(ports, inputs, mx, my, inside=inside)
+    actions.reveal_annotation(over_word >= 0)
+    route_hover(ports, actions, events.HoverObserved(obs))
 
 
-def update_hover_instrumented(reader: Reader) -> None:
+def update_hover_instrumented(ports: TipPorts, actions: HoverActions, inputs: HoverInputs) -> None:
     """Sampled split between pure target lookup and transition/tooltip work."""
-    mx, my, inside = _read_mouse(reader)
+    mx, my, inside = _read_mouse(ports, actions, inputs)
     with otel_metrics.traced("hover_target_lookup") as lookup:
-        obs, (over_word, over_tip, over_nest) = observe_hover(reader, mx, my, inside=inside)
+        obs, (over_word, over_tip, over_nest) = observe_hover(ports, inputs, mx, my, inside=inside)
         lookup.set(
             "region",
             "nested"
@@ -206,23 +203,14 @@ def update_hover_instrumented(reader: Reader) -> None:
             if over_word >= 0
             else "none",
         )
-        lookup.set("token_count", min(len(reader.tokens), 64))
-        lookup.set("box_count", min(len(reader.boxes), 64))
+        lookup.set("token_count", min(len(inputs.tokens), 64))
+        lookup.set("box_count", min(len(inputs.boxes), 64))
     with otel_metrics.traced("hover_transition") as transition:
-        previous = reader.hover
-        reader.set_annotation_hover(revealed=over_word >= 0)
-        route_hover(reader.tip_ports, reader.hover_actions, events.HoverObserved(obs))
-        transition.set("changed", previous != reader.hover)
-        transition.set(
-            "cue_state",
-            "empty"
-            if not reader.sub_text.strip()
-            else "retired"
-            if reader._cue_retired
-            else "pending"
-            if reader._sub_pending is not None
-            else "ready",
-        )
+        previous = inputs.hover()
+        actions.reveal_annotation(over_word >= 0)
+        route_hover(ports, actions, events.HoverObserved(obs))
+        transition.set("changed", previous != inputs.hover())
+        transition.set("cue_state", inputs.cue_state())
 
 
 def resolve_hover(reader: Reader, index: int) -> None:

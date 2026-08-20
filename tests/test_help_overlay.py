@@ -139,7 +139,7 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     reader = Reader(ipc, anki=object())
     hover_updates: list[str] = []
     actions: list[str] = []
-    monkeypatch.setattr(tooltip, "update_hover", lambda _reader: hover_updates.append("hover"))
+    monkeypatch.setattr(tooltip, "update_hover", lambda *_a: hover_updates.append("hover"))
     monkeypatch.setattr(reader, "mine_current", lambda: actions.append("mine"))
     monkeypatch.setattr(reader, "toggle_bookmark", lambda: actions.append("bookmark"))
 

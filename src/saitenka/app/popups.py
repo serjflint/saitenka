@@ -19,7 +19,7 @@ from saitenka.app.interaction_jobs import InteractionJobs
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     import numpy as np
 
@@ -83,6 +83,30 @@ class HoverActions:
     show_word: Callable[[int], None]
     retire_word: Callable[[], None]
     open_nested: Callable[[object], None]
+    reveal_annotation: Callable[[bool], None]
+    #: "The cursor is over the window" — read by prefetch as an engagement signal. An act rather
+    #: than a field write because it crosses an owner: the hover observes it, somebody else uses it.
+    publish_engagement: Callable[[bool], None]
+
+
+@dataclass(frozen=True, slots=True)
+class HoverInputs:
+    """What the hover observation reads: the cursor, and the rendered cue it can be over.
+
+    Live rather than snapshotted where it has to be. `hover` is a callable because the routing this
+    feeds *changes* it, and the sampled span reports whether it did — a snapshot would answer with
+    the value from before the turn and report "unchanged" every time.
+
+    `tokens` and `boxes` are plain values: they belong to the cue being rendered and cannot change
+    inside one observation.
+    """
+
+    mouse_pos: Callable[[], dict | None]
+    hit: Callable[[float, float], int]
+    hover: Callable[[], int]
+    cue_state: Callable[[], str]
+    tokens: Sequence[Token]
+    boxes: Sequence[object]
 
 
 class Panel:
@@ -433,6 +457,9 @@ class TooltipState:
         #: half-updated hover (new terms, stale mined flags) reaches a draw.
         self.hover = NO_HOVER_METADATA
         self.kanji_index = 0  # `k` cycles the hovered word's kanji
+        #: Samples the OTel hit-test histogram every `_HIT_TEST_SAMPLE_EVERY` poll ticks. Feature
+        #: -private: nothing outside the hover path has ever read it.
+        self.hit_test_tick = 0
         self.tip_keys_bound = False
         self.tip_tok: Token | None = None  # base tooltip's source token (for the crisp re-render)
         self.tip_inflected: str | None = (

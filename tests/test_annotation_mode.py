@@ -93,7 +93,7 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
         "set_annotation_hover",
         lambda *, revealed: calls.append(("style", revealed)),
     )
-    update_hover_impl(reader)
+    update_hover_impl(reader.tip_ports, reader.hover_actions, reader.hover_inputs)
 
     assert calls == [("style", True)]
     # The switch is a decision the dwell has not made yet: the target is armed, the tooltip has not
@@ -127,7 +127,7 @@ def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
         reader, "renderer", _SpyRenderer(lambda rq: states.append(rq.annotation_visible))
     )
 
-    update_hover_impl(reader)
+    update_hover_impl(reader.tip_ports, reader.hover_actions, reader.hover_inputs)
 
     assert states == [False]
 
