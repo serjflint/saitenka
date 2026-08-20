@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app import native_subtitles, subtitle_raster
+from saitenka.app import subtitle_raster
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_ownership import (
@@ -412,7 +412,7 @@ def target_of(reader: Reader) -> SubtitleTarget:
             (lambda: None)
             if geometry is None
             # Snapshot at call time, not here: the target outlives the observation.
-            else (lambda: geometry.refresh(native_subtitles.observation_of(reader)))
+            else (lambda: geometry.refresh(reader._geometry_observation()))
         ),
         draw_request=lambda: build_draw_request(reader),
         source=None if geometry is None else geometry.source_path,

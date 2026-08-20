@@ -521,7 +521,7 @@ def wheel(view: SidebarView, steps: int, pointer, *, hold: Callable[[float], boo
 
 def scroll(reader: Reader, steps: int) -> bool:
     return wheel(
-        view_of(reader),
+        reader.sidebar_view,
         steps,
         reader._prop("mouse-pos"),
         hold=reader.hold_sidebar_scroll,
@@ -625,7 +625,7 @@ def click(view: SidebarView, actions: SidebarActions, x: float, y: float) -> boo
 
 
 def on_click(reader: Reader, x: float, y: float) -> bool:
-    return click(view_of(reader), actions_of(reader), x, y)
+    return click(reader.sidebar_view, reader.sidebar_actions, x, y)
 
 
 def mine_active(view: SidebarView) -> None:
