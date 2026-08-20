@@ -61,8 +61,10 @@ from saitenka.runtime.events import (
 from saitenka.runtime.interaction_slice import (
     HELP_FEATURE,
     INTERACTION_FEATURE,
+    PICKER_FEATURE,
     HelpFeature,
     HoverFeature,
+    PickerFeature,
     interaction_slice_reducer,
 )
 from saitenka.runtime.playback_slice import (
@@ -417,7 +419,11 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
             subtitle=subtitle.initial({SUBTITLE_FEATURE: SubtitleTrackState()}),
             interaction=interaction.initial(
-                {INTERACTION_FEATURE: HoverFeature(), HELP_FEATURE: HelpFeature()}
+                {
+                    INTERACTION_FEATURE: HoverFeature(),
+                    HELP_FEATURE: HelpFeature(),
+                    PICKER_FEATURE: PickerFeature(),
+                }
             ),
             presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),
         ),

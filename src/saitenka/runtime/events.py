@@ -443,6 +443,34 @@ class HelpRepaginated:
     page_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class PickerOpened:
+    """Window 1 went up — a fresh generation, so anything still in flight is now stale."""
+
+
+@dataclass(frozen=True, slots=True)
+class PickerClosed:
+    """Window 1 came down, however it came down: the key, a click, or the session closing."""
+
+
+@dataclass(frozen=True, slots=True)
+class PickerListed:
+    """A subtitle listing came back. `generation` is which picker asked; the reducer decides
+    whether that is still the one on screen. `listing` is opaque — see `runtime/picker.py`."""
+
+    generation: int
+    listing: object
+
+
+@dataclass(frozen=True, slots=True)
+class PickerScrolled:
+    """A wheel notch over the picker. `count` rides along for the same reason the help page count
+    does: it is the length of a list the app rendered, and the clamp is decided against it."""
+
+    steps: int
+    count: int
+
+
 type InteractionEvent = (
     HoverConfigured
     | HoverObserved
@@ -451,6 +479,10 @@ type InteractionEvent = (
     | HoverDwellRefused
     | HelpCommanded
     | HelpRepaginated
+    | PickerOpened
+    | PickerClosed
+    | PickerListed
+    | PickerScrolled
 )
 
 INTERACTION_EVENTS = (
@@ -461,6 +493,10 @@ INTERACTION_EVENTS = (
     HoverDwellRefused,
     HelpCommanded,
     HelpRepaginated,
+    PickerOpened,
+    PickerClosed,
+    PickerListed,
+    PickerScrolled,
 )
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 import util
 
-from saitenka.app import sidebar, sub_picker, surfaces
+from saitenka.app import sidebar, surfaces
 from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.subselect import SubtitleCandidate
@@ -141,18 +141,23 @@ def test_scroll_command_routes_to_open_help(monkeypatch):
 
 
 def test_scroll_command_routes_to_open_picker(monkeypatch):
+    from saitenka.app.sub_picker import ListingResult
+    from saitenka.runtime import events, picker
+
     reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
-    reader.sub_picker.open = True
-    reader.sub_picker.rect = (0, 0, 100, 100)
     candidate = SubtitleCandidate(
         "provider", "name", 1, match=False, download=lambda: ("path", "ok")
     )
-    reader.sub_picker.candidates = (candidate,) * 20
+    reader._picker_store.dispatch(events.PickerOpened())
+    reader._picker_store.dispatch(
+        events.PickerListed(reader.sub_picker.generation, ListingResult((candidate,) * 20, ()))
+    )
+    reader.interaction.picker_panel.rect = (0, 0, 100, 100)
     monkeypatch.setattr(reader, "redraw_sub_picker", lambda: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert reader.sub_picker.scroll == sub_picker.ROWS_PER_WHEEL_STEP
+    assert reader.sub_picker.scroll == picker.ROWS_PER_WHEEL_STEP
 
 
 def test_scroll_command_routes_to_open_sidebar(monkeypatch):
@@ -179,16 +184,17 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     from saitenka.app.popups import TooltipState
     from saitenka.app.reader_context import InteractionContext
     from saitenka.app.sidebar import SidebarState
-    from saitenka.app.sub_picker import PickerState
+    from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.surfaces import wants_mouse_capture
-    from saitenka.runtime.interaction_slice import HelpStore
+    from saitenka.runtime.interaction_slice import HelpStore, PickerStore
     from saitenka.runtime.jobs import NoSessionRuntime
 
     interaction = InteractionContext()
-    # `help` is a slice feature now, so the context is given the store rather than the state — and
-    # `NoSessionRuntime` is how a transport-less stand-in says "no reactor here".
+    # Two of the five are slice features now, so the context is given their stores rather than
+    # their states — and `NoSessionRuntime` is how a transport-less stand-in says "no reactor here".
     interaction.help_store = HelpStore(NoSessionRuntime())
-    interaction.sub_picker = PickerState()
+    interaction.picker_store = PickerStore(NoSessionRuntime())
+    interaction.picker_panel = PickerPanel()
     interaction.sidebar = SidebarState()
     interaction.preview = PreviewState()
     interaction.tip = TooltipState()

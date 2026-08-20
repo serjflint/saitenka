@@ -7,8 +7,8 @@ takes and the other is the one almost every test takes.
 The outbox is what is new here. SUBTITLE declares, so its turns hand back nothing; INTERACTION
 observes, so the reducer is what decides and the decisions have to come back.
 
-Two features share this slot, so the second thing the file pins is that they are independent: one
-feature's events reach the other by broadcast, and each has to leave the other's state alone.
+Three features share this slot, so the second thing the file pins is that they are independent: one
+feature's events reach the others by broadcast, and each has to leave the others' state alone.
 """
 
 from __future__ import annotations
@@ -25,6 +25,10 @@ from saitenka.runtime.events import (
     HoverDwellRefused,
     HoverObserved,
     HoverScrolled,
+    PickerClosed,
+    PickerListed,
+    PickerOpened,
+    PickerScrolled,
 )
 from saitenka.runtime.help import HelpCommand, HelpState, OpenHelp, ShowHelpPage
 from saitenka.runtime.hover import (
@@ -44,6 +48,7 @@ from saitenka.runtime.interaction_slice import (
     HoverFeature,
     HoverReducer,
     HoverStore,
+    PickerStore,
 )
 
 DELAYS = HoverDelays(scan=0.1, hide=0.2, switch=0.3)
@@ -268,3 +273,79 @@ def test_a_shrunk_document_is_folded_in_through_the_store(request) -> None:
     store.repaginate(1)
 
     assert store.current == HelpState(open=True, page=0)
+
+
+# --- the slot's third feature ----------------------------------------------------------------------
+
+
+def test_the_three_features_of_the_slot_do_not_read_each_other(request) -> None:
+    """The broadcast is what makes this reachable: every event reaches every reducer in the slot."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    hover, help_, picker = HoverStore(ipc), HelpStore(ipc), PickerStore(ipc)
+
+    help_.dispatch(HelpCommand.TOGGLE)
+    picker.dispatch(PickerOpened())
+    for event in STREAM:
+        hover.dispatch(event)
+
+    assert help_.current == HelpState(open=True)
+    assert picker.current.open and picker.current.loading
+    assert hover.current.delays == DELAYS
+
+
+def test_a_listing_for_the_picker_that_was_up_a_moment_ago_is_refused(request) -> None:
+    """The generation is the point of the machine, and the store is where a real listing meets it:
+    a result that comes back after a close-and-reopen must not repopulate the picker on screen."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = PickerStore(ipc)
+
+    store.dispatch(PickerOpened())
+    stale = store.current.generation
+    store.dispatch(PickerClosed())
+    store.dispatch(PickerOpened())
+
+    assert store.dispatch(PickerListed(stale, "old")) == ()
+    assert store.current.listing is None
+    assert store.dispatch(PickerListed(store.current.generation, "current")) != ()
+    assert store.current.listing == "current"
+
+
+def test_closing_a_picker_that_is_already_down_publishes_nothing(request) -> None:
+    """The caller removes an overlay on the decision, so a second close must not ask for a removal
+    at an id something else may since have drawn on."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = PickerStore(ipc)
+    store.dispatch(PickerOpened())
+
+    assert store.dispatch(PickerClosed()) != ()
+    assert store.dispatch(PickerClosed()) == ()
+
+
+def test_the_same_picker_events_decide_the_same_state_with_or_without_a_reactor(request) -> None:
+    events = (
+        PickerOpened(),
+        PickerListed(1, "a"),
+        PickerScrolled(1, 10),
+        PickerScrolled(1, 10),
+        PickerClosed(),
+        PickerScrolled(1, 10),
+    )
+    local = PickerStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = PickerStore(ipc)
+
+    assert [local.dispatch(e) for e in events] == [routed.dispatch(e) for e in events]
+    assert local.current == routed.current

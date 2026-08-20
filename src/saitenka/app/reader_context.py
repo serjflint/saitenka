@@ -29,11 +29,12 @@ if TYPE_CHECKING:
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
     from saitenka.app.sidebar import SidebarState
-    from saitenka.app.sub_picker import PickerState
+    from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
     from saitenka.runtime.help import HelpState
-    from saitenka.runtime.interaction_slice import HelpStore
+    from saitenka.runtime.interaction_slice import HelpStore, PickerStore
+    from saitenka.runtime.picker import PickerState
     from saitenka.subtitles import Cue, CueIndex
 
 
@@ -113,19 +114,26 @@ class InteractionContext:
     #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the four need
     #: constructor arguments this container has no business knowing. Declared here so the container
     #: states its own shape rather than acquiring it from whoever writes first.
-    sub_picker: PickerState
     sidebar: SidebarState
     preview: PreviewState
     tip: TooltipState
 
-    #: `help` is the first of the five to become a slice feature, so the container asks for it
-    #: rather than holding it. Reached the same way by every surface hook — `interaction.help` — so
+    #: The surfaces that have become slice features ask for their state rather than holding it.
+    #: Reached the same way as the others — `interaction.help`, `interaction.sub_picker` — so
     #: nothing downstream can tell which of the five have moved yet.
     help_store: HelpStore
+    picker_store: PickerStore
+    #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
+    #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
+    picker_panel: PickerPanel
 
     @property
     def help(self) -> HelpState:
         return self.help_store.current
+
+    @property
+    def sub_picker(self) -> PickerState:
+        return self.picker_store.current
 
 
 class RenderCacheState:

@@ -1,4 +1,4 @@
-"""`Owner.INTERACTION`'s features: the hover hysteresis, and the shortcut overlay.
+"""`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, and the picker.
 
 The third slice, and the first whose events are *observations* rather than declarations. SUBTITLE
 needs no outbox because the sender has already done the thing it is declaring; here the reducer is
@@ -10,8 +10,8 @@ where it was.
 reactor ignores an event while closing) leaves the previous turn's outbox in place, and slice
 identity is the only thing that answers whether this turn is the one that filled it.
 
-Two features share the slot, which is what `OwnerSlice` exists for: `help` joined by registering a
-reducer and an initial state, with nothing in `hover` changing. Dispatch inside the slice is a
+Three features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
+reducer and an initial state, with nothing in the others changing. Dispatch inside the slice is a
 broadcast, so each feature clears its own outbox on an event it does not own — a stale outbox reads
 to its caller as a decision this turn made.
 """
@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka.runtime import picker
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     EpisodeRetired,
@@ -34,19 +35,28 @@ from saitenka.runtime.events import (
     HoverDwellRefused,
     HoverObserved,
     HoverScrolled,
+    PickerClosed,
+    PickerListed,
+    PickerOpened,
+    PickerScrolled,
 )
 from saitenka.runtime.help import HelpCommand, HelpState, repaginate
 from saitenka.runtime.help import decide as decide_help
 from saitenka.runtime.hover import HoverDelays, HoverState, decide, elapsed, refused, scrolled
+from saitenka.runtime.picker import PickerState
 from saitenka.runtime.state import OwnerSlice, ReduceResult, SliceReducer
 
 if TYPE_CHECKING:
     from saitenka.runtime.events import InteractionEvent, RuntimeEvent
     from saitenka.runtime.help import HelpEffect
     from saitenka.runtime.hover import Decision
+    from saitenka.runtime.picker import ListingAdopted, PickerRetired
 
 #: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
 type InteractionSliceEvent = InteractionEvent | EpisodeRetired
+
+#: What a picker turn hands back. Named so the store's signature does not spell the union.
+type PickerDecision = PickerRetired | ListingAdopted
 
 #: Until a session declares its own. Zero would make every dwell fire instantly, which is the one
 #: default that changes behaviour rather than deferring it.
@@ -122,13 +132,54 @@ class HelpReducer:
         return ReduceResult(self.reduce(state, event))
 
 
+@dataclass(frozen=True, slots=True)
+class PickerFeature:
+    """The slice: the picker's state, and the turn's outbox."""
+
+    picker: PickerState = field(default_factory=PickerState)
+    published: tuple[PickerDecision, ...] = ()
+
+
+class PickerReducer:
+    """Reduce one picker event. Pure: no overlay, no job lane, no host."""
+
+    def reduce(self, state: PickerFeature, event: RuntimeEvent) -> PickerFeature:
+        match event:
+            case PickerOpened():
+                turn = picker.opened(state.picker)
+            case PickerClosed():
+                turn = picker.retired(state.picker)
+            case PickerListed(generation=generation, listing=listing):
+                turn = picker.listed(state.picker, generation, listing)
+            case PickerScrolled(steps=steps, count=count):
+                turn = picker.scrolled(state.picker, steps, count)
+            # The picker is per-episode by construction — a candidate list for the file that just
+            # ended describes nothing on screen — but the close is what says so, and the re-slot
+            # already runs it. Retiring here as well would emit a second `PickerRetired`, and the
+            # overlay it asks to remove would be one the next episode had already put up.
+            case _:
+                return replace(state, published=())
+        return PickerFeature(turn.state, turn.decisions)
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, PickerFeature)
+        return ReduceResult(self.reduce(state, event))
+
+
 #: `Owner.INTERACTION`'s features, named once so a reader of the slot never spells a key itself.
 INTERACTION_FEATURE = "hover"
 HELP_FEATURE = "help"
+PICKER_FEATURE = "picker"
 
 
 def interaction_slice_reducer() -> SliceReducer:
-    return SliceReducer({INTERACTION_FEATURE: HoverReducer(), HELP_FEATURE: HelpReducer()})
+    return SliceReducer(
+        {
+            INTERACTION_FEATURE: HoverReducer(),
+            HELP_FEATURE: HelpReducer(),
+            PICKER_FEATURE: PickerReducer(),
+        }
+    )
 
 
 def slice_of(slot: object) -> HoverFeature:
@@ -142,6 +193,13 @@ def help_slice_of(slot: object) -> HelpFeature:
     assert isinstance(slot, OwnerSlice)
     state = slot.get(HELP_FEATURE)
     assert isinstance(state, HelpFeature)
+    return state
+
+
+def picker_slice_of(slot: object) -> PickerFeature:
+    assert isinstance(slot, OwnerSlice)
+    state = slot.get(PICKER_FEATURE)
+    assert isinstance(state, PickerFeature)
     return state
 
 
@@ -231,6 +289,31 @@ class HelpStore:
             self._state = self._reducer.reduce(self._state, event)
             return self._state.published
         return help_slice_of(self._port.route_session_interaction(_envelope(event))).published
+
+
+class PickerStore:
+    """Where the picker's slice is kept, chosen once — same rule as the other two."""
+
+    def __init__(self, port: InteractionRoutePort, *, reducer: PickerReducer | None = None) -> None:
+        self._reducer = reducer if reducer is not None else PickerReducer()
+        self._state = PickerFeature()
+        self._port: InteractionRoutePort | None = (
+            port if port.route_session_interaction(None) is not None else None
+        )
+
+    @property
+    def current(self) -> PickerState:
+        """What the picker is showing right now. Frozen: writing it is an event."""
+        if self._port is None:
+            return self._state.picker
+        return picker_slice_of(self._port.route_session_interaction(None)).picker
+
+    def dispatch(self, event: InteractionSliceEvent) -> tuple[PickerDecision, ...]:
+        """Reduce one picker event and drain the turn's outbox."""
+        if self._port is None:
+            self._state = self._reducer.reduce(self._state, event)
+            return self._state.published
+        return picker_slice_of(self._port.route_session_interaction(_envelope(event))).published
 
 
 def _envelope(event: InteractionSliceEvent) -> EventEnvelope:

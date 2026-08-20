@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
+    from saitenka.runtime.picker import PickerState
+
 from saitenka import otel_metrics
 from saitenka.app import (
     analysis_overlay,
@@ -181,7 +183,7 @@ from saitenka.runtime import help as help_machine
 from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
-from saitenka.runtime.interaction_slice import HelpStore, HoverStore
+from saitenka.runtime.interaction_slice import HelpStore, HoverStore, PickerStore
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.runner import SessionRunner
@@ -284,7 +286,6 @@ class Reader:
     # what lets a hook reach one without the host. Every other flat alias is gone: the lifetime
     # containers are addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`),
     # because an alias per field made one object look like N host members to every ratchet.
-    sub_picker = Delegated[sub_picker_module.PickerState]("interaction", "sub_picker")
     sidebar = Delegated[sidebar_module.SidebarState]("interaction", "sidebar")
     preview = Delegated[card_preview.PreviewState]("interaction", "preview")
     tip = Delegated[popups.TooltipState]("interaction", "tip")
@@ -572,7 +573,6 @@ class Reader:
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
         self.sidebar = sidebar.SidebarState()
-        self.sub_picker = sub_picker.PickerState()
         self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
         # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
@@ -691,6 +691,11 @@ class Reader:
         # `hover` did not change to make room for it.
         self._help_store = HelpStore(self.ipc)
         self.interaction.help_store = self._help_store
+        # …and its third: the subtitle picker. Its drawn geometry stays beside the slice rather than
+        # in it — one paint on one screen is not what a session-lived slot holds.
+        self._picker_store = PickerStore(self.ipc)
+        self.interaction.picker_store = self._picker_store
+        self.interaction.picker_panel = sub_picker.PickerPanel()
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self._translation = TranslationStore(self.ipc)
@@ -2178,7 +2183,7 @@ class Reader:
         """What one subtitle listing needs to run and to publish itself back."""
         return sub_picker_module.ListingPorts(
             lister=self._sub_picker_lister,
-            state=self.sub_picker,
+            store=self._picker_store,
             redraw=self.redraw_sub_picker,
             submit=self._sub_picker_submit,
             stop=self._stop,
@@ -2700,7 +2705,9 @@ class Reader:
                     self.listing_ports, self._get("path"), retire_hover=self.retire_hover
                 )
                 if opening
-                else sub_picker.close_picker(self.sub_picker, self.lifecycle_surfaces)
+                else sub_picker.close_picker(
+                    self._picker_store, self.interaction.picker_panel, self.lifecycle_surfaces
+                )
             )
         elif panel is panel_intents.Panel.CARD_PREVIEW:
             miner_ui.hide_preview(self.preview_ports)
@@ -3029,6 +3036,11 @@ class Reader:
         elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
 
+    @property
+    def sub_picker(self) -> PickerState:
+        """What the picker is showing. Read-only for the same reason `help` is: the slice owns it."""
+        return self.interaction.sub_picker
+
     def redraw_sub_picker(self) -> None:
         """Lay the picker out for this screen and present it, storing the geometry hit-testing uses."""
         from saitenka.app import sub_picker
@@ -3039,8 +3051,9 @@ class Reader:
         rendered, x, y, width, height = sub_picker.picker_panel(
             state, osd=self.osd, scale=self.chrome_scale, close_key=self.keys.sub_picker_key
         )
-        state.rect = (x, y, width, height)
-        state.hits = rendered.hitboxes
+        panel = self.interaction.picker_panel
+        panel.rect = (x, y, width, height)
+        panel.hits = rendered.hitboxes
         self.lifecycle_surfaces.present(rendered.image, x, y, oid=OverlayId.PICKER)
 
     # --- episode analysis: state module, executed here ------------------------------------------
@@ -3746,7 +3759,9 @@ class Reader:
         )
 
     def rebind_episode(self) -> None:
-        sub_picker.close_picker(self.sub_picker, self.lifecycle_surfaces)
+        sub_picker.close_picker(
+            self._picker_store, self.interaction.picker_panel, self.lifecycle_surfaces
+        )
         self._subtitle_force_select_revision += 1
         self._retire_episode()
         self.episode = EpisodeContext()

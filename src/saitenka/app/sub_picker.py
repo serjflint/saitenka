@@ -26,8 +26,9 @@ from typing import TYPE_CHECKING
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarRow, render_picker
 from saitenka.model import claims_pointer, in_rect
-from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+from saitenka.runtime import EffectFinished, EffectOutcome, Owner, events
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
+from saitenka.runtime.picker import ListingAdopted, PickerRetired, PickerState
 
 if TYPE_CHECKING:
     import threading
@@ -36,26 +37,28 @@ if TYPE_CHECKING:
     from saitenka.app.subselect import SubtitleCandidate
     from saitenka.app.subtitle_modes import FetchSubmitter
     from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
+    from saitenka.runtime.interaction_slice import PickerStore
 
 log = logging.getLogger(__name__)
 
 PICKER_ID = OverlayId.PICKER
-ROWS_PER_WHEEL_STEP = 3
 
 
 @dataclass
-class PickerState:
-    """Window 1's runtime state. Transient UI; rebuilt on every open."""
+class PickerPanel:
+    """Where the last paint put the picker, and the boxes that paint hit-tests to.
 
-    open: bool = False
-    loading: bool = False
-    error: str | None = None
-    candidates: tuple[SubtitleCandidate, ...] = ()
-    warnings: tuple[str, ...] = ()
-    scroll: int = 0
+    Kept beside the slice rather than in it. These describe one paint on one screen — a resize or a
+    scroll replaces both — and a per-paint observation folded into a session-lived slot is the
+    lifetime mistake the geometry split already made once.
+    """
+
     rect: tuple[int, int, int, int] | None = None
     hits: tuple = ()
-    generation: int = 0
+
+    def clear(self) -> None:
+        self.rect = None
+        self.hits = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +72,17 @@ class ListingResult:
     candidates: tuple[SubtitleCandidate, ...]
     warnings: tuple[str, ...]
     error: str | None = None
+
+
+#: What a picker with nothing adopted shows. One value rather than a `None` arm in every reader:
+#: "no listing yet" and "a listing that came back empty" render the same, and the difference the UI
+#: does care about — a search still running — is `PickerState.loading`.
+NO_LISTING = ListingResult((), ())
+
+
+def listing_of(state: PickerState) -> ListingResult:
+    """The picker's adopted listing. The slice carries it opaquely, so this is where it narrows."""
+    return state.listing if isinstance(state.listing, ListingResult) else NO_LISTING
 
 
 def run_listing(request: object, cancelled: threading.Event) -> object:
@@ -113,7 +127,7 @@ class ListingPorts:
 
     #: `None` when no provider is configured — the picker refuses to open rather than showing empty.
     lister: Callable[[str], tuple] | None
-    state: PickerState
+    store: PickerStore
     redraw: Callable[[], None]
     submit: JobSubmitter | None
     stop: threading.Event
@@ -123,13 +137,13 @@ class ListingPorts:
 
 def _start_listing(video: str, ports: ListingPorts) -> None:
     episode = ports.current_episode()
-    generation = ports.state.generation
+    generation = ports.store.current.generation
     lister, submitter = ports.lister, ports.submit
     # `lister is None` cannot be reached through `open_picker`, which refuses with its own message —
     # it is here so the two ways a listing cannot run have one answer rather than two.
     if lister is None or submitter is None:
         apply_listing(
-            ports.state,
+            ports.store,
             ports.redraw,
             generation,
             ListingResult((), (), "subtitle search unavailable"),
@@ -144,7 +158,7 @@ def _start_listing(video: str, ports: ListingPorts) -> None:
             and not ports.stop.is_set()
         ):
             finished_generation, result = finished_listing
-            apply_listing(ports.state, ports.redraw, finished_generation, result)
+            apply_listing(ports.store, ports.redraw, finished_generation, result)
 
     submitter(
         owner=Owner.SUBTITLE,
@@ -164,58 +178,40 @@ def open_picker(ports: ListingPorts, video: object, *, retire_hover: Callable[[]
     if not video:
         ports.toast("No media loaded", "warn")
         return
-    state = ports.state
-    state.open = True
-    state.loading = True
-    state.error = None
-    state.candidates = ()
-    state.warnings = ()
-    state.scroll = 0
-    state.generation += 1
+    ports.store.dispatch(events.PickerOpened())
     retire_hover()
     ports.redraw()
     _start_listing(str(video), ports)
 
 
-def close_picker(state, lifecycle_surfaces) -> None:
-    if not retire(state):
+def close_picker(store: PickerStore, panel: PickerPanel, lifecycle_surfaces) -> None:
+    if not retire(store, panel):
         return
     lifecycle_surfaces.remove(PICKER_ID)
 
 
-def retire(state) -> bool:
-    """Close the picker and bump its generation, reporting whether it was open.
+def retire(store: PickerStore, panel: PickerPanel) -> bool:
+    """Close the picker, reporting whether it was up.
 
-    The bump is what makes an in-flight listing stale: a reopen starts a new generation, so a result
-    for the closed one is dropped by `apply_listing` rather than repopulating a picker the user has
-    since closed and reopened.
+    The generation bump the close carries is what makes an in-flight listing stale: a reopen starts
+    a new one, so a result for the closed picker is dropped rather than repopulating a list the user
+    has since closed and reopened. The drawn geometry is cleared here because it is this side's — a
+    rectangle for a picker that is no longer up would still answer a hit test.
     """
-    if not state.open:
-        return False
-    state.open = False
-    state.generation += 1
-    state.rect = None
-    state.hits = ()
-    return True
+    retired = any(
+        isinstance(decision, PickerRetired) for decision in store.dispatch(events.PickerClosed())
+    )
+    if retired:
+        panel.clear()
+    return retired
 
 
-def adopt_listing(state, generation: int, result: ListingResult) -> bool:
-    """Install ``result`` if it still belongs to the open picker; report whether it did.
-
-    Returns rather than redrawing so the staleness rule is separable from the paint: a listing for a
-    closed or superseded generation must leave the state untouched, not merely skip a redraw.
-    """
-    if not state.open or generation != state.generation:
-        return False
-    state.loading = False
-    state.error = result.error
-    state.candidates = result.candidates
-    state.warnings = result.warnings
-    return True
-
-
-def apply_listing(state, redraw, generation: int, result: ListingResult) -> None:
-    if adopt_listing(state, generation, result):
+def apply_listing(store: PickerStore, redraw, generation: int, result: ListingResult) -> None:
+    """Offer a result to the picker; repaint only if it was still the one waiting for it."""
+    if any(
+        isinstance(decision, ListingAdopted)
+        for decision in store.dispatch(events.PickerListed(generation, result))
+    ):
         redraw()
 
 
@@ -230,7 +226,7 @@ def finish_listing(completion: EffectFinished) -> tuple[int, ListingResult] | No
 
 def _rows(state: PickerState) -> list[SidebarRow]:
     rows: list[SidebarRow] = []
-    for index, candidate in enumerate(state.candidates):
+    for index, candidate in enumerate(listing_of(state).candidates):
         # provider · format · match — same dot-tag idiom as the provider pill; `match` = the release
         # RESOLUTION matches this encode (a picker-fetch is never pre-downloaded), `srt`/`ass` the format.
         ext = Path(candidate.name).suffix.lstrip(".").lower()
@@ -254,16 +250,18 @@ def _rows(state: PickerState) -> list[SidebarRow]:
 def _message(state: PickerState) -> str | None:
     if state.loading:
         return "Searching subtitle providers…"
-    if state.error:
-        return state.error
-    if not state.candidates:
+    listing = listing_of(state)
+    if listing.error:
+        return listing.error
+    if not listing.candidates:
         return "No subtitle candidates found"
     return None
 
 
 def _footer(state: PickerState, close_key: str, total: int, shown: int) -> str:
-    if state.warnings:
-        return f"{'  ·  '.join(state.warnings)}  ·  {close_key} closes"
+    warnings = listing_of(state).warnings
+    if warnings:
+        return f"{'  ·  '.join(warnings)}  ·  {close_key} closes"
     if not total:
         return f"{close_key} closes"
     return (
@@ -294,18 +292,20 @@ def picker_panel(state: PickerState, *, osd: tuple[int, int], scale: float, clos
     return rendered, (osd[0] - width) // 2, (osd[1] - height) // 2, width, height
 
 
-def contains(state: PickerState, x: float, y: float) -> bool:
+def contains(state: PickerState, panel: PickerPanel, x: float, y: float) -> bool:
     """Whether ``(x, y)`` is inside the shown picker."""
-    if not (state.open and state.rect):
+    if not (state.open and panel.rect):
         return False
-    return in_rect(state.rect, x, y)
+    return in_rect(panel.rect, x, y)
 
 
 def suppress_hover(suppression: HoverSuppression) -> bool:
     state = suppression.interaction.sub_picker
     if not state.open:
         return False
-    if not claims_pointer(state.rect, suppression.pointer, open_=state.open):
+    if not claims_pointer(
+        suppression.interaction.picker_panel.rect, suppression.pointer, open_=state.open
+    ):
         return False
     suppression.release_hover()
     return True
@@ -315,17 +315,13 @@ def scroll(wheel: WheelStep, steps: int) -> bool:
     state = wheel.interaction.sub_picker
     if not state.open:
         return False
-    if not claims_pointer(state.rect, wheel.pointer, open_=state.open):
+    if not claims_pointer(wheel.interaction.picker_panel.rect, wheel.pointer, open_=state.open):
         return False
-    state.scroll = clamp_scroll(state.scroll, steps, len(state.candidates))
+    wheel.interaction.picker_store.dispatch(
+        events.PickerScrolled(steps, len(listing_of(state).candidates))
+    )
     wheel.redraw_picker()
     return True
-
-
-def clamp_scroll(scroll: int, steps: int, count: int) -> int:
-    """Where a wheel notch leaves the picker. Clamped at both ends rather than wrapped: a list that
-    jumped from the last row back to the first on one more notch reads as a lost scroll position."""
-    return max(0, min(max(0, count - 1), scroll + steps * ROWS_PER_WHEEL_STEP))
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,15 +335,16 @@ class DownloadPorts:
     surfaces: object
 
 
-def _download(state: PickerState, index: int, ports: DownloadPorts) -> None:
+def _download(target: ClickTarget, index: int, ports: DownloadPorts) -> None:
     """Fetch the chosen candidate and close the panel.
 
     Everything this needs is already a value or a port — `start_fetch` and `close_picker` both take
     facts, so the host was only being carried through to reach them.
     """
-    if not (0 <= index < len(state.candidates)):
+    candidates = listing_of(target.interaction.sub_picker).candidates
+    if not (0 <= index < len(candidates)):
         return
-    candidate = state.candidates[index]
+    candidate = candidates[index]
     from saitenka.app.subtitle_modes import start_fetch
 
     ports.toast(f"Downloading {candidate.name}…")
@@ -361,15 +358,16 @@ def _download(state: PickerState, index: int, ports: DownloadPorts) -> None:
         force_select=True,
     )
     # panel closes; the swap lands from the broker completion when the file arrives
-    close_picker(state, ports.surfaces)
+    close_picker(target.interaction.picker_store, target.interaction.picker_panel, ports.surfaces)
 
 
 def on_click(target: ClickTarget, x: float, y: float) -> bool:
     state = target.interaction.sub_picker
-    if not contains(state, x, y) or state.rect is None:
+    panel = target.interaction.picker_panel
+    if not contains(state, panel, x, y) or panel.rect is None:
         return False
-    local_x, local_y = x - state.rect[0], y - state.rect[1]
-    hit = next((box for box in state.hits if box.contains(local_x, local_y)), None)
+    local_x, local_y = x - panel.rect[0], y - panel.rect[1]
+    hit = next((box for box in panel.hits if box.contains(local_x, local_y)), None)
     if hit is not None and hit.kind == "picker-download":
-        _download(state, hit.value, target.download)
+        _download(target, hit.value, target.download)
     return True
