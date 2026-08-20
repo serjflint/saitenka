@@ -1,4 +1,4 @@
-"""`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, and the picker.
+"""`Owner.INTERACTION`'s features: the hover hysteresis, the shortcut overlay, the picker, the sidebar.
 
 The third slice, and the first whose events are *observations* rather than declarations. SUBTITLE
 needs no outbox because the sender has already done the thing it is declaring; here the reducer is
@@ -10,7 +10,7 @@ where it was.
 reactor ignores an event while closing) leaves the previous turn's outbox in place, and slice
 identity is the only thing that answers whether this turn is the one that filled it.
 
-Three features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
+Four features share the slot, which is what `OwnerSlice` exists for: each joined by registering a
 reducer and an initial state, with nothing in the others changing. Dispatch inside the slice is a
 broadcast, so each feature clears its own outbox on an event it does not own — a stale outbox reads
 to its caller as a decision this turn made.
@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime import picker
+from saitenka.runtime import picker, sidebar
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     EpisodeRetired,
@@ -39,11 +39,19 @@ from saitenka.runtime.events import (
     PickerListed,
     PickerOpened,
     PickerScrolled,
+    SidebarFollowed,
+    SidebarHidden,
+    SidebarHoldReleased,
+    SidebarReindexed,
+    SidebarScrolled,
+    SidebarShown,
+    SidebarViewSelected,
 )
 from saitenka.runtime.help import HelpCommand, HelpState, repaginate
 from saitenka.runtime.help import decide as decide_help
 from saitenka.runtime.hover import HoverDelays, HoverState, decide, elapsed, refused, scrolled
 from saitenka.runtime.picker import PickerState
+from saitenka.runtime.sidebar import Redraw, SidebarState
 from saitenka.runtime.state import OwnerSlice, ReduceResult, SliceReducer
 
 if TYPE_CHECKING:
@@ -166,10 +174,50 @@ class PickerReducer:
         return ReduceResult(self.reduce(state, event))
 
 
+@dataclass(frozen=True, slots=True)
+class SidebarFeature:
+    """The slice: the sidebar's state, and the turn's outbox."""
+
+    sidebar: SidebarState = field(default_factory=SidebarState)
+    published: tuple[Redraw, ...] = ()
+
+
+class SidebarReducer:
+    """Reduce one sidebar event. Pure: no rows, no renderer, no clock."""
+
+    def reduce(self, state: SidebarFeature, event: RuntimeEvent) -> SidebarFeature:
+        match event:
+            case SidebarShown(active=active, capacity=capacity):
+                turn = sidebar.shown(state.sidebar, active, capacity)
+            case SidebarHidden():
+                turn = sidebar.hidden(state.sidebar)
+            case SidebarReindexed():
+                turn = sidebar.reindexed(state.sidebar)
+            case SidebarViewSelected(view=view):
+                turn = sidebar.view_selected(state.sidebar, view)
+            case SidebarScrolled(steps=steps, maximum=maximum, held=held):
+                turn = sidebar.scrolled(state.sidebar, steps, maximum, held=held)
+            case SidebarFollowed(active=active, capacity=capacity, geometry=geometry):
+                turn = sidebar.followed(state.sidebar, active, capacity, geometry)
+            case SidebarHoldReleased():
+                turn = sidebar.released(state.sidebar)
+            # An episode's rows are gone with it, and the manual hold was taken against them — but
+            # the re-slot already rebuilds the index, and that is what says so. Retiring here too
+            # would decide the same thing twice, from two events with no order between them.
+            case _:
+                return replace(state, published=())
+        return SidebarFeature(turn.state, turn.decisions)
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, SidebarFeature)
+        return ReduceResult(self.reduce(state, event))
+
+
 #: `Owner.INTERACTION`'s features, named once so a reader of the slot never spells a key itself.
 INTERACTION_FEATURE = "hover"
 HELP_FEATURE = "help"
 PICKER_FEATURE = "picker"
+SIDEBAR_FEATURE = "sidebar"
 
 
 def interaction_slice_reducer() -> SliceReducer:
@@ -178,6 +226,7 @@ def interaction_slice_reducer() -> SliceReducer:
             INTERACTION_FEATURE: HoverReducer(),
             HELP_FEATURE: HelpReducer(),
             PICKER_FEATURE: PickerReducer(),
+            SIDEBAR_FEATURE: SidebarReducer(),
         }
     )
 
@@ -200,6 +249,13 @@ def picker_slice_of(slot: object) -> PickerFeature:
     assert isinstance(slot, OwnerSlice)
     state = slot.get(PICKER_FEATURE)
     assert isinstance(state, PickerFeature)
+    return state
+
+
+def sidebar_slice_of(slot: object) -> SidebarFeature:
+    assert isinstance(slot, OwnerSlice)
+    state = slot.get(SIDEBAR_FEATURE)
+    assert isinstance(state, SidebarFeature)
     return state
 
 
@@ -314,6 +370,33 @@ class PickerStore:
             self._state = self._reducer.reduce(self._state, event)
             return self._state.published
         return picker_slice_of(self._port.route_session_interaction(_envelope(event))).published
+
+
+class SidebarStore:
+    """Where the sidebar's slice is kept, chosen once — same rule as the other three."""
+
+    def __init__(
+        self, port: InteractionRoutePort, *, reducer: SidebarReducer | None = None
+    ) -> None:
+        self._reducer = reducer if reducer is not None else SidebarReducer()
+        self._state = SidebarFeature()
+        self._port: InteractionRoutePort | None = (
+            port if port.route_session_interaction(None) is not None else None
+        )
+
+    @property
+    def current(self) -> SidebarState:
+        """What the sidebar is showing right now. Frozen: writing it is an event."""
+        if self._port is None:
+            return self._state.sidebar
+        return sidebar_slice_of(self._port.route_session_interaction(None)).sidebar
+
+    def dispatch(self, event: InteractionSliceEvent) -> tuple[Redraw, ...]:
+        """Reduce one sidebar event and drain the turn's outbox."""
+        if self._port is None:
+            self._state = self._reducer.reduce(self._state, event)
+            return self._state.published
+        return sidebar_slice_of(self._port.route_session_interaction(_envelope(event))).published
 
 
 def _envelope(event: InteractionSliceEvent) -> EventEnvelope:

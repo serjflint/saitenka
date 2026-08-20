@@ -1141,17 +1141,18 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     # measure those separately below).
     sidebar.show(reader.sidebar_view)
     sidebar.draw(reader.sidebar_view)
-    hits = reader.sidebar.hits
+    panel = reader.interaction.sidebar_panel
+    hits = panel.hits
     tab = next((h for h in hits if h.kind.startswith("view:")), hits[0] if hits else None)
     note_id = {"n": 0}
 
     def click_sidebar() -> None:
-        if tab is None or reader.sidebar.rect is None:
+        if tab is None or panel.rect is None:
             return
         sidebar.on_click(
             reader.click_target,
-            reader.sidebar.rect[0] + tab.x + 1,
-            reader.sidebar.rect[1] + tab.y + 1,
+            panel.rect[0] + tab.x + 1,
+            panel.rect[1] + tab.y + 1,
         )
 
     def bookmark() -> None:

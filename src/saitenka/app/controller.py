@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from saitenka.runtime.picker import PickerState
+    from saitenka.runtime.sidebar import SidebarState
 
 from saitenka import otel_metrics
 from saitenka.app import (
@@ -183,7 +184,12 @@ from saitenka.runtime import help as help_machine
 from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
-from saitenka.runtime.interaction_slice import HelpStore, HoverStore, PickerStore
+from saitenka.runtime.interaction_slice import (
+    HelpStore,
+    HoverStore,
+    PickerStore,
+    SidebarStore,
+)
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.runner import SessionRunner
@@ -286,7 +292,6 @@ class Reader:
     # what lets a hook reach one without the host. Every other flat alias is gone: the lifetime
     # containers are addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`),
     # because an alias per field made one object look like N host members to every ratchet.
-    sidebar = Delegated[sidebar_module.SidebarState]("interaction", "sidebar")
     preview = Delegated[card_preview.PreviewState]("interaction", "preview")
     tip = Delegated[popups.TooltipState]("interaction", "tip")
 
@@ -572,7 +577,6 @@ class Reader:
         # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
-        self.sidebar = sidebar.SidebarState()
         self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
         # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
@@ -696,6 +700,11 @@ class Reader:
         self._picker_store = PickerStore(self.ipc)
         self.interaction.picker_store = self._picker_store
         self.interaction.picker_panel = sub_picker.PickerPanel()
+        # …and its fourth: the sidebar, cut the same way — the slice decides, the panel remembers
+        # what one paint put on screen.
+        self._sidebar_store = SidebarStore(self.ipc)
+        self.interaction.sidebar_store = self._sidebar_store
+        self.interaction.sidebar_panel = sidebar.SidebarPanel()
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self._translation = TranslationStore(self.ipc)
@@ -1901,7 +1910,8 @@ class Reader:
         — the precondition for the surface owning its own state.
         """
         return sidebar_module.SidebarView(
-            state=self.sidebar,
+            store=self._sidebar_store,
+            panel=self.interaction.sidebar_panel,
             active=sidebar_module._active_index(
                 self.episode.sub_index,
                 self.sub_text,
@@ -3037,6 +3047,11 @@ class Reader:
             self._toast(effect.text, effect.kind)
 
     @property
+    def sidebar(self) -> SidebarState:
+        """Where the sidebar is. Read-only for the same reason `help` and `sub_picker` are."""
+        return self.interaction.sidebar
+
+    @property
     def sub_picker(self) -> PickerState:
         """What the picker is showing. Read-only for the same reason `help` is: the slice owns it."""
         return self.interaction.sub_picker
@@ -4041,7 +4056,7 @@ class Reader:
         from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         def released() -> None:
-            self.sidebar.manual_hold = False
+            self._sidebar_store.dispatch(events.SidebarHoldReleased())
             sidebar.follow(self.sidebar_view)
 
         return self.lifecycle_timers.schedule(

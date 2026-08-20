@@ -16,7 +16,8 @@ from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.app.surfaces import SurfaceSpec
-from saitenka.runtime import UserCommand
+from saitenka.runtime import UserCommand, events
+from saitenka.runtime import sidebar as runtime_sidebar
 
 
 class _FakeState:
@@ -162,14 +163,14 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
 
 def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (0, 0, 100, 100)
-    reader.sidebar.total = 100
+    reader._sidebar_store.dispatch(events.SidebarShown(active=0, capacity=10))
+    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
+    reader.interaction.sidebar_panel.total = 100
     monkeypatch.setattr(sidebar, "draw", lambda _view: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert reader.sidebar.scroll == sidebar.ROWS_PER_WHEEL_STEP
+    assert reader.sidebar.scroll == runtime_sidebar.ROWS_PER_WHEEL_STEP
 
 
 def test_the_registry_reads_shown_ness_without_a_reader() -> None:
@@ -183,10 +184,10 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     from saitenka.app.card_preview import PreviewState
     from saitenka.app.popups import TooltipState
     from saitenka.app.reader_context import InteractionContext
-    from saitenka.app.sidebar import SidebarState
+    from saitenka.app.sidebar import SidebarPanel
     from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.surfaces import wants_mouse_capture
-    from saitenka.runtime.interaction_slice import HelpStore, PickerStore
+    from saitenka.runtime.interaction_slice import HelpStore, PickerStore, SidebarStore
     from saitenka.runtime.jobs import NoSessionRuntime
 
     interaction = InteractionContext()
@@ -195,11 +196,12 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     interaction.help_store = HelpStore(NoSessionRuntime())
     interaction.picker_store = PickerStore(NoSessionRuntime())
     interaction.picker_panel = PickerPanel()
-    interaction.sidebar = SidebarState()
+    interaction.sidebar_store = SidebarStore(NoSessionRuntime())
+    interaction.sidebar_panel = SidebarPanel()
     interaction.preview = PreviewState()
     interaction.tip = TooltipState()
 
     assert wants_mouse_capture(interaction) is False
 
-    interaction.sidebar.open = True
+    interaction.sidebar_store.dispatch(events.SidebarShown(active=0, capacity=10))
     assert wants_mouse_capture(interaction) is True

@@ -13,6 +13,7 @@ from util import record_spans
 from saitenka.app import backlog, sidebar
 from saitenka.app.controller import Reader
 from saitenka.app.subtitles import SidebarHitBox
+from saitenka.runtime import events
 
 
 class _FakeIPC(util.FakeIPC):
@@ -30,9 +31,13 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
     reader = Reader(_FakeIPC({}))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (0, 0, 100, 100)
-    reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
+    reader.interaction.sidebar_panel.hits = (
+        SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),
+    )
     # Inert actions instead of a stubbed internal: the port is the seam, so isolating the span
     # from what the click does no longer means knowing the private name that does it.
     inert = sidebar.SidebarActions(
@@ -48,9 +53,13 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
     spans = record_spans(monkeypatch)
     reader = Reader(_FakeIPC({}))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (0, 0, 100, 100)
-    reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
+    reader.interaction.sidebar_panel.hits = (
+        SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),
+    )
 
     assert (
         sidebar.on_click(reader.click_target, 50, 50) is True

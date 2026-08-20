@@ -7,7 +7,7 @@ takes and the other is the one almost every test takes.
 The outbox is what is new here. SUBTITLE declares, so its turns hand back nothing; INTERACTION
 observes, so the reducer is what decides and the decisions have to come back.
 
-Three features share this slot, so the second thing the file pins is that they are independent: one
+Four features share this slot, so the second thing the file pins is that they are independent: one
 feature's events reach the others by broadcast, and each has to leave the others' state alone.
 """
 
@@ -29,6 +29,10 @@ from saitenka.runtime.events import (
     PickerListed,
     PickerOpened,
     PickerScrolled,
+    SidebarFollowed,
+    SidebarHoldReleased,
+    SidebarScrolled,
+    SidebarShown,
 )
 from saitenka.runtime.help import HelpCommand, HelpState, OpenHelp, ShowHelpPage
 from saitenka.runtime.hover import (
@@ -49,6 +53,7 @@ from saitenka.runtime.interaction_slice import (
     HoverReducer,
     HoverStore,
     PickerStore,
+    SidebarStore,
 )
 
 DELAYS = HoverDelays(scan=0.1, hide=0.2, switch=0.3)
@@ -348,4 +353,98 @@ def test_the_same_picker_events_decide_the_same_state_with_or_without_a_reactor(
     routed = PickerStore(ipc)
 
     assert [local.dispatch(e) for e in events] == [routed.dispatch(e) for e in events]
+    assert local.current == routed.current
+
+
+# --- the slot's fourth feature ---------------------------------------------------------------------
+
+
+def test_a_manual_scroll_holds_auto_follow_until_the_active_row_is_visible_again(request) -> None:
+    """The rule three facts argue over: the wheel, the active cue, and a re-render. A hold wins
+    while the active row is off-screen, and is dropped — not merely overridden — once it is back."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = SidebarStore(ipc)
+    store.dispatch(SidebarShown(active=50, capacity=10))
+    store.dispatch(SidebarScrolled(steps=-5, maximum=100, held=True))
+    scrolled_to = store.current.scroll
+
+    store.dispatch(SidebarFollowed(active=51, capacity=10, geometry="same"))
+    assert store.current.scroll == scrolled_to, (
+        "the hold survives a cue the user scrolled away from"
+    )
+
+    store.dispatch(SidebarFollowed(active=scrolled_to + 1, capacity=10, geometry="same"))
+    assert store.current.manual_hold is False, "back in view: the hold is spent, not just ignored"
+
+
+def test_a_hold_that_could_not_be_armed_never_suppresses_a_follow(request) -> None:
+    """Fails closed. A hold whose deadline was refused can never be released, so taking it anyway
+    would suppress auto-follow for the rest of the session — the reducer decides that, not the
+    caller, which is why the arming answer rides on the event."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = SidebarStore(ipc)
+    store.dispatch(SidebarShown(active=50, capacity=10))
+
+    store.dispatch(SidebarScrolled(steps=-5, maximum=100, held=False))
+
+    assert store.current.manual_hold is False
+    store.dispatch(SidebarFollowed(active=51, capacity=10, geometry="same"))
+    assert store.current.scroll == 46  # followed straight away
+
+
+def test_a_re_render_against_a_different_screen_overrides_the_hold(request) -> None:
+    """`geometry` is opaque and only ever compared. A hold taken against one screen must not keep
+    the sidebar off-target after the thing being rendered changed underneath it."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = SidebarStore(ipc)
+    store.dispatch(SidebarShown(active=50, capacity=10))
+    store.dispatch(SidebarScrolled(steps=-5, maximum=100, held=True))
+
+    assert store.dispatch(SidebarFollowed(active=50, capacity=10, geometry="resized")) != ()
+
+
+def test_the_hold_deadline_landing_only_clears_the_flag(request) -> None:
+    """It does not move the list. Yanking rows out from under the pointer the instant a timer fires
+    is the jarring version; the follow that comes with it is the caller's next act, not this one."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    store = SidebarStore(ipc)
+    store.dispatch(SidebarShown(active=50, capacity=10))
+    store.dispatch(SidebarScrolled(steps=-5, maximum=100, held=True))
+    scrolled_to = store.current.scroll
+
+    assert store.dispatch(SidebarHoldReleased()) == ()
+    assert store.current.manual_hold is False
+    assert store.current.scroll == scrolled_to
+
+
+def test_the_same_sidebar_events_decide_the_same_state_with_or_without_a_reactor(request) -> None:
+    stream = (
+        SidebarShown(active=20, capacity=8),
+        SidebarScrolled(steps=-2, maximum=50, held=True),
+        SidebarFollowed(active=21, capacity=8, geometry="a"),
+        SidebarFollowed(active=21, capacity=8, geometry="b"),
+        SidebarHoldReleased(),
+        SidebarFollowed(active=40, capacity=8, geometry="b"),
+    )
+    local = SidebarStore(FakeIPC())
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    routed = SidebarStore(ipc)
+
+    assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
     assert local.current == routed.current

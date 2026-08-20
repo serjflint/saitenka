@@ -14,6 +14,8 @@ from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
 from saitenka.model import claims_pointer, in_rect
+from saitenka.runtime import events
+from saitenka.runtime.sidebar import MANUAL_SCROLL_HOLD, SidebarState
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -23,30 +25,30 @@ if TYPE_CHECKING:
     from saitenka.app.miner_ui import CardSource, PreviewPorts
     from saitenka.app.reader_context import SessionContext
     from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
+    from saitenka.runtime.interaction_slice import SidebarStore
     from saitenka.subtitles import Cue, CueIndex
 
 SIDEBAR_ID = OverlayId.SIDEBAR
-MANUAL_SCROLL_HOLD = 1.5
-ROWS_PER_WHEEL_STEP = 3
 PLAIN = (236, 241, 247, 255)
 
 
 @dataclass
-class SidebarState:
-    """The in-mpv sidebar's runtime state, grouped off the Reader (was ~10 ``_sidebar_*`` fields)."""
+class SidebarPanel:
+    """What the sidebar's last paint left behind: where it landed, what it hit-tests to, how many
+    rows it measured, and the per-cue colouring it memoised.
 
-    open: bool = False
-    view: str = "track"
-    scroll: int = 0
-    #: Honour the user's manual scroll over auto-follow until its deadline lands. A flag, not
-    #: a timestamp: the deadline owns when the hold ends, so nothing here reads a clock.
-    manual_hold: bool = False
-    last_active: int = -1
-    total: int = 0
+    None of it is in the slice. The first three describe one paint on one screen — the same cut the
+    picker makes — and `style_cache` is a memo rather than a fact: a reducer carrying it would be
+    threading a cache through a state transition, and the state would then differ from itself
+    depending on what had been drawn.
+    """
+
     rect: tuple[int, int, int, int] | None = None
     hits: tuple = ()
+    #: Rows the last draw measured. The wheel clamps against it, so it is read back — but it is an
+    #: output of rendering, which is why it rides on `SidebarScrolled` rather than living in the slice.
+    total: int = 0
     style_cache: dict = field(default_factory=dict)
-    geometry: tuple | None = None
 
 
 def _format_time(seconds: float) -> str:
@@ -77,7 +79,8 @@ class SidebarView:
     different cue than the comparison decided on is a bug shape, not a feature.
     """
 
-    state: SidebarState
+    store: SidebarStore
+    panel: SidebarPanel
     active: int
     index: CueIndex | None
     language: str
@@ -95,6 +98,16 @@ class SidebarView:
     tokenizer: object
     analysis: object
     can_mine: bool
+
+    @property
+    def state(self) -> SidebarState:
+        """Read through to the slice, never snapshotted onto the view.
+
+        The view is built once per operation and `show`/`scroll`/`follow` all dispatch and *then*
+        draw — so a captured state would have the draw render the state from before the event that
+        prompted it, which for `show` means drawing a sidebar that is still closed.
+        """
+        return self.store.current
 
     @property
     def capacity(self) -> int:
@@ -209,7 +222,7 @@ def _track_rows(view: SidebarView, first: int, capacity: int) -> tuple[list[Side
                 timestamp=_format_time(cue.start),
                 text=cue.text,
                 parts=_cue_parts(
-                    view.state.style_cache,
+                    view.panel.style_cache,
                     cue_index,
                     cue,
                     language=view.language,
@@ -419,46 +432,51 @@ def draw(view: SidebarView) -> None:
         unavailable=unavailable,
         scale=scale,
     )
-    state.rect = (x, y, width, height)
-    state.hits = rendered.hitboxes
-    state.total = total
+    panel = view.panel
+    panel.rect = (x, y, width, height)
+    panel.hits = rendered.hitboxes
+    panel.total = total
     view.surfaces.present(rendered.image, x, y, oid=SIDEBAR_ID)
+
+
+def _drive(view: SidebarView, event) -> bool:
+    """Reduce one sidebar event and carry out the redraw it decided on, if it decided on one."""
+    if not view.store.dispatch(event):
+        return False
+    draw(view)
+    return True
 
 
 def show(view: SidebarView) -> None:
     """Open the sidebar, centred on the active row."""
-    view.state.open = True
-    view.state.scroll = max(0, view.active - view.capacity // 2)
-    view.state.last_active = view.active
-    draw(view)
+    _drive(view, events.SidebarShown(view.active, view.capacity))
 
 
 def hide(view: SidebarView) -> None:
-    view.state.open = False
+    view.store.dispatch(events.SidebarHidden())
     view.surfaces.remove(SIDEBAR_ID)
-    view.state.rect = None
-    view.state.hits = ()
+    view.panel.rect = None
+    view.panel.hits = ()
 
 
 def index_changed(view: SidebarView) -> None:
-    view.state.style_cache.clear()
-    view.state.scroll = 0
-    view.state.last_active = -1
-    draw(view)
+    view.panel.style_cache.clear()
+    _drive(view, events.SidebarReindexed())
 
 
-def contains(state: SidebarState, x: float, y: float) -> bool:
+def contains(state: SidebarState, panel: SidebarPanel, x: float, y: float) -> bool:
     """Whether ``(x, y)`` is inside the shown sidebar."""
-    if not (state.open and state.rect):
+    if not (state.open and panel.rect):
         return False
-    return in_rect(state.rect, x, y)
+    return in_rect(panel.rect, x, y)
 
 
 def suppress_hover(suppression: HoverSuppression) -> bool:
     state = suppression.interaction.sidebar
     if not state.open:
         return False
-    if not claims_pointer(state.rect, suppression.pointer, open_=state.open):
+    rect = suppression.interaction.sidebar_panel.rect
+    if not claims_pointer(rect, suppression.pointer, open_=state.open):
         return False
     suppression.hide_annotation()  # the sidebar overlaps the cue, so the reveal goes with the hover
     suppression.release_hover()
@@ -466,18 +484,20 @@ def suppress_hover(suppression: HoverSuppression) -> bool:
 
 
 def wheel(view: SidebarView, steps: int, pointer, *, hold: Callable[[float], bool]) -> bool:
-    state = view.state
-    if not state.open:
+    if not view.state.open:
         return False
     at = pointer or {}
-    if not contains(state, at.get("x", -1), at.get("y", -1)):
+    if not contains(view.state, view.panel, at.get("x", -1), at.get("y", -1)):
         return False
-    maximum = max(0, state.total - view.capacity)
-    state.scroll = max(0, min(maximum, state.scroll + steps * ROWS_PER_WHEEL_STEP))
-    # Fails closed: a hold that cannot be released would suppress auto-follow for the rest of
-    # the session, which is worse than a manual scroll the next cue scrolls away from.
-    state.manual_hold = hold(MANUAL_SCROLL_HOLD)
-    draw(view)
+    # `hold` is armed here and its answer carried, not assumed: the reducer decides what a refusal
+    # means, and a hold that could never be released would suppress auto-follow for the rest of the
+    # session — worse than a manual scroll the next cue scrolls away from.
+    _drive(
+        view,
+        events.SidebarScrolled(
+            steps, max(0, view.panel.total - view.capacity), hold(MANUAL_SCROLL_HOLD)
+        ),
+    )
     return True
 
 
@@ -486,25 +506,15 @@ def scroll(step: WheelStep, steps: int) -> bool:
 
 
 def follow(view: SidebarView) -> None:
-    """Re-centre the track view on the active row unless the user's manual hold says otherwise."""
-    state = view.state
-    if not state.open or state.view != "track":
-        return
-    active = view.active
-    geometry = (view.osd, id(view.index), view.language, id(view.scorer))
-    changed = active != state.last_active or geometry != state.geometry
-    if not changed and state.manual_hold:
-        return
-    capacity = view.capacity
-    old_scroll = state.scroll
-    visible = state.scroll <= active < state.scroll + capacity
-    if active >= 0 and (not state.manual_hold or visible):
-        state.scroll = max(0, active - capacity // 2)
-        state.manual_hold = False
-    state.last_active = active
-    state.geometry = geometry
-    if changed or old_scroll != state.scroll:
-        draw(view)
+    """Offer the sidebar a chance to re-centre on the active row; the slice decides whether it does."""
+    _drive(
+        view,
+        events.SidebarFollowed(
+            view.active,
+            view.capacity,
+            (view.osd, id(view.index), view.language, id(view.scorer)),
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -534,8 +544,7 @@ def _seek_hit(view: SidebarView, actions: SidebarActions, hit) -> bool:
 
 def activate_hit(view: SidebarView, actions: SidebarActions, hit) -> None:
     if hit.kind.startswith("view:"):
-        view.state.view = hit.kind.split(":", 1)[1]
-        view.state.scroll = 0
+        view.store.dispatch(events.SidebarViewSelected(hit.kind.split(":", 1)[1]))
     elif _seek_hit(view, actions, hit):
         return
     elif hit.kind == "bookmark":
@@ -548,17 +557,16 @@ def activate_hit(view: SidebarView, actions: SidebarActions, hit) -> None:
         actions.mine()
     elif hit.kind == "mine-open":
         actions.open_mined(hit.value)
-    elif hit.kind == "relink":
-        if view.video:
-            view.backlog().relink(hit.value, view.video)
+    elif hit.kind == "relink" and view.video:
+        view.backlog().relink(hit.value, view.video)
 
 
 def click(view: SidebarView, actions: SidebarActions, x: float, y: float) -> bool:
-    state = view.state
-    if not contains(state, x, y) or state.rect is None:
+    panel = view.panel
+    if not contains(view.state, panel, x, y) or panel.rect is None:
         return False
-    local_x, local_y = x - state.rect[0], y - state.rect[1]
-    hit = next((box for box in state.hits if box.contains(local_x, local_y)), None)
+    local_x, local_y = x - panel.rect[0], y - panel.rect[1]
+    hit = next((box for box in panel.hits if box.contains(local_x, local_y)), None)
     if hit is None:
         return True
     # Was blind: a sidebar click can mine / bookmark / relink (main-thread SQLite) + a full redraw. Span

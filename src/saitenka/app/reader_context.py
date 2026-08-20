@@ -28,13 +28,14 @@ if TYPE_CHECKING:
     from saitenka.app.popups import TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
-    from saitenka.app.sidebar import SidebarState
+    from saitenka.app.sidebar import SidebarPanel
     from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
     from saitenka.runtime.help import HelpState
-    from saitenka.runtime.interaction_slice import HelpStore, PickerStore
+    from saitenka.runtime.interaction_slice import HelpStore, PickerStore, SidebarStore
     from saitenka.runtime.picker import PickerState
+    from saitenka.runtime.sidebar import SidebarState
     from saitenka.subtitles import Cue, CueIndex
 
 
@@ -114,7 +115,6 @@ class InteractionContext:
     #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the four need
     #: constructor arguments this container has no business knowing. Declared here so the container
     #: states its own shape rather than acquiring it from whoever writes first.
-    sidebar: SidebarState
     preview: PreviewState
     tip: TooltipState
 
@@ -123,9 +123,11 @@ class InteractionContext:
     #: nothing downstream can tell which of the five have moved yet.
     help_store: HelpStore
     picker_store: PickerStore
+    sidebar_store: SidebarStore
     #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
     #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
     picker_panel: PickerPanel
+    sidebar_panel: SidebarPanel
 
     @property
     def help(self) -> HelpState:
@@ -134,6 +136,10 @@ class InteractionContext:
     @property
     def sub_picker(self) -> PickerState:
         return self.picker_store.current
+
+    @property
+    def sidebar(self) -> SidebarState:
+        return self.sidebar_store.current
 
 
 class RenderCacheState:

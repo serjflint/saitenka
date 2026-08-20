@@ -18,6 +18,7 @@ from saitenka.app import sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+from saitenka.runtime import events
 from saitenka.runtime.help import HelpCommand
 from saitenka.subtitles import Cue, CueIndex
 
@@ -90,7 +91,7 @@ def _draw_help(r: Reader) -> None:
 
 
 def _draw_sidebar(r: Reader) -> None:
-    r.sidebar.open = True
+    r._sidebar_store.dispatch(events.SidebarShown(r.sidebar_view.active, r.sidebar_view.capacity))
     sidebar.draw(r.sidebar_view)
 
 

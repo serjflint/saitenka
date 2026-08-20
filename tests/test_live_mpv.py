@@ -242,7 +242,7 @@ def test_live_sidebar_key_draws_and_removes_sidebar():
             reader, lambda: not reader.sidebar.open, "sidebar key did not close the sidebar"
         )
 
-        assert reader.sidebar.rect is None
+        assert reader.interaction.sidebar_panel.rect is None
         assert ImageChops.difference(opened, closed).getbbox() is not None
 
 

@@ -471,6 +471,56 @@ class PickerScrolled:
     count: int
 
 
+@dataclass(frozen=True, slots=True)
+class SidebarShown:
+    """The sidebar went up. `capacity` is how many rows fit on this screen — a render fact, so it
+    rides on the event for the same reason the help page count does."""
+
+    active: int
+    capacity: int
+
+
+@dataclass(frozen=True, slots=True)
+class SidebarHidden:
+    """The sidebar came down."""
+
+
+@dataclass(frozen=True, slots=True)
+class SidebarReindexed:
+    """A new cue index arrived, so the scroll and the follow anchor point at rows that are gone."""
+
+
+@dataclass(frozen=True, slots=True)
+class SidebarViewSelected:
+    """The user picked one of the sidebar's views."""
+
+    view: str
+
+
+@dataclass(frozen=True, slots=True)
+class SidebarScrolled:
+    """A wheel notch over the sidebar. `held` is whether the manual-hold deadline was armed —
+    a refusal the reducer decides against, not one the caller resolves on its own."""
+
+    steps: int
+    maximum: int
+    held: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SidebarFollowed:
+    """One chance to re-centre on the active row. `geometry` is opaque: see `runtime/sidebar.py`."""
+
+    active: int
+    capacity: int
+    geometry: object
+
+
+@dataclass(frozen=True, slots=True)
+class SidebarHoldReleased:
+    """The manual-scroll hold's deadline landed."""
+
+
 type InteractionEvent = (
     HoverConfigured
     | HoverObserved
@@ -483,6 +533,13 @@ type InteractionEvent = (
     | PickerClosed
     | PickerListed
     | PickerScrolled
+    | SidebarShown
+    | SidebarHidden
+    | SidebarReindexed
+    | SidebarViewSelected
+    | SidebarScrolled
+    | SidebarFollowed
+    | SidebarHoldReleased
 )
 
 INTERACTION_EVENTS = (
@@ -497,6 +554,13 @@ INTERACTION_EVENTS = (
     PickerClosed,
     PickerListed,
     PickerScrolled,
+    SidebarShown,
+    SidebarHidden,
+    SidebarReindexed,
+    SidebarViewSelected,
+    SidebarScrolled,
+    SidebarFollowed,
+    SidebarHoldReleased,
 )
 
 
