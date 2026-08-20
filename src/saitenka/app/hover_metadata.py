@@ -26,6 +26,18 @@ class HoverMetadataKey:
     index: int
     job_id: int | None = None
 
+    def same_target(self, other: HoverMetadataKey) -> bool:
+        """Same hover, mined set aside — the one difference worth re-requesting for.
+
+        A result whose mined generation alone is stale answers about the word still hovered, so
+        the fix is another request rather than a dropped tooltip. Named because the comparison
+        used to be two tuple slices around index 2, where which field was being excused was
+        readable only by counting.
+        """
+        mine = (self.generation, self.dependency_generation, self.cue_identity, self.index)
+        theirs = (other.generation, other.dependency_generation, other.cue_identity, other.index)
+        return mine == theirs and self.job_id == other.job_id
+
 
 @dataclass(frozen=True, slots=True)
 class HoverMetadataRequest:

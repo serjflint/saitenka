@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from saitenka import otel_metrics
 from saitenka.app import nested_popup, tooltip_engaged
+from saitenka.app.hover_metadata import HoverMetadataKey
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.media import copy_clipboard, speak
@@ -324,19 +325,29 @@ def resolve_hover(reader: Reader, index: int) -> None:
     )
 
 
+def hover_key(reader: Reader, index: int) -> HoverMetadataKey:
+    """The identity a hover-metadata result has to still match to be worth applying.
+
+    One definition. The request built this tuple and the completion rebuilt it field for field, so
+    a field added to one and not the other would read as a stale result — a silently dropped
+    tooltip, with nothing failing at the seam.
+    """
+    return HoverMetadataKey(
+        reader._prefetch_gen,
+        reader._dependency_generation,
+        reader._mined.generation,
+        reader._current_cue_identity,
+        index,
+        reader._tip_view.job_id,
+    )
+
+
 def _request_hover_metadata(reader: Reader, index: int) -> None:
-    from saitenka.app.hover_metadata import HoverMetadataKey, HoverMetadataRequest
+    from saitenka.app.hover_metadata import HoverMetadataRequest
 
     reader._request_interaction_metadata(
         HoverMetadataRequest(
-            HoverMetadataKey(
-                reader._prefetch_gen,
-                reader._dependency_generation,
-                reader._mined.generation,
-                reader._current_cue_identity,
-                index,
-                reader._tip_view.job_id,
-            ),
+            hover_key(reader, index),
             reader.tokenizer.name,
             tuple(reader.tokens),
             reader.dict_set,
@@ -347,25 +358,9 @@ def _request_hover_metadata(reader: Reader, index: int) -> None:
 
 def apply_hover_metadata(reader: Reader, result) -> None:
     key = result.key
-    current = (
-        reader._prefetch_gen,
-        reader._dependency_generation,
-        reader._mined.generation,
-        reader._current_cue_identity,
-        reader.hover,
-        reader._tip_view.job_id,
-    )
-    expected = (
-        key.generation,
-        key.dependency_generation,
-        key.mined_generation,
-        key.cue_identity,
-        key.index,
-        key.job_id,
-    )
-    if current != expected:
-        same_target = current[:2] + current[3:] == expected[:2] + expected[3:]
-        if same_target:
+    current = hover_key(reader, reader.hover)
+    if current != key:
+        if current.same_target(key):
             _request_hover_metadata(reader, key.index)
         return
     if result.error:

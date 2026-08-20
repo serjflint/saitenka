@@ -746,6 +746,10 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/tooltip.py::hover_key"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/tooltip.py::navigate_tip"
     ],
     [
