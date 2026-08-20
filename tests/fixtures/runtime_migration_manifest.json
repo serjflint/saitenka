@@ -334,10 +334,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::configure"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::on_primary_changed"
     ],
     [

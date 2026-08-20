@@ -10,7 +10,6 @@ import util
 from dirty_equals import IsPartialDict
 from util import record_spans
 
-from saitenka.app import subtitle_modes
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG
@@ -2153,7 +2152,7 @@ def test_a_reconfigure_reasserts_before_mpv_echoes_the_selected_track(tmp_path: 
     before = renderer.ownership_state.context.ownership_epoch
 
     startup = SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
-    subtitle_modes.configure(result, startup)
+    result.configure_subtitle_mode(startup)
 
     assert ipc.props["sid"] == 1  # the echo has not landed: reading it back would see the old track
     assert renderer.ownership_state.context.ownership_epoch > before
@@ -2171,8 +2170,8 @@ def test_reconfiguring_the_same_track_spends_nothing(tmp_path: Path) -> None:
     renderer = _establish_native(result, ipc, sid=5)
     before = renderer.ownership_state.context.ownership_epoch
 
-    subtitle_modes.configure(
-        result, SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
+    result.configure_subtitle_mode(
+        SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
     )
 
     assert renderer.ownership_state.context.ownership_epoch == before

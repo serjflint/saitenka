@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.languages import MAIN_LANG, Language
 from saitenka.app.mpv_egress import send_correlated
-from saitenka.app.subtitle_ownership import ASK_MPV
-from saitenka.app.subtitle_render import target_of
+from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 from saitenka.app.subtitle_selection import (
     FetchAction,
     SubtitleStartup,
@@ -41,6 +40,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.reader_context import SubtitleSource
+    from saitenka.runtime.events import SubtitleEvent
 
     ProviderFetch = Callable[[], tuple[Path | None, str]]
     ProviderFetchFactory = Callable[[str], ProviderFetch]
@@ -177,8 +177,24 @@ def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
     return startup
 
 
-def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,jp") -> None:
-    reader.declare_subtitle(
+def configure(
+    startup: SubtitleStartup,
+    *,
+    slang: str = "ja,jpn,jp",
+    declare: Callable[[SubtitleEvent], object],
+    activate: Callable[[SelectedSid], None],
+    secondary_sid: object,
+    ipc,
+    invalidate: Callable[[], None],
+) -> None:
+    """Adopt a startup selection: declare it, take the pixels for it, drop a stale secondary.
+
+    Takes the facts rather than the host, and `activate` is handed in for the reason the
+    coordinator's own `activate` takes a `draw`: building the renderer's target reaches fifteen
+    presentation members this decision has no use for, so the caller that already holds them binds
+    it.
+    """
+    declare(
         SubtitleStartupConfigured(
             startup.tracks.jp_sid, startup.tracks.en_sid, startup.active or MAIN_LANG, slang
         )
@@ -189,14 +205,10 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     # unchanged and the pixels would stay owned on behalf of a track that is gone. When nothing was
     # written there is nothing to declare and the read is correct.
     sid = selected_sid(startup)
-    reader.subtitle_pipeline.activate(
-        target_of(reader),
-        ASK_MPV if sid is None else sid,
-        draw=reader._draw_subtitle,
-    )
-    if reader._get("secondary-sid") not in {None, False, "no"}:
-        _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    reader.invalidate_analysis()
+    activate(ASK_MPV if sid is None else sid)
+    if secondary_sid not in {None, False, "no"}:
+        _send(ipc, "clear-secondary", "set_property", "secondary-sid", "no")
+    invalidate()
 
 
 def setup_secondary(reader: Reader) -> int | None:

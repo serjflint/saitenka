@@ -2521,7 +2521,17 @@ class Reader:
     def configure_subtitle_mode(
         self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
     ) -> None:
-        subtitle_modes.configure(self, startup, slang=slang)
+        subtitle_modes.configure(
+            startup,
+            slang=slang,
+            declare=self.declare_subtitle,
+            activate=lambda sid: self.subtitle_pipeline.activate(
+                self._subtitle_target(), sid, draw=self._draw_subtitle
+            ),
+            secondary_sid=self._get("secondary-sid"),
+            ipc=self.ipc,
+            invalidate=self.invalidate_analysis,
+        )
 
     # --- subtitle-owned commands: pure reducer, executed here (WP4.2) -------------------------
     def _subtitle_inputs(self) -> subtitle_intents.SubtitleInputs:
