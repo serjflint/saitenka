@@ -476,7 +476,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
         def draw(self, _request=None, _surfaces=None, _ipc=None, /, **_ports) -> None:
             return None
 
-        def activate(self, reader: Reader) -> bool:
+        def activate(self, reader: Reader, _sid=None, /) -> bool:
             track_id = SubtitleTrackId("track-1")
             source_order = {"いち": 1, "に": 2}[reader.sub_text]
             event_id = SubtitleEventId(

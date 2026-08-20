@@ -10,13 +10,16 @@ import util
 from dirty_equals import IsPartialDict
 from util import record_spans
 
+from saitenka.app import subtitle_modes
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer
+from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 from saitenka.subtitles import (
@@ -2119,6 +2122,58 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     assert result.boxes
     box = result.boxes[0]
     assert result._hit(result.sub_origin[0] + box.x + 1, result.sub_origin[1] + box.y + 1) == 0
+    result.close()
+
+
+def _establish_native(result: Reader, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
+    """Own the pixels for `sid`, the way a session that has been playing a track already does."""
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    ipc.props["sid"] = sid
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    result._sub_pending = None
+    result.subtitle_pipeline.activate(result)
+    assert renderer.ownership_state.native_pixels_established
+    return renderer
+
+
+def test_a_reconfigure_reasserts_before_mpv_echoes_the_selected_track(tmp_path: Path) -> None:
+    """A live profile cycle must not leave the pixels owned on behalf of the track it replaced.
+
+    `configure` runs a few statements after `select_initial` writes `sid` fire-and-forget, so mpv has
+    not echoed the property yet and a renderer that reads it back still sees the OUTGOING track. It
+    would conclude the selection had not moved and — with `native_pixels_established` still true from
+    the old track — do nothing at all. So the selection is declared by the caller that wrote it.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    renderer = _establish_native(result, ipc, sid=1)
+    before = renderer.ownership_state.context.ownership_epoch
+
+    startup = SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
+    subtitle_modes.configure(result, startup)
+
+    assert ipc.props["sid"] == 1  # the echo has not landed: reading it back would see the old track
+    assert renderer.ownership_state.context.ownership_epoch > before
+    assert "5" in (renderer.ownership_state.context.selection or "")
+    result.close()
+
+
+def test_reconfiguring_the_same_track_spends_nothing(tmp_path: Path) -> None:
+    """The negative control for the above: declaring the track already selected is not a change.
+
+    Without this, "declare the selection" could be satisfied by bumping the epoch unconditionally,
+    which re-proves ownership on every reconfigure and costs a round-trip per profile cycle.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    renderer = _establish_native(result, ipc, sid=5)
+    before = renderer.ownership_state.context.ownership_epoch
+
+    subtitle_modes.configure(
+        result, SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
+    )
+
+    assert renderer.ownership_state.context.ownership_epoch == before
     result.close()
 
 

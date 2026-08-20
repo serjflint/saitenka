@@ -13,6 +13,27 @@ from enum import StrEnum
 OWNERSHIP_RETRY_DELAYS_MS = (50, 250, 1_000)
 
 
+class AskMpv:
+    """No declared selection — go read `sid` from mpv.
+
+    A sentinel rather than `None`, because `None` is a real selection: a file with no subtitle track
+    is left untouched and its sid stays unset.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "ASK_MPV"
+
+
+#: What a caller passes when it has nothing to declare. A caller that just *wrote* `sid` passes the
+#: value it wrote: mpv echoes the property asynchronously, so re-reading it here returns the previous
+#: track and the change goes unnoticed (#P1, `subtitle_modes.configure`).
+ASK_MPV = AskMpv()
+
+type SelectedSid = int | str | AskMpv | None
+
+
 class Lifecycle(StrEnum):
     OPEN = "open"
     CLOSING = "closing"

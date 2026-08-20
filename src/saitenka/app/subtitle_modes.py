@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.languages import MAIN_LANG, Language
 from saitenka.app.mpv_egress import send_correlated
+from saitenka.app.subtitle_ownership import ASK_MPV
 from saitenka.app.subtitle_selection import (
     FetchAction,
     SubtitleStartup,
@@ -163,10 +164,19 @@ def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
     return _discover(sub_tracks(ipc), slang)
 
 
+def selected_sid(startup: SubtitleStartup) -> int | str | None:
+    """The track `select_initial` selects for this startup — the one fact both it and `configure` need.
+
+    Derived in one place because the two disagreeing is invisible: `configure` would declare a track
+    nobody selected, and the ownership epoch would name it for the rest of the session.
+    """
+    return startup.tracks.jp_sid if startup.active == MAIN_LANG else startup.tracks.en_sid
+
+
 def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
     """Prefer Japanese, fall back to tagged English, and leave a missing-both file untouched."""
     startup = _initial(sub_tracks(ipc), slang)
-    sid = startup.tracks.jp_sid if startup.active == MAIN_LANG else startup.tracks.en_sid
+    sid = selected_sid(startup)
     if sid is not None:
         _send(ipc, "select-primary", "set_property", "sid", sid)
     return startup
@@ -177,7 +187,13 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     reader.en_sid = startup.tracks.en_sid
     reader.subtitle_language = startup.active or MAIN_LANG
     reader.subtitle_slang = slang
-    reader.subtitle_pipeline.activate(reader)
+    # Declare the track rather than let the renderer read it back. `select_initial` wrote `sid`
+    # fire-and-forget moments ago, so mid-session (a live profile cycle) mpv has not echoed it yet
+    # and `_prop("sid")` still answers with the track being replaced — the selection would look
+    # unchanged and the pixels would stay owned on behalf of a track that is gone. When nothing was
+    # written there is nothing to declare and the read is correct.
+    sid = selected_sid(startup)
+    reader.subtitle_pipeline.activate(reader, ASK_MPV if sid is None else sid)
     if reader._get("secondary-sid") not in {None, False, "no"}:
         _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     # Null the mirror too: configure now runs mid-session (a live profile cycle re-selects the track),

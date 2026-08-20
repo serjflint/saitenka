@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
+from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
@@ -42,13 +43,14 @@ class CurrentSubtitleRenderer(Protocol):
         """Whether a first-subtitle line has already been logged, for the caller to carry back."""
         ...
 
-    def activate(self, reader: Reader, /) -> bool:
+    def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV, /) -> bool:
         """Take the pixels, idempotently. `False` means the caller must draw them itself.
 
-        Idempotent by contract: safe to call on any event without tracking whether it already
-        did. It absorbed the old `reassert` — the precondition separating them ("has the ground
-        moved under the established flag?") is state the renderer owns, not something a caller
-        can know.
+        Idempotent by contract: safe to call on any event without tracking whether it already did.
+        It absorbed the old `reassert`, and the precondition separating them — has the ground moved
+        under the established flag? — is *mostly* the renderer's own state. The exception is the
+        selection: a caller that has just written `sid` knows the new track and the renderer does
+        not, because mpv echoes the property asynchronously. That caller declares it.
         """
         ...
 
@@ -145,8 +147,8 @@ class SubtitleModeCoordinator:
     def clear(self, reader: Reader) -> None:
         self._renderer.clear(reader.lifecycle_surfaces, reader.ipc)
 
-    def activate(self, reader: Reader) -> None:
-        if self._renderer.activate(reader) is False:
+    def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> None:
+        if self._renderer.activate(reader, sid) is False:
             self.draw_current(reader)
 
     def geometry_degraded(self, reader: Reader) -> None:

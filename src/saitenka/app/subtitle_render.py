@@ -18,7 +18,9 @@ from saitenka.app import subtitle_raster
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_ownership import (
+    ASK_MPV,
     ActionKind,
+    AskMpv,
     EventKind,
     OwnershipAction,
     OwnershipContext,
@@ -26,6 +28,7 @@ from saitenka.app.subtitle_ownership import (
     OwnershipMode,
     OwnershipState,
     PixelOwner,
+    SelectedSid,
     Visibility,
     reduce_ownership,
 )
@@ -226,7 +229,7 @@ class NoPixelOwnership:
 class SubtitleRenderer(NoPixelOwnership):
     """Rasterize the current cue and blit it as the SUB overlay — the real draw path."""
 
-    def activate(self, reader: Reader) -> bool:
+    def activate(self, reader: Reader, _sid: SelectedSid = ASK_MPV) -> bool:
         if not hasattr(self, "_restore_visibility"):
             self._restore_visibility = reader._get("sub-visibility")
         reply = reader.ipc.command(
@@ -379,7 +382,7 @@ class NullRenderer(NoPixelOwnership):
     def logged_first(self) -> bool:
         return False
 
-    def activate(self, _reader: Reader, /) -> bool:
+    def activate(self, _reader: Reader, _sid: SelectedSid = ASK_MPV, /) -> bool:
         return True
 
     def deactivate(self, _reader: Reader, /) -> None: ...
@@ -775,15 +778,19 @@ class NativeVisibleRenderer:
         )
         return actions
 
-    def _ensure_selection(self, reader: Reader) -> None:
+    def _ensure_selection(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> None:
         """Publish a selection change if one happened.
 
         The change is enough on its own: `_change_context` re-runs `_start_mode`, which re-shows
         mpv's pixels. Chaining a verify onto it would assert twice for one fact.
+
+        `sid` is the caller's declared selection. Reading it here instead is only safe when nobody
+        has just written it — mpv echoes `sid` asynchronously, so a reconfigure that re-reads sees
+        the track it is replacing and concludes nothing moved.
         """
         selection = repr(
             (
-                reader._prop("sid"),
+                reader._prop("sid") if isinstance(sid, AskMpv) else sid,
                 reader.native_geometry.source_path if reader.native_geometry else None,
             )
         )
@@ -802,16 +809,15 @@ class NativeVisibleRenderer:
         )
         self._execute(reader, actions)
 
-    def activate(self, reader: Reader) -> bool:
+    def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> bool:
         """Own the pixels, idempotently. `False` means the caller must draw them itself.
 
-        One member for what used to be `activate` + `reassert`. Both of `reassert`'s callers were
-        facts with their own names — a track reconfigure and an overlay releasing the pixels — so
-        neither needed a verb: the reconfigure arrives here as a selection change, and the overlay
-        release is `resume_after_overlay`. What is left is idempotent, which is what lets any
-        event call it without tracking whether it already did.
+        One member for what used to be `activate` + `reassert`: both of `reassert`'s callers were
+        facts with their own names, a track reconfigure and an overlay releasing the pixels. The
+        reconfigure arrives here as a selection change — but only if it *declares* the track it
+        selected, because mpv has not echoed the write yet when it calls.
         """
-        self._ensure_selection(reader)
+        self._ensure_selection(reader, sid)
         if (
             not self._state.native_pixels_established
             and self._state.active_assertion_id is None
@@ -934,6 +940,9 @@ class NativeVisibleRenderer:
             )
             self._execute(reader, actions)
             return
+        # The track can change while the overlay is up, so publish the selection first — `reassert`
+        # did, and dropping it left the epoch naming a track that is gone.
+        self._ensure_selection(reader)
         # Verify, not activate: `suspend_for_overlay` set sub-visibility behind the FSM's back, so
         # the established flag is stale by construction and only mpv can settle it.
         self._verify_native(reader)
