@@ -122,7 +122,7 @@ def _open_scan_popup(reader: Reader, scan) -> None:
 
     def opened() -> None:
         if reader._scan_target == scan.text and reader._nest.tail != scan.text:
-            reader._show_nested(scan)
+            nested_popup.show_nested(reader, scan)
 
     reader.arm_hover_deadline(LifecycleTimerKind.SCAN_OPEN, reader.scan_delay, opened)
 
@@ -140,12 +140,12 @@ def _linger_nested(reader: Reader) -> None:
 
     def hidden() -> None:
         reader._nest.hide_pending = False
-        reader._hide_nested()
+        nested_popup.hide_nested(reader)
 
     if reader.arm_hover_deadline(LifecycleTimerKind.NESTED_HIDE, reader.hide_delay, hidden):
         reader._nest.hide_pending = True
     else:
-        reader._hide_nested()
+        nested_popup.hide_nested(reader)
 
 
 def _update_nested_hover(
@@ -407,7 +407,7 @@ def set_hover(reader: Reader, index: int) -> None:
     if reader._interaction_metadata_submit is not None:
         # Retire the previous tooltip's logical identity immediately. Its acknowledged pixels may stay
         # until the replacement paints, but stale nested/open results can no longer attach to it.
-        reader._hide_nested()
+        nested_popup.hide_nested(reader)
         reader._tip_nav = []
         reader._tip_state = None
         reader._tip_rect = None
@@ -459,7 +459,7 @@ def flash(reader: Reader, oid: int) -> None:
     if not reader.schedule_flash_expiry():
         return
     reader._flash_oid = oid
-    reader._render_nested_view() if oid == OverlayId.NESTED else render_view(
+    render_view(reader, reader._nest) if oid == OverlayId.NESTED else render_view(
         reader, reader.tip.view
     )
 
@@ -614,7 +614,9 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
             lb,
             reader._nest.token,
         ):
-            reader._open_link(lb, reader._nest.xy, reader._nest.scroll)  # cross-ref → navigate
+            nested_popup.open_link(
+                reader, lb, reader._nest.xy, reader._nest.scroll
+            )  # cross-ref → navigate
     return True
 
 
@@ -640,12 +642,12 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
             # PLACE (Yomitan; Esc/back returns). A click must NEVER spawn a nested popup — that popup is
             # hover-governed, so it dismisses itself unless the cursor chases it into it.
             log.debug("tip click → navigate %r", lb.query)
-            reader._navigate_tip(lb.query)
+            navigate_tip(reader, lb.query)
     else:
         # No link under the cursor: a single-ideograph scan cell opens its kanji entry. If this fires on
         # a headword kanji click, the headword's kanji LinkBox was MISSED by _tip_link_hit (geometry).
         log.debug("tip click → no link at (%.0f,%.0f); kanji fallback", x, y)
-        reader._click_kanji_fallback(x, y)
+        nested_popup.click_kanji_fallback(reader, x, y)
     return True
 
 
@@ -1059,7 +1061,7 @@ def _place_tip(
 def show_tooltip_impl(reader: Reader, index: int) -> bool:
     tip = reader.tip
     view = tip.view
-    reader._hide_nested()  # switching the base word drops any stale scan popup
+    nested_popup.hide_nested(reader)  # switching the base word drops any stale scan popup
     tip.tip_nav = []  # a newly hovered word abandons any link-navigation back-history
     tip.kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = reader.tokens[index]
@@ -1588,7 +1590,7 @@ def navigate_tip(reader: Reader, query: str) -> None:
 def _install_navigated(reader: Reader, st: Panel) -> None:
     """Swap ``st`` in as the base tooltip's content: hide the stale scan popup, push the current view
     onto the back-stack, and blit. Shared by the synchronous nav and the deferred (worker-built) swap."""
-    reader._hide_nested()  # the old content's scan popup is stale
+    nested_popup.hide_nested(reader)  # the old content's scan popup is stale
     reader._tip_nav.append(_capture_tip_view(reader.tip))
     reader._tip_state = st
     # A navigated view is keyless (not a subtitle token) — the one panel composites native from its own
