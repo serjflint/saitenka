@@ -546,7 +546,8 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
 
     ipc = FakeIPC()
     r = Reader(ipc, anki=object(), mine_cfg=MineConfig())
-    monkeypatch.setattr(miner_ui, "render_preview", lambda _r: None)  # skip the PIL render
+    # skip the PIL render
+    monkeypatch.setattr(miner_ui, "render_preview", lambda *_args: None)
     pv = PreviewData(
         "exists", "読む", "よむ", ["本を読む"], "読む", ["to read"], None, None, "deck"
     )

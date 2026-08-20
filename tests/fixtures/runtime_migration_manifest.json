@@ -134,10 +134,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/miner_ui.py::render_preview"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/miner_ui.py::replay_preview"
     ],
     [

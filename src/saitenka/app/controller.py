@@ -2351,7 +2351,7 @@ class Reader:
         miner_ui.show_preview(self, pv, audio_path)
 
     def _render_preview(self) -> None:
-        miner_ui.render_preview(self)
+        miner_ui.render_preview(self.preview, self.lifecycle_surfaces, self.osd, self.tip_width)
 
     def _hide_preview(self) -> None:
         self._run_panel_command(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)

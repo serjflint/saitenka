@@ -30,6 +30,7 @@ from saitenka.model import in_rect
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
+    from saitenka.app.card_preview import PreviewState
     from saitenka.app.controller import Reader
 
 
@@ -189,26 +190,32 @@ def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
     _stop_preview_audio(reader.preview)  # replay (P) / a new mine silences any clip still playing
     reader.preview.last_preview, reader.preview.last_audio = pv, audio_path
     reader.preview.zoom = False
-    render_preview(reader)
+    render_preview(reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_width)
     _grab_preview_keys(reader.ipc, active_bindings(reader, "preview"))
 
 
-def render_preview(reader: Reader) -> None:
-    pv = reader.preview.last_preview
+def render_preview(preview: PreviewState, surfaces, osd: tuple[int, int], tip_width: int) -> None:
+    """Blit the card preview and record where each of its buttons landed.
+
+    Takes the four facts. `preview` is both the input (what to draw, zoomed or not) and the output
+    (the screen rects the click handler tests against) — which is why it is the state object and not
+    a snapshot: the rects have to survive the call.
+    """
+    pv = preview.last_preview
     if pv is None:
         return
-    pr = render_card_preview(pv, width=max(440, reader.tip_width), zoom=reader.preview.zoom)
-    px, py = round(reader.osd[0] * 0.03), round(reader.osd[1] * 0.06)
-    reader.lifecycle_surfaces.present(pr.image, px, py, oid=OverlayId.PREVIEW)
-    reader.preview.rect = (px, py, pr.image.width, pr.image.height)
+    pr = render_card_preview(pv, width=max(440, tip_width), zoom=preview.zoom)
+    px, py = round(osd[0] * 0.03), round(osd[1] * 0.06)
+    surfaces.present(pr.image, px, py, oid=OverlayId.PREVIEW)
+    preview.rect = (px, py, pr.image.width, pr.image.height)
 
     def _screen(r):
         return (px + r[0], py + r[1], r[2], r[3]) if r else None
 
-    reader.preview.close_rect = _screen(pr.close_rect)
-    reader.preview.audio_rect = _screen(pr.audio_rect)
-    reader.preview.image_rect = _screen(pr.image_rect)
-    reader.preview.dup_rect = _screen(pr.dup_rect)
+    preview.close_rect = _screen(pr.close_rect)
+    preview.audio_rect = _screen(pr.audio_rect)
+    preview.image_rect = _screen(pr.image_rect)
+    preview.dup_rect = _screen(pr.dup_rect)
 
 
 def hide_preview(reader: Reader) -> None:
@@ -236,7 +243,8 @@ def click_preview(reader: Reader, x: float, y: float) -> bool:
         reader._add_duplicate()  # ＋ add anyway → mine a second card for this scene
     elif reader.preview.image_rect and in_rect(reader.preview.image_rect, x, y):
         reader.preview.zoom = not reader.preview.zoom
-        render_preview(reader)  # enlarge to verify the frame / shrink back
+        # enlarge to verify the frame / shrink back
+        render_preview(reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_width)
     elif (
         reader.preview.audio_rect
         and in_rect(reader.preview.audio_rect, x, y)
