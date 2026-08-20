@@ -424,6 +424,10 @@ class Reader:
                     use_native=self._use_native_subtitle_renderer,
                     ownership_undecided=self._native_ownership_undecided,
                     redraw=self._draw_subtitle,
+                    publish=self._publish_geometry,
+                    tokenize_lookahead=lambda text: native_subtitles._lookahead_tokenized(
+                        self, text
+                    ),
                 ),
                 lookahead=o.subtitle_geometry.lookahead,
             )
@@ -841,6 +845,16 @@ class Reader:
     def _playback(self, state: playback.PlaybackState) -> None:
         self._playback_store.current = PlaybackSlice(state)
 
+    def _publish_geometry(self, boxes: list, origin: tuple[int, int] | None = None) -> None:
+        """Take the hit boxes the geometry owner produced. Ordering is the generation fence's."""
+        self.boxes = boxes
+        if origin is not None:
+            self.sub_origin = origin
+
+    def _geometry_observation(self) -> native_subtitles.GeometryObservation:
+        """The facts the geometry owner decides from, per operation — they all move per cue."""
+        return native_subtitles.observation_of(self)
+
     def _subtitle_target(self) -> SubtitleTarget:
         """What the subtitle renderers act on. Built per call — `native_geometry` is installed
         after construction, so a target cached on the Reader would predate it."""
@@ -984,7 +998,7 @@ class Reader:
 
     def _refresh_geometry(self) -> None:
         if self.native_geometry is not None:
-            self.native_geometry.refresh(self)
+            self.native_geometry.refresh(self._geometry_observation())
 
     def retire_geometry_refresh(self) -> None:
         """Drop a pending refresh; the source or track it was armed for is gone."""
@@ -1218,7 +1232,7 @@ class Reader:
         self._sub_pending = norm if self.dict_set is None else None
         if self.native_geometry is not None:
             self.boxes = []
-            self.native_geometry.schedule(self)
+            self.native_geometry.schedule(self._geometry_observation())
         self._draw_subtitle()
 
     def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
@@ -1348,7 +1362,7 @@ class Reader:
         self._sub_pending = None
         self._annotation_degraded = False
         if self.native_geometry is not None:
-            self.native_geometry.schedule(self)
+            self.native_geometry.schedule(self._geometry_observation())
         self._draw_subtitle()
         return True
 
@@ -1573,7 +1587,7 @@ class Reader:
             return
         self._apply_tokenized_cue(self._tokenize_cue(self._cue_norm(self.sub_text)))
         if self.native_geometry is not None:
-            self.native_geometry.refresh(self)
+            self.native_geometry.refresh(self._geometry_observation())
         self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:

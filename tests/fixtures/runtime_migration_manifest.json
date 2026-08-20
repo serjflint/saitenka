@@ -142,47 +142,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._active_observation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._apply"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._observation_key"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._publish_cached"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._resolve_schedule_inputs"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._schedule"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.apply"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.refresh"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.schedule"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/native_subtitles.py::_lookahead_tokenized"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/native_subtitles.py::observation_of"
     ],
     [
       "reader-parameter",

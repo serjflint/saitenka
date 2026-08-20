@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.token_cache import TokenizedCue
     from saitenka.app.tokenize import Token
+    from saitenka.subtitles import Cue, CueIndex
     from saitenka.subtitles.geometry import GeometrySnapshot
 
 log = logging.getLogger(__name__)
@@ -304,6 +305,56 @@ class GeometryPorts:
     use_native: Callable[[], bool]
     ownership_undecided: Callable[[], bool]
     redraw: Callable[[], None]
+    #: Hand the hit boxes (and, when the cue is installed, its origin) to whoever presents them.
+    #: The geometry owner IS the publisher of these — unlike a renderer, which returns them so a
+    #: superseded cue cannot write over a live one. Here the generation fence is what orders them.
+    publish: Callable[[list[WordBox], tuple[int, int] | None], None]
+    #: Tokenize a cue that is not on screen, for the lookahead. Session-lived, like the rest here;
+    #: the *active* tokenizer is not, because a profile switch replaces it.
+    tokenize_lookahead: Callable[[str], TokenizedCue]
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryObservation:
+    """The live facts one geometry decision is made from, snapshotted per operation.
+
+    Cut by contract: mpv-read (`prop`), presentation (`osd`), cue identity and nav (`text`,
+    `index`, `normalise`, `nav_index`, `cue_hint`, `cue_revision`), and the rendered cue
+    (`tokens`, `lines`). `is_skippable` is the dictionary's, and it travels here rather than in
+    the ports because a profile switch replaces the tokenizer mid-session.
+
+    Eleven members. That is a feature value, the size the sidebar's is — and the count is what
+    says this module is one feature and `tooltip`, at ninety-two, is not yet.
+    """
+
+    prop: Callable[[str], Any]
+    osd: tuple[int, int]
+    text: str
+    tokens: list[Token]
+    lines: list[list[Token]]
+    index: CueIndex | None
+    normalise: Callable[[str], str]
+    nav_index: int
+    cue_hint: Cue | None
+    cue_revision: int
+    is_skippable: Callable[[Token], bool]
+
+
+def observation_of(reader: Reader) -> GeometryObservation:
+    """Snapshot the host into the facts one geometry decision is made from."""
+    return GeometryObservation(
+        prop=reader._prop,
+        osd=reader.osd,
+        text=reader.sub_text,
+        tokens=reader.tokens,
+        lines=reader.lines,
+        index=reader._sub_index,
+        normalise=reader._cue_norm,
+        nav_index=reader._nav_idx,
+        cue_hint=reader._geometry_cue_hint,
+        cue_revision=reader.cue_revision,
+        is_skippable=reader.tokenizer.is_skippable,
+    )
 
 
 class NativeSubtitleGeometry:
@@ -612,8 +663,8 @@ class NativeSubtitleGeometry:
         if live:
             self._ports.clear_interaction()
 
-    def refresh(self, reader: Reader) -> None:
-        identity = self._observation_key(reader)
+    def refresh(self, seen: GeometryObservation) -> None:
+        identity = self._observation_key(seen)
         snapshot = self._ports.pipeline.current
         if (
             identity is not None
@@ -622,14 +673,14 @@ class NativeSubtitleGeometry:
             and snapshot is self._last_snapshot
         ):
             active_events = len(snapshot.frame_id.active_event_ids)
-            if reader._prop("sub-start") is None or reader._prop("sub-end") is None:
+            if seen.prop("sub-start") is None or seen.prop("sub-end") is None:
                 self._set_pending_with_current_geometry(active_events=active_events)
             else:
                 self._set_ready(active_events=active_events)
             return
         self.invalidate(live=True)
-        if reader.sub_text.strip():
-            self.schedule(reader)
+        if seen.text.strip():
+            self.schedule(seen)
 
     @staticmethod
     def record_clock_change(prop) -> None:
@@ -722,18 +773,18 @@ class NativeSubtitleGeometry:
             )
         )
 
-    def _observation_key(self, reader: Reader) -> str | None:
+    def _observation_key(self, seen: GeometryObservation) -> str | None:
         path = self.source_path
-        active_rows = reader._prop("sub-text/ass-full")
+        active_rows = seen.prop("sub-text/ass-full")
         if path is None or not isinstance(active_rows, str) or not active_rows.strip():
             return None
         try:
-            render = self._render_inputs(reader._prop, reader.osd)
+            render = self._render_inputs(seen.prop, seen.osd)
             cue = _CueInputs(
                 0,
                 1,
                 0,
-                reader.sub_text,
+                seen.text,
                 active_rows,
                 render.frame_size,
                 render.storage_size,
@@ -742,9 +793,7 @@ class NativeSubtitleGeometry:
                 render.use_margins,
                 render.profile,
             )
-            token_identity = tuple(
-                (token.surface, token.start, token.end) for token in reader.tokens
-            )
+            token_identity = tuple((token.surface, token.start, token.end) for token in seen.tokens)
             return repr((self._key(path, cue), token_identity))
         except (TypeError, ValueError):
             return None
@@ -829,14 +878,14 @@ class NativeSubtitleGeometry:
 
     def _prefetch(
         self,
-        reader: Reader,
+        seen: GeometryObservation,
         path: Path,
         track_id: SubtitleTrackId,
         generation: int,
         render_inputs: _RenderInputs,
         after_ms: int,
     ) -> None:
-        index = reader._sub_index
+        index = seen.index
         if index is None or self.lookahead == 0:
             return
         source = self._source_bytes
@@ -870,12 +919,12 @@ class NativeSubtitleGeometry:
             queued_keys.add(key)
 
             def build(inputs: _CueInputs = inputs) -> GeometryRequest:
-                tokenized = _lookahead_tokenized(reader, inputs.text)
+                tokenized = self._ports.tokenize_lookahead(inputs.text)
                 selection = self._annotations(
                     inputs.text,
                     tokenized.lines,
                     tokenized.tokens,
-                    reader.tokenizer.is_skippable,
+                    seen.is_skippable,
                 )
                 if not selection.annotations:
                     raise ValueError("prefetched frame has no interaction-eligible tokens")
@@ -891,9 +940,9 @@ class NativeSubtitleGeometry:
             if len(queued_keys) >= self.lookahead:
                 break
 
-    def schedule(self, reader: Reader) -> bool:
+    def schedule(self, seen: GeometryObservation) -> bool:
         try:
-            return self._schedule(reader)
+            return self._schedule(seen)
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
             self.worker.mark_not_ready()
             reason, code = geometry_failure_reason(error)
@@ -905,18 +954,18 @@ class NativeSubtitleGeometry:
 
     def _active_observation(
         self,
-        reader: Reader,
+        seen: GeometryObservation,
         source: bytes,
         track_id: SubtitleTrackId,
         start: float,
         end: float,
         active_rows: object,
     ) -> tuple[float, float, int, str] | None:
-        hint = reader._geometry_cue_hint
+        hint = seen.cue_hint
         if hint is not None:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
-            if semantic_text != reader._cue_norm(reader.sub_text):
+            if semantic_text != seen.normalise(seen.text):
                 self._degrade_geometry("subtitle-observation-pending")
                 return None
             return hint.start, hint.end, timestamp_ms, rows
@@ -925,21 +974,21 @@ class NativeSubtitleGeometry:
             return None
         try:
             _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
-                reader._prop("time-pos"), reader._prop("sub-delay"), start
+                seen.prop("time-pos"), seen.prop("sub-delay"), start
             )
         except (TypeError, ValueError):
             self._degrade_geometry("subtitle-timing-unavailable")
             return None
-        if reader._sub_index is not None:
-            position = reader._sub_index.locate(
-                text=reader.sub_text,
+        if seen.index is not None:
+            position = seen.index.locate(
+                text=seen.text,
                 sub_start=start,
                 time_pos=subtitle_time,
-                preferred=reader._nav_idx,
+                preferred=seen.nav_index,
             )
             if position >= 0:
-                indexed = reader._sub_index.cues[position]
-                if indexed.text == reader.sub_text:
+                indexed = seen.index.cues[position]
+                if indexed.text == seen.text:
                     start, end = indexed.start, indexed.end
         return start, end, timestamp_ms, active_rows
 
@@ -965,40 +1014,38 @@ class NativeSubtitleGeometry:
             return "no-tokens"
         return None
 
-    def _resolve_schedule_inputs(self, reader: Reader) -> _ScheduleInputs | None:
+    def _resolve_schedule_inputs(self, seen: GeometryObservation) -> _ScheduleInputs | None:
         path = self.source_path
         source = self._source_bytes
-        unassembled = self._unassembled_input(
-            cue_text=reader.sub_text, has_tokens=bool(reader.tokens)
-        )
+        unassembled = self._unassembled_input(cue_text=seen.text, has_tokens=bool(seen.tokens))
         if unassembled is not None or path is None or source is None:
             # Every other exit below records a reason; this one used to return a bare None, so a
             # geometry schedule that never ran was invisible in the logs and in telemetry.
-            self._trace_unscheduled(unassembled or "no-source-path", reader.cue_revision)
+            self._trace_unscheduled(unassembled or "no-source-path", seen.cue_revision)
             return None
         if self.ass_full_capability == AssFullCapability.UNSUPPORTED:
             self._degrade_geometry("subtitle-ass-full-unsupported")
             return None
         try:
-            render = self._render_inputs(reader._prop, reader.osd)
+            render = self._render_inputs(seen.prop, seen.osd)
         except (TypeError, ValueError) as error:
             self.worker.mark_not_ready()
             self._set_fallback("subtitle-render-input-unsupported", log_detail=str(error))
             self._ports.degrade()
             return None
         self._last_render_inputs = render
-        active_rows = reader._prop("sub-text/ass-full")
+        active_rows = seen.prop("sub-text/ass-full")
         if isinstance(active_rows, str):
             self.ass_full_capability = AssFullCapability.SUPPORTED
-        start = reader._prop("sub-start")
-        end = reader._prop("sub-end")
+        start = seen.prop("sub-start")
+        end = seen.prop("sub-end")
         if start is None or end is None:
             self._degrade_geometry("subtitle-observation-pending")
             return None
         generation = self._ports.pipeline.generation
-        track_id = SubtitleTrackId(f"sid:{reader._prop('sid')}:{path.resolve()}")
+        track_id = SubtitleTrackId(f"sid:{seen.prop('sid')}:{path.resolve()}")
         active = self._active_observation(
-            reader, source, track_id, float(start), float(end), active_rows
+            seen, source, track_id, float(start), float(end), active_rows
         )
         if active is None:
             return None
@@ -1007,7 +1054,7 @@ class NativeSubtitleGeometry:
             round(start * 1_000),
             round(end * 1_000),
             timestamp_ms,
-            reader.sub_text,
+            seen.text,
             rows,
             render.frame_size,
             render.storage_size,
@@ -1024,10 +1071,10 @@ class NativeSubtitleGeometry:
             render,
             cue,
             self._key(path, cue),
-            self._observation_key(reader),
+            self._observation_key(seen),
         )
 
-    def _publish_cached(self, reader: Reader, inputs: _ScheduleInputs) -> bool:
+    def _publish_cached(self, seen: GeometryObservation, inputs: _ScheduleInputs) -> bool:
         cached = self.worker.publish_prefetched(inputs.key, inputs.generation)
         if cached is None:
             return False
@@ -1042,7 +1089,7 @@ class NativeSubtitleGeometry:
             return True
         self._set_ready(active_events=len(cached.frame_id.active_event_ids))
         self._prefetch(
-            reader,
+            seen,
             inputs.path,
             inputs.track_id,
             inputs.generation,
@@ -1051,14 +1098,14 @@ class NativeSubtitleGeometry:
         )
         return True
 
-    def _schedule(self, reader: Reader) -> bool:
+    def _schedule(self, seen: GeometryObservation) -> bool:
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
-        inputs = self._resolve_schedule_inputs(reader)
+        inputs = self._resolve_schedule_inputs(seen)
         if inputs is None:
             return False
         with otel_metrics.traced("subtitle_geometry_cache") as span:
-            cache_hit = self._publish_cached(reader, inputs)
+            cache_hit = self._publish_cached(seen, inputs)
             stats = self.worker.stats
             span.set("outcome", "hit" if cache_hit else "miss")
             if not cache_hit:
@@ -1069,14 +1116,14 @@ class NativeSubtitleGeometry:
         if cache_hit:
             # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
             # a cached cue would sit unapplied until some later miss happened to land.
-            self.apply(reader)
+            self.apply(seen)
             return True
         try:
             selection = self._annotations(
-                reader.sub_text,
-                reader.lines,
-                reader.tokens,
-                reader.tokenizer.is_skippable,
+                seen.text,
+                seen.lines,
+                seen.tokens,
+                seen.is_skippable,
             )
         except ValueError:
             self.worker.mark_not_ready()
@@ -1085,7 +1132,7 @@ class NativeSubtitleGeometry:
         self._last_selection = selection
         self._eligible_tokens = len(selection.annotations)
         if not selection.annotations:
-            reader.boxes = []
+            self._ports.publish([], None)
             self.worker.mark_not_ready()
             if self._ports.use_native():
                 self._published_key = inputs.observation_key
@@ -1107,7 +1154,7 @@ class NativeSubtitleGeometry:
 
         def settled() -> None:
             """The lane terminal is what publishes the result — nothing polls for it."""
-            self.apply(reader)
+            self.apply(seen)
 
         # Everything the result will be judged against is established BEFORE the work is queued.
         # These used to run after, which reads fine while a completion is guaranteed to be later —
@@ -1123,7 +1170,7 @@ class NativeSubtitleGeometry:
         )
         if accepted:
             self._prefetch(
-                reader,
+                seen,
                 inputs.path,
                 inputs.track_id,
                 inputs.generation,
@@ -1132,9 +1179,9 @@ class NativeSubtitleGeometry:
             )
         return accepted
 
-    def apply(self, reader: Reader) -> bool:
+    def apply(self, seen: GeometryObservation) -> bool:
         try:
-            return self._apply(reader)
+            return self._apply(seen)
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
             reason, code = geometry_failure_reason(error)
             self._degrade_geometry(
@@ -1208,18 +1255,17 @@ class NativeSubtitleGeometry:
             )
         self._submitted_at = None
 
-    def _apply(self, reader: Reader) -> bool:
+    def _apply(self, seen: GeometryObservation) -> bool:
         snapshot = self._ports.pipeline.current
         if snapshot is None:
             self._consume_failure()
             return False
         if snapshot is self._last_snapshot:
             return False
-        if not self._snapshot_identities_are_valid(snapshot, len(reader.tokens)):
+        if not self._snapshot_identities_are_valid(snapshot, len(seen.tokens)):
             self._degrade_geometry("geometry-token-identity-invalid")
             return False
-        reader.boxes = self._install_snapshot(snapshot)
-        reader.sub_origin = (0, 0)
+        self._ports.publish(self._install_snapshot(snapshot), (0, 0))
         self._record_ready_latency(snapshot.generation)
         if not self._ports.use_native():
             if self._ports.ownership_undecided():
