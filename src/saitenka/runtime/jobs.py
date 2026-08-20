@@ -102,6 +102,9 @@ class NoSessionRuntime:
     def register_session_resource(self, _name: str, _resource: object) -> bool:
         return False
 
+    def route_session_playback(self, _envelope: object | None) -> object | None:
+        return None
+
 
 def configure_lane(
     ipc: RuntimeJobPort, name: str, policy: JobLanePolicy, handler

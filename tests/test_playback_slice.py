@@ -18,7 +18,7 @@ from saitenka.runtime.events import (
     SourceReplaced,
 )
 from saitenka.runtime.playback import PlaybackProjection, PlaybackState, RetireReason
-from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice
+from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, slice_of
 from saitenka.runtime.state import ReduceResult
 
 #: One stream that reaches every branch: a seed, a track selection, a split cue burst, an
@@ -106,3 +106,51 @@ def test_the_reducer_refuses_an_event_that_is_not_playbacks() -> None:
 
     with pytest.raises(AssertionError):
         PlaybackReducer()(PlaybackSlice(), StartupReady())
+
+
+def _reader_with_a_session_runtime(request):
+    from util import FakeIPC, runtime_gateway
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.subtitle_render import NullRenderer
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
+    reader = Reader(ipc, renderer=NullRenderer())
+    request.addfinalizer(reader.close)
+    return reader, gateway
+
+
+def test_a_session_runtime_owns_the_slot_the_reader_observes_into(request) -> None:
+    """The whole point of item 13: with a runtime installed there is no Reader-side copy."""
+    reader, gateway = _reader_with_a_session_runtime(request)
+    reader._observe_property("sub-text", "こんにちは")
+
+    slot = gateway.session_reactor.state.playback
+    assert slice_of(slot).state.value("sub-text") == "こんにちは"
+    assert reader._playback is slice_of(slot).state
+
+
+def test_a_reader_with_no_runtime_still_observes_into_its_own_slice(request) -> None:
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.subtitle_render import NullRenderer
+
+    reader = Reader(FakeIPC(), renderer=NullRenderer())
+    request.addfinalizer(reader.close)
+    reader._observe_property("sub-text", "ただいま")
+
+    assert reader._playback.value("sub-text") == "ただいま"
+
+
+def test_a_closed_reactor_drops_the_event_instead_of_replaying_the_last_outbox(request) -> None:
+    """A dropped turn leaves `published` in place; applying it again would double every delta."""
+    reader, gateway = _reader_with_a_session_runtime(request)
+    reader._observe_property("sub-text", "one")
+    gateway.session_reactor.close()
+
+    store = reader._playback_store
+    assert store.dispatch(PropertyObserved("sub-text", "two")) == ()

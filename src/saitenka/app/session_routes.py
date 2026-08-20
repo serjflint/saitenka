@@ -30,6 +30,7 @@ from saitenka.runtime.effects import (
     RemoveSessionArtifacts,
 )
 from saitenka.runtime.events import (
+    PLAYBACK_EVENTS,
     ConnectionReplaced,
     EffectFinished,
     EventEnvelope,
@@ -37,6 +38,11 @@ from saitenka.runtime.events import (
     SessionClosing,
     StartupHintRequested,
     StartupReady,
+)
+from saitenka.runtime.playback_slice import (
+    PLAYBACK_FEATURE,
+    PlaybackSlice,
+    playback_slice_reducer,
 )
 from saitenka.runtime.reactor import SessionReactor
 from saitenka.runtime.routing import OwnerRouter
@@ -96,6 +102,8 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
         return event.owner
     if isinstance(event, _SESSION_EVENTS):
         return Owner.SESSION
+    if isinstance(event, PLAYBACK_EVENTS):
+        return Owner.PLAYBACK
     return None
 
 
@@ -180,7 +188,7 @@ def install_session_runtime(ipc: MpvIPC, *, startup_hint: bool = True) -> MpvGat
     from saitenka.mpvio.gateway import install_legacy_gateway
 
     gateway = install_legacy_gateway(ipc)
-    gateway.session_reactor = install_session_reactor(gateway, startup_hint=startup_hint)
+    install_session_reactor(gateway, startup_hint=startup_hint)
     return gateway
 
 
@@ -203,9 +211,14 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     # One slot, several features: `Owner.SESSION` is a slice from the start, so the second session
     # feature is a registration rather than a rewrite of the hint's reducer.
     session = SliceReducer({STARTUP_HINT: hint, LIFECYCLE_CLOSE: reduce_lifecycle_close})
+    playback = playback_slice_reducer()
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
+    # `Owner.PLAYBACK` is not claimed: the Reader routes its observations here and then acts on
+    # the deltas the turn published. What has moved is the *state* — the slot is where the
+    # projection lives, so there is one of it. The duties that read it move next.
+    routes.update({RouteKey(event, Owner.PLAYBACK): playback for event in PLAYBACK_EVENTS})
     ledger = RuntimeLedger()
     gateway.session_ledger = ledger
     control = ControlSink(gateway, ledger)
@@ -214,7 +227,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             session=session.initial(
                 {STARTUP_HINT: StartupHintState(), LIFECYCLE_CLOSE: LifecycleCloseState()}
             ),
-            playback=None,
+            playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
             subtitle=None,
             interaction=None,
             presentation=None,
@@ -226,6 +239,10 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
         control=control,
     )
     control.reactor = reactor
+    # Attaching is part of installing, not a step the caller adds: every port that reaches the
+    # session goes through `gateway.session_reactor`, so a reactor that runs but is not findable
+    # is a session whose owners silently fall back to whatever the caller kept locally.
+    gateway.session_reactor = reactor
 
     def claims(payload: RuntimeEvent) -> bool:
         # A completion is claimed by *ownership*, not by type: the bridge and the reactor both

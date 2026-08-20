@@ -447,6 +447,20 @@ class FakeIPC:
         reactor.close()
         return True
 
+    def route_session_playback(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.PLAYBACK` port, including its no-reactor refusal.
+
+        A fake that always refused would keep every controller test on the Reader-owned store and
+        leave the routed path — the one production takes — exercised only where a test installs a
+        gateway by hand.
+        """
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.playback
+
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
     """The ``{key: message}`` map mpv would hold after registration, reconstructed from the recorded

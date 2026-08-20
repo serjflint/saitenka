@@ -660,6 +660,21 @@ class MpvIPC:
         reactor.close()  # type: ignore[attr-defined]  # `object` by design — see RuntimeGateway
         return True
 
+    def route_session_playback(self, envelope: object | None) -> object | None:
+        """Route one envelope to the session's reactor and hand back `SessionState.playback`.
+
+        A `None` envelope reads the slot without routing; `None` back means there is no reactor,
+        and the caller then owns the slice itself. `object` at this boundary for the same reason
+        `session_reactor` is: the transport must not depend on the runtime vocabulary.
+        """
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.playback  # type: ignore[attr-defined]  # `object` by design
+
     def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         gateway = self._runtime_gateway
         if gateway is None:

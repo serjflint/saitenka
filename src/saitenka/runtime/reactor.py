@@ -88,6 +88,15 @@ class SessionReactor[StateT]:
         self._highest_effect_id = -1
 
     @property
+    def state(self) -> StateT:
+        """The reduced state, without the diagnostic bundle around it.
+
+        `snapshot` sorts the pending-effect table on every read, which is the wrong cost for a
+        caller that reads an owner's slot on the observation path.
+        """
+        return self._state
+
+    @property
     def snapshot(self) -> ReactorSnapshot[StateT]:
         return ReactorSnapshot(
             self._state,

@@ -9,6 +9,7 @@ from util import runtime_gateway
 
 from saitenka.app.loading import SPINNER, loading_image
 from saitenka.mpvio.ipc import IPCRequest
+from saitenka.runtime.events import PropertySeeded
 
 
 def test_loading_image_renders_a_visible_frame():
@@ -162,13 +163,13 @@ def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
     r = Reader(ipc)
     ipc.drain_events()
     r._observing = True
-    r._playback = r._projection.seed(r._playback, "osd-dimensions", unavailable)
+    r._reduce_playback(PropertySeeded("osd-dimensions", unavailable))
 
     r._mark_interactive_ready()
     ipc.drain_events()
     assert ("show-text", "", 1) not in ipc.commands
 
-    r._playback = r._projection.seed(r._playback, "osd-dimensions", {"w": 1920, "h": 1080})
+    r._reduce_playback(PropertySeeded("osd-dimensions", {"w": 1920, "h": 1080}))
     r._mark_interactive_ready()
     ipc.drain_events()
     assert ipc.commands.count(("show-text", "", 1)) == 1

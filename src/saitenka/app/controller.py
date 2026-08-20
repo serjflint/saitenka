@@ -166,7 +166,7 @@ from saitenka.runtime import (
     events,
     playback,
 )
-from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice
+from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.runner import SessionRunner
 from saitenka.subtitles import Cue, CueIndex
 
@@ -644,9 +644,9 @@ class Reader:
         # Sole interpreter of raw mpv observations (saitenka/runtime/playback.py): it owns the
         # latest values, the explicit source/track/render-space revisions, and the decision that a
         # given observation conflicts with the installed cue identity.
-        self._playback_reducer = PlaybackReducer()
-        self._projection = self._playback_reducer.projection
-        self._playback_slice = PlaybackSlice()
+        reducer = PlaybackReducer()
+        self._projection = reducer.projection
+        self._playback_store = PlaybackStore(self.ipc, reducer=reducer)
         self._geometry_refresh = geometry_refresh.RefreshWindow()
         #: Latest cue identity observed this drain, reconciled once at the batch boundary.
         self._pending_cue: playback.ObservedCue | None = None
@@ -821,21 +821,19 @@ class Reader:
 
     @property
     def _playback(self) -> playback.PlaybackState:
-        return self._playback_slice.state
+        return self._playback_store.current.state
 
     @_playback.setter
     def _playback(self, state: playback.PlaybackState) -> None:
-        self._playback_slice = PlaybackSlice(state)
+        self._playback_store.current = PlaybackSlice(state)
 
     def _reduce_playback(self, event: events.PlaybackEvent) -> None:
         """Advance `Owner.PLAYBACK`'s slice by one event and apply what that turn published.
 
-        The published tuple is bound before the loop: applying a delta can reduce another event
+        The deltas are bound before the loop: applying one can reduce another event
         (`AuthoredCueStale` probes mpv and seeds the reply), which replaces the slice underneath.
         """
-        slice_ = self._playback_reducer.reduce(self._playback_slice, event)
-        self._playback_slice = slice_
-        for delta in slice_.published:
+        for delta in self._playback_store.dispatch(event):
             self._apply_playback_delta(delta)
 
     def _prop(self, name: str) -> Any:
