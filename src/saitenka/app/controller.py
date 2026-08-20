@@ -954,6 +954,39 @@ class Reader:
     def _last_announced_sid(self) -> int | None:
         return self._subtitle_tracks.current.announced_sid
 
+    @property
+    def track_ports(self) -> subtitle_modes.TrackPorts:
+        """The seam the whole track-selection family converted onto.
+
+        Built per call rather than held: the acts are bound methods and the slice is read through
+        `tracks`, so there is nothing here worth keeping alive between decisions.
+        """
+        return subtitle_modes.TrackPorts(
+            ipc=self.ipc,
+            get=self._get,
+            toast=self._toast,
+            tracks=lambda: self._subtitle_tracks.current,
+            declare=self.declare_subtitle,
+            invalidate=self.invalidate_analysis,
+            translation_visible=self._translation_visible,
+            drop_index=self._drop_sub_index,
+            rebuild_index=self._rebuild_sub_index,
+            sample_cue=self._sample_cue_text,
+            clear_cue=lambda: self.set_subtitle(""),
+            redraw_cue=lambda: self.set_subtitle(self.sub_text),
+        )
+
+    def _drop_sub_index(self) -> None:
+        self._sub_index = None
+
+    def _rebuild_sub_index(self) -> None:
+        from saitenka.app.embedded_subs import build_sub_index_for_current_track
+
+        build_sub_index_for_current_track(self)
+
+    def _sample_cue_text(self) -> str:
+        return subtitle_modes._sample_cue_text(self._sub_index, self.sub_text)
+
     def declare_subtitle(self, event: events.SubtitleEvent) -> subtitle_state.SubtitleTrackState:
         """Advance `Owner.SUBTITLE`'s slice by one declaration and hand back what it now holds.
 
@@ -1040,7 +1073,7 @@ class Reader:
                 self.native_geometry.set_source(None, live=True)
             else:
                 self.subtitle_pipeline.invalidate()
-            subtitle_modes.on_primary_changed(self, delta.sid)
+            subtitle_modes.on_primary_changed(self.track_ports, delta.sid)
         elif isinstance(delta, playback.SubtitleTimingChanged):
             if self.native_geometry is not None:
                 self.native_geometry.record_clock_change(self._prop)
@@ -2489,7 +2522,7 @@ class Reader:
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def _setup_secondary(self) -> int | None:
-        return subtitle_modes.setup_secondary(self)
+        return subtitle_modes.setup_secondary(self.track_ports)
 
     @property
     def _translate_on(self) -> bool:
@@ -2557,7 +2590,7 @@ class Reader:
         elif isinstance(effect, session_intents.SetSurfacesVisible):
             self.lifecycle_surfaces.set_visible(visible=effect.visible)
         elif isinstance(effect, session_intents.ReleaseSecondarySubtitles):
-            subtitle_modes.release_secondary(self)
+            subtitle_modes.release_secondary(self.track_ports)
         elif isinstance(effect, session_intents.SuspendSubtitles):
             self.subtitle_pipeline.suspend_for_overlay(self._subtitle_target())
         elif isinstance(effect, session_intents.ResumeSubtitles):
@@ -2834,9 +2867,9 @@ class Reader:
 
     def _apply_subtitle_effect(self, effect: subtitle_intents.SubtitleEffect) -> None:
         if isinstance(effect, subtitle_intents.SelectTrack):
-            subtitle_modes.select_track(self, effect.sid, effect.target)
+            subtitle_modes.select_track(self.track_ports, effect.sid, effect.target)
         elif isinstance(effect, subtitle_intents.AdoptCurrentAsTarget):
-            subtitle_modes.adopt_current_as_target(self, effect.sid)
+            subtitle_modes.adopt_current_as_target(self.track_ports, effect.sid)
         elif isinstance(effect, subtitle_intents.AcquireSubtitles):
             subtitle_modes.begin_acquisition(
                 self._submit_subtitle_fetch,
@@ -2913,7 +2946,7 @@ class Reader:
         self.lifecycle_surfaces.remove(OverlayId.TRANS)
         self._translation.dispatch(events.TranslationDrawn(None))
         if release:
-            subtitle_modes.release_secondary(self)
+            subtitle_modes.release_secondary(self.track_ports)
 
     def _toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
         img = render_toast(text, kind)
@@ -3358,7 +3391,7 @@ class Reader:
                 return
             try:
                 subtitle_modes.apply_fetch_result(
-                    self, subtitle_modes.finish_fetch(request, completion)
+                    self.track_ports, subtitle_modes.finish_fetch(request, completion)
                 )
             finally:
                 if on_done is not None:
@@ -3366,7 +3399,9 @@ class Reader:
 
         submitter = self._subtitle_fetch_submit
         if submitter is None:
-            subtitle_modes.apply_fetch_result(self, subtitle_modes.unavailable_fetch(request))
+            subtitle_modes.apply_fetch_result(
+                self.track_ports, subtitle_modes.unavailable_fetch(request)
+            )
             if on_done is not None:
                 on_done()
             return

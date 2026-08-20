@@ -371,7 +371,7 @@ def test_secondary_sid_event_does_not_change_primary_language():
     reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.declare_subtitle(SubtitleSecondaryLeased(2))
 
-    subtitle_modes.on_primary_changed(reader, 2)
+    subtitle_modes.on_primary_changed(reader.track_ports, 2)
 
     assert reader.subtitle_language == "en"
 
@@ -394,7 +394,7 @@ def test_hidden_translation_does_not_reserve_english_secondary():
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     ipc.commands.clear()
 
-    subtitle_modes.release_secondary(reader)
+    subtitle_modes.release_secondary(reader.track_ports)
 
     assert not [
         command for command in ipc.commands if command[:2] == ("set_property", "secondary-sid")
@@ -566,7 +566,7 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch):
     path = Path(tmp_path / "episode.synced.srt")
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader, path, "resynced")
+    subtitle_modes._replace_japanese_track(reader.track_ports, path, "resynced")
 
     assert ("set_property", "sub-delay", 0.0) in ipc.commands
 
@@ -678,7 +678,7 @@ def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypat
     ipc.commands.clear()
 
     subtitle_modes.apply_fetch_result(
-        reader,
+        reader.track_ports,
         subtitle_modes.SubtitleFetchResult(
             path=path,
             status="picker: chosen",
@@ -818,7 +818,7 @@ def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path):
     )
     _select(ipc, 2)
 
-    subtitle_modes.on_primary_changed(reader, 2)
+    subtitle_modes.on_primary_changed(reader.track_ports, 2)
 
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 2
@@ -854,7 +854,7 @@ def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path):
     )
     _select(ipc, 3)
 
-    subtitle_modes.on_primary_changed(reader, 3)
+    subtitle_modes.on_primary_changed(reader.track_ports, 3)
 
     assert reader.subtitle_language == SECOND_LANG
     assert reader.en_sid == 3
@@ -870,7 +870,7 @@ def test_manual_switch_to_untagged_track_is_adopted_as_japanese():
     ipc.tracks.append({"id": 3, "type": "sub", "lang": ""})  # empty tag == untagged
     _select(ipc, 3)
 
-    subtitle_modes.on_primary_changed(reader, 3)
+    subtitle_modes.on_primary_changed(reader.track_ports, 3)
 
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 3
@@ -886,7 +886,7 @@ def test_newly_primary_english_tagged_track_is_secondary_not_japanese():
     ipc.tracks.append({"id": 5, "type": "sub", "lang": "eng"})
     _select(ipc, 5)
 
-    subtitle_modes.on_primary_changed(reader, 5)
+    subtitle_modes.on_primary_changed(reader.track_ports, 5)
 
     assert reader.subtitle_language == SECOND_LANG
     assert reader.en_sid == 5
@@ -899,7 +899,7 @@ def test_subs_turned_off_adopt_no_track():
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     before = reader.subtitle_language
 
-    subtitle_modes.on_primary_changed(reader, None)
+    subtitle_modes.on_primary_changed(reader.track_ports, None)
 
     assert reader.subtitle_language == before
     assert reader.jp_sid is None
@@ -946,7 +946,7 @@ def test_announce_names_a_japanese_track(monkeypatch):
     seen = []
     monkeypatch.setattr(reader, "_toast", lambda text, *_args: seen.append(text))
 
-    subtitle_modes.announce_track(reader, 2)
+    subtitle_modes.announce_track(reader.track_ports, 2)
 
     assert seen == ["subtitles: Japanese (2/2)"]
 
@@ -957,7 +957,7 @@ def test_announce_passes_through_an_unknown_language(monkeypatch):
     seen = []
     monkeypatch.setattr(reader, "_toast", lambda text, *_args: seen.append(text))
 
-    subtitle_modes.announce_track(reader, 3)
+    subtitle_modes.announce_track(reader.track_ports, 3)
 
     assert seen == ["subtitles: ger (1/1)"]
 
@@ -981,7 +981,7 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, m
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader, path, "resynced")
+    subtitle_modes._replace_japanese_track(reader.track_ports, path, "resynced")
 
     assert reader._sub_index is old  # cues retained across the unresolved switch
 
@@ -1015,7 +1015,7 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_
     path.write_text("Japanese", encoding="utf-8")
 
     subtitle_modes.apply_fetch_result(
-        reader,
+        reader.track_ports,
         subtitle_modes.SubtitleFetchResult(
             path=path, status="resynced", select_if_unchanged=False, initial_sid=1, replace=True
         ),

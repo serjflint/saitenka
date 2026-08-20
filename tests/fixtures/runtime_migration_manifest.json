@@ -310,42 +310,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_add_background_japanese"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_replace_japanese_track"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::adopt_current_as_target"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::announce_track"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::apply_fetch_result"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::on_primary_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::release_secondary"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::select_track"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::setup_secondary"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.draw_current"
     ],
     [

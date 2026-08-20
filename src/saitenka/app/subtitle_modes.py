@@ -38,9 +38,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from saitenka.app.controller import Reader
     from saitenka.app.reader_context import SubtitleSource
     from saitenka.runtime.events import SubtitleEvent
+    from saitenka.runtime.subtitle import SubtitleTrackState
 
     ProviderFetch = Callable[[], tuple[Path | None, str]]
     ProviderFetchFactory = Callable[[str], ProviderFetch]
@@ -211,27 +211,52 @@ def configure(
     invalidate()
 
 
-def setup_secondary(reader: Reader) -> int | None:
-    if reader.jp_sid is None and reader.en_sid is None:
-        tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
-        reader.declare_subtitle(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
-    sid = reader.subtitle_tracks.translation_sid
-    if sid is None or sid == reader._get("sid"):
-        release_secondary(reader)
+@dataclass(frozen=True, slots=True)
+class TrackPorts:
+    """What deciding a track needs from the session, named rather than reached for.
+
+    `tracks` is a callable and not the slice itself: every declaration produces a new state and
+    this family reads back what it just declared, so a bound value would be one turn stale. The
+    index pair is two ports rather than one because `select_track` does other work between
+    dropping the old track's cues and building the new track's.
+    """
+
+    ipc: object
+    get: PropertyGet
+    toast: Toast
+    tracks: Callable[[], SubtitleTrackState]
+    declare: Callable[[SubtitleEvent], SubtitleTrackState]
+    invalidate: Callable[[], None]
+    translation_visible: Callable[[], bool]
+    drop_index: Callable[[], None]
+    rebuild_index: Callable[[], None]
+    sample_cue: Callable[[], str]
+    clear_cue: Callable[[], None]
+    redraw_cue: Callable[[], None]
+
+
+def setup_secondary(ports: TrackPorts) -> int | None:
+    state = ports.tracks()
+    if state.jp_sid is None and state.en_sid is None:
+        found = discover_tracks(ports.ipc, state.slang)
+        state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
+    sid = state.translation_sid
+    if sid is None or sid == ports.get("sid"):
+        release_secondary(ports)
         return None
-    if reader._translation_secondary_sid == sid:
+    if state.secondary_sid == sid:
         return sid
-    _send(reader.ipc, "select-secondary", "set_property", "secondary-sid", sid)
-    _send(reader.ipc, "hide-secondary", "set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
-    reader.declare_subtitle(SubtitleSecondaryLeased(sid))
+    _send(ports.ipc, "select-secondary", "set_property", "secondary-sid", sid)
+    _send(ports.ipc, "hide-secondary", "set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
+    ports.declare(SubtitleSecondaryLeased(sid))
     return sid
 
 
-def release_secondary(reader: Reader) -> None:
-    if reader._translation_secondary_sid is None:
+def release_secondary(ports: TrackPorts) -> None:
+    if ports.tracks().secondary_sid is None:
         return
-    clear_secondary(reader.ipc)
-    reader.declare_subtitle(SubtitleSecondaryLeased(None))
+    clear_secondary(ports.ipc)
+    ports.declare(SubtitleSecondaryLeased(None))
 
 
 def clear_secondary(ipc) -> None:
@@ -239,40 +264,36 @@ def clear_secondary(ipc) -> None:
     _send(ipc, "clear-secondary", "set_property", "secondary-sid", "no")
 
 
-def on_primary_changed(reader: Reader, sid) -> None:
-    if sid == reader._translation_secondary_sid:
+def on_primary_changed(ports: TrackPorts, sid) -> None:
+    state = ports.tracks()
+    if sid == state.secondary_sid:
         return
-    announce_track(reader, sid)
+    announce_track(ports, sid)
     if sid is None:
         return
-    known = sid in {reader.jp_sid, reader.en_sid}
+    known = sid in {state.jp_sid, state.en_sid}
     if not known:
         # The user just made this track primary (manual cycle / drag-'n'-drop). Index it from disk
         # FIRST, so an untagged track can be classified by its actual content just below.
-        reader._sub_index = None
-        from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-        build_sub_index_for_current_track(reader)
+        ports.drop_index()
+        ports.rebuild_index()
     language = _primary_role(
-        reader.ipc,
-        sid,
-        SubtitleTracks(reader.jp_sid, reader.en_sid),
-        _sample_cue_text(reader._sub_index, reader.sub_text),
+        ports.ipc, sid, SubtitleTracks(state.jp_sid, state.en_sid), ports.sample_cue()
     )
-    changed = language != reader.subtitle_language
+    changed = language != state.language
     if not known:
         # One declaration for both halves: the adoption *is* what makes this track's role true,
         # and the reducer's steal rule is why they cannot be two events that disagree.
-        reader.declare_subtitle(SubtitlePrimaryAdopted(sid, language))
+        ports.declare(SubtitlePrimaryAdopted(sid, language))
         log.info("subtitle sid=%s adopted as %s", sid, language)
     elif changed:
-        reader.declare_subtitle(SubtitleLanguageChanged(language))
+        ports.declare(SubtitleLanguageChanged(language))
     if changed:
-        reader.invalidate_analysis()
-    if reader._translation_visible():
-        setup_secondary(reader)
+        ports.invalidate()
+    if ports.translation_visible():
+        setup_secondary(ports)
     else:
-        release_secondary(reader)
+        release_secondary(ports)
 
 
 def _primary_role(ipc, sid, tracks: SubtitleTracks, sample: str) -> Language:
@@ -293,58 +314,54 @@ def _sample_cue_text(sub_index, sub_text: str, limit: int = 20) -> str:
     return sub_text or ""
 
 
-def announce_track(reader: Reader, sid) -> None:
-    if sid == reader._last_announced_sid:
+def announce_track(ports: TrackPorts, sid) -> None:
+    if sid == ports.tracks().announced_sid:
         return
-    tracks = sub_tracks(reader.ipc)
+    tracks = sub_tracks(ports.ipc)
     for index, track in enumerate(tracks, 1):
         if track.get("id") == sid:
-            reader.declare_subtitle(SubtitleTrackAnnounced(sid))
+            ports.declare(SubtitleTrackAnnounced(sid))
             name = language_name(track.get("lang"))
             # Log the same signal the toast shows: a surprising "unknown language (10/11)" here is the
             # earliest sign of a wrong-track selection, and belongs in the bundle, not just on screen.
             log.info("subtitles announced: %s (%d/%d) sid=%s", name, index, len(tracks), sid)
-            reader._toast(f"subtitles: {name} ({index}/{len(tracks)})")
+            ports.toast(f"subtitles: {name} ({index}/{len(tracks)})")
             return
 
 
-def select_track(reader: Reader, sid: int, target: Language) -> None:
+def select_track(ports: TrackPorts, sid: int, target: Language) -> None:
     """Carry out a decided language switch: make ``sid`` primary and adopt ``target`` as the role."""
-    tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
-    reader.declare_subtitle(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
-    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    reader.declare_subtitle(SubtitleSecondaryLeased(None))
-    _send(reader.ipc, "select-primary", "set_property", "sid", sid)
-    reader.declare_subtitle(SubtitleLanguageChanged(target))
-    reader._sub_index = None
+    tracks = discover_tracks(ports.ipc, ports.tracks().slang)
+    ports.declare(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
+    _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
+    ports.declare(SubtitleSecondaryLeased(None))
+    _send(ports.ipc, "select-primary", "set_property", "sid", sid)
+    ports.declare(SubtitleLanguageChanged(target))
+    ports.drop_index()
 
-    reader.invalidate_analysis()
-    reader.set_subtitle("")
-    if reader._translation_visible():
-        setup_secondary(reader)
+    ports.invalidate()
+    ports.clear_cue()
+    if ports.translation_visible():
+        setup_secondary(ports)
     else:
-        release_secondary(reader)
-    from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-    build_sub_index_for_current_track(reader)
-    announce_track(reader, sid)
+        release_secondary(ports)
+    ports.rebuild_index()
+    announce_track(ports, sid)
 
 
-def adopt_current_as_target(reader: Reader, sid) -> None:
+def adopt_current_as_target(ports: TrackPorts, sid) -> None:
     """Override: treat mpv's current primary subtitle track as the Japanese target, whatever its tag.
     The manual escape hatch — bound to a key so the user acts in mpv directly — for the rare case
     auto-adoption guessed wrong (an untagged track that is really English) or never fired."""
-    changed = reader.subtitle_language != MAIN_LANG
+    changed = ports.tracks().language != MAIN_LANG
     # The reducer takes the sid off the English role if it held it — the whole point of the
     # override is that the track on screen was filed wrong.
-    reader.declare_subtitle(SubtitlePrimaryAdopted(sid, MAIN_LANG))
+    ports.declare(SubtitlePrimaryAdopted(sid, MAIN_LANG))
     if changed:
-        reader.invalidate_analysis()
-    reader._sub_index = None
-    from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-    build_sub_index_for_current_track(reader)
-    reader.set_subtitle(reader.sub_text)  # recolor the on-screen cue now, don't wait for the next
+        ports.invalidate()
+    ports.drop_index()
+    ports.rebuild_index()
+    ports.redraw_cue()  # recolor the on-screen cue now, don't wait for the next
     log.info("user forced subtitle sid=%s as the Japanese primary", sid)
 
 
@@ -504,99 +521,97 @@ def _reset_sub_delay(ipc) -> None:
 
 
 def _replace_japanese_track(
-    reader: Reader, path, status: str, *, toast: str = "Japanese subtitles re-synced"
+    ports: TrackPorts, path, status: str, *, toast: str = "Japanese subtitles re-synced"
 ) -> None:
     """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry, or an
     explicit picker choice). Drops the stale external track(s) first — mpv caches an already-loaded
     external's cues in memory, and ``discover_tracks`` would pick the older duplicate JP — then re-adds
     + selects the fresh one and rebuilds the lookahead index, so the corrected timing shows immediately."""
-    from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-    for track in sub_tracks(reader.ipc):
+    for track in sub_tracks(ports.ipc):
         if track.get("external") and track.get("id") is not None:
-            _send(reader.ipc, "remove-external", "sub-remove", track["id"])
-    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    reader.declare_subtitle(SubtitleSecondaryLeased(None))
+            _send(ports.ipc, "remove-external", "sub-remove", track["id"])
+    _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
+    ports.declare(SubtitleSecondaryLeased(None))
     _send(
-        reader.ipc, "add-japanese", "sub-add", str(path), "select", "", "jpn"
+        ports.ipc, "add-japanese", "sub-add", str(path), "select", "", "jpn"
     )  # mpv selects it now
-    _reset_sub_delay(reader.ipc)  # our file is the timing truth; drop any persisted/stale offset
-    reader.declare_subtitle(
+    _reset_sub_delay(ports.ipc)  # our file is the timing truth; drop any persisted/stale offset
+    # The just-selected track, not discover_tracks' first JP. mpv answers `sid` with a track id or
+    # None; the string form ("no") only ever goes the other way, on a write.
+    selected = ports.get("sid")
+    ports.declare(
         SubtitleTracksDiscovered(
-            reader._get("sid"),  # the just-selected track, not discover_tracks' first JP
-            discover_tracks(reader.ipc, reader.subtitle_slang).en_sid,
+            selected if isinstance(selected, int) else None,
+            discover_tracks(ports.ipc, ports.tracks().slang).en_sid,
         )
     )
-    reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))
-    reader.set_subtitle("")
-    build_sub_index_for_current_track(reader)  # replaces the index on success; retains it if the
-    # just-added track can't resolve yet (rebuild is fail-soft) rather than blanking the cues
-    reader._toast(toast)
+    ports.declare(SubtitleLanguageChanged(MAIN_LANG))
+    ports.clear_cue()
+    ports.rebuild_index()  # replaces the index on success; retains it if the just-added track
+    # can't resolve yet (rebuild is fail-soft) rather than blanking the cues
+    ports.toast(toast)
     log.info("%s", status)
 
 
-def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> None:
+def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> None:
     """Non-disruptive arrival: add the fetched JP track but keep the current selection unless the user
     hasn't touched it and had no JP yet (then auto-select). Leaves English on screen for an explicit
     Alt+t otherwise — the background-fetch contract."""
     path, status = result.path, result.status
-    current_sid = reader._get("sid")
-    had_japanese = reader.jp_sid is not None
-    _send(reader.ipc, "add-japanese-background", "sub-add", str(path), "auto", "", "jpn")
-    tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
-    reader.declare_subtitle(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
+    current_sid = ports.get("sid")
+    state = ports.tracks()
+    had_japanese = state.jp_sid is not None
+    _send(ports.ipc, "add-japanese-background", "sub-add", str(path), "auto", "", "jpn")
+    found = discover_tracks(ports.ipc, state.slang)
+    state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
     select_japanese = selects_background_japanese(
         select_if_unchanged=result.select_if_unchanged,
         had_japanese=had_japanese,
         current_sid=current_sid,
         initial_sid=result.initial_sid,
-        jp_sid=reader.jp_sid,
+        jp_sid=state.jp_sid,
     )
     if not select_japanese:
         _send(
-            reader.ipc,
+            ports.ipc,
             "keep-primary",
             "set_property",
             "sid",
             current_sid if current_sid is not None else "no",
         )
-        reader._toast("Japanese subtitles ready — Alt+t to switch")
+        ports.toast("Japanese subtitles ready — Alt+t to switch")
         log.info("%s", status)
         return
-    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
-    reader.declare_subtitle(SubtitleSecondaryLeased(None))
-    _send(reader.ipc, "select-japanese", "set_property", "sid", reader.jp_sid)
-    _reset_sub_delay(reader.ipc)  # our file is the timing truth; drop any persisted/stale offset
-    reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))
-    reader.set_subtitle("")
-    if reader._translation_visible():
-        setup_secondary(reader)
-    from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-    build_sub_index_for_current_track(
-        reader
-    )  # replaces on success; retains prior cues if unresolved
-    reader._toast("Japanese subtitles ready")
+    _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
+    ports.declare(SubtitleSecondaryLeased(None))
+    _send(ports.ipc, "select-japanese", "set_property", "sid", state.jp_sid)
+    _reset_sub_delay(ports.ipc)  # our file is the timing truth; drop any persisted/stale offset
+    ports.declare(SubtitleLanguageChanged(MAIN_LANG))
+    ports.clear_cue()
+    if ports.translation_visible():
+        setup_secondary(ports)
+    ports.rebuild_index()  # replaces on success; retains prior cues if unresolved
+    ports.toast("Japanese subtitles ready")
     log.info("%s", status)
 
 
-def apply_fetch_result(reader: Reader, result: SubtitleFetchResult) -> None:
+def apply_fetch_result(ports: TrackPorts, result: SubtitleFetchResult) -> None:
     action = fetch_action(
         path_available=result.path is not None,
         force_select=result.force_select,
         replace=result.replace,
-        language=reader.subtitle_language,
+        language=ports.tracks().language,
     )
     if action is FetchAction.REPORT_FAILURE:
         log.warning("%s", result.status)
-        reader._toast(result.status, "warn")
+        ports.toast(result.status, "warn")
     elif action is FetchAction.REPLACE:
         toast = "Japanese subtitles selected" if result.force_select else None
         _replace_japanese_track(
-            reader,
+            ports,
             result.path,
             result.status,
             **({"toast": toast} if toast else {}),
         )
     else:
-        _add_background_japanese(reader, result)
+        _add_background_japanese(ports, result)
