@@ -140,3 +140,42 @@ def test_requesting_a_stop_wakes_the_transport(request) -> None:
         assert woken == [True]
     finally:
         reader.close()
+
+
+def test_the_claim_census_separates_what_the_reactor_owns_from_what_the_reader_still_does(
+    request,
+) -> None:
+    """The `session-loop` duty's meter, and the reason it needs one.
+
+    The loop already receives from the mailbox and the reactor already sees every envelope, so
+    neither is what keeps the duty open — what is left is the Reader still *acting* on the
+    envelopes nothing claimed. That is invisible to the debt census, because an unclaimed envelope
+    is not a debt symbol anywhere: it is a ratio, and the tail of it names the feature to migrate
+    next.
+    """
+    from saitenka.runtime import EventOrigin, TrafficClass
+    from saitenka.runtime.events import RawMpvEvent
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+
+    gateway.mailbox.publish(
+        RawMpvEvent({"event": "seek"}), origin=EventOrigin.MPV, traffic=TrafficClass.NORMAL
+    )
+    ipc.drain_events(0.0, ordered_terminals=True)
+
+    census = gateway.claim_census()
+    claimed, seen = census["RawMpvEvent"]
+    assert seen == 1
+    assert claimed == 0, "an mpv observation is still the Reader's to act on"
+
+
+def test_an_unrun_session_reports_an_empty_census_rather_than_a_clean_one(request) -> None:
+    """The negative control. A session that saw nothing must not read as fully migrated — an empty
+    census is a statement about the sample, and a ratio over zero would round to whatever suits."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+
+    assert gateway.claim_census() == {}

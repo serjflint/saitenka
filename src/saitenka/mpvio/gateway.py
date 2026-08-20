@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -78,6 +79,13 @@ class LegacyEventRouter:
         self._runtime_bridge: LegacyRuntimeBridge | None = None
         self._reactor: SessionReactor | None = None
         self._claims: Callable[[RuntimeEvent], bool] = lambda _payload: False
+        #: Envelopes seen, and how many the reactor owned outright. The `session-loop` duty retires
+        #: when the second reaches the first: the loop already receives from the mailbox and the
+        #: reactor already sees every envelope, so what is left is the Reader still *acting* on what
+        #: nothing claimed. Counted per payload type, because the tail is what says which feature is
+        #: next and a bare ratio does not.
+        self._seen: Counter[str] = Counter()
+        self._claimed: Counter[str] = Counter()
 
     def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None:
         if self._runtime_bridge is not None:
@@ -89,6 +97,15 @@ class LegacyEventRouter:
         """The session's mailbox. Exposed for an observer to be constructed against — a consumer
         must still go through `observe`, since the router is the only sanctioned one."""
         return self._mailbox
+
+    def claim_census(self) -> dict[str, tuple[int, int]]:
+        """`{payload type: (claimed, seen)}` for this session — the `session-loop` duty's meter.
+
+        A ratio, not a row count: an envelope the Reader still acts on is not a debt symbol
+        anywhere, so nothing else can see this. Empty on a session that never ran, which is a fact
+        about the sample and not about the migration.
+        """
+        return {name: (self._claimed[name], seen) for name, seen in self._seen.items()}
 
     def observe(
         self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
@@ -167,6 +184,10 @@ class LegacyEventRouter:
         # ownership question asked afterwards always answers "no" and every claimed terminal would
         # fall through to the bridge as well.
         claimed = self._claims(envelope.payload)
+        name = type(envelope.payload).__name__
+        self._seen[name] += 1
+        if claimed:
+            self._claimed[name] += 1
         self._observe(envelope)
         if not claimed:
             self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
@@ -277,6 +298,10 @@ class MpvGateway:
         """The session's mailbox. Exposed for an observer to be constructed against — a consumer
         must still go through `observe`, since the router is the only sanctioned one."""
         return self._mailbox
+
+    def claim_census(self) -> dict[str, tuple[int, int]]:
+        """What fraction of this session's envelopes the reactor owned — see the router's copy."""
+        return self._router.claim_census()
 
     def observe(
         self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
