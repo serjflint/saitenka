@@ -150,7 +150,7 @@ from saitenka.app.subtitle_render import (
     target_of,
 )
 from saitenka.app.toast import render_toast
-from saitenka.app.token_cache import TokenCache, TokenizedCue
+from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
 from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.mpvio.osd import Overlay
@@ -187,7 +187,7 @@ if TYPE_CHECKING:
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.panel import Freq
-    from saitenka.subtitles import Cue, CueIndex, GeometryBackend
+    from saitenka.subtitles import CueIndex, GeometryBackend
 
 log = logging.getLogger(__name__)
 
@@ -368,7 +368,7 @@ class Reader:
                     publish=self._publish_geometry,
                     tokenize_lookahead=lambda text: native_subtitles._lookahead_tokenized(
                         text,
-                        normalise=self._cue_norm,
+                        normalise=cue_key,
                         coordinator=self._annotation if self._annotation_async else None,
                         annotation_key=self._annotation_key,
                         annotation_inputs=self._annotation_inputs,
@@ -725,7 +725,6 @@ class Reader:
         )
         self.boxes: list = []
         self.sub_origin: tuple[int, int] = (0, 0)
-        self._geometry_cue_hint: Cue | None = None
         self.hover = -1
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
@@ -1288,12 +1287,12 @@ class Reader:
         if self.subtitle_language == SECOND_LANG:
             self.lines, self.tokens, self.styles = [], [], None
             self.boxes = []
-            self._install_cue_identity(self._annotation_identity(self._cue_norm(text)))
+            self._install_cue_identity(self._annotation_identity(cue_key(text)))
             self._cue_identity_ever_installed = True
             self._draw_subtitle()
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
-        norm = self._cue_norm(text)
+        norm = cue_key(text)
         cached = self.token_cache.get(norm)
         self._install_cue_identity(self._annotation_identity(norm))
         self._cue_identity_ever_installed = True
@@ -1357,7 +1356,7 @@ class Reader:
                 submitter=self._annotation_submit,
                 on_result=self._finish_annotation,
             )
-        norm = self._cue_norm(text)
+        norm = cue_key(text)
         cue = self._annotation.resolve(
             self._annotation_key(norm),
             self._annotation_inputs(norm),
@@ -1427,7 +1426,7 @@ class Reader:
         self._teardown_tip()
         self.hover = -1
         self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
-        norm = self._cue_norm(self.sub_text)
+        norm = cue_key(self.sub_text)
         self._sub_pending = norm
         if self.native_geometry is not None:
             self.native_geometry.invalidate(live=True)
@@ -1493,12 +1492,6 @@ class Reader:
                 self._publish_annotation(result.cue, result.identity)
             span.set("outcome", outcome.value)
 
-    @staticmethod
-    def _cue_norm(text: str) -> str:
-        """The token-cache key for a cue: mpv's sub-text with ASS/CR line breaks normalized to \\n.
-        The SAME transform for a live cue and a warmed one, so an episode-prefetched line is a hit."""
-        return text.replace("\\N", "\n").replace("\r", "")
-
     def warm_episode_tokens(self) -> None:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
         prefetch.warm_episode_tokens(self)
@@ -1516,7 +1509,7 @@ class Reader:
         while coordinator.pending_count() < 4 and self._annotation_episode_cursor < len(index.cues):
             cue = index.cues[self._annotation_episode_cursor]
             self._annotation_episode_cursor += 1
-            norm = self._cue_norm(cue.text)
+            norm = cue_key(cue.text)
             coordinator.submit(
                 self._annotation_key(norm),
                 self._annotation_inputs(norm),
@@ -1661,14 +1654,14 @@ class Reader:
             return
         if self._annotation_async:
             self._retire_cue_identity("profile")
-            norm = self._cue_norm(self.sub_text)
+            norm = cue_key(self.sub_text)
             self._install_cue_identity(self._annotation_identity(norm))
             self._sub_pending = norm
             self._annotation_degraded = False
             self._schedule_current_annotation(norm)
             self._draw_subtitle()
             return
-        self._apply_tokenized_cue(self._tokenize_cue(self._cue_norm(self.sub_text)))
+        self._apply_tokenized_cue(self._tokenize_cue(cue_key(self.sub_text)))
         if self.native_geometry is not None:
             self.native_geometry.refresh(self._geometry_observation())
         self._draw_subtitle()
@@ -3730,7 +3723,7 @@ class Reader:
         geometry-off."""
 
         def geometry_hint(cue) -> None:
-            self._geometry_cue_hint = cue
+            self.episode.geometry_cue_hint = cue
 
         return subnav.NavPorts(
             episode=self.episode,

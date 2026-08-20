@@ -13,6 +13,7 @@ from saitenka.app.controller import Reader
 from saitenka.app.popups import HoverMetadata, PopupView, TooltipState
 from saitenka.app.reader_context import EpisodeContext
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleStartupConfigured
+from saitenka.subtitles import Cue
 
 
 class FakeIPC(util.FakeIPC):
@@ -53,12 +54,16 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     r.episode.nav_idx = 9
     r.episode.sub_settle = r.episode.sub_settle.begin()
     r.episode.subtitle.retry_active = True  # a nested-cluster field, migrated fully off the Reader
+    # A geometry hint names a cue of *this* file, so carrying one over would aim the next episode's
+    # first decision at a line that is nowhere in it. It was a Reader field, where nothing cleared it.
+    r.episode.geometry_cue_hint = Cue(1.0, 2.0, "犬")
 
     r.episode = EpisodeContext()  # the re-slot move: one rebind resets every episode field
 
     assert r.episode.nav_idx == -1
     assert r.episode.sub_settle.open is False
     assert r.episode.subtitle.retry_active is False
+    assert r.episode.geometry_cue_hint is None
 
 
 def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():

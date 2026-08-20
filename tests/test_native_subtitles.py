@@ -1307,7 +1307,7 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
     source.write_bytes(ASS_TWO)
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._geometry_cue_hint = Cue(4.0, 6.0, "犬も見る")
+    result.episode.geometry_cue_hint = Cue(4.0, 6.0, "犬も見る")
 
     result.set_subtitle("犬も見る")
     assert result.native_geometry is not None

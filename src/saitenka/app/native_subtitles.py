@@ -19,6 +19,7 @@ from saitenka.app.subtitle_geometry_diagnostics import (
     geometry_failure_reason,
 )
 from saitenka.app.subtitles import WordBox
+from saitenka.app.token_cache import cue_key
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
     GeometryRequest,
@@ -358,9 +359,9 @@ def observation_of(reader: Reader) -> GeometryObservation:
         tokens=reader.tokens,
         lines=reader.lines,
         index=reader.episode.sub_index,
-        normalise=reader._cue_norm,
+        normalise=cue_key,
         nav_index=reader.episode.nav_idx,
-        cue_hint=reader._geometry_cue_hint,
+        cue_hint=reader.episode.geometry_cue_hint,
         cue_revision=reader.cue_revision,
         is_skippable=reader.tokenizer.is_skippable,
     )

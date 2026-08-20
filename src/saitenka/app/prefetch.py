@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka import otel_metrics
 from saitenka.app.perf import gil_disabled
+from saitenka.app.token_cache import cue_key
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy
 
@@ -603,7 +604,7 @@ def episode_warm_ports(reader: Reader) -> EpisodeWarmPorts:
         stop=reader._stop,
         token_cache=reader.token_cache,
         current_index=lambda: reader.episode.sub_index,
-        normalise=reader._cue_norm,
+        normalise=cue_key,
         tokenize=reader._tokenize_cue,
     )
 

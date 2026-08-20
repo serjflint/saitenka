@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from saitenka.app.sub_picker import PickerState
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
-    from saitenka.subtitles import CueIndex
+    from saitenka.subtitles import Cue, CueIndex
 
 
 class Delegated[T]:
@@ -92,6 +92,10 @@ class EpisodeContext:
         # While open, ignore mpv's mid-seek transient sub-text (app/subnav_settle.py).
         self.sub_settle = SettleWindow()
         self.nav_prev_text = ""  # cue text showing right before a nav render (reconcile)
+        # The cue a nav jumped to, so a geometry decision uses the target line rather than whatever
+        # mpv is still showing mid-seek. Episode-scoped: a hint left over from the previous file
+        # would aim the first decision of the new one at a cue that is no longer anywhere.
+        self.geometry_cue_hint: Cue | None = None
         self.nav_provisional_cue_counted = False
         # durable per-session recorder (app/session_stats.py); None until stats start on file load
         self.session_recorder: SessionRecorder | None = None
