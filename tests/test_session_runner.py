@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
+from util import FakeIPC, runtime_gateway
 
 from saitenka.runtime.runner import SessionRunner
 
@@ -74,3 +77,58 @@ def test_a_raising_step_is_not_swallowed() -> None:
 
     with pytest.raises(OSError, match="pipe closed"):
         SessionRunner(step).run_until(lambda: False, deadline=None)
+
+
+def test_a_stop_releases_a_receiver_blocked_with_no_events_pending() -> None:
+    """The bound `poll_interval` currently provides, stated as a property of the mailbox instead.
+
+    Without this a stop is only observed when the next event happens to arrive, which for an idle
+    session is never — the failure mode is a hang, so the negative control is the timeout itself.
+    """
+    from saitenka.runtime.mailbox import SessionMailbox
+
+    mailbox = SessionMailbox()
+    released = threading.Event()
+
+    def receiver() -> None:
+        mailbox.receive(timeout=5.0)
+        released.set()
+
+    thread = threading.Thread(target=receiver)
+    thread.start()
+    try:
+        mailbox.wake()
+        assert released.wait(2.0)
+    finally:
+        thread.join(2.0)
+
+
+def test_waking_publishes_nothing_and_does_not_close() -> None:
+    """A wake is not an event and not a close: the session has to stay drainable afterwards."""
+    from saitenka.runtime.mailbox import SessionMailbox
+
+    mailbox = SessionMailbox()
+
+    mailbox.wake()
+
+    assert mailbox.receive(timeout=0) is None
+    assert mailbox.drain_ready() == ()
+
+
+def test_requesting_a_stop_wakes_the_transport(request) -> None:
+    """The Reader half: the flag alone leaves a blocked receiver blocked."""
+    from saitenka.app.controller import Reader
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    reader = Reader(ipc, prefetch=False)
+    woken: list[bool] = []
+    reader.ipc.wake_session_runtime = lambda: woken.append(True) or True  # type: ignore[method-assign]
+    try:
+        reader.request_stop()
+        # Read before `close`, which legitimately requests a stop of its own.
+        assert reader._stop.is_set()
+        assert woken == [True]
+    finally:
+        reader.close()

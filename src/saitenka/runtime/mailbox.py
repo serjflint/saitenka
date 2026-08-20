@@ -81,6 +81,7 @@ class SessionMailbox:
         self._close_latch: EventEnvelope | None = None
         self._connection_lost: EventEnvelope | None = None
         self._closed = False
+        self._wakes = 0
         self._condition = threading.Condition()
 
     def publish(
@@ -241,8 +242,13 @@ class SessionMailbox:
 
     def receive(self, *, timeout: float | None = None) -> EventEnvelope | None:
         with self._condition:
+            # A counter, not a flag: `wait_for` re-tests its predicate after every notify, so a
+            # bare `notify_all` releases nobody. Comparing against the count read on entry also
+            # makes a wake un-latched — it frees the receivers blocked *now* and leaves no state
+            # for the next caller to trip over.
+            woken = self._wakes
             self._condition.wait_for(
-                lambda: self._has_events_locked() or self._closed,
+                lambda: self._has_events_locked() or self._closed or self._wakes != woken,
                 timeout,
             )
             return self._pop_next_locked()
@@ -281,6 +287,19 @@ class SessionMailbox:
                 return False
             self._terminal_reservations.remove(effect_id)
             return True
+
+    def wake(self) -> None:
+        """Release every blocked `receive` without closing or publishing anything.
+
+        The loop's stop flag is set from another thread, and a blocked receiver cannot observe it —
+        today `poll_interval` bounds the wait so the flag is noticed within a tick. That bound is
+        what item 10 retires, and retiring it without this would turn "stop" into "stop after the
+        next event, whenever that is". `close` cannot serve: it is terminal, and a stop has to be
+        observable while the mailbox is still live enough to drain.
+        """
+        with self._condition:
+            self._wakes += 1
+            self._condition.notify_all()
 
     def close(self) -> None:
         with self._condition:

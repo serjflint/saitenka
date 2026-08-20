@@ -49,6 +49,12 @@ if TYPE_CHECKING:
         #: transport depend on the runtime it is deliberately independent of.
         session_reactor: object | None
 
+        #: Same reasoning as `session_reactor`: named so the transport can wake a blocked receiver,
+        #: `object` so the transport does not import the runtime's mailbox to say so. Read-only,
+        #: because the gateway exposes it as a property and a settable member would not match.
+        @property
+        def mailbox(self) -> object: ...
+
         def submit_mpv(self, **kwargs) -> bool: ...
 
         def schedule_timer(self, **kwargs) -> bool: ...
@@ -646,6 +652,19 @@ class MpvIPC:
         if gateway is None:
             return False
         return gateway.close_job_lane(name, timeout)
+
+    def wake_session_runtime(self) -> bool:
+        """Release a blocked mailbox receiver. False when there is no runtime.
+
+        Not a close and not an event: the stop flag lives on the Reader and another thread sets it,
+        so a receiver blocked on the mailbox has to be let go before it can look. Today the poll
+        interval bounds that wait; this is what lets the interval go.
+        """
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.mailbox.wake()  # type: ignore[attr-defined]  # `object` by design — see RuntimeGateway
+        return True
 
     def close_session_runtime(self) -> bool:
         """Ask the session's reactor for the closed transition. False when there is no reactor.

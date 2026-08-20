@@ -3877,6 +3877,16 @@ class Reader:
 
         SessionRunner(step).run_until(lambda: not alive or self._stop.is_set())
 
+    def request_stop(self) -> None:
+        """Ask the loop to finish, from any thread.
+
+        Setting the flag is not enough on its own: the loop observes it between steps, and a step
+        blocks. `poll_interval` bounds that today, which is why a bare `set()` has looked sufficient
+        — the wake is what makes the flag observable once that bound goes.
+        """
+        self._stop.set()  # the workers do no IPC, so signalling them is race-free
+        self.ipc.wake_session_runtime()
+
     def _on_ipc_reconnect(self) -> None:
         self.subtitle_pipeline.connection_replaced(self._subtitle_target())
 
@@ -4126,7 +4136,7 @@ class Reader:
         def start_lane_budget() -> None:
             # Armed here, not at table-build time: the 2s budget starts once the capabilities are
             # down, and computing it earlier would silently spend that window on their teardown.
-            self._stop.set()  # the workers do no IPC, so signalling them is race-free
+            self.request_stop()
             self._lane_deadline = time.monotonic() + 2.0
 
         self._close_participants = dict(

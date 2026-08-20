@@ -67,6 +67,8 @@ class RuntimeJobPort(Protocol):
 
     def close_session_runtime(self) -> bool: ...
 
+    def wake_session_runtime(self) -> bool: ...
+
 
 class NoSessionRuntime:
     """For a headless stand-in with no session behind it: the runtime ports answer, and say no.
@@ -91,6 +93,9 @@ class NoSessionRuntime:
         return False
 
     def close_session_runtime(self) -> bool:
+        return False
+
+    def wake_session_runtime(self) -> bool:
         return False
 
     def schedule_runtime_timer(self, **_kwargs) -> bool:

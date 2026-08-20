@@ -440,6 +440,12 @@ class FakeIPC:
             return False
         return self._runtime_gateway.close_job_lane(name, timeout)
 
+    def wake_session_runtime(self) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        self._runtime_gateway.mailbox.wake()
+        return True
+
     def close_session_runtime(self) -> bool:
         reactor = getattr(self._runtime_gateway, "session_reactor", None)
         if reactor is None:
