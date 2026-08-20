@@ -156,7 +156,13 @@ class TooltipSession(RuleBasedStateMachine):
     @rule()
     def open_nested(self) -> None:
         tok = self.r.tokens[0]
-        nested_popup.open_nested(self.r, tok, tok.surface, nested_popup.Anchor(200.0, 200.0, 40.0))
+        nested_popup.open_nested(
+            self.r.tip_ports,
+            self.r.panel_ports,
+            tok,
+            tok.surface,
+            nested_popup.Anchor(200.0, 200.0, 40.0),
+        )
         self.nested_open = self.r.tip.nest.state is not None
         self._check("open_nested")
 

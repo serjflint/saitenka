@@ -538,7 +538,11 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
             reader.tip.nest.token,
         ):
             nested_popup.open_link(
-                reader, lb, reader.tip.nest.xy, reader.tip.nest.scroll
+                reader.tip_ports,
+                reader.panel_ports,
+                lb,
+                reader.tip.nest.xy,
+                reader.tip.nest.scroll,
             )  # cross-ref → navigate
     return True
 
@@ -572,7 +576,7 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
         # No link under the cursor: a single-ideograph scan cell opens its kanji entry. If this fires on
         # a headword kanji click, the headword's kanji LinkBox was MISSED by the base link hit-test (geometry).
         log.debug("tip click → no link at (%.0f,%.0f); kanji fallback", x, y)
-        nested_popup.click_kanji_fallback(reader, x, y)
+        nested_popup.click_kanji_fallback(reader.tip_ports, reader.panel_ports, x, y)
     return True
 
 
@@ -851,7 +855,7 @@ def apply_engaged_open(reader: Reader, result: tooltip_engaged.OpenReady) -> Non
     if id(ports.tip.view.state) != result.origin:
         return  # the base tooltip switched under us — don't open onto the new word
     built = nested_popup._engaged_open_panel(
-        reader, result.source, result.query
+        ports, reader.panel_ports, result.source, result.query
     )  # main thread → recompute mined
     if built is None:
         return

@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from saitenka.app.lifecycle_timers import LifecycleTimerKind
     from saitenka.app.prefetch import TipScale
     from saitenka.app.render_cache import LoadedView, RenderCache
+    from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
     from saitenka.model import Theme
     from saitenka.render.banded import WindowedPanel
@@ -60,6 +61,10 @@ class TipPorts:
     #: Arms the deadline that ends a copy-flash pulse; `False` when nothing can arm one (a closing
     #: session). The pulse is only drawn once its own retirement exists, so the port carries both.
     schedule_flash_expiry: Callable[[], bool]
+    toast: Callable[..., None]
+    #: Hands a popup build to the engaged worker; `True` when it took it, and the caller then shows
+    #: nothing and waits for the typed completion.
+    request_engaged_tooltip: Callable[..., bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +111,9 @@ class HoverInputs:
     hover: Callable[[], int]
     cue_state: Callable[[], str]
     tokens: Sequence[Token]
-    boxes: Sequence[object]
+    boxes: list[WordBox]
+    #: Where the cue was drawn — the boxes are relative to it, so a hit test needs both.
+    sub_origin: tuple[int, int]
 
 
 class Panel:

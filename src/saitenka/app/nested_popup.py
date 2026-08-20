@@ -19,11 +19,12 @@ from typing import TYPE_CHECKING
 
 from saitenka.app import tooltip_engaged
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import PopupView, TipPorts
+from saitenka.app.popups import HoverInputs, PopupView, TipPorts
 from saitenka.app.prefetch import cap_for
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
     TIP_GAP,
+    PanelPorts,
     is_mined,
     panel_for,
     panel_key,
@@ -102,7 +103,16 @@ def show_nested(reader: Reader, sb) -> None:
     anchor = Anchor(sx + sb.x, sy + (sb.y - ports.tip.view.scroll), sb.h)
     # defer=True: a cold inner word's head+bands raster off the main thread (tier-3), re-derived from the
     # scan cell when it lands — the hover-scan path, unlike a clicked link, is re-derivable via scan_hit.
-    open_nested(reader, tok, tok.surface, anchor, tail=sb.text, extra_terms=extra, defer=True)
+    open_nested(
+        ports,
+        reader.panel_ports,
+        tok,
+        tok.surface,
+        anchor,
+        tail=sb.text,
+        extra_terms=extra,
+        defer=True,
+    )
 
 
 def apply_nested_metadata(reader: Reader, result) -> None:
@@ -122,7 +132,8 @@ def apply_nested_metadata(reader: Reader, result) -> None:
     sx, sy = reader.tip.view.xy
     anchor = Anchor(sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
     open_nested(
-        reader,
+        reader.tip_ports,
+        reader.panel_ports,
         result.token,
         result.token.surface,
         anchor,
@@ -145,7 +156,8 @@ def _phrase_extra_terms(tokens, *, dict_set, tokenizer) -> tuple[str, ...]:
 
 
 def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosses this seam
-    reader: Reader,
+    ports: TipPorts,
+    panel: PanelPorts,
     tok,
     inflected,
     anchor: Anchor,
@@ -164,11 +176,10 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     show NOTHING — its typed completion re-derives the
     anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
     clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
-    ports = reader.tip_ports
     if mined is None:
-        mined = is_mined(tok, reader.session.mined)
+        mined = is_mined(tok, panel.mined_set)
     key = panel_key(
-        reader.panel_ports,
+        panel,
         tok,
         inflected,
         mined=mined,
@@ -192,10 +203,10 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
             tail=tail or tok.surface,
             job_id=ports.tip.nest.job_id,
         )
-        if reader._request_engaged_tooltip(request):
+        if ports.request_engaged_tooltip(request):
             return
     st = panel_for(
-        reader.panel_ports,
+        panel,
         tok,
         inflected,
         min_h=ports.scale.cap,
@@ -233,16 +244,15 @@ def place_nested(ports: TipPorts, st, key, token, word: str, anchor: Anchor, tai
     ports.request_render_ahead(ports.tip.nest, 1)
 
 
-def rerender_with_mined_state(reader: Reader) -> None:
+def rerender_with_mined_state(ports: TipPorts, panel: PanelPorts) -> None:
     """Rebuild the nested popup in place with the current mined-state, keeping its position."""
-    ports = reader.tip_ports
     tok = ports.tip.nest.token
     if tok is None:
         return
-    mined = is_mined(tok, reader.session.mined)
-    st = panel_for(reader.panel_ports, tok, tok.surface, min_h=ports.scale.cap, mined=mined)
+    mined = is_mined(tok, panel.mined_set)
+    st = panel_for(panel, tok, tok.surface, min_h=ports.scale.cap, mined=mined)
     ports.tip.nest.state = st
-    ports.tip.nest.key = panel_key(reader.panel_ports, tok, tok.surface, mined=mined)
+    ports.tip.nest.key = panel_key(panel, tok, tok.surface, mined=mined)
     render_view(ports, ports.tip.nest)
 
 
@@ -255,19 +265,21 @@ def _cached_rows_panel(tip: TooltipState, style: PanelStyle, cap: int, key, entr
     return st
 
 
-def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool | None = None):
+def _engaged_open_panel(
+    ports: TipPorts, panel: PanelPorts, source: str, query: str, *, mined: bool | None = None
+):
     """Build (or fetch cached) + measure the panel for a clicked/keyed nested open, WITHOUT placing it.
     Shared by the main-thread open (existence check + defer decision), the worker (warm the bands
     off-thread), and the tick (warm cache-hit re-show). Returns ``(panel, key, token, word, mined)`` or
     ``None`` (no entry — the caller toasts). ``source`` ∈ {``kanji``, ``search``, ``link``}. ``mined`` is
     forced by the worker (which must NOT touch jamdict via ``is_mined``); ``None`` = compute it here
     (main thread only — the tick recomputes for the freshest ⊕/✓)."""
-    style = reader.panel_style
+    style = panel.style
     ds = style.dict_set
     if ds is None or style.tokenizer is None:  # the pair travels together — see `_navigated_panel`
         return None
-    cap = reader.tip_scale.cap
-    cached = partial(_cached_rows_panel, reader.tip, style, cap)
+    cap = panel.cap
+    cached = partial(_cached_rows_panel, ports.tip, style, cap)
     key: tuple  # a ("kanji"/"search", …) tuple or a PanelKey (a NamedTuple) — both are tuples
     if source == "kanji":
         entry = ds.kanji_for(query, stroke_order=style.kanji_stroke_order)
@@ -283,28 +295,29 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
     if tok is None:
         return None
     if mined is None:  # main-thread only — jamdict (card_for) is not worker-safe
-        mined = is_mined(tok, reader.session.mined)
-    key = panel_key(reader.panel_ports, tok, tok.surface, mined=mined)
+        mined = is_mined(tok, panel.mined_set)
+    key = panel_key(panel, tok, tok.surface, mined=mined)
     st = panel_for(
-        reader.panel_ports,
+        panel,
         tok,
         tok.surface,
-        min_h=reader.tip_scale.cap,
+        min_h=panel.cap,
         mined=mined,
         nested=True,
     )
     return st, key, tok, tok.surface, mined
 
 
-def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> None:
+def _open_engaged(
+    ports: TipPorts, panel: PanelPorts, source: str, query: str, anchor: Anchor
+) -> None:
     """Open a clicked/keyed nested popup, deferring the getmask2 raster off the main thread when a worker
     is available (like the scan-hover tier-3, but anchor-CARRIED since a clicked link/kanji isn't
     scan-re-derivable). Existence-checked first, so a 'no entry' toast still fires on the click tick."""
-    ports = reader.tip_ports
-    built = _engaged_open_panel(reader, source, query)
+    built = _engaged_open_panel(ports, panel, source, query)
     if built is None:
         if source == "kanji":
-            reader._toast(f"no kanji entry for {query}", "warn", 1.2)
+            ports.toast(f"no kanji entry for {query}", "warn", 1.2)
         return
     st, key, token, word, mined = built
     request = tooltip_engaged.OpenRequest(
@@ -314,70 +327,78 @@ def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> No
         id(ports.tip.view.state),
         mined,
     )
-    if reader._request_engaged_tooltip(request):
+    if ports.request_engaged_tooltip(request):
         return
     place_nested(ports, st, key, token, word, anchor)
 
 
-def open_link(reader: Reader, lb, xy, scroll: int) -> None:
+def open_link(ports: TipPorts, panel: PanelPorts, lb, xy, scroll: int) -> None:
     """A cross-reference link was clicked → open its target in the nested popup. A wildcard target
     (``*``/``?``) opens a search-results popup whose rows are themselves clickable links back into exact
     terms; else the whole query is looked up as one exact term."""
     q = lb.query
     sx, sy = xy
     source = "search" if any(c in q for c in "*?＊？") else "link"
-    _open_engaged(reader, source, q, Anchor(sx + lb.x, sy + (lb.y - scroll), lb.h))
+    _open_engaged(ports, panel, source, q, Anchor(sx + lb.x, sy + (lb.y - scroll), lb.h))
 
 
-def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -> None:
+def open_search(
+    ports: TipPorts, panel: PanelPorts, pattern: str, wx: float, wy: float, wh: float
+) -> None:
     """Open a wildcard/prefix search-results popup for ``pattern``."""
-    _open_engaged(reader, "search", pattern, Anchor(wx, wy, wh))
+    _open_engaged(ports, panel, "search", pattern, Anchor(wx, wy, wh))
 
 
-def kanji_current(reader: Reader) -> None:
+def kanji_current(ports: TipPorts, panel: PanelPorts, inputs: HoverInputs) -> None:
     """`k` — open the hovered word's first kanji in the nested popup; repeat cycles through
     the word's kanji."""
-    if reader.dict_set is None or not (0 <= reader.hover < len(reader.tokens)):
+    hovered = inputs.hover()
+    if panel.style.dict_set is None or not (0 <= hovered < len(inputs.tokens)):
         return
-    chars = [c for c in reader.tokens[reader.hover].surface if is_ideograph(c)]
+    chars = [c for c in inputs.tokens[hovered].surface if is_ideograph(c)]
     if not chars:
-        reader._toast("no kanji in this word", "warn", 1.2)
+        ports.toast("no kanji in this word", "warn", 1.2)
         return
-    ch = chars[reader.tip.kanji_index % len(chars)]
-    ox, oy = reader.sub_origin
-    b = box_for_token(reader.boxes, reader.hover)
+    ch = chars[ports.tip.kanji_index % len(chars)]
+    ox, oy = inputs.sub_origin
+    b = box_for_token(inputs.boxes, hovered)
     if b is None:
         return
-    reader.tip.kanji_index += 1
-    open_kanji(reader, ch, ox + b.x, oy + b.y, b.h)
+    ports.tip.kanji_index += 1
+    open_kanji(ports, panel, ch, ox + b.x, oy + b.y, b.h)
 
 
-def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None:
+def open_kanji(
+    ports: TipPorts, panel: PanelPorts, ch: str, wx: float, wy: float, wh: float
+) -> None:
     """Open the kanji entry for ``ch`` in the nested popup — deferred off the click/key tick when a
     worker is available (the getmask2 raster #294 moved off the hover path), else built synchronously."""
-    _open_engaged(reader, "kanji", ch, Anchor(wx, wy, wh))
+    _open_engaged(ports, panel, "kanji", ch, Anchor(wx, wy, wh))
 
 
-def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
+def click_kanji_fallback(ports: TipPorts, panel: PanelPorts, x: float, y: float) -> None:
     """A click on a SINGLE-ideograph scan cell whose token has no term match opens the kanji
     entry instead — reuses the nested-popup route."""
-    if reader.dict_set is None:
+    # The pair travels together, as in `_engaged_open_panel`: a link target is looked up whole and
+    # the single-ideograph check tokenizes, so neither half alone can answer.
+    dict_set, tokenizer = panel.style.dict_set, panel.style.tokenizer
+    if dict_set is None or tokenizer is None:
         return
-    sb = scan_hit(reader.tip, reader.tip_scale.raster, x, y)
+    sb = scan_hit(ports.tip, ports.scale.raster, x, y)
     if sb is None or not sb.text:
         return
     ch = sb.text[0]
     if not is_ideograph(ch):
         return
-    toks = reader.tokenizer.tokenize(sb.text)
+    toks = tokenizer.tokenize(sb.text)
     tok = toks[0] if toks else None
     if (
         tok is not None
         and len(tok.surface) == 1
-        and not reader.dict_set.has_term(tok.lemma, tok.surface, tok.reading)
+        and not dict_set.has_term(tok.lemma, tok.surface, tok.reading)
     ):
-        sx, sy = reader.tip.view.xy
-        open_kanji(reader, ch, sx + sb.x, sy + (sb.y - reader.tip.view.scroll), sb.h)
+        sx, sy = ports.tip.view.xy
+        open_kanji(ports, panel, ch, sx + sb.x, sy + (sb.y - ports.tip.view.scroll), sb.h)
 
 
 def hide_nested(ports: TipPorts) -> None:

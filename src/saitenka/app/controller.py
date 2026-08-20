@@ -1861,6 +1861,7 @@ class Reader:
             cue_state=self._cue_state,
             tokens=self.tokens,
             boxes=self.boxes,
+            sub_origin=self.sub_origin,
         )
 
     def _cue_state(self) -> str:
@@ -1889,6 +1890,8 @@ class Reader:
             nested_max_frac=self.nested_max_frac,
             peek_render_cache=self._peek_render_cache,
             schedule_flash_expiry=self.schedule_flash_expiry,
+            toast=self._toast,
+            request_engaged_tooltip=self._request_engaged_tooltip,
         )
 
     @property
@@ -2270,14 +2273,16 @@ class Reader:
         """The (cached) panel for a clicked/keyed nested open — the shared builder the engaged-tooltip
         lane and session thread reach via the Reader seam. The worker
         passes ``mined`` (jamdict isn't worker-safe); the main thread lets it recompute."""
-        return nested_popup._engaged_open_panel(self, source, query, mined=mined)
+        return nested_popup._engaged_open_panel(
+            self.tip_ports, self.panel_ports, source, query, mined=mined
+        )
 
     # --- kanji lookup mode ------------------------------------------------------------------------
     def kanji_current(self) -> None:
         self._run_hover_command(hover_intents.HoverCommand.KANJI)
 
     def _open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
-        nested_popup.open_kanji(self, ch, wx, wy, wh)
+        nested_popup.open_kanji(self.tip_ports, self.panel_ports, ch, wx, wy, wh)
 
     def _hide_nested(self) -> None:
         nested_popup.hide_nested(self.tip_ports)

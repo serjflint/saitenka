@@ -175,7 +175,7 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     reader.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
 
-    nested_popup.open_link(reader, lb, (0, 0), 0)
+    nested_popup.open_link(reader.tip_ports, reader.panel_ports, lb, (0, 0), 0)
 
     assert "query_token" in spy.calls
 

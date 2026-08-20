@@ -68,7 +68,13 @@ def _apply(reader, action: str, arg: object) -> None:
         tooltip.tip_back(reader.tip_ports)
     elif action == "open_nested":
         tok = reader.tokens[0]
-        nested_popup.open_nested(reader, tok, tok.surface, nested_popup.Anchor(200.0, 200.0, 40.0))
+        nested_popup.open_nested(
+            reader.tip_ports,
+            reader.panel_ports,
+            tok,
+            tok.surface,
+            nested_popup.Anchor(200.0, 200.0, 40.0),
+        )
     elif action == "resize":
         scale = float(arg)  # type: ignore[arg-type]
         reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster

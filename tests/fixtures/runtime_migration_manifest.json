@@ -134,43 +134,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_engaged_open_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_open_engaged"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/nested_popup.py::apply_nested_metadata"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::click_kanji_fallback"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::kanji_current"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_kanji"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_link"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_search"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::rerender_with_mined_state"
     ],
     [
       "reader-parameter",

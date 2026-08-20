@@ -1623,7 +1623,7 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     tok = r.tokens[0]
     nested_popup.open_nested(
-        r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # anchor low → nested_view_h keeps full height
     st = r.tip.nest.state
     assert st is not None

@@ -83,7 +83,9 @@ def test_open_link_navigates_the_whole_query(monkeypatch):
     reader.sub_origin = (0, 0)
     monkeypatch.setattr(reader, "renderer", NullRenderer())
     lb = LinkBox("それにつけても", 0, 0, 10, 10)
-    nested_popup.open_link(reader, lb, (0, 0), 0)  # no worker → synchronous open
+    nested_popup.open_link(
+        reader.tip_ports, reader.panel_ports, lb, (0, 0), 0
+    )  # no worker → synchronous open
     assert ds.seen == ["それにつけても"]  # the WHOLE query reached the lookup, not それ
     assert reader.tip.nest.word == "それにつけても"  # …and it's the shown nested word
 

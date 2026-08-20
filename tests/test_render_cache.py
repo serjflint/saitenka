@@ -425,7 +425,9 @@ def test_cold_nested_scroll_rasters_on_the_interactive_thread():
     # actually fire (else a 0 in the positive test is meaningless).
     r = _nested_reader()
     tok = r.tokens[0]
-    nested_popup.open_nested(r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0))
+    nested_popup.open_nested(
+        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+    )
 
     def scroll_to_the_cold_tail() -> None:
         for _ in range(
@@ -443,7 +445,7 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
     r = _nested_reader()
     tok = r.tokens[0]
     nested_popup.open_nested(
-        r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # soft first paint
     tooltip_panel.scroll_view(
         r.tip_ports, r.tip.nest, r.tip.nest.view_h // 2
@@ -463,7 +465,9 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     # for the NESTED panel (not the base) so a worker can warm its next bands.
     r = _nested_reader()
     tok = r.tokens[0]
-    nested_popup.open_nested(r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0))
+    nested_popup.open_nested(
+        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+    )
     nest = r.tip.nest.state
     tooltip_panel.scroll_view(r.tip_ports, r.tip.nest, max(1, r.tip.nest.view_h // 3))
     pending = r._render_ahead.pending
@@ -528,7 +532,7 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     assert r.tip.view.crisp_pending
     tok = r.tokens[1]  # nested on a DIFFERENT word, so warming it can't warm the base
     nested_popup.open_nested(
-        r, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # nested soft paint
     assert r.tip.nest.crisp_pending  # nested has its OWN pending flag…
     assert r.tip.view.crisp_pending  # …and did NOT clobber the base's
@@ -873,7 +877,9 @@ def test_nested_cold_miss_defers_and_enqueues_nested(tmp_path, monkeypatch):
     _i, tok, inflected, _mined = _first_content(r)
     r.tip.view.xy, r.tip.view.scroll = (0, 0), 0
     r.tip.panel_cache.clear()
-    nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
+    nested_popup.open_nested(
+        r.tip_ports, r.panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
+    )
     assert r.tip.nest.state is None  # nothing shown — deferred
     request = submitter.calls[-1]["request"].request
     assert isinstance(request, tooltip_engaged.HoverRequest) and request.nested
@@ -889,7 +895,9 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
     _i, tok, inflected, _mined = _first_content(r)
     r.tip.view.xy, r.tip.view.scroll = (0, 0), 0
     r.tip.panel_cache.clear()
-    nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
+    nested_popup.open_nested(
+        r.tip_ports, r.panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
+    )
     assert r.tip.nest.state is not None  # shown synchronously
     assert r._engaged_tooltip.pending is None and r._engaged_tooltip.inflight is None
 

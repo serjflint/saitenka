@@ -216,6 +216,8 @@ class PanelDictionary(Protocol):
 
     def search(self, pattern: str, limit: int = 30) -> object: ...
 
+    def has_term(self, *forms: str | None) -> bool: ...
+
 
 @dataclass(frozen=True, slots=True)
 class PanelStyle:
