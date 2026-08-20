@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.popups import Panel
+    from saitenka.app.prefetch import TipScale
     from saitenka.app.tokenize import Token
 
 log = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ class EngagedBackend(Protocol):
 
 class EngagedHost(Protocol):
     nested_max_frac: float
-    _raster_scale: float
+    tip_scale: TipScale
 
     def _panel_for(self, token, inflected, **kwargs) -> Panel: ...
 
@@ -120,8 +121,6 @@ class EngagedHost(Protocol):
     def _mem_fill(self, token, inflected, **kwargs) -> None: ...
 
     def _cap_for(self, fraction: float) -> int: ...
-
-    def _tip_cap(self) -> int: ...
 
     def _navigated_panel(self, query: str) -> Panel | None: ...
 
@@ -167,7 +166,7 @@ class ReaderEngagedBackend:
         view_h = min(panel.full_height, reader._cap_for(reader.nested_max_frac))
         if view_h <= 0 or should_cancel():
             return
-        scale = reader._raster_scale
+        scale = reader.tip_scale.raster
         if scale > 1.0:
             panel.viewport(0, view_h, overscan=view_h, scale=scale)
         if not should_cancel():
@@ -178,11 +177,11 @@ class ReaderEngagedBackend:
         panel = reader._navigated_panel(request.query)
         if panel is None or should_cancel():
             return panel
-        panel.render_head(reader._tip_cap())
-        view_h = min(panel.full_height, reader._tip_cap())
+        panel.render_head(reader.tip_scale.cap)
+        view_h = min(panel.full_height, reader.tip_scale.cap)
         if view_h <= 0 or should_cancel():
             return panel
-        scale = reader._raster_scale
+        scale = reader.tip_scale.raster
         if scale > 1.0:
             panel.viewport(0, view_h, overscan=view_h, scale=scale)
         if not should_cancel():
@@ -198,7 +197,7 @@ class ReaderEngagedBackend:
         view_h = min(panel.full_height, reader._cap_for(reader.nested_max_frac))
         if view_h <= 0:
             return
-        scale = reader._raster_scale
+        scale = reader.tip_scale.raster
         if scale > 1.0:
             panel.viewport(0, view_h, overscan=view_h, scale=scale)
         if not should_cancel():

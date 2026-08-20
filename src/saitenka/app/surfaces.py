@@ -118,7 +118,7 @@ def _tip_click(reader: Reader, _x: float, _y: float) -> bool:
 
 def _tip_scroll(reader: Reader, steps: int) -> bool:
     """Terminal wheel fallback: scroll the tooltip. Always claims the step (matches the old else-branch)."""
-    reader._scroll_tip(steps * round(reader._tip_ref_h * _TIP_WHEEL_FRAC))
+    reader._scroll_tip(steps * round(reader.tip_scale.ref_h * _TIP_WHEEL_FRAC))
     return True
 
 

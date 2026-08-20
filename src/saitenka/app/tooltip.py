@@ -146,7 +146,9 @@ def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
         hit=lambda x, y: reader._hit(x, y) if reader.tokens else -1,
     )
     scan = (
-        scan_hit(reader.tip, reader._raster_scale, mx, my) if (over_tip and not over_nest) else None
+        scan_hit(reader.tip, reader.tip_scale.raster, mx, my)
+        if (over_tip and not over_nest)
+        else None
     )
     if scan is not None and reader._tip_link_hit(mx, my):
         scan = None
@@ -455,8 +457,8 @@ def chrome_for(reader: Reader, view: PopupView) -> HeaderChrome:
     draw. One function for both popups: the caller says which view, which is the only difference."""
     return HeaderChrome(
         view,
-        reader.tip_width,
-        reader._tip_display_scale,
+        reader.tip_scale.width,
+        reader.tip_scale.display,
         reader._tts_ok,
         anki_ok(reader.anki, reader._anki_capability),
     )
@@ -692,7 +694,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         reader._teardown_tip()
         return False
     inflected = reader._inflected_surface(index)
-    cap = reader._tip_cap()
+    cap = reader.tip_scale.cap
     with otel_metrics.traced("pause_ipc"):
         if _freeze_frame(
             reader.ipc,
@@ -772,7 +774,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
             st.full_height,
             cap,
             anchor,
-            scale=reader._tip_display_scale,
+            scale=reader.tip_scale.display,
             osd=reader.osd,
         )
         render_view(reader, reader.tip.view)
@@ -812,7 +814,7 @@ def _paint_from_cache(reader: Reader, key, cap: int, anchor) -> bool:
         full_h,
         cap,
         anchor,
-        scale=reader._tip_display_scale,
+        scale=reader.tip_scale.display,
         osd=reader.osd,
     )
     with otel_metrics.traced(
@@ -880,7 +882,7 @@ def _apply_engaged_nested(reader: Reader, tail: str) -> None:
     a cache hit whose bands the worker already rastered, so no getmask2 lands on this tick."""
     if reader.tip.nest.state is not None:
         return  # a nested popup already showing
-    sb = scan_hit(reader.tip, reader._raster_scale, *reader.tip.last_mouse)
+    sb = scan_hit(reader.tip, reader.tip_scale.raster, *reader.tip.last_mouse)
     if sb is None or sb.text != tail:
         return  # cursor left the inner word — never flash a stale nested popup
     key, token = reader.tip.nest.key, reader.tip.nest.token
@@ -971,10 +973,10 @@ def _navigated_panel(reader: Reader, query: str) -> Panel | None:
             return None
         entry = entry_for_tok(tok, tok.surface, dict_set=reader.dict_set, scorer=reader.scorer)
         reading = getattr(entry, "reading", "") or tok.reading
-    rows = panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok)
+    rows = panel_rows(entry, reader.tip_scale.width, add_button=False, speak_button=reader._tts_ok)
     return Panel.from_rows(
         rows,
-        reader.tip_width,
+        reader.tip_scale.width,
         reading,
         band_cache_max=reader.band_cache_max,
         raw_band_ceiling=reader.raw_band_ceiling,
@@ -1000,7 +1002,9 @@ def navigate_tip(reader: Reader, query: str) -> None:
     st = _navigated_panel(reader, query)
     if st is None:
         return
-    st.render_head(reader._tip_cap())  # warm the head so full_height sizes the viewport correctly
+    st.render_head(
+        reader.tip_scale.cap
+    )  # warm the head so full_height sizes the viewport correctly
     _install_navigated(reader, st)
 
 
@@ -1017,7 +1021,7 @@ def _install_navigated(reader: Reader, st: Panel) -> None:
     reader.tip.hover_reading = st.reading
     reader.tip.view.scroll = 0
     reader.tip.view.desired_scroll = 0
-    reader.tip.view.view_h = min(st.full_height, reader._tip_cap())
+    reader.tip.view.view_h = min(st.full_height, reader.tip_scale.cap)
     render_view(reader, reader.tip.view)
 
 

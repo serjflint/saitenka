@@ -83,7 +83,7 @@ def panel_key(
         tok.surface,
         tok.reading,
         inflected,
-        reader.tip_width,
+        reader.tip_scale.width,
         anki_ok(reader.anki, reader._anki_capability),
         mined,
         reader._tts_ok,
@@ -227,7 +227,7 @@ class PanelStyle:
 def panel_style(reader: Reader) -> PanelStyle:
     """Snapshot the build configuration off the host. The one host read in the build chain."""
     return PanelStyle(
-        width=reader.tip_width,
+        width=reader.tip_scale.width,
         band_cache_max=reader.band_cache_max,
         raw_band_ceiling=reader.raw_band_ceiling,
         layout_backend=reader.layout_backend,
@@ -340,7 +340,7 @@ def panel_for(
     # the untraced bulk of tooltip_show's self-time (#158 territory). Cheap on a re-measured cached
     # panel, a full walk on a fresh one. Nests under tooltip_show / prefetch_decode.
     with otel_metrics.traced("measure"):
-        st.render_head(min_h if min_h is not None else reader._tip_cap())
+        st.render_head(min_h if min_h is not None else reader.tip_scale.cap)
     return st
 
 
@@ -370,7 +370,7 @@ def place_panel(
 ) -> tuple[int, int]:
     """Choose a top-left (tx, ty) for a panel of REFERENCE size ``full_w`` × ``view_h`` anchored to an
     on-screen word box (wx, wy, wh): above it if there's room, else below, clamped to the safe area. The
-    panel is composited at reference size then upscaled by ``_tip_display_scale`` at upload, so placement
+    panel is composited at reference size then upscaled by ``TipScale.display`` at upload, so placement
     uses the DISPLAYED size. Shared by the base tooltip and nested popups."""
     s = scale
     disp_w, disp_h = full_w * s, view_h * s
@@ -423,7 +423,7 @@ def blit_panel(
     with otel_metrics.traced(
         "tip_compose",
         soft_reason=soft_reason or "n/a",
-        scale=f"{reader._tip_display_scale:.4f}",
+        scale=f"{reader.tip_scale.display:.4f}",
         kind=compose_kind(oid, navigated=bool(reader.tip.tip_nav)),
     ):
         view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
@@ -434,7 +434,7 @@ def decorate_and_upload(
     reader: Reader, view, y0: int, full_h: int, xy, oid: int, *, prescaled: bool = False
 ):
     """Draw the scrollbar thumb and the copy-flash border onto a REFERENCE-sized viewport BGRA array,
-    then upscale by ``_tip_display_scale`` to the live display and upload. Decorations are drawn in
+    then upscale by ``TipScale.display`` to the live display and upload. Decorations are drawn in
     reference px (crisp thumb) before the scale; the returned rect is in DISPLAY px (what the hit-test
     compares the OSD cursor against). ``prescaled`` (the idle crisp re-render) means ``view`` is ALREADY
     at display resolution, so the upscale is skipped — but ``full_h``/``y0`` are still display px so the
@@ -450,7 +450,7 @@ def decorate_and_upload(
         b = 4  # "copied" highlight border (a brief visual pulse)
         view[:b, :] = view[-b:, :] = FLASH_BGRA
         view[:, :b] = view[:, -b:] = FLASH_BGRA
-    s = reader._tip_display_scale
+    s = reader.tip_scale.display
     if not prescaled and abs(s - 1.0) > 1e-3:  # only hi-dpi pays the resize; 1080p is a 1:1 no-op
         from saitenka.bgra import scale_bgra
 
@@ -529,7 +529,7 @@ def apply_pending_crisp(reader: Reader, view: PopupView) -> None:
         return
     vh = min(view.view_h, st.full_height)
     y0 = max(0, min(view.scroll, max(0, st.full_height - vh)))
-    if st.native_viewport_warm(y0, vh, reader._raster_scale):
+    if st.native_viewport_warm(y0, vh, reader.tip_scale.raster):
         render_view(
             reader, view
         )  # warm now → _blit_native composites crisp and clears crisp_pending
@@ -543,7 +543,7 @@ def _blit_native(reader: Reader, view: PopupView, st: Panel):
     owns the scroll/viewport/xy + the soft→crisp flags, so base and nested each track their own."""
     scroll, view_h, xy, oid = view.scroll, view.view_h, view.xy, view.oid
     scale = (
-        reader._raster_scale
+        reader.tip_scale.raster
     )  # bucketed → matches hit_target's inverse; reuses cached native bands
     if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
         view.crisp_miss = "not_hidpi"

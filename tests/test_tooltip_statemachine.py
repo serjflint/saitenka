@@ -62,7 +62,7 @@ def _assert_agrees(reader, *, nested: bool) -> None:
         reader.tip.nest,
         reader.tip.view.state,
         reader.tip.view.scroll,
-        reader._raster_scale,
+        reader.tip_scale.raster,
         nested=nested,
     )
     if panel is None:
@@ -155,7 +155,7 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule(scale=st.sampled_from(_SCALES))
     def resize(self, scale: int) -> None:
-        self.r.osd = (round(1920 * scale), round(1080 * scale))  # live → changes _raster_scale
+        self.r.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
         tooltip_panel.render_view(self.r, self.r.tip.view)  # re-blit at the new scale
         self._check("resize")
 
@@ -167,7 +167,7 @@ class TooltipSession(RuleBasedStateMachine):
 
     def _check(self, action: str) -> None:
         view = "nested" if self.nested_open else ("nav" if self.nav_depth else "base")
-        event(f"action={action} view={view} scale={self.r._raster_scale}")  # drift-gate signal
+        event(f"action={action} view={view} scale={self.r.tip_scale.raster}")  # drift-gate signal
         _assert_agrees(self.r, nested=False)
         if self.r.tip.nest.state is not None:
             _assert_agrees(self.r, nested=True)
@@ -184,7 +184,7 @@ def test_the_agreement_oracle_has_teeth() -> None:
     r = _fresh_reader()
     r._show_tooltip(0)
     panel, s, scroll = tooltip_panel.hit_target(
-        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r._raster_scale, nested=False
+        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r.tip_scale.raster, nested=False
     )
     panel.windowed.viewport(scroll, r.tip.view.view_h)
     sx, sy = r.tip.view.xy

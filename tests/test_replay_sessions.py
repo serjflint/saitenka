@@ -71,7 +71,7 @@ def _apply(reader, action: str, arg: object) -> None:
         reader._open_nested(tok, tok.surface, 200.0, 200.0, 40.0)
     elif action == "resize":
         scale = float(arg)  # type: ignore[arg-type]
-        reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes _raster_scale
+        reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
         tooltip_panel.render_view(reader, reader.tip.view)
     else:  # pragma: no cover - guards a typo in a scenario table
         raise AssertionError(f"unknown action {action!r}")

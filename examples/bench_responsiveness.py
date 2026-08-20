@@ -255,7 +255,11 @@ def _tallest(reader, idxs) -> int:
     for i in idxs:
         tok = reader.tokens[i]
         entry = reader.dict_set.entry_for(tok, reader._inflected_surface(i))
-        h = LazyPanel(panel_rows(entry, reader.tip_width), reader.tip_width).finish().height
+        h = (
+            LazyPanel(panel_rows(entry, reader.tip_scale.width), reader.tip_scale.width)
+            .finish()
+            .height
+        )
         if h > best_h:
             best, best_h = i, h
     return best
@@ -384,7 +388,7 @@ def run_pathological(
     print(f"\nSaitenka overlay — PATHOLOGICAL cold-first-paint benchmark   ({tag})")
     print(format_runtime(rt))
     print(
-        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {reader._tip_cap()}px   "
+        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_scale.width}   cap: {reader.tip_scale.cap}px   "
         f"reps/word: {reps}"
     )
     print(f"first-hover-after-launch (fresh connections, {first_term}): {first_hover_ms:.1f} ms\n")
@@ -448,7 +452,7 @@ def run_render_cache(
     opts = ReaderOptions(tooltip=TooltipOptions(render_cache=True), prefetch=False)
     reader = Reader(_fake_ipc(), dict_set=ds, options=opts)
     reader.osd = OSD
-    cap = reader._tip_cap()
+    cap = reader.tip_scale.cap
     # The render cache is USE-WHEN-AVAILABLE (opens only if the file exists; prewarm is the builder), so
     # create the file up front — otherwise prime's store is a no-op and every peek misses. Mirrors prewarm.
     from pathlib import Path
@@ -480,7 +484,7 @@ def run_render_cache(
     print(f"\nSaitenka overlay — RENDER CACHE A/B (#149)   ({tag})")
     print(format_runtime(rt))
     print(
-        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {cap}px   "
+        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_scale.width}   cap: {cap}px   "
         f"gate: full_h ≥ {reader._render_cache_min_height()}px   reps/word: {reps}"
     )
     from saitenka.app import tooltip as _tt
@@ -600,7 +604,7 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     # Phase A — COLD: render with atlas WRITE on (builds the atlas), counting getmask2 rasterisations.
     reader_a = Reader(_fake_ipc(), dict_set=ds, options=opts)
     reader_a.osd = OSD
-    cap = reader_a._tip_cap()
+    cap = reader_a.tip_scale.cap
     atlas = mask_atlas.MaskAtlas.open(atlas_path)
     if atlas is None:
         raise RuntimeError(f"failed to open mask atlas at {atlas_path}")
@@ -767,7 +771,7 @@ def run_stress(
         f"entries × {reps} rounds   ({tag})"
     )
     print(format_runtime(rt))
-    print(f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   ops timed: {m['n']}")
+    print(f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_scale.width}   ops timed: {m['n']}")
     print(
         f"\nper-op frame latency:  p50 {m['p50']:.1f}  p95 {m['p95']:.1f}  p99 {m['p99']:.1f}  "
         f"MAX {m['max']:.1f} ms  (cv {m['cv']:.2f})"
@@ -944,7 +948,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     else:
         corpus = [(w, w) for w in ("かける", "する", "手", "気", "出る")]
     step = round(OSD[1] * 0.08)  # one wheel step
-    cap = reader._tip_cap()
+    cap = reader.tip_scale.cap
     cold: list[float] = []
     warm: list[float] = []
     worst: list[tuple[float, str, int]] = []
@@ -1021,7 +1025,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     )
     print(format_runtime(rt))
     print(
-        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {cap}px   step: {step}px   "
+        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_scale.width}   cap: {cap}px   step: {step}px   "
         f"scroll frames: {c['n']}"
     )
     print(
@@ -2248,7 +2252,7 @@ def main() -> int:
     reader.set_subtitle(LINE)
     idxs = _content_indices(reader)
     words = [reader.tokens[i].surface for i in idxs]
-    cap = reader._tip_cap()
+    cap = reader.tip_scale.cap
 
     rows = []
     cyc = {"cold": 0, "warm": 0}  # cycle through the words so each sample times ONE tooltip
@@ -2335,11 +2339,11 @@ def main() -> int:
     def comp_headrender():
         for i in idxs:
             e = ds.entry_for(reader.tokens[i], reader._inflected_surface(i))
-            LazyPanel(panel_rows(e, reader.tip_width), reader.tip_width).render_to(cap)
+            LazyPanel(panel_rows(e, reader.tip_scale.width), reader.tip_scale.width).render_to(cap)
 
     _tall_head = LazyPanel(
-        panel_rows(ds.entry_for(reader.tokens[tall]), reader.tip_width),
-        reader.tip_width,
+        panel_rows(ds.entry_for(reader.tokens[tall]), reader.tip_scale.width),
+        reader.tip_scale.width,
     ).render_to(cap)  # pre-rendered once, outside the timer
 
     def comp_bgra():
@@ -2384,7 +2388,9 @@ def main() -> int:
     gil_rc = finalize_runtime(rt, args.require_ft)
     print(f"\nSaitenka overlay — responsiveness benchmark   ({tag})")
     print(format_runtime(rt))
-    print(f"line: {LINE}   osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {cap}px")
+    print(
+        f"line: {LINE}   osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_scale.width}   cap: {cap}px"
+    )
     print(f"content words: {' '.join(words)}\n")
     # p99 = the jank tail (a p99 over the 16.7/33 ms frame budget drops a frame); cv = run-to-run
     # stability (a metric with high cv can't be regression-gated — the noise swamps the signal).

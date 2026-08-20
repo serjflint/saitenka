@@ -163,7 +163,7 @@ class _NativeView:
 
     @property
     def skey(self) -> float:
-        return round(self.scale, 3)  # band-cache scale key (bucketed upstream in _raster_scale)
+        return round(self.scale, 3)  # band-cache scale key (bucketed upstream in TipScale.raster)
 
     def dims(self, width: int) -> tuple[int, int, int]:
         """``(device_width, device_view_h, device_scroll)`` for this view over a ``width``-px panel."""

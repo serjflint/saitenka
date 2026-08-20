@@ -183,7 +183,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
 def test_main_flow_renders_at_4k_without_caches():
     # Cache-free AND scale ≠ 1: the reference-render → display-upscale path must stand on its own.
     r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
-    r.osd = (3840, 2160)  # 4K → _tip_display_scale 2.0, no prebuilt caches (hermetic)
+    r.osd = (3840, 2160)  # 4K → tip_scale.display 2.0, no prebuilt caches (hermetic)
     r.set_subtitle("本命を読む")
     ui = Driver(r)
     ui.move_to_word(_content_word(r))

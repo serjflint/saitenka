@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 
+from saitenka.app.prefetch import TipScale
 from saitenka.app.prewarm import PrewarmTuning, _popular_terms, _PrewarmJob, _startup_plan
 
 
@@ -79,8 +80,7 @@ class _FakeReader:
         self.calls: list[tuple] = []
         self._fail = fail
 
-    def _tip_cap(self) -> int:
-        return 260
+    tip_scale = TipScale(display=1.0, raster=1.0, cap=260)
 
     def _panel_for(self, *args, **kwargs):
         self.calls.append((args, kwargs))

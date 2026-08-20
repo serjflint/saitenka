@@ -190,7 +190,7 @@ def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
     _stop_preview_audio(reader.preview)  # replay (P) / a new mine silences any clip still playing
     reader.preview.last_preview, reader.preview.last_audio = pv, audio_path
     reader.preview.zoom = False
-    render_preview(reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_width)
+    render_preview(reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_scale.width)
     _grab_preview_keys(reader.ipc, active_bindings(reader.keys, "preview"))
 
 
@@ -244,7 +244,9 @@ def click_preview(reader: Reader, x: float, y: float) -> bool:
     elif reader.preview.image_rect and in_rect(reader.preview.image_rect, x, y):
         reader.preview.zoom = not reader.preview.zoom
         # enlarge to verify the frame / shrink back
-        render_preview(reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_width)
+        render_preview(
+            reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_scale.width
+        )
     elif (
         reader.preview.audio_rect
         and in_rect(reader.preview.audio_rect, x, y)

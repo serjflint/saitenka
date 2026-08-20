@@ -31,10 +31,10 @@ def _reader(scale: float, monkeypatch):
 def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
     panel, s, scroll = tooltip_panel.hit_target(
-        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r._raster_scale, nested=False
+        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r.tip_scale.raster, nested=False
     )
     assert panel is r.tip.view.state  # the ONE reference panel — there is no second native panel
-    assert s == r._raster_scale  # inverse == the (bucketed) scale the blit drew at
+    assert s == r.tip_scale.raster  # inverse == the (bucketed) scale the blit drew at
     assert scroll == r.tip.view.scroll
 
 
@@ -42,7 +42,7 @@ def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
 def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
     panel, s, scroll = tooltip_panel.hit_target(
-        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r._raster_scale, nested=False
+        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r.tip_scale.raster, nested=False
     )
     panel.windowed.viewport(0, 1_000_000)  # force every block measured → full geometry
     sx, sy = r.tip.view.xy
@@ -69,12 +69,14 @@ def test_cold_paint_is_soft_then_upgrades_to_crisp_when_bands_warm(scale, monkey
     st = r.tip.view.state
     vh = min(r.tip.view.view_h, st.full_height)
     y0 = max(0, min(r.tip.view.scroll, max(0, st.full_height - vh)))
-    st.viewport(y0, vh, scale=r._raster_scale)  # simulate the worker warming the native viewport
+    st.viewport(y0, vh, scale=r.tip_scale.raster)  # simulate the worker warming the native viewport
     tooltip_panel.apply_pending_crisp(r, r.tip.view)  # the poll-loop upgrade
 
     assert r.tip.view.crisp_miss == "" and not r.tip.view.crisp_pending  # now composited crisp
     assert r.tip.view.rect is not None
-    assert r.tip.view.rect[2] == round(r.tip_width * r._raster_scale)  # native display width
+    assert r.tip.view.rect[2] == round(
+        r.tip_scale.width * r.tip_scale.raster
+    )  # native display width
 
 
 @pytest.mark.parametrize("scale", _SCALES)
@@ -87,7 +89,7 @@ def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
     st = r.tip.view.state
     vh = min(r.tip.view.view_h, st.full_height)
     y0 = max(0, min(r.tip.view.scroll, max(0, st.full_height - vh)))
-    st.viewport(y0, vh, scale=r._raster_scale)  # warm the native viewport
+    st.viewport(y0, vh, scale=r.tip_scale.raster)  # warm the native viewport
     tooltip_panel.render_view(r, r.tip.view)  # re-blit with warm bands
     assert r.tip.view.crisp_miss == "" and not r.tip.view.crisp_pending
 
@@ -99,7 +101,7 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
     tooltip.navigate_tip(r, "見る")
     assert r.tip.view.key is None  # no synthetic nav key needed — one panel
     panel, s, scroll = tooltip_panel.hit_target(
-        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r._raster_scale, nested=False
+        r.tip.nest, r.tip.view.state, r.tip.view.scroll, r.tip_scale.raster, nested=False
     )
     assert panel is r.tip.view.state
     panel.windowed.viewport(0, 1_000_000)

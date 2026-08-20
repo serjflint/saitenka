@@ -1190,7 +1190,7 @@ def test_tooltip_capped_and_inside_safe_area():
     r.boxes = [WordBox(0, 900, 1000, 40, 40)]  # word near the bottom (like a subtitle)
     r._show_tooltip(0)
 
-    # osd == REFERENCE (1080p) so _tip_display_scale == 1.0 → viewport px are display px.
+    # osd == REFERENCE (1080p) so tip_scale.display == 1.0 → viewport px are display px.
     margin = max(16, round(1080 * 0.05))
     assert r.tip.view.view_h <= round(1080 * 0.5)  # height capped
     _tx, ty = r.tip.view.xy
@@ -1384,7 +1384,7 @@ def test_prefetch_worker_warms_cache_then_close_joins():
             surface="本命",
             reading="ほんめい",
             inflected="本命",
-            width=r.tip_width,
+            width=r.tip_scale.width,
             anki_ok=False,  # no anki configured
             mined=False,
         )
@@ -1446,7 +1446,7 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     r._show_tooltip(0)
     wp = r.tip.view.state.windowed
     assert wp.measured < wp.count  # head only — the whole tall panel was NOT rendered up front
-    assert r.tip.view.view_h >= r._tip_cap() - 1  # …but the viewport is fully covered
+    assert r.tip.view.view_h >= r.tip_scale.cap - 1  # …but the viewport is fully covered
     assert (
         r.hover_view().tip.state.full_height >= r.tip.view.view_h
     )  # estimate at least fills the viewport
@@ -1458,7 +1458,7 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
 def _click_center_of_add_button(r, ipc):
     from saitenka.panel import header_add_rect
 
-    px, py, pw, ph = header_add_rect(r.tip_width)
+    px, py, pw, ph = header_add_rect(r.tip_scale.width)
     sx, sy = r.tip.view.xy
     cx = sx + px + pw / 2
     cy = sy + (py - r.tip.view.scroll) + ph / 2
@@ -1512,7 +1512,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
     r._show_tooltip(0)
     events = []
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
-    px, py, pw, ph = header_speaker_rect(r.tip_width)
+    px, py, pw, ph = header_speaker_rect(r.tip_scale.width)
     sx, sy = r.tip.view.xy
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1641,14 +1641,17 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
 
 def test_tooltip_geometry_is_resolution_independent():
     # The tooltip renders at the 1920×1080 REFERENCE, so its geometry — and thus the render cache key —
-    # is IDENTICAL at 1080p and 4K. Only _tip_display_scale changes, so a 1080p prewarm hits at any
+    # is IDENTICAL at 1080p and 4K. Only tip_scale.display changes, so a 1080p prewarm hits at any
     # playback resolution.
     r = _scan_reader(FakeIPC())
     r.osd = (1920, 1080)
-    w_ref, cap_ref, scale_ref = r.tip_width, r._tip_cap(), r._tip_display_scale
+    w_ref, cap_ref, scale_ref = r.tip_scale.width, r.tip_scale.cap, r.tip_scale.display
     r.osd = (3840, 2160)
-    assert (r.tip_width, r._tip_cap()) == (w_ref, cap_ref)  # geometry unchanged by resolution
-    assert scale_ref == 1.0 and r._tip_display_scale == 2.0  # only the DISPLAY scale changes
+    assert (r.tip_scale.width, r.tip_scale.cap) == (
+        w_ref,
+        cap_ref,
+    )  # geometry unchanged by resolution
+    assert scale_ref == 1.0 and r.tip_scale.display == 2.0  # only the DISPLAY scale changes
 
 
 def test_tooltip_geometry_ignores_ui_scale():
@@ -1666,10 +1669,10 @@ def test_tooltip_geometry_ignores_ui_scale():
     )
     assert r.ui_scale == 1.5  # a large interface scale (for the sidebar / help / analysis panels)
     r.osd = (1920, 1080)
-    assert r.tip_width == 640  # reference width, NOT 640 × 1.5
+    assert r.tip_scale.width == 640  # reference width, NOT 640 × 1.5
     r.osd = (3840, 2160)  # 4K → displayed width tracks the vertical viewport, not ui_scale
     assert (
-        r.tip_width == 640 and r._tip_display_scale == 2.0
+        r.tip_scale.width == 640 and r.tip_scale.display == 2.0
     )  # displayed ≈ 1280px, not 1920 (the bug)
 
 
@@ -1692,7 +1695,7 @@ def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
     boxes = r.tip.view.state.windowed.scan_boxes()
     assert boxes
     sb = boxes[0]
-    s = r._tip_display_scale
+    s = r.tip_scale.display
     assert s == 2.0
     sx, sy = r.tip.view.xy
     hit = r._scan_hit(sx + (sb.x + sb.w / 2) * s, sy + (sb.y + sb.h / 2 - r.tip.view.scroll) * s)
@@ -1818,7 +1821,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     assert r.hover_view().nested.token is not None
     mined = []
     monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
-    px, py, pw, ph = header_add_rect(r.tip_width)
+    px, py, pw, ph = header_add_rect(r.tip_scale.width)
     nx, ny = r.tip.nest.xy
     ipc.props["mouse-pos"] = {
         "hover": True,

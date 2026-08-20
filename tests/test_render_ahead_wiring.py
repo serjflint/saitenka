@@ -135,7 +135,7 @@ def test_broker_completion_warms_the_requested_viewport():
     r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish()
     # warmed at the scroll pos, not cancelled, at the (bucketed) display scale — native bands (one panel)
-    assert panel.calls == [(120, 300, 1, False, r._raster_scale)]
+    assert panel.calls == [(120, 300, 1, False, r.tip_scale.raster)]
 
 
 def test_stale_completion_from_a_word_switch_is_not_published():

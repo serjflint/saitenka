@@ -112,7 +112,7 @@ def apply_nested_metadata(reader: Reader, result) -> None:
         or key.tooltip_origin != id(reader.tip.view.state)
     ):
         return
-    sb = scan_hit(reader.tip, reader._raster_scale, *reader.tip.last_mouse)
+    sb = scan_hit(reader.tip, reader.tip_scale.raster, *reader.tip.last_mouse)
     if sb is None or sb.text != key.tail:
         return
     sx, sy = reader.tip.view.xy
@@ -181,7 +181,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
             inflected,
             mined,
             tuple(key),
-            reader._tip_cap(),
+            reader.tip_scale.cap,
             tuple(extra_terms),
             nested=True,
             tail=tail or tok.surface,
@@ -193,7 +193,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         reader,
         tok,
         inflected,
-        min_h=reader._tip_cap(),
+        min_h=reader.tip_scale.cap,
         mined=mined,
         nested=True,
         extra_terms=extra_terms,
@@ -219,7 +219,7 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
         anchor.wy,
         anchor.wh,
         reader.tip.nest.view_h,
-        scale=reader._tip_display_scale,
+        scale=reader.tip_scale.display,
         osd=reader.osd,
     )
     # Kick a render-ahead so a first wheel notch on the nested popup composites crisp off warm
@@ -234,7 +234,7 @@ def rerender_with_mined_state(reader: Reader) -> None:
     if tok is None:
         return
     mined = is_mined(tok, reader.session.mined)
-    st = panel_for(reader, tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
+    st = panel_for(reader, tok, tok.surface, min_h=reader.tip_scale.cap, mined=mined)
     reader.tip.nest.state = st
     reader.tip.nest.key = panel_key(reader, tok, tok.surface, mined=mined)
     render_view(reader, reader.tip.nest)
@@ -242,7 +242,7 @@ def rerender_with_mined_state(reader: Reader) -> None:
 
 def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
     """The :class:`~saitenka.model.LinkBox` of ``state`` under (mx, my), via the windowed hit-test.
-    ``scale`` is the reference→display factor (``_tip_display_scale``): the panel is composited at the
+    ``scale`` is the reference→display factor (``TipScale.display``): the panel is composited at the
     reference size then upscaled to the display, so the screen offset is divided back to panel px."""
     if state is None:
         return None
@@ -257,15 +257,17 @@ def _cached_rows_panel(reader: Reader, key, entry, reading: str) -> Panel:
     st = reader.tip.panel_cache.get_or_build(
         key,
         lambda: Panel.from_rows(
-            panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok),
-            reader.tip_width,
+            panel_rows(
+                entry, reader.tip_scale.width, add_button=False, speak_button=reader._tts_ok
+            ),
+            reader.tip_scale.width,
             reading,
             band_cache_max=reader.band_cache_max,
             raw_band_ceiling=reader.raw_band_ceiling,
             layout_backend=reader.layout_backend,
         ),
     )
-    st.render_head(reader._tip_cap())
+    st.render_head(reader.tip_scale.cap)
     return st
 
 
@@ -284,10 +286,10 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
         entry = ds.kanji_for(query, stroke_order=reader.kanji_stroke_order)
         if entry is None:
             return None
-        key = ("kanji", query, reader.tip_width)
+        key = ("kanji", query, reader.tip_scale.width)
         return _cached_rows_panel(reader, key, entry, entry.reading), key, None, query, False
     if source == "search":
-        key = ("search", query, reader.tip_width)
+        key = ("search", query, reader.tip_scale.width)
         return _cached_rows_panel(reader, key, ds.search(query), ""), key, None, query, False
     # link → the WHOLE query as one exact term (never tokenize a link target); minable inner word
     tok = reader.tokenizer.query_token(query)
@@ -296,7 +298,7 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
     if mined is None:  # main-thread only — jamdict (card_for) is not worker-safe
         mined = is_mined(tok, reader.session.mined)
     key = panel_key(reader, tok, tok.surface, mined=mined)
-    st = panel_for(reader, tok, tok.surface, min_h=reader._tip_cap(), mined=mined, nested=True)
+    st = panel_for(reader, tok, tok.surface, min_h=reader.tip_scale.cap, mined=mined, nested=True)
     return st, key, tok, tok.surface, mined
 
 
@@ -366,7 +368,7 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
     entry instead — reuses the nested-popup route."""
     if reader.dict_set is None:
         return
-    sb = scan_hit(reader.tip, reader._raster_scale, x, y)
+    sb = scan_hit(reader.tip, reader.tip_scale.raster, x, y)
     if sb is None or not sb.text:
         return
     ch = sb.text[0]

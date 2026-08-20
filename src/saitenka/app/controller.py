@@ -233,11 +233,8 @@ OBSERVED_PROPS = (
 )
 # Which observations are geometry inputs, which retire the cue identity, and which render space
 # they revise all live in saitenka/runtime/playback.py — the sole interpreter.
-# The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
-# reuses cached native bands instead of re-rastering (see Reader._raster_scale).
 _SETTLE_TIMER = "subtitle:navigation-settle"
 _GEOMETRY_REFRESH_TIMER = "subtitle:geometry-refresh"
-_SCALE_BUCKET = 0.05
 
 # Every mpv size/scale source, probed at each osd-dimensions change to diagnose why the tooltip scale
 # (osd_h/REF_H) jitters: which source is stable (a candidate to key scale off) vs which wobbles. Unknown
@@ -471,7 +468,7 @@ class Reader:
         # One-panel crisp (scale-as-boundary): the ONE reference panel composites at the display scale
         # (native glyph masks over 1× geometry). ``crisp_upscale`` off → soft-only (never native).
         self._crisp_on = o.tooltip.crisp_upscale
-        self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes _tip_display_scale (see config)
+        self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes TipScale.display (see config)
         # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState). The Delegated shims below
         # keep the historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/
         # ``_panel_cache`` names so the hover FSM and its tests are untouched (#30 lifetime split).
@@ -777,39 +774,15 @@ class Reader:
         return self.sub_size_override or max(28, round(self.osd[1] * 0.05))
 
     @property
-    def tip_width(self) -> int:
-        # FIXED to the 1920×1080 REFERENCE (16:9), NOT the live OSD, so the render cache is
-        # resolution-independent (a 1080p prewarm hits at any playback res). The tooltip is a
-        # VIDEO-OVERLAY element: like the subtitle it scales with the vertical viewport (_tip_display_scale
-        # = osd_h/REF_H) at upload, NOT with the app-chrome ui_scale — so displayed width ≈ 0.59 × osd_h,
-        # calculated from the vertical viewport (narrow on an ultra-wide, unlike an osd_WIDTH formula).
-        # Its fonts are theme scale 1.0 (panel_rows gets no ui_scale), so width must stay 1.0 too.
-        return int(min(prefetch.REF_W * 0.36, 640))
+    def tip_scale(self) -> prefetch.TipScale:
+        """The tooltip's reference geometry and its factor onto the live display, as one value.
 
-    @property
-    def _tip_display_scale(self) -> float:
-        """Factor from the tooltip's REFERENCE render space to the live display: ``osd_h / REF_H`` — 1.0
-        at 1080p, 2.0 at 4K. Applied to the composited BGRA at upload and inverted in the hit-test, so
-        one 1080p-prewarmed render cache serves every resolution and the tooltip tracks the vertical
-        viewport size."""
-        if self._tip_scale_override > 0:  # [tooltip] tip_scale — a fixed cosmetic preference
-            return self._tip_scale_override
-        return self.osd[1] / prefetch.REF_H
-
-    @property
-    def _raster_scale(self) -> float:
-        """The display scale SNAPPED to a 0.05 bucket — the scale the one-panel crisp path rasters,
-        composites, AND inverts the hit-test at (all three must agree). Bucketing means mpv's osd-
-        dimensions wobble (``osd_h`` ±few px → a jitter in the 3rd decimal) reuses cached native bands
-        instead of re-rastering. Geometry is already scale-free, so this is a pure raster-cache concern.
-        The tooltip rasters, composites, and hit-tests at this one bucketed value."""
-        return round(self._tip_display_scale / _SCALE_BUCKET) * _SCALE_BUCKET
-
-    @property
-    def _tip_ref_h(self) -> int:
-        """The tooltip's reference render height (``REF_H``) — the panel-content coordinate space (scroll
-        amounts, viewport caps live here, not in OSD pixels; the display scale maps it to the screen)."""
-        return prefetch.REF_H
+        The tooltip is a VIDEO-OVERLAY element: it tracks the vertical viewport, not the app-chrome
+        ``ui_scale``. ``[tooltip] tip_scale`` fixes the factor as a cosmetic preference.
+        """
+        return prefetch.tip_scale(
+            self.osd[1], override=self._tip_scale_override, max_frac=self.tip_max_frac
+        )
 
     @property
     def chrome_scale(self) -> float:
@@ -1199,7 +1172,7 @@ class Reader:
         vop = probe.get("video-out-params") or {}
         span_attrs = {
             "reason": reason,
-            "tip_scale": f"{self._tip_display_scale:.4f}",
+            "tip_scale": f"{self.tip_scale.display:.4f}",
             "osd_w": str(osd.get("w")),
             "osd_h": str(osd.get("h")),
             "osd_mt": str(osd.get("mt")),
@@ -1805,7 +1778,7 @@ class Reader:
 
     def _hit_header_region(self, x: float, y: float, prect, xy, scroll: int, view_h: int) -> bool:
         return tooltip.hit_header_region(
-            x, y, prect, xy, scroll, view_h, scale=self._tip_display_scale
+            x, y, prect, xy, scroll, view_h, scale=self.tip_scale.display
         )
 
     def _hit_header_add(self, x: float, y: float) -> bool:
@@ -1917,8 +1890,8 @@ class Reader:
         """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
         resolution change recomputes it. Only called when the cache is on (dict_set present)."""
         rc = self.session.render_cache
-        cap = self._tip_cap()
-        ck = (self.tip_width, cap)
+        cap = self.tip_scale.cap
+        ck = (self.tip_scale.width, cap)
         if rc.config_sig is None or rc.sig_key != ck:
             from saitenka.app.render_cache import config_signature, dict_set_signature
 
@@ -1926,7 +1899,7 @@ class Reader:
                 self.dict_set is not None
             )  # _render_cache() gated on it before any caller reaches here
             rc.config_sig = config_signature(
-                width=self.tip_width, cap=cap, dict_sig=dict_set_signature(self.dict_set)
+                width=self.tip_scale.width, cap=cap, dict_sig=dict_set_signature(self.dict_set)
             )
             rc.sig_key = ck
         return rc.config_sig
@@ -2100,9 +2073,6 @@ class Reader:
     def _cap_for(self, frac: float) -> int:
         return prefetch.cap_for(frac)
 
-    def _tip_cap(self) -> int:
-        return prefetch.tip_cap(self.tip_max_frac)
-
     def _show_tooltip(self, index: int) -> None:
         tooltip.show_tooltip(self, index)
 
@@ -2110,7 +2080,7 @@ class Reader:
         self, full_w: int, wx: float, wy: float, wh: float, view_h: int
     ) -> tuple[int, int]:
         return tooltip_panel.place_panel(
-            full_w, wx, wy, wh, view_h, scale=self._tip_display_scale, osd=self.osd
+            full_w, wx, wy, wh, view_h, scale=self.tip_scale.display, osd=self.osd
         )
 
     def _blit_panel(self, panel, scroll: int, view_h: int, xy, oid: int):
@@ -2192,7 +2162,7 @@ class Reader:
                 span.set("full_h", st.full_height)
                 # Crisp health per scroll frame: the display scale (does it jitter mid-scroll?) and the
                 # soft-fallback reason ("" = composited crisp) — so a soft run is attributable to a cause.
-                span.set("scale", f"{self._tip_display_scale:.4f}")
+                span.set("scale", f"{self.tip_scale.display:.4f}")
                 span.set("crisp_miss", self.tip.view.crisp_miss or "n/a")
 
     def _scroll_nested(self, delta: int) -> None:
@@ -2200,7 +2170,7 @@ class Reader:
 
     # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
     def _scan_hit(self, mx: float, my: float):
-        return tooltip_panel.scan_hit(self.tip, self._raster_scale, mx, my)
+        return tooltip_panel.scan_hit(self.tip, self.tip_scale.raster, mx, my)
 
     def _show_nested(self, sb) -> None:
         nested_popup.show_nested(self, sb)
@@ -2221,7 +2191,7 @@ class Reader:
             self.tip.nest,
             self.tip.view.state,
             self.tip.view.scroll,
-            self._raster_scale,
+            self.tip_scale.raster,
             nested=False,
         )
         return nested_popup.link_hit(mx, my, panel, self.tip.view.xy, scroll, scale=scale)
@@ -2231,7 +2201,7 @@ class Reader:
             self.tip.nest,
             self.tip.view.state,
             self.tip.view.scroll,
-            self._raster_scale,
+            self.tip_scale.raster,
             nested=True,
         )
         return nested_popup.link_hit(mx, my, panel, self.tip.nest.xy, scroll, scale=scale)
@@ -2257,7 +2227,7 @@ class Reader:
 
     def _run_interaction_command(self, command: interaction_intents.InteractionCommand) -> None:
         inputs = interaction_intents.InteractionInputs(
-            can_go_back=self.tip_can_go_back, tooltip_view_height=self._tip_ref_h
+            can_go_back=self.tip_can_go_back, tooltip_view_height=self.tip_scale.ref_h
         )
         for effect in interaction_intents.reduce(command, inputs):
             self._apply_interaction_effect(effect)
@@ -2459,7 +2429,9 @@ class Reader:
         miner_ui.show_preview(self, pv, audio_path)
 
     def _render_preview(self) -> None:
-        miner_ui.render_preview(self.preview, self.lifecycle_surfaces, self.osd, self.tip_width)
+        miner_ui.render_preview(
+            self.preview, self.lifecycle_surfaces, self.osd, self.tip_scale.width
+        )
 
     def _hide_preview(self) -> None:
         self._run_panel_command(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)
@@ -3214,7 +3186,7 @@ class Reader:
                 view.desired_scroll,
                 view.view_h,
                 direction,
-                self._raster_scale,
+                self.tip_scale.raster,
                 threading.Event(),
             ),
             generation=self.prefetch_state.gen,

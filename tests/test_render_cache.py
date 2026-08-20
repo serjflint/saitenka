@@ -317,7 +317,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     r.tip.hover = NO_HOVER_METADATA
     i = next(i for i, t in enumerate(r.tokens) if t.is_content)
     tok = r.tokens[i]
-    cap, w = r._tip_cap(), r.tip_width
+    cap, w = r.tip_scale.cap, r.tip_scale.width
     key = r._panel_key(tok, r._inflected_surface(i), mined=r._is_mined(tok))
 
     # The reader uses the cache only WHEN AVAILABLE, so create + inject it (prewarm's role). The MAIN
@@ -388,7 +388,7 @@ def _nested_reader(*, two_words: bool = False):
         FakeIPC(), dict_set=_ScrollTallDS(), options=ReaderOptions(prefetch=True), scan_delay=0.0
     )
     r._render_ahead_submit = _DeferredRenderSubmitter()
-    r.osd = (3840, 2160)  # 4K → _raster_scale 2.0, so _blit_native takes the crisp path
+    r.osd = (3840, 2160)  # 4K → tip_scale.raster 2.0, so _blit_native takes the crisp path
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -492,8 +492,8 @@ def test_render_ahead_warms_raw_bands_ahead_on_hidpi(monkeypatch):
     monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
     r._show_tooltip(0)
     scales = _render_ahead_scales(r, r.tip.view, monkeypatch)
-    assert r._raster_scale > 1.0  # the fixture is 4K → native scale
-    assert r._raster_scale in scales  # native bands warmed ahead (unchanged)
+    assert r.tip_scale.raster > 1.0  # the fixture is 4K → native scale
+    assert r.tip_scale.raster in scales  # native bands warmed ahead (unchanged)
     assert 1.0 in scales  # …and the raw bands the soft flick path reads (the fix)
 
 
@@ -501,12 +501,12 @@ def test_render_ahead_warms_raw_once_on_lodpi(monkeypatch):
     # Negative control: at scale 1.0 the native path IS the raw path, so render-ahead warms raw exactly
     # once — the fix must not add a redundant second 1.0 warm when there are no separate native bands.
     r = _nested_reader()
-    r.osd = (1920, 1080)  # lo-dpi → _raster_scale 1.0
+    r.osd = (1920, 1080)  # lo-dpi → tip_scale.raster 1.0
     r.hover = 0
     monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
     r._show_tooltip(0)
     scales = _render_ahead_scales(r, r.tip.view, monkeypatch)
-    assert r._raster_scale == 1.0
+    assert r.tip_scale.raster == 1.0
     assert scales == [1.0]  # exactly one raw warm, no duplicate
 
 
@@ -527,7 +527,9 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     assert nest is not None
     vh = min(r.tip.nest.view_h, nest.full_height)
     y0 = max(0, min(r.tip.nest.scroll, max(0, nest.full_height - vh)))
-    nest.viewport(y0, vh, overscan=vh, scale=r._raster_scale)  # worker warms ONLY the nested native
+    nest.viewport(
+        y0, vh, overscan=vh, scale=r.tip_scale.raster
+    )  # worker warms ONLY the nested native
 
     uploads: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda _v, *_a, oid=None, **_k: uploads.append(oid))
@@ -709,7 +711,7 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
     # thread) and mirrors it into tier-2 — so the main-thread read then hits RAM, never SQLite.
     r, cache = _tall_reader(tmp_path, monkeypatch)
     _i, tok, inflected, mined = _first_content(r)
-    cap = r._tip_cap()
+    cap = r.tip_scale.cap
     st = r._panel_for(tok, inflected, min_h=cap, mined=mined)
     r._precompose_head(st, tok, inflected, mined=mined, cap=cap, protected=True)  # a prewarmed head
     assert cache.stats()[0] == 1  # persisted to disk
@@ -781,7 +783,7 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
     r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
-            tok, inflected, mined, tuple(key), r._tip_cap(), job_id=r.tip.view.job_id
+            tok, inflected, mined, tuple(key), r.tip_scale.cap, job_id=r.tip.view.job_id
         )
     )
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
@@ -800,7 +802,7 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
     r.tip.view.job_id = r._interaction_jobs.begin("tooltip")
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
-            tok, inflected, mined, tuple(old_key), r._tip_cap(), job_id=r.tip.view.job_id
+            tok, inflected, mined, tuple(old_key), r.tip_scale.cap, job_id=r.tip.view.job_id
         )
     )
 
@@ -894,7 +896,7 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     r.tip.panel_cache.clear()
     assert r._request_engaged_tooltip(
         tooltip_engaged.HoverRequest(
-            tok, inflected, mined, tuple(key), r._tip_cap(), nested=True, tail=tok.surface
+            tok, inflected, mined, tuple(key), r.tip_scale.cap, nested=True, tail=tok.surface
         )
     )
     submitter.finish()
@@ -999,7 +1001,7 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
 
 def _base_tip_up(r):
     _i, tok, inflected, mined = _first_content(r)
-    r.tip.view.state = r._panel_for(tok, inflected, min_h=r._tip_cap(), mined=mined)
+    r.tip.view.state = r._panel_for(tok, inflected, min_h=r.tip_scale.cap, mined=mined)
     return tok
 
 
@@ -1063,7 +1065,9 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
     tok = _base_tip_up(r)
     old = r.tip.view.state
     assert r._request_engaged_tooltip(
-        tooltip_engaged.HoverRequest(tok, tok.surface, mined=False, key=("old",), cap=r._tip_cap())
+        tooltip_engaged.HoverRequest(
+            tok, tok.surface, mined=False, key=("old",), cap=r.tip_scale.cap
+        )
     )
     r.prefetch_state.gen += 1
     r._cancel_engaged_tooltip()
@@ -1090,7 +1094,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
     # A word switch in the defer window → a genuinely different panel object under _tip_state.
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
     r.tip.view.state = r._panel_for(
-        r.tokens[j], r._inflected_surface(j), min_h=r._tip_cap(), mined=False
+        r.tokens[j], r._inflected_surface(j), min_h=r.tip_scale.cap, mined=False
     )
     call["on_finished"](
         EffectFinished(
@@ -1109,7 +1113,7 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     tooltip.navigate_tip(r, tok.surface)
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
     r.tip.view.state = r._panel_for(
-        r.tokens[j], r._inflected_surface(j), min_h=r._tip_cap(), mined=False
+        r.tokens[j], r._inflected_surface(j), min_h=r.tip_scale.cap, mined=False
     )
     rebuilt = []
     monkeypatch.setattr(r, "_navigated_panel", lambda query: rebuilt.append(query))

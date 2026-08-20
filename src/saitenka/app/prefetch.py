@@ -144,8 +144,7 @@ class PrefetchWork:
 
 class PrefetchHost(Protocol):
     dict_set: PrefetchDictionary | None
-
-    def _tip_cap(self) -> int: ...
+    tip_scale: TipScale
 
     def _panel_for(self, token, inflected, **kwargs): ...
 
@@ -192,7 +191,7 @@ class HostPrefetchBackend:
 
     def _render_head(self, item: PrefetchItem | HeadPrefetchItem, should_cancel) -> bool:
         reader = self._reader
-        cap = reader._tip_cap()
+        cap = reader.tip_scale.cap
         panel = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
         if should_cancel():
             return False
@@ -633,7 +632,7 @@ def _warm_episode_loop(idx: CueIndex, *, ports: EpisodeWarmPorts) -> None:
 # The tooltip's FIXED reference resolution. Tooltip geometry (width, viewport-height cap) is computed
 # against this, NOT the live OSD, so the persistent render cache is resolution-independent: a 1080p
 # prewarm hits at any playback resolution, and osd_h/REF_H scales the composited bitmap to the actual
-# display at upload time (Reader._tip_display_scale). The tooltip is a VIDEO-OVERLAY element that tracks
+# display at upload time (``TipScale.display``). The tooltip is a VIDEO-OVERLAY element that tracks
 # the vertical viewport, NOT the app-chrome ui_scale (its fonts are theme scale 1.0). Matches the
 # interaction goldens pinned at 1080p (scale 1.0 = the reference, unscaled).
 REF_W, REF_H = 1920, 1080
@@ -651,3 +650,40 @@ def tip_cap(max_frac: float) -> int:
     """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
     own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
     return cap_for(max_frac)
+
+
+# The tooltip's reference width. ``REF_W * 0.36`` clamped to 640 — displayed width ≈ 0.59 × osd_h,
+# derived from the VERTICAL viewport, so it stays narrow on an ultra-wide (an osd_WIDTH formula would
+# not). Theme scale 1.0, like the fonts ``panel_rows`` draws it with.
+TIP_W = int(min(REF_W * 0.36, 640))
+
+# mpv's osd dimensions wobble a few px, which jitters osd_h/REF_H in the third decimal. Snapping the
+# raster scale to a bucket means that wobble reuses cached native bands instead of re-rastering.
+SCALE_BUCKET = 0.05
+
+
+@dataclass(frozen=True, slots=True)
+class TipScale:
+    """The tooltip's reference geometry and the one factor that maps it onto the live display.
+
+    ``width``, ``cap`` and ``ref_h`` are reference-space and do not move with the resolution — that is
+    what makes the render cache resolution-independent, so a 1080p prewarm hits at any playback size.
+    ``display`` and ``raster`` are the only two that do.
+    """
+
+    #: REFERENCE→display factor: ``osd_h / REF_H`` (1.0 at 1080p, 2.0 at 4K), or a fixed ``tip_scale``
+    #: preference. Applied to the composited BGRA at upload and inverted in the hit-test.
+    display: float
+    #: ``display`` snapped to ``SCALE_BUCKET`` — the scale the crisp path rasters, composites AND
+    #: inverts the hit-test at. All three must agree, so there is one bucketed value, not three.
+    raster: float
+    #: Max BASE viewport height, in reference pixels.
+    cap: int
+    width: int = TIP_W
+    ref_h: int = REF_H
+
+
+def tip_scale(osd_h: int, *, override: float, max_frac: float) -> TipScale:
+    """The whole tooltip scale boundary from the three inputs it actually depends on."""
+    display = override if override > 0 else osd_h / REF_H
+    return TipScale(display, round(display / SCALE_BUCKET) * SCALE_BUCKET, tip_cap(max_frac))
