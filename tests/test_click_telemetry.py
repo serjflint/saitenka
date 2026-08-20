@@ -39,7 +39,7 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
         seek=lambda *_a: None, bookmark=lambda: None, mine=lambda: None, open_mined=lambda _n: None
     )
 
-    assert sidebar.click(sidebar.view_of(reader), inert, 10, 10) is True
+    assert sidebar.click(reader.sidebar_view, inert, 10, 10) is True
     (attrs,) = _named(spans, "sidebar_click")
     assert attrs["kind"] == "bookmark"
 

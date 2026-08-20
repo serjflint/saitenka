@@ -158,7 +158,7 @@ def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     reader.sidebar.open = True
     reader.sidebar.rect = (0, 0, 100, 100)
     reader.sidebar.total = 100
-    monkeypatch.setattr(sidebar, "redraw", lambda _reader: None)
+    monkeypatch.setattr(sidebar, "draw", lambda _view: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 

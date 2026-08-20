@@ -1831,6 +1831,20 @@ class Reader:
         )
 
     @property
+    def sidebar_view(self) -> sidebar_module.SidebarView:
+        """What the sidebar draws from, as one member rather than the fifteen it gathers.
+
+        Every consumer takes the value now, so the host is read here and nowhere else in the chain
+        — the precondition for the surface owning its own state.
+        """
+        return sidebar_module.view_of(self)
+
+    @property
+    def sidebar_actions(self) -> sidebar_module.SidebarActions:
+        """The sidebar's click acts, bound. Paired with `sidebar_view`."""
+        return sidebar_module.actions_of(self)
+
+    @property
     def panel_style(self) -> tooltip_panel.PanelStyle:
         """The session-lifetime half of a panel build, as one value.
 
@@ -2306,7 +2320,7 @@ class Reader:
 
     def _set_panel_open(self, panel: panel_intents.Panel, *, opening: bool) -> None:
         if panel is panel_intents.Panel.SIDEBAR:
-            sidebar.set_open(self, open=opening)
+            (sidebar.show if opening else sidebar.hide)(self.sidebar_view)
         elif panel is panel_intents.Panel.ANALYSIS:
             self.set_analysis_open(open=opening)
         elif panel is panel_intents.Panel.SUBTITLE_PICKER:
@@ -3074,7 +3088,8 @@ class Reader:
                 self._draw_subtitle()
             self._redraw_help()
             self._draw_analysis()
-            sidebar.update(self)  # row capacity changed, so the active row may need re-centring
+            # row capacity changed, so the active row may need re-centring
+            sidebar.follow(self.sidebar_view)
 
     def _apply_capabilities(self) -> None:
         if self._tts_capability is not None:
@@ -3471,7 +3486,7 @@ class Reader:
             self._draw_translation()
         # The active row tracks the loaded index, language and scorer as well as the cue, and those
         # change without a cue settling — so this is outside the early return below.
-        sidebar.update(self)
+        sidebar.follow(self.sidebar_view)
 
     def _settle_cue_observation(self) -> None:
         """Reconcile at the batch boundary, not per delta. mpv splits one cue across sub-text,
@@ -3616,7 +3631,7 @@ class Reader:
     def hold_sidebar_scroll(self, seconds: float) -> bool:
         """Arm the deadline that releases the sidebar's manual-scroll hold, resuming auto-follow.
 
-        The due event runs `sidebar.update` rather than only clearing the flag: a hold that expires
+        The due event follows the active row rather than only clearing the flag: a hold that expires
         while the cue has not moved would otherwise leave the sidebar off-target until the next cue
         happened to arrive.
         """
@@ -3624,7 +3639,7 @@ class Reader:
 
         def released() -> None:
             self.sidebar.manual_hold = False
-            sidebar.update(self)
+            sidebar.follow(self.sidebar_view)
 
         return self.lifecycle_timers.schedule(
             LifecycleTimerKind.SIDEBAR_MANUAL_HOLD, seconds, released
@@ -3742,7 +3757,7 @@ class Reader:
             open_settle=self.open_settle_window,
             retire_settle=self.retire_settle_window,
             warm_tokens=self.warm_episode_tokens,
-            index_changed=lambda: sidebar.on_index_changed(self),
+            index_changed=lambda: sidebar.index_changed(self.sidebar_view),
             geometry_hint=geometry_hint,
         )
 

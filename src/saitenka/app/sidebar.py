@@ -89,6 +89,9 @@ class SidebarView:
     backlog: Callable[[], BacklogStore]
     mined: Callable[[], mined_store.MinedCardStore]
     mined_exists: bool
+    #: Same shape and same reason as `mined_exists`: a view that could answer this by asking the
+    #: store would have had to open one, which is exactly what the guard exists to prevent.
+    backlog_exists: bool
     scorer: object
     tokenizer: object
     analysis: object
@@ -118,11 +121,12 @@ def _active_index(reader: Reader) -> int:
 
 
 def view_of(reader: Reader) -> SidebarView:
-    """Snapshot the host into the value the sidebar draws from.
+    """Build the value the sidebar draws from. Reached as `Reader.sidebar_view`.
 
-    The one host-taking row in this chain, deliberately, exactly as `hover_suppression` is for the
-    hover chain: a hook's own test needs to build what production builds, and a test that
-    assembles the value by hand is a second definition of it.
+    A builder rather than a seam every caller goes through: while the draw path took the host and
+    snapshotted here, each of the seven callers inherited all fifteen reads. They take the value
+    now, and a hook's own test still builds what production builds by asking the same builder —
+    a test that assembles a `SidebarView` by hand is a second definition of it.
     """
     return SidebarView(
         state=reader.sidebar,
@@ -136,6 +140,7 @@ def view_of(reader: Reader) -> SidebarView:
         backlog=lambda: _ensure_store(reader),
         mined=lambda: reader.mined_store,
         mined_exists=reader.session.mined_store is not None or mined_store.db_path().exists(),
+        backlog_exists=reader.session.backlog_store is not None or db_path().exists(),
         scorer=reader.scorer,
         tokenizer=reader.tokenizer,
         analysis=reader.analysis.current,
@@ -449,11 +454,6 @@ def draw(view: SidebarView) -> None:
     view.surfaces.present(rendered.image, x, y, oid=SIDEBAR_ID)
 
 
-def redraw(reader: Reader) -> None:
-    """Draw from a freshly snapshotted view. The seam, kept for the callers that hold a host."""
-    draw(view_of(reader))
-
-
 def show(view: SidebarView) -> None:
     """Open the sidebar, centred on the active row."""
     view.state.open = True
@@ -469,20 +469,11 @@ def hide(view: SidebarView) -> None:
     view.state.hits = ()
 
 
-def set_open(reader: Reader, *, open: bool) -> None:  # noqa: A002
-    """Show or hide the sidebar. The caller decides which — `panel_intents` owns the toggle."""
-    (show if open else hide)(view_of(reader))
-
-
 def index_changed(view: SidebarView) -> None:
     view.state.style_cache.clear()
     view.state.scroll = 0
     view.state.last_active = -1
     draw(view)
-
-
-def on_index_changed(reader: Reader) -> None:
-    index_changed(view_of(reader))
 
 
 def contains(state: SidebarState, x: float, y: float) -> bool:
@@ -550,10 +541,6 @@ def follow(view: SidebarView) -> None:
         draw(view)
 
 
-def update(reader: Reader) -> None:
-    follow(view_of(reader))
-
-
 @dataclass(frozen=True, slots=True)
 class SidebarActions:
     """What a sidebar click can ask the session to do — the counterpart to `SidebarView`.
@@ -570,7 +557,7 @@ class SidebarActions:
 
 
 def actions_of(reader: Reader) -> SidebarActions:
-    """Bind the click actions to the host. The seam, paired with `view_of`."""
+    """Bind the click actions to the host. Reached as `Reader.sidebar_actions`."""
     return SidebarActions(
         seek=lambda name, at: send_correlated(
             reader.ipc, name, "set_property", "time-pos", at, owner=Owner.PLAYBACK
@@ -632,15 +619,10 @@ def on_click(reader: Reader, x: float, y: float) -> bool:
     return click(view_of(reader), actions_of(reader), x, y)
 
 
-def mine_active(view: SidebarView, *, backlog_exists: bool) -> None:
-    """Mark the backlog entries covering the active cue as mined, then redraw.
-
-    `backlog_exists` is asked for rather than derived: the guard exists so mining an episode with
-    no backlog does not create one, and a view that could answer it would have had to open the
-    store to do so.
-    """
+def mine_active(view: SidebarView) -> None:
+    """Mark the backlog entries covering the active cue as mined, then redraw."""
     cue = view.active_cue
-    if not view.video or cue is None or not backlog_exists:
+    if not view.video or cue is None or not view.backlog_exists:
         return
     try:
         store = view.backlog()
@@ -651,10 +633,3 @@ def mine_active(view: SidebarView, *, backlog_exists: bool) -> None:
     except (OSError, sqlite3.Error, ValueError, KeyError):
         return
     draw(view)
-
-
-def mark_active_mined(reader: Reader) -> None:
-    mine_active(
-        view_of(reader),
-        backlog_exists=reader.session.backlog_store is not None or db_path().exists(),
-    )

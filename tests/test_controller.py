@@ -3270,11 +3270,13 @@ def test_the_sidebar_follows_the_cue_where_the_cue_settles(monkeypatch):
     ipc = RuntimeFakeIPC()
     r = Reader(ipc, prefetch=False, renderer=NullRenderer())
     follows = []
-    monkeypatch.setattr(C.sidebar, "update", follows.append)
+    monkeypatch.setattr(C.sidebar, "follow", follows.append)
 
     r._settle_cue_observation()
 
-    assert follows == [r]
+    # The view it followed, not the host: identity with `r.sidebar` says the settle boundary
+    # reached this sidebar's own state rather than merely calling something once.
+    assert [view.state for view in follows] == [r.sidebar]
     r.close()
 
 

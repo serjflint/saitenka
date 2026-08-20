@@ -53,7 +53,7 @@ def _reader(cue_count=20, *, active=0, props=None):
 
 def _view(reader, **overrides):
     """The value production draws from, with the row-level facts a test pins stated explicitly."""
-    return dataclasses.replace(sidebar.view_of(reader), **overrides)
+    return dataclasses.replace(reader.sidebar_view, **overrides)
 
 
 def _capture_render(monkeypatch):
@@ -71,7 +71,7 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
     reader, ipc = _reader(active=12)
     calls = _capture_render(monkeypatch)
 
-    sidebar.set_open(reader, open=not reader.sidebar.open)
+    (sidebar.hide if reader.sidebar.open else sidebar.show)(reader.sidebar_view)
 
     assert reader.sidebar.open is True
     assert [row.value for row in calls[-1][0]] == list(range(8, 17))
@@ -91,13 +91,13 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     the next `update` would leave the sidebar off-target for as long as the cue happened to last."""
     reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
     calls = _capture_render(monkeypatch)
-    sidebar.set_open(reader, open=not reader.sidebar.open)
+    (sidebar.hide if reader.sidebar.open else sidebar.show)(reader.sidebar_view)
     reader.sidebar.rect = (900, 50, 360, 600)
 
     assert sidebar.scroll(reader, -3) is True
     held_scroll = reader.sidebar.scroll
     reader.sub_text = "cue 18"
-    sidebar.update(reader)
+    sidebar.follow(reader.sidebar_view)
     assert reader.sidebar.scroll == held_scroll
 
     before_expiry = len(calls)
@@ -249,7 +249,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     )
     reader.session.backlog_store = store
 
-    rows = sidebar._summary_rows(sidebar.view_of(reader))
+    rows = sidebar._summary_rows(reader.sidebar_view)
 
     candidate = next(row for row in rows if row.actions)
     assert candidate.actions == (SidebarAction("✓", "relink", entry.media_id),)
@@ -264,7 +264,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
 
     assert store.entries_for_path(renamed) == [entry]
     assert store.media(entry.media_id).original_basename == original.name
-    matched_rows = sidebar._summary_rows(sidebar.view_of(reader))
+    matched_rows = sidebar._summary_rows(reader.sidebar_view)
     expanded = next(row for row in matched_rows if row.click_kind == "backlog-seek")
     assert (expanded.text, expanded.status) == ("秘密の字幕", "open")
 
@@ -283,7 +283,7 @@ def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, mo
     reader.session.backlog_store = store
     _capture_render(monkeypatch)
 
-    sidebar.mark_active_mined(reader)
+    sidebar.mine_active(reader.sidebar_view)
 
     assert store.entry(entry.id).status == "mined"
 
@@ -320,7 +320,7 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path):
     )
     reader.session.mined_store = store
 
-    rows = sidebar._mine_rows(sidebar.view_of(reader))
+    rows = sidebar._mine_rows(reader.sidebar_view)
 
     assert [(row.value, row.click_kind, row.status) for row in rows] == [
         (111, "mine-open", "mined"),
@@ -337,7 +337,7 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "absent.sqlite")
 
-    assert sidebar._mine_rows(sidebar.view_of(reader)) == []
+    assert sidebar._mine_rows(reader.sidebar_view) == []
     assert reader.session.mined_store is None
     assert not (tmp_path / "absent.sqlite").exists()
 
@@ -510,6 +510,6 @@ def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> 
     reader, _ipc = _reader(props={"path": ""})
     reader.sidebar.open = True
 
-    sidebar.redraw(reader)
+    sidebar.draw(reader.sidebar_view)
 
     assert reader.session.backlog_store is None

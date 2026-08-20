@@ -1134,8 +1134,8 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     # Open + render the sidebar so on_click has real hitboxes; click a view-tab so the measured cost is
     # the click dispatch + full redraw ALONE (a bookmark/mine hit would fold a store write into it — we
     # measure those separately below).
-    sidebar.set_open(reader, open=True)
-    sidebar.redraw(reader)
+    sidebar.show(reader.sidebar_view)
+    sidebar.draw(reader.sidebar_view)
     hits = reader.sidebar.hits
     tab = next((h for h in hits if h.kind.startswith("view:")), hits[0] if hits else None)
     note_id = {"n": 0}

@@ -90,7 +90,7 @@ def _draw_help(r: Reader) -> None:
 
 def _draw_sidebar(r: Reader) -> None:
     r.sidebar.open = True
-    sidebar.redraw(r)
+    sidebar.draw(r.sidebar_view)
 
 
 def _draw_stats(r: Reader) -> None:

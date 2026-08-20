@@ -12,7 +12,7 @@
   "saitenka.app.reader_deps": 2,
   "saitenka.app.session_runtime": 1,
   "saitenka.app.session_stats": 1,
-  "saitenka.app.sidebar": 12,
+  "saitenka.app.sidebar": 7,
   "saitenka.app.sub_picker": 4,
   "saitenka.app.subtitle_pipeline": 1,
   "saitenka.app.subtitle_render": 2,

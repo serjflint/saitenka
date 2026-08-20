@@ -242,31 +242,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::mark_active_mined"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::on_click"
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::on_index_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::redraw"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::set_open"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::update"
     ],
     [
       "reader-parameter",

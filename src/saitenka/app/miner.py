@@ -326,7 +326,7 @@ class Miner:
                     r._mark_mined(card.expression)  # already in the deck → ✓
                     from saitenka.app import sidebar
 
-                    sidebar.mark_active_mined(r)
+                    sidebar.mine_active(r.sidebar_view)
                     r.preview.dup_tok = tok  # remember for an explicit "add anyway"
                     r._preview_existing(existing[0], card, "exists")
                     return
@@ -361,7 +361,7 @@ class Miner:
             r._mark_mined(card.expression)
             from saitenka.app import sidebar
 
-            sidebar.mark_active_mined(r)
+            sidebar.mine_active(r.sidebar_view)
             r._preview_mined(card, tok, video, "duplicate" if force else "mined")
         except AnkiError as e:
             r._toast(f"mine failed: {e}", "err")
