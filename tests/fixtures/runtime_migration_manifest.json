@@ -422,10 +422,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.activate"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.clear"
     ],
     [

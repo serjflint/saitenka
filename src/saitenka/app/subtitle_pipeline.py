@@ -11,6 +11,8 @@ from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.controller import Reader
     from saitenka.app.subtitle_render import DrawResult, SubtitleTarget
     from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
@@ -148,11 +150,17 @@ class SubtitleModeCoordinator:
     def clear(self, reader: Reader) -> None:
         self._renderer.clear(reader.lifecycle_surfaces, reader.ipc)
 
-    def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> None:
-        from saitenka.app.subtitle_render import target_of
+    def activate(
+        self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV, *, draw: Callable[[], None]
+    ) -> None:
+        """Take the pixels; `draw` is what happens when the renderer refuses them.
 
-        if self._renderer.activate(target_of(reader), sid) is False:
-            self.draw_current(reader)
+        Handed in rather than reached for. `draw_current` writes `boxes` and `sub_origin` back onto
+        the host, so keeping it inline is what kept every caller of `activate` — `configure` above
+        all — reading a host it otherwise has no use for.
+        """
+        if self._renderer.activate(target, sid) is False:
+            draw()
 
     def geometry_degraded(self, target: SubtitleTarget) -> None:
         self._renderer.degrade_geometry(target)

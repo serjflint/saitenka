@@ -505,9 +505,9 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     ipc.commands.clear()
 
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(result)
+    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
     ipc.props["sid"] = 6
-    result.subtitle_pipeline.activate(result)
+    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
 
     assert _visibility_asserts(ipc) == 2
     result.close()
@@ -520,10 +520,10 @@ def test_reconfiguring_the_same_track_does_not_reassert(tmp_path: Path) -> None:
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(result)
+    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
     ipc.commands.clear()
 
-    result.subtitle_pipeline.activate(result)
+    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
 
     assert _visibility_asserts(ipc) == 0
     result.close()
@@ -964,7 +964,7 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
     try:
         ipc.set_property_error = "rejected"
         result.set_subtitle("猫を見る")
-        result.subtitle_pipeline.activate(result)
+        result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
 
         renderer = result.subtitle_pipeline.renderer
         assert isinstance(renderer, NativeVisibleRenderer)
@@ -2090,7 +2090,7 @@ def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, tr
     elif trigger == "reconnect":
         renderer.connection_replaced(target_of(result))
     else:
-        result.subtitle_pipeline.activate(result)
+        result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
 
     assert ipc.commands.count(("set_property", "sub-visibility", True)) <= 1
     assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
@@ -2115,7 +2115,7 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     ipc.set_property_error = "disconnected"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(result)
+    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
 
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert any(command[0] == "overlay-add" for command in ipc.commands)
@@ -2133,7 +2133,7 @@ def _establish_native(result: Reader, ipc: FakeIPC, sid: int) -> NativeVisibleRe
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     result._sub_pending = None
-    result.subtitle_pipeline.activate(result)
+    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
     assert renderer.ownership_state.native_pixels_established
     return renderer
 
@@ -2286,7 +2286,7 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     ipc.overlay_add_error = "unsupported format"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(result)
+    result.subtitle_pipeline.activate(target_of(result), draw=result._draw_subtitle)
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None

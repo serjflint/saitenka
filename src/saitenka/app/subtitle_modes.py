@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 from saitenka.app.languages import MAIN_LANG, Language
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_ownership import ASK_MPV
+from saitenka.app.subtitle_render import target_of
 from saitenka.app.subtitle_selection import (
     FetchAction,
     SubtitleStartup,
@@ -179,7 +180,11 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     # unchanged and the pixels would stay owned on behalf of a track that is gone. When nothing was
     # written there is nothing to declare and the read is correct.
     sid = selected_sid(startup)
-    reader.subtitle_pipeline.activate(reader, ASK_MPV if sid is None else sid)
+    reader.subtitle_pipeline.activate(
+        target_of(reader),
+        ASK_MPV if sid is None else sid,
+        draw=reader._draw_subtitle,
+    )
     if reader._get("secondary-sid") not in {None, False, "no"}:
         _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     # Null the mirror too: configure now runs mid-session (a live profile cycle re-selects the track),
