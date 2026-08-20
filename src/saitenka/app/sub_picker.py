@@ -94,13 +94,6 @@ def configure_runtime_job(ipc) -> JobSubmitter | None:
     )
 
 
-def configure(reader: Reader, lister) -> None:
-    """Enable the picker for this session with a provider-agnostic candidate lister. Called wherever the
-    subtitle-retry factory is wired, so the key binding is a no-op (with a toast) unless at least one
-    provider is enabled."""
-    reader._sub_picker_lister = lister
-
-
 def _human_size(size: int) -> str:
     if size <= 0:
         return "—"

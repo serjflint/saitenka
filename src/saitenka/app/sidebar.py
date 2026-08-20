@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from saitenka.app.controller import Reader
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.mined_store import MinedCard
+    from saitenka.app.reader_context import SessionContext
     from saitenka.app.surfaces import HoverSuppression
     from saitenka.subtitles import Cue, CueIndex
 
@@ -137,7 +138,7 @@ def view_of(reader: Reader) -> SidebarView:
         chrome_scale=reader.chrome_scale,
         surfaces=reader.lifecycle_surfaces,
         video=reader._get("path"),
-        backlog=lambda: _ensure_store(reader),
+        backlog=lambda: _ensure_store(reader.session),
         mined=lambda: reader.mined_store,
         mined_exists=reader.session.mined_store is not None or mined_store.db_path().exists(),
         backlog_exists=reader.session.backlog_store is not None or db_path().exists(),
@@ -148,12 +149,15 @@ def view_of(reader: Reader) -> SidebarView:
     )
 
 
-def _ensure_store(reader: Reader) -> BacklogStore:
-    store = (
-        reader.session.backlog_store
-    )  # local narrows cleanly (the shim's __get__ re-widens each read)
+def _ensure_store(session: SessionContext) -> BacklogStore:
+    """The session's backlog store, opened on first ask.
+
+    Takes the session rather than the host: the store is the only thing it wanted, and a view that
+    may never materialise it (see `view_of`'s guards) should not be able to reach anything else.
+    """
+    store = session.backlog_store  # local narrows cleanly (the shim's __get__ re-widens each read)
     if store is None:
-        store = reader.session.backlog_store = BacklogStore()
+        store = session.backlog_store = BacklogStore()
     return store
 
 

@@ -222,10 +222,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::_ensure_store"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::_open_mined"
     ],
     [
@@ -243,10 +239,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/sidebar.py::view_of"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::configure"
     ],
     [
       "reader-parameter",

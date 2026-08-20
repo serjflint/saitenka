@@ -2856,7 +2856,10 @@ class Reader:
         self._run_panel_command(panel_intents.PanelCommand.TOGGLE_SUBTITLE_PICKER)
 
     def configure_sub_picker(self, lister: Callable[[str], tuple]) -> None:
-        sub_picker.configure(self, lister)
+        """Enable the picker for this session with a provider-agnostic candidate lister. Called
+        wherever the subtitle-retry factory is wired, so the key binding is a no-op (with a toast)
+        unless at least one provider is enabled."""
+        self._sub_picker_lister = lister
 
     def toggle_analysis(self) -> None:
         self._run_panel_command(panel_intents.PanelCommand.TOGGLE_ANALYSIS)
