@@ -179,13 +179,20 @@ def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
         {SCROLL_UP_MSG: LegacyCommandBinding(lambda: handled.append("scroll"), "work-package-5")},
         policy=CommandPolicy((spec,)),
     )
-    ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
-    ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
+    try:
+        ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
+        ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
 
-    reader._drain_events()
+        reader._drain_events()
 
-    assert handled == ["scroll"]
-    assert gateway.snapshot.command_outcomes == 2
+        assert handled == ["scroll"]
+        assert gateway.snapshot.command_outcomes == 2
+    finally:
+        # Both own threads. Leaking a Reader and a gateway per run is survivable alone and is not
+        # survivable at `-n auto`, where the accumulated lanes exhaust the thread pool and this test
+        # fails somewhere unrelated to what it asserts.
+        reader.close()
+        gateway.close()
 
 
 def test_composition_threads_grouped_optional_services():

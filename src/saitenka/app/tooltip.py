@@ -433,9 +433,11 @@ def spoken_form(token, hover_reading: str) -> str:
     return hover_reading or token.reading or token.surface
 
 
-def copy_hovered(reader: Reader) -> None:
-    if 0 <= reader.hover < len(reader.tokens):
-        copy_token(reader._toast, reader.tokens[reader.hover])
+def copy_hovered(toast: Callable[..., object], tokens, hover: int) -> None:
+    """Copy the hovered token, if one is hovered. Takes the three facts, like `copy_token` beside it:
+    the host was only ever reached for the cue's tokens and the acknowledgement."""
+    if 0 <= hover < len(tokens):
+        copy_token(toast, tokens[hover])
 
 
 def token_clip(t) -> str:
@@ -475,7 +477,7 @@ def copy_click(reader: Reader) -> None:
             flash(reader, OverlayId.NESTED)
         return
     if reader._tip_rect is not None and in_rect(reader._tip_rect, x, y):
-        copy_hovered(reader)
+        copy_hovered(reader._toast, reader.tokens, reader.hover)
         flash(reader, OverlayId.TIP)
         return
     idx = reader._hit(x, y) if reader.tokens else -1  # not over a popup → the subtitle word, if any

@@ -814,10 +814,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::copy_hovered"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::decorate_and_upload"
     ],
     [
