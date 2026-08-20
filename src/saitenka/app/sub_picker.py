@@ -21,13 +21,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarRow, render_picker
 from saitenka.model import claims_pointer, in_rect
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     import threading
@@ -70,18 +70,6 @@ class ListingResult:
     error: str | None = None
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def run_listing(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, ListingRequest):
         raise TypeError("invalid subtitle listing request")
@@ -96,14 +84,12 @@ def run_listing(request: object, cancelled: threading.Event) -> object:
 
 
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "subtitle-picker",
         JobLanePolicy(capacity=2, workers=2),
         run_listing,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def configure(reader: Reader, lister) -> None:

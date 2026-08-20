@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.app.lookup import card_for
 from saitenka.app.tokenizer import get_tokenizer
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     import threading
@@ -77,18 +77,6 @@ MetadataRequest = HoverMetadataRequest | NestedMetadataRequest
 MetadataResult = HoverMetadata | NestedMetadata
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 @dataclass(slots=True)
 class InteractionMetadataState:
     """Event-thread state; the broker owns execution and lifetime."""
@@ -111,14 +99,12 @@ def run_metadata(request: object, cancelled: threading.Event) -> object:
 
 
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "interaction-metadata",
         JobLanePolicy(capacity=1),
         run_metadata,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def submit(

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.app.episode_analysis import AnalysisKey, EpisodeAnalysis, analysis_key, analyze_cues
 from saitenka.app.languages import MAIN_LANG
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 log = logging.getLogger(__name__)
 
@@ -56,27 +56,13 @@ def run_analysis(request: object, cancelled: threading.Event) -> object:
         raise
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "episode-analysis",
         JobLanePolicy(capacity=2, workers=2),
         run_analysis,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def panel_image(state: AnalysisState, *, osd: tuple[int, int], close_key: str, scale: float):

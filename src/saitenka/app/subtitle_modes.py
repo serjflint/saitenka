@@ -23,7 +23,7 @@ from saitenka.app.subtitle_selection import initial as _initial
 from saitenka.app.subtitle_selection import matching_track as _matching_track
 from saitenka.app.subtitle_selection import primary_role as _primary_role_for
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     import threading
@@ -91,18 +91,6 @@ class FetchSubmitter(Protocol):
     ) -> None: ...
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def run_fetch(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, SubtitleFetchRequest):
         raise TypeError("invalid subtitle fetch request")
@@ -124,14 +112,12 @@ def run_fetch(request: object, cancelled: threading.Event) -> object:
 
 
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "subtitle-fetch",
         JobLanePolicy(capacity=4, workers=2),
         run_fetch,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def finish_fetch(request: SubtitleFetchRequest, completion: EffectFinished) -> SubtitleFetchResult:

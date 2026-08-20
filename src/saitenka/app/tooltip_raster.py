@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     import threading
@@ -57,18 +57,6 @@ class RenderAheadState:
     closed: bool = False
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def run_render_ahead(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, RenderAheadRequest):
         raise TypeError("invalid render-ahead request")
@@ -102,14 +90,12 @@ def run_render_ahead(request: object, cancelled: threading.Event) -> object:
 
 
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "tooltip-render-ahead",
         JobLanePolicy(capacity=1),
         run_render_ahead,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def request(

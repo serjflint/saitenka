@@ -8,6 +8,8 @@ per-word step against a constructed fake reader, no dicts / no mpv.
 
 from __future__ import annotations
 
+import sys
+
 from saitenka.app.prewarm import PrewarmTuning, _popular_terms, _PrewarmJob, _startup_plan
 
 
@@ -349,3 +351,34 @@ def test_projection_is_stable_under_steady_growth():
     projs = [b.projected_bytes for b in beats]
     assert len(set(projs)) == 1  # same estimate every heartbeat → no oscillation
     assert projs[0] == start + rate * 1000  # = start + rate · to_raster
+
+
+def test_every_headless_stand_in_answers_the_job_port() -> None:
+    """A stand-in must REFUSE a lane, not lack the method.
+
+    Twelve features used to reach the runtime through
+    `getattr(ipc, "register_runtime_job_lane", None)`, which reads a headless stand-in and a renamed
+    method as the same thing — so a rename would have silently disabled every lane in the process.
+    They call the method now, which means anything passed in as an ipc has to have it.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    from saitenka.app.prewarm import _PrewarmIPC
+    from saitenka.runtime.jobs import JobLanePolicy, configure_lane
+
+    spec = importlib.util.spec_from_file_location(
+        "bench_responsiveness",
+        Path(__file__).resolve().parent.parent / "examples" / "bench_responsiveness.py",
+    )
+    assert spec is not None and spec.loader is not None
+    bench = importlib.util.module_from_spec(spec)
+    sys.modules["bench_responsiveness"] = bench
+    spec.loader.exec_module(bench)
+
+    for stand_in in (_PrewarmIPC(800, 600), bench.FakeIPC()):
+        assert stand_in.register_runtime_job_lane("any", JobLanePolicy(capacity=1), None) is False
+        assert stand_in.submit_runtime_job() is False
+        assert stand_in.close_runtime_job_lane("any") is False
+        # A refusal is a declared answer, so the feature gets None and takes its no-lane path.
+        assert configure_lane(stand_in, "any", JobLanePolicy(capacity=1), None) is None

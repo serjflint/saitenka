@@ -251,11 +251,8 @@ def start_prefetch(
         return
     if state.closed or state.submitter is not None:
         return
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None:
-        return
     desired = prefetch_worker_count(tokenizer, workers)
-    if not register(
+    if not ipc.register_runtime_job_lane(
         "speculative-prefetch",
         JobLanePolicy(capacity=desired, workers=desired),
         lambda request, cancelled: run_prefetch(request, cancelled, backend),

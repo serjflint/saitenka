@@ -8,12 +8,12 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from saitenka import otel_metrics
 from saitenka.app.token_cache import TokenizedCue
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -165,18 +165,6 @@ def _published_result(
     )
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 class AnnotationExecutor:
     """Executes broker-admitted annotation work."""
 
@@ -235,14 +223,12 @@ class AnnotationExecutor:
 
 
 def configure_runtime_job(ipc, executor: AnnotationExecutor) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "cue-annotation",
         JobLanePolicy(capacity=1),
         executor.run,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def annotate(inputs: AnnotationInputs) -> TokenizedCue:

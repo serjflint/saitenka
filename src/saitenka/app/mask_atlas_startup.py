@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,18 +41,6 @@ class ActivationState:
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def open_mask_atlas(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, MaskAtlasRequest):
         raise TypeError("invalid mask-atlas request")
@@ -70,14 +58,12 @@ def open_mask_atlas(request: object, cancelled: threading.Event) -> object:
 
 
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         _LANE,
         JobLanePolicy(capacity=1, workers=1),
         open_mask_atlas,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def request(

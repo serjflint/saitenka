@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, SubmitJob
+from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, Owner, SubmitJob
 from saitenka.runtime.events import EffectFinished, EventOrigin
 
 if TYPE_CHECKING:
@@ -31,6 +31,71 @@ class JobLanePolicy:
 
 class JobHandler(Protocol):
     def __call__(self, request: object, cancelled: threading.Event) -> object: ...
+
+
+class JobSubmitter(Protocol):
+    """Hand work to a registered lane. Returns False when the lane refuses it.
+
+    One declaration, because eleven identical copies of it is eleven chances for the ingress to be
+    described differently in each feature that reaches it.
+    """
+
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool: ...
+
+
+class RuntimeJobPort(Protocol):
+    """The job-lane ingress every feature reaches the runtime through.
+
+    Declared so a stand-in has to *refuse* rather than simply not have the method. Twelve features
+    used to probe `getattr(ipc, "register_runtime_job_lane", None)`, which cannot tell a headless
+    stand-in apart from a renamed method — the same silent hole the renderer protocol closed.
+    """
+
+    def register_runtime_job_lane(self, name: str, policy: JobLanePolicy, handler) -> bool: ...
+
+    def submit_runtime_job(self, **kwargs) -> bool: ...
+
+    def close_runtime_job_lane(self, name: str, timeout: float = 2.0) -> bool: ...
+
+
+class RefusesJobLanes:
+    """For a headless stand-in with no session behind it: the job port answers, and says no.
+
+    Inherit it to mean it. Shared rather than repeated, because "there is no runtime here" is one
+    decision, and the same refusal a live `MpvIPC` gives before its gateway is installed — so every
+    feature already has a path for it.
+    """
+
+    def register_runtime_job_lane(self, _name: str, _policy: JobLanePolicy, _handler) -> bool:
+        return False
+
+    def submit_runtime_job(self, **_kwargs) -> bool:
+        return False
+
+    def close_runtime_job_lane(self, _name: str, _timeout: float = 2.0) -> bool:
+        return False
+
+
+def configure_lane(
+    ipc: RuntimeJobPort, name: str, policy: JobLanePolicy, handler
+) -> JobSubmitter | None:
+    """Register one lane and hand back the submitter, or None if the ingress refuses it.
+
+    `None` is a declared refusal — no gateway, or the lane is already registered — and every caller
+    has a story for it. That is different from the port being absent, which is why this asks for the
+    method instead of probing for it.
+    """
+    if not ipc.register_runtime_job_lane(name, policy, handler):
+        return None
+    return ipc.submit_runtime_job
 
 
 @dataclass(slots=True)

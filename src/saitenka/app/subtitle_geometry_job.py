@@ -11,11 +11,11 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
 from saitenka.runtime import EffectFinished, Owner
-from saitenka.runtime.jobs import JobLanePolicy, LocalJobLane
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, LocalJobLane, configure_lane
 from saitenka.subtitles.geometry import GeometrySnapshot
 
 if TYPE_CHECKING:
@@ -29,18 +29,6 @@ if TYPE_CHECKING:
     from saitenka.subtitles.geometry import GeometryRequest
 
     GeometryRequestBuilder = Callable[[], GeometryRequest]
-
-
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,10 +74,7 @@ def run_geometry_job(request: object, cancelled: threading.Event) -> object:
 def configure_runtime_job(ipc) -> JobSubmitter | None:
     """Resolve the lane once, at composition. Absence becomes an explicit value here rather than a
     probe at each use site — see the sanctioned half of the capability-probe split."""
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(GEOMETRY_LANE, _GEOMETRY_LANE_POLICY, run_geometry_job):
-        return None
-    return ipc.submit_runtime_job
+    return configure_lane(ipc, GEOMETRY_LANE, _GEOMETRY_LANE_POLICY, run_geometry_job)
 
 
 class SubtitleGeometryWorker:

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, cast
 
 from saitenka.app.tokenize import Token
 from saitenka.mask_atlas import REFERENCE_SCALE
+from saitenka.runtime.jobs import RefusesJobLanes
 
 if TYPE_CHECKING:
     from saitenka.app.render_cache import RenderCache
@@ -34,9 +35,15 @@ _CHECKPOINT_EVERY = 2000  # rastered words between heartbeats (WAL truncate + pr
 _PLATEAU_MIN_NEW = 64  # a checkpoint adding fewer new masks than this counts as "dry"
 
 
-class _PrewarmIPC:
+class _PrewarmIPC(RefusesJobLanes):
     """A no-socket mpv stand-in: a fixed OSD and inert commands, so a headless Reader can build panels
-    without a running mpv (mirrors the benchmark's FakeIPC)."""
+    without a running mpv (mirrors the benchmark's FakeIPC).
+
+    There is no session here — no socket, no gateway, no events to reduce — so it **refuses** the
+    runtime job port rather than lacking it. Prewarm renders on its own `ThreadPoolExecutor`; a lane
+    would be a second, unowned pool. The refusal is the same one a live `MpvIPC` gives before its
+    gateway is installed, so every feature already has a path for it.
+    """
 
     def __init__(self, width: int, height: int):
         self._osd = {"w": width, "h": height}

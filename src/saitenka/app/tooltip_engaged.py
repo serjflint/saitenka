@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka import otel_metrics
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -128,18 +128,6 @@ class EngagedHost(Protocol):
     def _engaged_open_panel(self, source: str, query: str, **kwargs) -> tuple | None: ...
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 class ReaderEngagedBackend:
     """Background rendering adapter over the panel/cache seams."""
 
@@ -254,14 +242,12 @@ def run_engaged(
 
 
 def configure_runtime_job(ipc, backend: EngagedBackend) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "tooltip-engaged",
         JobLanePolicy(capacity=1),
         lambda request, cancelled: run_engaged(request, cancelled, backend),
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def submit(

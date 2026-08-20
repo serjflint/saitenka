@@ -497,11 +497,15 @@ def test_healthy_writer_lock_contention_does_not_drop_command() -> None:
         target=lambda: (entered.set(), requests.append(ipc.command_async("show-text", "ok", 1)))
     )
     thread.start()
-    assert entered.wait(1)
-    assert requests == []
+    # Generous deadlines: these guard a hang, and the thing being waited on is the SCHEDULER. Under
+    # the free-threaded suite at `-n auto` a 1s join is a budget, not a timeout — it fails on a busy
+    # machine and passes alone.
+    assert entered.wait(10)
+    assert requests == []  # still blocked on the lock this test holds
     ipc._write_lock.release()
-    thread.join(1)
+    thread.join(10)
 
+    assert not thread.is_alive(), "the writer never returned after the lock was released"
     assert requests and requests[0].accepted
     assert requests[0].connection_epoch == 0
     ipc.close()

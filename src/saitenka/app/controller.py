@@ -256,11 +256,6 @@ _DISPLAY_PROBE_PROPS = (
 _Nested = PopupView
 
 
-def _no_lane(_name: str, _timeout: float) -> bool:
-    """Stand-in for a transport with no job lanes, so `close` needs no per-site guard."""
-    return True
-
-
 class Reader:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
@@ -3717,7 +3712,7 @@ class Reader:
         would not survive being factored into a nested `def`.
         """
 
-        close_lane = getattr(self.ipc, "close_runtime_job_lane", None) or _no_lane
+        close_lane = self.ipc.close_runtime_job_lane
         # Armed by a step, not here: the 2s lane budget starts once the capabilities are down, and
         # computing it at table-build time would silently spend that window on their teardown.
         budget: list[float] = []

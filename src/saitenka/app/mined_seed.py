@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.app.miner import Miner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     import threading
-    from collections.abc import Callable
-
-    from saitenka.runtime import EffectFinished, Owner
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,24 +26,10 @@ def load_mined_seed(request: object, cancelled: threading.Event) -> object:
     return Miner.mined_expressions(request.anki, request.mine_cfg)
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "mined-seed",
         JobLanePolicy(capacity=2, workers=2),
         load_mined_seed,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
