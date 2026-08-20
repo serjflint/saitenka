@@ -98,7 +98,7 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
     # A link-navigated view builds no second panel — it composites native from its own reference panel
     # and the seam still holds, with no synthetic key.
     r = _reader(2.0, monkeypatch)
-    tooltip.navigate_tip(r, "見る")
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "見る")
     assert r.tip.view.key is None  # no synthetic nav key needed — one panel
     panel, s, scroll = tooltip_panel.hit_target(
         r.tip.nest, r.tip.view.state, r.tip.view.scroll, r.tip_scale.raster, nested=False

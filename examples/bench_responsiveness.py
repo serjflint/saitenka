@@ -1465,7 +1465,7 @@ def _timeline_interact(reader) -> None:
     reader._hide_nested()
     if 0 <= reader.hover < len(reader.tokens):
         tooltip.navigate_tip(
-            reader, reader.tokens[reader.hover].surface
+            reader.tip_ports, reader.panel_ports, reader.tokens[reader.hover].surface
         )  # in-place nav → kind="clicked"
         time.sleep(0.02)
         reader._drain_events()  # pump the typed completion and warm swap

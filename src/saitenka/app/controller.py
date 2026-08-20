@@ -118,6 +118,7 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import (
     NO_HOVER_METADATA,
+    ClickPorts,
     HoverActions,
     HoverInputs,
     Panel,
@@ -1767,7 +1768,7 @@ class Reader:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.COPY_LINE)
 
     def copy_click(self) -> None:
-        tooltip.copy_click(self)
+        tooltip.copy_click(self.tip_ports, self.click_ports, self.hover_inputs)
 
     def on_click(self) -> None:
         if not self.ov.visible:
@@ -1845,6 +1846,18 @@ class Reader:
             open_nested=lambda scan: nested_popup.show_nested(self, scan),
             reveal_annotation=lambda revealed: self.set_annotation_hover(revealed=revealed),
             publish_engagement=lambda inside: setattr(self, "_mouse_in", inside),
+        )
+
+    @property
+    def click_ports(self) -> ClickPorts:
+        """What a click on a popup can do. Paired with `tip_ports` and `panel_ports`."""
+        return ClickPorts(
+            mine_token=self._mine_token,
+            mine_current=self.mine_current,
+            speak_hovered=self.speak_hovered,
+            click_preview=self._click_preview,
+            cursor=lambda: self._get("mouse-pos"),
+            paused=lambda: self._prop("pause"),
         )
 
     @property

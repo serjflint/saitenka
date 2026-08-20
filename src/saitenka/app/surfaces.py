@@ -112,7 +112,7 @@ def _tip_state(interaction: InteractionContext) -> SurfaceState:
 def _tip_click(reader: Reader, _x: float, _y: float) -> bool:
     """Terminal click handler: preview/nested/tip together (tooltip.on_click reads mouse-pos itself and
     routes preview→nested→tip with its diagnostic log). Returns True so routing stops here."""
-    tooltip.on_click(reader)
+    tooltip.on_click(reader.tip_ports, reader.panel_ports, reader.click_ports, reader.hover_inputs)
     return True
 
 

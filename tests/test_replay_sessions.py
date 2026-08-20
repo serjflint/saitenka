@@ -63,7 +63,7 @@ def _apply(reader, action: str, arg: object) -> None:
     elif action == "scroll":
         reader._scroll_tip(int(arg))  # type: ignore[arg-type]
     elif action == "navigate":
-        tooltip.navigate_tip(reader, _NAV_QUERY)
+        tooltip.navigate_tip(reader.tip_ports, reader.panel_ports, _NAV_QUERY)
     elif action == "back":
         tooltip.tip_back(reader.tip_ports)
     elif action == "open_nested":

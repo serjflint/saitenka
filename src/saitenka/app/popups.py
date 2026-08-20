@@ -95,6 +95,25 @@ class HoverActions:
 
 
 @dataclass(frozen=True, slots=True)
+class ClickPorts:
+    """What a click on a popup can do, and the two things it has to ask mpv first.
+
+    Separate from `HoverActions` because a click is not a hover decision: the hysteresis never mines
+    or speaks, and a value that carried both would be the union of two features rather than either.
+
+    `cursor` is `get`, not the `prop` `HoverInputs.mouse_pos` uses — deliberately, and they are not
+    interchangeable.
+    """
+
+    mine_token: Callable[..., None]
+    mine_current: Callable[[], None]
+    speak_hovered: Callable[[], None]
+    click_preview: Callable[[float, float], bool]
+    cursor: Callable[[], dict | None]
+    paused: Callable[[], object]
+
+
+@dataclass(frozen=True, slots=True)
 class HoverInputs:
     """What the hover observation reads: the cursor, and the rendered cue it can be over.
 

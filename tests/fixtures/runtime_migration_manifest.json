@@ -258,14 +258,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_click_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_click_tip"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_request_hover_metadata"
     ],
     [
@@ -282,19 +274,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::copy_click"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::hover_key"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::navigate_tip"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::on_click"
     ],
     [
       "reader-parameter",

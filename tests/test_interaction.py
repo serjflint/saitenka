@@ -381,7 +381,7 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     assert ui.tip_shown
     base = r.tip.view.state
 
-    tooltip.navigate_tip(r, "本命")  # what _click_tip routes a link to
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")  # what _click_tip routes a link to
     assert r.tip.view.state is not None and r.tip.view.state is not base
     assert len(r.tip.tip_nav) == 1, "the previous view is pushed for back"
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
@@ -398,7 +398,7 @@ def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
     ui = Driver(r)
     i = _content_word(r)
     ui.move_to_word(i)
-    tooltip.navigate_tip(r, "本命")
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
     assert r.tip.tip_nav
 
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
@@ -412,8 +412,8 @@ def test_esc_steps_back_through_navigation_then_closes():
     ui.move_to_word(_content_word(r))
     from saitenka.app import tooltip
 
-    tooltip.navigate_tip(r, "本命")
-    tooltip.navigate_tip(r, "読む")
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
     assert len(r.tip.tip_nav) == 2
 
     r._tip_close_or_back()

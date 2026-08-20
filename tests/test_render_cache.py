@@ -1033,7 +1033,7 @@ def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r, tok.surface)
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     request = submitter.calls[-1]["request"].request
     assert isinstance(request, tooltip_engaged.NavigateRequest) and request.query == tok.surface
     assert r.tip.tip_nav == []  # nothing pushed / swapped yet
@@ -1045,7 +1045,7 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.prefetch = False
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r, tok.surface)
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     assert r._engaged_tooltip.inflight is None
     assert len(r.tip.tip_nav) == 1  # synchronous swap pushed the previous view
 
@@ -1057,7 +1057,7 @@ def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
     old = r.tip.view.state
-    tooltip.navigate_tip(r, tok.surface)  # defer
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)  # defer
     submitter.finish()
     assert r.tip.view.state is not None and r.tip.view.state is not old  # navigated panel installed
     assert len(r.tip.tip_nav) == 1  # previous view pushed for Esc/back
@@ -1072,7 +1072,7 @@ def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, 
     tok = _base_tip_up(r)
     old = r.tip.view.state
 
-    tooltip.navigate_tip(r, tok.surface)
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert r.tip.view.state is not None and r.tip.view.state is not old
@@ -1108,7 +1108,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r, tok.surface)
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     call = submitter.calls.pop(0)
     result = tooltip_engaged.run_engaged(call["request"], threading.Event(), submitter.backend)
     # A word switch in the defer window → a genuinely different panel object under _tip_state.
@@ -1130,7 +1130,7 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r, tok.surface)
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
     r.tip.view.state = r._panel_for(
         r.tokens[j], r._inflected_surface(j), min_h=r.tip_scale.cap, mined=False

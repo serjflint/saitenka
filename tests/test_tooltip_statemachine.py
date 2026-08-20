@@ -132,7 +132,7 @@ class TooltipSession(RuleBasedStateMachine):
     @rule()
     def navigate(self) -> None:
         before = len(self.r.tip.tip_nav)
-        tooltip.navigate_tip(self.r, _NAV_QUERY)
+        tooltip.navigate_tip(self.r.tip_ports, self.r.panel_ports, _NAV_QUERY)
         assert len(self.r.tip.tip_nav) == before + 1  # the wildcard target always resolves
         assert (
             self.r.tip.view.key is None

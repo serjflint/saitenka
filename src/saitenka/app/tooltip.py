@@ -24,6 +24,7 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import timed
 from saitenka.app.popups import (
     NO_HOVER_METADATA,
+    ClickPorts,
     HoverActions,
     HoverInputs,
     HoverMetadata,
@@ -33,6 +34,7 @@ from saitenka.app.popups import (
 )
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
+    PanelPorts,
     compose_kind,
     decorate_and_upload,
     dispatch_hover,
@@ -378,24 +380,23 @@ def flash(ports: TipPorts, oid: int) -> None:
     )
 
 
-def copy_click(reader: Reader) -> None:
+def copy_click(ports: TipPorts, click: ClickPorts, inputs: HoverInputs) -> None:
     """Right-click — copy the word under the cursor (the inner scanned word if over the nested
     popup, else the hovered/pointed subtitle word), with a brief highlight flash."""
-    ports = reader.tip_ports
-    mp = reader._get("mouse-pos") or {}
+    mp = click.cursor() or {}
     x, y = mp.get("x", -1), mp.get("y", -1)
     if ports.tip.nest.rect is not None and in_rect(ports.tip.nest.rect, x, y):
         if ports.tip.nest.token is not None:
-            copy_token(reader._toast, ports.tip.nest.token)
+            copy_token(ports.toast, ports.tip.nest.token)
             flash(ports, OverlayId.NESTED)
         return
     if ports.tip.view.rect is not None and in_rect(ports.tip.view.rect, x, y):
-        copy_hovered(reader._toast, reader.tokens, reader.hover)
+        copy_hovered(ports.toast, inputs.tokens, inputs.hover())
         flash(ports, OverlayId.TIP)
         return
-    idx = reader._hit(x, y) if reader.tokens else -1  # not over a popup → the subtitle word, if any
+    idx = inputs.hit(x, y) if inputs.tokens else -1  # not over a popup → the subtitle word, if any
     if idx >= 0:
-        copy_token(reader._toast, reader.tokens[idx])
+        copy_token(ports.toast, inputs.tokens[idx])
 
 
 # --- header hit-testing (⊕ / 🔊, shared by base tooltip and nested popup) -------------------------
@@ -509,88 +510,80 @@ def mine_index(query: object) -> int | None:
         return None
 
 
-def _click_nested(reader: Reader, x: float, y: float) -> bool:
+def _click_nested(
+    ports: TipPorts, panel: PanelPorts, click: ClickPorts, x: float, y: float
+) -> bool:
     """Handle a click landing on the nested popup. Returns True if it did (regardless of what, if
     anything, it hit) so the caller doesn't fall through to the base tooltip underneath."""
-    if reader.tip.nest.rect is None or not in_rect(reader.tip.nest.rect, x, y):
+    nest = ports.tip.nest
+    if nest.rect is None or not in_rect(nest.rect, x, y):
         return False
-    if (
-        hit_header_add(
-            chrome_for(reader.tip.nest, scale=reader.tip_scale, style=reader.panel_style), x, y
-        )
-        and reader.tip.nest.token is not None
-    ):
-        reader._mine_token(reader.tip.nest.token)  # ⊕ → mine the *inner* (scanned) word
-    elif (
-        hit_header_speaker(
-            chrome_for(reader.tip.nest, scale=reader.tip_scale, style=reader.panel_style), x, y
-        )
-        and reader.tip.nest.state
-    ):
-        speak(reader.tip.nest.state.reading)  # 🔊 → read the inner word aloud
+    chrome = chrome_for(nest, scale=ports.scale, style=panel.style)
+    if hit_header_add(chrome, x, y) and nest.token is not None:
+        click.mine_token(nest.token)  # ⊕ → mine the *inner* (scanned) word
+    elif hit_header_speaker(chrome, x, y) and nest.state:
+        speak(nest.state.reading)  # 🔊 → read the inner word aloud
     else:
-        lb = link_hit_at(reader.tip, reader.tip_scale.raster, x, y, nested=True)
+        lb = link_hit_at(ports.tip, ports.scale.raster, x, y, nested=True)
         if lb is not None and not _mine_link(
-            reader.dict_set,
-            reader.tip.hover.terms,
-            reader._mine_token,
-            lb,
-            reader.tip.nest.token,
+            panel.style.dict_set, ports.tip.hover.terms, click.mine_token, lb, nest.token
         ):
-            nested_popup.open_link(
-                reader.tip_ports,
-                reader.panel_ports,
-                lb,
-                reader.tip.nest.xy,
-                reader.tip.nest.scroll,
-            )  # cross-ref → navigate
+            nested_popup.open_link(ports, panel, lb, nest.xy, nest.scroll)  # cross-ref → navigate
     return True
 
 
-def _click_tip(reader: Reader, x: float, y: float) -> bool:
+def _click_tip(
+    ports: TipPorts,
+    panel: PanelPorts,
+    click: ClickPorts,
+    inputs: HoverInputs,
+    x: float,
+    y: float,
+) -> bool:
     """Handle a click landing on the base tooltip. Returns True if it did."""
-    if reader.tip.view.rect is None or not in_rect(reader.tip.view.rect, x, y):
+    if ports.tip.view.rect is None or not in_rect(ports.tip.view.rect, x, y):
         return False
     chrome = chrome_for(
-        reader.tip.view, scale=reader.tip_scale, style=reader.panel_style
+        ports.tip.view, scale=ports.scale, style=panel.style
     )  # one snapshot: both buttons, same geometry
     if hit_header_add(chrome, x, y):
-        reader.mine_current()  # ⊕ → mine the hovered word into Anki
+        click.mine_current()  # ⊕ → mine the hovered word into Anki
         return True
     if hit_header_speaker(chrome, x, y):
-        reader.speak_hovered()  # 🔊 → hear the word (TTS)
+        click.speak_hovered()  # 🔊 → hear the word (TTS)
         return True
-    lb = link_hit_at(reader.tip, reader.tip_scale.raster, x, y, nested=False)
+    lb = link_hit_at(ports.tip, ports.scale.raster, x, y, nested=False)
     if lb is not None:
-        tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
+        hovered = inputs.hover()
+        tok = inputs.tokens[hovered] if 0 <= hovered < len(inputs.tokens) else None
         # stacked entry ⊕ → mine that entry
-        if _mine_link(reader.dict_set, reader.tip.hover.terms, reader._mine_token, lb, tok):
+        if _mine_link(panel.style.dict_set, ports.tip.hover.terms, click.mine_token, lb, tok):
             log.debug("tip click → mine link %r", lb.query)
         else:
             # A headword kanji (``kanji:<ch>``) and a cross-reference both navigate the base tooltip IN
             # PLACE (Yomitan; Esc/back returns). A click must NEVER spawn a nested popup — that popup is
             # hover-governed, so it dismisses itself unless the cursor chases it into it.
             log.debug("tip click → navigate %r", lb.query)
-            navigate_tip(reader, lb.query)
+            navigate_tip(ports, panel, lb.query)
     else:
         # No link under the cursor: a single-ideograph scan cell opens its kanji entry. If this fires on
         # a headword kanji click, the headword's kanji LinkBox was MISSED by the base link hit-test (geometry).
         log.debug("tip click → no link at (%.0f,%.0f); kanji fallback", x, y)
-        nested_popup.click_kanji_fallback(reader.tip_ports, reader.panel_ports, x, y)
+        nested_popup.click_kanji_fallback(ports, panel, x, y)
     return True
 
 
-def on_click(reader: Reader) -> None:
+def on_click(ports: TipPorts, panel: PanelPorts, click: ClickPorts, inputs: HoverInputs) -> None:
     # Left-click drives buttons only — the card preview's ✕/screenshot/▶, and each popup's ⊕/🔊.
     # Clicking an empty area does NOTHING: audio must not fire on a stray body click.
-    mp = reader._get("mouse-pos") or {}
+    mp = click.cursor() or {}
     x, y = mp.get("x", -1), mp.get("y", -1)
-    in_tip = reader.tip.view.rect is not None and in_rect(reader.tip.view.rect, x, y)
-    if reader._click_preview(x, y):
+    in_tip = ports.tip.view.rect is not None and in_rect(ports.tip.view.rect, x, y)
+    if click.click_preview(x, y):
         captured = "preview"
-    elif _click_nested(reader, x, y):  # the nested popup sits on top → test it first
+    elif _click_nested(ports, panel, click, x, y):  # the nested popup sits on top → test it first
         captured = "nested"
-    elif _click_tip(reader, x, y):
+    elif _click_tip(ports, panel, click, inputs, x, y):
         captured = "tip"
     else:
         captured = "none"  # fell through — nothing under the click
@@ -603,9 +596,9 @@ def on_click(reader: Reader) -> None:
         bool(mp.get("hover")),
         in_tip,
         captured,
-        reader.tip.view.rect,
-        reader.tip.paused_by_tip,
-        reader._prop("pause"),
+        ports.tip.view.rect,
+        ports.tip.paused_by_tip,
+        click.paused(),
     )
 
 
@@ -989,7 +982,7 @@ def _navigated_panel(style: PanelStyle, query: str) -> Panel | None:
     return rows_panel(style, entry, reading)
 
 
-def navigate_tip(reader: Reader, query: str) -> None:
+def navigate_tip(ports: TipPorts, panel: PanelPorts, query: str) -> None:
     """Replace the base tooltip's content with the entry for ``query`` (a clicked cross-reference),
     pushing the current view onto the back-stack (Esc/back returns). The popup stays put — same anchor,
     same TIP slot — so this reads as an in-place navigation, not a new floating popup.
@@ -998,14 +991,13 @@ def navigate_tip(reader: Reader, query: str) -> None:
     the click tick is a synchronous getmask2 raster (the ``tip_compose[clicked]`` tail). With a worker
     running, enqueue it — the worker builds + warms the bands, the tick swaps from warm bands (a cheap
     assemble, no raster). No worker → the synchronous path (unchanged)."""
-    ports = reader.tip_ports
-    if reader.dict_set is None:
+    if panel.style.dict_set is None:
         return
     if ports.tip.view.state is not None:
         request = tooltip_engaged.NavigateRequest(query, id(ports.tip.view.state))
-        if reader._request_engaged_tooltip(request):
+        if ports.request_engaged_tooltip(request):
             return
-    st = _navigated_panel(reader.panel_style, query)
+    st = _navigated_panel(panel.style, query)
     if st is None:
         return
     st.render_head(ports.scale.cap)  # warm the head so full_height sizes the viewport correctly
