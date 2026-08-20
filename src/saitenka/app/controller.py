@@ -102,7 +102,7 @@ from saitenka.app.bindings import (
     active_bindings,
     section_contents,
 )
-from saitenka.app.close_ledger import CloseLedger, CloseStep
+from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_for
 from saitenka.app.config import ReaderOptions
 from saitenka.app.intents import Announce, DismissHover
 from saitenka.app.interaction_intents import InteractionCommand
@@ -666,6 +666,9 @@ class Reader:
             BACKLOG_RESOURCE,
             MINED_RESOURCE,
             SESSION_SUMMARY_RESOURCE,
+            SUBTITLE_CLEAR_RESOURCE,
+            SUBTITLE_CLOSE_RESOURCE,
+            SUBTITLE_DEACTIVATE_RESOURCE,
         )
 
         self._runtime_owns_stores = all(
@@ -682,6 +685,26 @@ class Reader:
                 ),
                 ipc.register_session_resource(
                     MINED_RESOURCE, session_resources.Retiring(lambda: self._close_mined_store())
+                ),
+            )
+        )
+        # The subtitle raster, retired at `RENDERING`. `native_geometry` is installed after this
+        # point, so every one of these resolves it when it closes rather than now.
+        self._runtime_owns_subtitle_rendering = all(
+            (
+                ipc.register_session_resource(
+                    SUBTITLE_DEACTIVATE_RESOURCE,
+                    session_resources.Retiring(
+                        lambda: self.subtitle_pipeline.deactivate(self._subtitle_target())
+                    ),
+                ),
+                ipc.register_session_resource(
+                    SUBTITLE_CLEAR_RESOURCE,
+                    session_resources.Retiring(lambda: self._clear_subtitle_pixels()),
+                ),
+                ipc.register_session_resource(
+                    SUBTITLE_CLOSE_RESOURCE,
+                    session_resources.Retiring(lambda: self._close_subtitle_raster()),
                 ),
             )
         )
@@ -3834,7 +3857,7 @@ class Reader:
                     lambda: self._mouse.release(),
                     # `present` skips on None, not on falsy — a `not owns` bool would keep the
                     # fallback running beside the effect, which is the thing it is a fallback for.
-                    lambda: None if self._runtime_owns_input_capture else self._mouse,
+                    fallback_for(lambda: self._mouse, owned=self._runtime_owns_input_capture),
                 ),
                 # The runtime's own close participants, in the position the Reader used to run
                 # them: it announces, the session reducer emits their effects. Delivered rather
@@ -3889,23 +3912,28 @@ class Reader:
                 # No refresh may land after the provider closes, nor a settle deadline outlive it.
                 CloseStep("geometry-refresh", lambda: self.retire_geometry_refresh()),
                 CloseStep("settle-window", lambda: self.retire_settle_window()),
+                # Retired by the `RENDERING` phase below when a runtime owns the raster; these
+                # three are the fallback for a Reader that has none. A step each, so a failure in
+                # one isolates — which is what `_retire` reproduces on the migrated path.
                 CloseStep(
                     "subtitle-deactivate",
                     lambda: self.subtitle_pipeline.deactivate(self._subtitle_target()),
+                    fallback_for(
+                        lambda: self.subtitle_pipeline, owned=self._runtime_owns_subtitle_rendering
+                    ),
                 ),
-                # The native path clears through the pipeline and closes geometry; the legacy path
-                # closes the pipeline itself. A step each, so a failure in either one isolates.
                 CloseStep(
                     "subtitle-clear",
-                    lambda: self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc),
-                    lambda: self.native_geometry,
+                    self._clear_subtitle_pixels,
+                    fallback_for(
+                        lambda: self.native_geometry, owned=self._runtime_owns_subtitle_rendering
+                    ),
                 ),
                 CloseStep(
                     "subtitle-close",
-                    lambda: (
-                        self.native_geometry.close()
-                        if self.native_geometry is not None
-                        else self.subtitle_pipeline.close()
+                    self._close_subtitle_raster,
+                    fallback_for(
+                        lambda: self.subtitle_pipeline, owned=self._runtime_owns_subtitle_rendering
                     ),
                 ),
                 CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
@@ -3915,17 +3943,17 @@ class Reader:
                 CloseStep(
                     "session-stats",
                     lambda: self._report_session(self.finish_session_stats()),
-                    lambda: None if self._runtime_owns_stores else self.session,
+                    fallback_for(lambda: self.session, owned=self._runtime_owns_stores),
                 ),
                 CloseStep(
                     "backlog-store",
                     self._close_backlog_store,
-                    lambda: None if self._runtime_owns_stores else self._backlog_store,
+                    fallback_for(lambda: self._backlog_store, owned=self._runtime_owns_stores),
                 ),
                 CloseStep(
                     "mined-store",
                     self._close_mined_store,
-                    lambda: None if self._runtime_owns_stores else self._mined_store,
+                    fallback_for(lambda: self._mined_store, owned=self._runtime_owns_stores),
                 ),
                 CloseStep("phase:stores", lambda: self._announce_close(ClosePhase.STORES)),
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
@@ -3939,7 +3967,7 @@ class Reader:
                 CloseStep(
                     "transport",
                     lambda: self.ov.close(),
-                    lambda: None if self._runtime_owns_surfaces else self.ov,
+                    fallback_for(lambda: self.ov, owned=self._runtime_owns_surfaces),
                 ),
                 # Per-session scratch dir, once nothing can still write to it.
                 CloseStep("temporary-artifacts", lambda: self._retire_artifacts()),
@@ -4008,6 +4036,18 @@ class Reader:
         """Close the current episode's row and retire the recorder. Idempotent."""
         recorder, self._session_recorder = self._session_recorder, None
         return session_stats.finish(recorder, self.analysis.current)
+
+    def _clear_subtitle_pixels(self) -> None:
+        """The native path clears through the pipeline; the legacy path has nothing to clear."""
+        if self.native_geometry is not None:
+            self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
+
+    def _close_subtitle_raster(self) -> None:
+        """Whichever of the provider and the pipeline owns the raster closes it, never both."""
+        if self.native_geometry is not None:
+            self.native_geometry.close()
+        else:
+            self.subtitle_pipeline.close()
 
     def _close_backlog_store(self) -> None:
         if self._backlog_store is not None:

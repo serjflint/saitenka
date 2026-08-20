@@ -12,6 +12,7 @@ from saitenka.runtime.effects import (
     CloseSessionOverlay,
     CloseSessionStores,
     CloseSessionSurfaces,
+    CloseSubtitleRendering,
     CoreControl,
     DetachDiagnostics,
     DispatchedEffect,
@@ -192,6 +193,7 @@ class SessionReactor[StateT]:
             effect,
             DetachDiagnostics
             | ReleaseInputCapture
+            | CloseSubtitleRendering
             | CloseSessionStores
             | CloseSessionSurfaces
             | CloseSessionOverlay

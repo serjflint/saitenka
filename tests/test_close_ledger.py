@@ -583,3 +583,46 @@ def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
 
     assert closed == ["backlog", "mined"]
     assert ledger.report() is None
+
+
+def test_a_runtime_owned_session_closes_the_subtitle_raster_exactly_once() -> None:
+    """The Reader keeps the three steps as the no-runtime fallback; both paths must not run."""
+    from util import runtime_gateway
+
+    from saitenka.app.session_routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    closed: list[str] = []
+    reader._clear_subtitle_pixels = lambda: closed.append("clear")  # type: ignore[method-assign]
+    reader._close_subtitle_raster = lambda: closed.append("close")  # type: ignore[method-assign]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert closed == ["clear", "close"]
+    assert ledger.report() is None
+
+
+def test_every_migrated_phase_retires_something_and_no_two_share_a_participant() -> None:
+    """The whole close table, as one assertion: a duty lands in exactly one phase.
+
+    Two phases naming the same resource would retire it twice — once early, against collaborators
+    that are still live — and no single-duty test can see that.
+    """
+    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+    from saitenka.app.session_routes import _RESOURCE_OF
+    from saitenka.runtime.events import ClosePhase, SessionClosing
+
+    state = LifecycleCloseState()
+    seen: list[str] = []
+    for phase in ClosePhase:
+        result = reduce_lifecycle_close(state, SessionClosing(phase))
+        state = result.state
+        for effect in result.effects:
+            seen.extend(_RESOURCE_OF.get(type(effect), ()))
+
+    assert len(seen) == len(set(seen))

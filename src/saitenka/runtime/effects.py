@@ -170,6 +170,15 @@ class ReleaseInputCapture:
 
 
 @dataclass(frozen=True, slots=True)
+class CloseSubtitleRendering:
+    """Give the subtitle pixels back and close the geometry provider, once no lane can render.
+
+    Three participants, isolated by the dispatcher: giving the pixels back, clearing them, and
+    closing whichever of the provider or the pipeline owns the raster.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class CloseSessionStores:
     """Flush and close the session's persistent writers, after nothing renders and before the
     surfaces go. One effect for the three of them because they retire together — the dispatcher
@@ -187,7 +196,9 @@ type LifecycleEffect = (
     StopSession
     | DetachDiagnostics
     | ReleaseInputCapture
+    | CloseSubtitleRendering
     | CloseSessionStores
+    | CloseSubtitleRendering
     | CloseSessionStores
     | CloseSessionSurfaces
     | CloseSessionOverlay
@@ -200,7 +211,9 @@ type LifecycleEffect = (
 type FireAndForget = (
     DetachDiagnostics
     | ReleaseInputCapture
+    | CloseSubtitleRendering
     | CloseSessionStores
+    | CloseSubtitleRendering
     | CloseSessionStores
     | CloseSessionSurfaces
     | CloseSessionOverlay

@@ -24,6 +24,7 @@ from saitenka.runtime.effects import (
     CloseSessionOverlay,
     CloseSessionStores,
     CloseSessionSurfaces,
+    CloseSubtitleRendering,
     DetachDiagnostics,
     EffectOutcome,
     ExpireEffect,
@@ -98,6 +99,9 @@ INPUT_CAPTURE_RESOURCE = "input-capture"
 SESSION_SUMMARY_RESOURCE = "session-summary"
 BACKLOG_RESOURCE = "backlog-store"
 MINED_RESOURCE = "mined-store"
+SUBTITLE_DEACTIVATE_RESOURCE = "subtitle-deactivate"
+SUBTITLE_CLEAR_RESOURCE = "subtitle-clear"
+SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
 
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
@@ -127,6 +131,11 @@ _RESOURCE_OF: dict[type, tuple[str, ...]] = {
     CloseSessionOverlay: (OVERLAY_RESOURCE,),
     ReleaseInputCapture: (INPUT_CAPTURE_RESOURCE,),
     CloseSessionStores: (SESSION_SUMMARY_RESOURCE, BACKLOG_RESOURCE, MINED_RESOURCE),
+    CloseSubtitleRendering: (
+        SUBTITLE_DEACTIVATE_RESOURCE,
+        SUBTITLE_CLEAR_RESOURCE,
+        SUBTITLE_CLOSE_RESOURCE,
+    ),
 }
 
 

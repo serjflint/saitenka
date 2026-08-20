@@ -45,6 +45,20 @@ class CloseStep:
     present: Callable[[], object] | None = None
 
 
+def _absent() -> None:
+    """A participant the runtime already retired — `present` skips on None."""
+    return
+
+
+def fallback_for(present: Callable[[], object], *, owned: bool) -> Callable[[], object]:
+    """`CloseStep.present` for a step the runtime performs when a runtime owns the session.
+
+    `present` skips on `None`, not on falsy, so "the runtime owns this" has to *be* None: a
+    `not owned` bool keeps the fallback running beside the effect it is a fallback for.
+    """
+    return _absent if owned else present
+
+
 @dataclass(slots=True)
 class CloseLedger:
     """Records what happened to each participant. Truthy failures mean close was not clean."""

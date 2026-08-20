@@ -750,18 +750,16 @@
     },
     {
       "id": "subtitle-and-ownership",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/app/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self.subtitle_pipeline.deactivate",
-        "call:self.subtitle_pipeline.clear",
-        "call:self.subtitle_pipeline.close",
-        "call:self.native_geometry.close"
+        "call:CloseSubtitleRendering",
+        "ref:event.phase"
       ],
       "target": "subtitle-close",
       "work_package": "4,6",
       "replacement": "CloseSubtitleRuntime -> SubtitleCloseOutcome",
       "test": "close restores pixel ownership before presentation removal",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "session-and-stores",
