@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
-from saitenka.app import nested_popup, tooltip_engaged
+from saitenka.app import hover_machine, nested_popup, tooltip_engaged
 from saitenka.app.hover_metadata import HoverMetadataKey
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.media import copy_clipboard, speak
@@ -86,142 +86,62 @@ def _hover_targets(mx: float, my: float, *, inside: bool, tip_rect, nest_rect, h
     return over_word, over_tip, over_nest
 
 
-def _open_scan_popup(reader: Reader, scan) -> None:
-    """A scan cell is under the cursor: open its nested popup once the dwell elapses.
-
-    Fails closed. The dwell exists so that dragging across the panel does not spawn a popup per
-    cell passed over; with no timer to wait on, opening instantly would produce exactly that, so
-    the popup stays shut instead.
-    """
-    reader.cancel_hover_deadline(LifecycleTimerKind.NESTED_HIDE)
-    reader._nest.hide_pending = False
-    if scan.text == reader._scan_target:
-        return  # this cell's dwell is already armed, or already resolved
-    reader._scan_target = scan.text
-    if reader._nest.tail == scan.text:
-        return  # already shown
-
-    def opened() -> None:
-        if reader._scan_target == scan.text and reader._nest.tail != scan.text:
-            nested_popup.show_nested(reader, scan)
-
-    reader.arm_hover_deadline(LifecycleTimerKind.SCAN_OPEN, reader.scan_delay, opened)
-
-
-def _linger_nested(reader: Reader) -> None:
-    """No scan cell under the cursor: let an already-open nested popup linger, then hide it.
-
-    Fails closed: a hide that can never fire leaves the popup on screen for the rest of the
-    session, so with no timer it hides at once and only the linger is lost.
-    """
-    reader._scan_target = None
-    reader.cancel_hover_deadline(LifecycleTimerKind.SCAN_OPEN)
-    if reader._nest.state is None or reader._nest.hide_pending:
-        return
-
-    def hidden() -> None:
-        reader._nest.hide_pending = False
-        nested_popup.hide_nested(reader)
-
-    if reader.arm_hover_deadline(LifecycleTimerKind.NESTED_HIDE, reader.hide_delay, hidden):
-        reader._nest.hide_pending = True
-    else:
-        nested_popup.hide_nested(reader)
-
-
-def _update_nested_hover(
-    reader: Reader, mx: float, my: float, *, over_tip: bool, over_nest: bool
-) -> None:
-    """Scan a word inside the tooltip; keep its popup alive while engaged. A cross-reference LINK is
-    click-to-open, NOT hover-scan — so scrolling past / reading a link doesn't spawn scan popups
-    that clutter the panel."""
-    scan = (
-        scan_hit(reader.tip, reader._raster_scale, mx, my) if (over_tip and not over_nest) else None
+def hysteresis_of(tip: TooltipState) -> hover_machine.HoverState:
+    """The hysteresis the machine owns, read off its storage. Four mutable fields, one value."""
+    return hover_machine.HoverState(
+        word_target=tip.word_target,
+        scan_target=tip.scan_target,
+        tip_hide_pending=tip.hide_pending,
+        nest_hide_pending=tip.nest.hide_pending,
     )
-    if scan is not None and reader._tip_link_hit(mx, my):
-        scan = None
-    if scan is not None:
-        _open_scan_popup(reader, scan)
-    elif over_nest:
-        reader._scan_target = None
-        reader.cancel_hover_deadline(LifecycleTimerKind.NESTED_HIDE)
-        reader._nest.hide_pending = False
-    else:
-        _linger_nested(reader)
 
 
-def _switch_word_hover(reader: Reader, over_word: int) -> None:
-    """First open is instant, but SWITCHING to a different word needs a brief dwell — so dragging the
-    cursor up to the tooltip across the OTHER line of a two-line sub doesn't hijack it onto every
-    word it passes over. Only resting on a new word switches.
+def _store(tip: TooltipState, state: hover_machine.HoverState) -> None:
+    tip.word_target = state.word_target
+    tip.scan_target = state.scan_target
+    tip.hide_pending = state.tip_hide_pending
+    tip.nest.hide_pending = state.nest_hide_pending
 
-    Fails open, unlike the hides: the dwell only refines *which* word wins, so with no timer the
-    switch happens at once. Never switching would strand the tooltip on a word the cursor left.
+
+def apply_hover_turn(reader: Reader, turn: hover_machine.HoverTurn) -> None:
+    """Store the turn's state, then perform its decisions — in that order, because a decision reads
+    the state it was decided from (an armed dwell re-checks the target it was armed for)."""
+    _store(reader.tip, turn.state)
+    for decision in turn.decisions:
+        _perform(reader, decision)
+
+
+def _perform(reader: Reader, decision: hover_machine.Decision) -> None:
+    match decision:
+        case hover_machine.Cancel(kind):
+            reader.cancel_hover_deadline(kind)
+        case hover_machine.Arm(kind, delay, intent):
+            if not reader.arm_hover_deadline(kind, delay, lambda: _dwell_elapsed(reader, intent)):
+                apply_hover_turn(reader, hover_machine.refused(hysteresis_of(reader.tip), intent))
+        case hover_machine.ShowWord(index):
+            reader.set_hover(index)
+        case hover_machine.RetireWord():
+            reader.retire_hover()
+        case hover_machine.OpenNested(scan):
+            nested_popup.show_nested(reader, scan)
+        case hover_machine.CloseNested():
+            nested_popup.hide_nested(reader)
+
+
+def _dwell_elapsed(reader: Reader, intent: hover_machine.Intent) -> None:
+    apply_hover_turn(
+        reader,
+        hover_machine.elapsed(hysteresis_of(reader.tip), intent, nest_tail=reader._nest.tail),
+    )
+
+
+def observe_hover(reader: Reader, mx: float, my: float, *, inside: bool):
+    """What the cursor is over, as the machine's input. Returns the observation and the raw target
+    triple, which the instrumented path labels its span with.
+
+    The scan cell is link-filtered here: a cross-reference LINK is click-to-open, NOT hover-scan, so
+    reading past one must not spawn scan popups that clutter the panel.
     """
-    if over_word == reader.hover:
-        reader._word_target = None
-        reader.cancel_hover_deadline(LifecycleTimerKind.HOVER_SWITCH)
-        return
-    if reader.hover < 0:
-        reader.set_hover(over_word)  # nothing open yet: no hijack to guard against
-        reader._word_target = None
-        return
-    if over_word == reader._word_target:
-        return  # this word's dwell is already armed
-    reader._word_target = over_word
-
-    def switched() -> None:
-        if reader._word_target == over_word:
-            reader.set_hover(over_word)
-            reader._word_target = None
-
-    if not reader.arm_hover_deadline(
-        LifecycleTimerKind.HOVER_SWITCH, reader.hover_switch_delay, switched
-    ):
-        switched()
-
-
-def _linger_word_hover(reader: Reader) -> None:
-    """No word under the cursor: let the base tooltip linger, then hide it.
-
-    Fails closed, for the same reason as the nested popup: a tooltip whose hide can never fire
-    stays on screen for the rest of the session.
-    """
-    reader._word_target = None
-    reader.cancel_hover_deadline(LifecycleTimerKind.HOVER_SWITCH)
-    if reader._hide_pending:
-        return
-
-    def hidden() -> None:
-        reader._hide_pending = False
-        reader.retire_hover()
-
-    if reader.arm_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE, reader.hide_delay, hidden):
-        reader._hide_pending = True
-    else:
-        reader.retire_hover()
-
-
-def _update_word_hover(reader: Reader, over_word: int, *, over_tip: bool, over_nest: bool) -> None:
-    """Base tooltip: also kept alive while the cursor is on the nested popup."""
-    if over_word >= 0:
-        _switch_word_hover(reader, over_word)
-        reader.cancel_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE)
-        reader._hide_pending = False
-    elif over_tip or over_nest:
-        reader.cancel_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE)  # keep it alive
-        reader._hide_pending = False
-        reader._word_target = None
-    elif reader.hover != -1:
-        _linger_word_hover(reader)
-
-
-def update_hover_impl(reader: Reader) -> None:
-    mp = reader._prop("mouse-pos") or {}
-    inside = bool(mp.get("hover"))
-    reader._mouse_in = inside  # engagement signal for prefetch
-    mx, my = mp.get("x", -1), mp.get("y", -1)
-    reader._last_mouse = (mx, my)
     over_word, over_tip, over_nest = _hover_targets(
         mx,
         my,
@@ -230,27 +150,52 @@ def update_hover_impl(reader: Reader) -> None:
         nest_rect=reader._nest.rect,
         hit=lambda x, y: reader._hit(x, y) if reader.tokens else -1,
     )
+    scan = (
+        scan_hit(reader.tip, reader._raster_scale, mx, my) if (over_tip and not over_nest) else None
+    )
+    if scan is not None and reader._tip_link_hit(mx, my):
+        scan = None
+    return (
+        hover_machine.HoverObservation(
+            hover=reader.hover,
+            word=over_word,
+            over_tip=over_tip,
+            over_nest=over_nest,
+            scan=scan,
+            nest_open=reader._nest.state is not None,
+            nest_tail=reader._nest.tail,
+        ),
+        (over_word, over_tip, over_nest),
+    )
+
+
+def _delays(reader: Reader) -> hover_machine.HoverDelays:
+    return hover_machine.HoverDelays(
+        scan=reader.scan_delay, hide=reader.hide_delay, switch=reader.hover_switch_delay
+    )
+
+
+def _read_mouse(reader: Reader) -> tuple[float, float, bool]:
+    mp = reader._prop("mouse-pos") or {}
+    inside = bool(mp.get("hover"))
+    reader._mouse_in = inside  # engagement signal for prefetch
+    mx, my = mp.get("x", -1), mp.get("y", -1)
+    reader._last_mouse = (mx, my)
+    return mx, my, inside
+
+
+def update_hover_impl(reader: Reader) -> None:
+    mx, my, inside = _read_mouse(reader)
+    obs, (over_word, _tip, _nest) = observe_hover(reader, mx, my, inside=inside)
     reader.set_annotation_hover(revealed=over_word >= 0)
-    _update_nested_hover(reader, mx, my, over_tip=over_tip, over_nest=over_nest)
-    _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
+    apply_hover_turn(reader, hover_machine.decide(hysteresis_of(reader.tip), obs, _delays(reader)))
 
 
 def update_hover_instrumented(reader: Reader) -> None:
     """Sampled split between pure target lookup and transition/tooltip work."""
-    mp = reader._prop("mouse-pos") or {}
-    inside = bool(mp.get("hover"))
-    reader._mouse_in = inside
-    mx, my = mp.get("x", -1), mp.get("y", -1)
-    reader._last_mouse = (mx, my)
+    mx, my, inside = _read_mouse(reader)
     with otel_metrics.traced("hover_target_lookup") as lookup:
-        over_word, over_tip, over_nest = _hover_targets(
-            mx,
-            my,
-            inside=inside,
-            tip_rect=reader._tip_rect,
-            nest_rect=reader._nest.rect,
-            hit=lambda x, y: reader._hit(x, y) if reader.tokens else -1,
-        )
+        obs, (over_word, over_tip, over_nest) = observe_hover(reader, mx, my, inside=inside)
         lookup.set(
             "region",
             "nested"
@@ -266,8 +211,9 @@ def update_hover_instrumented(reader: Reader) -> None:
     with otel_metrics.traced("hover_transition") as transition:
         previous = reader.hover
         reader.set_annotation_hover(revealed=over_word >= 0)
-        _update_nested_hover(reader, mx, my, over_tip=over_tip, over_nest=over_nest)
-        _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
+        apply_hover_turn(
+            reader, hover_machine.decide(hysteresis_of(reader.tip), obs, _delays(reader))
+        )
         transition.set("changed", previous != reader.hover)
         transition.set(
             "cue_state",

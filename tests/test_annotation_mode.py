@@ -93,12 +93,13 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
         "set_annotation_hover",
         lambda *, revealed: calls.append(("style", revealed)),
     )
-    monkeypatch.setattr(reader, "set_hover", lambda index: calls.append(("tooltip", index)))
-
     update_hover_impl(reader)
 
     assert calls == [("style", True)]
+    # The switch is a decision the dwell has not made yet: the target is armed, the tooltip has not
+    # moved. No stub stands in for the build — nothing calls it.
     assert reader._word_target == 1
+    assert reader.hover == 0
 
 
 def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch):

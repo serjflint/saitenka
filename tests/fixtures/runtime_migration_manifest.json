@@ -410,15 +410,15 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/tooltip.py::_delays"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::_dwell_elapsed"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/tooltip.py::_install_navigated"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_linger_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_linger_word_hover"
     ],
     [
       "reader-parameter",
@@ -426,11 +426,15 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_open_scan_popup"
+      "src/saitenka/app/tooltip.py::_paint_from_cache"
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_paint_from_cache"
+      "src/saitenka/app/tooltip.py::_perform"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::_read_mouse"
     ],
     [
       "reader-parameter",
@@ -439,18 +443,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::_restore_tip_view"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_switch_word_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_update_nested_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_update_word_hover"
     ],
     [
       "reader-parameter",
@@ -467,6 +459,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::apply_hover_metadata"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::apply_hover_turn"
     ],
     [
       "reader-parameter",
@@ -487,6 +483,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::navigate_tip"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::observe_hover"
     ],
     [
       "reader-parameter",
