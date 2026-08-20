@@ -44,3 +44,30 @@ def test_it_reads_as_the_set_it_replaced() -> None:
     assert frozenset(mined) == {"読む", "書く"}
     assert mined == {"読む", "書く"}
     assert mined != {"読む"}
+
+
+def test_a_snapshot_is_a_value_that_a_later_mine_cannot_move() -> None:
+    """The copy readers hold must not track the set — panel keys are compared against it later.
+
+    `frozenset(a_plain_set)` used to give this for free. Reading through `MinedSet` goes via Python
+    `__iter__`, so the copy is the class's job now, and taking it under the lock is what stops a
+    concurrent mine resizing the set mid-iteration.
+    """
+    mined = MinedSet({"猫"})
+    held = mined.snapshot()
+
+    mined.add("犬")
+
+    assert held == {"猫"}
+    assert mined.snapshot() == {"猫", "犬"}
+
+
+def test_iteration_does_not_raise_when_a_write_lands_during_it() -> None:
+    """A writer mid-iteration is a resize; without the snapshot this is `Set changed size`."""
+    mined = MinedSet(str(n) for n in range(500))
+    seen = 0
+    for _ in mined:
+        seen += 1
+        mined.add(f"new-{seen}")  # noqa: B909  # the mutation IS the assertion here
+
+    assert seen == 500  # the loop walked the snapshot, not the live set

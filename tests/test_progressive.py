@@ -8,7 +8,7 @@ import time
 from concurrent.futures import Future
 
 import pytest
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, await_ready, runtime_gateway
 
 from saitenka import otel_metrics
 from saitenka.app.bindings import SUB_PICKER_MSG
@@ -62,11 +62,7 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
     r.mine_cfg = object()
     try:
         r._request_mined_seed()
-        for _ in range(200):
-            r._drain_events()
-            if r._mined:
-                break
-            time.sleep(0.001)
+        await_ready(lambda: bool(r._mined), "mined seed never published", pump=r._drain_events)
 
         assert r._mined == {"猫"}
         assert r._mined.generation == 1
@@ -102,15 +98,13 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
         r._mined_seed_inflight = False
         r.anki = new_anki
         r._request_mined_seed()
-        for _ in range(200):
-            r._drain_events()
-            if r._mined:
-                break
-            time.sleep(0.001)
+        await_ready(lambda: bool(r._mined), "mined seed never published", pump=r._drain_events)
 
         assert r._mined == {"新しい"}
         assert r._mined.generation == 1
         release.set()
+        # Not a wait: drain repeatedly to give a late result the chance to arrive, then prove it
+        # did not. A deadline helper would return on the first pass and assert nothing.
         for _ in range(200):
             r._drain_events()
             time.sleep(0.001)
@@ -140,21 +134,17 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
     monkeypatch.setattr(Miner, "mined_expressions", fetch)
     try:
         r._request_mined_seed()
-        for _ in range(200):
-            r._drain_events()
-            if not r._mined_seed_inflight:
-                break
-            time.sleep(0.001)
+        await_ready(
+            lambda: not r._mined_seed_inflight,
+            "the failed seed never settled",
+            pump=r._drain_events,
+        )
         assert r._mined == set()
 
         # The backoff is a named deadline now, so firing it *is* the retry — and asserting it was
         # armed proves the failure path scheduled one rather than silently giving up.
         assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
-        for _ in range(200):
-            r._drain_events()
-            if r._mined:
-                break
-            time.sleep(0.001)
+        await_ready(lambda: bool(r._mined), "mined seed never published", pump=r._drain_events)
 
         assert attempts == 2 and r._mined == {"猫"}
     finally:
@@ -299,10 +289,7 @@ def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
     monkeypatch.setattr(r, "_apply_deps", applied.append)
 
     r.load_deps_async({})
-    for _ in range(200):  # the build runs on its own thread
-        if "lifecycle:deps-ready" in ipc.timers:
-            break
-        time.sleep(0.001)
+    await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed the injection")
 
     assert applied == []  # arming is not applying
     assert ipc.fire_runtime_timer("lifecycle:deps-ready")
@@ -325,10 +312,7 @@ def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
     monkeypatch.setattr(r, "arm_deps_ready", lambda: (seen.append(r._pending_deps), original())[1])
 
     r.load_deps_async({})
-    for _ in range(200):
-        if seen:
-            break
-        time.sleep(0.001)
+    await_ready(lambda: bool(seen), "the build thread never armed deps-ready")
 
     assert seen and seen[0] is not None
 

@@ -66,7 +66,7 @@ def show_nested(reader: Reader, sb) -> None:
                 ),
                 reader.tokenizer.name,
                 reader.dict_set,
-                frozenset(reader._mined),
+                reader._mined.snapshot(),
             )
         )
         return

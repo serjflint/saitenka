@@ -4,7 +4,7 @@ import threading
 import time
 
 import pytest
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, await_ready, runtime_gateway
 
 from saitenka.app import analysis_overlay
 from saitenka.app.bindings import ANALYSIS_MSG
@@ -39,12 +39,11 @@ def reader():
 
 
 def _finish(reader: Reader) -> None:
-    for _ in range(200):
-        reader._drain_events()
-        if reader.analysis.active_key is None:
-            return
-        time.sleep(0.001)
-    raise AssertionError("analysis result was not published")
+    await_ready(
+        lambda: reader.analysis.active_key is None,
+        "analysis result was not published",
+        pump=reader._drain_events,
+    )
 
 
 def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader):
@@ -165,6 +164,7 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
     current = reader.analysis.current
     assert current is not None
 
+    # Not a wait — see the note in test_progressive: this proves nothing further arrives.
     for _ in range(200):
         reader._drain_events()
         time.sleep(0.001)

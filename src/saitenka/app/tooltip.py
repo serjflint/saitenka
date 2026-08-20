@@ -337,7 +337,7 @@ def _request_hover_metadata(reader: Reader, index: int) -> None:
             reader.tokenizer.name,
             tuple(reader.tokens),
             reader.dict_set,
-            frozenset(reader._mined),
+            reader._mined.snapshot(),
         )
     )
 

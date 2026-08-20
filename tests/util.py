@@ -16,6 +16,7 @@ import importlib.util
 import os
 import sys
 import threading
+import time
 from concurrent.futures import Future
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -37,6 +38,34 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.render.layout_backend import LayoutBackend
+
+
+def await_ready(
+    ready: Callable[[], bool],
+    message: str,
+    *,
+    pump: Callable[[], None] = lambda: None,
+    timeout: float = 5.0,
+) -> None:
+    """Wait on a deadline for work happening on another thread.
+
+    Not `for _ in range(200): sleep(0.001)`. That is a *scheduling* budget wearing a timeout's
+    clothes: under the whole suite at `-n auto` the awaited thread can lose more than 200ms before
+    it is ever scheduled, so it fails on a busy machine and passes alone — which is why the ones it
+    bit never reproduced in isolation. A deadline fails just as fast when the work is genuinely
+    wedged and does not fail when the machine is merely busy, so the bound can be generous.
+
+    `pump` runs before each check and at least once, for a consumer that has to be driven.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        pump()
+        if ready():
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(message)
+        time.sleep(0.001)
+
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"

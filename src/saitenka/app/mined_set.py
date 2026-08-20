@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -19,13 +20,19 @@ class MinedSet:
 
     Writes go through `add`/`update`, which answer whether membership actually moved. There is no
     setter for the generation: it is derived, not reported.
+
+    Locked because it replaced a plain `set`, whose `frozenset(...)` copy took an internally
+    protected C-level path. Reading it through this class does not, so under free threading a copy
+    taken while another thread mines would see the set resize under the iterator. Every writer is on
+    the event thread today; the lock is what keeps that from being a precondition of correctness.
     """
 
-    __slots__ = ("_expressions", "_generation")
+    __slots__ = ("_expressions", "_generation", "_lock")
 
     def __init__(self, expressions: Iterable[str] = ()) -> None:
         self._expressions: set[str] = set(expressions)
         self._generation = 0
+        self._lock = threading.Lock()
 
     @property
     def generation(self) -> int:
@@ -37,17 +44,23 @@ class MinedSet:
 
     def update(self, expressions: Iterable[str]) -> bool:
         """Record many. True when at least one was new."""
-        before = len(self._expressions)
-        self._expressions.update(expressions)
-        changed = len(self._expressions) != before
-        self._generation += int(changed)
-        return changed
+        with self._lock:
+            before = len(self._expressions)
+            self._expressions.update(expressions)
+            changed = len(self._expressions) != before
+            self._generation += int(changed)
+            return changed
+
+    def snapshot(self) -> frozenset[str]:
+        """Membership as a value, copied under the lock — what a reader should hold, not the set."""
+        with self._lock:
+            return frozenset(self._expressions)
 
     def __contains__(self, expression: object) -> bool:
         return expression in self._expressions
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._expressions)
+        return iter(self.snapshot())
 
     def __len__(self) -> int:
         return len(self._expressions)

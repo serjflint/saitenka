@@ -343,12 +343,7 @@ def test_prefetch_warms_the_next_sibling(tmp_path, monkeypatch):
         resync=False,
     )
 
-    import time
-
-    for _ in range(200):  # daemon thread — poll until it runs, bounded
-        if fetched:
-            break
-        time.sleep(0.01)
+    util.await_ready(lambda: bool(fetched), "the prefetch daemon never ran")
     assert fetched == [4]  # warmed the NEXT episode, not the current one
 
 
