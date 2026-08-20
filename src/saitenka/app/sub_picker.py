@@ -111,16 +111,30 @@ def _human_size(size: int) -> str:
     return f"{size / (1024 * 1024):.1f} M"
 
 
-def _start_listing(reader: Reader, video: str) -> None:
-    lister = reader._sub_picker_lister
-    assert lister is not None  # open_picker guards this
-    episode = reader.episode
-    generation = reader.sub_picker.generation
-    submitter = reader._sub_picker_submit
+@dataclass(frozen=True, slots=True)
+class ListingPorts:
+    """What one listing needs to run and to publish itself back.
+
+    `current_episode` stays a callable — it is the staleness check, and a snapshot of the episode
+    would compare the completion against the episode it was issued for rather than the one playing.
+    """
+
+    lister: Callable[[str], tuple]
+    state: PickerState
+    redraw: Callable[[], None]
+    submit: JobSubmitter | None
+    stop: threading.Event
+    current_episode: Callable[[], object]
+
+
+def _start_listing(video: str, ports: ListingPorts) -> None:
+    episode = ports.current_episode()
+    generation = ports.state.generation
+    submitter = ports.submit
     if submitter is None:
         apply_listing(
-            reader.sub_picker,
-            reader.redraw_sub_picker,
+            ports.state,
+            ports.redraw,
             generation,
             ListingResult((), (), "subtitle search unavailable"),
         )
@@ -128,21 +142,26 @@ def _start_listing(reader: Reader, video: str) -> None:
 
     def finished(completion: EffectFinished) -> None:
         finished_listing = finish_listing(completion)
-        if finished_listing is not None and episode is reader.episode and not reader._stop.is_set():
+        if (
+            finished_listing is not None
+            and episode is ports.current_episode()
+            and not ports.stop.is_set()
+        ):
             finished_generation, result = finished_listing
-            apply_listing(reader.sub_picker, reader.redraw_sub_picker, finished_generation, result)
+            apply_listing(ports.state, ports.redraw, finished_generation, result)
 
     submitter(
         owner=Owner.SUBTITLE,
         identity=generation,
         lane="subtitle-picker",
-        request=ListingRequest(lister, video),
+        request=ListingRequest(ports.lister, video),
         on_finished=finished,
     )
 
 
 def open_picker(reader: Reader) -> None:
-    if reader._sub_picker_lister is None:
+    lister = reader._sub_picker_lister
+    if lister is None:
         reader._toast("Subtitle picker needs a provider — run with --jimaku or --tsukihime", "warn")
         return
     video = reader._get("path")
@@ -159,7 +178,17 @@ def open_picker(reader: Reader) -> None:
     state.generation += 1
     reader.retire_hover()
     reader.redraw_sub_picker()
-    _start_listing(reader, str(video))
+    _start_listing(
+        str(video),
+        ListingPorts(
+            lister=lister,
+            state=state,
+            redraw=reader.redraw_sub_picker,
+            submit=reader._sub_picker_submit,
+            stop=reader._stop,
+            current_episode=lambda: reader.episode,
+        ),
+    )
 
 
 def close_picker(state, lifecycle_surfaces) -> None:

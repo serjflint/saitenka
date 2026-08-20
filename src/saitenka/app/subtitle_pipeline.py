@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.controller import Reader
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.subtitle_render import DrawResult, SubtitleTarget
     from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
 
@@ -147,8 +148,8 @@ class SubtitleModeCoordinator:
         reader.sub_origin = result.origin
         reader._first_sub_logged = self._renderer.logged_first
 
-    def clear(self, reader: Reader) -> None:
-        self._renderer.clear(reader.lifecycle_surfaces, reader.ipc)
+    def clear(self, surfaces: LifecycleSurfaces, ipc) -> None:
+        self._renderer.clear(surfaces, ipc)
 
     def activate(
         self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV, *, draw: Callable[[], None]

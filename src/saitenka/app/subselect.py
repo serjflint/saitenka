@@ -502,17 +502,17 @@ def provider_fetch_factory(
     return factory
 
 
-def configure_providers(reader, cfg: ProviderConfig) -> None:
+def configure_providers(configure_retry, configure_picker, cfg: ProviderConfig) -> None:
     """Wire the runtime provider surfaces shared by ``run`` and ``attach``: the manual re-sync retry (a
     force re-fetch) and the ``Ctrl+J`` source picker. Clears the retry to ``None`` when no provider is
     enabled, so a config with providers off can't leave a stale factory bound after a re-slot."""
-    reader.configure_subtitle_retry(
+    configure_retry(
         provider_fetch_factory(cfg.enabled_providers, cfg, force=True)
         if cfg.enabled_providers
         else None
     )
     if cfg.enabled_providers:
-        reader.configure_sub_picker(
+        configure_picker(
             lambda video: list_candidates(
                 video,
                 cfg.enabled_providers,

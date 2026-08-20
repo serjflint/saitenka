@@ -90,10 +90,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/launch/run.py::_advance_at_eof"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/launch/run.py::_execute_reader_session"
     ],
     [
@@ -139,10 +135,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/miner_ui.py::show_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::_lookahead_tokenized"
     ],
     [
       "reader-parameter",
@@ -214,7 +206,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_warm_episode_loop"
+      "src/saitenka/app/prefetch.py::episode_warm_ports"
     ],
     [
       "reader-parameter",
@@ -294,10 +286,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_start_listing"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sub_picker.py::configure"
     ],
     [
@@ -323,10 +311,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subnav.py::sub_nav"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subselect.py::configure_providers"
     ],
     [
       "reader-parameter",
@@ -367,10 +351,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::setup_secondary"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.clear"
     ],
     [
       "reader-parameter",

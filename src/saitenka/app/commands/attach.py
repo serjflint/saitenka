@@ -105,7 +105,9 @@ def _finish_attach_subtitle_startup(
         build_sub_index_for_current_track(reader)
     from saitenka.app.subselect import configure_providers, provider_fetch_factory
 
-    configure_providers(reader, cfg)  # shared with run: manual re-sync retry + Ctrl+J source picker
+    configure_providers(
+        reader.configure_subtitle_retry, reader.configure_sub_picker, cfg
+    )  # shared with run: manual re-sync retry + Ctrl+J source picker
     if not fetch_in_background:
         return
     video_path = ipc.command("get_property", "path").get("data")

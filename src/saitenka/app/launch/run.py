@@ -11,7 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from saitenka import otel_metrics
 from saitenka.app import session_stats
@@ -27,6 +27,9 @@ from saitenka.app.session_runtime import SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
 from saitenka.runtime import Owner
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 
@@ -577,7 +580,9 @@ def _start_run_provider_fetch(
         resync=subs.resync,
         tsukihime_config=tsukihime_cfg,
     )
-    configure_providers(reader, pcfg)  # shared with attach: manual re-sync retry + Ctrl+J picker
+    configure_providers(
+        reader.configure_subtitle_retry, reader.configure_sub_picker, pcfg
+    )  # shared with attach: manual re-sync retry + Ctrl+J picker
     if providers:
         reader.fetch_japanese_subs_async(provider_fetch_factory(providers, pcfg)(str(video_path)))
 
@@ -644,21 +649,27 @@ def _mpv_has_next_playlist_entry(pos: object, count: object) -> bool:
     return isinstance(pos, int) and isinstance(count, int) and 0 <= pos < count - 1
 
 
-def _advance_at_eof(reader) -> bool:
+def _advance_at_eof(
+    prop: Callable[[str], object], current_media: Callable[[], Path | None], ipc
+) -> bool:
     """The eof-reached edge with auto-advance on. If mpv will advance itself (a playlist), defer —
     ``file-loaded`` drives the re-slot. Otherwise ``loadfile`` the next sibling (#100 resolver); its
     ``file-loaded`` re-slots too. Return False (hold the last frame via keep-open) when there's no
-    unambiguous next episode."""
-    if _mpv_has_next_playlist_entry(reader._prop("playlist-pos"), reader._prop("playlist-count")):
+    unambiguous next episode.
+
+    ``current_media`` is a callable, not a path: the hook outlives the episode it was installed for
+    and must resolve the sibling of whatever is playing when eof arrives.
+    """
+    if _mpv_has_next_playlist_entry(prop("playlist-pos"), prop("playlist-count")):
         return True  # mpv advances natively; the reactive re-slot follows on file-loaded
-    cur = reader.current_media_path()
+    cur = current_media()
     if cur is None:
         return False
     nxt = resolve_sibling(cur, 1)
     if nxt is None:
         return False  # no unambiguous next sibling → hold the last frame (keep-open)
     send_correlated(
-        reader.ipc, "advance-loadfile", "loadfile", str(nxt), owner=Owner.PLAYBACK
+        ipc, "advance-loadfile", "loadfile", str(nxt), owner=Owner.PLAYBACK
     )  # file-loaded → reslot_hook re-slots the overlay
     return True
 
@@ -688,7 +699,9 @@ def _install_watch_hooks(
 
     reader.install_reslot_hook(_reslot, initial=video_path)
     if auto_advance:
-        reader.advance_hook = lambda: _advance_at_eof(reader)
+        reader.advance_hook = lambda: _advance_at_eof(
+            reader._prop, reader.current_media_path, reader.ipc
+        )
     # Warm episode 2's subs while episode 1 plays, so the first advance re-slots cache-warm (no cold gap).
     _prefetch_sibling_subs(
         cfg, video_path, enabled=auto_advance, jimaku_key=subs.jimaku_key, resync=subs.resync

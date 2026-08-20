@@ -500,7 +500,8 @@ def test_provider_fetch_factory_defers_fetch_and_forwards_every_arg(monkeypatch)
 def test_configure_providers_wires_retry_and_picker():
     reader = _FakeReader()
     subselect.configure_providers(
-        reader,
+        reader.configure_subtitle_retry,
+        reader.configure_sub_picker,
         subselect.ProviderConfig(enabled_providers=("jimaku", "tsukihime"), tsukihime_config={}),
     )
     assert callable(reader.retry_factory)  # a force-refetch retry factory
@@ -509,7 +510,9 @@ def test_configure_providers_wires_retry_and_picker():
 
 def test_configure_providers_clears_retry_when_no_provider():
     reader = _FakeReader()
-    subselect.configure_providers(reader, subselect.ProviderConfig(enabled_providers=()))
+    subselect.configure_providers(
+        reader.configure_subtitle_retry, reader.configure_sub_picker, subselect.ProviderConfig()
+    )
     assert reader.retry_factory is None  # cleared, not left stale after a provider-off re-slot
     assert reader.picker_lister == "unset"  # picker never configured without a provider
 
@@ -524,7 +527,9 @@ def test_configure_providers_retry_forces_a_refetch(monkeypatch):
     )
     reader = _FakeReader()
     subselect.configure_providers(
-        reader, subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={})
+        reader.configure_subtitle_retry,
+        reader.configure_sub_picker,
+        subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={}),
     )
 
     reader.retry_factory("/v/x.mkv")()  # factory(video) → thunk → fetch_provider_path

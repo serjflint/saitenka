@@ -33,7 +33,7 @@ def _reader(*, dict_set=None) -> Reader:
 
 def test_warm_loop_caches_every_cue():
     reader = _reader(dict_set=_ExistsDS())
-    prefetch._warm_episode_loop(reader, reader._sub_index)
+    prefetch._warm_episode_loop(reader._sub_index, ports=prefetch.episode_warm_ports(reader))
     assert len(reader.token_cache) == len(_CUES)
     for cue in _CUES:
         assert reader.token_cache.get(cue) is not None
@@ -41,7 +41,7 @@ def test_warm_loop_caches_every_cue():
 
 def test_warmed_cue_is_a_hit_with_no_retokenization(monkeypatch):
     reader = _reader(dict_set=_ExistsDS())
-    prefetch._warm_episode_loop(reader, reader._sub_index)
+    prefetch._warm_episode_loop(reader._sub_index, ports=prefetch.episode_warm_ports(reader))
 
     monkeypatch.setattr(
         reader.tokenizer,
@@ -58,7 +58,9 @@ def test_warm_loop_stops_when_the_index_was_replaced():
     stale = reader._sub_index
     reader._sub_index = CueIndex(parse_srt(_SRT))  # a track switch installed a new index object
 
-    prefetch._warm_episode_loop(reader, stale)  # warming the OLD index must no-op
+    prefetch._warm_episode_loop(
+        stale, ports=prefetch.episode_warm_ports(reader)
+    )  # warming the OLD index must no-op
 
     assert len(reader.token_cache) == 0
 

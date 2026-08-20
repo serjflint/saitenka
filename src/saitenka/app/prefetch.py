@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.controller import Reader
+    from saitenka.app.token_cache import TokenCache
     from saitenka.app.tokenize import Token
     from saitenka.subtitles import CueIndex
 
@@ -573,25 +574,53 @@ def warm_episode_tokens(reader: Reader) -> None:
         reader._start_episode_annotation(idx)
         return
     threading.Thread(
-        target=lambda: _warm_episode_loop(reader, idx), name="saitenka-episode-warm", daemon=True
+        target=lambda: _warm_episode_loop(idx, ports=episode_warm_ports(reader)),
+        name="saitenka-episode-warm",
+        daemon=True,
     ).start()
 
 
-def _warm_episode_loop(reader: Reader, idx: CueIndex) -> None:
+@dataclass(frozen=True, slots=True)
+class EpisodeWarmPorts:
+    """What the background warm keeps asking, never what it saw once.
+
+    Every member is a callable or a live object on purpose: the loop's whole job is to notice that
+    the ground moved under it — closing, a track switch, a profile swap — so a snapshot would turn
+    the supersede checks into three constants.
+    """
+
+    stop: threading.Event
+    token_cache: TokenCache
+    current_index: Callable[[], CueIndex | None]
+    normalise: Callable[[str], str]
+    tokenize: Callable[..., object]
+
+
+def episode_warm_ports(reader: Reader) -> EpisodeWarmPorts:
+    return EpisodeWarmPorts(
+        stop=reader._stop,
+        token_cache=reader.token_cache,
+        current_index=lambda: reader._sub_index,
+        normalise=reader._cue_norm,
+        tokenize=reader._tokenize_cue,
+    )
+
+
+def _warm_episode_loop(idx: CueIndex, *, ports: EpisodeWarmPorts) -> None:
     warmed = 0
     # The generation this warm belongs to: a live profile swap (#254 D8) clears the cache and bumps it,
     # so a worker mid-tokenize with the OLD tokenizer can't put() a stale-language entry after the swap
     # — the gen is threaded into every put (dropped under the cache lock on mismatch) AND breaks the loop.
-    gen = reader.token_cache.generation
+    gen = ports.token_cache.generation
     for cue in list(idx.cues):
         if (
-            reader._stop.is_set()
-            or reader._sub_index is not idx
-            or reader.token_cache.generation != gen
+            ports.stop.is_set()
+            or ports.current_index() is not idx
+            or ports.token_cache.generation != gen
         ):
             return  # closing, a track switch replaced the index, or a profile swap → drop the stale warm
         try:
-            reader._tokenize_cue(reader._cue_norm(cue.text), generation=gen)
+            ports.tokenize(ports.normalise(cue.text), generation=gen)
             warmed += 1
         except Exception:
             log.debug("episode token warm failed for a cue", exc_info=True)  # never kill the warm

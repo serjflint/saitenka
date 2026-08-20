@@ -122,16 +122,25 @@ def _frame_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
     )
 
 
-def _lookahead_tokenized(reader: Reader, text: str) -> TokenizedCue:
-    norm = reader._cue_norm(text)
-    coordinator = reader._annotation
-    if reader._annotation_async and coordinator is not None:
-        return coordinator.resolve(
-            reader._annotation_key(norm),
-            reader._annotation_inputs(norm),
-            priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
-        )
-    return reader._tokenize_cue(norm)
+def _lookahead_tokenized(
+    text: str,
+    *,
+    normalise: Callable[[str], str],
+    coordinator: cue_annotation.CueAnnotationCoordinator | None,
+    annotation_key: Callable[[str], cue_annotation.AnnotationWorkKey],
+    annotation_inputs: Callable[[str], cue_annotation.AnnotationInputs],
+    tokenize: Callable[[str], TokenizedCue],
+) -> TokenizedCue:
+    """Tokenize an off-screen cue. `coordinator` is `None` when the async path is off — the caller
+    owns that config, so the switch does not travel here as a second flag."""
+    norm = normalise(text)
+    if coordinator is None:
+        return tokenize(norm)
+    return coordinator.resolve(
+        annotation_key(norm),
+        annotation_inputs(norm),
+        priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
+    )
 
 
 def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:

@@ -426,7 +426,12 @@ class Reader:
                     redraw=self._draw_subtitle,
                     publish=self._publish_geometry,
                     tokenize_lookahead=lambda text: native_subtitles._lookahead_tokenized(
-                        self, text
+                        text,
+                        normalise=self._cue_norm,
+                        coordinator=self._annotation if self._annotation_async else None,
+                        annotation_key=self._annotation_key,
+                        annotation_inputs=self._annotation_inputs,
+                        tokenize=self._tokenize_cue,
                     ),
                 ),
                 lookahead=o.subtitle_geometry.lookahead,
@@ -1193,7 +1198,7 @@ class Reader:
             self.lines, self.tokens, self.boxes = [], [], []
             if self.native_geometry is not None:
                 self.native_geometry.mark_empty()
-            self.subtitle_pipeline.clear(self)
+            self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
             hide = getattr(self.ov, "hide_interactive", self.ov.hide)
             hide(TIP_ID)
             return
@@ -1600,7 +1605,7 @@ class Reader:
         self.hover = -1
         self._hover_meta = NO_HOVER_METADATA
         self.boxes = []
-        self.subtitle_pipeline.clear(self)
+        self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
 
     def _degrade_native_subtitle_geometry(self) -> None:
         renderer = self.subtitle_pipeline.renderer
@@ -3859,7 +3864,7 @@ class Reader:
                 # closes the pipeline itself. A step each, so a failure in either one isolates.
                 CloseStep(
                     "subtitle-clear",
-                    lambda: self.subtitle_pipeline.clear(self),
+                    lambda: self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc),
                     lambda: self.native_geometry,
                 ),
                 CloseStep(

@@ -204,7 +204,9 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
         _candidate("Show - 01 (Release).ass", provider="tsukihime", size=0),
     ]
     reader.configure_sub_picker(_lister(candidates))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)  # no real search thread
+    monkeypatch.setattr(
+        sub_picker, "_start_listing", lambda _v, _ports: None
+    )  # no real search thread
 
     sub_picker.open_picker(reader)
     assert reader.sub_picker.open and reader.sub_picker.loading
@@ -365,7 +367,7 @@ def test_toggle_closes_an_open_picker():
 def test_queued_picker_presses_open_once_after_startup(monkeypatch):
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
     ipc.events = [
         {"event": "client-message", "args": [SUB_PICKER_MSG]},
         {"event": "client-message", "args": [SUB_PICKER_MSG]},
@@ -386,7 +388,7 @@ def test_queued_picker_presses_open_once_after_startup(monkeypatch):
 def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
     reader._help_open = True
     ipc.events = [
         {"event": "client-message", "args": [SUB_PICKER_MSG]},
@@ -403,7 +405,7 @@ def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
 def test_file_load_separates_picker_toggle_batches(monkeypatch):
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
     ipc.events = [
         {"event": "client-message", "args": [SUB_PICKER_MSG]},
         {"event": "file-loaded"},
@@ -419,7 +421,7 @@ def test_file_load_separates_picker_toggle_batches(monkeypatch):
 def test_property_change_does_not_split_startup_picker_presses(monkeypatch):
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
     ipc.events = [
         {"event": "client-message", "args": [SUB_PICKER_MSG]},
         {"event": "property-change", "name": "time-pos", "data": 1.0},
