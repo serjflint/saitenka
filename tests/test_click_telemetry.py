@@ -28,16 +28,18 @@ def _named(spans: list[dict], name: str) -> list[dict]:
 def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     # A sidebar click emits a sidebar_click span tagged with the action kind — the click-latency signal.
     spans = record_spans(monkeypatch)
-    monkeypatch.setattr(
-        sidebar, "_activate_hit", lambda *_a: None
-    )  # isolate the span from the action
-    monkeypatch.setattr(sidebar, "redraw", lambda *_a: None)
+    monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
     reader = Reader(_FakeIPC({}))
     reader.sidebar.open = True
     reader.sidebar.rect = (0, 0, 100, 100)
     reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),)
+    # Inert actions instead of a stubbed internal: the port is the seam, so isolating the span
+    # from what the click does no longer means knowing the private name that does it.
+    inert = sidebar.SidebarActions(
+        seek=lambda *_a: None, bookmark=lambda: None, mine=lambda: None, open_mined=lambda _n: None
+    )
 
-    assert sidebar.on_click(reader, 10, 10) is True
+    assert sidebar.click(sidebar.view_of(reader), inert, 10, 10) is True
     (attrs,) = _named(spans, "sidebar_click")
     assert attrs["kind"] == "bookmark"
 

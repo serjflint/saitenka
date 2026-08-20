@@ -544,82 +544,107 @@ def update(reader: Reader) -> None:
     follow(view_of(reader))
 
 
-def _seek_hit(reader: Reader, hit) -> bool:
-    if hit.kind == "seek" and reader._sub_index is not None:
-        send_correlated(
-            reader.ipc,
-            "sidebar-seek-cue",
-            "set_property",
-            "time-pos",
-            reader._sub_index.cues[hit.value].start,
-            owner=Owner.PLAYBACK,
-        )
+@dataclass(frozen=True, slots=True)
+class SidebarActions:
+    """What a sidebar click can ask the session to do — the counterpart to `SidebarView`.
+
+    Four members, one per owner the click reaches: PLAYBACK seeks, the mining feature bookmarks,
+    mines and opens a mined card. In the target each is an event that owner reduces; this is the
+    port that lets the click chain stop taking the host before those slices exist.
+    """
+
+    seek: Callable[[str, float], None]
+    bookmark: Callable[[], None]
+    mine: Callable[[], None]
+    open_mined: Callable[[int], None]
+
+
+def actions_of(reader: Reader) -> SidebarActions:
+    """Bind the click actions to the host. The seam, paired with `view_of`."""
+    return SidebarActions(
+        seek=lambda name, at: send_correlated(
+            reader.ipc, name, "set_property", "time-pos", at, owner=Owner.PLAYBACK
+        ),
+        bookmark=reader.toggle_bookmark,
+        mine=reader.mine_current,
+        open_mined=lambda note_id: _open_mined(reader, note_id),
+    )
+
+
+def _seek_hit(view: SidebarView, actions: SidebarActions, hit) -> bool:
+    if hit.kind == "seek" and view.index is not None:
+        actions.seek("sidebar-seek-cue", view.index.cues[hit.value].start)
         return True
     if hit.kind == "backlog-seek":
-        send_correlated(
-            reader.ipc,
-            "sidebar-seek-backlog",
-            "set_property",
-            "time-pos",
-            _ensure_store(reader).entry(hit.value).cue_start,
-            owner=Owner.PLAYBACK,
-        )
+        actions.seek("sidebar-seek-backlog", view.backlog().entry(hit.value).cue_start)
         return True
     return False
 
 
-def _activate_hit(reader: Reader, hit) -> None:
+def activate_hit(view: SidebarView, actions: SidebarActions, hit) -> None:
     if hit.kind.startswith("view:"):
-        reader.sidebar.view = hit.kind.split(":", 1)[1]
-        reader.sidebar.scroll = 0
-    elif _seek_hit(reader, hit):
+        view.state.view = hit.kind.split(":", 1)[1]
+        view.state.scroll = 0
+    elif _seek_hit(view, actions, hit):
         return
     elif hit.kind == "bookmark":
         # No active-index re-check: the B/+ actions render ONLY on the active row, so re-gating on
         # `hit.value == _active_index` at click time just DROPS the click when playback drifted a cue
         # between redraw and click (#252) — the silent no-op the ungated Alt+b never had. Both paths now
         # act on the live cue; capture_current toasts if there genuinely isn't one.
-        reader.toggle_bookmark()
+        actions.bookmark()
     elif hit.kind == "mine":
-        reader.mine_current()
+        actions.mine()
     elif hit.kind == "mine-open":
-        _open_mined(reader, hit.value)
+        actions.open_mined(hit.value)
     elif hit.kind == "relink":
-        video = reader._get("path")
-        if video:
-            _ensure_store(reader).relink(hit.value, video)
+        if view.video:
+            view.backlog().relink(hit.value, view.video)
 
 
-def on_click(reader: Reader, x: float, y: float) -> bool:
-    if not contains(reader.sidebar, x, y) or reader.sidebar.rect is None:
+def click(view: SidebarView, actions: SidebarActions, x: float, y: float) -> bool:
+    state = view.state
+    if not contains(state, x, y) or state.rect is None:
         return False
-    local_x, local_y = x - reader.sidebar.rect[0], y - reader.sidebar.rect[1]
-    hit = next((box for box in reader.sidebar.hits if box.contains(local_x, local_y)), None)
+    local_x, local_y = x - state.rect[0], y - state.rect[1]
+    hit = next((box for box in state.hits if box.contains(local_x, local_y)), None)
     if hit is None:
         return True
     # Was blind: a sidebar click can mine / bookmark / relink (main-thread SQLite) + a full redraw. Span
     # it (kind = the action) so a report shows whether a click stutters — the surface #293 left uncovered.
     with otel_metrics.traced("sidebar_click", kind=hit.kind):
-        _activate_hit(reader, hit)
-        redraw(reader)
+        activate_hit(view, actions, hit)
+        draw(view)
     return True
 
 
-def mark_active_mined(reader: Reader) -> None:
-    video = reader._get("path")
-    index = reader._sub_index
-    active = _active_index(reader)
-    if not video or index is None or active < 0:
+def on_click(reader: Reader, x: float, y: float) -> bool:
+    return click(view_of(reader), actions_of(reader), x, y)
+
+
+def mine_active(view: SidebarView, *, backlog_exists: bool) -> None:
+    """Mark the backlog entries covering the active cue as mined, then redraw.
+
+    `backlog_exists` is asked for rather than derived: the guard exists so mining an episode with
+    no backlog does not create one, and a view that could answer it would have had to open the
+    store to do so.
+    """
+    cue = view.active_cue
+    if not view.video or cue is None or not backlog_exists:
         return
-    if reader._backlog_store is None and not db_path().exists():
-        return
-    cue = index.cues[active]
     try:
-        store = _ensure_store(reader)
+        store = view.backlog()
         with otel_metrics.traced("backlog_write", op="set_status"):  # main-thread SQLite on a mine
-            for entry in store.entries_for_path(video):
+            for entry in store.entries_for_path(view.video):
                 if abs(entry.cue_start - cue.start) < 0.05 and abs(entry.cue_end - cue.end) < 0.05:
                     store.set_status(entry.id, "mined")
     except (OSError, sqlite3.Error, ValueError, KeyError):
         return
-    redraw(reader)
+    draw(view)
+
+
+def mark_active_mined(reader: Reader) -> None:
+    mine_active(
+        view_of(reader),
+        backlog_exists=reader._backlog_store is not None or db_path().exists(),
+    )
