@@ -62,10 +62,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/bindings.py::active_bindings"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/commands/attach.py::_attach_reslot"
     ],
     [

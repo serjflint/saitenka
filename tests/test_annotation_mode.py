@@ -36,7 +36,7 @@ def test_full_annotations_remain_the_default():
     reader = Reader(FakeIPC())
 
     assert reader.annotation_mode == "full"
-    assert reader.annotation_key == "Alt+a"
+    assert reader.keys.annotation_key == "Alt+a"
 
 
 def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):

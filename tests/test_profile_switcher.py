@@ -113,7 +113,7 @@ def test_profile_cycle_key_is_registered_even_on_the_default_path():
     ipc = FakeIPC()
     reader = Reader(ipc, renderer=NullRenderer())
     reader._register_keybinds()
-    assert keybind_registry(ipc).get(reader.profile_cycle_key) == "saitenka-cycle-profile"
+    assert keybind_registry(ipc).get(reader.keys.profile_cycle_key) == "saitenka-cycle-profile"
 
 
 # --- cycling: the key rotates the identity observably (tokenizer + langs + provider gating) ---------
@@ -140,13 +140,13 @@ def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
     assert reader.tokenizer.name == "unidic" and reader.langs.main == "jp"
     assert enabled_providers_for(reader.langs.main, flags) == ("jimaku", "universal")
 
-    press(reader, ipc, reader.profile_cycle_key)  # → fr
+    press(reader, ipc, reader.keys.profile_cycle_key)  # → fr
 
     assert reader.tokenizer.name == "latin" and reader.langs.main == "fr"
     assert reader.profile is _FR
     assert enabled_providers_for(reader.langs.main, flags) == ("universal",)  # jp-only dropped
 
-    press(reader, ipc, reader.profile_cycle_key)  # wraps → back to the JP default
+    press(reader, ipc, reader.keys.profile_cycle_key)  # wraps → back to the JP default
 
     assert reader.tokenizer.name == "unidic" and reader.langs.main == "jp"
     assert enabled_providers_for(reader.langs.main, flags) == ("jimaku", "universal")

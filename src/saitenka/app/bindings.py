@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
+    from saitenka.app.config import KeyOptions
 
 MINE_MSG = "saitenka-mine"
 MINE_VIDEO_MSG = "saitenka-mine-video"
@@ -346,7 +346,7 @@ BINDINGS: tuple[BindingSpec, ...] = (
 )
 
 
-def active_bindings(reader: Reader, *scopes: Scope) -> tuple[ActiveBinding, ...]:
+def active_bindings(keys: KeyOptions, *scopes: Scope) -> tuple[ActiveBinding, ...]:
     """Resolve configured keys for the given scopes. A binding is ALWAYS returned once its key is set —
     ``spec.requires`` ("anki"/"tts") is advisory metadata, NOT a registration gate: the action's handler
     (``mine_current``/``bulk_mine``/``speak_hovered``) checks the dep live and no-ops with a toast if
@@ -358,7 +358,7 @@ def active_bindings(reader: Reader, *scopes: Scope) -> tuple[ActiveBinding, ...]
     for spec in BINDINGS:
         if wanted and spec.scope not in wanted:
             continue
-        key = getattr(reader, spec.key_attr) if spec.key_attr else spec.key
+        key = getattr(keys, spec.key_attr) if spec.key_attr else spec.key
         if key:
             out.append(ActiveBinding(str(key), spec))
     return tuple(out)

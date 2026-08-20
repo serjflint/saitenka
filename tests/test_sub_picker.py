@@ -241,7 +241,7 @@ def test_provider_warnings_are_shown_in_the_footer():
     )
 
     assert reader.sub_picker.warnings == ("tsukihime: search truncated",)
-    footer = sub_picker._footer(reader.sub_picker, reader.sub_picker_key, 1, 1)
+    footer = sub_picker._footer(reader.sub_picker, reader.keys.sub_picker_key, 1, 1)
     assert "tsukihime: search truncated" in footer
 
 

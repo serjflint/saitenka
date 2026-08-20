@@ -29,7 +29,7 @@ def test_every_global_saitenka_binding_registers_without_deps():
     r._register_keybinds()
     reg = keybind_registry(ipc)
 
-    expected = {b.key: b.spec.message for b in active_bindings(r, "global") if b.spec.message}
+    expected = {b.key: b.spec.message for b in active_bindings(r.keys, "global") if b.spec.message}
     assert expected, "no global message bindings resolved — the sweep would be vacuous"
     missing = {k: m for k, m in expected.items() if reg.get(k) != m}
     assert not missing, f"global bindings not registered with anki=None: {missing}"
@@ -46,7 +46,9 @@ def test_requires_gated_bindings_still_register_when_the_dep_is_absent():
     reg = keybind_registry(ipc)
 
     gated = [
-        b for b in active_bindings(r, "global") if b.spec.requires != "always" and b.spec.message
+        b
+        for b in active_bindings(r.keys, "global")
+        if b.spec.requires != "always" and b.spec.message
     ]
     assert gated, "no requires-gated global bindings found — guard against the filter going empty"
     for b in gated:
@@ -150,7 +152,7 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
     r._register_keybinds()
     assert not r._help_open
 
-    press(r, ipc, r.help_key)
+    press(r, ipc, r.keys.help_key)
 
     assert r._help_open  # the keypress drove the real handler to mutate real state
 
@@ -166,7 +168,7 @@ def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypat
     monkeypatch.setattr(r, "mine_current", lambda **k: calls.append(k))
     r.anki = object()  # anki arrives later, no second registration pass
 
-    press(r, ipc, r.mine_key)
+    press(r, ipc, r.keys.mine_key)
 
     assert calls == [{}], "the mine key did not reach mine_current after async anki load"
 

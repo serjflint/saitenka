@@ -74,7 +74,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
     } <= sections
 
     expected = {
-        (binding.key, binding.spec.message) for binding in active_bindings(reader, "global")
+        (binding.key, binding.spec.message) for binding in active_bindings(reader.keys, "global")
     }
     reader._register_keybinds()
     # The registry spans the global section AND the forced mouse one, so compare against the

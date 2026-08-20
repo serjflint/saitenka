@@ -191,7 +191,7 @@ def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
     reader.preview.last_preview, reader.preview.last_audio = pv, audio_path
     reader.preview.zoom = False
     render_preview(reader.preview, reader.lifecycle_surfaces, reader.osd, reader.tip_width)
-    _grab_preview_keys(reader.ipc, active_bindings(reader, "preview"))
+    _grab_preview_keys(reader.ipc, active_bindings(reader.keys, "preview"))
 
 
 def render_preview(preview: PreviewState, surfaces, osd: tuple[int, int], tip_width: int) -> None:
@@ -226,7 +226,7 @@ def hide_preview(reader: Reader) -> None:
     reader.preview.clear()
     _release_preview_keys(
         reader.ipc,
-        active_bindings(reader, "preview"),
+        active_bindings(reader.keys, "preview"),
         help_open=reader._help_open,
         tip_keys_bound=reader._tip_keys_bound,
     )

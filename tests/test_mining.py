@@ -528,8 +528,8 @@ def test_preview_replay_key_is_tooltip_scoped():
     from saitenka.app.controller import Reader
 
     r = Reader(FakeIPC(), anki=object(), mine_cfg=MineConfig())
-    global_msgs = {b.spec.message for b in active_bindings(r, "global")}
-    tooltip_msgs = {b.spec.message for b in active_bindings(r, "tooltip")}
+    global_msgs = {b.spec.message for b in active_bindings(r.keys, "global")}
+    tooltip_msgs = {b.spec.message for b in active_bindings(r.keys, "tooltip")}
     assert PREVIEW_MSG not in global_msgs
     assert PREVIEW_MSG in tooltip_msgs
 

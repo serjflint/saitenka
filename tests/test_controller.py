@@ -3075,8 +3075,8 @@ def test_reader_accepts_grouped_options_object():
         prefetch=False,
     )
     r = Reader(FakeIPC(), options=opts)
-    assert r.mine_key == "Ctrl+x"
-    assert r.sub_prev_key == "Alt+a"
+    assert r.keys.mine_key == "Ctrl+x"
+    assert r.keys.sub_prev_key == "Alt+a"
     assert r.tip_max_frac == 0.5
     assert r.pause_on_tooltip is True
     assert r.prefetch is False
@@ -3085,7 +3085,7 @@ def test_reader_accepts_grouped_options_object():
 def test_reader_kwargs_still_work_and_map_onto_groups():
     # legacy exploded kwargs stay accepted (they build the options object internally)
     r = Reader(FakeIPC(), mine_key="Ctrl+z", tip_max_frac=0.4, auto_translate=True)
-    assert r.mine_key == "Ctrl+z" and r.tip_max_frac == 0.4 and r.auto_translate is True
+    assert r.keys.mine_key == "Ctrl+z" and r.tip_max_frac == 0.4 and r.auto_translate is True
     with pytest.raises(TypeError):
         Reader(FakeIPC(), not_a_knob=1)  # typo detection preserved
 

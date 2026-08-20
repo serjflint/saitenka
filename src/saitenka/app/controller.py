@@ -459,23 +459,9 @@ class Reader:
         self._loading = False
         self._load_frame = 0
         self._miner = Miner(self)  # mining flow (app/miner.py)
-        self.mine_key = o.keys.mine_key
-        self.mine_video_key = o.keys.mine_video_key
-        self.mine_all_key = o.keys.mine_all_key
-        self.translate_key = o.keys.translate_key
-        self.overlay_toggle_key = o.keys.overlay_toggle_key
-        self.subtitle_language_key = o.keys.subtitle_language_key
-        self.subtitle_mark_jp_key = o.keys.subtitle_mark_jp_key
-        self.bookmark_key = o.keys.bookmark_key
-        self.sidebar_key = o.keys.sidebar_key
-        self.analysis_key = o.keys.analysis_key
-        self.annotation_key = o.keys.annotation_key
-        self.help_key = o.keys.help_key
-        self.profile_cycle_key = o.keys.profile_cycle_key
-        self.subtitle_retry_key = o.keys.subtitle_retry_key
-        self.sub_picker_key = o.keys.sub_picker_key
-        self.preview_key = o.keys.preview_key
-        self.hover_pause_key = o.keys.hover_pause_key
+        # The whole group, not a field per key: `active_bindings` resolves `key_attr` against it, and
+        # a flat copy per key was a second representation of every one of them.
+        self.keys = o.keys
         self.play_audio = o.mining.play_audio
         self.show_preview = o.mining.show_preview  # auto-pop the card-preview panel after a mine
         # Interactive sessions publish this optional subprocess probe later; deterministic
@@ -499,9 +485,6 @@ class Reader:
         )
         self._anki_capability: CapabilityProbe | None = None
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
-        self.sub_prev_key = o.keys.sub_prev_key  # Alt+LEFT  → sub-seek -1 (previous line)
-        self.sub_next_key = o.keys.sub_next_key  # Alt+RIGHT → sub-seek  1 (next line)
-        self.sub_replay_key = o.keys.sub_replay_key  # Alt+DOWN  → sub-seek  0 (replay current)
         self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
@@ -2156,7 +2139,7 @@ class Reader:
         self._tip_keys_bound = True
         if self._help_open:
             return
-        for binding in active_bindings(self, "tooltip"):
+        for binding in active_bindings(self.keys, "tooltip"):
             submit = getattr(self.ipc, "command_async", self.ipc.command)
             submit("keybind", binding.key, f"script-message {binding.spec.message}")
 
@@ -2171,12 +2154,12 @@ class Reader:
         self._tip_keys_bound = False
         if self._help_open:
             return
-        for binding in active_bindings(self, "tooltip"):
+        for binding in active_bindings(self.keys, "tooltip"):
             submit = getattr(self.ipc, "command_async", self.ipc.command)
             submit("keybind", binding.key, "ignore")
 
     def _define_mouse_section(self) -> None:
-        self._mouse.define(active_bindings(self, "mouse"))
+        self._mouse.define(active_bindings(self.keys, "mouse"))
 
     def _wants_mouse_capture(self) -> bool:
         return surfaces.wants_mouse_capture(self.interaction)
@@ -2698,7 +2681,7 @@ class Reader:
         if not state.open:
             return
         rendered, x, y, width, height = sub_picker.picker_panel(
-            state, osd=self.osd, scale=self.chrome_scale, close_key=self.sub_picker_key
+            state, osd=self.osd, scale=self.chrome_scale, close_key=self.keys.sub_picker_key
         )
         state.rect = (x, y, width, height)
         state.hits = rendered.hitboxes
@@ -2711,7 +2694,7 @@ class Reader:
         image = analysis_overlay.panel_image(
             self.analysis,
             osd=self.osd,
-            close_key=self.analysis_key,
+            close_key=self.keys.analysis_key,
             scale=self.chrome_scale,
         )
         x = (self.osd[0] - image.width) // 2
@@ -2756,9 +2739,9 @@ class Reader:
         from saitenka.app.bindings import active_bindings
 
         return help_overlay.help_document(
-            active_bindings(self, "global", "tooltip", "mpv"),
+            active_bindings(self.keys, "global", "tooltip", "mpv"),
             osd=self.osd,
-            close_key=self.help_key,
+            close_key=self.keys.help_key,
             scale=self.chrome_scale,
         )
 
@@ -2777,7 +2760,7 @@ class Reader:
     def _bind_help_keys(self) -> None:
         from saitenka.app.bindings import active_bindings
 
-        for binding in active_bindings(self, "help"):
+        for binding in active_bindings(self.keys, "help"):
             message = binding.spec.message
             if message is not None:
                 send_correlated(
@@ -2798,9 +2781,9 @@ class Reader:
         from saitenka.app.bindings import active_bindings
 
         tooltip_by_key = {
-            binding.key: binding.spec.message for binding in active_bindings(self, "tooltip")
+            binding.key: binding.spec.message for binding in active_bindings(self.keys, "tooltip")
         }
-        for binding in active_bindings(self, "help"):
+        for binding in active_bindings(self.keys, "help"):
             message = tooltip_by_key.get(binding.key) if self._tip_keys_bound else None
             command = f"script-message {message}" if message else "ignore"
             send_correlated(
@@ -2986,7 +2969,7 @@ class Reader:
         # active_bindings no longer gates on `requires` — bind the anki/tts actions even when the dep
         # isn't up YET (attach mode loads Anki async, after this runs, and we never re-register). The
         # handlers (mine_current/bulk_mine/speak) no-op with a toast when the dep is absent.
-        bindings = [b for b in active_bindings(self, "global") if b.spec.message is not None]
+        bindings = [b for b in active_bindings(self.keys, "global") if b.spec.message is not None]
         contents = section_contents(bindings)
         if contents:
             send_correlated(
