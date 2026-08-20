@@ -210,10 +210,8 @@ def focus_drawing(rect: tuple[int, int, int, int]) -> str:
 class NoPixelOwnership:
     """For a renderer that owns no mpv-side pixels: the ownership members are no-ops, on purpose.
 
-    Shared rather than repeated, because "does nothing, deliberately" is one decision and two
-    copies of it drift. It is what the coordinator's `getattr` probes used to mean — with the
-    difference that a renderer now has to inherit this to mean it, instead of meaning it by
-    accident of not having the method.
+    Inherit it to mean it. A renderer that simply lacks the method means the same thing to the
+    reader and nothing at all to a type checker.
     """
 
     def cue_changed(self, _reader: Reader, /, *, nonempty: bool) -> None: ...
@@ -812,10 +810,9 @@ class NativeVisibleRenderer:
     def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> bool:
         """Own the pixels, idempotently. `False` means the caller must draw them itself.
 
-        One member for what used to be `activate` + `reassert`: both of `reassert`'s callers were
-        facts with their own names, a track reconfigure and an overlay releasing the pixels. The
-        reconfigure arrives here as a selection change — but only if it *declares* the track it
-        selected, because mpv has not echoed the write yet when it calls.
+        A reconfigure arrives here as a selection change, but only if it *declares* the track it
+        selected: mpv has not echoed the write yet when it calls, so reading `sid` back would
+        compare the incoming track against itself.
         """
         self._ensure_selection(reader, sid)
         if (

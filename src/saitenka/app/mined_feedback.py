@@ -19,9 +19,9 @@ if TYPE_CHECKING:
 def mark_mined(reader: Reader, expression: str) -> None:
     """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately.
 
-    The refresh is unconditional but the generation bump is not: re-mining a word already in the
-    deck (the duplicate path) leaves membership where it was, so every panel cached against it is
-    still correct. What the user asked for is the *visible* rebuild below, which happens either way.
+    The rebuild is unconditional; the generation bump is `MinedSet`'s call. Re-mining a word already
+    in the deck moves no membership, so the cached panels stay valid — but the user still pressed a
+    key and still expects the panel in front of them to redraw.
     """
     if not expression:
         return

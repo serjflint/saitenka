@@ -1,8 +1,7 @@
 """The subtitle-geometry lane: one queued job at a time, with a bounded prefetch and cache.
 
-Split from `subtitle_pipeline`, which keeps the generation fence (`SubtitleModeCoordinator`) this
-worker reserves against. One concept per module: the coordinator decides whether a result may still
-be published, the worker decides what runs and in what order.
+The generation fence it reserves against is `subtitle_pipeline.SubtitleModeCoordinator`: that
+decides whether a result may still be published, this decides what runs and in what order.
 """
 
 from __future__ import annotations

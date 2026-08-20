@@ -13,13 +13,9 @@ class MinedSet:
     """One object, because membership and its generation are one fact.
 
     Every panel cached against this set keys on the generation, so a set that can be mutated
-    without bumping it renders a stale ⊕. They used to live apart — the set a `SessionContext`
-    field, the counter a bare `Reader` attribute — and each of the three writers re-derived
-    "did anything change?" for itself, one of them wrongly (a re-mine of a word already in the
-    deck bumped the generation and invalidated every panel for nothing).
-
-    Writes go through `add`/`update`, which answer whether membership actually moved. There is no
-    setter for the generation: it is derived, not reported.
+    without bumping it renders a stale ⊕. Writes go through `add`/`update`, which answer whether
+    membership actually moved; there is no setter for the generation, because a caller that can
+    report a change can report one that did not happen.
 
     Locked because it replaced a plain `set`, whose `frozenset(...)` copy took an internally
     protected C-level path. Reading it through this class does not, so under free threading a copy

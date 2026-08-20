@@ -72,7 +72,7 @@ _DRIVER_SWITCH_SYMBOLS = {
     "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard",
 }
 #: What WP5 is allowed to leave behind, enumerated rather than described. Splitting it into three
-#: named sets is what makes WP5's exit ONE equality (`total == 22`) instead of a sentence with a
+#: named sets is what makes WP5's exit ONE equality (`total == 20`) instead of a sentence with a
 #: tilde in it — a plan draft that said "~26" was wrong by four and nobody could tell.
 #:
 #: These are not exemptions: every row here is real debt that a LATER work package deletes. They are

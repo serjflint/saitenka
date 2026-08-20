@@ -210,11 +210,7 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
 
 
 def rerender_with_mined_state(reader: Reader) -> None:
-    """Rebuild the nested popup in place with the current mined-state, keeping its position.
-
-    Lived in `miner_ui` because mining is what triggers it, but every line here is nested-popup
-    state and its one remaining caller is the mined-state feedback, which is not the preview panel.
-    """
+    """Rebuild the nested popup in place with the current mined-state, keeping its position."""
     tok = reader._nest.token
     if tok is None:
         return
