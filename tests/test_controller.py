@@ -2775,6 +2775,9 @@ def test_start_observing_registers_and_seeds_initial_state(request):
     ipc.props["pause"] = True
     ipc.props["sub-text"] = "字幕"
     r = Reader(ipc)
+    request.addfinalizer(
+        r.close
+    )  # LIFO: the reader goes down before the gateway it observes through
     r.start_observing()
     observed = {c[2] for c in ipc.commands if c and c[0] == "observe_property"}
     assert {

@@ -36,11 +36,14 @@ class _AsyncHintIPC(FakeIPC):
         return request
 
 
-def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch) -> None:
+def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, request) -> None:
     ipc = _AsyncHintIPC()
-    install_session_reactor(runtime_gateway(ipc))
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
     reader = Reader(ipc, renderer=NullRenderer())
+    request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     dispatched: list[bool] = []
     monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})

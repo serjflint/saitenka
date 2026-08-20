@@ -213,6 +213,7 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll(request):
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     r = Reader(ipc)
+    request.addfinalizer(r.close)  # LIFO: the reader goes down before its gateway
     assert ("show-text", "", 1) not in ipc.commands
 
     assert r.pump() is True
@@ -232,6 +233,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     reader = Reader(ipc)
+    request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     clear = ("show-text", "", 1)
     observed = []
     monkeypatch.setattr(
@@ -267,6 +269,7 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
     install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
     reader = Reader(ipc)
+    request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
 
     assert reader.pump() is True
     assert ("show-text", "", 1) in ipc.commands
