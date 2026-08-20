@@ -61,8 +61,9 @@ _SYNCHRONOUS_BY_CONTRACT = {
     "src/saitenka/app/media.py::screenshot",
     # Same: the reply IS the capture's result, and the file must exist when it returns.
     "src/saitenka/app/session_runtime.py::SessionRuntime.capture",
-    # `quit`, issued while the reactor is stopping.
-    "src/saitenka/app/launch/run.py::run_impl",
+    # `quit`, issued while the reactor is stopping — the entrypoint's terminal sequence, which is a
+    # declaration now rather than two hand-written `finally` blocks.
+    "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform",
 }
 #: mpv verbs that only READ. WP5's exit gate is phrased in terms of a direct *write* — a read has no
 #: terminal outcome to correlate, so routing one through the egress gateway buys nothing. Splitting

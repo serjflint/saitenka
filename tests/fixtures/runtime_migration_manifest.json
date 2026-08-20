@@ -631,55 +631,57 @@
     {
       "id": "transport",
       "source": [
-        "src/saitenka/app/launch/run.py::run_impl",
-        "src/saitenka/app/commands/attach.py::attach"
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform"
       ],
       "evidence": [
-        "call:ipc.close"
+        "call:transport.close",
+        "ref:TerminalStep.TRANSPORT_CLOSE"
       ],
       "target": "mpv-gateway-close",
       "work_package": "6",
       "replacement": "CloseGateway -> GatewayClosed",
       "test": "transport is the final in-runtime close participant",
-      "migrated": false
+      "migrated": true
     }
   ],
   "entrypoints": [
     {
       "id": "run-owned-player",
-      "source": "src/saitenka/app/launch/run.py::run_impl",
+      "source": [
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor.finalize"
+      ],
       "evidence": [
-        "call:reader.close",
-        "call:ipc.command:quit",
-        "call:ipc.close",
-        "call:proc.wait",
-        "call:kill_process_tree",
-        "call:_log_mpv_exit",
-        "call:_arm_exit_watchdog",
-        "order:call:reader.close>call:ipc.command:quit",
-        "order:call:ipc.command:quit>call:ipc.close",
-        "order:call:ipc.close>call:proc.wait",
-        "order:call:proc.wait>call:_arm_exit_watchdog:3.0",
-        "order:call:kill_process_tree>call:_arm_exit_watchdog:3.0"
+        "loop:self.steps=>call:self._perform",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:session.close",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:transport.command:quit",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:transport.close",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:self._reap",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:arm_exit_watchdog",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._reap|call:self.process.wait",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._reap|call:kill_process_tree",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._reap|call:self.on_exit_code"
       ],
       "target": "owned-session-composition",
       "work_package": "6",
       "replacement": "Closed -> OwnedProcessSupervisor.finalize",
       "test": "owned run quits and kills before arming the watchdog",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "attach-external-player",
-      "source": "src/saitenka/app/commands/attach.py::attach",
+      "source": [
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor.attached"
+      ],
       "evidence": [
-        "call:reader.close",
-        "call:ipc.close"
+        "call:cls",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:session.close",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:transport.close"
       ],
       "target": "attached-session-composition",
       "work_package": "6",
       "replacement": "Closed -> detach transport only",
       "test": "attach has no process-control capability",
-      "migrated": false
+      "migrated": true
     },
     {
       "id": "demo-owned-player",

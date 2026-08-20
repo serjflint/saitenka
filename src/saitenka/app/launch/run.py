@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from saitenka import otel_metrics
-from saitenka.app import session_stats
+from saitenka.app import player_supervisor, session_stats
 from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config, subtitle_geometry_options
 from saitenka.app.continuity import resolve_sibling
@@ -1206,36 +1206,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             translate_key=translate_key,
         )
     finally:
-        try:
-            reader.close()
-            # Stays direct: the reactor is stopping, and a correlated quit could never be drained.
-            ipc.command("quit")
-            ipc.close()
-        except Exception:
-            log.debug("reader/ipc shutdown cleanup failed", exc_info=True)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            from saitenka.app.procutil import kill_process_tree
-
-            kill_process_tree(proc)  # mpv didn't quit → kill it + any children (no orphans)
-        else:
-            _log_mpv_exit(proc.returncode)  # only meaningful for a self-exit, not our force-kill
-    # Teardown is done + every store flushed above; a lingering native thread (pyo3 taffylite/resvglite)
-    # can still keep the free-threaded interpreter from actually exiting, hanging the quit intermittently.
-    # Arm a daemon watchdog that force-exits if we don't terminate promptly on our own.
-    _arm_exit_watchdog(3.0)
+        player_supervisor.PlayerSupervisor.owned(proc, on_exit_code=_log_mpv_exit).finalize(
+            reader, ipc
+        )
     return 0
-
-
-def _arm_exit_watchdog(delay: float) -> None:
-    """Force process exit ``delay`` s from now if a stray/native thread stalls interpreter shutdown after a
-    clean teardown. Daemon, so it never delays a healthy exit (it's killed the instant the process ends)."""
-    import os
-
-    def _force() -> None:
-        time.sleep(delay)
-        log.warning("exit watchdog: interpreter did not exit %.1fs after teardown — forcing", delay)
-        os._exit(0)
-
-    threading.Thread(target=_force, name="saitenka-exit-watchdog", daemon=True).start()

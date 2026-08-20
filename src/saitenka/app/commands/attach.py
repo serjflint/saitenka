@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 import cyclopts
 
 from saitenka import otel_metrics
+from saitenka.app import player_supervisor
 from saitenka.app.config import TooltipOptions, load_config
 from saitenka.app.subselect import ProviderConfig
 
@@ -382,11 +383,8 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     try:
         reader.run()
     finally:
-        try:
-            reader.close()
-            ipc.close()
-        except Exception:
-            log.debug("attach shutdown cleanup failed", exc_info=True)
+        # Attached: no process control at all. Detaching leaves the user's mpv running.
+        player_supervisor.PlayerSupervisor.attached().finalize(reader, ipc)
     return 0
 
 
