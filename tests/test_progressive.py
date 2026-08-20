@@ -205,11 +205,13 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     assert count(0) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
-def test_owned_startup_hint_clears_after_the_first_completed_poll():
+def test_owned_startup_hint_clears_after_the_first_completed_poll(request):
     from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
-    install_session_reactor(runtime_gateway(ipc))
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
     r = Reader(ipc)
     assert ("show-text", "", 1) not in ipc.commands
 
@@ -222,11 +224,13 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll():
     assert ipc.commands.count(("show-text", "", 1)) == before
 
 
-def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch):
+def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch, request):
     from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
-    install_session_reactor(runtime_gateway(ipc))
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
     reader = Reader(ipc)
     clear = ("show-text", "", 1)
     observed = []
@@ -242,7 +246,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     assert clear in ipc.commands
 
 
-def test_unanswered_async_clear_does_not_delay_the_next_poll():
+def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
     from saitenka.app.session_routes import install_session_reactor
 
     class _AsyncFakeIPC(FakeIPC):
@@ -258,7 +262,9 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll():
             return request
 
     ipc = _AsyncFakeIPC()
-    install_session_reactor(runtime_gateway(ipc))
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
     reader = Reader(ipc)
 

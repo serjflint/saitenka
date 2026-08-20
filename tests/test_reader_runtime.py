@@ -129,12 +129,13 @@ def test_legacy_picker_repeat_guard_emits_bounded_suppression_outcome():
     )
 
 
-def test_reader_publishes_handler_failure_as_typed_runtime_outcome():
+def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request):
     def fail() -> None:
         raise RuntimeError
 
     ipc = FakeIPC()
     reader = create_reader(ipc)
+    request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     spec = CommandSpec("fail", Owner.SESSION, requires_cue=False)
     reader.commands = LegacyCommandExecutor(
         {"fail": LegacyCommandBinding(fail, "work-package-5")},
@@ -148,9 +149,10 @@ def test_reader_publishes_handler_failure_as_typed_runtime_outcome():
     ]
 
 
-def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch):
+def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request):
     ipc = FakeIPC()
     reader = create_reader(ipc)
+    request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     reader._help_open = True
     calls: list[int] = []
     monkeypatch.setattr(
@@ -195,12 +197,14 @@ def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
         gateway.close()
 
 
-def test_composition_threads_grouped_optional_services():
+def test_composition_threads_grouped_optional_services(request):
     services = ReaderServices(
         scorer="score", anki="anki", mining="mine", dictionaries="dict", tts=True
     )
 
     reader = create_reader(FakeIPC(), services=services)
+
+    request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
 
     assert (reader.scorer, reader.anki, reader.mine_cfg, reader.dict_set) == (
         "score",

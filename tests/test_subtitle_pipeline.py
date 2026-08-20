@@ -558,7 +558,7 @@ def test_worker_reports_loss_aware_prefetch_miss_provenance() -> None:
     worker.close()
 
 
-def test_a_gatewayed_session_runs_geometry_on_the_broker_lane() -> None:
+def test_a_gatewayed_session_runs_geometry_on_the_broker_lane(request) -> None:
     """The composition seam, pinned. `configure_runtime_job` resolves the lane once here; if it
     silently returned None the worker would fall back to its local lane and production geometry
     would never reach the broker — bounded admission and close would both be someone else's.
@@ -569,6 +569,7 @@ def test_a_gatewayed_session_runs_geometry_on_the_broker_lane() -> None:
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     ipc.install_runtime_ingress(lambda *_a: None, lambda *_a: None, None, gateway)
 
     submit = configure_runtime_job(ipc)

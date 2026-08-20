@@ -2757,7 +2757,7 @@ def test_fakeipc_in_util_emits_property_change_events():
     assert ipc.drain_events() == []  # drained
 
 
-def test_start_observing_registers_and_seeds_initial_state():
+def test_start_observing_registers_and_seeds_initial_state(request):
     from util import FakeIPC as EventIPC
 
     ipc = EventIPC()
@@ -2765,7 +2765,8 @@ def test_start_observing_registers_and_seeds_initial_state():
     # connecting — so a session without it is a configuration production never has. The fake used to
     # lack the port entirely, which sent `register_observer_set` down its no-gateway fallback and
     # made this pass against a path production never takes.
-    runtime_gateway(ipc)
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     ipc.props["pause"] = True
     ipc.props["sub-text"] = "字幕"
     r = Reader(ipc)

@@ -106,7 +106,7 @@ def test_show_startup_hint_posts_mpv_osd_text():
     assert ("show-text", STARTUP_HINT, 30000) in ipc.commands
 
 
-def test_show_startup_hint_skipped_for_screenshot():
+def test_show_startup_hint_skipped_for_screenshot(request):
     # A screenshot capture must not carry the breadcrumb, so it never touches mpv's OSD -- but the
     # session still gets its reactor, which is not the hint's to withhold.
     from util import FakeIPC
@@ -114,7 +114,9 @@ def test_show_startup_hint_skipped_for_screenshot():
     from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
-    reactor = install_session_reactor(runtime_gateway(ipc), startup_hint=False)
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    reactor = install_session_reactor(gateway, startup_hint=False)
     assert ipc.commands == []
     assert reactor is not None
 
