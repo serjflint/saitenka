@@ -99,12 +99,14 @@ def _cue_parts(
     return parts
 
 
-def _cue_statuses(reader: Reader) -> dict[int, str]:
-    index = reader._sub_index
-    video = reader._get("path")
-    if index is None or not video:
-        return {}
-    entries = _ensure_store(reader).entries_for_path(video)
+def _cue_statuses(index: CueIndex, video: str, store: BacklogStore) -> dict[int, str]:
+    """Mined status per cue index, for the Mine column.
+
+    Takes the three facts rather than the host. The store stays lazily built by the caller: opening
+    the tab for a session with no video must not materialise an empty backlog, which is why this
+    asks for a store instead of reaching for one.
+    """
+    entries = store.entries_for_path(video)
     cue_by_span = {
         (round(cue.start, 1), round(cue.end, 1)): cue_index
         for cue_index, cue in enumerate(index.cues)
@@ -134,7 +136,8 @@ def _track_rows(
     index = reader._sub_index
     if index is None:
         return [], 0
-    statuses = _cue_statuses(reader)
+    video = reader._get("path")
+    statuses = _cue_statuses(index, video, _ensure_store(reader)) if video else {}
     rows: list[SidebarRow] = []
     for cue_index in range(first, min(len(index), first + capacity)):
         cue = index.cues[cue_index]

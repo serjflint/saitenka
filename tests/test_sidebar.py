@@ -489,3 +489,19 @@ def test_a_bookmark_falls_back_to_the_other_language() -> None:
 
     assert _entry_text(only_jp, "en") == "猫を見る"
     assert _entry_text(only_jp, "jp") == "猫を見る"
+
+
+def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> None:
+    """Opening the tab must not materialise an empty store — it creates a file on disk.
+
+    `_cue_statuses` used to reach the host and guard `not video` itself. It takes a store now, so
+    the laziness moved to the caller, and a caller that builds the store before checking would open
+    a backlog for every video-less session. The guard is easy to lose and invisible when lost: the
+    statuses come back empty either way, and only the on-disk side effect differs.
+    """
+    reader, _ipc = _reader(props={"path": ""})
+    reader.sidebar.open = True
+
+    sidebar.redraw(reader)
+
+    assert reader._backlog_store is None

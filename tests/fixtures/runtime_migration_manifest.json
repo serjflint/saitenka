@@ -314,10 +314,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::_cue_statuses"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::_ensure_store"
     ],
     [
