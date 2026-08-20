@@ -191,7 +191,9 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))
     reader.set_subtitle(cue)
     idx = _index_at(reader.tokens, at)
-    resolve_hover(reader, idx)  # forward longest-match → _hover_meta.terms (the phrase/prefix seam)
+    resolve_hover(
+        reader.tip_ports, reader.word_lookup, reader.hover_inputs, idx
+    )  # forward longest-match → _hover_meta.terms (the phrase/prefix seam)
     tok = reader.tokens[idx]
     entry = entry_for_tok(
         tok,

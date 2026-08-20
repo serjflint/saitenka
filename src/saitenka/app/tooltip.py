@@ -4,7 +4,8 @@ anchored to the word, with a header ⊕ (mine) / 🔊 (speak). Owns the hover-hy
 click routing, and link navigation. Building, placing and compositing a panel is
 :mod:`saitenka.app.tooltip_panel`, which both this module and the nested popup render through.
 
-Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating methods on Reader.
+Host-free: every entry takes the values its feature needs (`TipPorts`, `PanelPorts`, `WordLookup`,
+`HoverInputs`, `HoverActions`, `ShowActions`, `ClickPorts`), built as `Reader` properties.
 """
 
 from __future__ import annotations
@@ -30,7 +31,9 @@ from saitenka.app.popups import (
     HoverMetadata,
     Panel,
     PopupView,
+    ShowActions,
     TipPorts,
+    WordLookup,
 )
 from saitenka.app.subtitles import box_for_token
 from saitenka.app.tooltip_panel import (
@@ -58,7 +61,6 @@ from saitenka.runtime import hover as hover_machine
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.popups import TooltipState
     from saitenka.app.prefetch import TipScale
     from saitenka.app.tooltip_panel import PanelStyle
@@ -215,7 +217,7 @@ def update_hover_instrumented(ports: TipPorts, actions: HoverActions, inputs: Ho
         transition.set("cue_state", inputs.cue_state())
 
 
-def resolve_hover(reader: Reader, index: int) -> None:
+def resolve_hover(ports: TipPorts, lookup: WordLookup, inputs: HoverInputs, index: int) -> None:
     """Set the hovered word's stacked phrase terms + highlight span. Multi-token dictionary terms
     starting at ``index`` (数ある over 数) are looked up as extra terms on the hovered word, so the
     tooltip stacks them above the bare word and the underline spans the longest. Runs before the
@@ -223,24 +225,24 @@ def resolve_hover(reader: Reader, index: int) -> None:
     terms: tuple[str, ...] = ()
     span: tuple[int, int] | None = None
     has_term = getattr(
-        reader.dict_set, "has_term", None
+        lookup.dict_set, "has_term", None
     )  # phrase merge is an optional dict capability
     if has_term is not None:
-        got = reader.tokenizer.phrase_terms(tokens=reader.tokens, index=index, has_term=has_term)
+        got = lookup.tokenizer.phrase_terms(tokens=inputs.tokens, index=index, has_term=has_term)
         if got is not None:
             term_list, start, end = got
             terms, span = tuple(term_list), (start, end)
-    reader.tip.hover = HoverMetadata(
+    ports.tip.hover = HoverMetadata(
         terms=terms,
         span=span,
-        mined=is_mined(reader.tokens[index], reader.session.mined),
+        mined=is_mined(inputs.tokens[index], lookup.mined),
         group_mined=group_mined_of(
-            reader.tokens[index], reader.session.mined, reader.dict_set, extra_terms=terms
+            inputs.tokens[index], lookup.mined, lookup.dict_set, extra_terms=terms
         ),
     )
 
 
-def hover_key(reader: Reader, index: int) -> HoverMetadataKey:
+def hover_key(ports: TipPorts, lookup: WordLookup, index: int) -> HoverMetadataKey:
     """The identity a hover-metadata result has to still match to be worth applying.
 
     One definition. The request built this tuple and the completion rebuilt it field for field, so
@@ -248,53 +250,61 @@ def hover_key(reader: Reader, index: int) -> HoverMetadataKey:
     tooltip, with nothing failing at the seam.
     """
     return HoverMetadataKey(
-        reader.prefetch_state.gen,
-        reader._dependency_generation,
-        reader.session.mined.generation,
-        reader._current_cue_identity,
+        lookup.prefetch_gen,
+        lookup.dependency_gen,
+        lookup.mined.generation,
+        lookup.cue_identity,
         index,
-        reader.tip.view.job_id,
+        ports.tip.view.job_id,
     )
 
 
-def _request_hover_metadata(reader: Reader, index: int) -> None:
+def _request_hover_metadata(
+    ports: TipPorts, lookup: WordLookup, inputs: HoverInputs, index: int
+) -> None:
     from saitenka.app.hover_metadata import HoverMetadataRequest
 
-    reader._request_interaction_metadata(
+    lookup.submit(
         HoverMetadataRequest(
-            hover_key(reader, index),
-            reader.tokenizer.name,
-            tuple(reader.tokens),
-            reader.dict_set,
-            reader.session.mined.snapshot(),
+            hover_key(ports, lookup, index),
+            lookup.tokenizer.name,
+            tuple(inputs.tokens),
+            lookup.dict_set,
+            lookup.mined.snapshot(),
         )
     )
 
 
-def apply_hover_metadata(reader: Reader, result) -> None:
+def apply_hover_metadata(
+    ports: TipPorts,
+    panel: PanelPorts,
+    lookup: WordLookup,
+    inputs: HoverInputs,
+    show: ShowActions,
+    result,
+) -> None:
     key = result.key
-    current = hover_key(reader, reader.hover)
+    current = hover_key(ports, lookup, inputs.hover())
     if current != key:
         if current.same_target(key):
-            _request_hover_metadata(reader, key.index)
+            _request_hover_metadata(ports, lookup, inputs, key.index)
         return
     if result.error:
-        reader.tip.jobs.finish("tooltip", "failed")
+        ports.tip.jobs.finish("tooltip", "failed")
         return
-    reader.tip.hover = HoverMetadata(
+    ports.tip.hover = HoverMetadata(
         terms=result.phrase_terms,
         span=result.phrase_span,
         mined=result.mined,
         group_mined=result.group_mined,
     )
-    reader._draw_subtitle()
-    if show_tooltip(reader, key.index):
-        if reader.episode.session_recorder is not None:
-            reader.episode.session_recorder.record_lookup()
-        reader._sync_auto_translation()
+    show.draw_cue()
+    if show_tooltip(ports, panel, inputs, show, key.index):
+        show.record_lookup()
+        show.sync_translation()
 
 
-def retire_hover(reader: Reader) -> None:
+def retire_hover(ports: TipPorts, inputs: HoverInputs, show: ShowActions) -> None:
     """Nothing is hovered any more: clear the metadata, redraw the cue, tear the tip down.
 
     Split from `set_hover` because every caller of the old `set_hover(-1)` meant exactly this and
@@ -302,25 +312,31 @@ def retire_hover(reader: Reader) -> None:
     function that both retires and builds makes a caller wanting the teardown inherit the build
     chain, and in the target this teardown is a fact the tooltip feature reduces, not a call.
     """
-    if reader.hover < 0:
+    if inputs.hover() < 0:
         return
-    reader.hover = -1
-    reader.tip.hover = NO_HOVER_METADATA
-    reader._draw_subtitle()
-    reader._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
+    show.select(-1)
+    ports.tip.hover = NO_HOVER_METADATA
+    show.draw_cue()
+    show.teardown()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
 
 
-def set_hover(reader: Reader, index: int) -> None:
-    ports = reader.tip_ports
+def set_hover(
+    ports: TipPorts,
+    panel: PanelPorts,
+    lookup: WordLookup,
+    inputs: HoverInputs,
+    show: ShowActions,
+    index: int,
+) -> None:
     if index < 0:
-        retire_hover(reader)  # any negative index means "nothing hovered"
+        retire_hover(ports, inputs, show)  # any negative index means "nothing hovered"
         return
-    if index == reader.hover:
+    if index == inputs.hover():
         return
-    reader.hover = index
+    show.select(index)
     ports.tip.view.job_id = ports.tip.jobs.begin("tooltip")
     ports.tip.view.job_kind = "tooltip"
-    if reader._interaction_metadata_submit is not None:
+    if lookup.deferred:
         # Retire the previous tooltip's logical identity immediately. Its acknowledged pixels may stay
         # until the replacement paints, but stale nested/open results can no longer attach to it.
         nested_popup.hide_nested(ports)
@@ -328,16 +344,15 @@ def set_hover(reader: Reader, index: int) -> None:
         ports.tip.view.state = None
         ports.tip.view.rect = None
         ports.tip.hover = NO_HOVER_METADATA
-        reader._draw_subtitle()
-        _request_hover_metadata(reader, index)
+        show.draw_cue()
+        _request_hover_metadata(ports, lookup, inputs, index)
         return
-    resolve_hover(reader, index)  # deterministic demo/test path
-    reader._draw_subtitle()
-    if not show_tooltip(reader, index):
+    resolve_hover(ports, lookup, inputs, index)  # deterministic demo/test path
+    show.draw_cue()
+    if not show_tooltip(ports, panel, inputs, show, index):
         return
-    if reader.episode.session_recorder is not None:
-        reader.episode.session_recorder.record_lookup()
-    reader._sync_auto_translation()  # hovering a word → auto-reveal the translation
+    show.record_lookup()
+    show.sync_translation()  # hovering a word → auto-reveal the translation
 
 
 def spoken_form(token, hover_reading: str) -> str:
@@ -608,17 +623,19 @@ def on_click(ports: TipPorts, panel: PanelPorts, click: ClickPorts, inputs: Hove
 # --- showing / placing / rendering the base tooltip ---------------------------------------------
 
 
-def show_tooltip(reader: Reader, index: int) -> bool:
+def show_tooltip(
+    ports: TipPorts, panel: PanelPorts, inputs: HoverInputs, show: ShowActions, index: int
+) -> bool:
     # "tooltip_show" is the end-to-end hover→drawn span (symmetric with scroll_frame/sub_seek); the
     # perf ring buffer stays for doctor/crashlog. Metrics recorded outside the spans so the kind
     # label (cold vs warm) — only known after impl builds/hits the panel — can split the histogram.
-    tip = reader.tip
+    tip = ports.tip
     start = time.perf_counter()
     with (
-        otel_metrics.traced("tooltip_show", layout_backend=reader.layout_engine) as span,
+        otel_metrics.traced("tooltip_show", layout_backend=panel.style.layout_engine) as span,
         timed("show_tooltip"),
     ):
-        shown = show_tooltip_impl(reader, index)
+        shown = show_tooltip_impl(ports, panel, inputs, show, index)
         # Attribute a slow (usually cold) hover: whether it was a panel build vs a cache hit, the word
         # length + panel height (a tall multi-dict entry is the coldest), and bands rastered on the
         # first paint. All low-cardinality — no raw word surface. Sort spans by dur → read the why.
@@ -636,7 +653,7 @@ def show_tooltip(reader: Reader, index: int) -> bool:
         if shown:
             st = tip.view.state
             span.set("cold", tip.tip_show_cold)
-            span.set("chars", len(reader.tokens[index].surface))
+            span.set("chars", len(inputs.tokens[index].surface))
             if st is not None:
                 span.set("full_h", st.full_height)
                 span.set("bands", st.last_frame_rasters)
@@ -681,31 +698,27 @@ def _freeze_frame(ipc, prop, *, enabled: bool, already_paused: bool) -> bool:
     return True
 
 
-def show_tooltip_impl(reader: Reader, index: int) -> bool:
-    ports = reader.tip_ports
+def show_tooltip_impl(
+    ports: TipPorts, panel: PanelPorts, inputs: HoverInputs, show: ShowActions, index: int
+) -> bool:
     tip = ports.tip
     view = tip.view
     nested_popup.hide_nested(ports)  # switching the base word drops any stale scan popup
     tip.tip_nav = []  # a newly hovered word abandons any link-navigation back-history
     tip.kanji_index = 0  # a new word restarts the `k` kanji cycle
-    tok = reader.tokens[index]
-    b = box_for_token(reader.boxes, index)
+    tok = inputs.tokens[index]
+    b = box_for_token(inputs.boxes, index)
     if b is None:
         log.debug("tooltip anchor disappeared for token index %d", index)
-        reader.hover = -1
+        show.select(-1)
         tip.hover = NO_HOVER_METADATA
         ports.tip.jobs.finish("tooltip", "failed")
-        reader._teardown_tip()
+        show.teardown()
         return False
-    inflected = reader._inflected_surface(index)
+    inflected = show.inflected(index)
     cap = ports.scale.cap
     with otel_metrics.traced("pause_ipc"):
-        if _freeze_frame(
-            reader.ipc,
-            reader._prop,
-            enabled=reader.pause_on_tooltip,
-            already_paused=tip.paused_by_tip,
-        ):
+        if show.freeze(already_paused=tip.paused_by_tip):
             tip.paused_by_tip = True
     # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
     # windowed engine composites the rest on scroll with overscan look-ahead.
@@ -713,7 +726,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # tooltip_show self-time under --mine, where reader._mined is populated so this actually looks up.
     meta = tip.hover
     key = panel_key(
-        reader.panel_ports,
+        panel,
         tok,
         inflected,
         mined=meta.mined,
@@ -721,7 +734,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         group_mined=meta.group_mined,
     )
     tip.tip_show_cold = key not in tip.panel_cache  # cold = a panel build, not a cache hit
-    ox, oy = reader.sub_origin
+    ox, oy = inputs.sub_origin
     anchor = (ox + b.x, oy + b.y, b.h)
 
     # Direct paint (#149): a COLD pathological hover the persistent cache has → place by the cached
@@ -744,11 +757,11 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
             tuple(meta.terms),
             job_id=view.job_id,
         )
-        if reader._request_engaged_tooltip(request):
+        if ports.request_engaged_tooltip(request):
             return True
 
     st = panel_for(
-        reader.panel_ports,
+        panel,
         tok,
         inflected,
         min_h=cap,
@@ -759,7 +772,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # Direct-paint hit built a fresh interactive panel — seed its first viewport from tier-2 (RAM inflate,
     # no disk on the main thread) so scrolling back to 0 later re-blits warm.
     if tip.tip_show_cold and st.windowed.first_view is None:
-        reader._seed_precomposed(st, key, cap)
+        show.seed_precomposed(st, key, cap)
     view.state, view.key = st, key
     tip.hover_reading = st.reading
     log.debug(
@@ -782,7 +795,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
             osd=ports.osd,
         )
         render_view(ports, ports.tip.view)
-    reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
+    show.bind_keys()  # UP/DOWN/ESC live only while the tip shows
     # One panel: the blit above painted soft (instant) if the native viewport wasn't warm yet — the
     # direct-paint (#149) path is soft too. Ask the raster lane to warm the native bands; its completion
     # upgrades soft→crisp. Keep the source token for scroll warms.
@@ -836,19 +849,20 @@ _CRISP_MIN_SCALE = (
 )
 
 
-def apply_engaged_open(reader: Reader, result: tooltip_engaged.OpenReady) -> None:
+def apply_engaged_open(
+    ports: TipPorts, panel: PanelPorts, result: tooltip_engaged.OpenReady
+) -> None:
     """Place a worker-warmed clicked/keyed nested open, iff still valid: same generation, and the base
     tip is still up and is the SAME one that was showing at click time (``origin``). REPLACES any current
     nested popup (an explicit open/`k`-cycle wins over a hover-scan popup — newest-wins on the slot keeps
     only the latest intent). Re-selects the (now-warm) cached panel via the shared builder and
     ``place_nested``s it at the carried anchor — a cache hit whose bands the worker rastered, no getmask2."""
-    ports = reader.tip_ports
     if ports.tip.view.state is None:
         return
     if id(ports.tip.view.state) != result.origin:
         return  # the base tooltip switched under us — don't open onto the new word
     built = nested_popup._engaged_open_panel(
-        ports, reader.panel_ports, result.source, result.query
+        ports, panel, result.source, result.query
     )  # main thread → recompute mined
     if built is None:
         return
@@ -868,16 +882,18 @@ def apply_engaged_nav(ports: TipPorts, result: tooltip_engaged.NavigateReady) ->
     _install_navigated(ports, result.panel)
 
 
-def _apply_engaged_base(reader: Reader, _key: tuple) -> None:
+def _apply_engaged_base(
+    ports: TipPorts, panel: PanelPorts, inputs: HoverInputs, show: ShowActions, _key: tuple
+) -> None:
     """Re-enter the current hover after a composed cold-miss head (generation already checked)."""
-    if reader.tip.view.state is not None:
+    if ports.tip.view.state is not None:
         return  # a warm hover raced ahead — a tooltip is already up
-    i = reader.hover
-    if not (0 <= i < len(reader.tokens)):
+    i = inputs.hover()
+    if not (0 <= i < len(inputs.tokens)):
         return  # not hovering a word anymore
     # Capability state is part of PanelKey and may publish while the worker is composing.  Re-entering
     # the regular path on a mismatch queues the current key instead of stranding the accepted hover.
-    show_tooltip(reader, i)
+    show_tooltip(ports, panel, inputs, show, i)
 
 
 def _apply_engaged_nested(ports: TipPorts, tail: str) -> None:
@@ -907,15 +923,20 @@ def _apply_engaged_nested(ports: TipPorts, tail: str) -> None:
     )
 
 
-def apply_engaged_hover(reader: Reader, result: tooltip_engaged.HoverReady) -> None:
-    ports = reader.tip_ports
+def apply_engaged_hover(
+    ports: TipPorts,
+    panel: PanelPorts,
+    inputs: HoverInputs,
+    show: ShowActions,
+    result: tooltip_engaged.HoverReady,
+) -> None:
     popup = ports.tip.nest if result.nested else ports.tip.view
     if popup.job_id != result.job_id:
         return
     if result.nested:
         _apply_engaged_nested(ports, result.tail)
     else:
-        _apply_engaged_base(reader, result.key)
+        _apply_engaged_base(ports, panel, inputs, show, result.key)
 
 
 def _capture_tip_view(tip: TooltipState) -> tuple:

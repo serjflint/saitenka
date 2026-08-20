@@ -750,7 +750,7 @@ def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
     submitter = _enable_engaged(r)
     i, _tok, _inflected, _mined = _first_content(r)
     r.tip.panel_cache.clear()  # ensure cold
-    tooltip.show_tooltip(r, i)
+    tooltip.show_tooltip(r.tip_ports, r.panel_ports, r.hover_inputs, r.show_actions, i)
     assert r.tip.view.state is None  # nothing shown — deferred
     assert submitter.calls  # handed to the runtime actor
 
@@ -767,7 +767,7 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
     r.tip.panel_cache.clear()
-    tooltip.show_tooltip(r, i)
+    tooltip.show_tooltip(r.tip_ports, r.panel_ports, r.hover_inputs, r.show_actions, i)
     assert r.tip.view.state is None and submitter.calls
     r.hover = i
     submitter.finish()
@@ -842,7 +842,11 @@ def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.hover, r.tip.view.state = -1, None  # not hovering that word anymore
     tooltip.apply_engaged_hover(
-        r, tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=None)
+        r.tip_ports,
+        r.panel_ports,
+        r.hover_inputs,
+        r.show_actions,
+        tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=None),
     )
     assert r.tip.view.state is None  # nothing shown
 
@@ -857,7 +861,11 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     r.tip.view.job_id = r.tip.jobs.begin("tooltip")
 
     tooltip.apply_engaged_hover(
-        r, tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=old_job)
+        r.tip_ports,
+        r.panel_ports,
+        r.hover_inputs,
+        r.show_actions,
+        tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=old_job),
     )
 
     assert r.tip.view.state is None
@@ -985,11 +993,15 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     monkeypatch.setattr(r, "_request_interaction_metadata", requests.append)
     r.hover = index
     r.tip.view.job_id = r.tip.jobs.begin("tooltip")
-    tooltip._request_hover_metadata(r, index)
+    tooltip._request_hover_metadata(r.tip_ports, r.word_lookup, r.hover_inputs, index)
     original = requests[-1]
     r.session.mined.add("__newly-mined__")  # bumps the generation because membership actually moved
     tooltip.apply_hover_metadata(
-        r,
+        r.tip_ports,
+        r.panel_ports,
+        r.word_lookup,
+        r.hover_inputs,
+        r.show_actions,
         HoverMetadata(
             original.key,
             phrase_terms=(),
@@ -1011,7 +1023,11 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.tip.view.state, r.tip.view.rect = None, None
     tooltip.apply_engaged_hover(
-        r, tooltip_engaged.HoverReady(("k",), nested=True, tail="本", job_id=None)
+        r.tip_ports,
+        r.panel_ports,
+        r.hover_inputs,
+        r.show_actions,
+        tooltip_engaged.HoverReady(("k",), nested=True, tail="本", job_id=None),
     )
     assert r.tip.nest.state is None
 

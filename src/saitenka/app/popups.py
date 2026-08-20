@@ -19,17 +19,19 @@ from saitenka.app.interaction_jobs import InteractionJobs
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     import numpy as np
 
     from saitenka.app.hover_store import HoverStore
     from saitenka.app.interaction_surfaces import InteractionSurfaces
     from saitenka.app.lifecycle_timers import LifecycleTimerKind
+    from saitenka.app.mined_set import MinedSet
     from saitenka.app.prefetch import TipScale
     from saitenka.app.render_cache import LoadedView, RenderCache
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
+    from saitenka.app.tokenizer import Tokenizer
     from saitenka.model import Theme
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend
@@ -129,10 +131,63 @@ class HoverInputs:
     hit: Callable[[float, float], int]
     hover: Callable[[], int]
     cue_state: Callable[[], str]
-    tokens: Sequence[Token]
+    #: The cue's tokens as the tokenizer produced them — a `list` because the lookup the show chain
+    #: runs hands them straight to `Tokenizer.phrase_terms`, which takes one.
+    tokens: list[Token]
     boxes: list[WordBox]
     #: Where the cue was drawn — the boxes are relative to it, so a hit test needs both.
     sub_origin: tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class WordLookup:
+    """What turning a hovered index into `HoverMetadata` reads, and where the async request goes.
+
+    Separate from `TipPorts` because none of it is the popup: it is the cue's tokens seen through
+    the dictionary, plus the four generations a completion has to still match. Those generations are
+    read here rather than passed along so that request and completion build the identity from one
+    place — the two used to be assembled field for field at both ends, where a field added to one
+    and not the other reads as a stale result and silently drops the tooltip.
+
+    `deferred` is the branch, not whether `submit` is set: `submit` also carries the retain-newest
+    queueing a lane still needs while one job is in flight, so a caller reading "no lane" off it
+    would skip that too. On the deterministic demo/screenshot path there is no lane and the chain
+    resolves the metadata inline instead of requesting it.
+    """
+
+    tokenizer: Tokenizer
+    dict_set: object
+    mined: MinedSet
+    prefetch_gen: int
+    dependency_gen: int
+    cue_identity: object
+    deferred: bool
+    submit: Callable[..., bool]
+
+
+@dataclass(frozen=True, slots=True)
+class ShowActions:
+    """What showing a hovered word does — the acts half of the `set_hover` -> `show_tooltip` chain.
+
+    `freeze` is one act rather than the IPC handle, the property reader and the config flag it is
+    built from: the chain only ever asks "pause for this hover, did I pause?", and carrying the
+    three parts would let a caller pause on its own terms.
+
+    `select` publishes which token index is hovered, including the `-1` that means none. It is an
+    act because the cue's own hit-testing reads it back, so a caller writing the field directly
+    would be publishing to a channel it does not own.
+    """
+
+    select: Callable[[int], None]
+    draw_cue: Callable[[], None]
+    teardown: Callable[[], None]
+    bind_keys: Callable[[], None]
+    seed_precomposed: Callable[[Panel, object, int], bool]
+    freeze: Callable[..., bool]
+    inflected: Callable[[int], str]
+    sync_translation: Callable[[], None]
+    #: Counts one dictionary lookup against the session, when a session is recording.
+    record_lookup: Callable[[], None]
 
 
 class Panel:

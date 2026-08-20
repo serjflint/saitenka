@@ -123,7 +123,9 @@ from saitenka.app.popups import (
     HoverInputs,
     Panel,
     PopupView,
+    ShowActions,
     TipPorts,
+    WordLookup,
 )
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
 from saitenka.app.reader_context import (
@@ -1722,11 +1724,18 @@ class Reader:
         tooltip.update_hover(self.tip_ports, self.hover_actions, self.hover_inputs)
 
     def set_hover(self, index: int) -> None:
-        tooltip.set_hover(self, index)
+        tooltip.set_hover(
+            self.tip_ports,
+            self.panel_ports,
+            self.word_lookup,
+            self.hover_inputs,
+            self.show_actions,
+            index,
+        )
 
     def retire_hover(self) -> None:
         """Publish that nothing is hovered — the teardown half of the old `set_hover(-1)`."""
-        tooltip.retire_hover(self)
+        tooltip.retire_hover(self.tip_ports, self.hover_inputs, self.show_actions)
 
     def prepare_hover_blocking(self, index: int) -> None:
         """Build the deterministic demo/screenshot hover before the event loop starts."""
@@ -1737,7 +1746,14 @@ class Reader:
         self._interaction_metadata_submit = None
         self._engaged_tooltip_submit = None
         try:
-            tooltip.set_hover(self, index)
+            tooltip.set_hover(
+                self.tip_ports,
+                self.panel_ports,
+                self.word_lookup,
+                self.hover_inputs,
+                self.show_actions,
+                index,
+            )
         finally:
             self._interaction_metadata_submit = metadata_submit
             self._engaged_tooltip_submit = engaged_submit
@@ -1876,6 +1892,49 @@ class Reader:
             boxes=self.boxes,
             sub_origin=self.sub_origin,
         )
+
+    @property
+    def word_lookup(self) -> WordLookup:
+        """What a hover lookup reads, bound. Paired with `hover_inputs` and `show_actions`.
+
+        Built per access so the generations are the ones current at the call: `prepare_hover_blocking`
+        drops the worker lane for the duration of a deterministic hover, and a value cached across
+        that would still report itself as deferred.
+        """
+        return WordLookup(
+            tokenizer=self.tokenizer,
+            dict_set=self.dict_set,
+            mined=self.session.mined,
+            prefetch_gen=self.prefetch_state.gen,
+            dependency_gen=self._dependency_generation,
+            cue_identity=self._current_cue_identity,
+            deferred=self._interaction_metadata_submit is not None,
+            submit=self._request_interaction_metadata,
+        )
+
+    @property
+    def show_actions(self) -> ShowActions:
+        """What showing a hovered word does, bound. Paired with `tip_ports` and `panel_ports`."""
+        return ShowActions(
+            select=lambda index: setattr(self, "hover", index),
+            draw_cue=self._draw_subtitle,
+            teardown=self._teardown_tip,
+            bind_keys=self._bind_tip_keys,
+            seed_precomposed=self._seed_precomposed,
+            freeze=lambda *, already_paused: tooltip._freeze_frame(
+                self.ipc,
+                self._prop,
+                enabled=self.pause_on_tooltip,
+                already_paused=already_paused,
+            ),
+            inflected=self._inflected_surface,
+            sync_translation=self._sync_auto_translation,
+            record_lookup=self._record_lookup,
+        )
+
+    def _record_lookup(self) -> None:
+        if self.episode.session_recorder is not None:
+            self.episode.session_recorder.record_lookup()
 
     def _cue_state(self) -> str:
         """How far this cue has got, as one fact rather than three reads into other features."""
@@ -2166,7 +2225,9 @@ class Reader:
         return prefetch.cap_for(frac)
 
     def _show_tooltip(self, index: int) -> None:
-        tooltip.show_tooltip(self, index)
+        tooltip.show_tooltip(
+            self.tip_ports, self.panel_ports, self.hover_inputs, self.show_actions, index
+        )
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
@@ -3197,7 +3258,14 @@ class Reader:
         result = hover_metadata.finish(self._interaction_metadata, completion)
         try:
             if isinstance(result, hover_metadata.HoverMetadata):
-                tooltip.apply_hover_metadata(self, result)
+                tooltip.apply_hover_metadata(
+                    self.tip_ports,
+                    self.panel_ports,
+                    self.word_lookup,
+                    self.hover_inputs,
+                    self.show_actions,
+                    result,
+                )
             elif isinstance(result, hover_metadata.NestedMetadata):
                 nested_popup.apply_nested_metadata(self, result)
         finally:
@@ -3262,11 +3330,13 @@ class Reader:
             self._fallback_engaged_tooltip(request)
             return
         if isinstance(result, tooltip_engaged.HoverReady):
-            tooltip.apply_engaged_hover(self, result)
+            tooltip.apply_engaged_hover(
+                self.tip_ports, self.panel_ports, self.hover_inputs, self.show_actions, result
+            )
         elif isinstance(result, tooltip_engaged.NavigateReady):
             tooltip.apply_engaged_nav(self.tip_ports, result)
         elif isinstance(result, tooltip_engaged.OpenReady):
-            tooltip.apply_engaged_open(self, result)
+            tooltip.apply_engaged_open(self.tip_ports, self.panel_ports, result)
 
     def _fallback_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> None:
         if isinstance(request, tooltip_engaged.NavigateRequest | tooltip_engaged.OpenRequest) and (
@@ -3283,11 +3353,13 @@ class Reader:
             log.warning("engaged tooltip fallback failed", exc_info=True)
             return
         if isinstance(result, tooltip_engaged.HoverReady):
-            tooltip.apply_engaged_hover(self, result)
+            tooltip.apply_engaged_hover(
+                self.tip_ports, self.panel_ports, self.hover_inputs, self.show_actions, result
+            )
         elif isinstance(result, tooltip_engaged.NavigateReady):
             tooltip.apply_engaged_nav(self.tip_ports, result)
         elif isinstance(result, tooltip_engaged.OpenReady):
-            tooltip.apply_engaged_open(self, result)
+            tooltip.apply_engaged_open(self.tip_ports, self.panel_ports, result)
 
     def _cancel_engaged_tooltip(self) -> None:
         tooltip_engaged.cancel(self._engaged_tooltip)

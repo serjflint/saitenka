@@ -159,7 +159,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
     reader.use_tokenizer(spy)
     reader.tokens = [Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
 
-    tooltip.resolve_hover(reader, 0)
+    tooltip.resolve_hover(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
 
     assert "phrase_terms" in spy.calls
 
