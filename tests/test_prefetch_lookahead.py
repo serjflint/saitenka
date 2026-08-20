@@ -149,7 +149,7 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
     monkeypatch.setattr(r, "_is_mined", is_mined)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["long"])
 
-    heads = prefetch._head_prefetch_items(r, 1, set())
+    heads = prefetch._head_prefetch_items(r.prefetch_ports, r.head_probe, 1, set())
 
     assert len(heads) == probes == 4
 
@@ -177,7 +177,7 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
     monkeypatch.setattr(r, "_is_mined", lambda _token: False)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["ordinary"])
 
-    heads = prefetch._head_prefetch_items(r, 1, set())
+    heads = prefetch._head_prefetch_items(r.prefetch_ports, r.head_probe, 1, set())
 
     assert [item.token.surface for _priority, item in heads] == ["語"]
 

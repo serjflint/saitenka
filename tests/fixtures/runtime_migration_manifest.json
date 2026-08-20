@@ -106,26 +106,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_head_prefetch_candidate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_head_prefetch_items"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::episode_warm_ports"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::update_prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::warm_episode_tokens"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/reader_deps.py::apply_deps"
     ],
     [

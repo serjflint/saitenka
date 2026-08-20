@@ -307,7 +307,7 @@ def test_swap_during_warm_drops_the_stale_language_entry(request):
     reader.use_tokenizer(_SwapMidWarmTokenizer(reader, new))  # active = OLD
 
     prefetch._warm_episode_loop(
-        reader.episode.sub_index, ports=prefetch.episode_warm_ports(reader)
+        reader.episode.sub_index, ports=reader.warm_ports.loop
     )  # swaps to NEW mid-loop
 
     assert reader.tokenizer is new  # the swap took effect
@@ -321,7 +321,7 @@ def test_warm_under_the_new_generation_stores_cleanly_after_a_swap(request):
     reader.use_tokenizer(_MinimalTokenizer("new"))  # settled generation
     reader._warmed_index = None
 
-    prefetch._warm_episode_loop(reader.episode.sub_index, ports=prefetch.episode_warm_ports(reader))
+    prefetch._warm_episode_loop(reader.episode.sub_index, ports=reader.warm_ports.loop)
 
     assert len(reader.token_cache) == 3  # all three cues warmed under the new generation
 

@@ -1494,7 +1494,7 @@ class Reader:
 
     def warm_episode_tokens(self) -> None:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
-        prefetch.warm_episode_tokens(self)
+        prefetch.warm_episode_tokens(self.warm_ports)
 
     def _start_episode_annotation(self, index: CueIndex) -> None:
         self._annotation_episode_index = index
@@ -2052,6 +2052,62 @@ class Reader:
         )
 
     @property
+    def prefetch_ports(self) -> prefetch.PrefetchPorts:
+        """What one speculative-warming pass reads. Paired with `head_probe`."""
+        return prefetch.PrefetchPorts(
+            enabled=bool(self.prefetch and self.dict_set is not None),
+            engaged=bool(self._prop("pause")) or self._mouse_in,
+            state=self.prefetch_state,
+            cues=prefetch.LookaheadCues(
+                self.episode.sub_index,
+                self.sub_text,
+                self.episode.nav_idx,
+                self.prefetch_lookahead,
+            ),
+            tokens=self.tokens,
+            styles=self.styles,
+            tokenizer=self.tokenizer,
+            inflected=self._inflected_surface,
+            is_mined=self._is_mined,
+            finish=self._finish_speculative_prefetch,
+        )
+
+    @property
+    def head_probe(self) -> prefetch.HeadProbe:
+        """What deciding a speculative HEAD render looks at. Paired with `prefetch_ports`."""
+        return prefetch.HeadProbe(
+            scorer=self.scorer,
+            panel_key=self._panel_key,
+            panel_cache=self.tip.panel_cache,
+            lookahead=self.head_prefetch_lookahead,
+        )
+
+    @property
+    def warm_ports(self) -> prefetch.WarmPorts:
+        """What starting the background episode warm decides on."""
+        return prefetch.WarmPorts(
+            enabled=bool(self.prefetch and self.dict_set is not None),
+            index=self.episode.sub_index,
+            claim=self._claim_warm_index,
+            annotate_async=self._annotation_async,
+            start_annotation=self._start_episode_annotation,
+            loop=prefetch.EpisodeWarmPorts(
+                stop=self._stop,
+                token_cache=self.token_cache,
+                current_index=lambda: self.episode.sub_index,
+                normalise=cue_key,
+                tokenize=self._tokenize_cue,
+            ),
+        )
+
+    def _claim_warm_index(self, index: CueIndex) -> bool:
+        """Claim an index for the episode warm; `False` when it is already warmed or being warmed."""
+        if self._warmed_index is index:
+            return False
+        self._warmed_index = index
+        return True
+
+    @property
     def tip_ports(self) -> TipPorts:
         """What the popup blit/scroll/placement chain needs, as one member rather than the set.
 
@@ -2278,7 +2334,7 @@ class Reader:
 
     def _update_prefetch(self) -> None:
         generation = self.prefetch_state.gen
-        prefetch.update_prefetch(self)
+        prefetch.update_prefetch(self.prefetch_ports, self.head_probe)
         if self.prefetch_state.gen != generation:
             self._cancel_engaged_tooltip()
             self._cancel_render_ahead()
