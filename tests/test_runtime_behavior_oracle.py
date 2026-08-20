@@ -11,7 +11,7 @@ from util import FakeIPC, runtime_gateway
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.session_routes import install_session_reactor
-from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
+from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer, target_of
 from saitenka.app.subtitles import WordBox
 from saitenka.mpvio.ipc import IPCRequest
 
@@ -146,20 +146,20 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
     renderer = NativeVisibleRenderer()
     reader = Reader(ipc, prefetch=False, renderer=renderer)
     reader.sub_text = "active"
-    reader.subtitle_pipeline.cue_changed(reader, nonempty=True)
+    reader.subtitle_pipeline.cue_changed(target_of(reader), nonempty=True)
     trace = LegacyReaderTrace(reader)
     trace.observe("native-cue", outcome="pixels-established")
 
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
-    renderer.use_native(reader)
+    renderer.use_native(target_of(reader))
     reader.hover = 0
     reader.subtitle_pipeline.draw_current(reader)
     trace.observe("geometry-ready", outcome="interaction-ready")
     reader.boxes = []
-    renderer.degrade_geometry(reader)
+    renderer.degrade_geometry(target_of(reader))
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
-    renderer.use_native(reader)
+    renderer.use_native(target_of(reader))
     reader.subtitle_pipeline.draw_current(reader)
     trace.observe("geometry-recovered", outcome="interaction-ready")
 

@@ -143,7 +143,13 @@ from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
 )
 from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
-from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer, SubtitleRenderer
+from saitenka.app.subtitle_render import (
+    NativeVisibleRenderer,
+    NullRenderer,
+    SubtitleRenderer,
+    SubtitleTarget,
+    target_of,
+)
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
@@ -827,6 +833,11 @@ class Reader:
     def _playback(self, state: playback.PlaybackState) -> None:
         self._playback_store.current = PlaybackSlice(state)
 
+    def _subtitle_target(self) -> SubtitleTarget:
+        """What the subtitle renderers act on. Built per call — `native_geometry` is installed
+        after construction, so a target cached on the Reader would predate it."""
+        return target_of(self)
+
     def _reduce_playback(self, event: events.PlaybackEvent) -> None:
         """Advance `Owner.PLAYBACK`'s slice by one event and apply what that turn published.
 
@@ -1135,7 +1146,7 @@ class Reader:
         provisional_navigation: bool = False,
     ) -> None:
         self.subtitle_pipeline.invalidate()
-        self.subtitle_pipeline.cue_changed(self, nonempty=bool(text.strip()))
+        self.subtitle_pipeline.cue_changed(self._subtitle_target(), nonempty=bool(text.strip()))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
@@ -1575,10 +1586,10 @@ class Reader:
         owner = getattr(getattr(ownership, "owner", None), "value", None)
         if owner != "legacy":
             self.boxes = []
-        self.subtitle_pipeline.geometry_degraded(self)
+        self.subtitle_pipeline.geometry_degraded(self._subtitle_target())
 
     def _use_native_subtitle_renderer(self) -> bool:
-        return self.subtitle_pipeline.renderer.use_native(self)
+        return self.subtitle_pipeline.renderer.use_native(self._subtitle_target())
 
     def _native_ownership_undecided(self) -> bool:
         """True while a visibility assertion is in flight, so `_use_native_subtitle_renderer` said
@@ -2435,9 +2446,9 @@ class Reader:
         elif isinstance(effect, session_intents.ReleaseSecondarySubtitles):
             subtitle_modes.release_secondary(self)
         elif isinstance(effect, session_intents.SuspendSubtitles):
-            self.subtitle_pipeline.suspend_for_overlay(self)
+            self.subtitle_pipeline.suspend_for_overlay(self._subtitle_target())
         elif isinstance(effect, session_intents.ResumeSubtitles):
-            self.subtitle_pipeline.resume_after_overlay(self)
+            self.subtitle_pipeline.resume_after_overlay(self._subtitle_target())
         elif isinstance(effect, session_intents.ShowTranslation):
             self._setup_secondary()
             self._draw_translation()
@@ -3722,7 +3733,7 @@ class Reader:
         SessionRunner(step).run_until(lambda: not alive or self._stop.is_set())
 
     def _on_ipc_reconnect(self) -> None:
-        self.subtitle_pipeline.connection_replaced(self)
+        self.subtitle_pipeline.connection_replaced(self._subtitle_target())
 
     def close(self) -> CloseLedger:
         """Tear the session down. Every participant runs even if an earlier one raises.
@@ -3818,7 +3829,10 @@ class Reader:
                 # No refresh may land after the provider closes, nor a settle deadline outlive it.
                 CloseStep("geometry-refresh", lambda: self.retire_geometry_refresh()),
                 CloseStep("settle-window", lambda: self.retire_settle_window()),
-                CloseStep("subtitle-deactivate", lambda: self.subtitle_pipeline.deactivate(self)),
+                CloseStep(
+                    "subtitle-deactivate",
+                    lambda: self.subtitle_pipeline.deactivate(self._subtitle_target()),
+                ),
                 # The native path clears through the pipeline and closes geometry; the legacy path
                 # closes the pipeline itself. A step each, so a failure in either one isolates.
                 CloseStep(

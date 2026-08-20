@@ -470,13 +470,18 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
     )
 
     class PublishingRenderer(_Inert):
-        """Publishes geometry at draw. Uses `activate`, which still receives the host, because the
-        cue identity it fabricates is host state rather than anything in a draw request."""
+        """Publishes geometry at `activate`. Holds the Reader by construction: the cue identity it
+        fabricates is host state, and `activate` receives a `SubtitleTarget` — deliberately narrower
+        than a host, so a stub that needs one says so instead of taking it from the protocol."""
+
+        def __init__(self, reader: Reader) -> None:
+            self._reader = reader
 
         def draw(self, _request=None, _surfaces=None, _ipc=None, /, **_ports) -> None:
             return None
 
-        def activate(self, reader: Reader, _sid=None, /) -> bool:
+        def activate(self, _target=None, _sid=None, /) -> bool:
+            reader = self._reader
             track_id = SubtitleTrackId("track-1")
             source_order = {"いち": 1, "に": 2}[reader.sub_text]
             event_id = SubtitleEventId(
@@ -507,7 +512,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
             return True
 
     r, ipc = _reader_with_index(monkeypatch)
-    r.renderer = PublishingRenderer()
+    r.renderer = PublishingRenderer(r)
     ipc.props["sub-text"] = "いち"
     r.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0

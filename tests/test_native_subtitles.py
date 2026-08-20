@@ -18,7 +18,7 @@ from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
-from saitenka.app.subtitle_render import NativeVisibleRenderer
+from saitenka.app.subtitle_render import NativeVisibleRenderer, target_of
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
@@ -539,7 +539,7 @@ def test_same_session_reconnect_reasserts_native_and_preserves_restore_baseline(
     ipc.props["sub-visibility"] = False
     ipc.commands.clear()
 
-    renderer.connection_replaced(result)
+    renderer.connection_replaced(target_of(result))
 
     assert renderer.ownership_state.owner.value == "native"
     assert renderer.ownership_state.context.connection_epoch == 1
@@ -973,8 +973,8 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
             otel_metrics.snapshot()["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
         )
         ipc.set_property_error = None
-        renderer.suspend_for_overlay(result)
-        renderer.resume_after_overlay(result)
+        renderer.suspend_for_overlay(target_of(result))
+        renderer.resume_after_overlay(target_of(result))
 
         assert renderer.ownership_state.owner.value == "legacy"
         assert (
@@ -1694,7 +1694,7 @@ def test_only_one_assertion_is_in_flight_across_a_reassert(tmp_path: Path) -> No
 
     # Through the fact, not a verb: an overlay release is the production trigger for a
     # re-verification with the selection unchanged.
-    result.subtitle_pipeline.renderer.resume_after_overlay(result)
+    result.subtitle_pipeline.renderer.resume_after_overlay(target_of(result))
 
     # A second assertion would orphan the first's effect id and leave a terminal nobody retires.
     assert [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c] == visibility
@@ -2051,7 +2051,7 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
-        renderer.cue_changed(result, nonempty=True)
+        renderer.cue_changed(target_of(result), nonempty=True)
         assert renderer.ownership_state.owner.value == "unknown"
         result.subtitle_pipeline.draw_current(result)
         # The retry is a named deadline now: nothing happens until it is due.
@@ -2086,9 +2086,9 @@ def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, tr
     ipc.commands.clear()
 
     if trigger == "empty-cue":
-        renderer.cue_changed(result, nonempty=False)
+        renderer.cue_changed(target_of(result), nonempty=False)
     elif trigger == "reconnect":
-        renderer.connection_replaced(result)
+        renderer.connection_replaced(target_of(result))
     else:
         result.subtitle_pipeline.activate(result)
 
@@ -2253,7 +2253,7 @@ def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: 
     ipc.commands.clear()
 
     ipc.correlate_commands = True
-    renderer.resume_after_overlay(result)
+    renderer.resume_after_overlay(target_of(result))
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the visibility write
     ipc.props["sub-visibility"] = False  # mpv refuses to keep its subtitles visible
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # readback FALSE: hand to legacy
@@ -2304,11 +2304,11 @@ def test_rejected_legacy_rehandoff_keeps_mpv_visible_and_retries(tmp_path: Path)
     result._draw_subtitle()
     assert renderer.ownership_state.owner.value == "legacy"
     ipc.set_property_exception = None
-    renderer.suspend_for_overlay(result)
+    renderer.suspend_for_overlay(target_of(result))
     ipc.commands.clear()
     ipc.overlay_add_error = "unsupported format"
 
-    renderer.resume_after_overlay(result)
+    renderer.resume_after_overlay(target_of(result))
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None

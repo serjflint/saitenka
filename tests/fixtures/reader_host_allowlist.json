@@ -19,8 +19,8 @@
   "saitenka.app.subnav": 3,
   "saitenka.app.subselect": 1,
   "saitenka.app.subtitle_modes": 10,
-  "saitenka.app.subtitle_pipeline": 17,
-  "saitenka.app.subtitle_render": 22,
+  "saitenka.app.subtitle_pipeline": 3,
+  "saitenka.app.subtitle_render": 2,
   "saitenka.app.surfaces": 8,
   "saitenka.app.tooltip": 46
 }

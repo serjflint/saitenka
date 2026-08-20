@@ -215,42 +215,42 @@ class NoPixelOwnership:
     reader and nothing at all to a type checker.
     """
 
-    def cue_changed(self, _reader: Reader, /, *, nonempty: bool) -> None: ...
+    def cue_changed(self, _target: SubtitleTarget, /, *, nonempty: bool) -> None: ...
 
-    def connection_replaced(self, _reader: Reader, /) -> None: ...
+    def connection_replaced(self, _target: SubtitleTarget, /) -> None: ...
 
-    def degrade_geometry(self, _reader: Reader, /) -> None: ...
+    def degrade_geometry(self, _target: SubtitleTarget, /) -> None: ...
 
-    def use_native(self, _reader: Reader, /) -> bool:
+    def use_native(self, _target: SubtitleTarget, /) -> bool:
         return True  # nothing to prove, so geometry is never withheld on ownership grounds
 
 
 class SubtitleRenderer(NoPixelOwnership):
     """Rasterize the current cue and blit it as the SUB overlay — the real draw path."""
 
-    def activate(self, reader: Reader, _sid: SelectedSid = ASK_MPV) -> bool:
+    def activate(self, target: SubtitleTarget, _sid: SelectedSid = ASK_MPV) -> bool:
         if not hasattr(self, "_restore_visibility"):
-            self._restore_visibility = reader._get("sub-visibility")
-        reply = reader.ipc.command(
+            self._restore_visibility = target.get("sub-visibility")
+        reply = target.ipc.command(
             "set_property",
             "sub-visibility",
             False,  # noqa: FBT003  # mpv IPC wire value
         )
         return not isinstance(reply, dict) or reply.get("error") in {None, "success"}
 
-    def deactivate(self, reader: Reader) -> None:
+    def deactivate(self, target: SubtitleTarget) -> None:
         restore = getattr(self, "_restore_visibility", None)
         if restore is not None:
             try:
-                reader.ipc.command("set_property", "sub-visibility", restore)
+                target.ipc.command("set_property", "sub-visibility", restore)
             except (OSError, ValueError):
                 log.info("could not restore mpv subtitle visibility during close")
 
-    def suspend_for_overlay(self, reader: Reader) -> None:
-        _send_visibility(reader.ipc, "subtitle:suspend-for-overlay", visible=True)
+    def suspend_for_overlay(self, target: SubtitleTarget) -> None:
+        _send_visibility(target.ipc, "subtitle:suspend-for-overlay", visible=True)
 
-    def resume_after_overlay(self, reader: Reader) -> None:
-        _send_visibility(reader.ipc, "subtitle:resume-after-overlay", visible=False)
+    def resume_after_overlay(self, target: SubtitleTarget) -> None:
+        _send_visibility(target.ipc, "subtitle:resume-after-overlay", visible=False)
 
     def __init__(self, provider: subtitle_raster.SubtitleRasterPort | None = None) -> None:
         self.provider: subtitle_raster.SubtitleRasterPort = (
@@ -439,14 +439,14 @@ class NullRenderer(NoPixelOwnership):
     def logged_first(self) -> bool:
         return False
 
-    def activate(self, _reader: Reader, _sid: SelectedSid = ASK_MPV, /) -> bool:
+    def activate(self, _target: SubtitleTarget, _sid: SelectedSid = ASK_MPV, /) -> bool:
         return True
 
-    def deactivate(self, _reader: Reader, /) -> None: ...
+    def deactivate(self, _target: SubtitleTarget, /) -> None: ...
 
-    def suspend_for_overlay(self, _reader: Reader, /) -> None: ...
+    def suspend_for_overlay(self, _target: SubtitleTarget, /) -> None: ...
 
-    def resume_after_overlay(self, _reader: Reader, /) -> None: ...
+    def resume_after_overlay(self, _target: SubtitleTarget, /) -> None: ...
 
 
 class NativeVisibleRenderer:
@@ -863,14 +863,13 @@ class NativeVisibleRenderer:
         )
         self._execute(target, actions)
 
-    def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> bool:
+    def activate(self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV) -> bool:
         """Own the pixels, idempotently. `False` means the caller must draw them itself.
 
         A reconfigure arrives here as a selection change, but only if it *declares* the track it
         selected: mpv has not echoed the write yet when it calls, so reading `sid` back would
         compare the incoming track against itself.
         """
-        target = target_of(reader)
         self._ensure_selection(target, sid)
         if (
             not self._state.native_pixels_established
@@ -892,8 +891,7 @@ class NativeVisibleRenderer:
         self._execute(target, actions)
         return self._state.owner == PixelOwner.NATIVE
 
-    def connection_replaced(self, reader: Reader) -> None:
-        target = target_of(reader)
+    def connection_replaced(self, target: SubtitleTarget) -> None:
         context = OwnershipContext(
             self._state.context.connection_epoch + 1,
             self._state.context.ownership_epoch + 1,
@@ -908,29 +906,26 @@ class NativeVisibleRenderer:
         self._trace_ownership("connection-replaced", owner_before=owner_before)
         self._execute(target, actions)
 
-    def use_native(self, reader: Reader) -> bool:
-        target = target_of(reader)
+    def use_native(self, target: SubtitleTarget) -> bool:
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.GEOMETRY_READY)
         )
         self._execute(target, actions)
-        return self.activate(reader)
+        return self.activate(target)
 
-    def degrade_geometry(self, reader: Reader) -> None:
-        target = target_of(reader)
+    def degrade_geometry(self, target: SubtitleTarget) -> None:
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.GEOMETRY_DEGRADED)
         )
         self._execute(target, actions)
 
-    def cue_changed(self, reader: Reader, *, nonempty: bool) -> None:
-        target = target_of(reader)
+    def cue_changed(self, target: SubtitleTarget, *, nonempty: bool) -> None:
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CUE_CHANGED, nonempty=nonempty)
         )
         self._execute(target, actions)
         if nonempty:
-            self.activate(reader)
+            self.activate(target)
 
     def draw(
         self, request: DrawRequest, surfaces=None, ipc=None, /, *, on_settled=None
@@ -976,8 +971,7 @@ class NativeVisibleRenderer:
         """The fallback's, since it is the one that rasters — and logs — when mpv is not the owner."""
         return self._fallback.logged_first
 
-    def deactivate(self, reader: Reader) -> None:
-        target = target_of(reader)
+    def deactivate(self, target: SubtitleTarget) -> None:
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CLOSE_REQUESTED)
         )
@@ -987,14 +981,12 @@ class NativeVisibleRenderer:
             log.info("could not finish native subtitle ownership teardown")
         self._state, _ = reduce_ownership(self._state, OwnershipEvent(EventKind.CLOSE_FINISHED))
 
-    def suspend_for_overlay(self, reader: Reader) -> None:
-        target = target_of(reader)
+    def suspend_for_overlay(self, target: SubtitleTarget) -> None:
         self._hide_focus(target.ipc)
         self._fallback.clear(target.surfaces, target.ipc)
         _send_visibility(target.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
-    def resume_after_overlay(self, reader: Reader) -> None:
-        target = target_of(reader)
+    def resume_after_overlay(self, target: SubtitleTarget) -> None:
         if self._state.owner == PixelOwner.LEGACY:
             self._state, actions = reduce_ownership(
                 self._state, OwnershipEvent(EventKind.LEGACY_REHANDOFF)

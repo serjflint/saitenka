@@ -12,7 +12,7 @@ from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
-    from saitenka.app.subtitle_render import DrawResult
+    from saitenka.app.subtitle_render import DrawResult, SubtitleTarget
     from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
 
 
@@ -21,7 +21,8 @@ class CurrentSubtitleRenderer(Protocol):
 
     That is precisely why the draw members take a request rather than a host: while `draw` took a
     `Reader`, the native renderer could never be narrower than the legacy one it shares this
-    protocol with.
+    protocol with. The lifecycle members follow the same rule and take a `SubtitleTarget` — the
+    widest renderer was measured, and outside the draw request it reaches five host members.
 
     **Total, deliberately.** The coordinator used to probe every lifecycle member with `getattr`
     and skip it when absent, which no type checker can see: a renamed method, or a renderer that
@@ -43,7 +44,7 @@ class CurrentSubtitleRenderer(Protocol):
         """Whether a first-subtitle line has already been logged, for the caller to carry back."""
         ...
 
-    def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV, /) -> bool:
+    def activate(self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV, /) -> bool:
         """Take the pixels, idempotently. `False` means the caller must draw them itself.
 
         Idempotent by contract: safe to call on any event without tracking whether it already did.
@@ -54,21 +55,21 @@ class CurrentSubtitleRenderer(Protocol):
         """
         ...
 
-    def deactivate(self, reader: Reader, /) -> None:
+    def deactivate(self, target: SubtitleTarget, /) -> None:
         """Give the pixels back, at close."""
         ...
 
-    def suspend_for_overlay(self, reader: Reader, /) -> None: ...
+    def suspend_for_overlay(self, target: SubtitleTarget, /) -> None: ...
 
-    def resume_after_overlay(self, reader: Reader, /) -> None: ...
+    def resume_after_overlay(self, target: SubtitleTarget, /) -> None: ...
 
-    def cue_changed(self, reader: Reader, /, *, nonempty: bool) -> None: ...
+    def cue_changed(self, target: SubtitleTarget, /, *, nonempty: bool) -> None: ...
 
-    def connection_replaced(self, reader: Reader, /) -> None: ...
+    def connection_replaced(self, target: SubtitleTarget, /) -> None: ...
 
-    def degrade_geometry(self, reader: Reader, /) -> None: ...
+    def degrade_geometry(self, target: SubtitleTarget, /) -> None: ...
 
-    def use_native(self, reader: Reader, /) -> bool:
+    def use_native(self, target: SubtitleTarget, /) -> bool:
         """Whether native geometry may be used. A renderer with no native pixel path answers
         `True`: it has no ownership to prove, so it never withholds geometry."""
         ...
@@ -130,9 +131,9 @@ class SubtitleModeCoordinator:
         Was spread across each renderer's `draw`. Collapsing it here is what makes the renderers
         host-free: they share one protocol member, so the widest of them set the signature for all.
         """
-        from saitenka.app.subtitle_render import build_draw_request
+        from saitenka.app.subtitle_render import build_draw_request, target_of
 
-        self._renderer.activate(reader)
+        self._renderer.activate(target_of(reader))
         result = self._renderer.draw(
             build_draw_request(reader), reader.lifecycle_surfaces, reader.ipc
         )
@@ -148,26 +149,28 @@ class SubtitleModeCoordinator:
         self._renderer.clear(reader.lifecycle_surfaces, reader.ipc)
 
     def activate(self, reader: Reader, sid: SelectedSid = ASK_MPV) -> None:
-        if self._renderer.activate(reader, sid) is False:
+        from saitenka.app.subtitle_render import target_of
+
+        if self._renderer.activate(target_of(reader), sid) is False:
             self.draw_current(reader)
 
-    def geometry_degraded(self, reader: Reader) -> None:
-        self._renderer.degrade_geometry(reader)
+    def geometry_degraded(self, target: SubtitleTarget) -> None:
+        self._renderer.degrade_geometry(target)
 
-    def cue_changed(self, reader: Reader, *, nonempty: bool) -> None:
-        self._renderer.cue_changed(reader, nonempty=nonempty)
+    def cue_changed(self, target: SubtitleTarget, *, nonempty: bool) -> None:
+        self._renderer.cue_changed(target, nonempty=nonempty)
 
-    def deactivate(self, reader: Reader) -> None:
-        self._renderer.deactivate(reader)
+    def deactivate(self, target: SubtitleTarget) -> None:
+        self._renderer.deactivate(target)
 
-    def suspend_for_overlay(self, reader: Reader) -> None:
-        self._renderer.suspend_for_overlay(reader)
+    def suspend_for_overlay(self, target: SubtitleTarget) -> None:
+        self._renderer.suspend_for_overlay(target)
 
-    def resume_after_overlay(self, reader: Reader) -> None:
-        self._renderer.resume_after_overlay(reader)
+    def resume_after_overlay(self, target: SubtitleTarget) -> None:
+        self._renderer.resume_after_overlay(target)
 
-    def connection_replaced(self, reader: Reader) -> None:
-        self._renderer.connection_replaced(reader)
+    def connection_replaced(self, target: SubtitleTarget) -> None:
+        self._renderer.connection_replaced(target)
 
     @property
     def generation(self) -> int:
