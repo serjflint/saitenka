@@ -69,9 +69,9 @@ _SYNCHRONOUS_BY_CONTRACT = {
 #: terminal outcome to correlate, so routing one through the egress gateway buys nothing. Splitting
 #: the kind is what makes that gate answerable from the manifest instead of by eye.
 _MPV_READ_VERBS = {"get_property"}
-_DRIVER_SWITCH_SYMBOLS = {
-    "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard",
-}
+#: Emptied with the driver switch, like `_TICK_METHODS`: the one symbol it named is deleted. Kept as
+#: a closed empty set so a second driver reintroduced under a name here is debt again.
+_DRIVER_SWITCH_SYMBOLS: set[str] = set()
 #: What WP5 is allowed to leave behind, enumerated rather than described. Splitting it into three
 #: named sets is what makes WP5's exit ONE equality (`total == 20`) instead of a sentence with a
 #: tilde in it — a plan draft that said "~26" was wrong by four and nobody could tell.
@@ -83,11 +83,10 @@ _DRIVER_SWITCH_SYMBOLS = {
 #: Rows, not symbols. Five of these symbols carry a `reader-parameter` row as well, and that second
 #: row IS WP5's to convert — a symbol-keyed set would have quietly excused all five.
 _TERMINAL_DEBT = {
-    # WP6 deleted the tick loop; what is left is the legacy staging path and the repeat guard that
-    # exists only because the picker was polled.
+    # WP6 deleted the tick loop and the drain-local guard beside it; what is left is the legacy
+    # staging path, which the bounded close barrier is the first thing that can retire.
     "driver-switch": frozenset(
         {
-            ("driver-switch", "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"),
             (
                 "direct-mpv-command",
                 "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action",

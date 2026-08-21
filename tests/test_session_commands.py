@@ -87,27 +87,3 @@ def test_the_transport_decides_whether_a_claimed_command_runs(monkeypatch, trans
     # Only the refusal is the performer's to publish; a command that runs is reported by the
     # handler stubbed out above, so a count here would be measuring the stub.
     assert outcomes == (1 if transport_lost else 0)
-
-
-@pytest.mark.timeout(5)
-def test_a_repeat_within_one_batch_is_still_coalesced_after_the_trip_through_the_reactor(
-    monkeypatch,
-) -> None:
-    """The guard is arrival machinery, so it stayed on the receive rather than moving into the
-    reducer. It is also the half a claim could silently drop: the performer reads it off the field,
-    and a performer that built its own would coalesce nothing and fire the picker twice."""
-    ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
-    install_session_reactor(gateway, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
-    handled: list[str] = []
-    monkeypatch.setattr(reader, "_handle", lambda command: handled.append(command.name))
-    try:
-        for _ in range(2):
-            ipc.emit({"event": "client-message", "args": ["saitenka-sub-picker"]})
-        reader._drain_events()
-    finally:
-        reader.close()
-        gateway.close()
-
-    assert handled == ["saitenka-sub-picker"]

@@ -95,15 +95,13 @@ def test_a_routed_store_does_not_reduce_what_the_reactor_already_did() -> None:
 def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
     """The Reader-side consequence, driven through the drain rather than by setting the state:
     a command that reaches a session whose socket is gone is rejected, not queued at mpv."""
-    from saitenka.app.runtime.commands import LegacyPickerRepeatGuard
     from saitenka.runtime.events import CommandOutcome, CommandReason, UserCommand
 
     ipc = FakeIPC()
     reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
-    guard = LegacyPickerRepeatGuard()
     try:
-        reader._drain_event(LOST, guard)
-        reader._drain_event(UserCommand("saitenka-help", command_id=7), guard)
+        reader._drain_event(LOST)
+        reader._drain_event(UserCommand("saitenka-help", command_id=7))
     finally:
         reader.close()
 
@@ -162,7 +160,7 @@ def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
     install_session_reactor(gateway, startup_hint=False)
     reslotted: list[str] = []
     reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
-    monkeypatch.setattr(reader, "_reslot_episode", lambda: reslotted.append("reslot"))
+    monkeypatch.setattr(reader, "_on_file_loaded", lambda: reslotted.append("reslot"))
     try:
         gateway.publish_session_event(FileLoaded())
         ipc.drain_events(0.0)

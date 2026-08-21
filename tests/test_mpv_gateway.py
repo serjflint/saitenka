@@ -280,7 +280,7 @@ def test_gateway_publishes_legacy_command_terminal_outcome() -> None:
     [
         (CommandOutcome.EXECUTED, None),
         (CommandOutcome.FAILED, CommandReason.INTERNAL),
-        (CommandOutcome.SUPPRESSED, CommandReason.LEGACY_REPEAT),
+        (CommandOutcome.SUPPRESSED, CommandReason.COALESCED),
     ],
 )
 def test_command_terminal_slot_survives_normal_lane_saturation(outcome, reason) -> None:

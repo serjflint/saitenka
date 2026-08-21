@@ -53,10 +53,6 @@
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility"
     ],
     [
-      "driver-switch",
-      "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"
-    ],
-    [
       "reader-parameter",
       "src/saitenka/app/controller.py::Reader.__init__"
     ],

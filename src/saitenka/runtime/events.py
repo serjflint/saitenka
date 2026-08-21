@@ -190,7 +190,6 @@ class CommandReason(StrEnum):
     CUE_RETIRED = "cue-retired"
     DISCONNECTED = "disconnected"
     INTERNAL = "internal"
-    LEGACY_REPEAT = "legacy-repeat"
     COALESCED = "coalesced"
 
 
@@ -219,8 +218,7 @@ class CommandHandled:
             CommandOutcome.UNBOUND: self.reason is None,
             CommandOutcome.FAILED: self.reason == CommandReason.INTERNAL,
             CommandOutcome.REJECTED: self.reason in rejection_reasons,
-            CommandOutcome.SUPPRESSED: self.reason
-            in {CommandReason.LEGACY_REPEAT, CommandReason.COALESCED},
+            CommandOutcome.SUPPRESSED: self.reason == CommandReason.COALESCED,
         }[self.outcome]
         if not valid_reason:
             raise ValueError("command outcome and reason are inconsistent")

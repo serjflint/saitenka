@@ -12,7 +12,6 @@ from saitenka.app.runtime import (
     CueCommandState,
     LegacyCommandBinding,
     LegacyCommandExecutor,
-    LegacyPickerRepeatGuard,
 )
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
@@ -113,21 +112,6 @@ def test_legacy_command_failure_is_a_terminal_typed_outcome():
 
     assert result.outcome == CommandOutcome.FAILED
     assert result.error_type == "RuntimeError"
-
-
-def test_legacy_picker_repeat_guard_emits_bounded_suppression_outcome():
-    guard = LegacyPickerRepeatGuard("picker")
-
-    assert guard.inspect(UserCommand("picker")) is None
-    suppressed = guard.inspect(UserCommand("picker"))
-
-    assert suppressed is not None
-    assert suppressed.event() == CommandHandled(
-        "picker",
-        Owner.INTERACTION,
-        CommandOutcome.SUPPRESSED,
-        reason=CommandReason.LEGACY_REPEAT,
-    )
 
 
 def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request):

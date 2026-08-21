@@ -115,7 +115,7 @@ class CommandExecution:
         if self.outcome == CommandOutcome.FAILED:
             reason = CommandReason.INTERNAL
         elif self.outcome == CommandOutcome.SUPPRESSED:
-            reason = CommandReason.LEGACY_REPEAT
+            reason = CommandReason.COALESCED
         return CommandHandled(self.name, self.owner, self.outcome, self.command_id, reason)
 
     def coalesced_events(self, command_ids: tuple[int, ...]) -> tuple[CommandHandled, ...]:
@@ -141,28 +141,6 @@ class CommandExecution:
             )
             for command_id in command_ids
         )
-
-
-class LegacyPickerRepeatGuard:
-    """Drain-local compatibility guard deleted with the tick driver."""
-
-    def __init__(self, picker_name: str = SUB_PICKER_MSG) -> None:
-        self._picker_name = picker_name
-        self._previous: str | None = None
-
-    def inspect(self, command: UserCommand) -> CommandExecution | None:
-        previous, self._previous = self._previous, command.name
-        if command.name != self._picker_name or previous != self._picker_name:
-            return None
-        return CommandExecution(
-            command.name,
-            Owner.INTERACTION,
-            CommandOutcome.SUPPRESSED,
-            command_id=command.command_id,
-        )
-
-    def separate(self) -> None:
-        self._previous = None
 
 
 _CUE_INDEPENDENT = frozenset(

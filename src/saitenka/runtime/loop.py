@@ -132,11 +132,14 @@ class SessionLoop:
         """
         self._correlator.publish_due()
         timeout = self._bounded_by_deadline(timeout)
+        head = None
         if timeout is None or timeout > 0:
-            envelope = self._mailbox.receive(timeout=timeout)
-            if envelope is not None:
-                self._turn(envelope, handle)
-        for envelope in self._mailbox.receive_ready():
+            head = self._mailbox.receive(timeout=timeout)
+        # The envelope we blocked for is part of the batch, not a turn of its own: coalescing is
+        # over adjacent envelopes, so handling the head separately would let a repeat arriving
+        # behind it through — the one press in ten that woke the loop rather than joining a batch
+        # already there.
+        for envelope in self._mailbox.receive_ready(start=head):
             self._turn(envelope, handle)
 
     def _bounded_by_deadline(self, timeout: float | None) -> float | None:

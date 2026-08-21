@@ -12,7 +12,6 @@ from saitenka.app.runtime.commands import (
     CueCommandState,
     LegacyCommandBinding,
     LegacyCommandExecutor,
-    LegacyPickerRepeatGuard,
 )
 
 __all__ = [
@@ -27,5 +26,4 @@ __all__ = [
     "CueCommandState",
     "LegacyCommandBinding",
     "LegacyCommandExecutor",
-    "LegacyPickerRepeatGuard",
 ]

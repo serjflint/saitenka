@@ -2943,7 +2943,6 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text():
 def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkeypatch):
     from util import FakeIPC as EventIPC
 
-    from saitenka.app.runtime import LegacyPickerRepeatGuard
     from saitenka.runtime import (
         CommandHandled,
         CommandOutcome,
@@ -2957,10 +2956,8 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkey
     reader.set_subtitle("古い字幕")
     copied = []
     monkeypatch.setattr(reader, "copy_line", lambda: copied.append(reader.sub_text))
-    guard = LegacyPickerRepeatGuard()
-
-    reader._drain_event(ConnectionLost(0), guard)
-    reader._drain_event(UserCommand(C.COPY_LINE_MSG, command_id=7), guard)
+    reader._drain_event(ConnectionLost(0))
+    reader._drain_event(UserCommand(C.COPY_LINE_MSG, command_id=7))
     assert reader.pump()
 
     assert copied == []

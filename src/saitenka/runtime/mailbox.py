@@ -28,6 +28,12 @@ if TYPE_CHECKING:
     from saitenka.runtime.events import RuntimeEvent
 
 
+#: Commands where adjacent repeats in one batch are one intent: a scroll accumulates, so two
+#: notches mpv reported together are one movement. Nothing else is folded — a repeat of a command
+#: that acts is the user asking for it again.
+_COALESCING_COMMANDS = frozenset({"saitenka-scroll-up", "saitenka-scroll-down"})
+
+
 class TrafficClass(StrEnum):
     NORMAL = "normal"
     LIFECYCLE = "lifecycle"
@@ -383,8 +389,5 @@ class SessionMailbox:
             # been seen, and mpv reports the cursor far faster than a turn can consume it.
             return left.name == right.name == "mouse-pos"
         if isinstance(left, UserCommand) and isinstance(right, UserCommand):
-            return left.name == right.name and left.name in {
-                "saitenka-scroll-up",
-                "saitenka-scroll-down",
-            }
+            return left.name == right.name and left.name in _COALESCING_COMMANDS
         return False

@@ -39,14 +39,15 @@ def test_runtime_migration_manifest_matches_production() -> None:
 def test_the_terminal_set_claims_every_remaining_row() -> None:
     """WP5 is out: every live row is now a *named* terminal one, not merely a counted one.
 
-    The interesting assertion is not `total == 20` — it is that the remainder is empty. A new row
-    appearing outside the terminal set (a regression, or a kind nobody enumerated) would leave the
-    total at 20 by displacing a converted row, and the count alone cannot see that.
+    The interesting assertion is not the total — it is that the remainder is empty. A new row
+    appearing outside the terminal set (a regression, or a kind nobody enumerated) would hold the
+    total steady by displacing a converted row, and the count alone cannot see that. The total
+    itself only ever falls, and falls by a deletion: WP6 took the drain-local guard out of it.
     """
     checker = _module()
     actual, _, _ = checker.scan()
     terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
-    assert len(terminal) == checker.TERMINAL_TOTAL == 20
+    assert len(terminal) == checker.TERMINAL_TOTAL == 19
     assert [item for item in actual if (item.kind, item.source) not in terminal] == []
 
 

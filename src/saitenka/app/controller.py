@@ -144,7 +144,6 @@ from saitenka.app.runtime import (
     CueCommandState,
     LegacyCommandBinding,
     LegacyCommandExecutor,
-    LegacyPickerRepeatGuard,
 )
 from saitenka.app.session_runtime import SessionEntry, SessionRuntime
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
@@ -333,7 +332,6 @@ class Reader:
         self.ipc = ipc
         self._interactive_ready = False
         self._connection = ConnectionStore(ipc)
-        self._picker_guard = LegacyPickerRepeatGuard()
         # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
         # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
         self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
@@ -686,7 +684,7 @@ class Reader:
             session_resources.Starting(lambda: self._on_ipc_reconnect()),
         )
         ipc.register_session_resource(
-            RESLOT_PARTICIPANT, session_resources.Starting(lambda: self._reslot_episode())
+            RESLOT_PARTICIPANT, session_resources.Starting(lambda: self._on_file_loaded())
         )
         ipc.register_session_resource(
             COMMAND_PERFORMER,
@@ -1509,8 +1507,7 @@ class Reader:
         """A turn taken from inside cue construction, so it settles nothing: the reconcile this is
         nested in owns the batch boundary, and running a second one here would build the cue again
         against the half-updated identity the outer one is still assembling."""
-        picker_guard = LegacyPickerRepeatGuard()
-        self.ipc.receive_session(timeout, lambda ev: self._drain_event(ev, picker_guard))
+        self.ipc.receive_session(timeout, self._drain_event)
 
     def _annotation_identity(self, norm: str) -> cue_annotation.CueIdentity:
         return cue_annotation.CueIdentity(
@@ -3917,16 +3914,6 @@ class Reader:
         self._slotted_path = p
         self.reslot_hook(p)
 
-    def _reslot_episode(self) -> None:
-        """Perform the episode boundary: break the coalescing window, then re-slot.
-
-        Both halves in one performer because both are what a file change means. The guard is
-        arrival machinery and the re-slot is the act, but a boundary that moved only one of them
-        would leave a picker press from the previous file coalescing against the next one's.
-        """
-        self._picker_guard.separate()
-        self._on_file_loaded()
-
     def pump(self, timeout: float | None = 0.0) -> bool:
         """Consume one turn of events, blocking up to ``timeout``. False if mpv went away.
 
@@ -3973,9 +3960,7 @@ class Reader:
         # file-load has to break the coalescing window, and with the boundary an effect now, the
         # performer is what breaks it. The window itself stays drain-local — coalescing across two
         # drains would suppress a genuine second press, and a batch is a property of arrival.
-        picker_guard = self._picker_guard
-        picker_guard.separate()
-        self.ipc.receive_session(timeout, lambda ev: self._drain_event(ev, picker_guard))
+        self.ipc.receive_session(timeout, self._drain_event)
         self._settle_cue_observation()
 
     def _settle_interaction(self) -> None:
@@ -4022,7 +4007,7 @@ class Reader:
         """The projection's cue revision — the identity a geometry refresh was armed for."""
         return self._playback.cue.cue.value
 
-    def _drain_event(self, ev: object, picker_guard: LegacyPickerRepeatGuard) -> None:
+    def _drain_event(self, ev: object) -> None:
         # The three connection arms are the no-reactor fallback, and nothing else: a session with
         # one claims all three, reduces them in the SESSION slice and performs these same acts as
         # registered effects. Every migrated lifecycle duty keeps a path like this — a screenshot
@@ -4035,7 +4020,7 @@ class Reader:
             self._on_ipc_reconnect()
             return
         if isinstance(ev, events.FileLoaded):
-            self._reslot_episode()
+            self._on_file_loaded()
             return
         if isinstance(ev, events.PropertyObserved):
             self._observe_property(ev.name, ev.data)
@@ -4047,7 +4032,7 @@ class Reader:
             self._connection.observed(ev)
             return
         if isinstance(ev, UserCommand):
-            self._perform_command(ev, picker_guard)
+            self._perform_command(ev)
             return
         if not isinstance(ev, dict):
             log.debug("ignored unsupported runtime event: %s", type(ev).__name__)
@@ -4057,21 +4042,20 @@ class Reader:
         # is all there is. Three layers, one writer — a reactor performs the effect, a gateway
         # without one hands over `FileLoaded`, and this is what is left when neither exists.
         if kind == "file-loaded":
-            self._reslot_episode()
+            self._on_file_loaded()
         elif kind == "property-change":
             self._on_property_change(ev)
         elif kind == "client-message":
             args = ev.get("args") or [""]
             name = args[0] if isinstance(args[0], str) else ""
-            self._drain_command(UserCommand(name, tuple(args[1:])), picker_guard)
+            self._handle(UserCommand(name, tuple(args[1:])))
 
     def _run_user_command(self, effect: object) -> None:
-        """Perform `RunUserCommand`. The guard is read off the field rather than passed: the
-        coalescing window belongs to the batch being received, and this runs inside one."""
+        """Perform `RunUserCommand`."""
         assert isinstance(effect, RunUserCommand)
-        self._perform_command(effect.command, self._picker_guard)
+        self._perform_command(effect.command)
 
-    def _perform_command(self, command: UserCommand, guard: LegacyPickerRepeatGuard) -> None:
+    def _perform_command(self, command: UserCommand) -> None:
         """Run one command, or refuse it because the transport is gone.
 
         The refusal is here and not in the reducer because it reads the connection feature's state,
@@ -4088,13 +4072,6 @@ class Reader:
                     reason=CommandReason.DISCONNECTED,
                 )
             )
-            return
-        self._drain_command(command, guard)
-
-    def _drain_command(self, command: UserCommand, guard: LegacyPickerRepeatGuard) -> None:
-        if (suppressed := guard.inspect(command)) is not None:
-            log.debug("script-message: %s (coalesced in current IPC batch)", command.name)
-            self._publish_command_outcome(suppressed)
             return
         self._handle(command)
 

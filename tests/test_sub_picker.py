@@ -18,20 +18,15 @@ from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
 from saitenka.app import sub_picker, subtitle_modes
-from saitenka.app.bindings import HELP_CLOSE_MSG, SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.runtime import (
-    CommandHandled,
-    CommandOutcome,
-    CommandReason,
     EffectOutcome,
     Owner,
     events,
     picker,
 )
-from saitenka.runtime.help import HelpCommand
 
 
 class FakeIPC(util.FakeIPC):
@@ -387,76 +382,6 @@ def test_toggle_closes_an_open_picker():
 
     assert reader.sub_picker.open is False
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
-
-
-def test_queued_picker_presses_open_once_after_startup(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert reader.sub_picker.open
-    assert len(_picker_adds(ipc)) == 1
-    assert ipc.runtime_outcomes[-1] == CommandHandled(
-        SUB_PICKER_MSG,
-        Owner.INTERACTION,
-        CommandOutcome.SUPPRESSED,
-        reason=CommandReason.LEGACY_REPEAT,
-    )
-
-
-def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
-    reader._help_store.dispatch(HelpCommand.TOGGLE)
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "client-message", "args": [HELP_CLOSE_MSG]},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert not reader.help.open
-    assert reader.sub_picker.open
-
-
-def test_file_load_separates_picker_toggle_batches(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "file-loaded"},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert not reader.sub_picker.open
-    assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
-
-
-def test_property_change_does_not_split_startup_picker_presses(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "property-change", "name": "time-pos", "data": 1.0},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert reader.sub_picker.open
-    assert len(_picker_adds(ipc)) == 1
 
 
 @pytest.mark.parametrize(
