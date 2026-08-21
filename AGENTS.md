@@ -109,6 +109,9 @@ the floor for every change; 3–6 are escalations, not replacements.
    (isolated reviewer, artifact only, P0–P3) is the high-quality gate before a human's eyes.
 6. **Idle time, nothing in flight** → the **Sharpen** / **Grow** loops (fix / write tests) — never against
    a module under active feature work.
+7. **A migration landed, or the meters read green and something still feels wrong** → the
+   **`architecture-review`** skill — an isolated reviewer judging fitness (not code) against the
+   product's goals. On a cadence, so drift is caught by schedule rather than by accident.
 
 ## Refactoring
 
