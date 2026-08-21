@@ -53,6 +53,13 @@ def _submitted_items(r):
     return [entry["request"].item for entry in submitted]
 
 
+def _upcoming(r, n: int) -> list[str]:
+    """The next `n` cue texts, from the function that owns them rather than through the Reader."""
+    return prefetch.upcoming_cue_texts(
+        r.episode.sub_index, n, text=r.sub_text, preferred=r.episode.nav_idx
+    )
+
+
 def test_lookahead_warms_the_next_cues_words(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
     r.set_subtitle("本を読む")  # cue 1
@@ -185,14 +192,14 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
 def test_upcoming_cue_texts_bounds_at_the_tail(monkeypatch):
     r = _reader(monkeypatch, lookahead=5)
     r.set_subtitle("水を飲む")  # last cue
-    assert r._upcoming_cue_texts(5) == []
+    assert _upcoming(r, 5) == []
 
 
 def test_upcoming_cue_texts_is_empty_without_an_index(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
     r.episode.sub_index = None
     r.set_subtitle("本を読む")
-    assert r._upcoming_cue_texts(2) == []
+    assert _upcoming(r, 2) == []
 
 
 def test_prefetch_lookahead_routes_through_reader_options():

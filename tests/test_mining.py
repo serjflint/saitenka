@@ -562,7 +562,7 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
         "exists", "読む", "よむ", ["本を読む"], "読む", ["to read"], None, None, "deck"
     )
 
-    r._show_preview(pv, None)
+    miner_ui.show_preview(r.preview_ports, pv, None)
     assert ("keybind", "ESC", f"script-message {PREVIEW_CLOSE_MSG}") in ipc.commands
 
     r._handle(PREVIEW_CLOSE_MSG)

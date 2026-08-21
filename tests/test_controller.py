@@ -14,7 +14,7 @@ from util import FakeIPC as RuntimeFakeIPC
 from util import keybind_registry, runtime_gateway
 
 import saitenka.app.controller as C
-from saitenka.app import bindings, miner_ui, nested_popup, tooltip, tooltip_panel
+from saitenka.app import bindings, miner, miner_ui, nested_popup, tooltip, tooltip_panel
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_render import NullRenderer
@@ -2227,7 +2227,7 @@ def _preview_reader(ipc, *, with_audio=True, with_image=True):
         3.9 if with_audio else None,
         "Saitenka::Mining · Lapis",
     )
-    r._show_preview(pv, "/tmp/a.mp3" if with_audio else None)
+    miner_ui.show_preview(r.preview_ports, pv, "/tmp/a.mp3" if with_audio else None)
     return r
 
 
@@ -2556,10 +2556,11 @@ def test_tag_slug_is_anki_safe():
 
 
 def test_mine_tags_carry_source_and_episode():
-    r = Reader(FakeIPC())
-    tags = r._mine_tags(VIDEO)
+    # No Reader: `mine_tags` reads nothing but the path. It only needed one while a delegation stood
+    # in front of it.
+    tags = miner.mine_tags(VIDEO)
     assert tags == ["saitenka::mined", "saitenka::source::Nippon_Sangoku", "saitenka::ep::10"]
-    assert r._mine_tags(None) == ["saitenka::mined"]  # no video → just the origin tag
+    assert miner.mine_tags(None) == ["saitenka::mined"]  # no video → just the origin tag
 
 
 # --- Stage 3: hygiene batch -----------------------------------------------------------------------

@@ -205,7 +205,6 @@ from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from saitenka.app.card_preview import PreviewData
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.render_cache import RenderCache
     from saitenka.app.tokenize import Token
@@ -2578,11 +2577,6 @@ class Reader:
     def _finish_speculative_prefetch(self, completion: EffectFinished) -> None:
         prefetch.finish(self.prefetch_state, completion, self._finish_speculative_prefetch)
 
-    def _upcoming_cue_texts(self, n: int) -> list[str]:
-        return prefetch.upcoming_cue_texts(
-            self.episode.sub_index, n, text=self.sub_text, preferred=self.episode.nav_idx
-        )
-
     def _inflected_surface(self, index: int) -> str:
         return self.tokenizer.inflected_in(self.tokens, index)
 
@@ -2827,9 +2821,6 @@ class Reader:
     def _provenance(self, video) -> str:
         return miner.provenance(self._get_number("time-pos") or 0.0, video)
 
-    def _mine_tags(self, video) -> list[str]:
-        return miner.mine_tags(video)
-
     # --- panel commands: pure reducer, executed here (WP5.3) ----------------------------------
     def _panel_inputs(self) -> panel_intents.PanelInputs:
         states = {
@@ -2952,9 +2943,6 @@ class Reader:
     def _sentence_lines(self) -> list[str]:
         return miner_ui.sentence_lines(self.lines)
 
-    def _footer(self, video) -> str:
-        return miner_ui.footer(self.mine_cfg, self._provenance(video))
-
     def _preview_mined(self, card, tok, video, status: str = "mined") -> None:
         if not self.show_preview:
             self._toast(f"mined {card.expression}")  # preview off → a terse confirmation instead
@@ -2979,9 +2967,6 @@ class Reader:
 
     def _media_tempfile(self, name):
         return miner_ui.media_tempfile(self.anki, name, self._tmp)
-
-    def _show_preview(self, pv: PreviewData, audio_path) -> None:
-        miner_ui.show_preview(self.preview_ports, pv, audio_path)
 
     def _render_preview(self) -> None:
         miner_ui.render_preview(
