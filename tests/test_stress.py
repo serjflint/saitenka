@@ -12,7 +12,7 @@ from __future__ import annotations
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app import nested_popup, surfaces
+from saitenka.app import nested_popup
 from saitenka.app.config import TooltipOptions
 from saitenka.app.controller import NESTED_ID, TIP_ID, Reader
 from saitenka.app.tokenize import Token
@@ -57,9 +57,9 @@ def _churn(r: Reader, term: str) -> bool:
     # Draw first, then hover: the boxes have to exist before a cursor has anywhere to land. The old
     # `set_hover(0)` did both at once, which is why it could not be a move.
     r._draw_subtitle()
-    Driver(r, instant=False).move_to_word(0)
+    ui = Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
-        r._scroll_tip(surfaces.tip_wheel_pixels(r.tip_scale.ref_h, 1))
+        ui.wheel(1)
     st = r.tip.view.state
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
@@ -68,7 +68,7 @@ def _churn(r: Reader, term: str) -> bool:
             r.tip_ports, r.panel_ports, r.word_lookup, boxes[len(boxes) // 3]
         )  # nested popup on an inner cell
         opened = r.tip.nest.state is not None
-        r._scroll_tip(surfaces.tip_wheel_pixels(r.tip_scale.ref_h, 1))  # nested is up
+        ui.wheel(1)  # nested is up
         r._hide_nested()
     r.retire_hover()  # dismiss the whole stack
     return opened
