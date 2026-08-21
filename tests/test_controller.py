@@ -1185,7 +1185,7 @@ def test_tooltip_capped_and_inside_safe_area():
     r.sub_origin = (0, 0)
     r.tokens = tokenize("本")
     r.boxes = [WordBox(0, 900, 1000, 40, 40)]  # word near the bottom (like a subtitle)
-    r._show_tooltip(0)
+    Driver(r).move_to_word(0)
 
     # osd == REFERENCE (1080p) so tip_scale.display == 1.0 → viewport px are display px.
     margin = max(16, round(1080 * 0.05))
@@ -1195,7 +1195,7 @@ def test_tooltip_capped_and_inside_safe_area():
     assert ty + r.tip.view.view_h <= 1080 - margin  # bottom stays inside the window
 
 
-def test_panel_cache_avoids_rerender_on_revisit():
+def test_panel_cache_avoids_rerender_on_revisit(monkeypatch):
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
     from saitenka.panel import Definition, Entry
@@ -1215,13 +1215,15 @@ def test_panel_cache_avoids_rerender_on_revisit():
         Token("読む", "読む", "よむ", "動詞", 2, 4),
     ]
     r.boxes = [WordBox(0, 100, 100, 40, 40), WordBox(1, 200, 100, 40, 40)]
-    r._show_tooltip(0)
-    r._show_tooltip(1)
-    r._show_tooltip(0)  # revisit → served from cache
+    monkeypatch.setattr(r, "renderer", NullRenderer())  # keep our boxes
+    ui = Driver(r)
+    ui.move_to_word(0)
+    ui.move_to_word(1)
+    ui.move_to_word(0)  # revisit → served from cache
     assert calls == ["本命", "読む"]  # each word rendered once, not on every hover
 
 
-def test_panel_cache_records_otel_render_and_cache_metrics():
+def test_panel_cache_records_otel_render_and_cache_metrics(monkeypatch):
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
@@ -1237,18 +1239,26 @@ def test_panel_cache_records_otel_render_and_cache_metrics():
     r = Reader(FakeIPC(), dict_set=FakeDS())
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
-    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
-    r.boxes = [WordBox(0, 100, 100, 40, 40)]
+    # Two words, because a hit needs a *revisit*: hovering the word already hovered is not a second
+    # lookup on the real input path — the cursor has to leave and come back for the cache to answer.
+    r.tokens = [
+        Token("本命", "本命", "ほんめい", "名詞", 0, 2),
+        Token("読む", "読む", "よむ", "動詞", 2, 4),
+    ]
+    r.boxes = [WordBox(0, 100, 100, 40, 40), WordBox(1, 200, 100, 40, 40)]
+    monkeypatch.setattr(r, "renderer", NullRenderer())  # keep our boxes
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
-        r._show_tooltip(0)  # cache miss → render
-        r._show_tooltip(0)  # cache hit → no render
+        ui = Driver(r)
+        ui.move_to_word(0)  # cache miss → render
+        ui.move_to_word(1)  # cache miss → render
+        ui.move_to_word(0)  # cache hit → no render
         snap = otel_metrics.snapshot()
-        assert snap["saitenka.render.duration_ms"]["count"] == 1
-        assert snap["saitenka.panel_cache.misses"]["value"] == 1
+        assert snap["saitenka.render.duration_ms"]["count"] == 2
+        assert snap["saitenka.panel_cache.misses"]["value"] == 2
         assert snap["saitenka.panel_cache.hits"]["value"] == 1
     finally:
         otel_metrics.unregister()
@@ -1303,7 +1313,7 @@ def test_pause_on_tooltip_respects_manual_pause():
     ipc = FakeIPC()
     ipc.props["pause"] = True  # user already paused
     r = _reader_with_word(ipc)
-    r._show_tooltip(0)
+    Driver(r).move_to_word(0)
     assert not r.hover_view().paused  # never took ownership → won't resume
 
 
@@ -1346,7 +1356,7 @@ def test_hover_pause_toggle_disables_future_hover_pause(monkeypatch):
     r = _reader_with_word(ipc)
     monkeypatch.setattr(r, "_toast", lambda *_args: None)
     r.toggle_hover_pause()
-    r._show_tooltip(0)
+    Driver(r).move_to_word(0)
     assert ("set_property", "pause", True) not in ipc.commands
 
 
@@ -1452,7 +1462,7 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     # the windowed engine composites (and measures) the deferred tail as the user scrolls down.
     r = _tall_reader(FakeIPC())
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r._show_tooltip(0)
+    Driver(r).move_to_word(0)
     wp = r.tip.view.state.windowed
     assert wp.measured < wp.count  # head only — the whole tall panel was NOT rendered up front
     assert r.tip.view.view_h >= r.tip_scale.cap - 1  # …but the viewport is fully covered
@@ -2602,7 +2612,7 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
     r.tokens = [tok]
-    r._show_tooltip(0)
+    Driver(r).move_to_word(0)
     # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
     assert f"key_{r.panel_cache_max - 1}" in r.tip.panel_cache, (
         "LRU eviction removed recently-used entry"
@@ -2686,7 +2696,7 @@ def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)  # pause_on_tooltip=True
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r._show_tooltip(0)  # opens tooltip and pauses mpv
+    Driver(r).move_to_word(0)  # opens tooltip and pauses mpv
     assert r.hover_view().paused
 
     # new cue arrives
@@ -3402,7 +3412,7 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
         ipc.props["pause"] = False
         reader = _reader_with_word(ipc)
         monkeypatch.setattr(reader, "renderer", NullRenderer())
-        reader._show_tooltip(0)
+        Driver(reader).move_to_word(0)
         assert reader.hover_view().paused
         before = len(ipc.commands)
         act(reader)
