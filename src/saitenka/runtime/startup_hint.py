@@ -17,9 +17,9 @@ epoch the session has *observed*, not on one that raced in between the reply and
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import TYPE_CHECKING
 
-from saitenka.app.loading import STARTUP_HINT, HintOperation, HintOutcome
 from saitenka.runtime.effects import (
     EffectError,
     EffectOutcome,
@@ -46,6 +46,23 @@ if TYPE_CHECKING:
 #: mpv keeps the hint up this long unaided; the clear is what normally removes it.
 _HINT_HOLD_MS = 30_000
 _REPLY_TIMEOUT_S = 10.0
+
+
+# Shown on mpv's OWN OSD the instant IPC connects — the only feedback possible before the first cue.
+# ASCII so it renders under any mpv OSD font / user config; mpv (not our vendored fonts) draws it.
+STARTUP_HINT = "saitenka starting..."
+
+
+class HintOutcome(Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    UNKNOWN = "unknown"
+    REJECTED = "rejected"
+
+
+class HintOperation(Enum):
+    SHOW = "show"
+    CLEAR = "clear"
 
 
 @dataclass(frozen=True, slots=True)

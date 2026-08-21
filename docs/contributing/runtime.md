@@ -171,6 +171,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
 | Effect interpreter ownership | An owner's effects are applied by that owner's adapter, not by the host. A pure reducer or a stateless policy returns effects; the object that interprets them belongs to the feature. Purity relocates impurity, and absent this rule it relocates onto the object being retired — which is what `poe host-mass` measures. |
+| Stateless registration | A stateless policy (`app/*_intents.py`) registers in `StatelessRouter` keyed by its command type, the counterpart to `SliceReducer` keyed by owner and event. Its adapter declares the host members it needs as a protocol — never a `Reader` parameter, which the host inventory is at zero to prevent. Unregistered policies are named in `tests/test_stateless_registration.py` and that list only shrinks. |
 
 The executable sources of truth are:
 

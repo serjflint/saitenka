@@ -56,7 +56,7 @@ def test_draw_loading_paints_one_timer_authorized_frame():
 
 # --- the mpv-native startup breadcrumb (the only feedback during mpv's pre-overlay file-load) --------
 #
-# The breadcrumb is a session-owned reducer (`app/startup_hint.py`), so these drive it the way the
+# The breadcrumb is a session-owned reducer (`runtime/startup_hint.py`), so these drive it the way the
 # session does: publish the fact, let the consumer drain, assert on what mpv was told. Readiness is
 # announced with a `StartupReady` event rather than a method call, and a reconnection is a real
 # epoch replacement rather than a poke at the object — the old lease let a test claim a
@@ -72,7 +72,7 @@ def _install(ipc):
 
 def _hint_state(reactor):
     from saitenka.app.session_routes import STARTUP_HINT
-    from saitenka.app.startup_hint import StartupHintState
+    from saitenka.runtime.startup_hint import StartupHintState
     from saitenka.runtime.state import OwnerSlice
 
     slot = reactor.snapshot.state.session
@@ -100,7 +100,7 @@ def _replace_connection(ipc, gateway, epoch: int) -> None:
 def test_show_startup_hint_posts_mpv_osd_text():
     from util import FakeIPC
 
-    from saitenka.app.loading import STARTUP_HINT
+    from saitenka.runtime.startup_hint import STARTUP_HINT
 
     ipc = FakeIPC()
     _install(ipc)
@@ -204,7 +204,7 @@ class _AsyncIPC:
 
 
 def test_late_show_acceptance_after_ready_clears_exactly_once():
-    from saitenka.app.loading import HintOutcome
+    from saitenka.runtime.startup_hint import HintOutcome
 
     ipc = _AsyncIPC()
     gateway, reactor = _install(ipc)
@@ -221,7 +221,7 @@ def test_late_show_acceptance_after_ready_clears_exactly_once():
 
 
 def test_late_show_rejection_never_authorizes_clear():
-    from saitenka.app.loading import HintOutcome
+    from saitenka.runtime.startup_hint import HintOutcome
 
     ipc = _AsyncIPC()
     gateway, reactor = _install(ipc)
@@ -234,7 +234,7 @@ def test_late_show_rejection_never_authorizes_clear():
 
 
 def test_lost_show_reply_clears_only_after_a_live_reconnection():
-    from saitenka.app.loading import HintOutcome
+    from saitenka.runtime.startup_hint import HintOutcome
 
     ipc = _AsyncIPC()
     gateway, reactor = _install(ipc)
@@ -252,7 +252,7 @@ def test_lost_show_reply_clears_only_after_a_live_reconnection():
 
 def test_show_disconnect_delivered_after_reconnect_still_clears() -> None:
     """The reply lands after the epoch already moved on, so the ambiguity is resolved on arrival."""
-    from saitenka.app.loading import HintOutcome
+    from saitenka.runtime.startup_hint import HintOutcome
 
     ipc = _AsyncIPC()
     gateway, reactor = _install(ipc)

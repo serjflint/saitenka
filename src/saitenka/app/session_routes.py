@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Protocol
 from saitenka.app import interaction_intents, panel_intents, telemetry
 from saitenka.app.interaction_adapter import InteractionAdapter, InteractionHost
 from saitenka.app.panel_adapter import PanelAdapter, PanelHost
-from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
@@ -105,6 +104,7 @@ from saitenka.runtime.presentation_slice import (
 )
 from saitenka.runtime.reactor import SessionReactor
 from saitenka.runtime.routing import OwnerRouter
+from saitenka.runtime.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.state import RouteKey, SessionReducer, SessionState, SliceReducer
 from saitenka.runtime.subtitle import SubtitleTrackState
 from saitenka.runtime.subtitle_slice import SUBTITLE_FEATURE, subtitle_slice_reducer
