@@ -103,3 +103,25 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
     assert [(o.outcome, o.reason) for o in rejected] == [
         (CommandOutcome.REJECTED, CommandReason.DISCONNECTED)
     ]
+
+
+def test_a_reconnect_reaches_the_slot_without_the_reader_seeing_it() -> None:
+    """`ConnectionReady` is claimed, so the reactor handles it *instead of* the Reader — and the
+    session must still come back ready. The census is the oracle: a claim that silently stopped
+    reaching anything looks identical to a working one from the Reader's side."""
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
+    store = ConnectionStore(ipc)
+
+    gateway.publish_session_event(LOST)
+    gateway.publish_session_event(READY)
+    ipc.drain_events(0.0)
+
+    assert store.current.ready is True
+    claimed, seen = gateway.claim_census()["ConnectionReady"]
+    assert (claimed, seen) == (1, 1)
+    assert gateway.claim_census()["ConnectionLost"] == (0, 1), (
+        "its twin must keep falling through — the Reader still retires the stranded cue"
+    )
+    gateway.close()

@@ -129,9 +129,15 @@ _SESSION_EVENTS = (
 #: `subtitle_pipeline.connection_replaced`. Claim it and reconnects stop reaching the pipeline,
 #: with nothing failing at the seam.
 #:
+#: `ConnectionLost` and `ConnectionReady` are the sharpest form of the same asymmetry: one slice
+#: feature reduces both, and only one of them is claimable. Learning the transport is back is the
+#: whole of what `ConnectionReady` means, so nothing is left for the Reader to do; losing it also
+#: strands a cue identity, and retiring one tears down the tip and the drawn geometry — acts that
+#: move with the rendered cue, not with this bit.
+#:
 #: A duty joins this tuple only when the Reader has no remaining part in it. That is the whole
 #: migration protocol: add the route, move the state, then claim.
-_CLAIMED = (StartupHintRequested, StartupReady, SessionClosing)
+_CLAIMED = (StartupHintRequested, StartupReady, SessionClosing, ConnectionReady)
 
 #: Feature keys inside `Owner.SESSION`'s slice. Named once so a reader of the slot does not spell
 #: a key itself and drift from the registration.

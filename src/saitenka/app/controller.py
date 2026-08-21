@@ -3979,6 +3979,9 @@ class Reader:
             self._on_ipc_reconnect()
             return
         if isinstance(ev, ConnectionReady):
+            # Only reached without a reactor: a session that has one claims this, because learning
+            # the transport is back is the whole of what the event means. Its twin cannot be
+            # claimed — losing the transport also strands a cue identity.
             self._connection.observed(ev)
             return
         if isinstance(ev, UserCommand):
