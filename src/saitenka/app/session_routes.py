@@ -44,6 +44,7 @@ from saitenka.runtime.effects import (
     ReplaySubtitleSelection,
     ReslotEpisode,
     RetireCueIdentity,
+    RunUserCommand,
     SeedOptionalCollaborators,
     StartPropertyObservation,
 )
@@ -65,6 +66,7 @@ from saitenka.runtime.events import (
     SessionStarting,
     StartupHintRequested,
     StartupReady,
+    UserCommand,
 )
 from saitenka.runtime.interaction_slice import (
     HELP_FEATURE,
@@ -102,6 +104,7 @@ from saitenka.runtime.routing import OwnerRouter
 from saitenka.runtime.state import RouteKey, SessionReducer, SessionState, SliceReducer
 from saitenka.runtime.subtitle import SubtitleTrackState
 from saitenka.runtime.subtitle_slice import SUBTITLE_FEATURE, subtitle_slice_reducer
+from saitenka.runtime.user_command import COMMAND_FEATURE, CommandIntake, reduce_user_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -123,6 +126,7 @@ _SESSION_EVENTS = (
     ConnectionReady,
     ConnectionReplaced,
     FileLoaded,
+    UserCommand,
     EffectFinished,
     SessionClosing,
 )
@@ -138,6 +142,9 @@ _SESSION_EVENTS = (
 #: rather than through a branch in the drain. `ConnectionReady` needed only the first two steps: it
 #: decides nothing but the bit.
 #:
+#: `UserCommand` is here on the same protocol and is the one whose act carries a subject: the
+#: binding table does not move, only the decision to consult it.
+#:
 #: Claiming withholds from the Reader, so what is left in `_drain_event` for these is the
 #: no-reactor fallback and nothing else. Deleting that would make a session without a runtime stop
 #: noticing its transport, which is most of the unit suite.
@@ -149,6 +156,7 @@ _CLAIMED = (
     ConnectionReady,
     ConnectionReplaced,
     FileLoaded,
+    UserCommand,
 )
 
 #: Feature keys inside `Owner.SESSION`'s slice. Named once so a reader of the slot does not spell
@@ -158,6 +166,7 @@ LIFECYCLE_CLOSE = "lifecycle-close"
 LIFECYCLE_START = "lifecycle-start"
 CONNECTION = "connection"
 EPISODE = EPISODE_FEATURE
+COMMAND = COMMAND_FEATURE
 
 #: Names in `gateway.session_resources`. Spelled once for the same reason the feature keys are:
 #: the owner that registers and the dispatcher that closes must not drift apart.
@@ -177,6 +186,9 @@ CUE_RETIRE_RESOURCE = "cue-identity-retire"
 #: Re-slotting onto a newly loaded file. A *starting* act — the episode is being established — so it
 #: goes in the start table beside the subtitle replay.
 RESLOT_PARTICIPANT = "start:episode-reslot"
+#: Running one arrived command. Neither verb fits: it starts nothing and retires nothing, and it is
+#: the only act so far whose effect has to say what it is about.
+COMMAND_PERFORMER = "run:user-command"
 
 #: The optional collaborators' probes, and the interaction work that outlives a cancelled hover.
 CAPABILITY_PARTICIPANTS = ("capability:tts", "capability:anki")
@@ -289,6 +301,25 @@ _PARTICIPANT_OF: dict[type, str] = {
 }
 
 
+#: Which registered performer each act-on-a-payload effect reaches. The third table, because the
+#: verb takes an argument: `start()` and `close()` answer for the session itself, and an act about
+#: something the effect carries cannot be spelled as either.
+_PERFORMER_OF: dict[type, str] = {RunUserCommand: COMMAND_PERFORMER}
+
+
+def _perform(gateway: MpvGateway, name: str, effect: Effect) -> bool:
+    """Hand one effect to its performer, or say it was never registered.
+
+    Not isolated, like `_begin` and unlike `_retire`: a command that raises is a bug in the act, and
+    the Reader's own arm has never swallowed one either.
+    """
+    performer = gateway.session_resources.get(name)
+    if performer is None:
+        return False
+    performer.perform(effect)  # type: ignore[attr-defined]  # registered by the owner that made it
+    return True
+
+
 def _begin(gateway: MpvGateway, name: str) -> bool:
     """Run one setup participant, or say it was never registered.
 
@@ -339,6 +370,9 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
             # here or nowhere.
             log.debug("runtime census: %s", ledger.counts)
             return True
+        performer = _PERFORMER_OF.get(type(effect))
+        if performer is not None:
+            return _perform(gateway, performer, effect)
         participant = _PARTICIPANT_OF.get(type(effect))
         if participant is not None:
             return _begin(gateway, participant)
@@ -429,6 +463,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             LIFECYCLE_START: reduce_lifecycle_start,
             CONNECTION: reduce_connection,
             EPISODE: reduce_episode,
+            COMMAND: reduce_user_command,
         }
     )
     playback = playback_slice_reducer()
@@ -478,6 +513,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
                     LIFECYCLE_START: LifecycleStartState(),
                     CONNECTION: ConnectionState(),
                     EPISODE: EpisodeBoundary(),
+                    COMMAND: CommandIntake(),
                 }
             ),
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),

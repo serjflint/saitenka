@@ -35,6 +35,7 @@ from saitenka.runtime.effects import (
     ReplaySubtitleSelection,
     ReslotEpisode,
     RetireCueIdentity,
+    RunUserCommand,
     SeedOptionalCollaborators,
     StartPropertyObservation,
     StopSession,
@@ -223,7 +224,8 @@ class SessionReactor[StateT]:
             | RemoveSessionArtifacts
             | ReplaySubtitleSelection
             | ReslotEpisode
-            | RetireCueIdentity,
+            | RetireCueIdentity
+            | RunUserCommand,
         ):
             # Fire-and-forget, like `StopSession`: a lifecycle effect carries no ID because there
             # is nothing to correlate a completion to. Reserving a terminal for one would leave a

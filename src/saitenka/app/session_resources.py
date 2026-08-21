@@ -29,6 +29,21 @@ class Starting:
 
 
 @dataclass(frozen=True, slots=True)
+class Performing:
+    """One act on what the effect carries, as a session participant.
+
+    A third verb because a third shape. `start()` and `close()` take nothing, which is right for an
+    act whose subject is the session itself; an act *about* something has to be told what, and
+    smuggling that through the registration would lose it the moment two arrive in one batch.
+    """
+
+    act: Callable[[object], None]
+
+    def perform(self, effect: object) -> None:
+        self.act(effect)
+
+
+@dataclass(frozen=True, slots=True)
 class Retiring:
     """One retirement step, wearing the resource contract.
 

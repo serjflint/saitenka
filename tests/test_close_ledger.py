@@ -657,14 +657,14 @@ def test_a_gateway_without_a_reactor_still_runs_every_close_participant() -> Non
 
 
 def test_every_registered_participant_is_named_by_an_effect_and_the_reverse() -> None:
-    """The two halves' tables have to agree, and nothing else checks that they do.
+    """The verb tables and the registrations have to agree, and nothing else checks that they do.
 
     A name registered but never named by an effect is a participant the runtime silently never
     retires — the Reader's fallback carries it forever and the duty reads as migrated. A name in a
     table but never registered is the mirror: `_retire` answers False and the phase reports a
     failure nobody caused.
     """
-    from saitenka.app.session_routes import _PARTICIPANT_OF, _RESOURCE_OF
+    from saitenka.app.session_routes import _PARTICIPANT_OF, _PERFORMER_OF, _RESOURCE_OF
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -675,8 +675,10 @@ def test_every_registered_participant_is_named_by_an_effect_and_the_reverse() ->
         reader.close()
         gateway.close()
 
-    named = {name for names in _RESOURCE_OF.values() for name in names} | set(
-        _PARTICIPANT_OF.values()
+    named = (
+        {name for names in _RESOURCE_OF.values() for name in names}
+        | set(_PARTICIPANT_OF.values())
+        | set(_PERFORMER_OF.values())
     )
 
     assert registered == named

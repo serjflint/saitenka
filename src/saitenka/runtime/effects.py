@@ -5,6 +5,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Type-only: `events` imports `Owner` from here, so the runtime edge goes one way.
+    from saitenka.runtime.events import UserCommand
 
 
 class Owner(StrEnum):
@@ -298,6 +303,19 @@ class ReslotEpisode:
 
 
 @dataclass(frozen=True, slots=True)
+class RunUserCommand:
+    """A command arrived from mpv: run it against the session's binding table.
+
+    Carries the command, unlike its neighbours here — the act is *about* this one, and two arriving
+    in one batch would be indistinguishable if the performer had to ask what to run. Whether the
+    session is in a state to run it is the performer's question, not the reducer's: the answer is a
+    read of another feature's state, and a slice's features do not read each other.
+    """
+
+    command: UserCommand
+
+
+@dataclass(frozen=True, slots=True)
 class RetireCueIdentity:
     """The transport went away, so the cue on screen describes nothing that is still live.
 
@@ -307,7 +325,8 @@ class RetireCueIdentity:
 
 
 type LifecycleEffect = (
-    ReslotEpisode
+    RunUserCommand
+    | ReslotEpisode
     | ReplaySubtitleSelection
     | RetireCueIdentity
     | StopSession
@@ -333,7 +352,8 @@ type LifecycleEffect = (
 #: terminal and no completion: nothing correlates to them, and a reservation raised during close
 #: is one nothing would ever retire.
 type FireAndForget = (
-    ReslotEpisode
+    RunUserCommand
+    | ReslotEpisode
     | ReplaySubtitleSelection
     | RetireCueIdentity
     | StartupEffect

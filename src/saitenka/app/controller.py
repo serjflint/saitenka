@@ -183,6 +183,7 @@ from saitenka.runtime import (
 from saitenka.runtime import help as help_machine
 from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.connection import ConnectionStore
+from saitenka.runtime.effects import RunUserCommand
 from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import (
@@ -601,6 +602,7 @@ class Reader:
         # to resolve them when it closes, not when it registers.
         from saitenka.app.session_routes import (
             BACKLOG_RESOURCE,
+            COMMAND_PERFORMER,
             CUE_RETIRE_RESOURCE,
             MINED_RESOURCE,
             RESLOT_PARTICIPANT,
@@ -684,6 +686,10 @@ class Reader:
         )
         ipc.register_session_resource(
             RESLOT_PARTICIPANT, session_resources.Starting(lambda: self._reslot_episode())
+        )
+        ipc.register_session_resource(
+            COMMAND_PERFORMER,
+            session_resources.Performing(lambda effect: self._run_user_command(effect)),
         )
         for name, retire in (
             (
@@ -4026,18 +4032,7 @@ class Reader:
             self._connection.observed(ev)
             return
         if isinstance(ev, UserCommand):
-            if not self._connection.current.ready:
-                self._publish_command_event(
-                    CommandHandled(
-                        ev.name,
-                        None,
-                        CommandOutcome.REJECTED,
-                        command_id=ev.command_id,
-                        reason=CommandReason.DISCONNECTED,
-                    )
-                )
-                return
-            self._drain_command(ev, picker_guard)
+            self._perform_command(ev, picker_guard)
             return
         if not isinstance(ev, dict):
             log.debug("ignored unsupported runtime event: %s", type(ev).__name__)
@@ -4054,6 +4049,32 @@ class Reader:
             args = ev.get("args") or [""]
             name = args[0] if isinstance(args[0], str) else ""
             self._drain_command(UserCommand(name, tuple(args[1:])), picker_guard)
+
+    def _run_user_command(self, effect: object) -> None:
+        """Perform `RunUserCommand`. The guard is read off the field rather than passed: the
+        coalescing window belongs to the batch being received, and this runs inside one."""
+        assert isinstance(effect, RunUserCommand)
+        self._perform_command(effect.command, self._picker_guard)
+
+    def _perform_command(self, command: UserCommand, guard: LegacyPickerRepeatGuard) -> None:
+        """Run one command, or refuse it because the transport is gone.
+
+        The refusal is here and not in the reducer because it reads the connection feature's state,
+        and a slice's features do not read each other. It is also the honest place: whether mpv can
+        still be commanded is a fact about the moment of performance.
+        """
+        if not self._connection.current.ready:
+            self._publish_command_event(
+                CommandHandled(
+                    command.name,
+                    None,
+                    CommandOutcome.REJECTED,
+                    command_id=command.command_id,
+                    reason=CommandReason.DISCONNECTED,
+                )
+            )
+            return
+        self._drain_command(command, guard)
 
     def _drain_command(self, command: UserCommand, guard: LegacyPickerRepeatGuard) -> None:
         if (suppressed := guard.inspect(command)) is not None:
