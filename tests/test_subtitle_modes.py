@@ -241,6 +241,24 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
         gateway.close()
 
 
+#: Every lane the LANES phase closes, in order. The tail four are unconstrained and go last; the
+#: rest carry the dependencies `WORKER_LANE_PARTICIPANTS` declares.
+_LANES_BEFORE_ARTIFACTS = [
+    "subtitle-fetch",
+    "subtitle-picker",
+    "subtitle-geometry",
+    "cue-annotation",
+    "tooltip-render-ahead",
+    "tooltip-engaged",
+    "speculative-prefetch",
+    "mask-atlas-startup",
+    "capabilities",
+    "interaction-metadata",
+    "mined-seed",
+    "episode-analysis",
+]
+
+
 def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
@@ -253,16 +271,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
 
     def remove_artifacts(_path, *, ignore_errors):
         assert ignore_errors
-        assert order == [
-            "subtitle-fetch",
-            "subtitle-picker",
-            "subtitle-geometry",
-            "cue-annotation",
-            "tooltip-render-ahead",
-            "tooltip-engaged",
-            "speculative-prefetch",
-            "mask-atlas-startup",
-        ]
+        assert order == _LANES_BEFORE_ARTIFACTS
         order.append("artifacts")
 
     ipc.close_runtime_job_lane = close_lane
@@ -270,17 +279,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
 
     reader.close()
 
-    assert order == [
-        "subtitle-fetch",
-        "subtitle-picker",
-        "subtitle-geometry",
-        "cue-annotation",
-        "tooltip-render-ahead",
-        "tooltip-engaged",
-        "speculative-prefetch",
-        "mask-atlas-startup",
-        "artifacts",
-    ]
+    assert order == [*_LANES_BEFORE_ARTIFACTS, "artifacts"]
 
 
 def test_startup_prefers_japanese_and_remembers_both_tracks():

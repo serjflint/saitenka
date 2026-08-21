@@ -153,6 +153,11 @@ INTERACTION_WORK_PARTICIPANTS = ("interaction-jobs", "hover-metadata")
 #: Every worker and job lane, in the one order that is safe. Declared here rather than derived from
 #: the lane registry: the registry knows the lanes, not that the geometry executor must stop before
 #: the state it renders against, nor that the atlas is uninstalled only after its lane has drained.
+#:
+#: The trailing four have no ordering constraint at all — whatever owns their state closed in an
+#: earlier phase — so they go last, where they cannot spend the shared lane budget the constrained
+#: chain above them needs. A lane closes by *cancelling* first and joining second, so a starved
+#: budget still stops the work; it only stops waiting for it.
 WORKER_LANE_PARTICIPANTS = (
     "lanes:stop-workers",
     "lanes:subtitle-fetch",
@@ -169,6 +174,10 @@ WORKER_LANE_PARTICIPANTS = (
     "lanes:mask-atlas-startup-worker",
     "lanes:mask-atlas-startup",
     "lanes:mask-atlas-uninstall",
+    "lanes:capabilities",
+    "lanes:interaction-metadata",
+    "lanes:mined-seed",
+    "lanes:episode-analysis",
 )
 
 #: Setup participants. Prefixed because the two halves are separate contracts, not two uses of one:

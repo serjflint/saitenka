@@ -4611,6 +4611,15 @@ class Reader:
                     lambda: mask_atlas_startup.close(self._mask_atlas_startup),
                     lane("mask-atlas-startup"),
                     lambda: mask_atlas_startup.uninstall(self.session.render_cache),
+                    # The unconstrained tail. Each one's state was already retired by an earlier
+                    # phase — the probes at CAPABILITIES, the metadata at PARTICIPANTS, the mined
+                    # seed by the generation bump `close` opens with — so what is left is the
+                    # workers, and cancelling them here is what keeps one from running on into the
+                    # store and anki closes two phases below.
+                    lane("capabilities"),
+                    lane("interaction-metadata"),
+                    lane("mined-seed"),
+                    lane("episode-analysis"),
                 ),
                 strict=True,
             )
