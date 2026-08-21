@@ -193,9 +193,8 @@ def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None
 
 
 def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
-    """There is one representation of the hysteresis. `TooltipState` used to mirror four of its
-    fields for `hover_view()` to read; the mirror is gone, so what a caller is told about a dwell
-    is what the machine armed, with nothing in between that can go stale."""
+    """There is one representation of the hysteresis: what a caller is told about a dwell is what
+    the machine armed, with no mirrored copy in between that can go stale."""
     from saitenka.app.controller import Reader
     from saitenka.app.subtitle_render import NullRenderer
 

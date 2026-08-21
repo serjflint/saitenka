@@ -1,10 +1,9 @@
 """The base tooltip's link-navigation back-stack: how deep it is, and what Esc goes back to.
 
 Clicking a cross-reference replaces the tooltip's content in place and pushes what was showing; Esc
-pops it. That is a machine rather than a list because the pop *refuses* — an empty stack means the
-key falls through to whatever else Esc does — and spelled inline the fact and the act were one
-statement (`if not nav: return False` then `nav.pop()`), so nothing could ask how deep the stack was
-without being the code that unwound it.
+pops it. A machine rather than a list because the pop *refuses* — an empty stack means the key falls
+through to whatever else Esc does — and separating the refusal from the unwinding is what lets
+anything ask how deep the stack is without being the code that unwinds it.
 
 The captured view rides opaquely. `runtime` cannot name a panel, a pixmap or a token, and has no
 reason to: this decides *whether* there is a step to go back to, never what is in one. Capturing and

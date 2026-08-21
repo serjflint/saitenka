@@ -1,16 +1,16 @@
 """The mined-card preview: what it is showing, the clip its ▶ replays, and whether it is enlarged.
 
-A fresh preview starts un-zoomed, and that is the only rule here — but it is a rule that was two
-assignments at the show site, so a second way to show one would have had to remember the second
-half. The zoom belongs *with* the content for the same reason: it describes that content, and a
-dismiss that kept it would enlarge whatever came next.
+A fresh preview starts un-zoomed, and that is the only rule here — a rule, not an assignment the
+show site makes, or a second way to show one has to remember it. The zoom belongs *with* the content
+for the same reason: it describes that content, and a dismiss that kept it would enlarge whatever
+came next.
 
 Content and clip ride opaquely. `runtime` cannot name a composed panel or a media path, and nothing
 here branches on either — it decides only whether there is something on screen.
 
 What is deliberately not here: the drawn rectangle and its four button boxes (one paint's output),
 and the clip's live `subprocess.Popen`. A reducer cannot kill a process, so the handle stays where
-something can — the same wall a lifetime container is behind, one surface down.
+something can — which blocks that one field, not the surface around it.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ class CardPreview:
     @property
     def open(self) -> bool:
         """Shown iff something is composed — the uniform `SurfaceState` predicate the surface
-        registry reads. It used to be "a rect is placed", which is the same answer one step later:
-        a composed preview is always drawn before anything can look."""
+        registry reads. Deliberately not "a rect is placed", which is the same answer one step
+        later: a composed preview is always drawn before anything can look."""
         return self.content is not None
 
 

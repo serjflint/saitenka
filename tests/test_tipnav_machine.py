@@ -27,8 +27,8 @@ def test_popping_hands_back_the_step_it_removes() -> None:
 
 
 def test_popping_an_empty_stack_decides_nothing() -> None:
-    """The refusal is the whole reason this is a machine — Esc falls through to closing the
-    tooltip, and inline the check and the mutation were one statement."""
+    """The refusal is the whole reason this is a machine: Esc falls through to closing the
+    tooltip, so the check has to be answerable without being the code that unwinds."""
     assert popped(EMPTY) == TipNavTurn(EMPTY)
 
 

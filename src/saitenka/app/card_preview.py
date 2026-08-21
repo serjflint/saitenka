@@ -75,8 +75,8 @@ class PreviewPanel:
     rects the click handler tests against and the clip's live player, which no reducer can kill.
 
     `last_jpg` / `last_audio` are the *mine's* output, not the shown preview's: the miner captures
-    them and the next `build_preview` reads them. The preview's own clip is the slice's, and they
-    shared one field until the two lifetimes disagreed.
+    them and the next `build_preview` reads them. The clip the shown preview replays is the slice's
+    — two lifetimes, so two fields, or a dismiss cannot drop one and keep the other.
     """
 
     last_jpg: Path | None = None  # the mpv still (mining fallback image); drives the preview

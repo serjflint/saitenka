@@ -241,8 +241,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
         gateway.close()
 
 
-#: Every lane the LANES phase closes, in order. The tail four are unconstrained and go last; the
-#: rest carry the dependencies `WORKER_LANE_PARTICIPANTS` declares.
+#: Every lane the LANES phase closes, in the order `WORKER_LANE_PARTICIPANTS` declares.
 _LANES_BEFORE_ARTIFACTS = [
     "subtitle-fetch",
     "subtitle-picker",

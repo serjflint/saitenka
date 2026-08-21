@@ -55,9 +55,9 @@ class SubtitleReducer:
                 return replace(state, secondary_sid=sid)
             case SubtitleTrackAnnounced(sid=sid):
                 return replace(state, announced_sid=sid)
-            # The named reset the slot's episode-safety used to rest on `configure` always running.
-            # A structural guarantee traded for a procedural one is only as good as the rule; this
-            # is the rule, said out loud and asserted.
+            # The named reset the slot's episode-safety rests on. A session-lived slot trades
+            # `EpisodeContext`'s rebinding — a structural guarantee — for a procedural one, which
+            # is only as good as the rule; this is the rule, said out loud and asserted.
             case EpisodeRetired():
                 return SubtitleTrackState()
 

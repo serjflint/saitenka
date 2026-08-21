@@ -16,8 +16,8 @@ CYCLING = HoveredWord(meta="cat", reading="ねこ", kanji=2)
 
 
 def test_a_new_answer_restarts_the_kanji_cycle() -> None:
-    """The reset used to be a `= 0` written at three sites, each of which had to remember. A new
-    answer *is* the restart, so a site that forgets cannot exist."""
+    """A new answer *is* the restart, so a site that resolves a word and forgets to rewind the
+    cycle cannot exist."""
     assert resolved(CYCLING, "dog").state == HoveredWord(meta="dog", reading="ねこ", kanji=0)
 
 

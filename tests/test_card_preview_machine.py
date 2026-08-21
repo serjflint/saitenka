@@ -8,8 +8,8 @@ ZOOMED = CardPreview(content="card", audio="clip.opus", zoom=True)
 
 
 def test_a_fresh_preview_starts_un_zoomed() -> None:
-    """A new card at the last card's magnification is a surprise, and the reset used to be a second
-    assignment at the show site that a second way to show one would have had to remember."""
+    """A new card at the last card's magnification is a surprise, and as an assignment at the show
+    site it is a rule every second way to show one has to remember."""
     assert shown("next", "next.opus").state == CardPreview("next", "next.opus")
 
 
@@ -27,7 +27,7 @@ def test_a_dismiss_forgets_the_clip_with_the_panel() -> None:
 
 
 def test_shown_ness_is_having_something_composed() -> None:
-    """The registry's uniform predicate. It used to be "a rect is placed", which is the same answer
-    one step later — a composed preview is always drawn before anything can look."""
+    """The registry's uniform predicate. Deliberately not "a rect is placed", which is the same
+    answer one step later — a composed preview is always drawn before anything can look."""
     assert CardPreview().open is False
     assert CardPreview(content="card").open is True

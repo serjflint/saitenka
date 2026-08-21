@@ -1,10 +1,9 @@
 """What the session resolved about the word under the cursor, and where `k` is in its kanji.
 
-The cycle is why these are one feature rather than three fields. It restarts on a new word, and
-that restart used to be a `= 0` written at three separate sites — the teardown, the show, and the
-clear — each of which had to remember. Here a new answer *is* the restart, so a site that forgets
-cannot exist. Correcting an answer about the same word (a mine landing on the hovered term) keeps
-the cycle, which is the distinction the two verbs carry and the reason a single "set" would be
+The cycle is why these are one feature rather than three fields. It restarts on a new word — as a
+separate `= 0` that is a rule every site that resolves a word has to remember, so a new answer *is*
+the restart here. Correcting an answer about the same word (a mine landing on the hovered term)
+keeps the cycle, which is the distinction the two verbs carry and the reason a single "set" would be
 wrong.
 
 The answer itself rides opaquely: `runtime` cannot name a dictionary term, a phrase span or a mined
@@ -47,9 +46,9 @@ def read_as(state: HoveredWord, reading: str) -> HoveredWordTurn:
 
 
 def forgotten() -> HoveredWordTurn:
-    """Nothing is hovered, or the hover moved and its answer has not arrived yet. Everything goes:
-    a reading held past its word is what TTS would say next, and the cycle indexes a word that is
-    no longer there — which is why this takes no prior state: there is nothing in it to keep."""
+    """Nothing is hovered, or the hover moved and its answer has not arrived yet. Everything goes —
+    a reading held past its word is what TTS would say next, and the cycle would index a word that
+    is no longer there — so there is no prior state to take."""
     return HoveredWordTurn(HoveredWord())
 
 

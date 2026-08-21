@@ -683,12 +683,10 @@ def test_every_registered_participant_is_named_by_an_effect_and_the_reverse() ->
 
 
 def test_every_lane_the_session_opens_the_session_closes_by_name() -> None:
-    """`WORKER_LANE_PARTICIPANTS` says "every worker and job lane", and four were missing from it.
-
-    A lane left out is not left open — the gateway's blanket `JobBroker.close()` reaches it — but
-    it is reached *after* the session's close has finished, so its workers are still running
-    against collaborators the phases behind it have already torn down. Closing by name is what puts
-    the cancellation inside the session's own teardown.
+    """A lane left out of `WORKER_LANE_PARTICIPANTS` is not left open — the gateway's blanket
+    `JobBroker.close()` reaches it — but only *after* the session's close has finished, so its
+    workers run on against collaborators the phases behind it have torn down. Closing by name is
+    what puts the cancellation inside the session's own teardown.
 
     Asserted as a subset, not an equality: the table also carries steps that close a feature rather
     than a lane, and a session built with `prefetch=False` opens fewer lanes than a full one.

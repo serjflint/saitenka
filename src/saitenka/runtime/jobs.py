@@ -54,9 +54,9 @@ class JobSubmitter(Protocol):
 class RuntimeJobPort(Protocol):
     """The job-lane ingress every feature reaches the runtime through.
 
-    Declared so a stand-in has to *refuse* rather than simply not have the method. Twelve features
-    used to probe `getattr(ipc, "register_runtime_job_lane", None)`, which cannot tell a headless
-    stand-in apart from a renamed method — the same silent hole the renderer protocol closed.
+    Declared so a stand-in has to *refuse* rather than simply not have the method. A
+    `getattr(ipc, "register_runtime_job_lane", None)` probe cannot tell a headless stand-in apart
+    from a renamed method, and the second reads as a silent feature-off.
     """
 
     def register_runtime_job_lane(self, name: str, policy: JobLanePolicy, handler) -> bool: ...
@@ -78,9 +78,8 @@ class NoSessionRuntime:
     feature already has a path for it.
 
     Covers the ports a stand-in gets asked about: job lanes, lifecycle timers, and the session
-    resource registry. It grew the timer
-    half the same way it grew the first — a probe was replaced by a call, and the call found a fake
-    that had never declared the port.
+    resource registry. It grows whenever a probe becomes a call and the call finds a fake that never
+    declared the port.
     """
 
     def register_runtime_job_lane(self, _name: str, _policy: JobLanePolicy, _handler) -> bool:

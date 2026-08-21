@@ -163,8 +163,8 @@ class WordLookup:
     Separate from `TipPorts` because none of it is the popup: it is the cue's tokens seen through
     the dictionary, plus the four generations a completion has to still match. Those generations are
     read here rather than passed along so that request and completion build the identity from one
-    place — the two used to be assembled field for field at both ends, where a field added to one
-    and not the other reads as a stale result and silently drops the tooltip.
+    place. Assembled field for field at both ends, a generation added to one and not the other reads
+    as a stale result and silently drops the tooltip.
 
     `deferred` is the branch, not whether `submit` is set: `submit` also carries the retain-newest
     queueing a lane still needs while one job is in flight, so a caller reading "no lane" off it
@@ -428,10 +428,9 @@ class PopupView:
 class PanelCache:
     """Bounded LRU of rendered panels, with the lock next to the data it guards.
 
-    It used to be three separate things on the Reader — the `OrderedDict`, a `panel_cache_max`, and
-    a lock shared with an unrelated cache — and the fetch-or-build-then-LRU-touch dance around them
-    was written out twice, in `tooltip` and in `nested_popup`. Two copies of a lock protocol is one
-    copy too many: the second is where the `move_to_end` outside the lock lives.
+    The map, its bound and its lock are one object because the fetch-or-build-then-LRU-touch dance
+    around them otherwise gets written out once per caller — and two copies of a lock protocol is
+    one copy too many: the second is where the `move_to_end` outside the lock lives.
     """
 
     def __init__(self, limit: int, lock) -> None:

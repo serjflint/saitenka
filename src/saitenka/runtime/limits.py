@@ -1,9 +1,8 @@
 """The session runtime's bounded-work policy: one place, and every field has an enforcer.
 
-Only bounds something actually reads live here. This file used to declare twelve and enforce none,
-which is worse than no policy at all: `mailbox_terminal` said 128 while the mailbox ran at 64 and
-nothing could notice, because a limit nobody applies cannot disagree with anything. The mailbox's
-value won — it was the one in force. A field arrives here when its enforcer does, not before.
+Only bounds something actually reads live here. A declared-but-unenforced limit is worse than no
+policy at all — nothing can notice it disagreeing with the value actually in force, because a limit
+nobody applies cannot disagree with anything. A field arrives here when its enforcer does.
 """
 
 from __future__ import annotations
