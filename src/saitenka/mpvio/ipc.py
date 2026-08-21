@@ -694,6 +694,20 @@ class MpvIPC:
             reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
         return reactor.state.playback  # type: ignore[attr-defined]  # `object` by design
 
+    def route_session_lifecycle(self, envelope: object | None) -> object | None:
+        """`Owner.SESSION`'s half of the same port. See `route_session_playback`.
+
+        Named for what the slot holds — the startup hint, the two lifecycle sequences, the
+        connection — rather than for the owner, whose name would repeat.
+        """
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.session  # type: ignore[attr-defined]  # `object` by design
+
     def route_session_subtitle(self, envelope: object | None) -> object | None:
         """`Owner.SUBTITLE`'s half of the same port. See `route_session_playback`."""
         gateway = self._runtime_gateway

@@ -182,6 +182,7 @@ from saitenka.runtime import (
 )
 from saitenka.runtime import help as help_machine
 from saitenka.runtime import subtitle as subtitle_state
+from saitenka.runtime.connection import ConnectionStore
 from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import (
@@ -330,7 +331,7 @@ class Reader:
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self._interactive_ready = False
-        self._connection_ready = True
+        self._connection = ConnectionStore(ipc)
         # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
         # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
         self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
@@ -3887,7 +3888,7 @@ class Reader:
             # sample taken after it would miss the very draw the paused nudge exists to re-flush.
             ops_before = self.ov.ops
             self._drain_events(timeout)
-            if not self._connection_ready:
+            if not self._connection.current.ready:
                 return True
             self._schedule_paused_nudge(ops_before)
             if self._mark_interactive_ready():
@@ -3971,17 +3972,17 @@ class Reader:
             self.ipc.dispatch_runtime_terminal(ev)
             return
         if isinstance(ev, ConnectionLost):
-            self._connection_ready = False
+            self._connection.observed(ev)
             self._retire_cue_identity("connection-lost")
             return
         if isinstance(ev, ConnectionReplaced):
             self._on_ipc_reconnect()
             return
         if isinstance(ev, ConnectionReady):
-            self._connection_ready = True
+            self._connection.observed(ev)
             return
         if isinstance(ev, UserCommand):
-            if not self._connection_ready:
+            if not self._connection.current.ready:
                 self._publish_command_event(
                     CommandHandled(
                         ev.name,

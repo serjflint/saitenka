@@ -20,6 +20,7 @@ from saitenka.app import telemetry
 from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.app.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
+from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
     AttachSessionDiagnostics,
@@ -48,6 +49,8 @@ from saitenka.runtime.events import (
     PLAYBACK_EVENTS,
     PRESENTATION_EVENTS,
     SUBTITLE_EVENTS,
+    ConnectionLost,
+    ConnectionReady,
     ConnectionReplaced,
     EffectFinished,
     EpisodeRetired,
@@ -111,6 +114,8 @@ _SESSION_EVENTS = (
     SessionStarting,
     StartupHintRequested,
     StartupReady,
+    ConnectionLost,
+    ConnectionReady,
     ConnectionReplaced,
     EffectFinished,
     SessionClosing,
@@ -133,6 +138,7 @@ _CLAIMED = (StartupHintRequested, StartupReady, SessionClosing)
 STARTUP_HINT = "startup-hint"
 LIFECYCLE_CLOSE = "lifecycle-close"
 LIFECYCLE_START = "lifecycle-start"
+CONNECTION = "connection"
 
 #: Names in `gateway.session_resources`. Spelled once for the same reason the feature keys are:
 #: the owner that registers and the dispatcher that closes must not drift apart.
@@ -388,6 +394,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             STARTUP_HINT: hint,
             LIFECYCLE_CLOSE: reduce_lifecycle_close,
             LIFECYCLE_START: reduce_lifecycle_start,
+            CONNECTION: reduce_connection,
         }
     )
     playback = playback_slice_reducer()
@@ -435,6 +442,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
                     STARTUP_HINT: StartupHintState(),
                     LIFECYCLE_CLOSE: LifecycleCloseState(),
                     LIFECYCLE_START: LifecycleStartState(),
+                    CONNECTION: ConnectionState(),
                 }
             ),
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),

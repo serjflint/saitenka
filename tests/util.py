@@ -467,6 +467,15 @@ class FakeIPC:
             reactor.handle(envelope)
         return reactor.state.playback
 
+    def route_session_lifecycle(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.SESSION` port, refusal included — as above."""
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.session
+
     def route_session_subtitle(self, envelope) -> object | None:
         """Mirror the transport's `Owner.SUBTITLE` port, refusal included — as above."""
         reactor = getattr(self._runtime_gateway, "session_reactor", None)
