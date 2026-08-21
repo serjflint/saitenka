@@ -142,9 +142,9 @@ saitenka-sub-picker|interaction|global|modal"""
 
 
 def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
-    """End-to-end proof the firing seam works on a REAL, unstubbed handler: F1 → toggle_help →
-    open_help flips _help_open. Exercises client-message → _drain_events → _handle → router with a
-    genuine state mutation, not a spy."""
+    """End-to-end proof the firing seam works on a REAL, unstubbed handler: F1 → toggle_help flips
+    `help.open`. Exercises client-message → _drain_events → _handle → router with a genuine state
+    mutation, not a spy."""
     ipc = FakeIPC()
     r = Reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())

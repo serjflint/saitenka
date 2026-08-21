@@ -122,7 +122,7 @@ def test_profile_cycle_key_is_registered_even_on_the_default_path():
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
     """Two configured profiles → the key flips tokenizer AND language, and wraps back. Driven through
-    the REAL keybind dispatch (press → _handle → _HANDLERS → cycle_profile), so it proves the wire, not
+    the REAL keybind dispatch (press → _handle → the command table → cycle_profile), so it proves the wire, not
     just the method. Provider gating follows ``reader.langs.main`` (the D5 capability gate)."""
     import saitenka.app.subtitle_providers as prov
 

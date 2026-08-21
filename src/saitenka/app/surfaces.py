@@ -40,7 +40,7 @@ class SurfaceState(Protocol):
 
 
 # Wheel-scroll amount the tooltip (the terminal fallback surface) applies per coalesced step — the OSD
-# tooltip's own step, distinct from the keyboard TIP_UP/DOWN 0.12 in controller._HANDLERS.
+# tooltip's own step, distinct from the keyboard TIP_UP/DOWN 0.12 in the command table.
 _TIP_WHEEL_FRAC = 0.14
 
 

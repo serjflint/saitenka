@@ -566,7 +566,7 @@ def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
 
 def press(reader, ipc: FakeIPC, key: str) -> None:
     """Fire the handler bound to ``key`` through the REAL dispatch chain — a synthetic mpv
-    ``client-message`` drained by ``reader._drain_events()`` → ``_handle`` → ``_HANDLERS`` — the way an
+    ``client-message`` drained by ``reader._drain_events()`` → ``_handle`` → the command table — the way an
     actual keypress does. This is the hop FakeIPC can't simulate on its own (it echoes the bind, never
     fires it), so a test that only checks ``ipc.commands`` proves saitenka *sent* the bind, not that a
     press *runs* the action. Raises :class:`KeyError` if ``key`` isn't currently bound — a dead shortcut

@@ -20,7 +20,7 @@ engineering log — every baseline, every lever, the raw percentile tables — l
 | Warm hover (prefetched → shown) | p50 ~0.5 ms | < 16 ms |
 | Cold first paint (hover → first pixels) | p50 ~21.8 ms · p95 ~46.1 ms | p50 < 100 ms · p95 < 250 ms |
 | Scroll frame (one wheel step) | p50 ~0.6 ms | < 16 ms |
-| Poll-tick hover hit-test | ~0.4–0.5 ms | < 5 ms |
+| Hover hit-test (per mouse move) | ~0.4–0.5 ms | < 5 ms |
 | Pathological corpus (20 worst words) | worst p95 ~132 ms | < 150 ms (all 20) |
 
 The common case — a word you hover after the background prefetch has already warmed the line —
@@ -37,11 +37,11 @@ tied to a perceptible failure if it's missed:
 | Warm hover | < 16 ms | The common case: prefetch warms the line while you read, so the shown panel must feel instant. |
 | Cold first paint | p50 < 100 ms · p95 < 250 ms | The headline latency — a fresh word's first pixels. p95 guards the tail, not just the median. |
 | Scroll frame | < 16 ms | One wheel step must fit inside a single 60 fps frame or scrolling visibly stutters. |
-| Hit-test | < 5 ms | Runs every poll tick (25 ms interval); the per-tick cost must be a small fraction of it. |
+| Hit-test | < 5 ms | Runs once per observed mouse move; it must stay a small fraction of the gap between two. |
 | Nested popup | < 150 ms | First paint for an inner (scanned) word, the heaviest interactive path. |
 
-Anything crossing the 16.7 ms frame budget risks dropping a frame; anything crossing the poll
-interval risks stalling the loop that watches the subtitle and mouse. The measured numbers sit inside
+Anything crossing the 16.7 ms frame budget risks dropping a frame; anything slower than mouse moves
+arrive risks stalling the loop that watches the subtitle and mouse. The measured numbers sit inside
 every budget with margin.
 
 ## Honest caveats

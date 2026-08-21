@@ -50,8 +50,7 @@ internal modules with explicit dependency contracts, not independently published
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
 - **`app/`** — the application layer. `controller.py`'s `Reader` is the production driver and
-  owns the mpv session lifecycle and interactive state. `app/runtime/` owns its closed command table
-  and ordered tick primitives;
+  owns the mpv session lifecycle and interactive state. `app/runtime/` owns its closed command table;
   `reader_factory.py` is the production `Reader` construction seam. `cli.py` owns process setup and
   Cyclopts registration, `commands/` owns domain command surfaces and attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
@@ -583,7 +582,7 @@ baseline instead.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
 - **Composition is explicit at the application boundary.** `cli.py` registers commands and process
   policy; domain commands call launch use cases; `reader_factory.py` constructs `Reader`. Runtime
-  command and tick primitives never receive a god context, although `Reader` still owns their assembly.
+  command primitives never receive a god context, although `Reader` still owns their assembly.
 - **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
   sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`
