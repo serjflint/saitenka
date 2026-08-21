@@ -3528,8 +3528,18 @@ class Reader:
     def _build_command_router(self) -> LegacyCommandExecutor:
         """Assemble feature-owned actions once; handlers are bound and receive no god context."""
 
-        def action(method_name: str) -> Callable[[], None]:
-            return lambda: getattr(self, method_name)()
+        def action(method: Callable[[Reader], object]) -> Callable[[], None]:
+            """Route to a `Reader` verb, resolved by name at call time.
+
+            Late binding is deliberate: a keybind test overrides the verb on the *instance* and
+            then presses the key, so a row that captured the bound method would route past the
+            override. Taking the function rather than its name is what makes the row a real
+            reference — a rename carries the table with it instead of failing at the next
+            keypress, and a verb reached only from here stops looking dead to every tool that
+            resolves symbols.
+            """
+            name = method.__name__
+            return lambda: getattr(self, name)()
 
         def interaction(command) -> Callable[[], None]:
             return lambda: self._run_interaction_command(command)
@@ -3542,34 +3552,34 @@ class Reader:
         # `runtime.help`, `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
         # `interaction_intents`.
         reducers = {
-            SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
-            SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
-            SUBTITLE_RETRY_MSG: action("retry_japanese_subtitles"),
-            ANNOTATION_MSG: action("toggle_annotation_mode"),
-            TRANS_MSG: action("toggle_translation"),
-            COPY_LINE_MSG: action("copy_line"),
-            SUB_PREV_MSG: action("_navigate_previous"),
-            SUB_NEXT_MSG: action("_navigate_next"),
-            SUB_REPLAY_MSG: action("_replay_cue"),
-            SUB_ANCHOR_MSG: action("_anchor_subtitles"),
-            HELP_TOGGLE_MSG: action("toggle_help"),
+            SUBTITLE_LANGUAGE_MSG: action(Reader.toggle_subtitle_language),
+            SUBTITLE_MARK_JP_MSG: action(Reader.mark_current_subtitle_japanese),
+            SUBTITLE_RETRY_MSG: action(Reader.retry_japanese_subtitles),
+            ANNOTATION_MSG: action(Reader.toggle_annotation_mode),
+            TRANS_MSG: action(Reader.toggle_translation),
+            COPY_LINE_MSG: action(Reader.copy_line),
+            SUB_PREV_MSG: action(Reader._navigate_previous),
+            SUB_NEXT_MSG: action(Reader._navigate_next),
+            SUB_REPLAY_MSG: action(Reader._replay_cue),
+            SUB_ANCHOR_MSG: action(Reader._anchor_subtitles),
+            HELP_TOGGLE_MSG: action(Reader.toggle_help),
             HELP_PREV_MSG: lambda: self._run_help_command(HelpCommand.PREVIOUS),
             HELP_NEXT_MSG: lambda: self._run_help_command(HelpCommand.NEXT),
             HELP_CLOSE_MSG: lambda: self._run_help_command(HelpCommand.CLOSE),
-            SPEAK_MSG: action("speak_hovered"),
-            COPY_MSG: action("copy_hovered"),
-            KANJI_MSG: action("kanji_current"),
-            HOVER_PAUSE_MSG: action("toggle_hover_pause"),
-            MINE_MSG: action("mine_current"),
-            MINE_VIDEO_MSG: action("mine_current_video"),
-            MINE_ALL_MSG: action("bulk_mine"),
-            BOOKMARK_MSG: action("toggle_bookmark"),
-            PROFILE_CYCLE_MSG: action("cycle_profile"),
-            SIDEBAR_MSG: action("toggle_sidebar"),
-            SUB_PICKER_MSG: action("toggle_sub_picker"),
-            ANALYSIS_MSG: action("toggle_analysis"),
-            PREVIEW_MSG: action("replay_preview"),
-            PREVIEW_CLOSE_MSG: action("_hide_preview"),
+            SPEAK_MSG: action(Reader.speak_hovered),
+            COPY_MSG: action(Reader.copy_hovered),
+            KANJI_MSG: action(Reader.kanji_current),
+            HOVER_PAUSE_MSG: action(Reader.toggle_hover_pause),
+            MINE_MSG: action(Reader.mine_current),
+            MINE_VIDEO_MSG: action(Reader.mine_current_video),
+            MINE_ALL_MSG: action(Reader.bulk_mine),
+            BOOKMARK_MSG: action(Reader.toggle_bookmark),
+            PROFILE_CYCLE_MSG: action(Reader.cycle_profile),
+            SIDEBAR_MSG: action(Reader.toggle_sidebar),
+            SUB_PICKER_MSG: action(Reader.toggle_sub_picker),
+            ANALYSIS_MSG: action(Reader.toggle_analysis),
+            PREVIEW_MSG: action(Reader.replay_preview),
+            PREVIEW_CLOSE_MSG: action(Reader._hide_preview),
             SCROLL_UP_MSG: interaction(InteractionCommand.WHEEL_UP),
             SCROLL_DOWN_MSG: interaction(InteractionCommand.WHEEL_DOWN),
             TIP_UP_MSG: interaction(InteractionCommand.TOOLTIP_UP),
@@ -3577,7 +3587,7 @@ class Reader:
             TIP_CLOSE_MSG: interaction(InteractionCommand.TOOLTIP_BACK_OR_CLOSE),
             CLICK_MSG: interaction(InteractionCommand.CLICK),
             COPY_CLICK_MSG: interaction(InteractionCommand.COPY_UNDER_CURSOR),
-            OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
+            OVERLAY_TOGGLE_MSG: action(Reader.toggle_overlay),
         }
         return LegacyCommandExecutor(
             {
