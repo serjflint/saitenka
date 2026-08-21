@@ -63,10 +63,11 @@ internal modules with explicit dependency contracts, not independently published
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py` (subtitle fetching).
-- **`runtime/`** — an isolated, test-only session contract package: closed events/effects, bounded
-  mailbox lanes with reserved terminal capacity, a deterministic lifecycle ledger, and named timers.
-  Production does not import it. The [runtime architecture](docs/contributing/runtime.md) describes
-  its relationship to the production loop and the maintained invariants.
+- **`runtime/`** — the session runtime: closed events/effects, bounded mailbox lanes with reserved
+  terminal capacity, a deterministic lifecycle ledger, named timers, the owner slices, and
+  `SessionLoop`, which drives the session off the mailbox. It knows nothing about `app/`; the edge
+  runs one way. The [runtime architecture](docs/contributing/runtime.md) describes its relationship
+  to `Reader` and the maintained invariants.
 - **Root leaf modules** — dependency-neutral types and policies shared across layers live directly in
   `saitenka` rather than a generic `utils` package: `model.py`, `bgra.py`, `fonts.py`, `mask_atlas.py`,
   `otel_metrics.py`, `parallel.py`, `resources.py`, `session.py`, and `version.py`. A root module should
@@ -99,12 +100,13 @@ cli.create_app
         -> Reader
 ```
 
-Inside a `Reader`, mpv script messages go through a closed `CommandRouter`, and each poll executes a
-named `TickPipeline`. Both reject duplicate names, which makes ordering and ownership independently
-testable. `Reader` still assembles those tables from its feature methods, so this is an explicit
-internal composition seam rather than an open third-party plugin API.
+Inside a `Reader`, mpv script messages go through a closed `CommandRouter`, which rejects duplicate
+names and so makes ordering and ownership independently testable. `Reader` still assembles that table
+from its feature methods, so this is an explicit internal composition seam rather than an open
+third-party plugin API.
 
-The separate `saitenka.runtime` contract package is not part of this assembly. See
+`saitenka.runtime` is a production package, not a separate contract: `session_routes.py` imports it,
+and a session with a gateway is driven by `SessionLoop` off the mailbox rather than by a poll. See
 [Interactive runtime architecture](docs/contributing/runtime.md) for both runtime packages, their
 actual call boundaries, and the executable invariants.
 
@@ -116,8 +118,8 @@ protocol-shaped class from being mistaken for production swappability.
 | Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
-| Reader commands and ticks | `CommandRouter`, `TickPipeline` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
-| Session events and effects | `saitenka.runtime` | Test-only: mailbox, lifecycle ledger, and timers are characterized but not a production driver. |
+| Reader commands | `CommandRouter` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
+| Session events and effects | `saitenka.runtime` | Live: the mailbox is the session's ingress, `SessionLoop` drives it, and effects return as correlated terminals. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
@@ -294,9 +296,9 @@ handled as misses on every read path.
 ## Current production data flow (hover → lookup → render → mine)
 
 1. `MpvIPC`'s reader thread buffers observed properties and client messages while resolving correlated
-   reply futures directly. `Reader.poll_once` checks connection health, drains the buffered events,
-   then runs the named tick stages: expire surfaces, refresh OSD, reconcile subtitles, apply
-   background results, and update interaction.
+   reply futures directly. `SessionLoop` blocks on the mailbox — bounded by the earliest armed timer,
+   so an idle session with nothing armed does not wake at all — and hands each envelope to the
+   session's reactor and then, unless the reactor claimed it, to `Reader`'s turn.
 2. A new subtitle line is normalized, tokenized by the active profile, compound-merged against the
    dictionary capability, scored, and cached as a `TokenizedCue`. Subtitle rendering returns the
    visible word boxes used by the hover test.

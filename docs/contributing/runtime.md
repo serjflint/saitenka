@@ -2,11 +2,10 @@
 
 Saitenka has two runtime packages with different jobs:
 
-- `saitenka.app.runtime` supplies the command table and ordered stages used by the production
-  `Reader` loop;
-- `saitenka.runtime` holds the pure runtime contracts — events, effects, mailbox admission, effect
-  lifecycle, timers, and the playback projection. Most of it is still exercised only by tests; the
-  projection is live in production.
+- `saitenka.app.runtime` supplies the command table the production `Reader` decides with;
+- `saitenka.runtime` holds the runtime itself — events, effects, mailbox admission, effect
+  lifecycle, timers, the owner slices and the session loop. It is production, not a contract package:
+  `session_routes.py` composes it and a session with a gateway is driven from it.
 
 This page describes both as they exist on `main`. The whole-system module map remains in
 [Architecture](architecture.md); native subtitle ownership and its supported operating envelope are
@@ -14,24 +13,22 @@ documented in [Native mpv subtitles](../usage/native-subtitles.md).
 
 ## Production session
 
-`Reader` owns the live session, interaction, and presentation state. `Reader.run()` wakes at a fixed
-cadence and calls `poll_once()`:
+`Reader` owns the live session, interaction, and presentation state. `Reader.run()` hands the thread to
+`SessionLoop`, which blocks on the mailbox rather than waking at a cadence:
 
 ```text
 mpv JSON IPC ──► background reader
-                       ├─ events ──► event buffer ──► Reader.poll_once()
-                       └─ replies ─► correlated futures ──► command callers
+                       ├─ events ──► mailbox ──► SessionLoop.receive()
+                       └─ replies ─► correlated futures ──► EffectCorrelator
 
-Reader.poll_once()
-          │
-          ├────────────────┬────────────────┐
-          ▼                ▼                ▼
-          connection health   ordered event    TickPipeline
-          and reconnect       drain             ├─ expire surfaces
-                                                 ├─ refresh OSD
-                                                 ├─ reconcile subtitles
-worker result queues ───────────────────────────►├─ apply results
-                                                 └─ update interaction
+SessionLoop.receive(timeout bounded by the earliest armed timer)
+          │  one envelope at a time, in mailbox sequence
+          ├──────────────────────┐
+          ▼                      ▼
+     SessionReactor.handle    Reader's turn, unless the reactor claimed it
+     (owner slices, effects)   ├─ reconcile subtitles
+                               ├─ apply results
+worker result queues ─────────►└─ update interaction
 
 Reader and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
 ```
@@ -40,17 +37,17 @@ The IPC reader performs blocking transport reads away from the session thread. I
 the event buffer and resolves reply futures directly. Replies are matched by request ID; the
 connection epoch prevents an old transport from completing work for a replacement connection. A
 single writer thread owns physical transport writes. Its queue is bounded, so admission can fail
-explicitly instead of growing with input.
+explicitly instead of growing with input. `close` flushes that queue, bounded, before dropping the
+transport — a correlated fire-and-forget carries no implication that its bytes left, so a teardown
+write would otherwise be queued and then discarded.
 
-`pump()` does not read the socket. It reports connection loss and performs bounded reconnect work.
-The session thread then drains already-buffered mpv events in arrival order. A conflicting subtitle
-observation retires the active cue immediately, before a later cue-dependent command in the same
-drain can use its tokens or hit boxes.
+`pump()` does not read the socket. It reports connection loss, performs bounded reconnect work, and
+takes one turn off the loop. A conflicting subtitle observation retires the active cue immediately,
+before a later cue-dependent command in the same batch can use its tokens or hit boxes.
 
 `CommandRouter` is a closed table of script-message handlers. Duplicate names are rejected, and the
-router distinguishes commands that require a current cue from session-wide commands. `TickPipeline`
-is the named, ordered sequence shown above; duplicate stage names are rejected. Both are assembled by
-`Reader`, so they expose composition seams without creating another state owner.
+router distinguishes commands that require a current cue from session-wide commands. It is assembled
+by `Reader`, so it exposes a composition seam without creating another state owner.
 
 ## Background work and publication
 
