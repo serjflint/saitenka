@@ -121,6 +121,9 @@ the floor for every change; 3–6 are escalations, not replacements.
   rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched. LibCST
   lives in the opt-in `codemod` dependency group (its pyo3 build has no free-threaded 3.15t wheel, so it's
   kept out of the default `dev` env): run codemods with `uv run --group codemod <script>`.
+- **Price a migration before starting it.** A conversion spanning many call sites gets its unit price,
+  its leverage device (and the rejected ones), and a retirement meter beside its debt meter, on day 1
+  — the **`plan-migration`** skill (`.agents/skills/plan-migration/`) is the procedure.
 - **Extract behind a stable seam.** Move logic into a new module as functions taking the host
   (`def f(reader: Reader)`) and leave thin delegating methods, so the public API is unchanged and both
   mypy and basedpyright stay green (a `self: Subclass` mixin trips mypy's supertype rule). Repoint any
