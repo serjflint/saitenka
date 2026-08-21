@@ -90,11 +90,16 @@ def test_init_assigned_attributes_count_as_always_present():
     assert "_bytes_read" in always.get("MpvIPC", set())
 
 
-def test_the_live_census_resolves_something_and_stays_clean():
-    """Guards the discovery half: a census that resolved no receiver at all would report zero dead
-    probes and pass, having measured nothing."""
+def test_the_live_census_is_not_vacuous():
+    """Guards the discovery half, and *only* that: a census resolving no receiver would report zero
+    dead probes and pass, having measured nothing.
+
+    Deliberately does not assert `dead == 0` — `poe port-probe` owns that, and this file runs at
+    position 7 of `poe all` while the gate runs at 20. Asserting it here made a dead probe abort the
+    sequence with `FAILED test_the_live_census_…`, naming neither the file nor the fix, and the gate's
+    actual message was never reached. One fact, one owner.
+    """
     state = C.build()
+
     assert state["total"] > 0, "no getattr probes found in src — the sweep would be vacuous"
-    resolved = state["total"] - state["unresolved"]
-    assert resolved > 0, "no receiver resolved to a class — the discriminator is not running"
-    assert state["dead"] == 0
+    assert state["total"] - state["unresolved"] > 0, "no receiver resolved — discriminator is off"

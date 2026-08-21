@@ -115,8 +115,13 @@ def test_a_pure_reducer_reports_nothing():
 
 
 def test_the_live_census_finds_the_registered_reducers():
-    """Guards the discovery half: if walking the reactor's route table ever returns nothing, every
-    other number here is zero and the gate passes while measuring an empty set."""
+    """Guards the discovery half, and only that: if walking the reactor's route table ever returns
+    nothing, every number is zero and the gate passes while measuring an empty set.
+
+    `decides == 0` belongs to `poe reducer-purity`, not here — see the note in
+    `test_port_probe_census.py`: this file runs earlier in `poe all`, so asserting the value here
+    aborts the sequence before the gate's message is reached.
+    """
     state = R.build()
+
     assert state["reducers"] >= 5, "the reactor registers at least one reducer per owner slot"
-    assert state["decides"] == 0
