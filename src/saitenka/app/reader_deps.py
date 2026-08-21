@@ -516,14 +516,10 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     reader.lifecycle_surfaces.remove(OverlayId.LOADING)
     if reader._anki_capability is not None:
         reader._anki_capability.close()
-    reader._mined_seed_generation += 1
-    reader._mined_seed_inflight = False
-    reader._mined_seed_done = False
-    reader._mined_seed_failures = 0
-    # A backoff armed against the previous deps would retry into the new ones, so retire it here
-    # rather than only clearing the flag that gates the next attempt.
+    # A backoff armed against the previous deps would retry into the new ones, so retire the timer
+    # too — the lane's flag says a retry is armed, it cannot disarm one.
     reader.lifecycle_timers.cancel(LifecycleTimerKind.MINED_SEED_RETRY)
-    reader._mined_seed_retry_pending = False
+    reader.mined_seed.restart()
     reader.scorer = deps.get("scorer")
     reader.anki = deps.get("anki")
     reader.mine_cfg = deps.get("mine_cfg")

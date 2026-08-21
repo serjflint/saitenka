@@ -407,11 +407,7 @@ class Reader:
         # Progressive startup: deps loaded on a background thread, injected on the main thread by the
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
         self._pending_deps: dict | None = None
-        self._mined_seed_generation = 0
-        self._mined_seed_inflight = False
-        self._mined_seed_done = False
-        self._mined_seed_failures = 0
-        self._mined_seed_retry_pending = False
+        self.mined_seed = mined_seed.MinedSeedLane()
         self._interaction_metadata = hover_metadata.InteractionMetadataState()
         self._interaction_metadata_submit = hover_metadata.configure_runtime_job(ipc)
         self._loading = False
@@ -3646,18 +3642,12 @@ class Reader:
             self._anki_capability.request()
 
     def _request_mined_seed(self) -> None:
-        if (
-            self._mined_seed_inflight
-            or self._mined_seed_done
-            or self._mined_seed_retry_pending
-            or self.anki is None
-            or self.mine_cfg is None
-        ):
+        if not self.mined_seed.idle or self.anki is None or self.mine_cfg is None:
             return
         if self._mined_seed_submit is None:
             return
-        self._mined_seed_inflight = True
-        generation = self._mined_seed_generation
+        self.mined_seed.inflight = True
+        generation = self.mined_seed.generation
         self._mined_seed_submit(
             owner=Owner.SESSION,
             identity=generation,
@@ -3675,10 +3665,10 @@ class Reader:
         from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         def due() -> None:
-            self._mined_seed_retry_pending = False
+            self.mined_seed.retry_pending = False
             self._request_mined_seed()
 
-        self._mined_seed_retry_pending = self.lifecycle_timers.schedule(
+        self.mined_seed.retry_pending = self.lifecycle_timers.schedule(
             LifecycleTimerKind.MINED_SEED_RETRY, delay_s, due
         )
 
@@ -3686,18 +3676,18 @@ class Reader:
         generation = completion.identity
         if (
             not isinstance(generation, int)
-            or generation != self._mined_seed_generation
+            or generation != self.mined_seed.generation
             or self._stop.is_set()
         ):
             return
-        self._mined_seed_inflight = False
+        self.mined_seed.inflight = False
         values = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
         if not isinstance(values, set):
-            self._mined_seed_failures += 1
-            self._arm_mined_seed_retry(min(8.0, 0.25 * (2 ** (self._mined_seed_failures - 1))))
+            self.mined_seed.failures += 1
+            self._arm_mined_seed_retry(self.mined_seed.backoff_delay())
             return
-        self._mined_seed_done = True
-        self._mined_seed_failures = 0
+        self.mined_seed.done = True
+        self.mined_seed.failures = 0
         self.session.mined.update(values)
 
     def _finish_analysis(self, completion: EffectFinished) -> None:
@@ -4476,7 +4466,7 @@ class Reader:
         )
 
         self._build_close_participants()
-        self._mined_seed_generation += 1  # invalidate in-flight seeds before anything tears down
+        self.mined_seed.invalidate()  # in-flight seeds are stale before anything tears down
         ledger = CloseLedger()
         ledger.run(
             (

@@ -68,7 +68,7 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
 
         assert r.session.mined == {"猫"}
         assert r.session.mined.generation == 1
-        assert r._mined_seed_inflight is False
+        assert r.mined_seed.inflight is False
     finally:
         r.close()
         gateway.close()
@@ -96,8 +96,7 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
     try:
         r._request_mined_seed()
         assert old_started.wait(1)
-        r._mined_seed_generation += 1
-        r._mined_seed_inflight = False
+        r.mined_seed.restart()  # what replacing the deck does, through the lane's own verb
         r.anki = new_anki
         r._request_mined_seed()
         await_ready(
@@ -139,7 +138,7 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
     try:
         r._request_mined_seed()
         await_ready(
-            lambda: not r._mined_seed_inflight,
+            lambda: not r.mined_seed.inflight,
             "the failed seed never settled",
             pump=r._drain_events,
         )
