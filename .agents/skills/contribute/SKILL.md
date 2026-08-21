@@ -43,7 +43,10 @@ PoC feeds the review, a review finding sends you back to the design.
    real production input and run the pure function/seam offline until the cause is
    deterministic. **Name the class before proposing a fix** — selection vs grounding, symptom
    vs cause, correctness vs perf — because the fix differs by class. A cause you can't
-   reproduce offline you haven't found yet; keep going.
+   reproduce offline you haven't found yet; keep going. **Before naming a cause, open the
+   artifact that would falsify it** — the signature, the AST classification, the API field. A
+   clean correlation is more suspicious, not less. **State the discriminator in the finding**, so a
+   later reader can check the claim without redoing the work.
 3. **Smallest coherent design, then a PoC that proves tractability.** Prefer an existing seam
    over a new dispatcher condition. The PoC's offline verification — reconstruct the input,
    assert the module's **documented invariants**, and **measure the churn / blast-radius** —
@@ -70,6 +73,8 @@ PoC feeds the review, a review finding sends you back to the design.
 ## Anti-patterns
 
 - Proposing a fix before the cause reproduces offline.
+- Reporting a mechanism you inferred from a matching pair of totals or a shared call shape —
+  that is a correlation, and the artifact that would falsify it was one command away.
 - "Verifying" a pure-function change by eyeballing output instead of asserting its invariants
   and measuring churn.
 - Letting the reviewer see your rationale — it must judge the artifact, not your story.
