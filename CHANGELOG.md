@@ -9,6 +9,9 @@ logs.
 
 ### Fixed
 
+- **Exiting Saitenka reliably restores mpv's own subtitle visibility.** Teardown writes are flushed to
+  the socket before the connection is dropped, so the setting a session found is the setting it leaves —
+  previously the last write could still be queued when the transport went away.
 - **Hovering and tooltip scrolling no longer wait on optional services or mpv IPC.** Phrase/mining
   metadata, Anki and TTS capability checks, tooltip raster preparation, file staging, and transport
   writes now run behind bounded session workers. Rapid hover and wheel input is newest-wins, while
