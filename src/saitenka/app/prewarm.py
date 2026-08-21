@@ -53,8 +53,8 @@ class _PrewarmIPC(NoSessionRuntime):
             return {"data": self._osd}
         return {"data": None}
 
-    def drain_events(self, *_args, **_kwargs):
-        return []
+    def receive_session(self, _timeout, _handle) -> None:
+        return None
 
 
 @dataclass(frozen=True, slots=True)

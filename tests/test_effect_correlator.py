@@ -41,11 +41,11 @@ class _RecordingMailbox(SessionMailbox):
 class FakeIPC:
     def __init__(self) -> None:
         self.requests: list[IPCRequest] = []
-        self.legacy_source = list
+        self.session_loop = None
         self.event_sink = None
 
-    def install_runtime_ingress(self, event_sink, _connection_sink, legacy_source, _gateway):
-        self.legacy_source = legacy_source
+    def install_runtime_ingress(self, event_sink, _connection_sink, session_loop, _gateway):
+        self.session_loop = session_loop
         self.event_sink = event_sink
 
     def command_async(self, *args, expected_connection_epoch=None) -> IPCRequest:
@@ -53,6 +53,12 @@ class FakeIPC:
         request = IPCRequest(len(self.requests), 0, Future())
         self.requests.append(request)
         return request
+
+    def drain(self, timeout: float | None = 0.0) -> list:
+        """One turn as a list — the loop pushes, so a test that wants a batch collects it."""
+        events: list = []
+        self.session_loop.receive(timeout, events.append)
+        return events
 
 
 def test_legacy_bridge_delivers_a_command_outcome_on_the_reader_turn() -> None:
@@ -71,7 +77,7 @@ def test_legacy_bridge_delivers_a_command_outcome_on_the_reader_turn() -> None:
     ipc.requests[0].future.set_result({"error": "success", "data": True})
     assert completed == []
 
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
     assert len(completed) == 1
     assert completed[0].outcome is EffectOutcome.SUCCEEDED
     assert completed[0].result is True
@@ -91,10 +97,10 @@ def test_legacy_bridge_deadline_wins_and_late_reply_is_stale() -> None:
     )
 
     clock.now = 1.0
-    assert ipc.legacy_source() == []
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
+    assert ipc.drain() == []
     ipc.requests[0].future.set_result({"error": "success"})
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
 
     assert len(completed) == 1
     assert completed[0].outcome is EffectOutcome.FAILED
@@ -136,11 +142,11 @@ def test_named_timer_delivers_only_after_its_due_turn() -> None:
         on_finished=completed.append,
     )
     clock.now = 1.99
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
     assert completed == []
 
     clock.now = 2.0
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
     assert [item.outcome for item in completed] == [EffectOutcome.SUCCEEDED]
 
 
@@ -164,7 +170,7 @@ def test_the_drain_never_blocks_past_the_earliest_armed_timer() -> None:
         due_at=10.25,
         on_finished=lambda _result: None,
     )
-    ipc.legacy_source(30.0)
+    ipc.drain(30.0)
 
     assert waits == [0.25]  # the timer, not the caller's thirty seconds
 
@@ -175,8 +181,8 @@ def test_the_drain_blocks_for_as_long_as_asked_when_nothing_is_armed() -> None:
     gateway = MpvGateway(cast("MpvIPC", ipc), _RecordingMailbox(), clock=Clock())
     waits = gateway.mailbox.waits
 
-    ipc.legacy_source(30.0)
-    ipc.legacy_source(None)
+    ipc.drain(30.0)
+    ipc.drain(None)
 
     assert waits == [30.0, None]  # unbounded stays unbounded
 
@@ -233,9 +239,9 @@ def test_replacing_named_timer_terminally_cancels_old_revision() -> None:
                 (identity, result.outcome)
             ),
         )
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
     clock.now = 2.0
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
 
     assert completed == [
         ("toast:1", EffectOutcome.CANCELLED),
@@ -356,7 +362,7 @@ def test_job_close_cancels_pending_work_and_quarantines_late_completion() -> Non
     assert started.wait(1.0)
 
     gateway.close()
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == []
     assert len(completed) == 1
     assert completed[0].outcome is EffectOutcome.CANCELLED
     assert not gateway.submit_job(
@@ -383,33 +389,33 @@ def _observation_then_terminal(ipc: FakeIPC, gateway: MpvGateway, sink: list) ->
     ipc.requests[0].future.set_result({"error": "success", "data": True})
 
 
-def test_ordered_terminals_hands_the_completion_back_in_envelope_sequence() -> None:
-    """A completion published after an observation must not be dispatched before it. The caller
-    owns a whole turn, so it receives both and runs them in the order mpv produced them."""
+def test_a_completion_is_dispatched_at_its_place_in_the_sequence() -> None:
+    """A completion published after an observation runs after it — the whole of what the retired
+    ordered/inline modes were arguing about.
+
+    They existed because the consumer received a batch and only then acted: a callback run during
+    the receive preceded every observation the consumer had not reached yet, and handing it back
+    instead just moved the question to who dispatches it. With each payload handed over as it is
+    popped, "in position" and "now" are the same instant and there is nothing left to choose.
+    """
     ipc = FakeIPC()
     gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
     seen: list = []
 
-    _observation_then_terminal(ipc, gateway, seen)
-    drained = ipc.legacy_source(ordered_terminals=True)
+    def record(event: object) -> None:
+        assert isinstance(event, PropertyObserved)
+        seen.append(("observation", event.name))
 
-    assert seen == []  # nothing ran during the drain
-    for event in drained:
-        if isinstance(event, PropertyObserved):
-            seen.append(("observation", event.name))
-        else:
-            gateway.dispatch_terminal(event)
+    _observation_then_terminal(ipc, gateway, seen)
+    assert ipc.session_loop is not None
+    ipc.session_loop.receive(0.0, record)
+
     assert seen == [("observation", "sub-text"), ("terminal", "probe")]
 
 
-def test_a_completion_is_dispatched_in_place_when_nothing_waits_on_the_caller() -> None:
-    """The ordered mode exists so a callback does not precede an observation the caller still owes.
-    With a reactor claiming every earlier envelope the caller owes nothing, so the receive
-    dispatches the completion where it sits and the caller never sees one.
-
-    The negative control is the test above: the same batch with an unclaimed observation in it
-    hands the completion back instead.
-    """
+def test_a_claimed_batch_still_completes_the_effect_it_carried() -> None:
+    """The completion belongs to the correlator, so claiming the observations around it changes
+    who sees the batch and not whether the effect finishes."""
     from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
@@ -418,21 +424,7 @@ def test_a_completion_is_dispatched_in_place_when_nothing_waits_on_the_caller() 
     seen: list = []
 
     _observation_then_terminal(ipc, gateway, seen)
-    drained = ipc.legacy_source(ordered_terminals=True)
+    drained = ipc.drain()
 
     assert seen == [("terminal", "probe")]
     assert drained == [], "the observation was claimed and the completion never left the receive"
-
-
-def test_inline_dispatch_runs_the_completion_before_the_batch_is_handled() -> None:
-    """The negative control for the test above, and the contract `_drive_annotation_once` keeps:
-    without ordered terminals the callback fires mid-drain, ahead of an older observation."""
-    ipc = FakeIPC()
-    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
-    seen: list = []
-
-    _observation_then_terminal(ipc, gateway, seen)
-    drained = ipc.legacy_source()
-
-    assert seen == [("terminal", "probe")]  # already ran, before the caller sees anything
-    assert [e.name for e in drained if isinstance(e, PropertyObserved)] == ["sub-text"]

@@ -11,8 +11,8 @@ still owns the rest. The seam has two halves, and the tests here pin both:
 Every hazard asserted here was found by executing the code, not by reading it.
 
 **Most of this file is scaffolding with a known demolition date.** Everything marked `TRANSITIONAL`
-exists only while two reactor implementations coexist, and D4 — which deletes `LegacyEventRouter`
-and folds the correlator into the loop — deletes it too. It is written down so that removal is a decision someone
+exists only while two reactor implementations coexist, and D4 — which folds the correlator
+into the loop — deletes it too. It is written down so that removal is a decision someone
 can make quickly, rather than a judgement call they avoid. The `OwnerRouter` test below is the one
 that outlives them.
 """
@@ -62,11 +62,17 @@ class _NoCommands:
 
 def _consumer(mailbox, *, clock=lambda: 0.0):
     """The mailbox's sole consumer, with the correlator it drives timers and completions through."""
-    from saitenka.mpvio.gateway import LegacyEventRouter
     from saitenka.runtime.correlator import EffectCorrelator
+    from saitenka.runtime.loop import SessionLoop
 
     correlator = EffectCorrelator(mailbox, _NoCommands(), clock=clock)
-    return LegacyEventRouter(mailbox, correlator, clock=clock), correlator
+    return SessionLoop(mailbox, correlator, clock=clock), correlator
+
+
+def _drain(consumer, timeout: float | None = 0.0) -> list:
+    events: list = []
+    consumer.receive(timeout, events.append)
+    return events
 
 
 def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
@@ -105,7 +111,7 @@ def test_a_claimed_event_is_withheld_from_the_reader() -> None:
             traffic=TrafficClass.NORMAL,
         )
 
-    assert consumer.drain_events() == [{"event": "unclaimed"}]
+    assert _drain(consumer) == [{"event": "unclaimed"}]
 
 
 def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> None:
@@ -218,7 +224,7 @@ def test_a_completion_reaches_the_correlator_that_issued_it_past_the_observer() 
         on_finished=finished.append,
     )
 
-    consumer.drain_events(ordered_terminals=True)
+    _drain(consumer)
 
     assert [(item.result, item.outcome) for item in finished] == [
         ("probe", EffectOutcome.SUCCEEDED)
@@ -250,7 +256,7 @@ def test_the_observer_sees_domain_events_without_consuming_them() -> None:
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
     )
-    events = consumer.drain_events()
+    events = _drain(consumer)
 
     assert len(seen) == 1  # the reactor saw it
     assert events == [{"event": "property-change", "name": "pause"}]  # and so did the Reader

@@ -53,9 +53,10 @@ class FakeIPC(util.FakeIPC):
             self.props["sid"] = args[2]
         return reply
 
-    def drain_events(self, *_args, **_kwargs):
+    def receive_session(self, _timeout, handle) -> None:
         evs, self.pending_events = self.pending_events, []
-        return evs
+        for event in evs:
+            handle(event)
 
 
 def _observe_eof(reader, *, reached: bool) -> None:

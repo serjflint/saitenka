@@ -31,8 +31,8 @@ class FakeIPC(RuntimeFakeIPC):
     `commands`, so draining queued events here would fire observations they never asked for.
     """
 
-    def drain_events(self, *_args, **_kwargs):
-        return []
+    def receive_session(self, _timeout, _handle) -> None:
+        return None
 
 
 def test_hover_view_snapshots_the_hover_stack():

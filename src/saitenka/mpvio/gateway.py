@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -18,7 +17,6 @@ from saitenka.runtime import (
     EffectError,
     EffectFinished,
     EffectOutcome,
-    EventEnvelope,
     EventOrigin,
     ExpireEffect,
     FileLoaded,
@@ -34,6 +32,7 @@ from saitenka.runtime import (
     UserCommand,
 )
 from saitenka.runtime.jobs import JobBroker, JobLanePolicy
+from saitenka.runtime.loop import SessionLoop
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -70,177 +69,6 @@ class ConnectionPhase(StrEnum):
 _CANDIDATE_EVENT_LIMIT = 256
 
 
-class LegacyEventRouter:
-    """Temporary sole consumer that presents mailbox observations to Reader unchanged."""
-
-    def __init__(
-        self,
-        mailbox: SessionMailbox,
-        correlator: EffectCorrelator,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self._mailbox = mailbox
-        self._clock = clock
-        self._correlator = correlator
-        self._reactor: SessionReactor | None = None
-        self._claims: Callable[[RuntimeEvent], bool] = lambda _payload: False
-        #: Envelopes seen, and how many the reactor owned outright. The `session-loop` duty retires
-        #: when the second reaches the first: the loop already receives from the mailbox and the
-        #: reactor already sees every envelope, so what is left is the Reader still *acting* on what
-        #: nothing claimed. Counted per payload type, because the tail is what says which feature is
-        #: next and a bare ratio does not.
-        self._seen: Counter[str] = Counter()
-        self._claimed: Counter[str] = Counter()
-
-    @property
-    def mailbox(self) -> SessionMailbox:
-        """The session's mailbox. Exposed for an observer to be constructed against — a consumer
-        must still go through `observe`, since the router is the only sanctioned one."""
-        return self._mailbox
-
-    def claim_census(self) -> dict[str, tuple[int, int]]:
-        """`{payload type: (claimed, seen)}` for this session — the `session-loop` duty's meter.
-
-        A ratio, not a row count: an envelope the Reader still acts on is not a debt symbol
-        anywhere, so nothing else can see this. Empty on a session that never ran, which is a fact
-        about the sample and not about the migration.
-        """
-        return {name: (self._claimed[name], seen) for name, seen in self._seen.items()}
-
-    def observe(
-        self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
-    ) -> None:
-        """Give the reactor every envelope this consumer sees, terminals included.
-
-        Fanned out HERE rather than from the Reader's turn because this is the mailbox's declared
-        sole consumer, and `SessionReactor.handle` takes an envelope without reading the mailbox —
-        so a second observer costs no envelope. `run_until_idle` would consume, and must not be used
-        while this router exists.
-
-        Terminals are safe to fan out because the reactor retires only what it dispatched; an
-        effect it never issued is not its to complete.
-
-        `claims` is the migration's fallthrough seam: a payload it accepts is the reactor's alone
-        and is withheld from the legacy Reader, so a migrated duty runs once rather than twice.
-        Everything else falls through untouched. **It is a declared set, never derived from the
-        route table** — the two are not the same question. `ConnectionReplaced` is routed to the
-        startup-hint reducer *and* still needed by `subtitle_pipeline.connection_replaced`;
-        inferring "routed implies claimed" would silently stop reconnects reaching the pipeline.
-        """
-        if self._reactor is not None:
-            raise RuntimeError("reactor already observing")
-        self._reactor = reactor
-        if claims is not None:
-            self._claims = claims
-
-    def drain_events(
-        self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
-    ) -> list[object]:
-        """Drain one batch. With `ordered_terminals`, completions are returned in envelope
-        sequence for the caller to dispatch instead of being run inline.
-
-        Inline dispatch runs a completion's callback *during* the drain, so it precedes every
-        observation the caller has not handled yet — the reverse of mailbox sequence, and of the
-        order the WP6 runner will deliver. Callers that own a whole turn ask for ordered
-        terminals; `Reader._drive_annotation_once` must not, because it drains from inside cue
-        construction and a due event dispatched there would reenter mid-build.
-        """
-        self._correlator.publish_due()
-        timeout = self._bounded_by_deadline(timeout)
-        events: list[object] = []
-        if timeout is None or timeout > 0:
-            envelope = self._mailbox.receive(timeout=timeout)
-            if envelope is not None:
-                self._turn(envelope, events, ordered_terminals=ordered_terminals)
-        for envelope in self._mailbox.receive_ready():
-            self._turn(envelope, events, ordered_terminals=ordered_terminals)
-        return events
-
-    def _bounded_by_deadline(self, timeout: float | None) -> float | None:
-        """Never block past the earliest armed timer.
-
-        A timer that fires without producing an mpv event is otherwise invisible until something
-        else arrives, which for an idle session is never — the job the retired poll interval was
-        doing. `publish_due` has already run, so anything due now is in the mailbox and this only
-        ever looks forward.
-        """
-        due_at = self._correlator.next_deadline
-        if due_at is None:
-            return timeout
-        remaining = max(0.0, due_at - self._clock())
-        return remaining if timeout is None else min(timeout, remaining)
-
-    def _turn(
-        self, envelope: EventEnvelope, events: list[object], *, ordered_terminals: bool
-    ) -> None:
-        """One envelope: the reactor always sees it; the Reader sees it unless the reactor owns it.
-
-        The order matters — the reactor's dispatch has always preceded the Reader's handling of the
-        same envelope, and keeping it means a claim changes *who* acts, never *when*.
-        """
-        # Asked BEFORE the reactor runs: handling a completion retires it from `_pending`, so an
-        # ownership question asked afterwards always answers "no" and every claimed terminal would
-        # fall through to the correlator as well.
-        claimed = self._claims(envelope.payload)
-        name = type(envelope.payload).__name__
-        self._seen[name] += 1
-        if claimed:
-            self._claimed[name] += 1
-        self._observe(envelope)
-        if not claimed:
-            self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
-
-    def announce(self, event: RuntimeEvent, now: float, connection_epoch: int) -> bool:
-        """Show the reactor one event that never went through the mailbox.
-
-        The sequence number is the mailbox's ordering device and the reactor does not read it, so
-        an off-mailbox announcement carries 0 rather than inventing one that would collide.
-        """
-        if self._reactor is None:
-            return False
-        self._reactor.handle(EventEnvelope(0, now, EventOrigin.LIFECYCLE, connection_epoch, event))
-        return True
-
-    def _observe(self, envelope: EventEnvelope) -> None:
-        if self._reactor is not None:
-            self._reactor.handle(envelope)
-
-    def _route(
-        self, payload: RuntimeEvent, events: list[object], *, ordered_terminals: bool = False
-    ) -> None:
-        if isinstance(payload, CloseRequested):
-            reason = (
-                "runtime mailbox overloaded"
-                if payload.reason == "runtime-overloaded"
-                else payload.reason
-            )
-            raise OSError(reason)
-        if isinstance(payload, EffectFinished):
-            # A completion belongs to the correlator that issued the effect. The only reason one
-            # ever went out to the caller is order — a callback run mid-drain precedes every
-            # observation the caller has not handled yet. So it goes out only while the caller is
-            # actually holding something: with every earlier envelope claimed, "in position" and
-            # "now" are the same instant, and the round trip through the Reader buys nothing.
-            if not (ordered_terminals and events):
-                self._correlator.handle_terminal(payload)
-            elif ordered_terminals:
-                events.append(payload)
-            return
-        if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
-            events.append(payload.data)
-        elif isinstance(
-            payload,
-            UserCommand
-            | ConnectionLost
-            | ConnectionReady
-            | ConnectionReplaced
-            | FileLoaded
-            | PropertyObserved,
-        ):
-            events.append(payload)
-
-
 class MpvGateway:
     def __init__(
         self,
@@ -274,7 +102,7 @@ class MpvGateway:
         #: means. An owner hands its resource over at construction and stops closing it itself.
         self.session_resources: dict[str, object] = {}
         #: The session's runtime census, set by whoever installs a reactor. Here rather than on the
-        #: reactor because the router that counts unrouted events is not the reactor's to expose,
+        #: reactor because the loop that counts unrouted events is not the reactor's to expose,
         #: and the gateway is the one handle every entrypoint already holds.
         self.session_ledger: RuntimeLedger | None = None
         #: The session's reactor, once one is installed. Held because close is a *state transition*
@@ -291,11 +119,11 @@ class MpvGateway:
             job_adapter=self._jobs,
             clock=clock,
         )
-        self._router = router = LegacyEventRouter(mailbox, self._correlator, clock=clock)
+        self._loop = loop = SessionLoop(mailbox, self._correlator, clock=clock)
         ipc.install_runtime_ingress(
             self._publish_observation,
             self._publish_connection,
-            router.drain_events,
+            loop,
             self,
         )
         with self._lock:
@@ -305,12 +133,12 @@ class MpvGateway:
     @property
     def mailbox(self) -> SessionMailbox:
         """The session's mailbox. Exposed for an observer to be constructed against — a consumer
-        must still go through `observe`, since the router is the only sanctioned one."""
+        must still go through `observe`, since the loop is the only sanctioned consumer."""
         return self._mailbox
 
     def claim_census(self) -> dict[str, tuple[int, int]]:
-        """What fraction of this session's envelopes the reactor owned — see the router's copy."""
-        return self._router.claim_census()
+        """What fraction of this session's envelopes the reactor owned — see the loop's copy."""
+        return self._loop.claim_census()
 
     def observe(
         self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
@@ -318,10 +146,10 @@ class MpvGateway:
         """Let a `SessionReactor` see the session, and own the part of it `claims` accepts.
 
         The gateway owns the mailbox's sole consumer, so this is the only place an observer can be
-        attached without splitting the envelope stream. See `LegacyEventRouter.observe` for what
+        attached without splitting the envelope stream. See `SessionLoop.observe` for what
         claiming means and why it is declared rather than derived.
         """
-        self._router.observe(reactor, claims)
+        self._loop.observe(reactor, claims)
 
     def publish_session_event(self, event: RuntimeEvent) -> bool:
         """Put a session-lifecycle fact on the mailbox for the reactor to route.
@@ -351,7 +179,7 @@ class MpvGateway:
         (cue settlement, reconcile) against half-closed collaborators. `handle` reads nothing but
         the envelope, so this is the whole cost.
         """
-        return self._router.announce(event, self._clock(), self.connection_epoch)
+        return self._loop.announce(event, self._clock(), self.connection_epoch)
 
     def dispatch_effect(self, effect) -> bool:
         """Perform one reactor-issued effect. Only the kinds an owner has actually migrated."""
@@ -377,10 +205,6 @@ class MpvGateway:
 
     def cancel_timer(self, timer: str) -> bool:
         return self._correlator.cancel_timer(timer)
-
-    def dispatch_terminal(self, completion: EffectFinished) -> None:
-        """Run a completion that `drain_events(ordered_terminals=True)` handed to the caller."""
-        self._correlator.handle_terminal(completion)
 
     def register_job_lane(self, name: str, policy: JobLanePolicy, handler) -> None:
         self._jobs.register(name, policy, handler)

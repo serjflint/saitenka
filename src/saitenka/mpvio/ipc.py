@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     from saitenka.runtime import CommandHandled
+    from saitenka.runtime.loop import SessionLoop
 
     class RuntimeGateway(Protocol):
         def close(self) -> None: ...
@@ -61,18 +62,11 @@ if TYPE_CHECKING:
 
         def cancel_timer(self, timer: str) -> bool: ...
 
-        def dispatch_terminal(self, completion) -> None: ...
-
         def register_job_lane(self, name: str, policy, handler) -> None: ...
 
         def submit_job(self, **kwargs) -> bool: ...
 
         def close_job_lane(self, name: str, timeout: float = 2.0) -> bool: ...
-
-    class LegacyEventSource(Protocol):
-        def __call__(
-            self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
-        ) -> list[object]: ...
 
 
 log = logging.getLogger(__name__)
@@ -158,7 +152,7 @@ class MpvIPC:
         self._events_lock = threading.Lock()
         self._event_sink: Callable[[dict, int], None] | None = None
         self._connection_sink: Callable[[str, int], None] | None = None
-        self._legacy_event_source: LegacyEventSource | None = None
+        self._session_loop: SessionLoop | None = None
         self._runtime_gateway: RuntimeGateway | None = None
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
@@ -523,23 +517,35 @@ class MpvIPC:
             return False
         return True
 
-    def drain_events(
-        self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
-    ) -> list[object]:
-        """Return and clear buffered async events (collected by the reader thread).
+    def receive_session(self, timeout: float | None, handle: Callable[[object], None]) -> None:
+        """Take one turn of this session's events, handing each to `handle` in arrival order.
 
-        `ordered_terminals` asks the runtime router to return effect completions in envelope
-        sequence rather than dispatching them inline; see `LegacyEventRouter.drain_events`.
+        Two ingresses behind one call: the mailbox when a gateway owns this session, and the
+        reader thread's buffer when none does. The branch is here rather than at each caller
+        because which one a session has is not something a consumer of events can act on.
         """
-        if self._legacy_event_source is not None:
-            return self._legacy_event_source(timeout, ordered_terminals=ordered_terminals)
+        loop = self._session_loop
+        if loop is not None:
+            loop.receive(timeout, handle)
+            return
         if timeout:
             self._await_event(timeout)
         with self._events_lock:
             buffered, self._events = self._events, []
             self._event_arrived.clear()
-            evs: list[object] = list(buffered)
-        return evs
+        for event in buffered:
+            handle(event)
+
+    @property
+    def session_loop(self) -> SessionLoop | None:
+        """The loop driving this session, or `None` when no gateway owns it."""
+        return self._session_loop
+
+    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
+        """Collect one turn as a list, for a caller that is not the session's consumer."""
+        events: list[object] = []
+        self.receive_session(timeout, events.append)
+        return events
 
     def _await_event(self, timeout: float | None) -> None:
         """Block until an event lands, the connection drops, or the timeout passes.
@@ -559,7 +565,7 @@ class MpvIPC:
         self,
         event_sink: Callable[[dict, int], None],
         connection_sink: Callable[[str, int], None],
-        legacy_event_source: LegacyEventSource,
+        session_loop: SessionLoop,
         gateway: RuntimeGateway,
     ) -> None:
         """Switch event ownership to a mailbox while the legacy consumer still drives policy."""
@@ -569,7 +575,7 @@ class MpvIPC:
                 event_sink(dict(event), self._connection_epoch)
             self._event_sink = event_sink
             self._connection_sink = connection_sink
-            self._legacy_event_source = legacy_event_source
+            self._session_loop = session_loop
             self._runtime_gateway = gateway
         if self._closed.is_set() and not self._intentional:
             connection_sink("lost", self._connection_epoch)
@@ -578,12 +584,6 @@ class MpvIPC:
         gateway = self._runtime_gateway
         if gateway is not None:
             gateway.publish_legacy_outcome(outcome)
-
-    def dispatch_runtime_terminal(self, completion) -> None:
-        """Run a completion returned by `drain_events(ordered_terminals=True)`."""
-        gateway = self._runtime_gateway
-        if gateway is not None:
-            gateway.dispatch_terminal(completion)
 
     def publish_runtime_event(self, event) -> bool:
         """Announce a session fact to the runtime. False when no gateway owns this session."""

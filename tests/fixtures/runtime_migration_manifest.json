@@ -183,14 +183,14 @@
       "id": "session-loop",
       "source": "src/saitenka/app/controller.py::Reader.run",
       "evidence": [
-        "call:SessionRunner",
-        "src/saitenka/app/controller.py::Reader.run.step|call:self.pump"
+        "ref:self.ipc.session_loop",
+        "call:loop.run"
       ],
-      "target": "session-runner",
+      "target": "session-loop",
       "work_package": "6",
-      "replacement": "SessionMailbox.receive -> SessionReactor.handle",
+      "replacement": "SessionLoop.run -> SessionMailbox.receive -> SessionReactor.handle",
       "test": "idle runtime blocks with zero domain turns",
-      "migrated": false
+      "migrated": true
     }
   ],
   "close": [

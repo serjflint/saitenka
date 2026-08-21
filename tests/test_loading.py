@@ -180,7 +180,7 @@ class _AsyncIPC:
     def __init__(self):
         self.commands: list[tuple] = []
         self.requests: list[IPCRequest] = []
-        self.legacy_source = list
+        self.session_loop = None
         self.connection_sink = None
         self.disconnected = False
 
@@ -191,12 +191,16 @@ class _AsyncIPC:
         self.requests.append(request)
         return request
 
-    def install_runtime_ingress(self, _event_sink, connection_sink, legacy_event_source, _gateway):
+    def install_runtime_ingress(self, _event_sink, connection_sink, session_loop, _gateway):
         self.connection_sink = connection_sink
-        self.legacy_source = legacy_event_source
+        self.session_loop = session_loop
 
     def drain_events(self, *_args, **_kwargs):
-        return self.legacy_source()
+        if self.session_loop is None:
+            return []
+        events: list = []
+        self.session_loop.receive(0.0, events.append)
+        return events
 
 
 def test_late_show_acceptance_after_ready_clears_exactly_once():

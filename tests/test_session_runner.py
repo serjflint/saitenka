@@ -80,6 +80,76 @@ def test_a_raising_step_is_not_swallowed() -> None:
         SessionRunner(step).run_until(lambda: False, deadline=None)
 
 
+def _loop(mailbox, *, clock=time.monotonic):
+    """A loop over a real mailbox, with the correlator it drives timers and completions through."""
+    from saitenka.runtime.correlator import EffectCorrelator
+    from saitenka.runtime.loop import SessionLoop
+
+    class _NoCommands:
+        connection_epoch = 0
+
+        def dispatch(self, _effect) -> bool:
+            return False
+
+        def expire(self, _control) -> None:
+            return None
+
+    return SessionLoop(mailbox, EffectCorrelator(mailbox, _NoCommands(), clock=clock), clock=clock)
+
+
+def test_the_loop_drives_turns_until_it_is_asked_to_stop() -> None:
+    from saitenka.runtime.mailbox import SessionMailbox
+
+    turns: list[float | None] = []
+    stop = [3]
+
+    def turn(timeout: float | None) -> bool:
+        turns.append(timeout)
+        stop[0] -= 1
+        return True
+
+    _loop(SessionMailbox()).run(turn, until=lambda: stop[0] == 0)
+
+    assert turns == [None, None, None]  # nothing armed, so each turn blocks until something happens
+
+
+def test_a_turn_that_reports_the_transport_gone_ends_the_loop() -> None:
+    """Not expressible as a predicate over session state: nobody asked for this stop, and the
+    session that would answer the predicate is the one that just lost its transport."""
+    from saitenka.runtime.mailbox import SessionMailbox
+
+    turns: list[float | None] = []
+
+    def turn(timeout: float | None) -> bool:
+        turns.append(timeout)
+        return False
+
+    _loop(SessionMailbox()).run(turn, until=lambda: False)
+
+    assert len(turns) == 1
+
+
+def test_the_loop_hands_each_payload_over_in_mailbox_sequence() -> None:
+    """The push contract: a consumer sees the batch as it is popped, not after it is collected."""
+    from saitenka.runtime import EventOrigin, TrafficClass
+    from saitenka.runtime.events import PropertyObserved
+    from saitenka.runtime.mailbox import SessionMailbox
+
+    mailbox = SessionMailbox()
+    loop = _loop(mailbox)
+    for value in ("いち", "に"):
+        mailbox.publish(
+            PropertyObserved("sub-text", value),
+            origin=EventOrigin.MPV,
+            traffic=TrafficClass.NORMAL,
+        )
+    seen: list[object] = []
+
+    loop.receive(0.0, seen.append)
+
+    assert [event.data for event in seen if isinstance(event, PropertyObserved)] == ["いち", "に"]
+
+
 def test_a_stop_releases_a_receiver_blocked_with_no_events_pending() -> None:
     """A stop reaches a receiver that is already blocked.
 
@@ -163,7 +233,7 @@ def test_the_claim_census_separates_what_the_reactor_owns_from_what_the_reader_s
     gateway.mailbox.publish(
         RawMpvEvent({"event": "seek"}), origin=EventOrigin.MPV, traffic=TrafficClass.NORMAL
     )
-    ipc.drain_events(0.0, ordered_terminals=True)
+    ipc.drain_events()
 
     census = gateway.claim_census()
     claimed, seen = census["RawMpvEvent"]

@@ -254,7 +254,7 @@ class FakeIPC:
         self.requests: list[IPCRequest] = []
         self._event_sink = None
         self._connection_sink = None
-        self._legacy_event_source = None
+        self._session_loop = None
         self._runtime_gateway = None
         self.runtime_outcomes: list[object] = []
         #: Named timers scheduled through the runtime port, newest per name. Nothing fires on a
@@ -324,11 +324,11 @@ class FakeIPC:
         self.requests.append(request)
         return request
 
-    def drain_events(
-        self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
-    ) -> list[dict]:
-        if self._legacy_event_source is not None:
-            return self._legacy_event_source(timeout, ordered_terminals=ordered_terminals)
+    def receive_session(self, timeout: float | None, handle) -> None:
+        loop = self._session_loop
+        if loop is not None:
+            loop.receive(timeout, handle)
+            return
         if timeout:
             with self._events_lock:
                 pending = bool(self.events)
@@ -337,12 +337,22 @@ class FakeIPC:
         with self._events_lock:
             evs, self.events = self.events, []
             self._event_arrived.clear()
-        return evs
+        for event in evs:
+            handle(event)
 
-    def install_runtime_ingress(self, event_sink, connection_sink, legacy_event_source, gateway):
+    @property
+    def session_loop(self):
+        return self._session_loop
+
+    def drain_events(self, timeout: float | None = 0.0) -> list:
+        events: list = []
+        self.receive_session(timeout, events.append)
+        return events
+
+    def install_runtime_ingress(self, event_sink, connection_sink, session_loop, gateway):
         self._event_sink = event_sink
         self._connection_sink = connection_sink
-        self._legacy_event_source = legacy_event_source
+        self._session_loop = session_loop
         self._runtime_gateway = gateway
         for event in self.events:
             event_sink(event, 0)
@@ -359,10 +369,6 @@ class FakeIPC:
         if gateway is None:
             return {}
         return gateway.register_observers(names)
-
-    def dispatch_runtime_terminal(self, completion) -> None:
-        if self._runtime_gateway is not None:
-            self._runtime_gateway.dispatch_terminal(completion)
 
     def publish_runtime_event(self, event) -> bool:
         if self._runtime_gateway is None:

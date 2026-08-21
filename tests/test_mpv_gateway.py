@@ -46,7 +46,7 @@ class FakeIPC:
     def __init__(self) -> None:
         self.event_sink = None
         self.connection_sink = None
-        self.legacy_source = None
+        self.session_loop = None
         self.requests: list[IPCRequest] = []
         self.commands: list[tuple] = []
         self.reconnect_results: list[bool] = []
@@ -56,11 +56,17 @@ class FakeIPC:
         self.replay_entered: threading.Event | None = None
         self.replay_release: threading.Event | None = None
 
-    def install_runtime_ingress(self, event_sink, connection_sink, legacy_source, gateway) -> None:
+    def install_runtime_ingress(self, event_sink, connection_sink, session_loop, gateway) -> None:
         self.event_sink = event_sink
         self.connection_sink = connection_sink
-        self.legacy_source = legacy_source
+        self.session_loop = session_loop
         self.gateway = gateway
+
+    def drain(self, timeout: float | None = 0.0) -> list:
+        """One turn as a list — the loop pushes, so a test that wants a batch collects it."""
+        events: list = []
+        self.session_loop.receive(timeout, events.append)
+        return events
 
     def command_async(self, *_args, expected_connection_epoch=None) -> IPCRequest:
         if expected_connection_epoch not in {None, 0}:
@@ -175,7 +181,7 @@ def test_connection_loss_wakes_reconnect_and_replays_registered_observers() -> N
     deadline = time.monotonic() + 1
     events: list[object] = []
     while time.monotonic() < deadline and len(events) < 5:
-        events.extend(ipc.legacy_source())
+        events.extend(ipc.drain())
         time.sleep(0.001)
 
     assert events == [
@@ -209,10 +215,10 @@ def test_failed_reconnect_retries_only_when_named_timer_is_due() -> None:
     assert len(ipc.reconnect_results) == 1
     assert not ipc.reconnected.is_set()
 
-    ipc.legacy_source()
+    ipc.drain()
     assert not ipc.reconnected.is_set()
     clock.now += 0.05
-    ipc.legacy_source()
+    ipc.drain()
     assert ipc.reconnected.wait(1)
 
 
@@ -234,8 +240,8 @@ def test_legacy_router_reads_the_authoritative_mailbox_once() -> None:
     MpvGateway(ipc, mailbox)
     ipc.publish({"event": "property-change", "name": "sub-text", "data": "猫"})
 
-    assert ipc.legacy_source() == [PropertyObserved("sub-text", "猫")]
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == [PropertyObserved("sub-text", "猫")]
+    assert ipc.drain() == []
 
 
 def test_legacy_router_preserves_typed_user_command() -> None:
@@ -244,7 +250,7 @@ def test_legacy_router_preserves_typed_user_command() -> None:
     MpvGateway(ipc, mailbox)
     ipc.publish({"event": "client-message", "args": ["saitenka-picker", "arg"]})
 
-    assert ipc.legacy_source() == [UserCommand("saitenka-picker", ("arg",), 0)]
+    assert ipc.drain() == [UserCommand("saitenka-picker", ("arg",), 0)]
 
 
 def test_gateway_publishes_legacy_command_terminal_outcome() -> None:
@@ -338,7 +344,7 @@ def test_exhausted_reconnect_requests_a_bounded_session_stop() -> None:
     deadline = time.monotonic() + 1
     while time.monotonic() < deadline:
         try:
-            ipc.legacy_source()
+            ipc.drain()
         except OSError as error:
             assert str(error) == "mpv-disconnected"
             return
@@ -393,13 +399,13 @@ def test_replaying_connection_blocks_commands_and_buffers_wire_events() -> None:
         1,
     )
     assert not gateway.dispatch(blocked)
-    assert ipc.legacy_source() == [ConnectionLost(0)]
+    assert ipc.drain() == [ConnectionLost(0)]
 
     ipc.replay_release.set()
     deadline = time.monotonic() + 1
     events: list[object] = []
     while time.monotonic() < deadline and not any(isinstance(x, ConnectionReady) for x in events):
-        events.extend(ipc.legacy_source())
+        events.extend(ipc.drain())
         time.sleep(0.001)
 
     assert events == [
@@ -432,7 +438,7 @@ def test_failed_candidate_never_publishes_a_replacement() -> None:
     observed: list[object] = []
     while time.monotonic() < deadline:
         try:
-            observed.extend(ipc.legacy_source())
+            observed.extend(ipc.drain())
         except OSError:
             break
         time.sleep(0.001)
@@ -624,7 +630,7 @@ def test_gateway_turns_inbound_overload_into_controlled_legacy_stop() -> None:
     ipc.publish({"event": "property-change", "name": "sub-text", "data": "猫"})
 
     try:
-        ipc.legacy_source()
+        ipc.drain()
     except OSError as error:
         assert str(error) == "runtime mailbox overloaded"
     else:  # pragma: no cover - bounded ingress contract

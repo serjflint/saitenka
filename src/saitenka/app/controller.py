@@ -1506,9 +1506,11 @@ class Reader:
         self.set_subtitle(text)
 
     def _drive_annotation_once(self, timeout: float | None) -> None:
+        """A turn taken from inside cue construction, so it settles nothing: the reconcile this is
+        nested in owns the batch boundary, and running a second one here would build the cue again
+        against the half-updated identity the outer one is still assembling."""
         picker_guard = LegacyPickerRepeatGuard()
-        for event in self.ipc.drain_events(timeout):
-            self._drain_event(event, picker_guard)
+        self.ipc.receive_session(timeout, lambda ev: self._drain_event(ev, picker_guard))
 
     def _annotation_identity(self, norm: str) -> cue_annotation.CueIdentity:
         return cue_annotation.CueIdentity(
@@ -3973,10 +3975,7 @@ class Reader:
         # drains would suppress a genuine second press, and a batch is a property of arrival.
         picker_guard = self._picker_guard
         picker_guard.separate()
-        # This drain owns a whole turn, so completions come back in envelope sequence and are
-        # dispatched below in order with the observations they followed.
-        for ev in self.ipc.drain_events(timeout, ordered_terminals=True):
-            self._drain_event(ev, picker_guard)
+        self.ipc.receive_session(timeout, lambda ev: self._drain_event(ev, picker_guard))
         self._settle_cue_observation()
 
     def _settle_interaction(self) -> None:
@@ -4024,13 +4023,6 @@ class Reader:
         return self._playback.cue.cue.value
 
     def _drain_event(self, ev: object, picker_guard: LegacyPickerRepeatGuard) -> None:
-        if isinstance(ev, EffectFinished):
-            # Reached only when something earlier in this batch fell through to the drain, which
-            # for a session with a reactor is nothing: the receive dispatches a completion in place
-            # once nothing is waiting on the Reader. This relays it back so the order the ordered
-            # mode exists for survives.
-            self.ipc.dispatch_runtime_terminal(ev)
-            return
         # The three connection arms are the no-reactor fallback, and nothing else: a session with
         # one claims all three, reduces them in the SESSION slice and performs these same acts as
         # registered effects. Every migrated lifecycle duty keeps a path like this — a screenshot
@@ -4401,17 +4393,19 @@ class Reader:
         # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
         if self.dict_set is not None:
             self._announce_runtime()
-        # No interval and no tick: the session blocks on its transport until something happens. The
-        # transport bounds the wait by the earliest armed timer, so a deadline that produces no mpv
-        # event comes due on time rather than within a tick of it, and an idle session with nothing
-        # armed blocks indefinitely instead of waking 40 times a second to find nothing.
-        alive = True
+        loop = self.ipc.session_loop
+        if loop is None:
+            # No gateway, so no mailbox and no timer heap to wait under: a session that is not one
+            # (a screenshot capture, most unit tests) drives the same turn off the buffered wire.
+            alive = True
 
-        def step(timeout: float | None) -> None:
-            nonlocal alive
-            alive = self.pump(timeout)
+            def step(timeout: float | None) -> None:
+                nonlocal alive
+                alive = self.pump(timeout)
 
-        SessionRunner(step).run_until(lambda: not alive or self._stop.is_set())
+            SessionRunner(step).run_until(lambda: not alive or self._stop.is_set())
+            return
+        loop.run(self.pump, until=self._stop.is_set)
 
     def request_stop(self) -> None:
         """Ask the loop to finish, from any thread.
