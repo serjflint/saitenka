@@ -762,6 +762,10 @@ runtime-status = { shell = "uv run --extra full python tools/runtime_migration_c
 # are 116 real ones. Ratchets down like the sibling gate; growth is the failure.
 host-arity = { shell = "uv run python tools/host_arity.py check" }
 host-arity-over = { shell = "uv run python tools/host_arity.py over", help = "Host-taking functions over ruff's max-args once converted, worst first — the WP5 queue" }
+# NOT a gate — the map a migration's design step reads: what a module actually touches on the host,
+# and what those names resolve to underneath (seven names over one owner slice are one port, not
+# seven parameters). `--member` is the step before a codemod; its `--json` is the worklist.
+cluster-map = { shell = "uv run python tools/cluster_map.py", help = "What a module touches on the host, by fact — `--member NAME` for one member and its sites" }
 # GATE (in `all`) — `getattr(port, "method", fallback)` where the port ALWAYS has the method, so the
 # fallback is unreachable and the probe's only live effect is making a rename silent (a renamed timer
 # method disarms every lifecycle deadline, with nothing red). Resolves the receiver's type and asks
