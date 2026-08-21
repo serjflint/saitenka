@@ -23,17 +23,10 @@ def test_runtime_migration_manifest_matches_production() -> None:
     actual, _, _ = checker.scan()
     assert checker.check() == 0
     # Live rows, so the scanner is checked against production and not only against the synthetic
-    # source below. Anchors, not landmarks: as the migration converts them, point these at whatever
-    # `poe runtime-status` still reports rather than weakening the assertion. Every mpv verb
-    # kind is gone entirely now — the driver, then the writes, then the reads — so the anchor is the
-    # composition root, which is the only debt left.
-    assert (
-        checker.Debt("reader-parameter", "src/saitenka/app/reader_factory.py::create_reader")
-        in actual
-    )
-    assert not any(
-        item.kind in {"tick-stage", "direct-mpv-command", "direct-mpv-read"} for item in actual
-    )
+    # source below. Every kind is gone now — the driver, the writes, the reads, and finally the
+    # host parameter — so the live assertion is that the census is empty. `_names_the_host` below
+    # is what stops that being a scanner that quietly stopped looking.
+    assert not actual
 
 
 def test_the_terminal_set_claims_every_remaining_row() -> None:
@@ -48,21 +41,27 @@ def test_the_terminal_set_claims_every_remaining_row() -> None:
     checker = _module()
     actual, _, _ = checker.scan()
     terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
-    assert len(terminal) == checker.TERMINAL_TOTAL == 2
+    assert len(terminal) == checker.TERMINAL_TOTAL == 0
     assert [item for item in actual if (item.kind, item.source) not in terminal] == []
 
 
 def test_a_terminal_row_whose_symbol_moved_is_a_failure() -> None:
-    """A renamed terminal symbol lowers the number WP5 compares against, without touching a count."""
+    """A renamed terminal symbol lowers the number WP5 compares against, without touching a count.
+
+    Synthetic now that `_TERMINAL_DEBT` is empty. The guard is what a future row would be added
+    behind, so it has to keep being exercised — a guard tested only through a live row stops being
+    tested the moment the last row converts, which is exactly when it is about to be re-used.
+    """
     checker = _module()
     actual, symbols, evidence = checker.scan()
+    source = "src/saitenka/app/reader_factory.py::create_reader"
+    checker._TERMINAL_DEBT = {"synthetic": frozenset({("reader-parameter", source)})}
     manifest = {
         "debt": [[item.kind, item.source] for item in sorted(actual)],
         **{group: [] for group in ("startup", "close", "entrypoints")},
     }
-    kept = symbols - {"src/saitenka/app/reader_factory.py::create_reader"}
-    problems = checker.failures(manifest, actual, kept, evidence)
-    assert problems["terminal_unresolved"] == ["src/saitenka/app/reader_factory.py::create_reader"]
+    problems = checker.failures(manifest, actual, symbols - {source}, evidence)
+    assert problems["terminal_unresolved"] == [source]
 
 
 def test_scanner_detects_each_debt_category() -> None:
@@ -514,3 +513,42 @@ def test_a_duty_sourced_at_two_entrypoints_is_watched_at_both() -> None:
     # The second site stops doing it: the duty is not silently satisfied by the first.
     one = checker.failures(manifest, set(), symbols, {"a.py::f": {"call:ipc.close"}})
     assert one.get("missing_evidence") == ["duty@b.py::g:call:ipc.close"]
+
+
+def test_a_host_parameter_is_the_host_and_not_a_value_named_after_it() -> None:
+    """The census is zero, so the scanner has to be shown still biting — and shown where it stopped.
+
+    A substring test on the annotation counted `ReaderOptions` and `ReaderServices` as host
+    parameters. Both were then filed under terminal composition debt, where being unconvertible is
+    the point, so nothing re-examined them and the last two rows of the migration were a spelling.
+    """
+    checker = _module()
+    bites = [
+        "def by_name(reader): ...",
+        "def annotated(host: Reader): ...",
+        'def quoted(host: "Reader"): ...',
+        "def optional(host: Reader | None): ...",
+        "def qualified(host: controller.Reader): ...",
+        "def keyword_only(*, host: Reader): ...",
+    ]
+    for source in bites:
+        annotation = ast.parse(source).body[0].args
+        arguments = [*annotation.args, *annotation.kwonlyargs]
+        assert any(
+            argument.arg == "reader" or checker._names_the_host(argument.annotation)
+            for argument in arguments
+        ), source
+
+    passes = [
+        "def config(options: ReaderOptions): ...",
+        "def services(services: ReaderServices | None): ...",
+        "def unrelated(x: int): ...",
+        "def bare(x): ...",
+    ]
+    for source in passes:
+        annotation = ast.parse(source).body[0].args
+        arguments = [*annotation.args, *annotation.kwonlyargs]
+        assert not any(
+            argument.arg == "reader" or checker._names_the_host(argument.annotation)
+            for argument in arguments
+        ), source

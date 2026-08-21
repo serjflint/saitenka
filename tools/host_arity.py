@@ -33,15 +33,12 @@ CENSUS = ROOT / "tests" / "fixtures" / "host_arity_census.json"
 #: the same number, not a friendlier one.
 MAX_ARGS = 8
 
-#: Hold the host because the host is what they build or own. `HOST_COMPOSITION` in the runtime
-#: manifest; repeated here because this tool answers a different question and must not report a
-#: composition root as an unconvertible monster.
-EXEMPT = frozenset(
-    {
-        "controller.py::Reader.__init__",
-        "reader_factory.py::create_reader",
-    }
-)
+#: Held the host because the host was what they built or owned — `_TERMINAL_DEBT` in the runtime
+#: manifest, and empty for the same reason it is: the last two rows named `ReaderOptions` and
+#: `ReaderServices`, not the host, and neither tool was matching the name (`_names_the_host`).
+#: Kept as a closed empty set so a real composition root is exempt again rather than reported as an
+#: unconvertible monster.
+EXEMPT: frozenset[str] = frozenset()
 
 
 @dataclass(slots=True)
@@ -381,12 +378,29 @@ def _resolve_dispatch(
     return record
 
 
+#: Identifiers that ARE the host. Kept in lockstep with `runtime_migration_check._HOST_NAMES`: the
+#: two tools disagreeing about what a host parameter is makes WP5's exit unanswerable from either.
+_HOST_NAMES = {"Reader", "controller.Reader", "saitenka.app.controller.Reader"}
+
+
+def _names_the_host(annotation: ast.expr | None) -> bool:
+    """Does this annotation name the `Reader`, rather than merely containing the word.
+
+    A substring test counted `options: ReaderOptions` and `services: ReaderServices` as host
+    parameters. Taking a config dataclass is not holding the host.
+    """
+    if annotation is None:
+        return False
+    parts = [
+        piece.strip().strip('"').strip("'")
+        for piece in ast.unparse(annotation).replace("|", " ").split()
+    ]
+    return any(part in _HOST_NAMES for part in parts)
+
+
 def _host_argument(arguments: list[ast.arg]) -> str | None:
     for argument in arguments:
-        annotation = argument.annotation
-        if argument.arg == "reader" or (
-            annotation is not None and "Reader" in ast.unparse(annotation)
-        ):
+        if argument.arg == "reader" or _names_the_host(argument.annotation):
             return argument.arg
     return None
 

@@ -82,43 +82,31 @@ _DRIVER_SWITCH_SYMBOLS: set[str] = set()
 #:
 #: Rows, not symbols. Five of these symbols carry a `reader-parameter` row as well, and that second
 #: row IS WP5's to convert — a symbol-keyed set would have quietly excused all five.
-_TERMINAL_DEBT = {
-    # Two groups are gone rather than emptied — unlike `_TICK_METHODS` this set *excludes* rows
-    # rather than detecting them, so an empty group would guard nothing:
-    #   * `driver-switch`, three visibility writes, correlated once `MpvIPC.close` started flushing
-    #     its write queue — without that barrier a teardown restore was queued and then discarded;
-    #   * `transport-reads`, ten property reads, retired by the typed query port they were waiting
-    #     for (`MpvIPC.query` / `probe`).
-    # The detectors for both kinds stay live, so a reintroduced direct read or write is debt again.
-    #
-    # Take the host because the host is what they build or own. Converting these is not a smaller
-    # signature, it is a different composition root — WP7's job, not a `reader-parameter` row.
-    #
-    # `Miner.__init__` was filed here and did not belong: it did not build or own the Reader, it read
-    # twenty-one of its members. That is a feature value, and it converted as one. Check the claim
-    # before adding a row — "holds the host" and "composes the host" look identical at a signature.
-    #
-    # `load_deps_async` was the same mis-filing one layer down: it *injects into* a built Reader
-    # rather than building one, which is the write-back category the plan says to re-examine, not a
-    # composition root. Five members, cut facts-from-acts, and it converted on `Reader.deps_load`.
-    #
-    # `apply_deps` went the other way and was deleted rather than converted: every line of it wrote a
-    # `Reader` field or called a `Reader` act, which is the round-trip shape, so it moved onto the
-    # owner of that state. `reader_deps` no longer imports `Reader` at all — a module that BUILDS
-    # collaborators has no business performing the transition that installs them.
-    #
-    # `SessionRuntime.__init__` held a `Reader` because it DRIVES one, which read as composition
-    # until the members were counted: seven facts and nine acts, i.e. a feature value. What is left
-    # here is the two that genuinely compose — one builds the `Reader`, the other IS it.
-    "host-composition": frozenset(
-        ("reader-parameter", source)
-        for source in (
-            "src/saitenka/app/controller.py::Reader.__init__",
-            "src/saitenka/app/reader_factory.py::create_reader",
-        )
-    ),
-}
-#: WP5's exit gate, as a number the tool can answer.
+_TERMINAL_DEBT: dict[str, frozenset[tuple[str, str]]] = {}
+#: Empty, and every group was DELETED rather than emptied — unlike `_TICK_METHODS` this set
+#: *excludes* rows rather than detecting them, so a group left behind would guard nothing:
+#:
+#:   * `driver-switch`, three visibility writes, correlated once `MpvIPC.close` started flushing its
+#:     write queue — without that barrier a teardown restore was queued and then discarded;
+#:   * `transport-reads`, ten property reads, retired by the typed query port (`MpvIPC.query`);
+#:   * `host-composition`, which is the story worth keeping.
+#:
+#: Four of `host-composition`'s rows were mis-filed, in the same way and for the same reason: this
+#: set is where "cannot be converted" lives, so a row parked here is a row nothing re-examines.
+#:
+#:   * `Miner.__init__` did not build or own the Reader, it read twenty-one of its members — a
+#:     feature value, and it converted as one;
+#:   * `load_deps_async` *injects into* a built Reader rather than building one, which is the
+#:     write-back category, not a composition root. Five members, cut facts-from-acts;
+#:   * `apply_deps` was deleted rather than converted: every line wrote a `Reader` field or called a
+#:     `Reader` act, so it moved onto the owner of that state;
+#:   * `SessionRuntime.__init__` held a Reader because it *drives* one — seven facts, nine acts.
+#:
+#: The last two were not debt at all. `Reader.__init__` and `create_reader` were flagged because
+#: their annotations *contain* the word: `options: ReaderOptions`, `services: ReaderServices`. See
+#: `_names_the_host`. A measurement bug is invisible while it lives in the set of things nobody
+#: expects to move — check the claim before adding a row, and re-check the ones already here.
+
 TERMINAL_TOTAL = sum(len(group) for group in _TERMINAL_DEBT.values())
 _DUTY_IDS = {
     "startup": {
@@ -149,6 +137,28 @@ _DUTY_IDS = {
         "screenshot-owned-player",
     },
 }
+
+
+#: Identifiers that ARE the host, spelled every way an annotation can carry it (bare, quoted,
+#: qualified, optional, in a union).
+_HOST_NAMES = {"Reader", "controller.Reader", "saitenka.app.controller.Reader"}
+
+
+def _names_the_host(annotation) -> bool:
+    """Does this annotation name the `Reader` itself — as opposed to merely containing the word.
+
+    A substring test read `options: ReaderOptions` and `services: ReaderServices` as host parameters
+    and filed both under terminal composition debt, where being unconvertible is the whole point, so
+    nothing ever re-examined them. `ReaderOptions` is a config dataclass; taking one is not holding
+    the host. Match the name, not the spelling.
+    """
+    if annotation is None:
+        return False
+    parts = [
+        piece.strip().strip('"').strip("'")
+        for piece in ast.unparse(annotation).replace("|", " ").split()
+    ]
+    return any(part in _HOST_NAMES for part in parts)
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -237,8 +247,7 @@ class Scanner(ast.NodeVisitor):
         )
         annotations = [arg.annotation for arg in arguments]
         if any(argument.arg == "reader" for argument in arguments) or any(
-            annotation is not None and "Reader" in ast.unparse(annotation)
-            for annotation in annotations
+            _names_the_host(annotation) for annotation in annotations
         ):
             self._debt.add(Debt("reader-parameter", self._source()))
         self.generic_visit(node)
