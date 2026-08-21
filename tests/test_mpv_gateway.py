@@ -23,6 +23,7 @@ from saitenka.runtime import (
     ExpireEffect,
     FileLoaded,
     Owner,
+    PropertyObserved,
     RawMpvEvent,
     SendMpvCommand,
     SessionMailbox,
@@ -180,7 +181,7 @@ def test_connection_loss_wakes_reconnect_and_replays_registered_observers() -> N
     assert events == [
         ConnectionLost(0),
         ConnectionReplaced(1),
-        {"event": "property-change", "name": "pause", "data": "pause"},
+        PropertyObserved("pause", "pause"),
         FileLoaded(),
         ConnectionReady(1),
     ]
@@ -231,10 +232,9 @@ def test_legacy_router_reads_the_authoritative_mailbox_once() -> None:
     mailbox = SessionMailbox()
     ipc = FakeIPC()
     MpvGateway(ipc, mailbox)
-    event = {"event": "property-change", "name": "sub-text", "data": "猫"}
-    ipc.publish(event)
+    ipc.publish({"event": "property-change", "name": "sub-text", "data": "猫"})
 
-    assert ipc.legacy_source() == [event]
+    assert ipc.legacy_source() == [PropertyObserved("sub-text", "猫")]
     assert ipc.legacy_source() == []
 
 
@@ -404,9 +404,9 @@ def test_replaying_connection_blocks_commands_and_buffers_wire_events() -> None:
 
     assert events == [
         ConnectionReplaced(1),
-        {"event": "property-change", "name": "pause", "data": "pause"},
+        PropertyObserved("pause", "pause"),
         FileLoaded(),
-        {"event": "property-change", "name": "pause", "data": False},
+        PropertyObserved("pause", data=False),
         ConnectionReady(1),
     ]
 

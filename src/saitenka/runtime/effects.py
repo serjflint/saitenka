@@ -8,8 +8,9 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Type-only: `events` imports `Owner` from here, so the runtime edge goes one way.
+    # Type-only: `events` and `playback` import from here, so the runtime edge goes one way.
     from saitenka.runtime.events import UserCommand
+    from saitenka.runtime.playback import PlaybackDelta
 
 
 class Owner(StrEnum):
@@ -303,6 +304,19 @@ class ReslotEpisode:
 
 
 @dataclass(frozen=True, slots=True)
+class ApplyPlaybackDeltas:
+    """`Owner.PLAYBACK` reduced an observation: here is what that turn published.
+
+    The outbox, as an effect. It carries the deltas rather than pointing at the slice for the
+    reason the slice's own docstring gives — `published` is the *last* turn's, and a batch of
+    observations overwrites it once per event, so a performer that read it back would apply the
+    newest turn several times and the rest never.
+    """
+
+    deltas: tuple[PlaybackDelta, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RunUserCommand:
     """A command arrived from mpv: run it against the session's binding table.
 
@@ -325,7 +339,8 @@ class RetireCueIdentity:
 
 
 type LifecycleEffect = (
-    RunUserCommand
+    ApplyPlaybackDeltas
+    | RunUserCommand
     | ReslotEpisode
     | ReplaySubtitleSelection
     | RetireCueIdentity
@@ -352,7 +367,8 @@ type LifecycleEffect = (
 #: terminal and no completion: nothing correlates to them, and a reservation raised during close
 #: is one nothing would ever retire.
 type FireAndForget = (
-    RunUserCommand
+    ApplyPlaybackDeltas
+    | RunUserCommand
     | ReslotEpisode
     | ReplaySubtitleSelection
     | RetireCueIdentity

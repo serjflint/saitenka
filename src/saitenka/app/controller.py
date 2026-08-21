@@ -183,7 +183,7 @@ from saitenka.runtime import (
 from saitenka.runtime import help as help_machine
 from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.connection import ConnectionStore
-from saitenka.runtime.effects import RunUserCommand
+from saitenka.runtime.effects import ApplyPlaybackDeltas, RunUserCommand
 from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import (
@@ -605,6 +605,7 @@ class Reader:
             COMMAND_PERFORMER,
             CUE_RETIRE_RESOURCE,
             MINED_RESOURCE,
+            PLAYBACK_DELTAS_PERFORMER,
             RESLOT_PARTICIPANT,
             SESSION_SUMMARY_RESOURCE,
             SUBTITLE_CLEAR_RESOURCE,
@@ -690,6 +691,10 @@ class Reader:
         ipc.register_session_resource(
             COMMAND_PERFORMER,
             session_resources.Performing(lambda effect: self._run_user_command(effect)),
+        )
+        ipc.register_session_resource(
+            PLAYBACK_DELTAS_PERFORMER,
+            session_resources.Performing(lambda effect: self._apply_playback_deltas(effect)),
         )
         for name, retire in (
             (
@@ -1069,10 +1074,21 @@ class Reader:
     def _reduce_playback(self, event: events.PlaybackEvent) -> None:
         """Advance `Owner.PLAYBACK`'s slice by one event and apply what that turn published.
 
-        The deltas are bound before the loop: applying one can reduce another event
-        (`AuthoredCueStale` probes mpv and seeds the reply), which replaces the slice underneath.
+        Empty for a routed session — the turn's deltas arrived through `ApplyPlaybackDeltas` before
+        this returned. What is left here is the store that keeps its own slice.
         """
         for delta in self._playback_store.dispatch(event):
+            self._apply_playback_delta(delta)
+
+    def _apply_playback_deltas(self, effect: object) -> None:
+        """Perform `ApplyPlaybackDeltas`: `Owner.PLAYBACK`'s outbox, delivered.
+
+        The tuple is bound by the effect rather than read back off the slice, which is also what
+        makes it safe to re-enter: applying one delta can reduce another event (`AuthoredCueStale`
+        probes mpv and seeds the reply) and replace the slice underneath this loop.
+        """
+        assert isinstance(effect, ApplyPlaybackDeltas)
+        for delta in effect.deltas:
             self._apply_playback_delta(delta)
 
     def _prop(self, name: str) -> Any:
@@ -4024,6 +4040,9 @@ class Reader:
             return
         if isinstance(ev, events.FileLoaded):
             self._reslot_episode()
+            return
+        if isinstance(ev, events.PropertyObserved):
+            self._observe_property(ev.name, ev.data)
             return
         if isinstance(ev, ConnectionReady):
             # Only reached without a reactor: a session that has one claims this, because learning

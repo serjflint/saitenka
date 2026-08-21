@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest, MpvIPC
 from saitenka.runtime.effects import EffectError, EffectOutcome, Owner
+from saitenka.runtime.events import PropertyObserved
 from saitenka.runtime.jobs import JobLanePolicy
 from saitenka.runtime.mailbox import SessionMailbox
 
@@ -394,8 +395,8 @@ def test_ordered_terminals_hands_the_completion_back_in_envelope_sequence() -> N
 
     assert seen == []  # nothing ran during the drain
     for event in drained:
-        if isinstance(event, dict):
-            seen.append(("observation", event["name"]))
+        if isinstance(event, PropertyObserved):
+            seen.append(("observation", event.name))
         else:
             gateway.dispatch_terminal(event)
     assert seen == [("observation", "sub-text"), ("terminal", "probe")]
@@ -412,4 +413,4 @@ def test_inline_dispatch_runs_the_completion_before_the_batch_is_handled() -> No
     drained = ipc.legacy_source()
 
     assert seen == [("terminal", "probe")]  # already ran, before the caller sees anything
-    assert [event["name"] for event in drained if isinstance(event, dict)] == ["sub-text"]
+    assert [e.name for e in drained if isinstance(e, PropertyObserved)] == ["sub-text"]

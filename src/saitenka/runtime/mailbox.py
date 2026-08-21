@@ -17,7 +17,7 @@ from saitenka.runtime.events import (
     EffectFinished,
     EventEnvelope,
     EventOrigin,
-    RawMpvEvent,
+    PropertyObserved,
     UserCommand,
 )
 from saitenka.runtime.limits import DEFAULT_RUNTIME_LIMITS
@@ -378,7 +378,9 @@ class SessionMailbox:
         if previous.connection_epoch != current.connection_epoch:
             return False
         left, right = previous.payload, current.payload
-        if isinstance(left, RawMpvEvent) and isinstance(right, RawMpvEvent):
+        if isinstance(left, PropertyObserved) and isinstance(right, PropertyObserved):
+            # The pointer only: every other observation is a fact a later one may depend on having
+            # been seen, and mpv reports the cursor far faster than a turn can consume it.
             return left.name == right.name == "mouse-pos"
         if isinstance(left, UserCommand) and isinstance(right, UserCommand):
             return left.name == right.name and left.name in {

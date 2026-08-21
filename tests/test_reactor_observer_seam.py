@@ -113,9 +113,12 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     )
     from saitenka.app.subtitle_render import NullRenderer
     from saitenka.runtime.connection import ConnectionState, reduce_connection
-    from saitenka.runtime.events import ConnectionLost, ConnectionReplaced
+    from saitenka.runtime.events import PLAYBACK_EVENTS, ConnectionLost, ConnectionReplaced
 
-    assert set(_CLAIMED) <= set(_SESSION_EVENTS), "a claim without a route reduces nothing"
+    # Not `_SESSION_EVENTS` alone any more: `PropertyObserved` is claimed and routed to
+    # `Owner.PLAYBACK`, so the invariant is against the whole route table's vocabulary.
+    routed = set(_SESSION_EVENTS) | set(PLAYBACK_EVENTS)
+    assert set(_CLAIMED) <= routed, "a claim without a route reduces nothing"
     assert owner_of(ConnectionReplaced(1)) is Owner.SESSION
 
     ipc = FakeIPC()

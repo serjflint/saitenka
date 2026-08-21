@@ -24,6 +24,7 @@ from saitenka.runtime import (
     FileLoaded,
     MailboxFull,
     Owner,
+    PropertyObserved,
     RawMpvEvent,
     RuntimeEvent,
     SendMpvCommand,
@@ -228,7 +229,12 @@ class LegacyEventRouter:
             events.append(payload.data)
         elif isinstance(
             payload,
-            UserCommand | ConnectionLost | ConnectionReady | ConnectionReplaced | FileLoaded,
+            UserCommand
+            | ConnectionLost
+            | ConnectionReady
+            | ConnectionReplaced
+            | FileLoaded
+            | PropertyObserved,
         ):
             events.append(payload)
 
@@ -528,8 +534,10 @@ class MpvGateway:
 
     def _observation_payload(self, message: dict, *, lock_held: bool) -> RuntimeEvent:
         name = str(message.get("event", "unknown"))
-        if name == "property-change" and message.get("name") == "mouse-pos":
-            name = "mouse-pos"
+        if name == "property-change":
+            # No epoch on the payload: `_publish_observation` has already dropped anything from a
+            # connection that is not the current one, and the projection applies its own fence.
+            return PropertyObserved(str(message.get("name", "")), message.get("data"))
         if name == "file-loaded":
             return FileLoaded()
         if name == "client-message":

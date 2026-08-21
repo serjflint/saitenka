@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime.effects import (
+    ApplyPlaybackDeltas,
     AsyncEffect,
     AttachSessionDiagnostics,
     CancelEffect,
@@ -225,7 +226,8 @@ class SessionReactor[StateT]:
             | ReplaySubtitleSelection
             | ReslotEpisode
             | RetireCueIdentity
-            | RunUserCommand,
+            | RunUserCommand
+            | ApplyPlaybackDeltas,
         ):
             # Fire-and-forget, like `StopSession`: a lifecycle effect carries no ID because there
             # is nothing to correlate a completion to. Reserving a terminal for one would leave a

@@ -29,6 +29,7 @@ from saitenka.runtime import (
     MailboxFull,
     Owner,
     OwnerSlice,
+    PropertyObserved,
     RawMpvEvent,
     ReduceResult,
     RoutedEvent,
@@ -179,19 +180,19 @@ def test_connection_loss_has_epoch_coalesced_reserved_admission() -> None:
 def test_mailbox_coalesces_only_the_closed_input_allowlist() -> None:
     mailbox = SessionMailbox()
     first_mouse = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 1}),
+        PropertyObserved("mouse-pos", {"x": 1}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
         connection_epoch=1,
     )
     latest_mouse = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 2}),
+        PropertyObserved("mouse-pos", {"x": 2}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
         connection_epoch=1,
     )
     property_change = mailbox.publish(
-        RawMpvEvent("property-change", {"name": "sub-text"}),
+        PropertyObserved("sub-text", "\u3044\u3061"),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
         connection_epoch=1,
@@ -234,12 +235,12 @@ def test_mailbox_coalesces_production_scroll_names_without_losing_outcome_slots(
 def test_mailbox_does_not_coalesce_across_the_turn_quantum() -> None:
     mailbox = SessionMailbox()
     first = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 1}),
+        PropertyObserved("mouse-pos", {"x": 1}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
     )
     second = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 2}),
+        PropertyObserved("mouse-pos", {"x": 2}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
     )

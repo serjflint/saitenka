@@ -23,6 +23,7 @@ from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
+    ApplyPlaybackDeltas,
     AttachSessionDiagnostics,
     CancelInteractionWork,
     CloseCapabilityActors,
@@ -62,6 +63,7 @@ from saitenka.runtime.events import (
     EventEnvelope,
     EventOrigin,
     FileLoaded,
+    PropertyObserved,
     SessionClosing,
     SessionStarting,
     StartupHintRequested,
@@ -145,6 +147,11 @@ _SESSION_EVENTS = (
 #: `UserCommand` is here on the same protocol and is the one whose act carries a subject: the
 #: binding table does not move, only the decision to consult it.
 #:
+#: `PropertyObserved` is the first claim that is not `Owner.SESSION`'s, and the first where the act
+#: is *applying what the turn published*. It has to be claimed in the same breath as being routed:
+#: the Reader's own `_reduce_playback` already routes through the reactor, so an observation both
+#: routed and left to fall through would reduce twice.
+#:
 #: Claiming withholds from the Reader, so what is left in `_drain_event` for these is the
 #: no-reactor fallback and nothing else. Deleting that would make a session without a runtime stop
 #: noticing its transport, which is most of the unit suite.
@@ -157,6 +164,7 @@ _CLAIMED = (
     ConnectionReplaced,
     FileLoaded,
     UserCommand,
+    PropertyObserved,
 )
 
 #: Feature keys inside `Owner.SESSION`'s slice. Named once so a reader of the slot does not spell
@@ -189,6 +197,8 @@ RESLOT_PARTICIPANT = "start:episode-reslot"
 #: Running one arrived command. Neither verb fits: it starts nothing and retires nothing, and it is
 #: the only act so far whose effect has to say what it is about.
 COMMAND_PERFORMER = "run:user-command"
+#: Applying what one reduced observation published. `Owner.PLAYBACK`'s outbox, delivered.
+PLAYBACK_DELTAS_PERFORMER = "apply:playback-deltas"
 
 #: The optional collaborators' probes, and the interaction work that outlives a cancelled hover.
 CAPABILITY_PARTICIPANTS = ("capability:tts", "capability:anki")
@@ -304,7 +314,10 @@ _PARTICIPANT_OF: dict[type, str] = {
 #: Which registered performer each act-on-a-payload effect reaches. The third table, because the
 #: verb takes an argument: `start()` and `close()` answer for the session itself, and an act about
 #: something the effect carries cannot be spelled as either.
-_PERFORMER_OF: dict[type, str] = {RunUserCommand: COMMAND_PERFORMER}
+_PERFORMER_OF: dict[type, str] = {
+    RunUserCommand: COMMAND_PERFORMER,
+    ApplyPlaybackDeltas: PLAYBACK_DELTAS_PERFORMER,
+}
 
 
 def _perform(gateway: MpvGateway, name: str, effect: Effect) -> bool:

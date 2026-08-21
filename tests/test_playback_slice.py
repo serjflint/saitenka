@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from saitenka.runtime.effects import ApplyPlaybackDeltas
 from saitenka.runtime.events import (
     CueIdentityInstalled,
     CueIdentityRetireRequested,
@@ -17,7 +18,12 @@ from saitenka.runtime.events import (
     PropertySeeded,
     SourceReplaced,
 )
-from saitenka.runtime.playback import PlaybackProjection, PlaybackState, RetireReason
+from saitenka.runtime.playback import (
+    PauseChanged,
+    PlaybackProjection,
+    PlaybackState,
+    RetireReason,
+)
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, slice_of
 from saitenka.runtime.state import ReduceResult
 
@@ -98,7 +104,9 @@ def test_the_feature_call_shape_returns_a_reduce_result() -> None:
     assert isinstance(result.state, PlaybackSlice)
     assert result.state.state.paused is True
     assert result.internal_events == ()
-    assert result.effects == ()
+    # The routed half's outbox: `reduce` publishes into the slice, `__call__` hands it out as the
+    # effect a mailbox-delivered observation has no caller to return deltas to.
+    assert result.effects == (ApplyPlaybackDeltas((PauseChanged(paused=True),)),)
 
 
 def test_the_reducer_refuses_an_event_that_is_not_playbacks() -> None:

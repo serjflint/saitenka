@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka.runtime.effects import ApplyPlaybackDeltas
 from saitenka.runtime.events import (
     PLAYBACK_EVENTS,
     CueIdentityInstalled,
@@ -87,9 +88,15 @@ class PlaybackReducer:
                 return PlaybackSlice(projection.retire(state, RetireReason.SOURCE)[0])
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        """The routed half. `reduce` is the reduction; this is what a reactor's route table calls,
+        and the difference is where the outbox goes: a routed turn hands its deltas back as an
+        effect, because the caller that would have read `published` is not the one that ran it."""
         assert isinstance(state, PlaybackSlice)
         assert isinstance(event, (*PLAYBACK_EVENTS, EpisodeRetired))
-        return ReduceResult(self.reduce(state, event))
+        reduced = self.reduce(state, event)
+        if not reduced.published:
+            return ReduceResult(reduced)
+        return ReduceResult(reduced, effects=(ApplyPlaybackDeltas(reduced.published),))
 
 
 #: `Owner.PLAYBACK`'s only feature so far. Named once so the owner that registers it and the
@@ -158,18 +165,18 @@ class PlaybackStore:
         self._slice = value
 
     def dispatch(self, event: PlaybackSliceEvent) -> tuple[PlaybackDelta, ...]:
-        """Reduce one event and return the deltas to act on, empty when the turn did not run.
+        """Reduce one event and return the deltas to act on, empty when the reactor owns the turn.
 
-        Identity, not `published`: a reactor that is closing drops the event and leaves the
-        previous turn's outbox in place, which a caller reading `published` blindly would apply a
-        second time. Every reduction builds a new slice, so `is` answers exactly.
+        Nothing comes back from a routed dispatch, and that is the point: the same reduction runs
+        for an event that arrived through the mailbox, where there is no caller to hand deltas to,
+        so the routed path has exactly one channel — `ApplyPlaybackDeltas`, already performed by
+        the time this returns. Returning `published` as well would apply the turn twice.
         """
-        before = self.current
         if self._port is None:
-            self._slice = self._reducer.reduce(before, event)
+            self._slice = self._reducer.reduce(self.current, event)
             return self._slice.published
-        after = slice_of(self._port.route_session_playback(_envelope(event)))
-        return () if after is before else after.published
+        self._port.route_session_playback(_envelope(event))
+        return ()
 
 
 def _envelope(event: PlaybackSliceEvent) -> EventEnvelope:
