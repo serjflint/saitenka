@@ -8,7 +8,7 @@ import time
 from concurrent.futures import Future
 
 import pytest
-from util import FakeIPC, await_ready, runtime_gateway
+from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka import otel_metrics
 from saitenka.app import mined_seed as mined_seed_lane
@@ -108,9 +108,7 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
         release.set()
         # Not a wait: drain repeatedly to give a late result the chance to arrive, then prove it
         # did not. A deadline helper would return on the first pass and assert nothing.
-        for _ in range(200):
-            r._drain_events()
-            time.sleep(0.001)
+        drain_for(r._drain_events)
 
         assert r.session.mined == {"新しい"}
         assert r.session.mined.generation == 1

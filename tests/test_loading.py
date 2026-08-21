@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import Future
 
 import pytest
-from util import runtime_gateway
+from util import await_ready, runtime_gateway
 
 from saitenka.app.loading import SPINNER, loading_image
 from saitenka.mpvio.ipc import IPCRequest
@@ -302,7 +302,6 @@ def test_apply_deps_stops_the_spinner():
 def test_load_deps_async_uses_a_custom_build():
     """#16: `run` passes its own CLI-flag-aware builder; load_deps_async must call THAT (not the
     config-only build_reader_deps) and publish its result for the poll loop to inject."""
-    import time
 
     from util import FakeIPC
 
@@ -318,10 +317,7 @@ def test_load_deps_async_uses_a_custom_build():
 
     r.load_deps_async({}, build=_build)
     assert r._loading is True  # spinner armed immediately (subs draw meanwhile)
-    for _ in range(300):  # wait for the background thread to publish
-        if r._pending_deps is not None:
-            break
-        time.sleep(0.01)
+    await_ready(lambda: r._pending_deps is not None, "the build thread never published deps")
     assert called["n"] == 1
     assert r._pending_deps == {
         "scorer": "SCORER",
@@ -336,7 +332,6 @@ def test_load_deps_async_uses_a_custom_build():
 def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
     """The run-mode hoist: begin_deps_build starts the build BEFORE mpv launches; load_deps_async then
     consumes that Future (it must NOT build a second time) and publishes the result for the poll loop."""
-    import time
 
     from util import FakeIPC
 
@@ -353,10 +348,7 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
     r = Reader(FakeIPC())
     r.ov = _RecOv()
     r.load_deps_async({}, prebuilt=fut)  # consume the in-flight build, don't restart it
-    for _ in range(300):
-        if r._pending_deps is not None:
-            break
-        time.sleep(0.01)
+    await_ready(lambda: r._pending_deps is not None, "the build thread never published deps")
     assert (
         built["n"] == 1
     )  # built exactly once — by begin_deps_build, not re-run by load_deps_async

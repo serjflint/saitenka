@@ -67,6 +67,22 @@ def await_ready(
         time.sleep(0.001)
 
 
+def drain_for(pump: Callable[[], None], *, seconds: float = 0.2) -> None:
+    """Drive a consumer for a wall-clock window, then let the caller assert nothing arrived.
+
+    The negative counterpart of `await_ready`, and a poll count is wrong here for the same reason:
+    `for _ in range(200): sleep(0.001)` is 200 *scheduling slots*, not 200ms, so on a busy machine
+    the thread that was supposed to get a chance to misbehave never ran and the test passes by not
+    having looked. A window is short by design — a negative can only ever be "not within this long".
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        pump()
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.001)
+
+
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
 

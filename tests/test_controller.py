@@ -2,7 +2,6 @@
 
 import functools
 import logging
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +10,7 @@ from driver import Driver
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from util import FakeIPC as RuntimeFakeIPC
-from util import keybind_registry, runtime_gateway
+from util import await_ready, keybind_registry, runtime_gateway
 
 import saitenka.app.controller as C
 from saitenka.app import bindings, miner, miner_ui, nested_popup, tooltip, tooltip_panel
@@ -1401,10 +1400,7 @@ def test_prefetch_worker_warms_cache_then_close_joins():
             anki_ok=False,  # no anki configured
             mined=False,
         )
-        for _ in range(300):
-            if key in r.tip.panel_cache:
-                break
-            time.sleep(0.01)
+        await_ready(lambda: key in r.tip.panel_cache, "the prefetch never warmed the panel")
         assert key in r.tip.panel_cache  # prefetched in the background, no hover needed
     finally:
         r.close()

@@ -1,10 +1,9 @@
 """Episode analysis runs off-thread and its overlay never mutates playback."""
 
 import threading
-import time
 
 import pytest
-from util import FakeIPC, await_ready, runtime_gateway
+from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka.app import analysis_overlay
 from saitenka.app.bindings import ANALYSIS_MSG
@@ -170,9 +169,7 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
     assert current is not None
 
     # Not a wait — see the note in test_progressive: this proves nothing further arrives.
-    for _ in range(200):
-        reader._drain_events()
-        time.sleep(0.001)
+    drain_for(reader._drain_events)
     assert reader.analysis.current is current
     assert newest_calls == 1
 

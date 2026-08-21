@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from pathlib import Path
 
 import pytest
@@ -15,7 +14,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from util import validate_ctf_document
+from util import await_ready, validate_ctf_document
 
 from saitenka.app.otel_export import CTFSpanProcessor, _span_to_ctf_event
 from saitenka.app.telemetry import ActiveGate
@@ -261,10 +260,10 @@ def test_live_writer_thread_exports_a_span(tmp_path):
     proc = CTFSpanProcessor(path, gate, interval=0.05)
     try:
         proc.on_end(_make_span())
-        for _ in range(60):
-            if path.exists() and json.loads(path.read_text())["traceEvents"]:
-                break
-            time.sleep(0.05)
+        await_ready(
+            lambda: path.exists() and bool(json.loads(path.read_text())["traceEvents"]),
+            "the writer thread never flushed the span",
+        )
         assert len(json.loads(path.read_text(encoding="utf-8"))["traceEvents"]) == 1
     finally:
         proc.shutdown()
@@ -275,13 +274,16 @@ def test_live_writer_thread_samples_counters_periodically(tmp_path):
     gate = ActiveGate()
     gate.set(value=True)
     proc = CTFSpanProcessor(path, gate, sample_fn=lambda: {"a": 1.0}, interval=0.05)
+
+    def sampled() -> bool:
+        return path.exists() and any(
+            e["ph"] == "C" for e in json.loads(path.read_text())["traceEvents"]
+        )
+
     try:
-        for _ in range(100):
-            if path.exists() and any(
-                e["ph"] == "C" for e in json.loads(path.read_text())["traceEvents"]
-            ):
-                break
-            time.sleep(0.02)
+        # A deadline, not `for _ in range(100)`: that is a scheduling budget in a timeout's clothes,
+        # and under `test-ft` the writer thread loses it before it is ever scheduled.
+        await_ready(sampled, "the writer thread never sampled a counter")
         counters = [e for e in json.loads(path.read_text())["traceEvents"] if e["ph"] == "C"]
         assert counters and all(e["name"] == "a" for e in counters)
     finally:
