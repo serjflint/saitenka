@@ -599,7 +599,7 @@ def _mpv_render_inputs(ipc: Any) -> dict[str, Any]:
         "options/sub-scale",
         "options/sub-pos",
     ):
-        reply = ipc.command("get_property", name)
+        reply = ipc.probe(name)
         if reply.get("error") != "success":
             raise AssertionError(f"mpv did not expose required render input {name}")
         inputs[name] = reply.get("data")
@@ -677,7 +677,7 @@ class _MpvSession:
                 if reply.get("error") != "success":
                     raise AssertionError(f"mpv rejected {name}={value!r}")
             _wait_for(
-                lambda: self.ipc.command("get_property", "sub-text").get("data"),
+                lambda: self.ipc.query("sub-text"),
                 timeout=3.0,
                 message=f"mpv did not render {label}",
             )

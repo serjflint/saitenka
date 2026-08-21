@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 
 
 def sub_tracks(ipc) -> list[dict]:
-    data = ipc.command("get_property", "track-list").get("data") or []
+    data = ipc.query("track-list") or []
     return [track for track in data if track.get("type") == "sub"]
 
 
@@ -63,7 +63,9 @@ class SubtitleFetchResult:
     path: Path | None
     status: str
     select_if_unchanged: bool
-    initial_sid: int | str | None
+    #: The selection at submit time. `object` because the only question asked of it is whether
+    #: it still equals the current one — mpv answers `sid` with an int or a string.
+    initial_sid: object
     replace: bool = (
         False  # a user retry: swap the on-screen (mistimed) JP for the fresh re-synced one
     )
@@ -76,7 +78,7 @@ class SubtitleFetchResult:
 class SubtitleFetchRequest:
     fetch: ProviderFetch
     select_if_unchanged: bool
-    initial_sid: int | str | None
+    initial_sid: object
     replace: bool
     force_select: bool
 
@@ -85,7 +87,7 @@ class SubtitleFetchRequest:
 #: is a callable, not a value: the completion lambda re-reads the CURRENT episode when it fires, and
 #: binding the source eagerly would finish a retry against the episode we just left.
 if TYPE_CHECKING:
-    PropertyGet = Callable[[str], "int | str | None"]
+    PropertyGet = Callable[[str], object]
     Toast = Callable[..., None]
     EpisodeSubtitle = Callable[[], SubtitleSource]
 
@@ -425,7 +427,7 @@ def _start_resync_window(
     from saitenka.app.resync import resync_current, resync_window
 
     playhead = get("time-pos")
-    start_s = float(playhead) if playhead is not None else 0.0
+    start_s = float(playhead) if isinstance(playhead, int | float) else 0.0
     toast("Re-timing subtitles from here…")
 
     def do() -> tuple[Path | None, str]:

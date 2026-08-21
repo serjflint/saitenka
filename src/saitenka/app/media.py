@@ -390,8 +390,8 @@ def has_sub_lang(path: str | Path, langs: str = "ja,jpn,jp") -> bool | None:
 
 def current_timespan(ipc) -> Timespan | None:
     """The current subtitle's [start, end] in file-timeline seconds, or None."""
-    start = ipc.command("get_property", "sub-start").get("data")
-    end = ipc.command("get_property", "sub-end").get("data")
+    start = ipc.query("sub-start")
+    end = ipc.query("sub-end")
     if start is None or end is None:
         return None
     return Timespan(float(start), float(end))

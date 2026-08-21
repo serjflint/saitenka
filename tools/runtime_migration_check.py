@@ -83,28 +83,14 @@ _DRIVER_SWITCH_SYMBOLS: set[str] = set()
 #: Rows, not symbols. Five of these symbols carry a `reader-parameter` row as well, and that second
 #: row IS WP5's to convert — a symbol-keyed set would have quietly excused all five.
 _TERMINAL_DEBT = {
-    # The `driver-switch` group is gone with WP6, not emptied: unlike `_TICK_METHODS` this set
-    # *excludes* rows rather than detecting them, so an empty group would guard nothing. The three
-    # visibility writes it held became correlated once `MpvIPC.close` started flushing its write
-    # queue — without that barrier a teardown restore was queued and then discarded.
+    # Two groups are gone rather than emptied — unlike `_TICK_METHODS` this set *excludes* rows
+    # rather than detecting them, so an empty group would guard nothing:
+    #   * `driver-switch`, three visibility writes, correlated once `MpvIPC.close` started flushing
+    #     its write queue — without that barrier a teardown restore was queued and then discarded;
+    #   * `transport-reads`, ten property reads, retired by the typed query port they were waiting
+    #     for (`MpvIPC.query` / `probe`).
+    # The detectors for both kinds stay live, so a reintroduced direct read or write is debt again.
     #
-    # Property reads. A read has no terminal outcome to correlate, so routing one through the egress
-    # gateway buys nothing until the transport itself grows a typed query port.
-    "transport-reads": frozenset(
-        ("direct-mpv-read", source)
-        for source in (
-            "src/saitenka/app/commands/attach.py::_finish_attach_subtitle_startup",
-            "src/saitenka/app/commands/attach.py::_install_attach_reslot_hook",
-            "src/saitenka/app/controller.py::Reader._get",
-            "src/saitenka/app/controller.py::Reader._probe_ass_full",
-            "src/saitenka/app/embedded_subs.py::_selected_sub_track",
-            "src/saitenka/app/media.py::current_timespan",
-            "src/saitenka/app/subselect.py::fetch_jimaku",
-            "src/saitenka/app/subselect.py::remove_external_sub_tracks",
-            "src/saitenka/app/subtitle_modes.py::sub_tracks",
-            "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility",
-        )
-    ),
     # Take the host because the host is what they build or own. Converting these is not a smaller
     # signature, it is a different composition root — WP7's job, not a `reader-parameter` row.
     "host-composition": frozenset(

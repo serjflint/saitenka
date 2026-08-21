@@ -346,3 +346,21 @@ def test_close_flushes_writes_queued_behind_an_inflight_one():
         ["set_property", "sub-visibility", False],
         ["set_property", "sub-visibility", True],
     ]
+
+
+def test_a_failed_property_reply_answers_none_even_when_it_carries_data():
+    """mpv can report an error and still send a payload; reading past the error is how a stale value
+    becomes a fact. One caller checked for this and nine spelled a bare `.get("data")`, which is why
+    the check belongs to the port rather than to whoever remembers it."""
+    ipc = MpvIPC("unused")
+    replies = {
+        "success": {"error": "success", "data": False},
+        "stale": {"error": "property unavailable", "data": False},
+        "unset": {"error": "success", "data": None},
+    }
+    ipc.command = lambda _verb, name: replies[name]  # type: ignore[method-assign]
+
+    assert ipc.query("success") is False
+    assert ipc.query("stale") is None
+    assert ipc.query("unset") is None
+    assert ipc.probe("stale") == {"error": "property unavailable", "data": False}

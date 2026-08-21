@@ -873,8 +873,30 @@ class Reader:
         return round(self.osd[1] * self.bottom_margin_frac)
 
     # --- mpv property helpers -----------------------------------------------------------------
-    def _get(self, prop):
-        return self.ipc.command("get_property", prop).get("data")
+    def _get(self, prop: str) -> object | None:
+        """One property, un-narrowed. The transport promises a JSON value and nothing more.
+
+        The three readers below are the narrowings that have a consumer; each answers `None` (or
+        empty) for a shape mpv did not send, because "the property is unset" and "mpv sent something
+        this caller cannot use" are the same fact to every one of them.
+        """
+        return self.ipc.query(prop)
+
+    def _get_text(self, prop: str) -> str | None:
+        value = self._get(prop)
+        return value if isinstance(value, str) else None
+
+    def _get_number(self, prop: str) -> float | None:
+        value = self._get(prop)
+        return float(value) if isinstance(value, int | float) else None
+
+    def _get_mapping(self, prop: str) -> dict:
+        value = self._get(prop)
+        return value if isinstance(value, dict) else {}
+
+    def _get_sequence(self, prop: str) -> list:
+        value = self._get(prop)
+        return value if isinstance(value, list) else []
 
     def start_observing(self, *, connection_replaced: bool = False) -> None:
         """Register ``observe_property`` for the hot-path properties and seed their initial values
@@ -1116,7 +1138,7 @@ class Reader:
         if self.native_geometry is None or not self._ass_full_probe_dirty:
             return
         if self.native_geometry.ass_full_capability.value == "unknown":
-            reply = self.ipc.command("get_property", "sub-text/ass-full")
+            reply = self.ipc.probe("sub-text/ass-full")
             self._reduce_playback(events.PropertySeeded("sub-text/ass-full", reply.get("data")))
             self.native_geometry.observe_ass_full_reply(reply)
         self._ass_full_probe_dirty = False
@@ -1308,7 +1330,8 @@ class Reader:
         Emits a low-cardinality ``osd_probe`` span (trace_report breaks down each source's distinct values)
         + a full-fidelity log line. Cheap: only fires on an actual osd change (minutes apart in practice)."""
         probe = {p: self._get(p) for p in _DISPLAY_PROBE_PROPS}
-        vop = probe.get("video-out-params") or {}
+        vop = probe.get("video-out-params")
+        vop = vop if isinstance(vop, dict) else {}
         span_attrs = {
             "reason": reason,
             "tip_scale": f"{self.tip_scale.display:.4f}",
@@ -1927,7 +1950,7 @@ class Reader:
     def on_click(self) -> None:
         if not self.ov.visible:
             return
-        mp = self._get("mouse-pos") or {}
+        mp = self._get_mapping("mouse-pos")
         surfaces.route_click(self.click_target, mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
@@ -1988,7 +2011,7 @@ class Reader:
             osd=self.osd,
             chrome_scale=self.chrome_scale,
             surfaces=self.lifecycle_surfaces,
-            video=self._get("path"),
+            video=self._get_text("path"),
             backlog=lambda: sidebar_module._ensure_store(self.session),
             mined=lambda: self.mined_store,
             mined_exists=self.session.mined_store is not None or mined_store.db_path().exists(),
@@ -2097,7 +2120,7 @@ class Reader:
             mine_current=self.mine_current,
             speak_hovered=self.speak_hovered,
             click_preview=self._click_preview,
-            cursor=lambda: self._get("mouse-pos"),
+            cursor=lambda: self._get_mapping("mouse-pos") or None,
             paused=lambda: self._prop("pause"),
         )
 
@@ -2269,9 +2292,9 @@ class Reader:
     def capture_ports(self) -> backlog.CapturePorts:
         """What a bookmark toggle samples the cue from — read now, so the write is this cue."""
         return backlog.CapturePorts(
-            video=self._get("path"),
-            start=self._get("sub-start"),
-            end=self._get("sub-end"),
+            video=self._get_text("path"),
+            start=self._get_number("sub-start"),
+            end=self._get_number("sub-end"),
             text=self.sub_text,
             secondary_text=self._secondary_text(),
             language=self.subtitle_language,
@@ -2279,7 +2302,7 @@ class Reader:
             hover=self.hover,
             jp_sid=self.jp_sid,
             en_sid=self.en_sid,
-            tracks=self._get("track-list") or [],
+            tracks=self._get_sequence("track-list"),
             store=lambda: sidebar_module._ensure_store(self.session),
             toast=self._toast,
             record_capture=self._record_capture,
@@ -3039,7 +3062,7 @@ class Reader:
             annotation_mode=self.annotation_mode,
             has_cue=bool(self.sub_text.strip()),
             retry_in_flight=self.episode.subtitle.retry_active,
-            media_path=self._get("path"),
+            media_path=self._get_text("path"),
             has_external_sub=_current_external_sub(self.ipc) is not None,
             has_cue_lines=bool(self.lines),
             cue_starts=tuple(cue.start for cue in index.cues) if index is not None else (),

@@ -89,7 +89,7 @@ def to_bench_json(result: dict) -> list[dict]:
 
 
 def _counter(ipc, prop: str) -> int:
-    data = ipc.command("get_property", prop).get("data")
+    data = ipc.query(prop)
     return int(data) if isinstance(data, (int, float)) else 0
 
 

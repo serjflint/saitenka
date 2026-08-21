@@ -48,7 +48,7 @@ def _selected_sub_track(ipc) -> dict | None:
     """The PRIMARY selected subtitle track-list entry (``main-selection`` 0), or None if no sub
     track is selected. mpv can have a secondary track selected too (dual-sub); only the primary
     one drives the overlay's lookahead."""
-    data = ipc.command("get_property", "track-list").get("data") or []
+    data = ipc.query("track-list") or []
     subs = [t for t in data if t.get("type") == "sub" and t.get("selected")]
     if not subs:
         return None

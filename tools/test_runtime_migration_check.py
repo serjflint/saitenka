@@ -24,12 +24,16 @@ def test_runtime_migration_manifest_matches_production() -> None:
     assert checker.check() == 0
     # Live rows, so the scanner is checked against production and not only against the synthetic
     # source below. Anchors, not landmarks: as the migration converts them, point these at whatever
-    # `poe runtime-status` still reports rather than weakening the assertion. `tick-stage` and
-    # `direct-mpv-command` are both gone entirely — WP6 deleted the driver, then correlated the last
-    # three visibility writes — so the anchor moved to the reads, which stay until a read has a
-    # terminal to come back on.
-    assert checker.Debt("direct-mpv-read", "src/saitenka/app/controller.py::Reader._get") in actual
-    assert not any(item.kind in {"tick-stage", "direct-mpv-command"} for item in actual)
+    # `poe runtime-status` still reports rather than weakening the assertion. Every mpv verb
+    # kind is gone entirely now — the driver, then the writes, then the reads — so the anchor is the
+    # composition root, which is the only debt left.
+    assert (
+        checker.Debt("reader-parameter", "src/saitenka/app/reader_factory.py::create_reader")
+        in actual
+    )
+    assert not any(
+        item.kind in {"tick-stage", "direct-mpv-command", "direct-mpv-read"} for item in actual
+    )
 
 
 def test_the_terminal_set_claims_every_remaining_row() -> None:
@@ -38,12 +42,13 @@ def test_the_terminal_set_claims_every_remaining_row() -> None:
     The interesting assertion is not the total — it is that the remainder is empty. A new row
     appearing outside the terminal set (a regression, or a kind nobody enumerated) would hold the
     total steady by displacing a converted row, and the count alone cannot see that. The total
-    itself only ever falls, and falls by a deletion: WP6 took the whole `driver-switch` group out.
+    itself only ever falls, and falls by a deletion: the `driver-switch` and `transport-reads`
+    groups were both taken out whole.
     """
     checker = _module()
     actual, _, _ = checker.scan()
     terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
-    assert len(terminal) == checker.TERMINAL_TOTAL == 16
+    assert len(terminal) == checker.TERMINAL_TOTAL == 6
     assert [item for item in actual if (item.kind, item.source) not in terminal] == []
 
 
@@ -378,8 +383,26 @@ def test_a_synchronous_by_contract_write_is_exempt_but_its_neighbours_are_not() 
         assert checker.Debt("direct-mpv-command", source) not in actual
         assert checker.Debt("direct-mpv-read", source) not in actual
 
-    # Same module as an exempt symbol, still counted.
-    assert checker.Debt("direct-mpv-read", "src/saitenka/app/media.py::current_timespan") in actual
+    # Same module as an exempt symbol, still counted. Planted rather than pointed at a live row:
+    # every module is clean now, so a live neighbour would keep vanishing and the non-widening
+    # claim would quietly stop being asserted.
+    scanner = checker.Scanner("src/saitenka/app/media.py")
+    scanner.visit(
+        ast.parse(
+            """
+def screenshot(ipc):
+    ipc.command("screenshot-to-file", "shot.png")
+
+def neighbour(ipc):
+    ipc.command("get_property", "sub-start")
+"""
+        )
+    )
+    assert (
+        checker.Debt("direct-mpv-command", "src/saitenka/app/media.py::screenshot")
+        not in scanner.debt
+    )
+    assert checker.Debt("direct-mpv-read", "src/saitenka/app/media.py::neighbour") in scanner.debt
 
 
 def test_no_write_to_mpv_bypasses_the_egress_gateway() -> None:

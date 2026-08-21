@@ -313,6 +313,19 @@ class FakeIPC:
             return {"data": self.props.get(args[1])}
         return {"data": None}
 
+    def probe(self, name: str) -> dict:
+        return self.command("get_property", name)
+
+    def query(self, name: str) -> object | None:
+        # Through `command`, like `command_async`: a subclass that simulates mpv state must see
+        # every read, and a fake with a second path for one channel reads as a production bug.
+        # The error check mirrors `MpvIPC.query` — a fake that answered past an error would let a
+        # caller depend on a payload production discards.
+        reply = self.probe(name)
+        if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
+            return None
+        return reply.get("data")
+
     def command_async(self, *args, expected_connection_epoch=None):
         del expected_connection_epoch
         # Delegate to `command` rather than recording directly: mpv has one channel, and a subclass

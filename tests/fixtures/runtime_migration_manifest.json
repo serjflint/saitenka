@@ -1,46 +1,6 @@
 {
   "debt": [
     [
-      "direct-mpv-read",
-      "src/saitenka/app/commands/attach.py::_finish_attach_subtitle_startup"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/commands/attach.py::_install_attach_reslot_hook"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/controller.py::Reader._get"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/controller.py::Reader._probe_ass_full"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/embedded_subs.py::_selected_sub_track"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/media.py::current_timespan"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/subselect.py::fetch_jimaku"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/subselect.py::remove_external_sub_tracks"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/subtitle_modes.py::sub_tracks"
-    ],
-    [
-      "direct-mpv-read",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility"
-    ],
-    [
       "reader-parameter",
       "src/saitenka/app/controller.py::Reader.__init__"
     ],

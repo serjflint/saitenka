@@ -83,6 +83,9 @@ class FakeIPC(NoSessionRuntime):
             return {"data": self.props.get(args[1])}
         return {"data": None}
 
+    def query(self, name: str) -> object | None:
+        return self.props.get(name)
+
     def drain_events(self, *_args, **_kwargs):
         return []
 

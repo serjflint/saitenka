@@ -330,7 +330,7 @@ class SubtitleEgress(Protocol):
     port must *refuse* one, and a `getattr` probe cannot tell that apart from a renamed method.
     """
 
-    def command(self, *args: object) -> dict: ...
+    def query(self, name: str) -> object | None: ...
 
     def submit_runtime_mpv(self, **kwargs: object) -> bool: ...
 
@@ -445,13 +445,15 @@ class NativeVisibleRenderer:
         return Visibility.UNKNOWN
 
     def _read_visibility(self, ipc) -> Visibility:
+        # The blanket stays here rather than moving into `query`: "anything I could not read is
+        # UNKNOWN, never legacy proof" is this machine's invariant, and hanging it on the
+        # transport's catch list would make a stand-in that raises something else hand the pixels
+        # away. `query` already discards a payload that arrived beside an error.
         try:
-            reply = ipc.command("get_property", "sub-visibility")
+            value = ipc.query("sub-visibility")
         except Exception:  # noqa: BLE001  # an unreadable boundary is unknown, never legacy proof
             return Visibility.UNKNOWN
-        if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
-            return Visibility.UNKNOWN
-        return self._visibility_of(reply.get("data"))
+        return self._visibility_of(value)
 
     def _trace_ownership(
         self,

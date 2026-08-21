@@ -331,7 +331,7 @@ class DownloadPorts:
 
     toast: Callable[..., object]
     submit_fetch: FetchSubmitter
-    get_property: Callable[[str], int | str | None]
+    get_property: Callable[[str], object]
     surfaces: object
 
 

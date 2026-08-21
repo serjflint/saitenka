@@ -367,7 +367,7 @@ def _wait_for(predicate, *, timeout: float, message: str):
 
 
 def _track_for_path(ipc, path: Path) -> dict[str, Any] | None:
-    tracks = ipc.command("get_property", "track-list").get("data") or []
+    tracks = ipc.query("track-list") or []
     target = os.path.normcase(str(path.resolve()))
     return next(
         (
@@ -382,7 +382,7 @@ def _track_for_path(ipc, path: Path) -> dict[str, Any] | None:
 
 
 def _internal_ass_track(ipc) -> dict[str, Any] | None:
-    tracks = ipc.command("get_property", "track-list").get("data") or []
+    tracks = ipc.query("track-list") or []
     candidates = [
         track
         for track in tracks
@@ -456,7 +456,7 @@ def _wait_track_event(ipc, path: Path, *, present: bool) -> dict[str, Any]:
 
 
 def _probe_phase(ipc, generated_sid: int, native_sid: int, *, paused: bool) -> dict[str, Any]:
-    current_pause = ipc.command("get_property", "pause").get("data")
+    current_pause = ipc.query("pause")
     if current_pause == paused:
         pause_observation = {"kind": "current-value", "data": current_pause}
     else:
@@ -761,9 +761,9 @@ def run_mpv_transition_probe(
             _probe_phase(ipc, generated_sid, native_sid, paused=True),
             _probe_phase(ipc, generated_sid, native_sid, paused=False),
         ]
-        before_wrong = ipc.command("get_property", "sid").get("data")
+        before_wrong = ipc.query("sid")
         wrong_reply = ipc.command("set_property", "sid", 2_147_483_647)
-        after_wrong = ipc.command("get_property", "sid").get("data")
+        after_wrong = ipc.query("sid")
         _require(
             wrong_reply.get("error") != "success" and after_wrong == before_wrong,
             "wrong-track control did not fail closed",
@@ -776,8 +776,8 @@ def run_mpv_transition_probe(
             timeout=3.0,
             message="generated track was not removed",
         )
-        final_sid = ipc.command("get_property", "sid").get("data")
-        final_secondary_sid = ipc.command("get_property", "secondary-sid").get("data")
+        final_sid = ipc.query("sid")
+        final_secondary_sid = ipc.query("secondary-sid")
         final_native_mask = _subtitle_mask(ipc, workspace, "final-native")
         native_visual_restored = (
             final_sid == native_sid

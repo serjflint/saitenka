@@ -110,7 +110,7 @@ def _finish_attach_subtitle_startup(
     )  # shared with run: manual re-sync retry + Ctrl+J source picker
     if not fetch_in_background:
         return
-    video_path = ipc.command("get_property", "path").get("data")
+    video_path = ipc.query("path")
     if not video_path:
         return
     background_fetch = provider_fetch_factory(fetch_in_background, cfg)
@@ -178,7 +178,7 @@ def _install_attach_reslot_hook(
     re-establish JP subs via :func:`_attach_reslot`, so watching continues in Japanese without a manual
     re-attach. Reactive only (``reslot_hook`` on ``file-loaded``) — attach never sets ``advance_hook``;
     the user/SyncPlay owns advancing (the #62 gate). No-op if mpv has no current path yet."""
-    current_path = ipc.command("get_property", "path").get("data")
+    current_path = ipc.query("path")
     if not current_path:
         return
 

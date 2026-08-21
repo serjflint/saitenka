@@ -398,6 +398,39 @@ class MpvIPC:
                 )
                 return {"error": "timeout"}
 
+    def probe(self, name: str) -> dict:
+        """The whole reply for one property — for the question the value cannot answer.
+
+        mpv distinguishes "property not found" from "property is unavailable": a build that lacks a
+        feature from one that has not produced it yet. That answer is the error string, so a
+        capability probe reads the reply and everything else reads `query`.
+        """
+        return self.command("get_property", name)
+
+    def query(self, name: str) -> object | None:
+        """The value mpv reports for one property, or `None` when it does not answer.
+
+        Total, and the transport's job rather than each feature's: a read is a capability the
+        transport has, not a command a feature composes out of a verb string and a `.get("data")`
+        tail. Every caller spelled that tail itself, and each one guessed differently about a reply
+        carrying an error.
+
+        `None` conflates unset with unanswered because mpv reports an unset property as a null value
+        — there was never a distinction here to lose. A caller that needs one reads `probe`, or
+        issues a correlated read whose terminal carries an outcome.
+
+        A failed reply answers `None` even when it carries a `data` field, which mpv does: reading
+        the payload past the error is how a dead socket's stale `false` becomes a fact. One caller
+        checked for this and the other nine spelled a bare `.get("data")`.
+        """
+        try:
+            reply = self.probe(name)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
+            return None
+        return reply.get("data")
+
     def _pop_pending(self, epoch: int | None = None) -> list[Future[dict]]:
         with self._pending_lock:
             if epoch is None:

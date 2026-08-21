@@ -535,7 +535,7 @@ def fetch_jimaku(
 
     Returns ``(ok, status)`` so callers can fall back on failure. Usable
     standalone as the runtime "force jimaku" action (a keybind can call this mid-playback)."""
-    video = ipc.command("get_property", "path").get("data")
+    video = ipc.query("path")
     if not video:
         return False, "jimaku: mpv reports no file path — cannot fetch"
     sub_path, status = fetch_jimaku_path(
@@ -596,7 +596,7 @@ def remove_external_sub_tracks(ipc) -> int:
     before re-adding the current episode's srt. mpv carries a prior episode's external over a playlist
     advance AND auto-selects it, so on advance the overlay would show the old episode's lines (found
     live: ep2's srt selected on ep03 as "unknown language 10/11"). Ids are stable across removals."""
-    data = ipc.command("get_property", "track-list").get("data") or []
+    data = ipc.query("track-list") or []
     removed = 0
     for track in data:
         if track.get("type") == "sub" and track.get("external") and track.get("id") is not None:
