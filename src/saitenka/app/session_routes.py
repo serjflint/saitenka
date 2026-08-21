@@ -42,10 +42,12 @@ from saitenka.runtime.effects import (
     ReleaseInputCapture,
     RemoveSessionArtifacts,
     ReplaySubtitleSelection,
+    ReslotEpisode,
     RetireCueIdentity,
     SeedOptionalCollaborators,
     StartPropertyObservation,
 )
+from saitenka.runtime.episode import EPISODE_FEATURE, EpisodeBoundary, reduce_episode
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     PLAYBACK_EVENTS,
@@ -58,6 +60,7 @@ from saitenka.runtime.events import (
     EpisodeRetired,
     EventEnvelope,
     EventOrigin,
+    FileLoaded,
     SessionClosing,
     SessionStarting,
     StartupHintRequested,
@@ -119,6 +122,7 @@ _SESSION_EVENTS = (
     ConnectionLost,
     ConnectionReady,
     ConnectionReplaced,
+    FileLoaded,
     EffectFinished,
     SessionClosing,
 )
@@ -144,6 +148,7 @@ _CLAIMED = (
     ConnectionLost,
     ConnectionReady,
     ConnectionReplaced,
+    FileLoaded,
 )
 
 #: Feature keys inside `Owner.SESSION`'s slice. Named once so a reader of the slot does not spell
@@ -152,6 +157,7 @@ STARTUP_HINT = "startup-hint"
 LIFECYCLE_CLOSE = "lifecycle-close"
 LIFECYCLE_START = "lifecycle-start"
 CONNECTION = "connection"
+EPISODE = EPISODE_FEATURE
 
 #: Names in `gateway.session_resources`. Spelled once for the same reason the feature keys are:
 #: the owner that registers and the dispatcher that closes must not drift apart.
@@ -168,6 +174,9 @@ SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
 #: with the rest — nothing about that seam is close-specific, and an act moves off the Reader by
 #: becoming an effect with a registered performer whatever the phase.
 CUE_RETIRE_RESOURCE = "cue-identity-retire"
+#: Re-slotting onto a newly loaded file. A *starting* act — the episode is being established — so it
+#: goes in the start table beside the subtitle replay.
+RESLOT_PARTICIPANT = "start:episode-reslot"
 
 #: The optional collaborators' probes, and the interaction work that outlives a cancelled hover.
 CAPABILITY_PARTICIPANTS = ("capability:tts", "capability:anki")
@@ -269,6 +278,7 @@ _RESOURCE_OF: dict[type, tuple[str, ...]] = {
 #: because the verbs differ; sharing one would be the widening this vocabulary avoids.
 _PARTICIPANT_OF: dict[type, str] = {
     ReplaySubtitleSelection: SUBTITLE_REPLAY_PARTICIPANT,
+    ReslotEpisode: RESLOT_PARTICIPANT,
     GuardMainRender: RENDER_GUARD_PARTICIPANT,
     EstablishRenderSpace: RENDER_SPACE_PARTICIPANT,
     StartPropertyObservation: OBSERVERS_PARTICIPANT,
@@ -418,6 +428,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             LIFECYCLE_CLOSE: reduce_lifecycle_close,
             LIFECYCLE_START: reduce_lifecycle_start,
             CONNECTION: reduce_connection,
+            EPISODE: reduce_episode,
         }
     )
     playback = playback_slice_reducer()
@@ -466,6 +477,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
                     LIFECYCLE_CLOSE: LifecycleCloseState(),
                     LIFECYCLE_START: LifecycleStartState(),
                     CONNECTION: ConnectionState(),
+                    EPISODE: EpisodeBoundary(),
                 }
             ),
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),

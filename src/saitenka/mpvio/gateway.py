@@ -21,6 +21,7 @@ from saitenka.runtime import (
     EventEnvelope,
     EventOrigin,
     ExpireEffect,
+    FileLoaded,
     MailboxFull,
     Owner,
     RawMpvEvent,
@@ -226,7 +227,8 @@ class LegacyEventRouter:
         if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
             events.append(payload.data)
         elif isinstance(
-            payload, UserCommand | ConnectionLost | ConnectionReady | ConnectionReplaced
+            payload,
+            UserCommand | ConnectionLost | ConnectionReady | ConnectionReplaced | FileLoaded,
         ):
             events.append(payload)
 
@@ -528,6 +530,8 @@ class MpvGateway:
         name = str(message.get("event", "unknown"))
         if name == "property-change" and message.get("name") == "mouse-pos":
             name = "mouse-pos"
+        if name == "file-loaded":
+            return FileLoaded()
         if name == "client-message":
             args = message.get("args")
             if lock_held:

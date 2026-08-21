@@ -142,3 +142,33 @@ def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
     }
     assert census["ConnectionReady"] == (1, 1)
     gateway.close()
+
+
+def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
+    """The episode boundary, claimed. The reducer holds nothing — whether this is a *new* file is
+    the performer's question, answered against mpv when it acts — so the oracle is that the act
+    happened, not that a field changed."""
+    from saitenka.runtime.effects import ReslotEpisode
+    from saitenka.runtime.episode import EpisodeBoundary, reduce_episode
+    from saitenka.runtime.events import FileLoaded
+
+    assert reduce_episode(EpisodeBoundary(), FileLoaded()).effects == (ReslotEpisode(),)
+    assert reduce_episode(EpisodeBoundary(), READY).effects == (), (
+        "the slice broadcasts, so every SESSION event reaches this and only one is its own"
+    )
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
+    reslotted: list[str] = []
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    monkeypatch.setattr(reader, "_reslot_episode", lambda: reslotted.append("reslot"))
+    try:
+        gateway.publish_session_event(FileLoaded())
+        ipc.drain_events(0.0)
+    finally:
+        reader.close()
+        gateway.close()
+
+    assert reslotted == ["reslot"], "claimed away from the Reader, so the effect is the only path"
+    assert gateway.claim_census()["FileLoaded"] == (1, 1)

@@ -332,6 +332,7 @@ class Reader:
         self.ipc = ipc
         self._interactive_ready = False
         self._connection = ConnectionStore(ipc)
+        self._picker_guard = LegacyPickerRepeatGuard()
         # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
         # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
         self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
@@ -602,6 +603,7 @@ class Reader:
             BACKLOG_RESOURCE,
             CUE_RETIRE_RESOURCE,
             MINED_RESOURCE,
+            RESLOT_PARTICIPANT,
             SESSION_SUMMARY_RESOURCE,
             SUBTITLE_CLEAR_RESOURCE,
             SUBTITLE_CLOSE_RESOURCE,
@@ -676,7 +678,12 @@ class Reader:
         )
         ipc.register_session_resource(
             SUBTITLE_REPLAY_PARTICIPANT,
-            session_resources.Starting(self._on_ipc_reconnect),
+            # Late-bound like every other registered step: an early-bound method also freezes the
+            # seam a test replaces, and these two are reached only through the effect.
+            session_resources.Starting(lambda: self._on_ipc_reconnect()),
+        )
+        ipc.register_session_resource(
+            RESLOT_PARTICIPANT, session_resources.Starting(lambda: self._reslot_episode())
         )
         for name, retire in (
             (
@@ -3886,6 +3893,16 @@ class Reader:
         self._slotted_path = p
         self.reslot_hook(p)
 
+    def _reslot_episode(self) -> None:
+        """Perform the episode boundary: break the coalescing window, then re-slot.
+
+        Both halves in one performer because both are what a file change means. The guard is
+        arrival machinery and the re-slot is the act, but a boundary that moved only one of them
+        would leave a picker press from the previous file coalescing against the next one's.
+        """
+        self._picker_guard.separate()
+        self._on_file_loaded()
+
     def pump(self, timeout: float | None = 0.0) -> bool:
         """Consume one turn of events, blocking up to ``timeout``. False if mpv went away.
 
@@ -3928,7 +3945,12 @@ class Reader:
             otel_metrics.osd_paused_nudge.add(1)
 
     def _drain_events(self, timeout: float | None = 0.0) -> None:
-        picker_guard = LegacyPickerRepeatGuard()
+        # Reset rather than rebuilt, which is the same thing and leaves the guard reachable: a
+        # file-load has to break the coalescing window, and with the boundary an effect now, the
+        # performer is what breaks it. The window itself stays drain-local — coalescing across two
+        # drains would suppress a genuine second press, and a batch is a property of arrival.
+        picker_guard = self._picker_guard
+        picker_guard.separate()
         # This drain owns a whole turn, so completions come back in envelope sequence and are
         # dispatched below in order with the observations they followed.
         for ev in self.ipc.drain_events(timeout, ordered_terminals=True):
@@ -3994,6 +4016,9 @@ class Reader:
         if isinstance(ev, ConnectionReplaced):
             self._on_ipc_reconnect()
             return
+        if isinstance(ev, events.FileLoaded):
+            self._reslot_episode()
+            return
         if isinstance(ev, ConnectionReady):
             # Only reached without a reactor: a session that has one claims this, because learning
             # the transport is back is the whole of what the event means. Its twin cannot be
@@ -4018,9 +4043,11 @@ class Reader:
             log.debug("ignored unsupported runtime event: %s", type(ev).__name__)
             return
         kind = ev.get("event")
+        # The wire shape, for a session with no gateway: nothing has named the event, so the dict
+        # is all there is. Three layers, one writer — a reactor performs the effect, a gateway
+        # without one hands over `FileLoaded`, and this is what is left when neither exists.
         if kind == "file-loaded":
-            picker_guard.separate()
-            self._on_file_loaded()
+            self._reslot_episode()
         elif kind == "property-change":
             self._on_property_change(ev)
         elif kind == "client-message":

@@ -288,6 +288,16 @@ class ReplaySubtitleSelection:
 
 
 @dataclass(frozen=True, slots=True)
+class ReslotEpisode:
+    """mpv loaded a file: re-slot the overlay and the subtitle source onto it.
+
+    Carries no path, for the reason `FileLoaded` does not: the performer asks mpv what is playing
+    when it acts, and skips a file it has already slotted. A path on the effect would be the
+    answer as it was one turn ago.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class RetireCueIdentity:
     """The transport went away, so the cue on screen describes nothing that is still live.
 
@@ -297,7 +307,8 @@ class RetireCueIdentity:
 
 
 type LifecycleEffect = (
-    ReplaySubtitleSelection
+    ReslotEpisode
+    | ReplaySubtitleSelection
     | RetireCueIdentity
     | StopSession
     | StartupEffect
@@ -322,7 +333,8 @@ type LifecycleEffect = (
 #: terminal and no completion: nothing correlates to them, and a reservation raised during close
 #: is one nothing would ever retire.
 type FireAndForget = (
-    ReplaySubtitleSelection
+    ReslotEpisode
+    | ReplaySubtitleSelection
     | RetireCueIdentity
     | StartupEffect
     | DetachDiagnostics

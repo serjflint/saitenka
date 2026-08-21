@@ -145,6 +145,17 @@ class StartupReady:
 
 
 @dataclass(frozen=True, slots=True)
+class FileLoaded:
+    """mpv finished loading a file.
+
+    Typed rather than left in `RawMpvEvent`, for the reason `UserCommand` already is: `owner_of`
+    dispatches on the payload's type, so an observation that needs an owner needs a name. It
+    carries no path — whether this is a *new* file is the performer's question, and it reads the
+    answer from mpv when it acts rather than from a field that was true when the event was built.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class RawMpvEvent:
     name: str
     data: object = None
@@ -730,6 +741,7 @@ type RuntimeEvent = (
     | ConnectionReady
     | ConnectionReplaced
     | CloseRequested
+    | FileLoaded
     | SessionClosing
     | SessionStarting
     | RawMpvEvent

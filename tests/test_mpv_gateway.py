@@ -21,6 +21,7 @@ from saitenka.runtime import (
     EffectOutcome,
     EventOrigin,
     ExpireEffect,
+    FileLoaded,
     Owner,
     RawMpvEvent,
     SendMpvCommand,
@@ -180,7 +181,7 @@ def test_connection_loss_wakes_reconnect_and_replays_registered_observers() -> N
         ConnectionLost(0),
         ConnectionReplaced(1),
         {"event": "property-change", "name": "pause", "data": "pause"},
-        {"event": "file-loaded"},
+        FileLoaded(),
         ConnectionReady(1),
     ]
     assert ipc.commands == [
@@ -299,13 +300,14 @@ def test_command_terminal_slot_survives_normal_lane_saturation(outcome, reason) 
 
 
 def test_gateway_preserves_events_buffered_before_installation() -> None:
+    """Buffered before the gateway existed, and still delivered — typed, because the gateway names
+    a file-load rather than passing the wire dict through."""
     ipc = MpvIPC("unused")
-    event = {"event": "file-loaded"}
     ipc._feed(b'{"event":"file-loaded"}\n')
 
     MpvGateway(ipc, SessionMailbox())
 
-    assert ipc.drain_events() == [event]
+    assert ipc.drain_events() == [FileLoaded()]
     ipc.close()
 
 
@@ -403,7 +405,7 @@ def test_replaying_connection_blocks_commands_and_buffers_wire_events() -> None:
     assert events == [
         ConnectionReplaced(1),
         {"event": "property-change", "name": "pause", "data": "pause"},
-        {"event": "file-loaded"},
+        FileLoaded(),
         {"event": "property-change", "name": "pause", "data": False},
         ConnectionReady(1),
     ]
