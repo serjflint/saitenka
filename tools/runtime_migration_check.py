@@ -83,24 +83,11 @@ _DRIVER_SWITCH_SYMBOLS: set[str] = set()
 #: Rows, not symbols. Five of these symbols carry a `reader-parameter` row as well, and that second
 #: row IS WP5's to convert — a symbol-keyed set would have quietly excused all five.
 _TERMINAL_DEBT = {
-    # WP6 deleted the tick loop and the drain-local guard beside it; what is left is the legacy
-    # staging path, which the bounded close barrier is the first thing that can retire.
-    "driver-switch": frozenset(
-        {
-            (
-                "direct-mpv-command",
-                "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action",
-            ),
-            (
-                "direct-mpv-command",
-                "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate",
-            ),
-            (
-                "direct-mpv-command",
-                "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate",
-            ),
-        }
-    ),
+    # The `driver-switch` group is gone with WP6, not emptied: unlike `_TICK_METHODS` this set
+    # *excludes* rows rather than detecting them, so an empty group would guard nothing. The three
+    # visibility writes it held became correlated once `MpvIPC.close` started flushing its write
+    # queue — without that barrier a teardown restore was queued and then discarded.
+    #
     # Property reads. A read has no terminal outcome to correlate, so routing one through the egress
     # gateway buys nothing until the transport itself grows a typed query port.
     "transport-reads": frozenset(

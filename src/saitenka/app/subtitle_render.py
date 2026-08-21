@@ -197,22 +197,21 @@ class SubtitleRenderer(NoPixelOwnership):
     """Rasterize the current cue and blit it as the SUB overlay — the real draw path."""
 
     def activate(self, target: SubtitleTarget, _sid: SelectedSid = ASK_MPV) -> bool:
+        """Ask mpv to stop drawing its own subtitles; this renderer draws them either way.
+
+        `True` unconditionally, because this path never hands the pixels back: a refused write is
+        reported on its own terminal, and returning it here would hand the caller a decision it
+        cannot act on — the legacy render is already the fallback it would fall back to.
+        """
         if not hasattr(self, "_restore_visibility"):
             self._restore_visibility = target.get("sub-visibility")
-        reply = target.ipc.command(
-            "set_property",
-            "sub-visibility",
-            False,  # noqa: FBT003  # mpv IPC wire value
-        )
-        return not isinstance(reply, dict) or reply.get("error") in {None, "success"}
+        _send_visibility(target.ipc, "subtitle:hide-for-legacy-render", visible=False)
+        return True
 
     def deactivate(self, target: SubtitleTarget) -> None:
         restore = getattr(self, "_restore_visibility", None)
         if restore is not None:
-            try:
-                target.ipc.command("set_property", "sub-visibility", restore)
-            except (OSError, ValueError):
-                log.info("could not restore mpv subtitle visibility during close")
+            _send_visibility(target.ipc, "subtitle:restore-visibility", visible=bool(restore))
 
     def suspend_for_overlay(self, target: SubtitleTarget) -> None:
         _send_visibility(target.ipc, "subtitle:suspend-for-overlay", visible=True)
@@ -728,11 +727,7 @@ class NativeVisibleRenderer:
         elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
             self._stage_legacy(target, action)
         elif action.kind == ActionKind.SHOW_MPV:
-            target.ipc.command(
-                "set_property",
-                "sub-visibility",
-                True,  # noqa: FBT003  # mpv IPC wire value
-            )
+            _send_visibility(target.ipc, "ownership:show-mpv", visible=True)
         elif action.kind == ActionKind.SCHEDULE_RETRY:
             self._arm_retry(target, action)
         elif action.kind == ActionKind.CANCEL_RETRY:
@@ -741,7 +736,7 @@ class NativeVisibleRenderer:
             target.ipc.cancel_runtime_timer(OWNERSHIP_RETRY_TIMER)
         elif action.kind == ActionKind.RESTORE_VISIBILITY:
             restore = True if self._restore_visibility is None else self._restore_visibility
-            target.ipc.command("set_property", "sub-visibility", restore)
+            _send_visibility(target.ipc, "ownership:restore-visibility", visible=restore)
 
     def _arm_retry(self, target: SubtitleTarget, action: OwnershipAction) -> None:
         """Arm the ownership retry as a named deadline, fenced by its effect id."""

@@ -24,16 +24,12 @@ def test_runtime_migration_manifest_matches_production() -> None:
     assert checker.check() == 0
     # Live rows, so the scanner is checked against production and not only against the synthetic
     # source below. Anchors, not landmarks: as the migration converts them, point these at whatever
-    # `poe runtime-status` still reports rather than weakening the assertion. `tick-stage` is gone
-    # entirely — WP6 deleted the driver — so the anchor moved to the legacy staging path WP6 leaves.
-    assert (
-        checker.Debt(
-            "direct-mpv-command",
-            "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action",
-        )
-        in actual
-    )
-    assert not any(item.kind == "tick-stage" for item in actual)
+    # `poe runtime-status` still reports rather than weakening the assertion. `tick-stage` and
+    # `direct-mpv-command` are both gone entirely — WP6 deleted the driver, then correlated the last
+    # three visibility writes — so the anchor moved to the reads, which stay until a read has a
+    # terminal to come back on.
+    assert checker.Debt("direct-mpv-read", "src/saitenka/app/controller.py::Reader._get") in actual
+    assert not any(item.kind in {"tick-stage", "direct-mpv-command"} for item in actual)
 
 
 def test_the_terminal_set_claims_every_remaining_row() -> None:
@@ -42,12 +38,12 @@ def test_the_terminal_set_claims_every_remaining_row() -> None:
     The interesting assertion is not the total — it is that the remainder is empty. A new row
     appearing outside the terminal set (a regression, or a kind nobody enumerated) would hold the
     total steady by displacing a converted row, and the count alone cannot see that. The total
-    itself only ever falls, and falls by a deletion: WP6 took the drain-local guard out of it.
+    itself only ever falls, and falls by a deletion: WP6 took the whole `driver-switch` group out.
     """
     checker = _module()
     actual, _, _ = checker.scan()
     terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
-    assert len(terminal) == checker.TERMINAL_TOTAL == 19
+    assert len(terminal) == checker.TERMINAL_TOTAL == 16
     assert [item for item in actual if (item.kind, item.source) not in terminal] == []
 
 
@@ -386,22 +382,18 @@ def test_a_synchronous_by_contract_write_is_exempt_but_its_neighbours_are_not() 
     assert checker.Debt("direct-mpv-read", "src/saitenka/app/media.py::current_timespan") in actual
 
 
-def test_the_only_remaining_direct_writes_are_the_driver_switch_set() -> None:
-    """WP5's exit condition for writes, stated as an assertion instead of read off by eye. These
-    three are `DRIVER_SWITCH_DEBT` — the renderer's activate/deactivate and `_apply_action`'s
-    SHOW_MPV / RESTORE_VISIBILITY — and WP6 deletes them with the driver.
+def test_no_write_to_mpv_bypasses_the_egress_gateway() -> None:
+    """WP5's exit condition for writes, now at zero: every mpv write in `app/` is correlated.
 
-    If this fails because a row was CONVERTED, tighten it. If it fails because one was added, that
-    is the gate doing its job.
+    The last three — the renderer's activate/deactivate and `_apply_action`'s SHOW_MPV /
+    RESTORE_VISIBILITY — waited on `MpvIPC.close` flushing its write queue, without which a
+    correlated teardown restore was queued and then dropped. What stays permanently synchronous is
+    enumerated in `_SYNCHRONOUS_BY_CONTRACT`, and is exempted there rather than counted here.
     """
     checker = _module()
     actual, _, _ = checker.scan()
 
-    assert {d.source for d in actual if d.kind == "direct-mpv-command"} == {
-        "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action",
-        "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate",
-        "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate",
-    }
+    assert {d.source for d in actual if d.kind == "direct-mpv-command"} == set()
 
 
 def test_a_converted_symbol_is_retired_without_a_hand_bless() -> None:

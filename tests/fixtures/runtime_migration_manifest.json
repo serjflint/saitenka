@@ -1,18 +1,6 @@
 {
   "debt": [
     [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate"
-    ],
-    [
       "direct-mpv-read",
       "src/saitenka/app/commands/attach.py::_finish_attach_subtitle_startup"
     ],

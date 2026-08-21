@@ -17,7 +17,7 @@ from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
-from saitenka.app.subtitle_render import NativeVisibleRenderer
+from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, events
@@ -2716,3 +2716,24 @@ def test_the_profile_changes_when_any_setting_does():
     """The profile keys the geometry cache. Two different render configurations sharing a key would
     serve one's boxes for the other's frame."""
     assert _inputs().profile != _inputs(**{"sub-ass-force-margins": True}).profile
+
+
+def test_the_legacy_renderer_restores_the_visibility_it_found_at_close(tmp_path: Path) -> None:
+    """The teardown write that kept `deactivate` synchronous — correlated now, and it still lands.
+
+    `activate` records what mpv held before hiding its subtitles and close puts it back. That is the
+    one thing a user notices about a session that ended, and nothing asserted it: the native
+    renderer's own restore was covered, the fallback's was not.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    ipc.props["sub-visibility"] = True
+    renderer = SubtitleRenderer()
+    result.subtitle_pipeline.renderer = renderer
+
+    assert renderer.activate(result._subtitle_target()) is True
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    ipc.commands.clear()
+
+    result.close()
+
+    assert ("set_property", "sub-visibility", True) in ipc.commands
