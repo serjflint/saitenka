@@ -14,8 +14,32 @@ import threading
 import pytest
 
 from saitenka.app.launch import run as cli_run
-from saitenka.app.session_runtime import SessionEntry, SessionRuntime
+from saitenka.app.session_runtime import (
+    SessionActs,
+    SessionEntry,
+    SessionFacts,
+    SessionRuntime,
+)
 from saitenka.app.tokenize import Token
+
+
+def _facts(**given) -> SessionFacts:
+    """A `SessionFacts` for a stand-in: what it supplies, and a raiser for everything else.
+
+    Total by construction, like the value it stands in for. A member this drive never uses raises
+    rather than answering `None`, so a change that starts reading it fails here instead of silently
+    observing nothing.
+    """
+    return SessionFacts(**{**dict.fromkeys(SessionFacts.__slots__, _unused), **given})
+
+
+def _acts(**given) -> SessionActs:
+    """The acts half of `_facts`, same contract."""
+    return SessionActs(**{**dict.fromkeys(SessionActs.__slots__, _unused), **given})
+
+
+def _unused(*_a, **_k):
+    raise AssertionError("this drive was not supposed to reach that member")
 
 
 class _FakeReader:
@@ -31,7 +55,7 @@ class _FakeReader:
     @property
     def session_entry(self):
         """The shape `Reader.session_entry` builds — the seam the entry point is driven through."""
-        return SessionEntry(runtime=SessionRuntime(self, self.ipc), run=self.run)
+        return SessionEntry(runtime=SessionRuntime(_facts(), _acts(), self.ipc), run=self.run)
 
 
 def test_run_session_logs_mode_run_before_the_loop(caplog):
@@ -65,7 +89,26 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
 
         @property
         def session_entry(self):
-            return SessionEntry(runtime=SessionRuntime(self, self.ipc), run=self.run)
+            return SessionEntry(
+                runtime=SessionRuntime(
+                    _facts(
+                        refresh_osd=self.refresh_osd,
+                        prop=self._prop,
+                        get=self._get,
+                        tokens=lambda: self.tokens,
+                        is_content_token=lambda _t: True,
+                        painted=lambda: True,
+                    ),
+                    _acts(
+                        drive_annotation_once=lambda _t: None,
+                        prepare_subtitle=self.prepare_subtitle_blocking,
+                        prepare_hover=self.prepare_hover_blocking,
+                        mark_ready=self._mark_interactive_ready,
+                    ),
+                    self.ipc,
+                ),
+                run=self.run,
+            )
 
         def refresh_osd(self) -> None:
             pass
@@ -127,6 +170,14 @@ class _GeometryReader:
         return {"w": 1920, "h": 1080} if self.remaining <= 0 else {}
 
 
+def _geometry_facts(reader) -> SessionFacts:
+    return _facts(refresh_osd=reader.refresh_osd, prop=reader._prop)
+
+
+def _geometry_acts(reader) -> SessionActs:
+    return _acts(drive_annotation_once=reader._drive_annotation_once)
+
+
 def test_demo_waits_for_readiness_and_uses_the_owned_terminal_sequence():
     """A demo drives the session until mpv publishes its geometry rather than napping for it.
 
@@ -137,7 +188,7 @@ def test_demo_waits_for_readiness_and_uses_the_owned_terminal_sequence():
     from saitenka.app.session_runtime import SessionRuntime
 
     reader = _GeometryReader(turns_until_geometry=3)
-    runtime = SessionRuntime(reader, ipc=None)
+    runtime = SessionRuntime(_geometry_facts(reader), _geometry_acts(reader), ipc=None)
 
     assert runtime.await_render_space(timeout=5.0) is True
     assert len(reader.turns) == 3, "it drove the session per wake, rather than sleeping through it"
@@ -150,7 +201,9 @@ def test_a_demo_that_never_gets_geometry_gives_up_on_its_deadline():
 
     clock = iter([0.0, 0.0, 1.0, 9.0])
     reader = _GeometryReader(turns_until_geometry=10**6)
-    runtime = SessionRuntime(reader, ipc=None, clock=lambda: next(clock))
+    runtime = SessionRuntime(
+        _geometry_facts(reader), _geometry_acts(reader), ipc=None, clock=lambda: next(clock)
+    )
 
     assert runtime.await_render_space(timeout=5.0) is False
 

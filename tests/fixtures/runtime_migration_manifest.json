@@ -7,10 +7,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/reader_factory.py::create_reader"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/session_runtime.py::SessionRuntime.__init__"
     ]
   ],
   "startup": [

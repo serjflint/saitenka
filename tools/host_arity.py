@@ -40,7 +40,6 @@ EXEMPT = frozenset(
     {
         "controller.py::Reader.__init__",
         "reader_factory.py::create_reader",
-        "session_runtime.py::SessionRuntime.__init__",
     }
 )
 

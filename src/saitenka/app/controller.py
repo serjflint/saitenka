@@ -49,6 +49,7 @@ from saitenka.app import (
     reader_deps,
     session_intents,
     session_resources,
+    session_runtime,
     session_stats,
     sidebar,
     sub_picker,
@@ -4363,6 +4364,36 @@ class Reader:
 
     # --- progressive dep loading --------------------------------------------------------------
     @property
+    def session_facts(self) -> session_runtime.SessionFacts:
+        """What a noninteractive drive observes. A property, so it is not a debt row."""
+        return session_runtime.SessionFacts(
+            refresh_osd=self.refresh_osd,
+            prop=self._prop,
+            get=self._get,
+            tokens=lambda: self.tokens,
+            is_content_token=lambda token: self.tokenizer.is_content(token),
+            osd_height=lambda: self.osd[1],
+            painted=lambda: (
+                self.lifecycle_surfaces.settled() and self.interaction_surfaces.settled()
+            ),
+        )
+
+    @property
+    def session_acts(self) -> session_runtime.SessionActs:
+        """What a noninteractive drive performs — every one blocking or immediate by contract."""
+        return session_runtime.SessionActs(
+            drive_annotation_once=self._drive_annotation_once,
+            prepare_subtitle=self.prepare_subtitle_blocking,
+            prepare_hover=self.prepare_hover_blocking,
+            mark_ready=self._mark_interactive_ready,
+            scroll_tip=self._scroll_tip,
+            setup_secondary=self._setup_secondary,
+            toggle_translation=self.toggle_translation,
+            mine_current=self.mine_current,
+            bulk_mine=self.bulk_mine,
+        )
+
+    @property
     def deps_load(self) -> reader_deps.DepsLoad:
         """What starting a background dep load needs. A property, so it is not a debt row."""
         return reader_deps.DepsLoad(
@@ -4475,7 +4506,9 @@ class Reader:
     @property
     def session_entry(self) -> SessionEntry:
         """This reader as run mode's entry point: the demo runtime, and the loop."""
-        return SessionEntry(runtime=SessionRuntime(self, self.ipc), run=self.run)
+        return SessionEntry(
+            runtime=SessionRuntime(self.session_facts, self.session_acts, self.ipc), run=self.run
+        )
 
     def run(self) -> None:
         """Bring the session up phase by phase, then hand the thread to the loop.

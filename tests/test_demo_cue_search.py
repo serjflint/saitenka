@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
 
 import util
 
 from saitenka.app.launch.run import DEMO_LINE, _demo_cue_text
-from saitenka.app.session_runtime import SessionRuntime, choose_demo_token
+from saitenka.app.session_runtime import (
+    SessionActs,
+    SessionFacts,
+    SessionRuntime,
+    choose_demo_token,
+)
 
 
 class FakeIPC(util.FakeIPC):
@@ -25,8 +31,11 @@ class FakeIPC(util.FakeIPC):
         return super().command(*args)
 
 
-def reader_for(texts: list[str], ipc: FakeIPC, clock: list[float]):
-    """A reader whose `sub-text` follows `texts`, one value per hop.
+def ports_for(texts: list[str], ipc: FakeIPC, clock: list[float]):
+    """The two drive values whose `sub-text` follows `texts`, one value per hop.
+
+    A stand-in for the values rather than for a `Reader`: what a cue search reads is six facts and
+    one act, and standing in for those is what makes the double's surface the drive's surface.
 
     Each hop advances the injected clock by the time it was granted, so a search that never finds a
     cue exhausts its deadline without the test spending it — the determinism rule, and the
@@ -44,18 +53,47 @@ def reader_for(texts: list[str], ipc: FakeIPC, clock: list[float]):
         # passes through without a turn — these tests are about what the *cue* search costs.
         return {"w": 1920, "h": 1080} if name == "osd-dimensions" else None
 
-    return SimpleNamespace(
-        refresh_osd=lambda: None, _get=get, _prop=prop, _drive_annotation_once=drive
+    unused = _never_reached
+    return (
+        SessionFacts(
+            refresh_osd=lambda: None,
+            prop=prop,
+            get=get,
+            tokens=unused,
+            is_content_token=unused,
+            osd_height=unused,
+            painted=unused,
+        ),
+        SessionActs(
+            drive_annotation_once=drive,
+            prepare_subtitle=unused,
+            prepare_hover=unused,
+            mark_ready=unused,
+            scroll_tip=unused,
+            setup_secondary=unused,
+            toggle_translation=unused,
+            mine_current=unused,
+            bulk_mine=unused,
+        ),
     )
+
+
+def _never_reached(*_a, **_k):
+    """A member a cue search must not touch. Raising beats `None`: it names the change that broke it."""
+    raise AssertionError("the cue search reached a member it does not own")
 
 
 def test_a_cue_already_showing_needs_no_search() -> None:
     ipc = FakeIPC()
     clock = [0.0]
-    reader = reader_for(["猫を見る"], ipc, clock)
+    facts, acts = ports_for(["猫を見る"], ipc, clock)
 
     assert (
-        _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv") == "猫を見る"
+        _demo_cue_text(
+            SessionRuntime(facts, acts, ipc, clock=lambda: clock[0]),
+            "/a.mkv",
+        )
+        == "猫を見る"
     )
     assert ipc.seeks == 0
 
@@ -63,10 +101,14 @@ def test_a_cue_already_showing_needs_no_search() -> None:
 def test_it_hops_until_a_cue_lands() -> None:
     ipc = FakeIPC()
     clock = [0.0]
-    reader = reader_for(["", "", "犬も見る"], ipc, clock)
+    facts, acts = ports_for(["", "", "犬も見る"], ipc, clock)
 
     assert (
-        _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv") == "犬も見る"
+        _demo_cue_text(
+            SessionRuntime(facts, acts, ipc, clock=lambda: clock[0]),
+            "/a.mkv",
+        )
+        == "犬も見る"
     )
     assert ipc.seeks == 2  # stopped at the cue rather than running a fixed count out
 
@@ -77,16 +119,21 @@ def test_each_hop_is_bounded_so_the_search_keeps_seeking() -> None:
     ipc = FakeIPC()
     waits: list[float | None] = []
     clock = [0.0]
-    reader = reader_for([""], ipc, clock)
-    original = reader._drive_annotation_once
+    facts, acts = ports_for([""], ipc, clock)
+    original = acts.drive_annotation_once
 
     def record(timeout: float | None) -> None:
         waits.append(timeout)
         original(timeout)  # still advances the clock, or the search never reaches its deadline
 
-    reader._drive_annotation_once = record
+    # A new value rather than a patched one: the acts are frozen, which is what stops a drive from
+    # rebinding what it was handed halfway through.
+    acts = dataclasses.replace(acts, drive_annotation_once=record)
 
-    _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv")
+    _demo_cue_text(
+        SessionRuntime(facts, acts, ipc, clock=lambda: clock[0]),
+        "/a.mkv",
+    )
 
     assert waits
     assert max(w for w in waits if w is not None) <= 0.12
@@ -97,10 +144,14 @@ def test_a_search_that_never_finds_a_cue_falls_back() -> None:
     end up with *something* to render either way."""
     ipc = FakeIPC()
     clock = [0.0]
-    reader = reader_for([""], ipc, clock)
+    facts, acts = ports_for([""], ipc, clock)
 
     assert (
-        _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), "/a.mkv") == DEMO_LINE
+        _demo_cue_text(
+            SessionRuntime(facts, acts, ipc, clock=lambda: clock[0]),
+            "/a.mkv",
+        )
+        == DEMO_LINE
     )
 
 
@@ -108,9 +159,15 @@ def test_no_video_never_seeks() -> None:
     """Nothing to seek through, so waiting could only ever time out."""
     ipc = FakeIPC()
     clock = [0.0]
-    reader = reader_for([""], ipc, clock)
+    facts, acts = ports_for([""], ipc, clock)
 
-    assert _demo_cue_text(SessionRuntime(reader, ipc, clock=lambda: clock[0]), None) == DEMO_LINE
+    assert (
+        _demo_cue_text(
+            SessionRuntime(facts, acts, ipc, clock=lambda: clock[0]),
+            None,
+        )
+        == DEMO_LINE
+    )
     assert ipc.seeks == 0
 
 

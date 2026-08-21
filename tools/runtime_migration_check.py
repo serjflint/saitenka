@@ -106,12 +106,15 @@ _TERMINAL_DEBT = {
     # `Reader` field or called a `Reader` act, which is the round-trip shape, so it moved onto the
     # owner of that state. `reader_deps` no longer imports `Reader` at all — a module that BUILDS
     # collaborators has no business performing the transition that installs them.
+    #
+    # `SessionRuntime.__init__` held a `Reader` because it DRIVES one, which read as composition
+    # until the members were counted: seven facts and nine acts, i.e. a feature value. What is left
+    # here is the two that genuinely compose — one builds the `Reader`, the other IS it.
     "host-composition": frozenset(
         ("reader-parameter", source)
         for source in (
             "src/saitenka/app/controller.py::Reader.__init__",
             "src/saitenka/app/reader_factory.py::create_reader",
-            "src/saitenka/app/session_runtime.py::SessionRuntime.__init__",
         )
     ),
 }

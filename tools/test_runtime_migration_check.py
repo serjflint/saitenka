@@ -48,7 +48,7 @@ def test_the_terminal_set_claims_every_remaining_row() -> None:
     checker = _module()
     actual, _, _ = checker.scan()
     terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
-    assert len(terminal) == checker.TERMINAL_TOTAL == 3
+    assert len(terminal) == checker.TERMINAL_TOTAL == 2
     assert [item for item in actual if (item.kind, item.source) not in terminal] == []
 
 

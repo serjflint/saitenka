@@ -8,8 +8,11 @@ would have to keep alive.
 
 So the entry modes name operations here instead. What each one costs today (a Reader call, a
 correlated command) is this module's business; when WP6 repoints them at reducers and ports, the
-entry modes do not change. The seam is the point — `SessionRuntime` holding a `Reader` is the debt
-that remains, and it is one row instead of one per helper.
+entry modes do not change. The seam is the point.
+
+It held a `Reader` for exactly one reason — it *drives* one — and that read as composition until the
+members were counted: three facts and a dozen acts, which is a feature value. `SessionFacts` and
+`SessionActs` are that value, split the way every feature here splits.
 """
 
 from __future__ import annotations
@@ -28,6 +31,45 @@ if TYPE_CHECKING:
 #: One hop's worth of waiting. Bounded per attempt so a cue search keeps seeking rather than parking
 #: on the first wake; the overall bound is the caller's deadline, not a retry count.
 CUE_HOP_SECONDS = 0.12
+
+
+@dataclass(frozen=True, slots=True)
+class SessionFacts:
+    """What driving a noninteractive session *observes*.
+
+    `prop` and `get` are both here and are not the same question: `prop` answers with the observed
+    property while observing, which is what the render-space wait needs, and `get` is the plain
+    transport read.
+    """
+
+    refresh_osd: Callable[[], object]
+    prop: Callable[[str], object]
+    get: Callable[[str], object]
+    tokens: Callable[[], Sequence[Any]]
+    is_content_token: Callable[[Any], bool]
+    #: Height of the space actually being drawn into — the scroll step is a fraction of it.
+    osd_height: Callable[[], int]
+    #: Every staged surface acknowledged. A capture taken before this photographs the previous frame.
+    painted: Callable[[], bool]
+
+
+@dataclass(frozen=True, slots=True)
+class SessionActs:
+    """What driving a noninteractive session *performs*.
+
+    Every one of these is blocking or immediate by contract: a demo composes a frame and then looks
+    at it, so an act that merely queued would be photographed half-done.
+    """
+
+    drive_annotation_once: Callable[[float | None], object]
+    prepare_subtitle: Callable[[str], None]
+    prepare_hover: Callable[[int], None]
+    mark_ready: Callable[[], object]
+    scroll_tip: Callable[[int], None]
+    setup_secondary: Callable[[], object]
+    toggle_translation: Callable[[], None]
+    mine_current: Callable[[], None]
+    bulk_mine: Callable[[], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +102,16 @@ def choose_demo_token(tokens: Sequence[Any], target: str, is_content: Callable[[
 class SessionRuntime:
     """Drive one session through named operations instead of `Reader` internals."""
 
-    def __init__(self, reader, ipc, *, clock: Callable[[], float] = time.monotonic) -> None:
-        self._reader = reader
+    def __init__(
+        self,
+        facts: SessionFacts,
+        acts: SessionActs,
+        ipc,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._facts = facts
+        self._acts = acts
         self._ipc = ipc
         self._clock = clock
         # Resolved per step, not bound here: a mode that never waits must not require the host to
@@ -69,7 +119,7 @@ class SessionRuntime:
         self._runner = SessionRunner(self._drive, clock=clock)
 
     def _drive(self, timeout: float | None) -> None:
-        self._reader._drive_annotation_once(timeout)
+        self._acts.drive_annotation_once(timeout)
 
     # --- driving -----------------------------------------------------------------------------
 
@@ -86,13 +136,12 @@ class SessionRuntime:
         return self.run_until(self._painted, timeout=timeout)
 
     def _painted(self) -> bool:
-        reader = self._reader
-        return reader.lifecycle_surfaces.settled() and reader.interaction_surfaces.settled()
+        return self._facts.painted()
 
     # --- cue ---------------------------------------------------------------------------------
 
     def refresh_render_space(self) -> None:
-        self._reader.refresh_osd()
+        self._facts.refresh_osd()
 
     def await_render_space(self, *, timeout: float) -> bool:
         """Pump until mpv publishes its window geometry. `False` if the deadline passed first.
@@ -107,12 +156,14 @@ class SessionRuntime:
         return self.run_until(self._render_space_known, timeout=timeout)
 
     def _render_space_known(self) -> bool:
-        self._reader.refresh_osd()  # fold in whatever this turn observed
-        dimensions = self._reader._prop("osd-dimensions") or {}
+        self._facts.refresh_osd()  # fold in whatever this turn observed
+        observed = self._facts.prop("osd-dimensions")
+        dimensions = observed if isinstance(observed, dict) else {}
         return bool(dimensions.get("w")) and bool(dimensions.get("h"))
 
     def cue_text(self) -> str:
-        return self._reader._get("sub-text") or ""
+        text = self._facts.get("sub-text")
+        return text if isinstance(text, str) else ""
 
     def seek_next_cue(self) -> None:
         send_correlated(self._ipc, "demo-cue-hop", "sub-seek", 1, owner=Owner.SUBTITLE)
@@ -128,7 +179,7 @@ class SessionRuntime:
 
         def hop(remaining: float | None) -> None:
             self.seek_next_cue()
-            self._reader._drive_annotation_once(
+            self._acts.drive_annotation_once(
                 CUE_HOP_SECONDS if remaining is None else min(remaining, CUE_HOP_SECONDS)
             )
 
@@ -138,19 +189,19 @@ class SessionRuntime:
         return self.cue_text()
 
     def prepare_cue(self, text: str) -> None:
-        self._reader.prepare_subtitle_blocking(text)
+        self._acts.prepare_subtitle(text)
 
     def tokens(self) -> Sequence[Any]:
-        return self._reader.tokens
+        return self._facts.tokens()
 
     def is_content_token(self, token: Any) -> bool:
-        return self._reader.tokenizer.is_content(token)
+        return self._facts.is_content_token(token)
 
     def prepare_hover(self, index: int) -> None:
-        self._reader.prepare_hover_blocking(index)
+        self._acts.prepare_hover(index)
 
     def mark_ready(self) -> None:
-        self._reader._mark_interactive_ready()
+        self._acts.mark_ready()
 
     # --- interaction -------------------------------------------------------------------------
 
@@ -159,14 +210,14 @@ class SessionRuntime:
     SCROLL_FRACTION = 0.12
 
     def scroll_tooltip(self) -> None:
-        self._reader._scroll_tip(round(self._reader.osd[1] * self.SCROLL_FRACTION))
+        self._acts.scroll_tip(round(self._facts.osd_height() * self.SCROLL_FRACTION))
 
     def enable_translation(self) -> None:
-        self._reader._setup_secondary()
-        self._reader.toggle_translation()
+        self._acts.setup_secondary()
+        self._acts.toggle_translation()
 
     def mine(self, *, bulk: bool) -> None:
-        (self._reader.bulk_mine if bulk else self._reader.mine_current)()
+        (self._acts.bulk_mine if bulk else self._acts.mine_current)()
 
     def capture(self, path: str) -> object:
         """Capture the window to `path`, synchronously.
