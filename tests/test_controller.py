@@ -1081,8 +1081,7 @@ def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
 
     def mouse(x, y):
-        ipc.props["mouse-pos"] = {"hover": True, "x": x, "y": y}
-        r._update_hover()
+        Driver(r, instant=False).move(x, y)
 
     mouse(5, 5)  # first hover → opens INSTANTLY (no dwell)
     assert seen == [0] and r.hover == 0
@@ -1115,8 +1114,8 @@ def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
     from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
     identity, due = ipc.timers["lifecycle:scan-open"]  # the due event, captured in flight
-    ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave before it elapses
-    r._update_hover()  # retires the dwell — but the captured due event is already out there
+    # leaving retires the dwell — but the captured due event is already out there
+    Driver(r, instant=False).move(5, 5)
 
     due(EffectFinished(EffectId(0), Owner.INTERACTION, identity, EffectOutcome.SUCCEEDED))
 
@@ -1136,8 +1135,7 @@ def test_transit_over_word_does_not_switch(monkeypatch):
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
 
     def mouse(x, y):
-        ipc.props["mouse-pos"] = {"hover": True, "x": x, "y": y}
-        r._update_hover()
+        Driver(r, instant=False).move(x, y)
 
     mouse(5, 5)  # tooltip on word 0
     mouse(5, 50)  # brush word 1 briefly (transit) — arms the switch dwell
@@ -1162,8 +1160,7 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
 
     def mouse(x, y):
-        ipc.props["mouse-pos"] = {"hover": True, "x": x, "y": y}
-        r._update_hover()
+        Driver(r, instant=False).move(x, y)
 
     mouse(5, 5)  # on the word → hovered, no pending hide
     assert r.hover == 0 and not r.hover_view().tip.hide_pending
@@ -1512,8 +1509,7 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     tx, ty, tw, th = r.tip.view.rect
-    ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + th - 5}  # low in the body
-    r.on_click()
+    Driver(r, instant=False).move(tx + tw / 2, ty + th - 5).click()  # low in the body
     assert events == []  # neither speaks nor mines
 
 
@@ -1530,12 +1526,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     px, py, pw, ph = header_speaker_rect(r.tip_scale.width)
     sx, sy = r.tip.view.xy
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": sx + px + pw / 2,
-        "y": sy + (py - r.tip.view.scroll) + ph / 2,
-    }
-    r.on_click()
+    Driver(r, instant=False).move(sx + px + pw / 2, sy + (py - r.tip.view.scroll) + ph / 2).click()
     assert events == ["speak"]  # only the 🔊 button plays audio
 
 
@@ -1825,8 +1816,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None
-    ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave the whole stack
-    r._update_hover()
+    Driver(r, instant=False).move(5, 5)  # leave the whole stack
     assert r._hover_store.current.hysteresis.nest_hide_pending  # scheduled, not instant
 
     assert _fire_dwell(ipc, "nested-hide")
@@ -1852,12 +1842,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
     px, py, pw, ph = header_add_rect(r.tip_scale.width)
     nx, ny = r.tip.nest.xy
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": nx + px + pw / 2,
-        "y": ny + (py - r.tip.nest.scroll) + ph / 2,
-    }
-    r.on_click()
+    Driver(r, instant=False).move(nx + px + pw / 2, ny + (py - r.tip.nest.scroll) + ph / 2).click()
     assert mined and mined[0].startswith("追")  # ⊕ mined the scanned inner word
 
 
@@ -1955,12 +1940,9 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     lb = next(b for b in r.tip.view.state.windowed.link_boxes() if not b.query.startswith("kanji:"))
     assert "*" in lb.query  # the cross-ref is a wildcard pattern
     sx, sy = r.tip.view.xy
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": sx + lb.x + lb.w / 2,
-        "y": sy + (lb.y - r.tip.view.scroll) + lb.h / 2,
-    }
-    r.on_click()
+    Driver(r, instant=False).move(
+        sx + lb.x + lb.w / 2, sy + (lb.y - r.tip.view.scroll) + lb.h / 2
+    ).click()
     # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
     assert r.hover_view().nested.state is None
     assert len(r.interaction.tip_nav.back) == 1
@@ -2140,12 +2122,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     tx, ty, tw, _th = r.tip.view.rect
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": tx + tw / 2,
-        "y": ty + 5,
-    }  # header, not a scan cell
-    r.copy_click()
+    Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()  # header, not a scan cell
     assert got and "本命" in got[0]  # copied the hovered word
     assert r.interaction.copy_pulse.overlay == C.TIP_ID
 
@@ -2160,8 +2137,7 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     nx, ny, nw, nh = r.tip.nest.rect
-    ipc.props["mouse-pos"] = {"hover": True, "x": nx + nw / 2, "y": ny + nh / 2}
-    r.copy_click()
+    Driver(r, instant=False).move(nx + nw / 2, ny + nh / 2).right_click()
     assert got and got[0].startswith("追")  # copied the inner scanned word
     assert r.interaction.copy_pulse.overlay == C.NESTED_ID
 
@@ -2181,8 +2157,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
         r.ov, "show_bgra", lambda bgra, _x, _y, oid: shots.append((oid, bgra.copy()))
     )
     tx, ty, tw, _th = r.tip.view.rect
-    ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
-    r.copy_click()
+    Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
     oid, view = shots[-1]
     hl = np.array(tooltip_panel.FLASH_BGRA, np.uint8)
     assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
@@ -2202,8 +2177,7 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     _hover_base_word(r)
     tx, ty, tw, _th = r.tip.view.rect
-    ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
-    r.copy_click()
+    Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
     stale = ipc.timers["lifecycle:flash-expiry"]
 
     r.copy_click()  # arms a second pulse; the first deadline is now stale
@@ -2223,8 +2197,7 @@ def test_closing_retires_a_pending_copy_flash(monkeypatch):
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     _hover_base_word(r)
     tx, ty, tw, _th = r.tip.view.rect
-    ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
-    r.copy_click()
+    Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
 
     r.close()
 
@@ -2313,8 +2286,7 @@ def test_preview_empty_click_plays_nothing(monkeypatch):
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     px, py, _pw, ph = r.interaction.preview_panel.rect
-    ipc.props["mouse-pos"] = {"hover": True, "x": px + 6, "y": py + ph - 6}  # empty body
-    r.on_click()
+    Driver(r, instant=False).move(px + 6, py + ph - 6).click()  # empty body
     assert played == []
 
 

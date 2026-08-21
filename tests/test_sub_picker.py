@@ -336,11 +336,11 @@ def test_scroll_only_fires_with_the_pointer_over_the_panel():
     rect = reader.interaction.picker_panel.rect
     assert rect is not None
 
-    ipc.props["mouse-pos"] = {"x": 0, "y": 0}
+    ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
     assert sub_picker.scroll(reader.wheel_step, 1) is False
     assert reader.sub_picker.scroll == 0
 
-    ipc.props["mouse-pos"] = {"x": rect[0] + 5, "y": rect[1] + 5}
+    ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
     assert sub_picker.scroll(reader.wheel_step, 1) is True
     assert reader.sub_picker.scroll == picker.ROWS_PER_WHEEL_STEP
 
@@ -354,10 +354,10 @@ def test_suppress_hover_only_over_the_panel():
     rect = reader.interaction.picker_panel.rect
     assert rect is not None
 
-    ipc.props["mouse-pos"] = {"x": rect[0] + 5, "y": rect[1] + 5}
+    ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
     assert sub_picker.suppress_hover(reader.hover_suppression) is True
 
-    ipc.props["mouse-pos"] = {"x": 0, "y": 0}
+    ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
     assert sub_picker.suppress_hover(reader.hover_suppression) is False
 
 
