@@ -220,10 +220,15 @@ class LegacyEventRouter:
             )
             raise OSError(reason)
         if isinstance(payload, EffectFinished):
-            if ordered_terminals:
-                events.append(payload)
-            elif self._runtime_bridge is not None:
+            # A completion belongs to the correlator that issued the effect. The only reason one
+            # ever went out to the caller is order — a callback run mid-drain precedes every
+            # observation the caller has not handled yet. So it goes out only while the caller is
+            # actually holding something: with every earlier envelope claimed, "in position" and
+            # "now" are the same instant, and the round trip through the Reader buys nothing.
+            if self._runtime_bridge is not None and not (ordered_terminals and events):
                 self._runtime_bridge.handle_terminal(payload)
+            elif ordered_terminals:
+                events.append(payload)
             return
         if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
             events.append(payload.data)

@@ -4025,6 +4025,10 @@ class Reader:
 
     def _drain_event(self, ev: object, picker_guard: LegacyPickerRepeatGuard) -> None:
         if isinstance(ev, EffectFinished):
+            # Reached only when something earlier in this batch fell through to the drain, which
+            # for a session with a reactor is nothing: the receive dispatches a completion in place
+            # once nothing is waiting on the Reader. This relays it back so the order the ordered
+            # mode exists for survives.
             self.ipc.dispatch_runtime_terminal(ev)
             return
         # The three connection arms are the no-reactor fallback, and nothing else: a session with

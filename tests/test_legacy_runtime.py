@@ -402,6 +402,28 @@ def test_ordered_terminals_hands_the_completion_back_in_envelope_sequence() -> N
     assert seen == [("observation", "sub-text"), ("terminal", "probe")]
 
 
+def test_a_completion_is_dispatched_in_place_when_nothing_waits_on_the_caller() -> None:
+    """The ordered mode exists so a callback does not precede an observation the caller still owes.
+    With a reactor claiming every earlier envelope the caller owes nothing, so the receive
+    dispatches the completion where it sits and the caller never sees one.
+
+    The negative control is the test above: the same batch with an unclaimed observation in it
+    hands the completion back instead.
+    """
+    from saitenka.app.session_routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
+    install_session_reactor(gateway, startup_hint=False)
+    seen: list = []
+
+    _observation_then_terminal(ipc, gateway, seen)
+    drained = ipc.legacy_source(ordered_terminals=True)
+
+    assert seen == [("terminal", "probe")]
+    assert drained == [], "the observation was claimed and the completion never left the receive"
+
+
 def test_inline_dispatch_runs_the_completion_before_the_batch_is_handled() -> None:
     """The negative control for the test above, and the contract `_drive_annotation_once` keeps:
     without ordered terminals the callback fires mid-drain, ahead of an older observation."""
