@@ -766,6 +766,7 @@ host-arity-over = { shell = "uv run python tools/host_arity.py over", help = "Ho
 # and what those names resolve to underneath (seven names over one owner slice are one port, not
 # seven parameters). `--member` is the step before a codemod; its `--json` is the worklist.
 cluster-map = { shell = "uv run python tools/cluster_map.py", help = "What a module touches on the host, by fact — `--member NAME` for one member and its sites" }
+arch-map = { shell = "uv run --extra full python tools/arch_map.py", help = "The four architecture views ARCHITECTURE.md cannot hold: imports, ownership, commands, seams (`-- --json` for the data)" }
 # GATE (in `all`) — the host's mass, ratcheted. `total` is the anti-laundering number: moving a body
 # into a module function and leaving a thin delegator behind shrinks the substantive split while the
 # host is unchanged, and gating only that would report the growth mode this repo prescribes as
