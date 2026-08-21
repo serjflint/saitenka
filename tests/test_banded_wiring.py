@@ -16,7 +16,10 @@ from saitenka.panel import Definition, Entry
 
 
 class _FakeDS:
-    def entry_for(self, tok, _inflected=None):
+    # The signature is the real `DictionarySet.entry_for`'s, keywords included: the interactive
+    # hover expands a phrase and calls it `entry_for(tok, inflected=…, extra_terms=…)`, which a
+    # positional-only stand-in rejects. Poking `_show_tooltip` never reached that call.
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         # Far taller than head + one-screen overscan, so some blocks stay unmeasured after the first
         # paint — proving the lazy tail. CJK body → yields scan cells for the hit-test.
         para = "とても長い定義の本文で追いかける。" * 12
@@ -43,7 +46,7 @@ def _content_word(r: Reader) -> int:
 
 def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
     r = _reader()
-    r._show_tooltip(_content_word(r))
+    Driver(r).move_to_word(_content_word(r))
     st = r.tip.view.state
     assert st is not None and st.windowed is not None  # the windowed engine composites the tooltip
     assert r.hover_view().tip.rect is not None  # first frame composited + uploaded without error

@@ -1423,8 +1423,7 @@ def test_hover_off_window_still_lingers(monkeypatch):
     r.tokens = ["x"]
     r.hover = 0
     monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
-    ipc.props["mouse-pos"] = {"hover": False, "x": -1, "y": -1}  # cursor left the window
-    r._update_hover()
+    Driver(r, instant=False).leave()  # cursor left the window
     assert r.hover == 0 and r.hover_view().tip.hide_pending  # scheduled, not instant
 
 
@@ -1474,15 +1473,18 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     assert wp.measured > before  # scrolling measured more blocks (the deferred tail)
 
 
-def _click_center_of_add_button(r, ipc):
+def _add_button_center(r) -> tuple[float, float]:
+    """Screen coords of the ⊕ in the card header."""
     from saitenka.panel import header_add_rect
 
     px, py, pw, ph = header_add_rect(r.tip_scale.width)
     sx, sy = r.tip.view.xy
-    cx = sx + px + pw / 2
-    cy = sy + (py - r.tip.view.scroll) + ph / 2
-    ipc.props["mouse-pos"] = {"hover": True, "x": cx, "y": cy}
-    return cx, cy
+    return sx + px + pw / 2, sy + (py - r.tip.view.scroll) + ph / 2
+
+
+def _point_at_add_button(r) -> Driver:
+    """Move onto the ⊕; return the driver so the click follows the cursor."""
+    return Driver(r, instant=False).move(*_add_button_center(r))
 
 
 @pytest.mark.usefixtures("anki_up")  # the ⊕ button only draws when AnkiConnect is reachable
@@ -1498,8 +1500,7 @@ def test_header_add_button_click_mines_hovered_word(monkeypatch):
     events = []
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
-    _click_center_of_add_button(r, ipc)
-    r.on_click()
+    _point_at_add_button(r).click()
     assert events == ["mine"]  # ⊕ mined; did not fall through to TTS
 
 
@@ -1542,7 +1543,7 @@ def test_header_add_button_absent_without_anki(monkeypatch):
     r.hover = 0
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
-    cx, cy = _click_center_of_add_button(r, ipc)
+    cx, cy = _add_button_center(r)
     assert not tooltip.hit_header_add(
         tooltip.chrome_for(r.tip.view, scale=r.tip_scale, style=r.panel_style), cx, cy
     )  # no ⊕ button when mining is unavailable
@@ -1773,18 +1774,14 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     boxes = r.tip.view.state.windowed.scan_boxes()
     sx, sy = r.tip.view.xy
 
+    ui = Driver(r, instant=False)
+
     def hover(sb):
-        ipc.props["mouse-pos"] = {
-            "hover": True,
-            "x": sx + sb.x + sb.w / 2,
-            "y": sy + sb.y + sb.h / 2,
-        }
+        ui.move(sx + sb.x + sb.w / 2, sy + sb.y + sb.h / 2)
 
     hover(boxes[0])
-    r._update_hover()
     assert r.hover_view().scan_target == boxes[0].text
     hover(boxes[1])  # drift to a different cell before the dwell elapses
-    r._update_hover()
 
     assert r.hover_view().scan_target == boxes[1].text  # the dwell restarted on the new cell
     assert r.hover_view().nested.state is None  # no popup fired mid-drift
@@ -2084,7 +2081,7 @@ def test_scroll_resets_scan_dwell(monkeypatch):
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().scan_target is not None  # a scan target is settling
     r.tip.view.view_h = 20  # make the panel scrollable
-    r._scroll_tip(20)  # scrolling the panel…
+    Driver(r, instant=False).wheel(1)  # scrolling the panel…
     assert r.hover_view().scan_target is None  # …restarts the dwell so no popup fires mid-scroll
 
 
@@ -2184,10 +2181,10 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     _hover_base_word(r)
     tx, ty, tw, _th = r.tip.view.rect
-    Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
+    ui = Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
     stale = ipc.timers["lifecycle:flash-expiry"]
 
-    r.copy_click()  # arms a second pulse; the first deadline is now stale
+    ui.right_click()  # arms a second pulse; the first deadline is now stale
 
     assert ipc.timers["lifecycle:flash-expiry"] != stale
     assert ipc.fire_runtime_timer("lifecycle:flash-expiry")
@@ -2237,9 +2234,10 @@ def _preview_reader(ipc, *, with_audio=True, with_image=True):
     return r
 
 
-def _point_at(ipc, rect):
+def _point_at(r, rect) -> Driver:
+    """Move onto the centre of a preview-panel rect; return the driver so the click follows."""
     x, y, w, h = rect
-    ipc.props["mouse-pos"] = {"hover": True, "x": x + w / 2, "y": y + h / 2}
+    return Driver(r, instant=False).move(x + w / 2, y + h / 2)
 
 
 def test_preview_does_not_autoplay(monkeypatch):
@@ -2282,8 +2280,7 @@ def test_preview_audio_button_plays_on_click(monkeypatch):
     monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    _point_at(ipc, r.interaction.preview_panel.audio_rect)
-    r.on_click()
+    _point_at(r, r.interaction.preview_panel.audio_rect).click()
     assert played == ["/tmp/a.mp3"]  # ▶ button plays the mined clip
 
 
@@ -2301,21 +2298,17 @@ def test_preview_image_click_toggles_zoom():
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     assert not r.interaction.preview.zoom
-    _point_at(ipc, r.interaction.preview_panel.image_rect)
-    r.on_click()
+    _point_at(r, r.interaction.preview_panel.image_rect).click()
     assert r.interaction.preview.zoom  # click screenshot → enlarge
-    _point_at(
-        ipc, r.interaction.preview_panel.image_rect
-    )  # the (bigger) image moved — re-read its rect
-    r.on_click()
+    # the (bigger) image moved — re-read its rect
+    _point_at(r, r.interaction.preview_panel.image_rect).click()
     assert not r.interaction.preview.zoom  # click again → back
 
 
 def test_preview_close_button_dismisses():
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    _point_at(ipc, r.interaction.preview_panel.close_rect)
-    r.on_click()
+    _point_at(r, r.interaction.preview_panel.close_rect).click()
     assert r.interaction.preview_panel.rect is None and not r.interaction.preview.open
 
 

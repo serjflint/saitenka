@@ -195,18 +195,19 @@ def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None
 def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
     """There is one representation of the hysteresis: what a caller is told about a dwell is what
     the machine armed, with no mirrored copy in between that can go stale."""
+    from driver import Driver
+
     from saitenka.app.controller import Reader
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()
-    ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}
     reader = Reader(ipc, prefetch=False, renderer=NullRenderer(), hover_switch_delay=10.0)
     try:
         reader.tokens = [object(), object()]
         reader.hover = 0
         reader._hit = lambda *_args: 1  # type: ignore[method-assign]
 
-        reader._update_hover()
+        Driver(reader, instant=False).move(5, 5)
 
         assert reader._hover_store.current.hysteresis.word_target == 1
         assert reader.hover_view().scan_target is None

@@ -58,6 +58,8 @@ SCENARIOS: dict[str, list[Step]] = {
 
 
 def _apply(reader, action: str, arg: object) -> None:
+    # `hover` and `scroll` enter below the input seam, for the reasons the state machine's own rules
+    # give: the fixture's tooltip covers words 1–2, and a scroll offset is what the oracle is about.
     if action == "hover":
         reader._show_tooltip(int(arg))  # type: ignore[arg-type]
     elif action == "scroll":

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 import util
 from dirty_equals import IsPartialDict
+from driver import Driver
 from util import record_spans
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
@@ -1407,7 +1408,7 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.commands.clear()
 
-    result.set_hover(2)
+    Driver(result).move_to_word(2)
 
     assert result.hover == 2
     assert result.tip.view.state is not None

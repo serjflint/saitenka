@@ -1,5 +1,6 @@
 """In-player help uses effective bindings and remains playback-neutral."""
 
+from driver import Driver
 from util import FakeIPC, keybind_registry
 
 from saitenka.app import tooltip
@@ -143,17 +144,14 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     monkeypatch.setattr(reader, "mine_current", lambda: actions.append("mine"))
     monkeypatch.setattr(reader, "toggle_bookmark", lambda: actions.append("bookmark"))
 
-    reader._handle(HELP_TOGGLE_MSG)
-    reader._update_hover()
-    reader._handle(MINE_MSG)
-    reader._handle(BOOKMARK_MSG)
-    reader._handle(SUB_NEXT_MSG)
+    ui = Driver(reader, instant=False)
+    ui.key(HELP_TOGGLE_MSG).move(5, 5)
+    ui.key(MINE_MSG).key(BOOKMARK_MSG).key(SUB_NEXT_MSG)
     assert hover_updates == []
     assert actions == []
     assert not [command for command in ipc.commands if command[0] == "sub-seek"]
 
-    reader._handle(HELP_CLOSE_MSG)
-    reader._update_hover()
+    ui.key(HELP_CLOSE_MSG).move(5, 5)
     assert hover_updates == ["hover"]
 
 

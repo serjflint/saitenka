@@ -26,6 +26,7 @@ from __future__ import annotations
 from functools import partial
 
 import pytest
+from driver import Driver
 from hypothesis import HealthCheck, event, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
@@ -118,6 +119,10 @@ class TooltipSession(RuleBasedStateMachine):
 
     @rule(idx=st.integers(min_value=0, max_value=2))
     def hover(self, idx: int) -> None:
+        # Below the input seam, like `scroll` below, and for a sharper reason: the fixture's tooltip
+        # (1280×864 at y=352) covers words 1 and 2, so a cursor that opened word 0 can never reach
+        # another one — correct runtime behaviour, and it collapses this rule to a single word. The
+        # subject here is panel geometry across transitions, not which word a cursor can pick.
         self.r._show_tooltip(idx)  # a fresh hover resets nav history and drops any nested popup
         self.shown, self.nav_depth, self.nested_open = True, 0, False
         self._check("hover")
@@ -125,6 +130,9 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule(delta=st.integers(min_value=-500, max_value=500))
     def scroll(self, delta: int) -> None:
+        # Below the input seam on purpose: the oracle is scroll *position* vs drawn geometry, and the
+        # two producers (a wheel notch, a TIP_UP/DOWN page) only reach a handful of the offsets where
+        # clamping and band boundaries live. A notch count would not explore them.
         self.r._scroll_tip(delta)
         self._check("scroll")
 
@@ -198,7 +206,7 @@ def test_the_agreement_oracle_has_teeth() -> None:
     # displayed centres round-trip, but a deliberately DRIFTED transform mis-hits — so a real seam
     # regression (a stale scroll / scale / panel after some transition) would turn the state machine red.
     r = _fresh_reader()
-    r._show_tooltip(0)
+    Driver(r).move_to_word(0)
     panel, s, scroll = tooltip_panel.hit_target(
         r.tip.nest, r.tip.view.state, r.tip.view.scroll, r.tip_scale.raster, nested=False
     )

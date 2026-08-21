@@ -4,6 +4,7 @@ import dataclasses
 
 import pytest
 import util
+from driver import Driver
 from PIL import Image
 
 from saitenka.app import sidebar
@@ -258,7 +259,7 @@ def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):
         lambda _reader: (_ for _ in ()).throw(AssertionError("tooltip reached")),
     )
 
-    reader._update_hover()
+    Driver(reader, instant=False).move(110, 110)
 
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
