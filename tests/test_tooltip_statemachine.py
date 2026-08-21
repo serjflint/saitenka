@@ -133,7 +133,7 @@ class TooltipSession(RuleBasedStateMachine):
         # Below the input seam on purpose: the oracle is scroll *position* vs drawn geometry, and the
         # two producers (a wheel notch, a TIP_UP/DOWN page) only reach a handful of the offsets where
         # clamping and band boundaries live. A notch count would not explore them.
-        self.r._scroll_tip(delta)
+        self.r.scroll_tip(delta)
         self._check("scroll")
 
     @precondition(lambda self: self.shown)

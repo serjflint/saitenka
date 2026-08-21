@@ -33,7 +33,6 @@ from saitenka.app import (
     hover_intents,
     hover_metadata,
     hover_snapshot,
-    interaction_intents,
     mask_atlas_startup,
     mine_intents,
     mined_feedback,
@@ -2050,7 +2049,7 @@ class Reader:
             self.redraw_sub_picker,
             self.sidebar_view,
             self.hold_sidebar_scroll,
-            self._scroll_tip,
+            self.scroll_tip,
             self.tip_scale.ref_h,
         )
 
@@ -2660,7 +2659,7 @@ class Reader:
     def _render_nested_view(self) -> None:
         tooltip_panel.render_view(self.tip_ports, self.tip.nest)
 
-    def _scroll_tip(self, delta: int) -> None:
+    def scroll_tip(self, delta: int) -> None:
         # event → redraw-finished latency for one scroll tick: nests the downstream "render"
         # (banded block-cache miss) and "upload" (OSD blit) spans, so a scroll-frame trace_id
         # groups the whole chain instead of leaving "upload" as an orphaned, unrelated span.
@@ -2704,27 +2703,6 @@ class Reader:
         not grow a row per feature.
         """
         return StatelessRouter(stateless_features(self))
-
-    def _run_interaction_command(self, command: interaction_intents.InteractionCommand) -> None:
-        inputs = interaction_intents.InteractionInputs(
-            can_go_back=self.tip_can_go_back, tooltip_view_height=self.tip_scale.ref_h
-        )
-        for effect in interaction_intents.reduce(command, inputs):
-            self._apply_interaction_effect(effect)
-
-    def _apply_interaction_effect(self, effect: interaction_intents.InteractionEffect) -> None:
-        if isinstance(effect, interaction_intents.RouteWheel):
-            surfaces.route_scroll(self.wheel_step, effect.steps)
-        elif isinstance(effect, interaction_intents.ScrollTooltip):
-            self._scroll_tip(effect.pixels)
-        elif isinstance(effect, interaction_intents.NavigateBack):
-            tooltip.tip_back(self.tip_ports)
-        elif isinstance(effect, DismissHover):
-            self.retire_hover()
-        elif isinstance(effect, interaction_intents.RouteClick):
-            self.on_click()
-        elif isinstance(effect, interaction_intents.CopyUnderCursor):
-            self.copy_click()
 
     def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
         """The (cached) panel for a clicked/keyed nested open — the shared builder the engaged-tooltip
@@ -3511,7 +3489,7 @@ class Reader:
             return lambda: getattr(self, name)()
 
         def interaction(command) -> Callable[[], None]:
-            return lambda: self._run_interaction_command(command)
+            return lambda: self._stateless.run(command)
 
         # Every row's decision is a pure reducer — `subtitle_intents`, `runtime.help`,
         # `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
@@ -3945,7 +3923,7 @@ class Reader:
         them, which is what left this as a drain and a pair of post-drain settlements.
         """
         try:
-            self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
+            self._scrolled_this_tick = False  # set by scroll_tip below (wheel or TIP_UP/DOWN)
             # Sampled before the drain: cue reconciliation draws from the batch boundary, so a
             # sample taken after it would miss the very draw the paused nudge exists to re-flush.
             ops_before = self.ov.ops
@@ -4346,7 +4324,7 @@ class Reader:
             prepare_subtitle=self.prepare_subtitle_blocking,
             prepare_hover=self.prepare_hover_blocking,
             mark_ready=self._mark_interactive_ready,
-            scroll_tip=self._scroll_tip,
+            scroll_tip=self.scroll_tip,
             setup_secondary=self._setup_secondary,
             toggle_translation=self.toggle_translation,
             mine_current=self.mine_current,

@@ -50,7 +50,7 @@ subtitle_geometry_extract_ms: Histogram | None = None
 subtitle_geometry_active_events: Histogram | None = None
 subtitle_geometry_eligible_tokens: Histogram | None = None
 subtitle_geometry_skipped_tokens: Histogram | None = None
-# Scroll-input → redraw-finished chain: wraps controller._scroll_tip end-to-end (banded/blit
+# Scroll-input → redraw-finished chain: wraps controller.scroll_tip end-to-end (banded/blit
 # re-render + OSD upload) for one wheel tick or TIP_UP/DOWN keypress — its duration IS the
 # scroll-to-photon latency a user would feel as stutter.
 scroll_frame_duration_ms: Histogram | None = None

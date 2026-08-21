@@ -59,7 +59,7 @@ _ARGUED: dict[tuple[str, str], str] = {
 def _residue_class(node: ast.Call, *, hover_written: bool) -> str | None:
     """Which seam a call reaches past, or None when it does not reach past one."""
     attribute = node.func.attr
-    if attribute == "_scroll_tip":
+    if attribute == "scroll_tip":
         return "scroll-in-pixels"
     if attribute == "_update_hover":
         return "hover-without-a-cursor"

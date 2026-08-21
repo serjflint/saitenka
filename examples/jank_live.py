@@ -98,7 +98,7 @@ def _scroll_four(reader) -> None:
 
     before = reader.tip.view.scroll
     for _ in range(4):
-        reader._scroll_tip(surfaces.tip_wheel_pixels(reader.tip_scale.ref_h, 1))
+        reader.scroll_tip(surfaces.tip_wheel_pixels(reader.tip_scale.ref_h, 1))
         reader.pump()
     if reader.tip.view.scroll == before:
         raise RuntimeError("live scroll workload did not advance the tooltip viewport")

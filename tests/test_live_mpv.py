@@ -143,7 +143,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
 
         # after scrolling the tall tip (windowed full_height converges here), the rect must still
         # match the drawn tip: its centre must read over_tip, not the word beneath.
-        reader._scroll_tip(round(reader.osd[1] * 0.3))
+        reader.scroll_tip(round(reader.osd[1] * 0.3))
         for _ in range(3):
             reader.pump()
             time.sleep(0.02)

@@ -740,7 +740,7 @@ def run_stress(
         reader.hover = 0
         timed(lambda: reader._show_tooltip(0))
         for _ in range(4):  # scroll toward the bottom of a tall entry
-            timed(lambda: reader._scroll_tip(step))
+            timed(lambda: reader.scroll_tip(step))
         st = reader.tip.view.state
         boxes = st.windowed.scan_boxes() if st else []
         if boxes:
@@ -750,7 +750,7 @@ def run_stress(
                     reader.tip_ports, reader.panel_ports, reader.word_lookup, sb
                 )
             )
-            timed(lambda: reader._scroll_tip(step))  # scroll while the nested popup is up
+            timed(lambda: reader.scroll_tip(step))  # scroll while the nested popup is up
             timed(reader._hide_nested)
         timed(lambda: reader.retire_hover())  # dismiss the whole stack
 
@@ -853,7 +853,7 @@ def _scroll_span_live(reader, subset, step: int, span_px: int, speed: float) -> 
         reader.tip.view.scroll = 0
         for _s in range(max(1, span_px // step)):
             t0 = time.perf_counter()
-            reader._scroll_tip(step)  # scroll_tip requests render-ahead in this direction
+            reader.scroll_tip(step)  # scroll_tip requests render-ahead in this direction
             frames.append((time.perf_counter() - t0) * 1000.0)
             time.sleep(dwell)
     return frames
@@ -979,7 +979,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
         steps = min(_SCROLL_JANK_STEPS, max(1, (st.full_height - cap) // step + 1))
         for _ in range(steps):
             t0 = time.perf_counter()
-            reader._scroll_tip(step)
+            reader.scroll_tip(step)
             bucket.append((time.perf_counter() - t0) * 1000.0)
             if word is not None:
                 worst.append((bucket[-1], word, st.full_height))
@@ -1875,7 +1875,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
                     if reader.tip.view.state is None:
                         continue  # nothing shown to scroll (a scroll before the first hover)
                     t0 = time.perf_counter()
-                    reader._scroll_tip(step)
+                    reader.scroll_tip(step)
                     dt = (time.perf_counter() - t0) * 1000.0
                     scroll_ms.append(dt)
                     if dt > 16.0:
@@ -2314,7 +2314,7 @@ def main() -> int:
 
     def scroll_frame():
         reader.tip.view.scroll = 0
-        reader._scroll_tip(step)  # down one step (re-render)
+        reader.scroll_tip(step)  # down one step (re-render)
 
     rows.append((f"scroll frame  (one {step}px step)", measure(scroll_frame, args.reps * 3)))
 

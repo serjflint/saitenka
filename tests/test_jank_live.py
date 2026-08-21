@@ -85,7 +85,7 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
         def __init__(self):
             self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
 
-        def _scroll_tip(self, delta):
+        def scroll_tip(self, delta):
             self.tip.view.scroll += delta
 
         def pump(self):
@@ -108,7 +108,7 @@ def test_scroll_workload_rejects_a_non_scrollable_tooltip():
         def __init__(self):
             self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
 
-        def _scroll_tip(self, _delta):
+        def scroll_tip(self, _delta):
             pass
 
         def pump(self):

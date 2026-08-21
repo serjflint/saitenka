@@ -16,7 +16,8 @@ import shutil
 import time
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app import panel_intents, telemetry
+from saitenka.app import interaction_intents, panel_intents, telemetry
+from saitenka.app.interaction_adapter import InteractionAdapter, InteractionHost
 from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.app.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.app.panel_adapter import PanelAdapter, PanelHost
@@ -581,7 +582,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     return reactor
 
 
-class StatelessHost(PanelHost, Protocol):
+class StatelessHost(InteractionHost, PanelHost, Protocol):
     """Every stateless feature's host surface at once, one base class per registered feature.
 
     There is no intersection type, so this is how the composition root types the object it hands
@@ -599,4 +600,8 @@ def stateless_features(host: StatelessHost) -> dict[type, StatelessFeature]:
     """
     return {
         panel_intents.PanelCommand: (panel_intents.reduce, PanelAdapter(host)),
+        interaction_intents.InteractionCommand: (
+            interaction_intents.reduce,
+            InteractionAdapter(host),
+        ),
     }

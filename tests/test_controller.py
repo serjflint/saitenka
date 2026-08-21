@@ -1469,7 +1469,7 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
         r.hover_view().tip.state.full_height >= r.tip.view.view_h
     )  # estimate at least fills the viewport
     before = wp.measured
-    r._scroll_tip(r.tip.view.state.full_height)  # wheel toward the bottom
+    r.scroll_tip(r.tip.view.state.full_height)  # wheel toward the bottom
     assert wp.measured > before  # scrolling measured more blocks (the deferred tail)
 
 
