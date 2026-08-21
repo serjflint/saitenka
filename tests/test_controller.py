@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from driver import Driver
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from util import FakeIPC as RuntimeFakeIPC
@@ -1108,9 +1109,8 @@ def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.scan_delay = 0.25
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()  # arms the scan dwell
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)  # arms the scan dwell
 
     from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
@@ -1589,15 +1589,25 @@ def _fire_dwell(ipc, kind: str) -> bool:
     return ipc.fire_runtime_timer(f"lifecycle:{kind}")
 
 
-def _hover_first_scan_cell(r, ipc):
-    """Point the cursor at the first scan cell of the base tooltip; return the ScanBox."""
+def _hover_base_word(r) -> Driver:
+    """Hover the subtitle word and return the driver the rest of the test drives.
+
+    `move_to_word` hit-tests the cursor against the word's box, which `set_hover(0)` never did — a
+    test that pokes the index proves the tooltip builds, never that a cursor over that word gets it.
+    """
+    return Driver(r, instant=False).move_to_word(0)
+
+
+def _hover_first_scan_cell(r):
+    """Arrive on the first scan cell of the base tooltip; return the ScanBox.
+
+    The move goes through `Driver`, so it is mpv's `mouse-pos` read by the real `_update_hover` —
+    the path a cursor takes. `instant=False` because these tests deliver their own dwells; an
+    arrival that also fired them could not express "just arrived, nothing opens yet".
+    """
     sb = r.tip.view.state.windowed.scan_boxes()[0]
     sx, sy = r.tip.view.xy
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": sx + sb.x + sb.w / 2,
-        "y": sy + (sb.y - r.tip.view.scroll) + sb.h / 2,
-    }
+    Driver(r, instant=False).move(sx + sb.x + sb.w / 2, sy + (sb.y - r.tip.view.scroll) + sb.h / 2)
     return sb
 
 
@@ -1731,9 +1741,8 @@ def test_hover_inner_word_opens_nested_popup(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)  # base tooltip on the subtitle word
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()
+    _hover_base_word(r)  # base tooltip on the subtitle word
+    _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None  # a nested popup opened…
     assert r.hover_view().nested.rect is not None
@@ -1747,12 +1756,10 @@ def test_nested_scan_waits_for_dwell(monkeypatch):
     r = _scan_reader(ipc)
     r.scan_delay = 0.25  # require the cursor to settle before opening
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-
-    r._update_hover()
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)
     assert r.hover_view().nested.state is None  # just arrived — nothing opens yet
-    r._update_hover()
+    _hover_first_scan_cell(r)  # re-arriving on the same cell must not re-arm
     assert r.hover_view().nested.state is None  # still settling on the same cell
 
     assert _fire_dwell(ipc, "scan-open")  # the cursor rested it out
@@ -1765,7 +1772,7 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     r = _scan_reader(ipc)
     r.scan_delay = 0.25
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     boxes = r.tip.view.state.windowed.scan_boxes()
     sx, sy = r.tip.view.xy
 
@@ -1800,9 +1807,8 @@ def test_switch_base_word_drops_nested(monkeypatch):
     ]
     r.boxes = [WordBox(0, 100, 300, 40, 40), WordBox(1, 500, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None
     r.set_hover(1)  # move to a different subtitle word
@@ -1815,9 +1821,8 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None
     ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave the whole stack
@@ -1839,9 +1844,8 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     r._anki_capability = SimpleNamespace(value=True, request=lambda: False)
     r._tts_ok = True
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.token is not None
     mined = []
@@ -2088,9 +2092,8 @@ def test_scroll_resets_scan_dwell(monkeypatch):
     r = _scan_reader(ipc)
     r.scan_delay = 0.25
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().scan_target is not None  # a scan target is settling
     r.tip.view.view_h = 20  # make the panel scrollable
@@ -2136,7 +2139,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     tx, ty, tw, _th = r.tip.view.rect
@@ -2154,9 +2157,8 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")  # open the nested popup
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
@@ -2176,7 +2178,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
-    r.set_hover(0)
+    _hover_base_word(r)
     shots = []
     monkeypatch.setattr(
         r.ov, "show_bgra", lambda bgra, _x, _y, oid: shots.append((oid, bgra.copy()))
@@ -2201,7 +2203,7 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
-    r.set_hover(0)
+    _hover_base_word(r)
     tx, ty, tw, _th = r.tip.view.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
@@ -2222,7 +2224,7 @@ def test_closing_retires_a_pending_copy_flash(monkeypatch):
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
-    r.set_hover(0)
+    _hover_base_word(r)
     tx, ty, tw, _th = r.tip.view.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
@@ -2356,7 +2358,7 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
     r = _scan_reader(ipc)  # dict_set present
     r.anki = object()
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     assert r.hover_view().tip.key.mined is False  # not mined yet → ⊕
     r._mark_mined(card_for(r.tokens[0]).expression)
     assert r.hover_view().tip.key.mined is True  # tooltip rebuilt with ✓
@@ -2691,7 +2693,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)  # open a tooltip on the first subtitle
+    _hover_base_word(r)  # open a tooltip on the first subtitle
     assert r.hover_view().tip.rect is not None  # tooltip is shown
     assert r.hover == 0
 
@@ -2792,9 +2794,8 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
-    _hover_first_scan_cell(r, ipc)
-    r._update_hover()
+    _hover_base_word(r)
+    _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")  # open the nested popup
     assert r.hover_view().nested.state is not None
 
