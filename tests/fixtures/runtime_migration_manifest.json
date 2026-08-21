@@ -10,10 +10,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/reader_deps.py::load_deps_async"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/reader_factory.py::create_reader"
     ],
     [

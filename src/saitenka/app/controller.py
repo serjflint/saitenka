@@ -4362,8 +4362,28 @@ class Reader:
         subnav.reconcile_sub_text(self.nav_ports, text)
 
     # --- progressive dep loading --------------------------------------------------------------
+    @property
+    def deps_load(self) -> reader_deps.DepsLoad:
+        """What starting a background dep load needs. A property, so it is not a debt row."""
+        return reader_deps.DepsLoad(
+            begin_loading=self._begin_loading,
+            enable_async_annotation=self._enable_async_annotation,
+            publish=self._publish_pending_deps,
+            announce=self.arm_deps_ready,
+        )
+
+    def _begin_loading(self) -> None:
+        """Plain subs plus the spinner until the deps land."""
+        self._loading = True
+        self._schedule_loading_frame(delay_s=0.0)
+
+    def _publish_pending_deps(self, deps: dict) -> None:
+        """Hand the built deps over from the build thread. Publishes only — `arm_deps_ready` is
+        what says so, and the injection itself happens on the session turn."""
+        self._pending_deps = deps
+
     def load_deps_async(self, cfg: dict, build=None, *, prebuilt=None) -> None:
-        reader_deps.load_deps_async(self, cfg, build, prebuilt=prebuilt)
+        reader_deps.load_deps_async(self.deps_load, cfg, build, prebuilt=prebuilt)
 
     def _apply_deps(self, deps: dict) -> None:
         reader_deps.apply_deps(self, deps)

@@ -97,12 +97,15 @@ _TERMINAL_DEBT = {
     # `Miner.__init__` was filed here and did not belong: it did not build or own the Reader, it read
     # twenty-one of its members. That is a feature value, and it converted as one. Check the claim
     # before adding a row — "holds the host" and "composes the host" look identical at a signature.
+    #
+    # `load_deps_async` was the same mis-filing one layer down: it *injects into* a built Reader
+    # rather than building one, which is the write-back category the plan says to re-examine, not a
+    # composition root. Five members, cut facts-from-acts, and it converted on `Reader.deps_load`.
     "host-composition": frozenset(
         ("reader-parameter", source)
         for source in (
             "src/saitenka/app/controller.py::Reader.__init__",
             "src/saitenka/app/reader_deps.py::apply_deps",
-            "src/saitenka/app/reader_deps.py::load_deps_async",
             "src/saitenka/app/reader_factory.py::create_reader",
             "src/saitenka/app/session_runtime.py::SessionRuntime.__init__",
         )

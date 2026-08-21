@@ -16,12 +16,15 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import Future
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.controller import Reader
     from saitenka.app.fsrs import KnownSnap
 
@@ -481,11 +484,30 @@ def begin_deps_build(cfg: dict, build=None) -> Future[dict]:
     return fut
 
 
+@dataclass(frozen=True, slots=True)
+class DepsLoad:
+    """What starting a background dep load needs: say we are loading, and hand the result over.
+
+    Five members, cut facts-from-acts. `publish` and `announce` are deliberately two: the order
+    between them is the whole hand-off, and one combined act would hide which came first.
+    """
+
+    #: Draw plain subs and run the spinner until the build lands.
+    begin_loading: Callable[[], None]
+    #: Annotation goes off-thread for the duration — the build is holding the CPU.
+    enable_async_annotation: Callable[[], None]
+    #: Publish the built deps. Called from the *build* thread, so it must not act on them.
+    publish: Callable[[dict], None]
+    #: Arm the deadline that injects them on the session turn. Returns whether it armed; nothing
+    #: reads that, because with no timer the deps still land on the next session turn.
+    announce: Callable[[], object]
+
+
 def load_deps_async(
-    reader: Reader, cfg: dict, build=None, *, prebuilt: Future[dict] | None = None
+    ports: DepsLoad, cfg: dict, build=None, *, prebuilt: Future[dict] | None = None
 ) -> None:
-    """Wire a background dep build into the reader: when it lands, the session turn injects it on the
-    main thread (:func:`apply_deps`). Plain subs draw meanwhile; a named timer animates the spinner.
+    """Wire a background dep build into the session: when it lands, the session turn injects it on
+    the main thread (:func:`apply_deps`). Plain subs draw meanwhile; a named timer animates the spinner.
 
     ``prebuilt`` is a Future from a HOISTED :func:`begin_deps_build` (``run`` starts the build before
     mpv launches so it overlaps launch dead time); without it the build starts now (attach/plugin mode,
@@ -493,16 +515,15 @@ def load_deps_async(
     arms the deadline that injects it, so the injection still happens on the session turn.
 
     Callers should have already fired :func:`warm_tokenizer` on its own thread as early as possible."""
-    reader._loading = True
-    reader._enable_async_annotation()
-    reader._schedule_loading_frame(delay_s=0.0)
+    ports.begin_loading()
+    ports.enable_async_annotation()
     fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build)
 
     def landed(finished: Future[dict]) -> None:
-        # Order matters and is the whole hand-off: publish the value, then say so. Arming first
-        # would let the due event fire against a `_pending_deps` that is still None.
-        reader._pending_deps = finished.result()
-        reader.arm_deps_ready()
+        # Order matters and is the whole hand-off: publish the value, then say so. Announcing first
+        # would let the due event fire against deps that are still None.
+        ports.publish(finished.result())
+        ports.announce()
 
     fut.add_done_callback(landed)
 
