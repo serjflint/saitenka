@@ -559,8 +559,8 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     gateway.session_reactor = reactor
 
     def claims(payload: RuntimeEvent) -> bool:
-        # A completion is claimed by *ownership*, not by type: the bridge and the reactor both
-        # issue effects, and the bridge's terminals must keep reaching it or every correlated
+        # A completion is claimed by *ownership*, not by type: the correlator and the reactor both
+        # issue effects, and the correlator's terminals must keep reaching it or every correlated
         # command it owns hangs.
         if isinstance(payload, EffectFinished):
             return reactor.owns(payload.effect_id)

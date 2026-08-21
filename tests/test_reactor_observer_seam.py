@@ -1,6 +1,6 @@
 """The seam two reactor implementations share while one migrates into the other.
 
-`SessionReactor` (typed) now owns a slice of the session; `LegacyRuntimeBridge` (callback-shaped)
+`SessionReactor` (typed) now owns a slice of the session; `EffectCorrelator` (callback-shaped)
 still owns the rest. The seam has two halves, and the tests here pin both:
 
 * **observe** — the reactor sees every envelope, so it can track epochs and its own completions.
@@ -11,8 +11,8 @@ still owns the rest. The seam has two halves, and the tests here pin both:
 Every hazard asserted here was found by executing the code, not by reading it.
 
 **Most of this file is scaffolding with a known demolition date.** Everything marked `TRANSITIONAL`
-exists only while two reactor implementations coexist, and D4 — which deletes `LegacyRuntimeBridge`
-and `LegacyEventRouter` — deletes it too. It is written down so that removal is a decision someone
+exists only while two reactor implementations coexist, and D4 — which deletes `LegacyEventRouter`
+and folds the correlator into the loop — deletes it too. It is written down so that removal is a decision someone
 can make quickly, rather than a judgement call they avoid. The `OwnerRouter` test below is the one
 that outlives them.
 """
@@ -30,7 +30,6 @@ from saitenka.runtime import (
     SessionMailbox,
     TrafficClass,
 )
-from saitenka.runtime.effects import EffectId
 from saitenka.runtime.reactor import SessionReactor
 from saitenka.runtime.routing import OwnerRouter
 from saitenka.runtime.state import (
@@ -47,6 +46,27 @@ def _state() -> SessionState:
 
 def _reactor(mailbox, router):
     return SessionReactor(_state(), router, mailbox, lambda _effect: True)
+
+
+class _NoCommands:
+    """A correlator needs somewhere to send an mpv command; these tests never issue one."""
+
+    connection_epoch = 0
+
+    def dispatch(self, _effect) -> bool:
+        return False
+
+    def expire(self, _control) -> None:
+        return None
+
+
+def _consumer(mailbox, *, clock=lambda: 0.0):
+    """The mailbox's sole consumer, with the correlator it drives timers and completions through."""
+    from saitenka.mpvio.gateway import LegacyEventRouter
+    from saitenka.runtime.correlator import EffectCorrelator
+
+    correlator = EffectCorrelator(mailbox, _NoCommands(), clock=clock)
+    return LegacyEventRouter(mailbox, correlator, clock=clock), correlator
 
 
 def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
@@ -72,10 +92,8 @@ def test_a_claimed_event_is_withheld_from_the_reader() -> None:
 
     Without the claim both act on the same envelope and the duty runs twice.
     """
-    from saitenka.mpvio.gateway import LegacyEventRouter
-
     mailbox = SessionMailbox()
-    consumer = LegacyEventRouter(mailbox)
+    consumer, _correlator = _consumer(mailbox)
     consumer.observe(
         _reactor(mailbox, OwnerRouter(SessionReducer({}), lambda _e: None)),
         lambda payload: isinstance(payload, RawMpvEvent) and payload.name == "claimed",
@@ -139,11 +157,11 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
             assert set(names) <= registered
 
 
-def test_a_bridge_owned_completion_is_never_claimed_by_the_reactor() -> None:
+def test_a_correlator_owned_completion_is_never_claimed_by_the_reactor() -> None:
     """Claiming a completion is an ownership question, not a type question.
 
-    The bridge and the reactor both issue effects. Claiming by type would strand every correlated
-    command the bridge owns — its terminal would be withheld and its callback never run.
+    The correlator and the reactor both issue effects. Claiming by type would strand every
+    correlated command the correlator owns — its terminal would be withheld and its callback never run.
     """
     from util import runtime_gateway
 
@@ -153,8 +171,8 @@ def test_a_bridge_owned_completion_is_never_claimed_by_the_reactor() -> None:
     gateway = runtime_gateway(ipc)
     reactor = install_session_reactor(gateway)
     try:
-        bridge_effect = gateway.mailbox.allocate_effect()
-        assert reactor.owns(bridge_effect) is False
+        correlated = gateway.mailbox.allocate_effect()
+        assert reactor.owns(correlated) is False
     finally:
         gateway.close()
 
@@ -162,46 +180,49 @@ def test_a_bridge_owned_completion_is_never_claimed_by_the_reactor() -> None:
 def test_effect_ids_from_one_mailbox_never_collide_across_allocators() -> None:
     """D2: the mailbox owns the ID because the mailbox is what the ID must be unique within.
 
-    Before this, `LegacyRuntimeBridge` counted from 0 privately. A second allocator — which is
-    exactly what D3 makes the reactor — would have reissued IDs the bridge still held, and the
+    Before this, the correlator counted from 0 privately. A second allocator — which is
+    exactly what D3 makes the reactor — would have reissued IDs the correlator still held, and the
     only symptom is `reserve_terminal` returning False, which every caller already treats as an
     overloaded lane.
     """
     mailbox = SessionMailbox()
-    bridge_ids = [mailbox.allocate_effect() for _ in range(3)]
+    correlator_ids = [mailbox.allocate_effect() for _ in range(3)]
     reactor_ids = mailbox.allocate_effects(3)
 
-    assert set(bridge_ids).isdisjoint(reactor_ids)
+    assert set(correlator_ids).isdisjoint(reactor_ids)
     # Every one is reservable: a collision would surface here as a False, not as an exception.
-    assert all(mailbox.reserve_terminal(effect_id) for effect_id in (*bridge_ids, *reactor_ids))
+    assert all(mailbox.reserve_terminal(effect_id) for effect_id in (*correlator_ids, *reactor_ids))
 
 
-def test_the_observer_never_retires_a_terminal_the_bridge_owns() -> None:
-    """The hazard that silently breaks every correlated command.
+def test_a_completion_reaches_the_correlator_that_issued_it_past_the_observer() -> None:
+    """The hazard that silently breaks every correlated effect.
 
     Measured before `_finish` checked ownership: the reactor retired a completion it never
-    dispatched, the bridge's own `retire_terminal` then returned False, and it dropped the
-    completion — so whatever awaited that command waited forever.
+    dispatched, the correlator's own `retire_terminal` then returned False, and it dropped the
+    completion — so whatever awaited that effect waited forever. The oracle is that consequence and
+    not the bookkeeping: the callback runs, which it cannot if anything upstream retired the
+    reservation first.
 
     Outlives D4 in meaning, not in form: the *rule* (retiring is a claim of ownership) is
     permanent; only the second owner here is temporary.
     """
     mailbox = SessionMailbox()
-    effect_id = EffectId(7)
-    assert mailbox.reserve_terminal(effect_id)  # the bridge owns this effect
-
-    from saitenka.mpvio.gateway import LegacyEventRouter
-
-    consumer = LegacyEventRouter(mailbox)
+    consumer, correlator = _consumer(mailbox)
     consumer.observe(_reactor(mailbox, OwnerRouter(SessionReducer({}), lambda _e: None)))
-
-    mailbox.publish_terminal(
-        EffectFinished(effect_id, Owner.PLAYBACK, "identity", EffectOutcome.SUCCEEDED),
-        origin=EventOrigin.MPV,
+    finished: list[EffectFinished] = []
+    assert correlator.schedule_timer(
+        owner=Owner.PLAYBACK,
+        identity="identity",
+        timer="probe",
+        due_at=0.0,
+        on_finished=finished.append,
     )
+
     consumer.drain_events(ordered_terminals=True)
 
-    assert mailbox.retire_terminal(effect_id) is True  # still the bridge's to complete
+    assert [(item.result, item.outcome) for item in finished] == [
+        ("probe", EffectOutcome.SUCCEEDED)
+    ]
 
 
 def test_the_observer_sees_domain_events_without_consuming_them() -> None:
@@ -221,9 +242,7 @@ def test_the_observer_sees_domain_events_without_consuming_them() -> None:
         lambda _event: Owner.PLAYBACK,
     )
 
-    from saitenka.mpvio.gateway import LegacyEventRouter
-
-    consumer = LegacyEventRouter(mailbox)
+    consumer, _correlator = _consumer(mailbox)
     consumer.observe(_reactor(mailbox, router))
 
     mailbox.publish(

@@ -61,7 +61,7 @@ def test_legacy_bridge_delivers_a_command_outcome_on_the_reader_turn() -> None:
     gateway = MpvGateway(cast("MpvIPC", ipc), mailbox, clock=Clock())
     completed: list[EffectFinished] = []
 
-    assert gateway.legacy.submit_mpv(
+    assert gateway.correlator.submit_mpv(
         owner=Owner.SESSION,
         identity="startup-hint",
         command=("show-text", "starting", 30000),
@@ -82,7 +82,7 @@ def test_legacy_bridge_deadline_wins_and_late_reply_is_stale() -> None:
     ipc = FakeIPC()
     gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=clock)
     completed: list[EffectFinished] = []
-    assert gateway.legacy.submit_mpv(
+    assert gateway.correlator.submit_mpv(
         owner=Owner.SESSION,
         identity="startup-hint",
         command=("show-text", "starting", 30000),
@@ -107,7 +107,7 @@ def test_legacy_bridge_rejects_when_terminal_capacity_cannot_fit_the_deadline_pa
     gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(terminal_capacity=1), clock=Clock())
     completed: list[EffectFinished] = []
 
-    assert not gateway.legacy.submit_mpv(
+    assert not gateway.correlator.submit_mpv(
         owner=Owner.SESSION,
         identity="startup-hint",
         command=("show-text", "starting", 30000),
@@ -128,7 +128,7 @@ def test_named_timer_delivers_only_after_its_due_turn() -> None:
     gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=clock)
     completed: list[EffectFinished] = []
 
-    assert gateway.legacy.schedule_timer(
+    assert gateway.correlator.schedule_timer(
         owner=Owner.SESSION,
         identity="toast:1",
         timer="lifecycle:toast",
@@ -157,7 +157,7 @@ def test_the_drain_never_blocks_past_the_earliest_armed_timer() -> None:
     gateway = MpvGateway(cast("MpvIPC", ipc), _RecordingMailbox(), clock=clock)
     waits = gateway.mailbox.waits
 
-    assert gateway.legacy.schedule_timer(
+    assert gateway.correlator.schedule_timer(
         owner=Owner.SESSION,
         identity="toast:1",
         timer="lifecycle:toast",
@@ -204,7 +204,7 @@ def test_arming_a_timer_releases_a_receiver_already_blocked_under_a_later_bound(
         while not released.is_set() and time.monotonic() < deadline:
             # Re-armed against a deadline for the reason the stop wake is: the release is
             # un-latched, so one sent before the thread blocks is correctly a no-op.
-            gateway.legacy.schedule_timer(
+            gateway.correlator.schedule_timer(
                 owner=Owner.SESSION,
                 identity="late",
                 timer="lifecycle:late",
@@ -224,7 +224,7 @@ def test_replacing_named_timer_terminally_cancels_old_revision() -> None:
     completed: list[tuple[str, EffectOutcome]] = []
 
     for identity, due in (("toast:1", 1.0), ("toast:2", 2.0)):
-        assert gateway.legacy.schedule_timer(
+        assert gateway.correlator.schedule_timer(
             owner=Owner.SESSION,
             identity=identity,
             timer="lifecycle:toast",
@@ -247,7 +247,7 @@ def test_named_timer_rejects_when_terminal_capacity_is_full() -> None:
     ipc = FakeIPC()
     gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(terminal_capacity=1), clock=Clock())
     completed: list[EffectFinished] = []
-    assert gateway.legacy.schedule_timer(
+    assert gateway.correlator.schedule_timer(
         owner=Owner.SESSION,
         identity="first",
         timer="first",
@@ -255,7 +255,7 @@ def test_named_timer_rejects_when_terminal_capacity_is_full() -> None:
         on_finished=completed.append,
     )
 
-    assert not gateway.legacy.schedule_timer(
+    assert not gateway.correlator.schedule_timer(
         owner=Owner.SESSION,
         identity="second",
         timer="second",
@@ -293,7 +293,7 @@ def test_job_completion_is_delivered_on_the_reader_turn() -> None:
 
     envelope = mailbox.receive(timeout=1.0)
     assert envelope is not None
-    gateway.legacy.handle_terminal(cast("EffectFinished", envelope.payload))
+    gateway.correlator.handle_terminal(cast("EffectFinished", envelope.payload))
     assert len(completed) == 1
     assert completed[0].outcome is EffectOutcome.SUCCEEDED
     assert completed[0].result == "done:input"
@@ -371,7 +371,7 @@ def test_job_close_cancels_pending_work_and_quarantines_late_completion() -> Non
 
 def _observation_then_terminal(ipc: FakeIPC, gateway: MpvGateway, sink: list) -> None:
     """Publish an observation, then resolve a command so its terminal is the later envelope."""
-    assert gateway.legacy.submit_mpv(
+    assert gateway.correlator.submit_mpv(
         owner=Owner.SESSION,
         identity="probe",
         command=("get_property", "sub-visibility"),

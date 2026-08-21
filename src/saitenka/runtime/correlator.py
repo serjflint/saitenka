@@ -1,4 +1,10 @@
-"""Temporary Reader-thread driver for typed effects during runtime migration."""
+"""The session's effect correlator: issue, pair with a deadline, complete.
+
+Every effect that has a reply — an mpv command, a timer, a job — is issued here and completed
+here, because correlation is one fact: the ID the mailbox reserved, the callback waiting on it, and
+the deadline timer paired with it are three views of one outstanding effect. Split across owners,
+a completion would have to be broadcast to find out whose it was.
+"""
 
 from __future__ import annotations
 
@@ -35,22 +41,17 @@ class CommandAdapter(Protocol):
     def expire(self, control) -> None: ...
 
 
-class TerminalRouter(Protocol):
-    def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None: ...
-
-
 class JobAdapter(Protocol):
     def dispatch(self, effect: SubmitJob) -> bool: ...
 
 
-class LegacyRuntimeBridge:
-    """Drive typed command/deadline effects from the legacy Reader turn."""
+class EffectCorrelator:
+    """Issue correlated effects and complete them; hold the timer heap they are paired against."""
 
     def __init__(
         self,
         mailbox: SessionMailbox,
         command_adapter: CommandAdapter,
-        router: TerminalRouter,
         *,
         job_adapter: JobAdapter | None = None,
         clock: Callable[[], float] = time.monotonic,
@@ -65,7 +66,6 @@ class LegacyRuntimeBridge:
         self._job_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._deadlines = DeadlineRegistry()
         self._timers = TimerScheduler()
-        router.install_runtime_bridge(self)
 
     def submit_job(
         self,

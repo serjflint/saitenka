@@ -39,8 +39,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.mpvio.ipc import IPCRequest, MpvIPC
+    from saitenka.runtime.correlator import EffectCorrelator
     from saitenka.runtime.diagnostics import RuntimeLedger
-    from saitenka.runtime.legacy import LegacyRuntimeBridge
     from saitenka.runtime.reactor import SessionReactor
 
 
@@ -74,11 +74,15 @@ class LegacyEventRouter:
     """Temporary sole consumer that presents mailbox observations to Reader unchanged."""
 
     def __init__(
-        self, mailbox: SessionMailbox, *, clock: Callable[[], float] = time.monotonic
+        self,
+        mailbox: SessionMailbox,
+        correlator: EffectCorrelator,
+        *,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._mailbox = mailbox
         self._clock = clock
-        self._runtime_bridge: LegacyRuntimeBridge | None = None
+        self._correlator = correlator
         self._reactor: SessionReactor | None = None
         self._claims: Callable[[RuntimeEvent], bool] = lambda _payload: False
         #: Envelopes seen, and how many the reactor owned outright. The `session-loop` duty retires
@@ -88,11 +92,6 @@ class LegacyEventRouter:
         #: next and a bare ratio does not.
         self._seen: Counter[str] = Counter()
         self._claimed: Counter[str] = Counter()
-
-    def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None:
-        if self._runtime_bridge is not None:
-            raise RuntimeError("runtime bridge already installed")
-        self._runtime_bridge = bridge
 
     @property
     def mailbox(self) -> SessionMailbox:
@@ -147,9 +146,8 @@ class LegacyEventRouter:
         terminals; `Reader._drive_annotation_once` must not, because it drains from inside cue
         construction and a due event dispatched there would reenter mid-build.
         """
-        if self._runtime_bridge is not None:
-            self._runtime_bridge.publish_due()
-            timeout = self._bounded_by_deadline(timeout)
+        self._correlator.publish_due()
+        timeout = self._bounded_by_deadline(timeout)
         events: list[object] = []
         if timeout is None or timeout > 0:
             envelope = self._mailbox.receive(timeout=timeout)
@@ -167,8 +165,7 @@ class LegacyEventRouter:
         doing. `publish_due` has already run, so anything due now is in the mailbox and this only
         ever looks forward.
         """
-        assert self._runtime_bridge is not None
-        due_at = self._runtime_bridge.next_deadline
+        due_at = self._correlator.next_deadline
         if due_at is None:
             return timeout
         remaining = max(0.0, due_at - self._clock())
@@ -184,7 +181,7 @@ class LegacyEventRouter:
         """
         # Asked BEFORE the reactor runs: handling a completion retires it from `_pending`, so an
         # ownership question asked afterwards always answers "no" and every claimed terminal would
-        # fall through to the bridge as well.
+        # fall through to the correlator as well.
         claimed = self._claims(envelope.payload)
         name = type(envelope.payload).__name__
         self._seen[name] += 1
@@ -225,8 +222,8 @@ class LegacyEventRouter:
             # observation the caller has not handled yet. So it goes out only while the caller is
             # actually holding something: with every earlier envelope claimed, "in position" and
             # "now" are the same instant, and the round trip through the Reader buys nothing.
-            if self._runtime_bridge is not None and not (ordered_terminals and events):
-                self._runtime_bridge.handle_terminal(payload)
+            if not (ordered_terminals and events):
+                self._correlator.handle_terminal(payload)
             elif ordered_terminals:
                 events.append(payload)
             return
@@ -285,22 +282,21 @@ class MpvGateway:
         #: and a handle nobody keeps is a transition nothing can reach — which is why that path has
         #: been implemented and unreachable since it landed.
         self.session_reactor: object | None = None
-        self._router = router = LegacyEventRouter(mailbox, clock=clock)
+        from saitenka.runtime.correlator import EffectCorrelator
+
+        self._jobs = JobBroker(mailbox)
+        self._correlator = EffectCorrelator(
+            mailbox,
+            self,
+            job_adapter=self._jobs,
+            clock=clock,
+        )
+        self._router = router = LegacyEventRouter(mailbox, self._correlator, clock=clock)
         ipc.install_runtime_ingress(
             self._publish_observation,
             self._publish_connection,
             router.drain_events,
             self,
-        )
-        from saitenka.runtime.legacy import LegacyRuntimeBridge
-
-        self._jobs = JobBroker(mailbox)
-        self._legacy = LegacyRuntimeBridge(
-            mailbox,
-            self,
-            router,
-            job_adapter=self._jobs,
-            clock=clock,
         )
         with self._lock:
             self._ready = True
@@ -369,28 +365,28 @@ class MpvGateway:
             return self._connection_epoch
 
     @property
-    def legacy(self) -> LegacyRuntimeBridge:
-        return self._legacy
+    def correlator(self) -> EffectCorrelator:
+        return self._correlator
 
     def submit_mpv(self, **kwargs) -> bool:
         """Submit one correlated command for a compatibility-owned runtime slice."""
-        return self._legacy.submit_mpv(**kwargs)
+        return self._correlator.submit_mpv(**kwargs)
 
     def schedule_timer(self, **kwargs) -> bool:
-        return self._legacy.schedule_timer(**kwargs)
+        return self._correlator.schedule_timer(**kwargs)
 
     def cancel_timer(self, timer: str) -> bool:
-        return self._legacy.cancel_timer(timer)
+        return self._correlator.cancel_timer(timer)
 
     def dispatch_terminal(self, completion: EffectFinished) -> None:
         """Run a completion that `drain_events(ordered_terminals=True)` handed to the caller."""
-        self._legacy.handle_terminal(completion)
+        self._correlator.handle_terminal(completion)
 
     def register_job_lane(self, name: str, policy: JobLanePolicy, handler) -> None:
         self._jobs.register(name, policy, handler)
 
     def submit_job(self, **kwargs) -> bool:
-        return self._legacy.submit_job(**kwargs)
+        return self._correlator.submit_job(**kwargs)
 
     def close_job_lane(self, name: str, timeout: float = 2.0) -> bool:
         return self._jobs.close_lane(name, timeout)
@@ -416,7 +412,7 @@ class MpvGateway:
             self._connection_phase = ConnectionPhase.CLOSED
             self._candidate_events.clear()
             thread = self._reconnect_thread
-        self._legacy.cancel_timer("mpv-reconnect")
+        self._correlator.cancel_timer("mpv-reconnect")
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=1.5)
 
@@ -724,7 +720,7 @@ class MpvGateway:
             elif completion.outcome is EffectOutcome.REJECTED:
                 self._request_close(retry_epoch)
 
-        if not self._legacy.schedule_timer(
+        if not self._correlator.schedule_timer(
             owner=Owner.SESSION,
             identity=ReconnectRetry(retry_epoch, attempt),
             timer="mpv-reconnect",

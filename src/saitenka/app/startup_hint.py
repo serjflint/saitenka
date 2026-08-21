@@ -56,7 +56,7 @@ def _lost(event: EffectFinished) -> bool:
     """Did the connection swallow this, leaving mpv's actual state unknown?
 
     STALE joins DISCONNECTED because the reactor retires an effect issued on a superseded epoch —
-    a completion path the lock-based lease never had, since the bridge answered for it instead.
+    a completion path the lock-based lease never had, since the correlator answered for it instead.
     """
     return event.error is EffectError.DISCONNECTED or event.outcome is EffectOutcome.STALE
 
