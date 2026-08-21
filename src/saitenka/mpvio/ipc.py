@@ -120,6 +120,9 @@ _MAX_RECONNECTS = 30
 # the poll loop for command()'s full timeout, _MAX_RECONNECTS times over. Bail fast instead → exit.
 _RECONNECT_PROBE_S = 2.0
 _OUTBOUND_MAX = 256
+# How long `close` waits for the queued writes to leave. Generous against a healthy socket (these
+# are a few dozen bytes each) and short enough that a wedged one costs a pause, not a hang.
+_CLOSE_FLUSH_TIMEOUT = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,9 +160,9 @@ class MpvIPC:
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
-        self._outbound: queue.Queue[tuple[int, int, bytes, Future[dict]] | None] = queue.Queue(
-            maxsize=_OUTBOUND_MAX
-        )
+        self._outbound: queue.Queue[
+            tuple[int, int, bytes, Future[dict]] | threading.Event | None
+        ] = queue.Queue(maxsize=_OUTBOUND_MAX)
         self._next_request_id = 0
         self._connection_epoch = 0
         self._transitioning = threading.Event()
@@ -312,18 +315,26 @@ class MpvIPC:
                 continue
             if item is None:
                 return
-            epoch, request_id, data, future = item
-            if future.done():
+            if isinstance(item, threading.Event):
+                # A flush barrier: FIFO means everything queued ahead of it has already been handed
+                # to the transport (or failed), which is the whole guarantee `_flush_outbound` sells.
+                item.set()
                 continue
-            closed = None
-            try:
-                transport, closed = self._write_target(epoch)
-                transport.write(data)
-            except OSError as error:
-                log.warning("mpv IPC: queued write failed (%s) — disconnected", error)
-                self._reject_write(request_id, future, "disconnected")
-                if closed is not None:
-                    closed.set()
+            self._write_one(item)
+
+    def _write_one(self, item: tuple[int, int, bytes, Future[dict]]) -> None:
+        epoch, request_id, data, future = item
+        if future.done():
+            return
+        closed = None
+        try:
+            transport, closed = self._write_target(epoch)
+            transport.write(data)
+        except OSError as error:
+            log.warning("mpv IPC: queued write failed (%s) — disconnected", error)
+            self._reject_write(request_id, future, "disconnected")
+            if closed is not None:
+                closed.set()
 
     def _reject_write(self, request_id: int, future: Future[dict], error: str) -> None:
         with self._pending_lock:
@@ -744,7 +755,30 @@ class MpvIPC:
             return {}
         return gateway.register_observers(names)
 
+    def _flush_outbound(self, timeout: float) -> bool:
+        """Wait, bounded, until every accepted write has reached the transport.
+
+        The close barrier the teardown writes need. `command_async` only *queues* — the writer
+        thread does the socket — and `close` drops the transport and pushes a sentinel the writer
+        returns on, so anything still queued is discarded. A synchronous `command` never noticed
+        because waiting for the reply implied the bytes had left; a correlated fire-and-forget
+        issued during close has no such implication, and the restore of the user's `sub-visibility`
+        is exactly that write.
+
+        Bounded rather than joined: a wedged socket must not hold the session open, and a restore
+        that misses its bound is a visible subtitle setting, not a hang.
+        """
+        if self._closed.is_set() or not self._writer.is_alive():
+            return False
+        barrier = threading.Event()
+        try:
+            self._outbound.put_nowait(barrier)
+        except queue.Full:
+            return False
+        return barrier.wait(timeout)
+
     def close(self) -> None:
+        self._flush_outbound(_CLOSE_FLUSH_TIMEOUT)
         with self._write_lock:
             self._intentional = (
                 True  # a real shutdown, not a dropped pipe — never publish a re-dial

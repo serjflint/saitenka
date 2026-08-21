@@ -303,3 +303,46 @@ def test_close_serializes_with_an_inflight_async_write():
     assert errors == []
     assert submitted[0].future.result(timeout=1) == {"error": "disconnected"}
     assert transport.closed is True
+
+
+@pytest.mark.timeout(5)
+def test_close_flushes_writes_queued_behind_an_inflight_one():
+    """The bounded close barrier: every accepted write leaves before the transport goes.
+
+    `command_async` only queues, and `close` drops the transport — so a teardown write issued
+    fire-and-forget (the restore of the user's `sub-visibility`) used to be discarded whenever the
+    writer had not reached it yet. The oracle is the transport's own record, not a reply: the
+    session is closing and nothing is left to correlate one against.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+
+    class GatedTransport:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+
+        def write(self, data: bytes) -> None:
+            entered.set()
+            assert release.wait(2)
+            self.written.append(data)
+
+        def close(self) -> None: ...
+
+    ipc = MpvIPC("unused")
+    transport = GatedTransport()
+    ipc._transport = transport
+    for value in (True, False, True):
+        ipc.command_async("set_property", "sub-visibility", value)
+    assert entered.wait(1)  # the writer holds the first; the other two are still queued
+
+    releaser = threading.Thread(target=lambda: (time.sleep(0.05), release.set()))
+    releaser.start()
+    ipc.close()
+    releaser.join(2)
+
+    sent = [json.loads(line)["command"] for line in transport.written]
+    assert sent == [
+        ["set_property", "sub-visibility", True],
+        ["set_property", "sub-visibility", False],
+        ["set_property", "sub-visibility", True],
+    ]
