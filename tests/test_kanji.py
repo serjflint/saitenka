@@ -5,6 +5,7 @@ import json
 import zipfile
 
 import dicthelp
+from driver import Driver
 from util import FakeIPC, assert_golden, keybind_registry
 
 from saitenka.app.controller import Reader
@@ -229,20 +230,15 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    ui = Driver(r)
+    ui.move_to_word(0)  # base tooltip through hit-testing, not a poke
     # find the scan cell whose tail starts with 本
     sb = next(b for b in r.tip.view.state.windowed.scan_boxes() if b.text.startswith("本"))
     # make the term lookup miss so the fallback triggers (本 has no term entry in this fixture… it
     # actually might tokenize to 本 with a lemma the dict lacks — force the miss deterministically)
     monkeypatch.setattr(type(ds), "has_term", lambda _self, *_forms: False)
     sx, sy = r.tip.view.xy
-    ipc = r.ipc
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": sx + sb.x + sb.w / 2,
-        "y": sy + (sb.y - r.tip.view.scroll) + sb.h / 2,
-    }
-    r.on_click()
+    ui.move(sx + sb.x + sb.w / 2, sy + (sb.y - r.tip.view.scroll) + sb.h / 2).click()
     assert r.hover_view().nested.state is not None
     assert r.hover_view().nested.word == "本"  # the kanji entry, via the nested-popup route
     assert r.hover_view().nested.token is None  # a kanji panel has no minable token

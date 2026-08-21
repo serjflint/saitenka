@@ -10,6 +10,7 @@ import threading
 import zipfile
 
 import dicthelp
+from driver import Driver
 from util import FakeIPC
 
 from saitenka.app import nested_popup, tooltip, tooltip_engaged
@@ -79,9 +80,7 @@ def _reader(tmp_path, *, worker: bool):
     r.renderer = NullRenderer()
     # Warm both base panels while there's NO worker (else a cold base show would itself defer, #293), so
     # the base tooltip is up + switchable synchronously and the tests isolate the nested-open defer.
-    r.set_hover(0)
-    r.set_hover(1)
-    r.set_hover(0)  # end on 読む, both base panels now cached
+    Driver(r).move_to_word(0).move_to_word(1).move_to_word(0)  # end on 読む, both panels cached
     if worker:
         r._engaged_tooltip_submit = _DeferredEngagedSubmitter(r)
     return r
@@ -127,7 +126,8 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
     submitter = r._engaged_tooltip_submit
     call = submitter.calls.pop(0)
     result = tooltip_engaged.run_engaged(call["request"], threading.Event(), submitter.backend)
-    r.set_hover(1)  # switch the base tooltip to 見る (a different panel → different id)
+    # the user moves to another word mid-flight → a different panel, so a different id
+    Driver(r).move_to_word(1)
     call["on_finished"](
         EffectFinished(
             EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
@@ -139,7 +139,7 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
 def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
-    r.set_hover(1)
+    Driver(r).move_to_word(1)
     rebuilt = []
     monkeypatch.setattr(
         r,

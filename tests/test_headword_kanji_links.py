@@ -10,6 +10,7 @@ import json
 import zipfile
 
 import dicthelp
+from driver import Driver
 from util import FakeIPC
 
 from saitenka.app.controller import Reader
@@ -70,17 +71,13 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)  # base tooltip for 読む
+    ui = Driver(r)
+    ui.move_to_word(0)  # base tooltip for 読む, through hit-testing rather than a poke
 
     lb = next(b for b in r.tip.view.state.windowed.link_boxes() if b.query == "kanji:読")
     sx, sy = r.tip.view.xy
-    r.ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": sx + lb.x + lb.w / 2,
-        "y": sy + (lb.y - r.tip.view.scroll) + lb.h / 2,
-    }
     base = r.tip.view.state
-    r.on_click()
+    ui.move(sx + lb.x + lb.w / 2, sy + (lb.y - r.tip.view.scroll) + lb.h / 2).click()
 
     # A click must NEVER spawn a nested popup (hover-governed → self-dismisses unless the cursor chases
     # it); a headword kanji navigates the base tooltip IN PLACE, Yomitan-style.
