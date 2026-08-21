@@ -14,11 +14,12 @@ from __future__ import annotations
 import logging
 import shutil
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app import telemetry
+from saitenka.app import panel_intents, telemetry
 from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.app.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
+from saitenka.app.panel_adapter import PanelAdapter, PanelHost
 from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
@@ -111,6 +112,7 @@ from saitenka.runtime.user_command import COMMAND_FEATURE, CommandIntake, reduce
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.stateless import StatelessFeature
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.effects import CoreControl, Effect
@@ -577,3 +579,24 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             )
         )
     return reactor
+
+
+class StatelessHost(PanelHost, Protocol):
+    """Every stateless feature's host surface at once, one base class per registered feature.
+
+    There is no intersection type, so this is how the composition root types the object it hands
+    each adapter. Adding a feature adds a base here — which is the registration cost being visible
+    rather than hidden behind a `Reader` annotation.
+    """
+
+
+def stateless_features(host: StatelessHost) -> dict[type, StatelessFeature]:
+    """The stateless half's route table — the counterpart to the reducer routes above.
+
+    Same shape, different key: a stateful feature is reached by the event it owns, a stateless one
+    by the command vocabulary it owns. Both are a registration, which is the point — neither half
+    should require editing the host to add a feature.
+    """
+    return {
+        panel_intents.PanelCommand: (panel_intents.reduce, PanelAdapter(host)),
+    }

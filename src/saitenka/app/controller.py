@@ -11,6 +11,7 @@ import logging
 import tempfile
 import threading
 import time
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -176,8 +177,10 @@ from saitenka.app.session_routes import (
     SUBTITLE_REPLAY_PARTICIPANT,
     SURFACES_RESOURCE,
     WORKER_LANE_PARTICIPANTS,
+    stateless_features,
 )
 from saitenka.app.session_runtime import SessionEntry, SessionRuntime
+from saitenka.app.stateless import StatelessRouter
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
@@ -2692,6 +2695,16 @@ class Reader:
         """A link-navigation step is available to pop — the fact, split from the act."""
         return self.interaction.tip_nav.can_go_back
 
+    @cached_property
+    def _stateless(self) -> StatelessRouter:
+        """The stateless half's route table, built on first use.
+
+        Lazy rather than a line in `__init__`: the adapters read the host through the reference they
+        hold, so nothing here depends on how far construction has got, and the composition root does
+        not grow a row per feature.
+        """
+        return StatelessRouter(stateless_features(self))
+
     def _run_interaction_command(self, command: interaction_intents.InteractionCommand) -> None:
         inputs = interaction_intents.InteractionInputs(
             can_go_back=self.tip_can_go_back, tooltip_view_height=self.tip_scale.ref_h
@@ -2799,47 +2812,6 @@ class Reader:
         return miner.provenance(self._get_number("time-pos") or 0.0, video)
 
     # --- panel commands: pure reducer, executed here (WP5.3) ----------------------------------
-    def _panel_inputs(self) -> panel_intents.PanelInputs:
-        states = {
-            panel_intents.Panel.SIDEBAR: self.sidebar.open,
-            panel_intents.Panel.ANALYSIS: self.analysis.open,
-            panel_intents.Panel.SUBTITLE_PICKER: self.sub_picker.open,
-        }
-        return panel_intents.PanelInputs(
-            open_panels=frozenset(panel for panel, is_open in states.items() if is_open)
-        )
-
-    def _run_panel_command(self, command: panel_intents.PanelCommand) -> None:
-        for effect in panel_intents.reduce(command, self._panel_inputs()):
-            self._apply_panel_effect(effect)
-
-    def _set_panel_open(self, panel: panel_intents.Panel, *, opening: bool) -> None:
-        if panel is panel_intents.Panel.SIDEBAR:
-            (sidebar.show if opening else sidebar.hide)(self.sidebar_view)
-        elif panel is panel_intents.Panel.ANALYSIS:
-            self.set_analysis_open(open=opening)
-        elif panel is panel_intents.Panel.SUBTITLE_PICKER:
-            (
-                sub_picker.open_picker(
-                    self.listing_ports, self._get("path"), retire_hover=self.retire_hover
-                )
-                if opening
-                else sub_picker.close_picker(
-                    self._picker_store, self.interaction.picker_panel, self.lifecycle_surfaces
-                )
-            )
-        elif panel is panel_intents.Panel.CARD_PREVIEW:
-            miner_ui.hide_preview(self.preview_ports)
-
-    def _apply_panel_effect(self, effect: panel_intents.PanelEffect) -> None:
-        if isinstance(effect, DismissHover):
-            self.retire_hover()
-        elif isinstance(effect, panel_intents.ReplayCardPreview):
-            miner_ui.replay_preview(self.preview_ports)
-        elif isinstance(effect, panel_intents.OpenPanel):
-            self._set_panel_open(effect.panel, opening=True)
-        elif isinstance(effect, panel_intents.ClosePanel):
-            self._set_panel_open(effect.panel, opening=False)
 
     # --- mining commands: pure reducer, executed here (WP5.3) ---------------------------------
     def _has_active_cue(self) -> bool:
@@ -2951,13 +2923,13 @@ class Reader:
         )
 
     def _hide_preview(self) -> None:
-        self._run_panel_command(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)
+        self._stateless.run(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)
 
     def _click_preview(self, x: float, y: float) -> bool:
         return miner_ui.click_preview(self.preview_ports, x, y)
 
     def replay_preview(self) -> None:
-        self._run_panel_command(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
+        self._stateless.run(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
 
     def _frequency(self, tok) -> tuple[str, str]:
         return miner.frequency(self.dict_set, tok)
@@ -3158,6 +3130,19 @@ class Reader:
             self._resume_after_hover_pause()
         elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
+
+    @property
+    def picker_store(self) -> PickerStore:
+        """The picker's store, for a feature adapter that must not reach into `_get`-style names.
+
+        An adapter declares its host surface as a protocol, so every member it names has to be part
+        of the public one — a private in a port is a coupling nothing outside can honour.
+        """
+        return self._picker_store
+
+    def property_value(self, name: str) -> object | None:
+        """One mpv property as last observed. `_get` under a name a port can declare."""
+        return self._get(name)
 
     @property
     def sidebar(self) -> SidebarState:
@@ -3430,10 +3415,10 @@ class Reader:
         self._run_mine_command(mine_intents.MineCommand.BOOKMARK_CUE)
 
     def toggle_sidebar(self) -> None:
-        self._run_panel_command(panel_intents.PanelCommand.TOGGLE_SIDEBAR)
+        self._stateless.run(panel_intents.PanelCommand.TOGGLE_SIDEBAR)
 
     def toggle_sub_picker(self) -> None:
-        self._run_panel_command(panel_intents.PanelCommand.TOGGLE_SUBTITLE_PICKER)
+        self._stateless.run(panel_intents.PanelCommand.TOGGLE_SUBTITLE_PICKER)
 
     def configure_sub_picker(self, lister: Callable[[str], tuple]) -> None:
         """Enable the picker for this session with a provider-agnostic candidate lister. Called
@@ -3442,7 +3427,7 @@ class Reader:
         self._sub_picker_lister = lister
 
     def toggle_analysis(self) -> None:
-        self._run_panel_command(panel_intents.PanelCommand.TOGGLE_ANALYSIS)
+        self._stateless.run(panel_intents.PanelCommand.TOGGLE_ANALYSIS)
 
     def toggle_annotation_mode(self) -> None:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
