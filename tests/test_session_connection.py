@@ -14,9 +14,11 @@ from saitenka.app.controller import Reader
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.connection import ConnectionState, ConnectionStore, reduce_connection
+from saitenka.runtime.effects import ReplaySubtitleSelection, RetireCueIdentity
 from saitenka.runtime.events import (
     ConnectionLost,
     ConnectionReady,
+    ConnectionReplaced,
     EventEnvelope,
     EventOrigin,
     SessionStarting,
@@ -24,6 +26,7 @@ from saitenka.runtime.events import (
 
 LOST = ConnectionLost(1)
 READY = ConnectionReady(2)
+REPLACED = ConnectionReplaced(2)
 
 
 def test_a_session_starts_ready() -> None:
@@ -38,11 +41,16 @@ def test_losing_and_regaining_the_transport_is_one_bit_each_way() -> None:
     assert reduce_connection(lost.state, READY).state == ConnectionState(ready=True)
 
 
-def test_a_declaration_decides_nothing() -> None:
-    """No outbox and no effects: by the time this is told, the socket is already gone or already
-    back. What retiring a stranded cue identity means stays with the owner that holds one."""
-    result = reduce_connection(ConnectionState(), LOST)
-    assert result.effects == ()
+def test_the_acts_ride_out_as_effects_and_the_bit_stays_behind() -> None:
+    """No outbox — an outbox hands a delta back for the caller to apply in its own frame, and
+    neither of these acts is the caller's. `runtime` cannot name a tooltip or a subtitle track, so
+    it decides only *that* a cue is stranded and *that* a replacement has never heard the
+    selection; the performers are registered app-side."""
+    assert reduce_connection(ConnectionState(), LOST).effects == (RetireCueIdentity(),)
+    assert reduce_connection(ConnectionState(), REPLACED).effects == (ReplaySubtitleSelection(),)
+    assert reduce_connection(ConnectionState(), READY).effects == (), (
+        "learning the transport is back decides nothing but the bit"
+    )
 
 
 def test_an_unrelated_session_event_leaves_the_connection_alone() -> None:
@@ -105,23 +113,32 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
     ]
 
 
-def test_a_reconnect_reaches_the_slot_without_the_reader_seeing_it() -> None:
-    """`ConnectionReady` is claimed, so the reactor handles it *instead of* the Reader — and the
-    session must still come back ready. The census is the oracle: a claim that silently stopped
-    reaching anything looks identical to a working one from the Reader's side."""
+def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
+    """All three are claimed, so a session with a reactor never hands one to the Reader — and it
+    must still end up ready and still have performed the acts.
+
+    The census is the oracle rather than the state, because a claim that silently stopped reaching
+    anything looks identical to a working one from the Reader's side: nothing raises, the bit is
+    right, and the reconnect simply never reaches the pipeline.
+    """
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     store = ConnectionStore(ipc)
 
-    gateway.publish_session_event(LOST)
-    gateway.publish_session_event(READY)
+    # Ordered lost -> ready -> replaced, not lost -> replaced -> ready: handling a replacement
+    # moves the reactor's epoch, and every later envelope is fenced against it. Production publishes
+    # the whole replacement sequence at the new epoch, so this order is the one a stand-alone
+    # publisher can produce without forging one.
+    for event in (LOST, READY, REPLACED):
+        gateway.publish_session_event(event)
     ipc.drain_events(0.0)
 
     assert store.current.ready is True
-    claimed, seen = gateway.claim_census()["ConnectionReady"]
-    assert (claimed, seen) == (1, 1)
-    assert gateway.claim_census()["ConnectionLost"] == (0, 1), (
-        "its twin must keep falling through — the Reader still retires the stranded cue"
-    )
+    census = gateway.claim_census()
+    assert {name: census[name] for name in ("ConnectionLost", "ConnectionReplaced")} == {
+        "ConnectionLost": (1, 1),
+        "ConnectionReplaced": (1, 1),
+    }
+    assert census["ConnectionReady"] == (1, 1)
     gateway.close()

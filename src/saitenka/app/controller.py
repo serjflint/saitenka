@@ -600,11 +600,13 @@ class Reader:
         # to resolve them when it closes, not when it registers.
         from saitenka.app.session_routes import (
             BACKLOG_RESOURCE,
+            CUE_RETIRE_RESOURCE,
             MINED_RESOURCE,
             SESSION_SUMMARY_RESOURCE,
             SUBTITLE_CLEAR_RESOURCE,
             SUBTITLE_CLOSE_RESOURCE,
             SUBTITLE_DEACTIVATE_RESOURCE,
+            SUBTITLE_REPLAY_PARTICIPANT,
         )
 
         for name, retire in (
@@ -666,6 +668,16 @@ class Reader:
             ipc.register_session_resource(name, session_resources.Starting(self._step_for(step)))
         # The subtitle raster, retired at `RENDERING`. `native_geometry` is installed after this
         # point, so every one of these resolves it when it closes rather than now.
+        # The two connection acts. Registered here with the rest and late-bound for the same
+        # reason: both read collaborators this constructor has not finished building.
+        ipc.register_session_resource(
+            CUE_RETIRE_RESOURCE,
+            session_resources.Retiring(lambda: self._retire_cue_identity("connection-lost")),
+        )
+        ipc.register_session_resource(
+            SUBTITLE_REPLAY_PARTICIPANT,
+            session_resources.Starting(self._on_ipc_reconnect),
+        )
         for name, retire in (
             (
                 SUBTITLE_DEACTIVATE_RESOURCE,
@@ -3971,6 +3983,10 @@ class Reader:
         if isinstance(ev, EffectFinished):
             self.ipc.dispatch_runtime_terminal(ev)
             return
+        # The three connection arms are the no-reactor fallback, and nothing else: a session with
+        # one claims all three, reduces them in the SESSION slice and performs these same acts as
+        # registered effects. Every migrated lifecycle duty keeps a path like this — a screenshot
+        # capture and most unit tests are sessions that never had a runtime.
         if isinstance(ev, ConnectionLost):
             self._connection.observed(ev)
             self._retire_cue_identity("connection-lost")

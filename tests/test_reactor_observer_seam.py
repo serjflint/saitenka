@@ -90,19 +90,50 @@ def test_a_claimed_event_is_withheld_from_the_reader() -> None:
     assert consumer.drain_events() == [{"event": "unclaimed"}]
 
 
-def test_a_routed_event_the_reader_still_needs_is_not_claimed() -> None:
-    """`ConnectionReplaced` is routed to the startup-hint reducer AND drives
-    `subtitle_pipeline.connection_replaced`.
+def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> None:
+    """Claiming withholds a payload from the Reader, so an act the Reader was performing has to
+    have somewhere else to land — an effect with a registered performer.
 
-    Deriving the claim set from the route table would swallow it, and nothing fails at the seam —
-    reconnects just stop reaching the pipeline. This pins the two apart.
+    This is the failure the seam cannot report on its own. A claim added ahead of its performer
+    routes fine, reduces fine, and silently stops doing the thing: `ConnectionReplaced` would be
+    claimed away and reconnects would simply stop reaching the subtitle pipeline, with nothing
+    raising. So the oracle is composition — every act named by a claimed payload's reducer resolves
+    to a name a real session registered.
     """
-    from saitenka.app.session_routes import _CLAIMED, _SESSION_EVENTS, owner_of
-    from saitenka.runtime.events import ConnectionReplaced
+    from util import runtime_gateway
 
-    assert ConnectionReplaced in _SESSION_EVENTS  # routed
-    assert ConnectionReplaced not in _CLAIMED  # but never claimed
+    from saitenka.app.controller import Reader
+    from saitenka.app.session_routes import (
+        _CLAIMED,
+        _PARTICIPANT_OF,
+        _RESOURCE_OF,
+        _SESSION_EVENTS,
+        install_session_reactor,
+        owner_of,
+    )
+    from saitenka.app.subtitle_render import NullRenderer
+    from saitenka.runtime.connection import ConnectionState, reduce_connection
+    from saitenka.runtime.events import ConnectionLost, ConnectionReplaced
+
+    assert set(_CLAIMED) <= set(_SESSION_EVENTS), "a claim without a route reduces nothing"
     assert owner_of(ConnectionReplaced(1)) is Owner.SESSION
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    try:
+        registered = set(gateway.session_resources)
+    finally:
+        reader.close()
+        gateway.close()
+
+    for event in (ConnectionLost(1), ConnectionReplaced(1)):
+        effects = reduce_connection(ConnectionState(), event).effects
+        assert effects, f"{type(event).__name__} is claimed, so its act must ride out as an effect"
+        for effect in effects:
+            names = _RESOURCE_OF.get(type(effect)) or (_PARTICIPANT_OF[type(effect)],)
+            assert set(names) <= registered
 
 
 def test_a_bridge_owned_completion_is_never_claimed_by_the_reactor() -> None:

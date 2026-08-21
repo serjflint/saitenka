@@ -277,8 +277,29 @@ class RemoveSessionArtifacts:
     path: str
 
 
+@dataclass(frozen=True, slots=True)
+class ReplaySubtitleSelection:
+    """The transport was replaced: re-assert the track selection against the new connection.
+
+    A session fact with a subtitle act, which is why it is an effect and not a slice delta — the
+    slot holds what was *decided* about the tracks, and re-sending that decision to a connection
+    that has never heard it is a performance, not a decision.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class RetireCueIdentity:
+    """The transport went away, so the cue on screen describes nothing that is still live.
+
+    Carries no reason. Losing the connection is the whole fact; a reason would be the producer's
+    story about it, and no performer branches on one.
+    """
+
+
 type LifecycleEffect = (
-    StopSession
+    ReplaySubtitleSelection
+    | RetireCueIdentity
+    | StopSession
     | StartupEffect
     | DetachDiagnostics
     | ReleaseInputCapture
@@ -301,7 +322,9 @@ type LifecycleEffect = (
 #: terminal and no completion: nothing correlates to them, and a reservation raised during close
 #: is one nothing would ever retire.
 type FireAndForget = (
-    StartupEffect
+    ReplaySubtitleSelection
+    | RetireCueIdentity
+    | StartupEffect
     | DetachDiagnostics
     | ReleaseInputCapture
     | CloseCapabilityActors

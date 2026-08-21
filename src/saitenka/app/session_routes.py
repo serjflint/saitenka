@@ -41,6 +41,8 @@ from saitenka.runtime.effects import (
     RegisterInputBindings,
     ReleaseInputCapture,
     RemoveSessionArtifacts,
+    ReplaySubtitleSelection,
+    RetireCueIdentity,
     SeedOptionalCollaborators,
     StartPropertyObservation,
 )
@@ -124,20 +126,25 @@ _SESSION_EVENTS = (
 #: Payload types the reactor handles *instead of* the legacy Reader, not merely as well as it.
 #:
 #: Declared, never derived from `_SESSION_EVENTS` — routing and claiming answer different
-#: questions. `ConnectionReplaced` is routed here (the hint FSM resolves a lost acknowledgement on
-#: it) yet must NOT be claimed: `Reader._on_ipc_reconnect` still drives
-#: `subtitle_pipeline.connection_replaced`. Claim it and reconnects stop reaching the pipeline,
-#: with nothing failing at the seam.
+#: questions, and a payload joins this tuple only when the Reader has no remaining part in it.
 #:
-#: `ConnectionLost` and `ConnectionReady` are the sharpest form of the same asymmetry: one slice
-#: feature reduces both, and only one of them is claimable. Learning the transport is back is the
-#: whole of what `ConnectionReady` means, so nothing is left for the Reader to do; losing it also
-#: strands a cue identity, and retiring one tears down the tip and the drawn geometry — acts that
-#: move with the rendered cue, not with this bit.
+#: What "no remaining part" means is the whole protocol: route the payload, move the act, then
+#: claim. All three connection payloads are here because their acts moved — the stranded cue
+#: identity and the track-selection replay are registered performers now, reached through an effect
+#: rather than through a branch in the drain. `ConnectionReady` needed only the first two steps: it
+#: decides nothing but the bit.
 #:
-#: A duty joins this tuple only when the Reader has no remaining part in it. That is the whole
-#: migration protocol: add the route, move the state, then claim.
-_CLAIMED = (StartupHintRequested, StartupReady, SessionClosing, ConnectionReady)
+#: Claiming withholds from the Reader, so what is left in `_drain_event` for these is the
+#: no-reactor fallback and nothing else. Deleting that would make a session without a runtime stop
+#: noticing its transport, which is most of the unit suite.
+_CLAIMED = (
+    StartupHintRequested,
+    StartupReady,
+    SessionClosing,
+    ConnectionLost,
+    ConnectionReady,
+    ConnectionReplaced,
+)
 
 #: Feature keys inside `Owner.SESSION`'s slice. Named once so a reader of the slot does not spell
 #: a key itself and drift from the registration.
@@ -157,6 +164,10 @@ MINED_RESOURCE = "mined-store"
 SUBTITLE_DEACTIVATE_RESOURCE = "subtitle-deactivate"
 SUBTITLE_CLEAR_RESOURCE = "subtitle-clear"
 SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
+#: The cue identity a lost transport strands. A *retiring* act, so it goes in the close-verb table
+#: with the rest — nothing about that seam is close-specific, and an act moves off the Reader by
+#: becoming an effect with a registered performer whatever the phase.
+CUE_RETIRE_RESOURCE = "cue-identity-retire"
 
 #: The optional collaborators' probes, and the interaction work that outlives a cancelled hover.
 CAPABILITY_PARTICIPANTS = ("capability:tts", "capability:anki")
@@ -201,6 +212,10 @@ INPUT_PARTICIPANT = "start:input"
 COLLABORATORS_PARTICIPANT = "start:collaborators"
 HISTORY_PARTICIPANT = "start:history"
 DIAGNOSTICS_PARTICIPANT = "start:diagnostics"
+#: Re-asserting the track selection against a replacement connection. In the *start* table, not the
+#: close one: the connection that has never heard the selection needs it established, and a verb
+#: that meant both would be a lie in the one place this vocabulary has to stay readable.
+SUBTITLE_REPLAY_PARTICIPANT = "start:subtitle-replay"
 
 
 #: Events that belong to no single owner and are reduced by every slice that registers them.
@@ -234,6 +249,7 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
 #: The names are a tuple because a duty can have several participants that retire together; the
 #: order inside one is the contract, exactly as it is between two effects in one phase.
 _RESOURCE_OF: dict[type, tuple[str, ...]] = {
+    RetireCueIdentity: (CUE_RETIRE_RESOURCE,),
     CloseSessionSurfaces: (SURFACES_RESOURCE,),
     CloseSessionOverlay: (OVERLAY_RESOURCE,),
     ReleaseInputCapture: (INPUT_CAPTURE_RESOURCE,),
@@ -252,6 +268,7 @@ _RESOURCE_OF: dict[type, tuple[str, ...]] = {
 #: Which registered participant each setup effect brings up. Separate table from `_RESOURCE_OF`
 #: because the verbs differ; sharing one would be the widening this vocabulary avoids.
 _PARTICIPANT_OF: dict[type, str] = {
+    ReplaySubtitleSelection: SUBTITLE_REPLAY_PARTICIPANT,
     GuardMainRender: RENDER_GUARD_PARTICIPANT,
     EstablishRenderSpace: RENDER_SPACE_PARTICIPANT,
     StartPropertyObservation: OBSERVERS_PARTICIPANT,

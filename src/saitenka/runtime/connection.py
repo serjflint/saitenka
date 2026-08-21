@@ -17,7 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime.events import ConnectionLost, ConnectionReady
+from saitenka.runtime.effects import ReplaySubtitleSelection, RetireCueIdentity
+from saitenka.runtime.events import ConnectionLost, ConnectionReady, ConnectionReplaced
 from saitenka.runtime.state import OwnerSlice, ReduceResult
 
 if TYPE_CHECKING:
@@ -39,15 +40,22 @@ class ConnectionState:
 def reduce_connection(state: object, event: RuntimeEvent, /) -> ReduceResult:
     """`FeatureReducer` for `Owner.SESSION`'s view of its transport.
 
-    A declaring feature: the sender has already lost or replaced the socket by the time this is
-    told, so there is nothing to decide and no outbox. What retiring a stranded cue identity means
-    stays with the owner that holds one.
+    The state is one bit; the acts ride out as effects, because both of them belong to owners this
+    reducer cannot name. `runtime` must not know what a tooltip or a subtitle track is — it only
+    has to decide *that* a stranded cue is stranded and *that* a replaced connection has never
+    heard the track selection. The performers are registered app-side.
+
+    No outbox: an outbox exists to hand a delta back for the caller to apply in its own frame, and
+    neither of these is the caller's to apply. `ConnectionReady` is the one that decides nothing at
+    all, which is exactly why it is the one payload here the reactor can claim outright.
     """
     assert isinstance(state, ConnectionState)
     if isinstance(event, ConnectionLost):
-        return ReduceResult(ConnectionState(ready=False))
+        return ReduceResult(ConnectionState(ready=False), effects=(RetireCueIdentity(),))
     if isinstance(event, ConnectionReady):
         return ReduceResult(ConnectionState(ready=True))
+    if isinstance(event, ConnectionReplaced):
+        return ReduceResult(state, effects=(ReplaySubtitleSelection(),))
     return ReduceResult(state)
 
 
