@@ -11,6 +11,7 @@ import pytest
 from driver import Driver
 from util import FakeIPC
 
+from saitenka.app.bindings import TIP_CLOSE_MSG
 from saitenka.app.controller import Reader
 from saitenka.panel import Definition, Entry
 
@@ -295,7 +296,7 @@ def test_full_stress_chain_through_the_hit_test_path():
     ui.move_to_word(j)  # switch base word through hit-test → the nested popup is dropped
     assert ui.hover == j and not ui.nested_shown, "switching words drops the nested popup"
 
-    r._tip_close_or_back()  # the Esc/close gesture tears the base tooltip down
+    ui.key(TIP_CLOSE_MSG)  # the Esc/close gesture tears the base tooltip down
     assert not ui.tip_shown, "closing dismisses the base tooltip — the whole session unwinds"
 
 
@@ -418,11 +419,11 @@ def test_esc_steps_back_through_navigation_then_closes():
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
     assert len(r.interaction.tip_nav.back) == 2
 
-    r._tip_close_or_back()
+    ui.key(TIP_CLOSE_MSG)
     assert len(r.interaction.tip_nav.back) == 1 and ui.tip_shown
-    r._tip_close_or_back()
+    ui.key(TIP_CLOSE_MSG)
     assert r.interaction.tip_nav.back == () and ui.tip_shown
-    r._tip_close_or_back()  # at the root → close
+    ui.key(TIP_CLOSE_MSG)  # at the root → close
     assert not ui.tip_shown
 
 

@@ -2730,9 +2730,6 @@ class Reader:
         elif isinstance(effect, interaction_intents.CopyUnderCursor):
             self.copy_click()
 
-    def _tip_close_or_back(self) -> None:
-        self._run_interaction_command(interaction_intents.InteractionCommand.TOOLTIP_BACK_OR_CLOSE)
-
     def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
         """The (cached) panel for a clicked/keyed nested open — the shared builder the engaged-tooltip
         lane and session thread reach via the Reader seam. The worker
