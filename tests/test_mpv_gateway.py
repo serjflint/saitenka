@@ -638,6 +638,20 @@ def test_gateway_turns_inbound_overload_into_controlled_legacy_stop() -> None:
     assert gateway.snapshot.inbound_overloads == 1
 
 
+def test_a_position_backlog_does_not_stop_the_session() -> None:
+    """The other half of the overload contract above: a lane that fills with superseded values is
+    not the lane filling with work, and must not reach the same stop."""
+    mailbox = SessionMailbox(normal_capacity=2)
+    ipc = FakeIPC()
+    gateway = MpvGateway(ipc, mailbox)
+    for position in range(8):
+        ipc.publish({"event": "property-change", "name": "time-pos", "data": float(position)})
+
+    assert not mailbox.snapshot.close_requested
+    assert gateway.snapshot.inbound_overloads == 0
+    assert mailbox.receive_ready()[-1].payload == PropertyObserved("time-pos", 7.0)
+
+
 def test_a_correlated_write_reaches_the_wire_before_a_following_read() -> None:
     """The premise `send_correlated` is built on, and which every non-awaited caller depends on:
     the write is dispatched during the submit, not queued for the reactor, so a synchronous readback

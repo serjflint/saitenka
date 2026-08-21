@@ -140,6 +140,12 @@ SessionMailbox ──► SessionReactor ──► reducer(state, event)
 first reserves terminal capacity. The reservation prevents unrelated traffic from consuming the
 slot needed for that effect's completion. Sequence numbers preserve publication order across lanes.
 
+Refusing admission on the normal lane is a teardown, not a bound: the gateway turns `MailboxFull`
+into `CloseRequested("runtime-overloaded")`. So the lane first reclaims what the session no longer
+needs — a queued `time-pos` or `mouse-pos` another queued one already supersedes, both properties
+whose deltas the projection either never publishes or folds at drain. Anything else still stops the
+session, because the alternative is dropping a fact silently.
+
 `SessionReactor` is deterministic: it passes one event at a time to a reducer, dispatches returned
 effects, validates completions against the accepted owner and identity, and rejects stale connection
 epochs. A reservation permits at most one terminal publication. Closing rejects new work and emits

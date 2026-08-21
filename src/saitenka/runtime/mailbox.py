@@ -33,6 +33,12 @@ if TYPE_CHECKING:
 #: that acts is the user asking for it again.
 _COALESCING_COMMANDS = frozenset({"saitenka-scroll-up", "saitenka-scroll-down"})
 
+#: Properties carrying a value rather than a change: the newest is the whole truth, so a queued
+#: older one is already dead. `time-pos` publishes no delta at all and `mouse-pos`'s is folded at
+#: drain by `_may_coalesce` — both in `runtime/playback.py`. Nothing else may join: a fact a later
+#: event can depend on having been seen is not superseded by a newer value of itself.
+_VALUE_LATEST_PROPERTIES = frozenset({"time-pos", "mouse-pos"})
+
 
 class TrafficClass(StrEnum):
     NORMAL = "normal"
@@ -52,6 +58,8 @@ class MailboxSnapshot:
     terminal_reserved: int
     terminal_enqueued: int
     command_reserved: int
+    #: Cumulative, not a depth: what admission reclaimed instead of stopping the session.
+    superseded_dropped: int
     close_requested: bool
     connection_lost: bool
     closed: bool
@@ -87,6 +95,7 @@ class SessionMailbox:
         self._close_latch: EventEnvelope | None = None
         self._connection_lost: EventEnvelope | None = None
         self._closed = False
+        self._superseded_dropped = 0
         self._wakes = 0
         self._condition = threading.Condition()
 
@@ -139,6 +148,7 @@ class SessionMailbox:
                 terminal_reserved=len(self._terminal_reservations),
                 terminal_enqueued=len(self._terminal_enqueued),
                 command_reserved=len(self._command_reservations),
+                superseded_dropped=self._superseded_dropped,
                 close_requested=self._close_latch is not None,
                 connection_lost=self._connection_lost is not None,
                 closed=self._closed,
@@ -159,10 +169,10 @@ class SessionMailbox:
                 raise MailboxFull("mailbox is closed")
             if command_id in self._command_reservations:
                 raise ValueError(f"command already admitted: {command_id}")
-            normal = self._queues[TrafficClass.NORMAL]
-            used = len(normal) + len(self._command_reservations)
-            if used + 2 > self._capacities[TrafficClass.NORMAL]:
+            # Two: the command and the outcome it will correlate with.
+            if not self._room_for_locked(TrafficClass.NORMAL, 2):
                 raise MailboxFull("normal mailbox lane cannot reserve a command outcome")
+            normal = self._queues[TrafficClass.NORMAL]
             self._command_reservations.add(command_id)
             envelope = self._envelope_locked(command, origin, connection_epoch)
             normal.append(envelope)
@@ -317,12 +327,43 @@ class SessionMailbox:
     def _publish_locked(self, envelope: EventEnvelope, traffic: TrafficClass) -> None:
         if self._closed:
             raise MailboxFull("mailbox is closed")
+        if not self._room_for_locked(traffic, 1):
+            raise MailboxFull(f"{traffic.value} mailbox lane is full")
+        self._queues[traffic].append(envelope)
+        self._condition.notify()
+
+    def _room_for_locked(self, traffic: TrafficClass, need: int) -> bool:
+        """Whether `need` slots are free, reclaiming superseded values in the normal lane first.
+
+        Refusing admission here is not a bound but a teardown: the gateway turns `MailboxFull` into
+        `CloseRequested("runtime-overloaded")`. So before spending the session, drop what the
+        session no longer needs. Only value-latest properties are reclaimable, which keeps the bound
+        real for a lane genuinely filling with work — a backlog of cues still stops the session,
+        because the alternative is losing them silently.
+        """
         queue = self._queues[traffic]
         reserved = len(self._command_reservations) if traffic == TrafficClass.NORMAL else 0
-        if len(queue) + reserved >= self._capacities[traffic]:
-            raise MailboxFull(f"{traffic.value} mailbox lane is full")
-        queue.append(envelope)
-        self._condition.notify()
+        while len(queue) + reserved + need > self._capacities[traffic]:
+            if traffic != TrafficClass.NORMAL or not self._drop_superseded_locked():
+                return False
+        return True
+
+    def _drop_superseded_locked(self) -> bool:
+        """Drop the oldest queued observation another queued one already supersedes."""
+        queue = self._queues[TrafficClass.NORMAL]
+        names = [
+            payload.name
+            if isinstance(payload := envelope.payload, PropertyObserved)
+            and payload.name in _VALUE_LATEST_PROPERTIES
+            else None
+            for envelope in queue
+        ]
+        for index, name in enumerate(names):
+            if name is not None and name in names[index + 1 :]:
+                del queue[index]
+                self._superseded_dropped += 1
+                return True
+        return False
 
     def _envelope_locked(
         self,

@@ -249,6 +249,34 @@ def test_mailbox_does_not_coalesce_across_the_turn_quantum() -> None:
     assert mailbox.receive_ready(limit=1) == (second,)
 
 
+def test_a_stalled_normal_lane_drops_superseded_positions_rather_than_the_session() -> None:
+    """`time-pos` fills the lane whenever the drain stalls — a mine with Anki down stalls it ~55 s.
+
+    Refusing admission there is not a bound, it is a teardown: the gateway turns `MailboxFull` into
+    `CloseRequested("runtime-overloaded")` and the overlay exits. And it exits over values the
+    projection publishes no delta for at all (`playback.py`, TIMING_PROPERTIES minus `sub-delay`),
+    so the backlog was dead before it was refused.
+    """
+    mailbox = SessionMailbox(normal_capacity=4)
+    kept = mailbox.publish(
+        RawMpvEvent("file-loaded"),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+    )
+    for position in range(10):
+        mailbox.publish(
+            PropertyObserved("time-pos", float(position)),
+            origin=EventOrigin.MPV,
+            traffic=TrafficClass.NORMAL,
+        )
+
+    drained = mailbox.receive_ready()
+    assert len(drained) == 4
+    assert drained[0] == kept
+    assert drained[-1].payload == PropertyObserved("time-pos", 9.0)
+    assert mailbox.snapshot.superseded_dropped == 7
+
+
 def test_terminal_reservation_survives_normal_lane_saturation() -> None:
     mailbox = SessionMailbox(normal_capacity=1, lifecycle_capacity=1, terminal_capacity=1)
     effect_id = EffectId(4)
