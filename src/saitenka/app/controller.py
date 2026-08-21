@@ -38,6 +38,7 @@ from saitenka.app import (
     mined_feedback,
     mined_seed,
     mined_store,
+    miner,
     miner_ui,
     mouse_capture,
     native_subtitles,
@@ -116,7 +117,7 @@ from saitenka.app.media import (
     copy_clipboard,
     tts_available,
 )
-from saitenka.app.miner import Miner, tag_slug
+from saitenka.app.miner import MineCue, MinerPorts, tag_slug
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
@@ -416,7 +417,6 @@ class Reader:
         self._interaction_metadata_submit = hover_metadata.configure_runtime_job(ipc)
         self._loading = False
         self._load_frame = 0
-        self._miner = Miner(self)  # mining flow (app/miner.py)
         # The whole group, not a field per key: `active_bindings` resolves `key_attr` against it, and
         # a flat copy per key was a second representation of every one of them.
         self.keys = o.keys
@@ -2761,8 +2761,58 @@ class Reader:
         nested_popup.hide_nested(self.tip_ports)
 
     # --- mining (flow lives in app/miner.py; thin delegates here) --------------------------------
+    @property
+    def mine_cue(self) -> MineCue:
+        """What picking a target reads. Its own value, so the tooltip's ⊕ does not pay for a mine."""
+        return MineCue(self.tokens, self.styles, self.hover, self.tokenizer, self.max_bulk)
+
+    @property
+    def miner_ports(self) -> MinerPorts | None:
+        """The mining feature's value for THIS cue, or `None` when there is no deck to mine into.
+
+        A property rather than a stored value: half of it is the current cue, and a mining object
+        holding it would mine whatever was on screen when the session was built. The mpv reads
+        happen here, once, so one mine sees one reading of the file and the playhead.
+        """
+        if not self.anki or not self.mine_cfg:
+            return None
+        return MinerPorts(
+            cue=self.mine_cue,
+            anki=self.anki,
+            mine_cfg=self.mine_cfg,
+            dict_set=self.dict_set,
+            mined_store=self.mined_store,
+            ipc=self.ipc,
+            scratch=self._tmp,
+            media_path=self._get_text("path"),
+            playhead=self._get_number("time-pos") or 0.0,
+            sentence_html=self._sentence_html(),
+            hovered_terms=self.interaction.hovered_word_meta.terms,
+            preview=self.interaction.preview_panel,
+            session_recorder=self.episode.session_recorder,
+            toast=self._toast,
+            mark_mined=self._mark_mined,
+            mined_here=self._sidebar_mined_here,
+            preview_existing=self._preview_existing,
+            preview_mined=self._preview_mined,
+            merge_mined=self.session.mined.update,
+        )
+
+    def _mine(self, run: Callable[[MinerPorts], None]) -> None:
+        """Run one mining operation against a freshly-read cue, or do nothing without a deck."""
+        ports = self.miner_ports
+        if ports is not None:
+            run(ports)
+
+    def _sidebar_mined_here(self) -> None:
+        """Mark the backlog rows covering this cue mined and redraw. The sidebar's own read set stays
+        the sidebar's — mining asks for the act, not for the view."""
+        from saitenka.app import sidebar
+
+        sidebar.mine_active(self.sidebar_view)
+
     def _mine_target(self) -> int | None:
-        return self._miner.mine_target()
+        return miner.mine_target(self.mine_cue)
 
     def _sentence_html(self) -> str:
         return "<br>".join("".join(t.surface for t in line) for line in self.lines)
@@ -2775,10 +2825,10 @@ class Reader:
         return source_meta(video)
 
     def _provenance(self, video) -> str:
-        return self._miner.provenance(video)
+        return miner.provenance(self._get_number("time-pos") or 0.0, video)
 
     def _mine_tags(self, video) -> list[str]:
-        return self._miner.mine_tags(video)
+        return miner.mine_tags(video)
 
     # --- panel commands: pure reducer, executed here (WP5.3) ----------------------------------
     def _panel_inputs(self) -> panel_intents.PanelInputs:
@@ -2861,9 +2911,13 @@ class Reader:
             log.info("mine: %r animated=%s", self.tokens[effect.index].surface, effect.animated)
             with otel_metrics.traced("anki_mine", source="base") as span:
                 span.set("animated", bool(effect.animated))
-                self._miner.mine_token(self.tokens[effect.index], animated=effect.animated)
+                self._mine(
+                    lambda p: miner.mine_token(
+                        p, self.tokens[effect.index], animated=effect.animated
+                    )
+                )
         elif isinstance(effect, mine_intents.MineEpisode):
-            self._miner.bulk_mine()
+            self._mine(miner.bulk_mine)
         elif isinstance(effect, mine_intents.BookmarkCue):
             backlog.capture_current(self.capture_ports)
         elif isinstance(effect, Announce):
@@ -2882,7 +2936,7 @@ class Reader:
 
     def _mine_token(self, tok, *, card=None) -> None:
         with otel_metrics.traced("anki_mine", source="nested"):
-            self._miner.mine_token(tok, card=card)
+            self._mine(lambda p: miner.mine_token(p, tok, card=card))
 
     def _mark_mined(self, expression: str) -> None:
         mined_feedback.mark_mined(
@@ -2912,7 +2966,7 @@ class Reader:
         expression is already in the deck (a different line/episode/anime)."""
         duplicate = self.interaction.preview_panel.dup_tok
         if duplicate is not None:
-            self._miner.mine_token(duplicate, force=True)
+            self._mine(lambda p: miner.mine_token(p, duplicate, force=True))
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         if not self.show_preview:
@@ -2944,10 +2998,11 @@ class Reader:
         self._run_panel_command(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
 
     def _frequency(self, tok) -> tuple[str, str]:
-        return self._miner.frequency(tok)
+        return miner.frequency(self.dict_set, tok)
 
     def _capture_media(self, base: str, video) -> tuple[str, str]:
-        return self._miner.capture_media(base, video)
+        ports = self.miner_ports
+        return ("", "") if ports is None else miner.capture_media(ports, base, video)
 
     def bulk_mine(self) -> None:
         self._run_mine_command(mine_intents.MineCommand.EPISODE)
@@ -4271,7 +4326,7 @@ class Reader:
             )
 
     def _seed_mined(self) -> None:
-        self._miner.seed_mined()
+        self._mine(miner.seed_mined)
 
     # --- subtitle navigation (instant render, then seek) --------------------------------------
     @property

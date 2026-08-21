@@ -87,7 +87,7 @@ def test_mined_store_write_is_spanned(monkeypatch):
     # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
     from types import SimpleNamespace
 
-    from saitenka.app.miner import Miner
+    from saitenka.app import miner
 
     spans = record_spans(monkeypatch)
     reader = Reader(_FakeIPC({"sub-start": 1.0, "sub-end": 3.0}))
@@ -97,5 +97,8 @@ def test_mined_store_write_is_spanned(monkeypatch):
     reader.mine_cfg = SimpleNamespace(deck="Mining")
     card = SimpleNamespace(expression="猫", reading="ねこ")
 
-    Miner(reader)._persist_mined(note_id=42, card=card, video="/x/Show - 01.mkv")
+    reader.anki = SimpleNamespace()  # `miner_ports` refuses to build without a deck to mine into
+    ports = reader.miner_ports
+    assert ports is not None
+    miner._persist_mined(ports, note_id=42, card=card, video="/x/Show - 01.mkv")
     assert len(_named(spans, "mined_store_write")) == 1

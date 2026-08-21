@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app.miner import Miner
+from saitenka.app.miner import mined_expressions
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ def load_mined_seed(request: object, cancelled: threading.Event) -> object:
         raise TypeError("invalid mined-seed request")
     if cancelled.is_set():
         return None
-    return Miner.mined_expressions(request.anki, request.mine_cfg)
+    return mined_expressions(request.anki, request.mine_cfg)
 
 
 def configure_runtime_job(ipc) -> JobSubmitter | None:

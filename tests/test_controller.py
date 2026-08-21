@@ -2638,9 +2638,13 @@ def test_close_cleans_up_tmp_dir():
 
 def test_capture_media_failure_shows_toast(monkeypatch):
     """If both screenshot and audio fail, _capture_media must show a warn toast, not be silent."""
+    from saitenka.app.anki import MineConfig
+
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
     r.sub_text = "本命"
+    # A deck to mine into: capture runs off the mining value, which a session without one never builds.
+    r.anki, r.mine_cfg = object(), MineConfig()
 
     # Patch screenshot and clip_audio to always raise (capture lives in app/miner.py since 8d).
     import saitenka.app.miner as _M
@@ -3189,20 +3193,35 @@ def test_from_rows_band_cache_max_retains_more_of_a_tall_panel():
 
 
 def test_miner_module_owns_the_mining_flow(monkeypatch):
-    from saitenka.app.miner import Miner, tag_slug
+    from saitenka.app import miner
+    from saitenka.app.miner import tag_slug
 
     assert tag_slug("Nippon Sangoku") == "Nippon_Sangoku"
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
-    assert isinstance(r._miner, Miner)
-    # Reader's mining API delegates to the Miner (behaviour preserved)
+    # Reader's mining API delegates to the module, handing it the cue it built (behaviour preserved)
     mined = []
-    monkeypatch.setattr(r._miner, "mine_token", lambda tok, **_k: mined.append(tok.surface))
+    monkeypatch.setattr(
+        miner, "mine_token", lambda p, tok, **_k: mined.append((p.cue.hover, tok.surface))
+    )
     r.anki = object()
     r.mine_cfg = object()
     r.hover = 0
     r.mine_current()
-    assert mined == ["本命"]
+    assert mined == [(0, "本命")]
+
+
+def test_a_reader_with_no_deck_builds_no_mining_value(monkeypatch):
+    """ "Is there anywhere to mine into" is decided once, by the property, instead of at every entry
+    point — so an unconfigured session cannot reach the flow at all."""
+    from saitenka.app import miner
+
+    r = _reader_with_word(FakeIPC())
+    r.anki = None
+    monkeypatch.setattr(miner, "mine_token", lambda *_a, **_k: pytest.fail("mined with no deck"))
+
+    assert r.miner_ports is None
+    r.mine_current()  # must be a no-op, not an AttributeError on the missing client
 
 
 def _accrual_reader(ipc, monkeypatch) -> tuple[Reader, list]:

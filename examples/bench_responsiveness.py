@@ -1115,7 +1115,7 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     from types import SimpleNamespace
 
     from saitenka.app import backlog, mined_store, sidebar
-    from saitenka.app.miner import Miner
+    from saitenka.app import miner as miner_flow
     from saitenka.subtitles import Cue, CueIndex
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-clicks-"))
@@ -1137,7 +1137,9 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     reader.session.backlog_store = backlog.BacklogStore(tmp / "backlog.sqlite")
     reader.session.mined_store = mined_store.MinedCardStore(tmp / "mined.sqlite")
     reader.mine_cfg = SimpleNamespace(deck="Mining")
-    miner = Miner(reader)
+    reader.anki = SimpleNamespace()  # `miner_ports` refuses to build without a deck to mine into
+    ports = reader.miner_ports
+    assert ports is not None
 
     # Open + render the sidebar so on_click has real hitboxes; click a view-tab so the measured cost is
     # the click dispatch + full redraw ALONE (a bookmark/mine hit would fold a store write into it — we
@@ -1165,8 +1167,8 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
 
     def persist_mine() -> None:
         note_id["n"] += 1
-        miner._persist_mined(
-            note_id["n"], SimpleNamespace(expression="猫", reading="ねこ"), reader._get("path")
+        miner_flow._persist_mined(
+            ports, note_id["n"], SimpleNamespace(expression="猫", reading="ねこ"), ports.media_path
         )
 
     sc, bk, mn = (

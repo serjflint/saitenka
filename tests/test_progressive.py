@@ -11,9 +11,9 @@ import pytest
 from util import FakeIPC, await_ready, runtime_gateway
 
 from saitenka import otel_metrics
+from saitenka.app import mined_seed as mined_seed_lane
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
-from saitenka.app.miner import Miner
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.mpvio.ipc import IPCRequest
@@ -56,7 +56,7 @@ def test_apply_deps_injects_and_stops_loading():
 def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    monkeypatch.setattr(Miner, "mined_expressions", lambda _anki, _cfg: {"猫"})
+    monkeypatch.setattr(mined_seed_lane, "mined_expressions", lambda _anki, _cfg: {"猫"})
     r = Reader(ipc)
     r.anki = object()
     r.mine_cfg = object()
@@ -89,7 +89,7 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
             return {"古い"}
         return {"新しい"}
 
-    monkeypatch.setattr(Miner, "mined_expressions", fetch)
+    monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     r = Reader(ipc)
     r.anki = old_anki
     r.mine_cfg = object()
@@ -135,7 +135,7 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
             return None
         return {"猫"}
 
-    monkeypatch.setattr(Miner, "mined_expressions", fetch)
+    monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     try:
         r._request_mined_seed()
         await_ready(

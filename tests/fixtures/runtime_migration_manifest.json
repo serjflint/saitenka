@@ -6,10 +6,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/miner.py::Miner.__init__"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/reader_deps.py::apply_deps"
     ],
     [

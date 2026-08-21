@@ -39,7 +39,6 @@ MAX_ARGS = 8
 EXEMPT = frozenset(
     {
         "controller.py::Reader.__init__",
-        "miner.py::Miner.__init__",
         "reader_deps.py::apply_deps",
         "reader_deps.py::load_deps_async",
         "reader_factory.py::create_reader",

@@ -93,11 +93,14 @@ _TERMINAL_DEBT = {
     #
     # Take the host because the host is what they build or own. Converting these is not a smaller
     # signature, it is a different composition root — WP7's job, not a `reader-parameter` row.
+    #
+    # `Miner.__init__` was filed here and did not belong: it did not build or own the Reader, it read
+    # twenty-one of its members. That is a feature value, and it converted as one. Check the claim
+    # before adding a row — "holds the host" and "composes the host" look identical at a signature.
     "host-composition": frozenset(
         ("reader-parameter", source)
         for source in (
             "src/saitenka/app/controller.py::Reader.__init__",
-            "src/saitenka/app/miner.py::Miner.__init__",
             "src/saitenka/app/reader_deps.py::apply_deps",
             "src/saitenka/app/reader_deps.py::load_deps_async",
             "src/saitenka/app/reader_factory.py::create_reader",
