@@ -36,13 +36,15 @@ def transformer(mapping: dict[str, str]) -> type[cst.CSTTransformer]:
             self.count = 0
 
         def leave_Attribute(
-            self, _original: cst.Attribute, updated: cst.Attribute
+            self,
+            original_node: cst.Attribute,  # noqa: ARG002  # LibCST fixes both parameter names
+            updated_node: cst.Attribute,
         ) -> cst.BaseExpression:
-            path = mapping.get(updated.attr.value)
+            path = mapping.get(updated_node.attr.value)
             if path is None:
-                return updated
+                return updated_node
             self.count += 1
-            return _attribute(updated.value, path)
+            return _attribute(updated_node.value, path)
 
     return Move
 

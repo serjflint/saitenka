@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -29,12 +29,6 @@ ROOT = Path(__file__).resolve().parents[2]
 #: The declaration being retired lives here; rewriting the class body turns a descriptor into a
 #: nonsense assignment. A transform that renames host members excludes it.
 CONTROLLER = ROOT / "src" / "saitenka" / "app" / "controller.py"
-
-
-class Counting(Protocol):
-    """A LibCST transformer that reports how many sites it actually changed."""
-
-    count: int
 
 
 def worklist(members: Iterable[str]) -> list[Path]:
@@ -55,7 +49,11 @@ def apply(
     *,
     check: bool = False,
 ) -> int:
-    """Run the transform over the worklist; return the number of sites rewritten."""
+    """Run the transform over the worklist; return the number of sites rewritten.
+
+    The transformer must expose a `count` of the sites it changed: a file is only rewritten when it
+    reports one, so an unchanged file keeps its mtime and stays out of the diff.
+    """
     import libcst as cst  # the codemod group is opt-in, not a tool-wide dependency
 
     total, touched = 0, 0
@@ -63,7 +61,7 @@ def apply(
         source = path.read_text(encoding="utf-8")
         transformer = make()
         tree = cst.parse_module(source).visit(transformer)
-        changed: int = transformer.count  # type: ignore[attr-defined]
+        changed: int = getattr(transformer, "count", 0)
         if not changed:
             continue
         total += changed
