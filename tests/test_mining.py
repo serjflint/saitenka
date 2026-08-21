@@ -472,7 +472,8 @@ def test_capture_media_still_only_when_animated_disabled(monkeypatch, tmp_path):
 
 def test_capture_media_survives_a_timespan_read_error(monkeypatch, tmp_path):
     # A transient IPC error reading the cue timespan must NOT escape capture_media — in bulk_mine it would
-    # propagate to poll_once and tear the session down. The still is still captured (image-only mine).
+    # propagate out of the session loop and tear the session down. The still is still captured
+    # (image-only mine).
     import saitenka.app.miner as _M
 
     r = _capture_reader(tmp_path, animated_enabled=False)
