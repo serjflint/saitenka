@@ -9,6 +9,7 @@ gate. The *performance* side of the same scenario lives in examples/bench_respon
 
 from __future__ import annotations
 
+from driver import Driver
 from util import FakeIPC
 
 from saitenka.app import nested_popup, surfaces
@@ -48,14 +49,15 @@ _CORPUS = [f"語{i:03d}" for i in range(PANEL_CACHE_MAX + 24)]
 
 def _churn(r: Reader, term: str) -> bool:
     """One cold hover → scroll → nested → scroll → dismiss cycle via the real entry points. Setting
-    lines+tokens lets set_hover/_draw_subtitle build a consistent box for token 0. Returns whether a
-    nested popup actually opened (so a test can assert the nested path was exercised)."""
+    lines+tokens lets `_draw_subtitle` build a consistent box for token 0. Returns whether a nested
+    popup actually opened (so a test can assert the nested path was exercised)."""
     tok = Token(term, term, "ご", "名詞", 0, len(term))
     r.lines = [[tok]]
     r.tokens = [tok]
-    r.set_hover(
-        0
-    )  # draws the subtitle (builds boxes) + shows the tip; retire_hover() tears it down
+    # Draw first, then hover: the boxes have to exist before a cursor has anywhere to land. The old
+    # `set_hover(0)` did both at once, which is why it could not be a move.
+    r._draw_subtitle()
+    Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
         r._scroll_tip(surfaces.tip_wheel_pixels(r.tip_scale.ref_h, 1))
     st = r.tip.view.state

@@ -1802,7 +1802,8 @@ def test_switch_base_word_drops_nested(monkeypatch):
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None
-    r.set_hover(1)  # move to a different subtitle word
+    # a real switch: the cursor moves to the other word and its switch dwell comes due
+    Driver(r).move_to_word(1)
     assert r.hover_view().nested.state is None  # the stale scan popup is dropped
 
 
