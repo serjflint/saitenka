@@ -253,6 +253,23 @@ def test_writer_survives_a_failing_sample_fn(tmp_path):
 # --- live writer thread ----------------------------------------------------------------------
 
 
+def _settled_events(path) -> list[dict]:
+    """Events on disk, or `[]` while the writer is mid-rewrite.
+
+    The writer thread rewrites the whole document each flush, so a reader that lands between the
+    truncate and the last byte parses a fragment. Half a document is not "no events yet" to
+    `json`, it is `JSONDecodeError` — raised out of the *predicate*, which no deadline can catch
+    and which names a different test on every run. Treating a torn read as not-yet-ready is what
+    makes the wait a wait rather than a race the reader usually wins.
+    """
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["traceEvents"]
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+
 def test_live_writer_thread_exports_a_span(tmp_path):
     path = tmp_path / "trace.json"
     gate = ActiveGate()
@@ -260,13 +277,10 @@ def test_live_writer_thread_exports_a_span(tmp_path):
     proc = CTFSpanProcessor(path, gate, interval=0.05)
     try:
         proc.on_end(_make_span())
-        await_ready(
-            lambda: path.exists() and bool(json.loads(path.read_text())["traceEvents"]),
-            "the writer thread never flushed the span",
-        )
-        assert len(json.loads(path.read_text(encoding="utf-8"))["traceEvents"]) == 1
+        await_ready(lambda: bool(_settled_events(path)), "the writer thread never flushed the span")
     finally:
         proc.shutdown()
+    assert len(_settled_events(path)) == 1  # after shutdown: no writer left to tear the read
 
 
 def test_live_writer_thread_samples_counters_periodically(tmp_path):
@@ -274,20 +288,17 @@ def test_live_writer_thread_samples_counters_periodically(tmp_path):
     gate = ActiveGate()
     gate.set(value=True)
     proc = CTFSpanProcessor(path, gate, sample_fn=lambda: {"a": 1.0}, interval=0.05)
-
-    def sampled() -> bool:
-        return path.exists() and any(
-            e["ph"] == "C" for e in json.loads(path.read_text())["traceEvents"]
-        )
-
     try:
         # A deadline, not `for _ in range(100)`: that is a scheduling budget in a timeout's clothes,
         # and under `test-ft` the writer thread loses it before it is ever scheduled.
-        await_ready(sampled, "the writer thread never sampled a counter")
-        counters = [e for e in json.loads(path.read_text())["traceEvents"] if e["ph"] == "C"]
-        assert counters and all(e["name"] == "a" for e in counters)
+        await_ready(
+            lambda: any(e["ph"] == "C" for e in _settled_events(path)),
+            "the writer thread never sampled a counter",
+        )
     finally:
         proc.shutdown()
+    counters = [e for e in _settled_events(path) if e["ph"] == "C"]
+    assert counters and all(e["name"] == "a" for e in counters)
 
 
 def test_shutdown_flushes_the_tail(tmp_path):

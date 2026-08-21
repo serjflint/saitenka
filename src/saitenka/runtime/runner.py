@@ -1,4 +1,4 @@
-"""The shared session-driving core (WP5.5).
+"""The shared session-driving core.
 
 One loop, owned here, so a feature that needs to wait for something does not grow its own. A
 feature-local spin is a second event loop: it has its own idea of ordering, its own timeout
@@ -6,7 +6,7 @@ handling, and its own way to hang — and the two drift, because only one of the
 the interactive path.
 
 `run_until` is the bounded mode: pump until a predicate holds or a deadline passes. The blocking
-mode WP6 switches `run`/`attach` onto is the same loop with `predicate=lambda: closed`.
+mode `run`/`attach` use is the same loop with `predicate=lambda: closed`.
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ class SessionRunner:
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        #: Consumes one turn, blocking up to the timeout it is given. A drain today; a
-        #: `SessionMailbox.receive` once the blocking runner lands.
+        #: Consumes one turn, blocking up to the timeout it is given. `SessionLoop` passes a step
+        #: that receives from the mailbox; a session with no runtime passes its own drain.
         self._step = step
         self._clock = clock
 
