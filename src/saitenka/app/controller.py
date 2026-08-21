@@ -1359,10 +1359,10 @@ class Reader:
     # --- subtitle -----------------------------------------------------------------------------
     def _teardown_tip(self) -> None:
         """Tear down the hover stack unconditionally: hide TIP_ID/NESTED_ID, reset all tooltip
-        state, and release any pause a tooltip took. Called by set_hover(-1) AND set_subtitle so that
-        a cue change while a tooltip is showing always clears it via the real path — avoiding the
-        early-return in set_hover (index == self.hover) that would otherwise short-circuit teardown
-        when hover is already -1 but the tip is still on screen."""
+        state, and release any pause a tooltip took. Called by `retire_hover` AND `set_subtitle`, so
+        a cue change while a tooltip is showing always clears it via the real path — unconditional
+        because `retire_hover` early-returns when hover is already -1, which a tip still on screen
+        does not imply."""
         self.tip.jobs.cancel_all()
         hide = getattr(self.ov, "hide_interactive", self.ov.hide)
         hide(TIP_ID)
@@ -1411,9 +1411,9 @@ class Reader:
         self.subtitle_pipeline.cue_changed(self._subtitle_target(), nonempty=bool(text.strip()))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
-        # any tooltip-owned pause is released.  We cannot rely on set_hover(-1) here because its
-        # early-return (index == self.hover) would skip teardown if hover is already -1 but
-        # tip state is present (e.g. _show_tooltip was called directly without set_hover).
+        # any tooltip-owned pause is released. `retire_hover` will not do: it early-returns on
+        # hover already -1, which does not imply the tip is down (`_show_tooltip` can be called
+        # without a hover).
         with otel_metrics.traced("teardown_tip"):
             self._teardown_tip()
         self.hover = -1

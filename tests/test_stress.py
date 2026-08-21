@@ -53,7 +53,9 @@ def _churn(r: Reader, term: str) -> bool:
     tok = Token(term, term, "ご", "名詞", 0, len(term))
     r.lines = [[tok]]
     r.tokens = [tok]
-    r.set_hover(0)  # draws the subtitle (builds boxes) + shows the tip; set_hover(-1) tears it down
+    r.set_hover(
+        0
+    )  # draws the subtitle (builds boxes) + shows the tip; retire_hover() tears it down
     for _ in range(4):  # scroll toward the bottom of the tall entry
         r._scroll_tip(round(r.osd[1] * 0.12))
     st = r.tip.view.state
@@ -66,7 +68,7 @@ def _churn(r: Reader, term: str) -> bool:
         opened = r.tip.nest.state is not None
         r._scroll_tip(round(r.osd[1] * 0.12))  # scroll while nested is up
         r._hide_nested()
-    r.set_hover(-1)  # dismiss the whole stack
+    r.retire_hover()  # dismiss the whole stack
     return opened
 
 
@@ -87,7 +89,7 @@ def test_sustained_churn_evicts_and_stays_clean():
     assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX, (
         f"panel cache overflowed its LRU cap: {len(r.tip.panel_cache)}"
     )
-    # after the final set_hover(-1) the whole hover stack must be torn down
+    # after the final retire_hover() the whole hover stack must be torn down
     assert r.hover_view().tip.state is None
     assert r.hover_view().nested.state is None  # nested popup cleared
     assert r.hover == -1

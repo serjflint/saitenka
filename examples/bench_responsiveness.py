@@ -752,7 +752,7 @@ def run_stress(
             )
             timed(lambda: reader._scroll_tip(step))  # scroll while the nested popup is up
             timed(reader._hide_nested)
-        timed(lambda: reader.set_hover(-1))  # dismiss the whole stack
+        timed(lambda: reader.retire_hover())  # dismiss the whole stack
 
     for term, reading in corpus:  # one warmup round before the memory baseline
         one_word(term, reading)
@@ -1614,7 +1614,7 @@ def run_timeline(
                 _timeline_interact(
                     reader
                 )  # nested + clicked, off this base tooltip (realistic kinds)
-            reader.set_hover(-1)
+            reader.retire_hover()
     finally:
         reader._stop.set()
 
@@ -2278,7 +2278,7 @@ def main() -> int:
 
     def show_cold(i):
         reader.tip.panel_cache.clear()
-        reader.set_hover(-1)
+        reader.retire_hover()
         reader._show_tooltip(i)
 
     def show_warm(i):

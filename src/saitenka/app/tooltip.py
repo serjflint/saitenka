@@ -335,9 +335,16 @@ def set_hover(
     show: ShowActions,
     index: int,
 ) -> None:
+    """Show the tooltip for one word. `index` is a word, so a negative one is a caller's bug.
+
+    It used to mean "nothing hovered" and forward to `retire_hover`, which is what let a caller
+    wanting only the teardown reach the build chain through a sentinel. The machine has emitted
+    `ShowWord` and `RetireWord` separately since the hover decision got its own home, so the
+    sentinel had no production caller left — and refusing it is what stops the next one appearing.
+    """
     if index < 0:
-        retire_hover(ports, inputs, show)  # any negative index means "nothing hovered"
-        return
+        msg = f"set_hover({index}): nothing-hovered is retire_hover, not a negative index"
+        raise ValueError(msg)
     if index == inputs.hover():
         return
     show.select(index)

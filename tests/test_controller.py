@@ -1286,8 +1286,21 @@ def test_pause_on_tooltip_pauses_then_resumes(monkeypatch):
     r._show_tooltip(0)  # tooltip shown → pause
     assert ("set_property", "pause", True) in ipc.commands
     r.hover = 0
-    r.set_hover(-1)  # tooltip hidden → resume
+    r.retire_hover()  # tooltip hidden → resume
     assert ("set_property", "pause", False) in ipc.commands
+
+
+def test_set_hover_refuses_the_nothing_hovered_sentinel():
+    """`set_hover` shows a word; "nothing hovered" is `retire_hover` and nothing else.
+
+    The negative index used to forward to the teardown, which is how a caller that wanted only the
+    teardown reached the build chain. Refusing it is the seam — a silent early-return would let the
+    next caller re-introduce it.
+    """
+    r = _reader_with_word(FakeIPC())
+    r.hover = 0
+    with pytest.raises(ValueError, match="retire_hover"):
+        r.set_hover(-1)
 
 
 def test_pause_on_tooltip_respects_manual_pause():
@@ -2397,7 +2410,7 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     r.set_hover(0)
     assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
     assert r._trans_text == "I want you to read this."
-    r.set_hover(-1)
+    r.retire_hover()
     assert OverlayId.TRANS in hidden  # leaving the word hid it again
 
 
@@ -2425,7 +2438,7 @@ def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.toggle_translation()  # force it ON with `t`
     assert r._translate_on and r._translation_visible()
-    r.set_hover(-1)  # …and it stays even with nothing hovered
+    r.retire_hover()  # …and it stays even with nothing hovered
     assert r._translation_visible()
 
 
