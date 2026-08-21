@@ -277,7 +277,8 @@ def build() -> dict:
 def markdown(state: dict) -> str:
     lines = [
         (
-            f"- **Reducer purity** {state['reducers']} registered reducers; "
+            f"- **Reducer purity** {state['reducers']} registered reducers "
+            "(the route table only — stateless policies are outside this census); "
             f"**{state['decides']} readings reach a branch**, {state['stamps']} only stamp an "
             f"emitted effect, {state['argued']} argued."
         ),
@@ -308,8 +309,9 @@ if __name__ == "__main__":
             )
             raise SystemExit(1)
         print(  # this is a CLI
-            f"reducer-purity: OK ({state['reducers']} reducers, 0 deciding readings; "
-            f"{state['stamps']} stamp-only, {state['argued']} argued)"
+            f"reducer-purity: OK ({state['reducers']} REGISTERED reducers, 0 deciding readings; "
+            f"{state['stamps']} stamp-only, {state['argued']} argued). Decision functions outside "
+            "the route table are not measured here."
         )
     else:
         print(markdown(state))  # this is a CLI
