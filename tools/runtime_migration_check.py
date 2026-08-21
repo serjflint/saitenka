@@ -554,7 +554,10 @@ def status() -> int:
     )
     live = {(item.kind, item.source) for item in actual}
     kinds = sorted({kind for kind, _ in blessed | live})
-    width = max(len(label) for label in [*kinds, *(f"terminal/{name}" for name in _TERMINAL_DEBT)])
+    # `default=` because an empty census is now the expected state, and a report that crashes on
+    # success is a report nobody reaches for once it does.
+    labels = [*kinds, *(f"terminal/{name}" for name in _TERMINAL_DEBT), "WP5 converts"]
+    width = max((len(label) for label in labels), default=12)
     for kind in kinds:
         was = sum(1 for k, _ in blessed if k == kind)
         now = sum(1 for k, _ in live if k == kind)
