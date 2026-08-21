@@ -100,7 +100,7 @@ def test_a_panel_build_needs_no_host() -> None:
     from saitenka.panel import Definition, Entry
 
     class _DictSet:
-        def entry_for(self, tok, _inflected=None):
+        def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     style = PanelStyle(

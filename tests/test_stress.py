@@ -25,7 +25,7 @@ class _TallDS:
     """A dict that returns a multi-section entry tall enough to scroll and dense enough to yield
     scan boxes (so nested popups open) — the shape that stresses the panel machinery."""
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         para = "とても長い定義の本文で" * 8  # CJK run → many per-char scan cells, wraps + scrolls
         return Entry(
             headword=tok.surface,

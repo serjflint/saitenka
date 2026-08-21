@@ -1203,7 +1203,7 @@ def test_panel_cache_avoids_rerender_on_revisit(monkeypatch):
     calls = []
 
     class FakeDS:
-        def entry_for(self, tok, _inflected=None):
+        def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             calls.append(tok.surface)
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
@@ -1233,7 +1233,7 @@ def test_panel_cache_records_otel_render_and_cache_metrics(monkeypatch):
     from saitenka.panel import Definition, Entry
 
     class FakeDS:
-        def entry_for(self, tok, _inflected=None):
+        def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = Reader(FakeIPC(), dict_set=FakeDS())
@@ -1266,7 +1266,7 @@ def test_panel_cache_records_otel_render_and_cache_metrics(monkeypatch):
 
 
 class _FakeDS:
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         from saitenka.panel import Definition, Entry
 
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
@@ -1430,7 +1430,7 @@ def test_hover_off_window_still_lingers(monkeypatch):
 class _TallDS:
     """A dictionary entry far taller than one viewport — several long def bodies."""
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         from saitenka.panel import Definition, Entry
 
         para = "とても長い定義の本文でありスクロールが必要になるほど縦に伸びます。" * 6
@@ -1555,7 +1555,7 @@ def test_header_add_button_absent_without_anki(monkeypatch):
 class _ScanDS:
     """A dictionary entry with a CJK (monolingual) body, so the panel carries scan hitboxes."""
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         from saitenka.panel import Definition, Entry
 
         return Entry(
@@ -1856,7 +1856,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
 class _LinkDS:
     """A dictionary entry whose def body contains an internal <a> cross-reference to 見る."""
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         from saitenka.panel import Definition, Entry
 
         body = ["同義語は", {"tag": "a", "href": "?query=見る", "content": "見る"}, "。"]
@@ -1911,7 +1911,7 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
 class _WildcardDS:
     """A def body whose cross-reference is a WILDCARD, plus a search() that returns clickable results."""
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         from saitenka.panel import Definition, Entry
 
         body = ["類語は", {"tag": "a", "href": "?query=食べ*", "content": "食べ…"}, "など。"]
@@ -1966,7 +1966,7 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     ipc = FakeIPC()
 
     class _ExternalDS:
-        def entry_for(self, tok, _inflected=None):
+        def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             from saitenka.panel import Definition, Entry
 
             body = [
@@ -1994,7 +1994,7 @@ class _RubyLinkDS:
     """A def body whose cross-reference target carries furigana (a ruby'd <a>) — the 思し召し-in-考え
     case. It must still be a clickable link, not merely blue-styled hover-scan text."""
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         from saitenka.panel import Definition, Entry
 
         ref = {
@@ -2586,7 +2586,7 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
         def __init__(self):
             self.calls = 0
 
-        def entry_for(self, tok, _inflected=None):
+        def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             self.calls += 1
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
@@ -2715,7 +2715,7 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
 
     class _CachedDS:
         @functools.cache  # noqa: B019  # test-local fake, GC'd with the test — no leak risk
-        def entry_for(self, surface, _inflected=None):
+        def entry_for(self, surface, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return _Entry(headword=surface, defs=[Definition("D", ["x"])], freqs=[])
 
     r = Reader(

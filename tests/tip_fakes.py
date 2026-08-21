@@ -15,7 +15,7 @@ class LinkingDS:
     """A dict set whose entries carry BOTH CJK scan cells and an inline cross-reference link, so a
     tooltip built from it exercises scan-hit AND link-hit. ``search`` backs a wildcard navigation."""
 
-    def entry_for(self, _tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         return util.cjk_links_entry(4)
 
     def search(self, _pattern):
