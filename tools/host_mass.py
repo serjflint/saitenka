@@ -5,12 +5,14 @@
     uv run --extra full python tools/host_mass.py check      # non-zero if the host grew
     uv run --extra full python tools/host_mass.py bless "why"  # accept growth, with its reason
 
-**Three gated numbers, not one.** `total` is the anti-laundering ratchet: moving a body into a module
+**Four gated numbers, not one.** `total` is the anti-laundering ratchet: moving a body into a module
 function and leaving `return ops.f(self._a, self._b)` behind drops `substantive` while the host is
 unchanged, and gating only the substantive split would report that as progress — then reward shaping
 every new feature as one module function plus one thin delegator. `substantive` and
 `substantive_lines` are the diagnostic half: they say whether the mass that moved was behaviour or
-naming, which a total alone cannot.
+naming, which a total alone cannot. `init_lines` closes the last escape the member counts have:
+wiring a collaborator in `__init__` adds lines without adding a member, so a feature can move off
+the host and leave its construction behind with every other number still falling.
 
 **Members are discovered live, never by parsing one file.** A static parse of `controller.py` cannot
 follow a mixin base and cannot see `Reader.foo = foo` executed at import time at all — and that is
@@ -49,7 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CENSUS = ROOT / "tests" / "fixtures" / "host_mass_census.json"
 
 #: Numbers a growth in which fails the gate. The rest of the census is reported, not gated.
-GATED = ("total", "substantive", "substantive_lines")
+GATED = ("total", "substantive", "substantive_lines", "init_lines")
 
 #: `type`'s own bookkeeping in `vars(cls)`. Not members anybody wrote.
 _MACHINERY = frozenset(
@@ -165,7 +167,20 @@ def classify(host: type, resolved: dict[str, cluster_map.Member]) -> dict[str, i
             if kind == "substantive":
                 counts["substantive_lines"] += _lines(node)
         counts[kind] = counts.get(kind, 0) + 1
+    counts["init_lines"] = _init_lines(host)
     return dict(sorted(counts.items()))
+
+
+def _init_lines(host: type) -> int:
+    """`__init__`'s length — capped, not judged.
+
+    The composition root is the one member the member counts cannot see: wiring a collaborator adds
+    lines without adding a member, so a feature that "moved off the host" can leave its construction
+    behind and every gated number still falls. Whether 476 lines is composition or accumulation is a
+    decision nobody has made; this holds it still until someone does.
+    """
+    node = _node(host.__init__)
+    return 0 if node is None else _lines(node)
 
 
 def census() -> dict[str, int]:

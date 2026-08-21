@@ -131,3 +131,29 @@ def test_the_live_census_is_not_vacuous():
 
     assert counts["total"] > 0, "no member resolved on the host — discovery is off"
     assert counts["substantive"] > 0, "every member classified away — the ladder is off"
+
+
+class WiredRoot:
+    """The escape the member counts cannot see: construction, not members."""
+
+    def __init__(self) -> None:
+        self.a = _ops()
+        self.b = _ops()
+        self.c = _ops()
+
+
+class WiredRootPlusOne:
+    def __init__(self) -> None:
+        self.a = _ops()
+        self.b = _ops()
+        self.c = _ops()
+        self.d = _ops()
+
+
+def test_a_collaborator_wired_in_init_moves_no_member_but_still_registers():
+    """Both classes have exactly one member. Only `init_lines` can tell them apart."""
+    before, after = _counts(WiredRoot), _counts(WiredRootPlusOne)
+
+    assert before["total"] == after["total"]
+    assert before["substantive"] == after["substantive"]
+    assert after["init_lines"] == before["init_lines"] + 1

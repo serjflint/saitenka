@@ -4,7 +4,7 @@
     uv run python tools/port_probe_census.py json
     uv run python tools/port_probe_census.py check      # non-zero if a dead probe appears
 
-A probe on a port we define is never defensive here (AGENTS.md; `vibe/runtime-migration-plan.md`):
+A probe on a port we define is never defensive here (AGENTS.md; `vibe/retired/runtime-migration-plan.md`):
 it cannot tell "this stand-in has no runtime" from "somebody renamed the method", and the second
 reads as a silent feature-off. A renamed timer method disarms every lifecycle deadline in the
 process, and nothing goes red, because the fallback branch is the one every caller then takes.
