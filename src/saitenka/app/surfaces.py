@@ -44,6 +44,16 @@ class SurfaceState(Protocol):
 _TIP_WHEEL_FRAC = 0.14
 
 
+def tip_wheel_pixels(ref_h: int, steps: int) -> int:
+    """Pixels the tooltip scrolls for `steps` coalesced wheel notches.
+
+    A notch is the unit the input path speaks and pixels are the unit `scroll_tip` takes, so the
+    conversion needs one home: a second copy is a fake that scrolls a different amount than the
+    wheel it stands in for, and it reads as a production regression from the assertion's side.
+    """
+    return steps * round(ref_h * _TIP_WHEEL_FRAC)
+
+
 @dataclass(frozen=True, slots=True)
 class HoverSuppression:
     """What a surface needs to decide whether it swallows the hover under the cursor.
@@ -161,7 +171,7 @@ def _tip_click(target: ClickTarget, _x: float, _y: float) -> bool:
 
 def _tip_scroll(wheel: WheelStep, steps: int) -> bool:
     """Terminal wheel fallback: scroll the tooltip. Always claims the step (matches the old else-branch)."""
-    wheel.scroll_tip(steps * round(wheel.tip_ref_h * _TIP_WHEEL_FRAC))
+    wheel.scroll_tip(tip_wheel_pixels(wheel.tip_ref_h, steps))
     return True
 
 

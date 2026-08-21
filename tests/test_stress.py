@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app import nested_popup
+from saitenka.app import nested_popup, surfaces
 from saitenka.app.config import TooltipOptions
 from saitenka.app.controller import NESTED_ID, TIP_ID, Reader
 from saitenka.app.tokenize import Token
@@ -57,7 +57,7 @@ def _churn(r: Reader, term: str) -> bool:
         0
     )  # draws the subtitle (builds boxes) + shows the tip; retire_hover() tears it down
     for _ in range(4):  # scroll toward the bottom of the tall entry
-        r._scroll_tip(round(r.osd[1] * 0.12))
+        r._scroll_tip(surfaces.tip_wheel_pixels(r.tip_scale.ref_h, 1))
     st = r.tip.view.state
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
@@ -66,7 +66,7 @@ def _churn(r: Reader, term: str) -> bool:
             r.tip_ports, r.panel_ports, r.word_lookup, boxes[len(boxes) // 3]
         )  # nested popup on an inner cell
         opened = r.tip.nest.state is not None
-        r._scroll_tip(round(r.osd[1] * 0.12))  # scroll while nested is up
+        r._scroll_tip(surfaces.tip_wheel_pixels(r.tip_scale.ref_h, 1))  # nested is up
         r._hide_nested()
     r.retire_hover()  # dismiss the whole stack
     return opened

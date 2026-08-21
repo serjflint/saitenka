@@ -68,7 +68,9 @@ class Driver:
 
     def wheel(self, steps: int) -> Driver:
         """Scroll the popup under the cursor by ``steps`` notches (down positive)."""
-        self.r._scroll_tip(steps * round(self.r.osd[1] * 0.12))
+        from saitenka.app import surfaces
+
+        self.r._scroll_tip(surfaces.tip_wheel_pixels(self.r.tip_scale.ref_h, steps))
         return self
 
     def key(self, msg: str) -> Driver:

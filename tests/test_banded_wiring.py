@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app import tooltip_panel
+from saitenka.app import surfaces, tooltip_panel
 from saitenka.app.controller import Reader
 from saitenka.panel import Definition, Entry
 
@@ -53,7 +53,7 @@ def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
 
     # Scrolling drives the windowed re-composite (and measures more blocks) without error.
     before = wp.measured
-    r._scroll_tip(round(r.osd[1] * 0.12))
+    r._scroll_tip(surfaces.tip_wheel_pixels(r.tip_scale.ref_h, 1))  # one wheel notch
     assert r.tip.view.scroll > 0 and r.hover_view().tip.rect is not None
     assert wp.measured >= before
 
