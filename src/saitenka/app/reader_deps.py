@@ -7,8 +7,8 @@ is a bare subtitle renderer — no FSRS/known coloring, no JLPT underlines, no f
 dictionary tooltips, no mining. Anki-dependent pieces degrade to None (logged) when Anki is closed,
 so a missing Anki never blocks attaching.
 
-``load_deps_async``/``apply_deps``/``draw_loading`` take ``reader: Reader`` (the AGENTS.md seam
-pattern) with thin delegating methods on Reader.
+``load_deps_async`` takes a ``DepsLoad`` port; injecting what it built is the Reader's own state
+transition and lives there.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from saitenka.app.overlay_ids import OverlayId
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.fsrs import KnownSnap
 
 log = logging.getLogger(__name__)
@@ -526,45 +525,6 @@ def load_deps_async(
         ports.announce()
 
     fut.add_done_callback(landed)
-
-
-def apply_deps(reader: Reader, deps: dict) -> None:
-    """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
-    reader._loading = False
-    from saitenka.app.lifecycle_timers import LifecycleTimerKind
-
-    reader.lifecycle_timers.cancel(LifecycleTimerKind.LOADING_FRAME)
-    reader.lifecycle_surfaces.remove(OverlayId.LOADING)
-    if reader._anki_capability is not None:
-        reader._anki_capability.close()
-    # A backoff armed against the previous deps would retry into the new ones, so retire the timer
-    # too — the lane's flag says a retry is armed, it cannot disarm one.
-    reader.lifecycle_timers.cancel(LifecycleTimerKind.MINED_SEED_RETRY)
-    reader.mined_seed.restart()
-    reader.scorer = deps.get("scorer")
-    reader.anki = deps.get("anki")
-    reader.mine_cfg = deps.get("mine_cfg")
-    reader.dict_set = deps.get("dict_set")
-    if reader.anki is not None:
-        from saitenka.app.anki import anki_reachable
-        from saitenka.app.capabilities import CapabilityProbe
-
-        reader._anki_capability = CapabilityProbe(
-            lambda: anki_reachable(timeout=reader.anki_ping_timeout),
-            name="anki",
-            ttl=reader.anki_ok_ttl,
-            retry=min(reader.anki_ok_ttl, 1.0),
-            timeout=max(reader.anki_ping_timeout * 2, 0.1),
-            max_retry=max(reader.anki_ok_ttl, 8.0),
-            submit=reader._capability_submit,
-        )
-        reader._anki_capability.request(force=True)
-
-    reader.invalidate_analysis(vocabulary_changed=True)
-    reader._dependencies_changed()
-    reader.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
-    reader.warm_episode_tokens()  # deps arrived after the index built → warm the episode's cues now
-    reader._announce_runtime()  # workers are up now — print the banner with the real count (once)
 
 
 def draw_loading(surfaces, frame: int) -> None:

@@ -4386,7 +4386,59 @@ class Reader:
         reader_deps.load_deps_async(self.deps_load, cfg, build, prebuilt=prebuilt)
 
     def _apply_deps(self, deps: dict) -> None:
-        reader_deps.apply_deps(self, deps)
+        """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place.
+
+        Lived in `reader_deps` as a host-taking function, which is the round-trip shape: every line
+        of it writes a `Reader` field or calls a `Reader` act, so the module that *builds* the
+        collaborators was also performing the state transition that installs them.
+        """
+        self._stop_loading()
+        self._install_collaborators(deps)
+        self._dependencies_arrived()
+
+    def _stop_loading(self) -> None:
+        """Plain-subs mode is over: spinner frame, spinner overlay, and the previous deck's probe."""
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        self._loading = False
+        self.lifecycle_timers.cancel(LifecycleTimerKind.LOADING_FRAME)
+        self.lifecycle_surfaces.remove(OverlayId.LOADING)
+        if self._anki_capability is not None:
+            self._anki_capability.close()
+        # A backoff armed against the previous deps would retry into the new ones, so retire the
+        # timer too — the lane's flag says a retry is armed, it cannot disarm one.
+        self.lifecycle_timers.cancel(LifecycleTimerKind.MINED_SEED_RETRY)
+        self.mined_seed.restart()
+
+    def _install_collaborators(self, deps: dict) -> None:
+        """Swap in what the build produced, and probe the deck it came with."""
+        self.scorer = deps.get("scorer")
+        self.anki = deps.get("anki")
+        self.mine_cfg = deps.get("mine_cfg")
+        self.dict_set = deps.get("dict_set")
+        if self.anki is None:
+            return
+        from saitenka.app.anki import anki_reachable
+        from saitenka.app.capabilities import CapabilityProbe
+
+        self._anki_capability = CapabilityProbe(
+            lambda: anki_reachable(timeout=self.anki_ping_timeout),
+            name="anki",
+            ttl=self.anki_ok_ttl,
+            retry=min(self.anki_ok_ttl, 1.0),
+            timeout=max(self.anki_ping_timeout * 2, 0.1),
+            max_retry=max(self.anki_ok_ttl, 8.0),
+            submit=self._capability_submit,
+        )
+        self._anki_capability.request(force=True)
+
+    def _dependencies_arrived(self) -> None:
+        """Everything that has to hear about a new vocabulary, in the order it has to hear it."""
+        self.invalidate_analysis(vocabulary_changed=True)
+        self._dependencies_changed()
+        self.start_prefetch()  # prefetch can spin up now (no-op while dict_set is still None)
+        self.warm_episode_tokens()  # deps landed after the index built → warm this episode's cues
+        self._announce_runtime()  # workers are up — the banner can carry the real count (once)
 
     def _draw_loading(self) -> None:
         reader_deps.draw_loading(self.lifecycle_surfaces, self._load_frame)

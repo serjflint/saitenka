@@ -101,11 +101,15 @@ _TERMINAL_DEBT = {
     # `load_deps_async` was the same mis-filing one layer down: it *injects into* a built Reader
     # rather than building one, which is the write-back category the plan says to re-examine, not a
     # composition root. Five members, cut facts-from-acts, and it converted on `Reader.deps_load`.
+    #
+    # `apply_deps` went the other way and was deleted rather than converted: every line of it wrote a
+    # `Reader` field or called a `Reader` act, which is the round-trip shape, so it moved onto the
+    # owner of that state. `reader_deps` no longer imports `Reader` at all — a module that BUILDS
+    # collaborators has no business performing the transition that installs them.
     "host-composition": frozenset(
         ("reader-parameter", source)
         for source in (
             "src/saitenka/app/controller.py::Reader.__init__",
-            "src/saitenka/app/reader_deps.py::apply_deps",
             "src/saitenka/app/reader_factory.py::create_reader",
             "src/saitenka/app/session_runtime.py::SessionRuntime.__init__",
         )
