@@ -462,11 +462,10 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     takes an envelope and reads nothing else, so constructing one here is the whole cost; the
     sequence number is the mailbox's ordering device and unused by the reactor.
     """
-    hint = StartupHintReducer(
-        gateway.mailbox.allocate_effect,
-        lambda: gateway.connection_epoch,
-        time.monotonic,
-    )
+    # Only two collaborators, and neither decides: an effect-ID allocator and a clock, both of
+    # which stamp an effect the turn has already chosen. The connection epoch used to be a third and
+    # was the one that branched — it is slice state now, fed by the connection payloads routed here.
+    hint = StartupHintReducer(gateway.mailbox.allocate_effect, time.monotonic)
     # One slot, several features: `Owner.SESSION` is a slice from the start, so the second session
     # feature is a registration rather than a rewrite of the hint's reducer.
     session = SliceReducer(

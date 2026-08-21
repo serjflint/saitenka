@@ -5,9 +5,13 @@ methods that each recomputed the same "may I clear now?" predicate under the loc
 four inbound events, one effect kind. Moving it onto the runtime turn removes the lock (a turn is
 single-threaded by construction) and leaves the predicate stated once, in `_clearable`.
 
-The reducer is pure per turn but not port-free: emitting a `SendMpvCommand` needs an effect ID, an
-absolute deadline and the live connection epoch. Those are bound at construction, so the *turn*
-stays a function of (state, event) — which is what makes the FSM testable without a session.
+The reducer decides from `(state, event)` and nothing else. It still holds two injected callables —
+an effect-ID allocator and a clock — but neither reaches a branch: they *stamp* an effect the turn
+has already decided to emit. The connection epoch used to be a third, and that one did decide
+(`_show_completed` and `_clear_completed` both compared it), so two identical turns could take
+different branches depending on when they ran. It is now state the slice keeps, updated from the
+connection events it already reduces — which is also the truer reading: a turn should decide on the
+epoch the session has *observed*, not on one that raced in between the reply and the reduce.
 """
 
 from __future__ import annotations
@@ -24,6 +28,8 @@ from saitenka.runtime.effects import (
     SendMpvCommand,
 )
 from saitenka.runtime.events import (
+    ConnectionLost,
+    ConnectionReady,
     ConnectionReplaced,
     EffectFinished,
     StartupHintRequested,
@@ -50,6 +56,9 @@ class StartupHintState:
     clear_submitted: bool = False
     clear_connection_epoch: int = -1
     shown_connection_epoch: int = -1
+    #: The newest epoch the session has told this slice about. Starts at the gateway's own initial
+    #: epoch, so a hint requested before any connection event still stamps a valid one.
+    connection_epoch: int = 0
 
 
 def _lost(event: EffectFinished) -> bool:
@@ -80,15 +89,18 @@ class StartupHintReducer:
     def __init__(
         self,
         allocate: Callable[[], EffectId],
-        connection_epoch: Callable[[], int],
         clock: Callable[[], float],
     ) -> None:
         self._allocate = allocate
-        self._connection_epoch = connection_epoch
         self._clock = clock
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, StartupHintState)
+        # Every connection payload carries its epoch and all three route here, so the slice can hold
+        # the newest one it has been told about. Recorded before the arms below run: a turn that
+        # decides on a reconnection must see the epoch that reconnection brought.
+        if isinstance(event, ConnectionLost | ConnectionReady | ConnectionReplaced):
+            state = replace(state, connection_epoch=event.connection_epoch)
         if isinstance(event, StartupHintRequested):
             return self._show(state)
         if isinstance(event, StartupReady):
@@ -100,7 +112,7 @@ class StartupHintReducer:
         return ReduceResult(state)
 
     def _show(self, state: StartupHintState) -> ReduceResult:
-        epoch = self._connection_epoch()
+        epoch = state.connection_epoch
         return ReduceResult(
             replace(state, shown_connection_epoch=epoch),
             effects=(self._command(HintOperation.SHOW, (STARTUP_HINT, _HINT_HOLD_MS), epoch),),
@@ -130,7 +142,7 @@ class StartupHintReducer:
         )
         # A newer epoch by the time the reply lands means the connection was already replaced, so
         # the "did mpv get it?" ambiguity is resolved the same way a later ConnectionReplaced would.
-        replaced = ambiguous and self._connection_epoch() > state.shown_connection_epoch
+        replaced = ambiguous and state.connection_epoch > state.shown_connection_epoch
         settled = self._settle(
             replace(
                 state,
@@ -151,7 +163,7 @@ class StartupHintReducer:
         # The clear was lost with the connection. Re-arm and let `_settle` resubmit, but only on a
         # genuinely newer epoch — otherwise a disconnect storm resubmits against the dead socket.
         rearmed = replace(state, clear_submitted=False)
-        if self._connection_epoch() <= state.clear_connection_epoch:
+        if state.connection_epoch <= state.clear_connection_epoch:
             return ReduceResult(rearmed, effects=(diagnostic,))
         settled = self._settle(rearmed)
         return ReduceResult(settled.state, effects=(diagnostic, *settled.effects))
@@ -159,7 +171,7 @@ class StartupHintReducer:
     def _settle(self, state: StartupHintState) -> ReduceResult:
         if not _clearable(state):
             return ReduceResult(state)
-        epoch = self._connection_epoch()
+        epoch = state.connection_epoch
         return ReduceResult(
             replace(state, clear_submitted=True, clear_connection_epoch=epoch),
             effects=(self._command(HintOperation.CLEAR, ("", 1), epoch),),
