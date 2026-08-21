@@ -109,11 +109,15 @@ from saitenka.app.bindings import (
     active_bindings,
     section_contents,
 )
+from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.config import ReaderOptions
 from saitenka.app.intents import Announce, DismissHover
 from saitenka.app.interaction_intents import InteractionCommand
+from saitenka.app.interaction_surfaces import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
+from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 from saitenka.app.media import (
     copy_clipboard,
     tts_available,
@@ -121,6 +125,7 @@ from saitenka.app.media import (
 from saitenka.app.miner import MineCue, MinerPorts, tag_slug
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.paths import cache_dir
 from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import (
     ClickPorts,
@@ -146,6 +151,32 @@ from saitenka.app.runtime import (
     CommandOutcome,
     CueCommandState,
 )
+from saitenka.app.session_routes import (
+    BACKLOG_RESOURCE,
+    CAPABILITY_PARTICIPANTS,
+    COLLABORATORS_PARTICIPANT,
+    COMMAND_PERFORMER,
+    CUE_RETIRE_RESOURCE,
+    DIAGNOSTICS_PARTICIPANT,
+    HISTORY_PARTICIPANT,
+    INPUT_CAPTURE_RESOURCE,
+    INPUT_PARTICIPANT,
+    INTERACTION_WORK_PARTICIPANTS,
+    MINED_RESOURCE,
+    OBSERVERS_PARTICIPANT,
+    OVERLAY_RESOURCE,
+    PLAYBACK_DELTAS_PERFORMER,
+    RENDER_GUARD_PARTICIPANT,
+    RENDER_SPACE_PARTICIPANT,
+    RESLOT_PARTICIPANT,
+    SESSION_SUMMARY_RESOURCE,
+    SUBTITLE_CLEAR_RESOURCE,
+    SUBTITLE_CLOSE_RESOURCE,
+    SUBTITLE_DEACTIVATE_RESOURCE,
+    SUBTITLE_REPLAY_PARTICIPANT,
+    SURFACES_RESOURCE,
+    WORKER_LANE_PARTICIPANTS,
+)
 from saitenka.app.session_runtime import SessionEntry, SessionRuntime
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import (
@@ -164,6 +195,7 @@ from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
 from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.mpvio.osd import Overlay
+from saitenka.render.layout_backend import backend_label, resolve_backend
 from saitenka.runtime import (
     ClosePhase,
     CommandHandled,
@@ -335,9 +367,6 @@ class Reader:
         # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
         # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
         self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
-        from saitenka.app.interaction_surfaces import InteractionSurfaces
-        from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
-        from saitenka.app.lifecycle_timers import LifecycleTimers
 
         self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
         # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
@@ -346,7 +375,6 @@ class Reader:
         # table's fallback still has to run.
         # `getattr`, like the job-lane port below: a partial IPC (the benches' fake) constructs a
         # Reader without implementing every runtime port, and construction must not demand one.
-        from saitenka.app.session_routes import OVERLAY_RESOURCE, SURFACES_RESOURCE
 
         self._runtime_owns_surfaces = ipc.register_session_resource(
             SURFACES_RESOURCE, self.lifecycle_surfaces
@@ -420,7 +448,6 @@ class Reader:
         # Interactive sessions publish this optional subprocess probe later; deterministic
         # demo/screenshot assembly supplies it synchronously through ReaderServices.
         self._tts_ok = bool(tts_ok)
-        from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 
         self._capability_submit = configure_runtime_jobs(ipc)
         self._mined_seed_submit = mined_seed.configure_runtime_job(ipc)
@@ -488,7 +515,6 @@ class Reader:
         self.tip = popups.TooltipState(
             panel_cache_max=self.panel_cache_max, cache_lock=self._cache_lock
         )
-        from saitenka.render.layout_backend import backend_label, resolve_backend
 
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
         # import chokepoint; missing → default). Threaded to every Panel.from_rows so all popups agree.
@@ -584,7 +610,6 @@ class Reader:
         self.interaction.preview_panel = card_preview.PreviewPanel()
         # INTERACTION's claim on mpv's clicks and wheel, as a resource with a lifetime: the
         # runtime retires it at `PARTICIPANTS`, and an effect can only retire what it can find.
-        from saitenka.app.session_routes import INPUT_CAPTURE_RESOURCE
 
         self._mouse = mouse_capture.MouseCapture(
             ipc, self.lifecycle_timers, self._wants_mouse_capture
@@ -593,19 +618,6 @@ class Reader:
         # The session's persistent writers, retired at `STORES`. Wrapped rather than registered
         # directly: the recorder is per-episode and both stores open lazily, so the resource has
         # to resolve them when it closes, not when it registers.
-        from saitenka.app.session_routes import (
-            BACKLOG_RESOURCE,
-            COMMAND_PERFORMER,
-            CUE_RETIRE_RESOURCE,
-            MINED_RESOURCE,
-            PLAYBACK_DELTAS_PERFORMER,
-            RESLOT_PARTICIPANT,
-            SESSION_SUMMARY_RESOURCE,
-            SUBTITLE_CLEAR_RESOURCE,
-            SUBTITLE_CLOSE_RESOURCE,
-            SUBTITLE_DEACTIVATE_RESOURCE,
-            SUBTITLE_REPLAY_PARTICIPANT,
-        )
 
         for name, retire in (
             (SESSION_SUMMARY_RESOURCE, lambda: self._report_session(self.finish_session_stats())),
@@ -616,11 +628,6 @@ class Reader:
         # The capability probes, the interaction work, and every worker lane — the close half's
         # three remaining phases. Named by the same tables the dispatcher orders them from, so a
         # step and its position cannot drift apart.
-        from saitenka.app.session_routes import (
-            CAPABILITY_PARTICIPANTS,
-            INTERACTION_WORK_PARTICIPANTS,
-            WORKER_LANE_PARTICIPANTS,
-        )
 
         self._close_participants: dict[str, Callable[[], object]] = {}
         #: Which close phases the runtime actually performed, filled by the announcement.
@@ -634,15 +641,6 @@ class Reader:
             )
         # The setup steps, run phase by phase from `run`. Registered here so the runtime owns
         # *what* each phase does; the Reader keeps only the order and the no-runtime fallback.
-        from saitenka.app.session_routes import (
-            COLLABORATORS_PARTICIPANT,
-            DIAGNOSTICS_PARTICIPANT,
-            HISTORY_PARTICIPANT,
-            INPUT_PARTICIPANT,
-            OBSERVERS_PARTICIPANT,
-            RENDER_GUARD_PARTICIPANT,
-            RENDER_SPACE_PARTICIPANT,
-        )
 
         self._startup_steps: dict[events.StartPhase, Callable[[], object]] = {
             events.StartPhase.PROCESS: self._guard_main_render,
@@ -799,7 +797,6 @@ class Reader:
         )
         self.commands = self._build_command_router()
         self.start_prefetch()
-        from saitenka.app.paths import cache_dir
 
         mask_atlas_startup.request(
             self._mask_atlas_startup,
@@ -2418,7 +2415,6 @@ class Reader:
             return None
         if not rc.built:
             rc.built = True
-            from saitenka.app.paths import cache_dir
             from saitenka.app.render_cache import RenderCache
 
             path = cache_dir() / "render-cache.sqlite"
@@ -3430,7 +3426,6 @@ class Reader:
         x = (self.osd[0] - img.width) // 2
         y = round(self.osd[1] * 0.08)
         self.lifecycle_surfaces.present(img, x, y, oid=TOAST_ID)
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         scheduled = self.lifecycle_timers.schedule(
             LifecycleTimerKind.TOAST_EXPIRY,
@@ -3664,7 +3659,6 @@ class Reader:
         Fails open: with no timer the retry simply is not held back, so the seed still lands on a
         later capability pass. Losing the backoff costs requests; never retrying costs the feature.
         """
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         def due() -> None:
             self.mined_seed.retry_pending = False
@@ -4149,7 +4143,6 @@ class Reader:
         probe without the runtime lane falls back to its own thread, and letting that thread run
         `_request_mined_seed` would mutate reader state from off the turn.
         """
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         def due() -> None:
             self._apply_capabilities()
@@ -4164,7 +4157,6 @@ class Reader:
         deadline is the hop: the due event runs where every other effect does. The tick used to
         discover `_pending_deps` by looking; now the build says so.
         """
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         return self.lifecycle_timers.schedule(
             LifecycleTimerKind.DEPS_READY, 0.0, self._apply_pending_deps
@@ -4177,7 +4169,6 @@ class Reader:
         this a long session would hold everything in memory until close and lose it all to a crash.
         The due event re-arms, because durability is a standing obligation rather than one deadline.
         """
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         def due() -> None:
             session_stats.accrue(
@@ -4205,7 +4196,6 @@ class Reader:
         while the cue has not moved would otherwise leave the sidebar off-target until the next cue
         happened to arrive.
         """
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         def released() -> None:
             self._sidebar_store.dispatch(events.SidebarHoldReleased())
@@ -4218,7 +4208,6 @@ class Reader:
     def schedule_flash_expiry(self) -> bool:
         """Arm the deadline that ends a copy-flash pulse. A second flash supersedes the first,
         which `LifecycleTimers` fences by revision so only the latest due event lands."""
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         return self.lifecycle_timers.schedule(
             LifecycleTimerKind.FLASH_EXPIRY, self.flash_secs, self._flash_expired
@@ -4261,7 +4250,6 @@ class Reader:
         their own, and re-adding every tick would be wasteful."""
         if self.ov.ops == ops_before or not self._prop("pause"):
             return
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         # Fails open: with no timer port the repaint runs inline. A nudge that never fires is a
         # frozen overlay the user has to jiggle the mouse to unstick — mpv #8172 in full — which is
@@ -4430,7 +4418,6 @@ class Reader:
 
     def _stop_loading(self) -> None:
         """Plain-subs mode is over: spinner frame, spinner overlay, and the previous deck's probe."""
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         self._loading = False
         self.lifecycle_timers.cancel(LifecycleTimerKind.LOADING_FRAME)
@@ -4451,7 +4438,6 @@ class Reader:
         if self.anki is None:
             return
         from saitenka.app.anki import anki_reachable
-        from saitenka.app.capabilities import CapabilityProbe
 
         self._anki_capability = CapabilityProbe(
             lambda: anki_reachable(timeout=self.anki_ping_timeout),
@@ -4477,7 +4463,6 @@ class Reader:
         self._load_frame += 1
 
     def _schedule_loading_frame(self, *, delay_s: float) -> bool:
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         return self.lifecycle_timers.schedule(
             LifecycleTimerKind.LOADING_FRAME,
@@ -4564,12 +4549,6 @@ class Reader:
         open one, so per-duty evidence and its pairwise `order:` constraints survive here — and
         would not survive being factored into a nested `def`.
         """
-
-        from saitenka.app.session_routes import (
-            CAPABILITY_PARTICIPANTS,
-            INTERACTION_WORK_PARTICIPANTS,
-            WORKER_LANE_PARTICIPANTS,
-        )
 
         self._build_close_participants()
         self.mined_seed.invalidate()  # in-flight seeds are stale before anything tears down
@@ -4739,7 +4718,6 @@ class Reader:
         )
 
     def _attach_diagnostics(self) -> None:
-        from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
         telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
         self.lifecycle_timers.schedule(
@@ -4792,11 +4770,6 @@ class Reader:
         are installed afterwards, and because the lane budget starts when the capabilities are down
         — computing it at construction would spend the whole window on the session.
         """
-        from saitenka.app.session_routes import (
-            CAPABILITY_PARTICIPANTS,
-            INTERACTION_WORK_PARTICIPANTS,
-            WORKER_LANE_PARTICIPANTS,
-        )
 
         close_lane = self.ipc.close_runtime_job_lane
 
