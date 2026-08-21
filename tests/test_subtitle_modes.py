@@ -401,7 +401,7 @@ def test_translation_leases_english_only_while_visible(monkeypatch):
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    monkeypatch.setattr(reader, "_draw_translation", lambda: None)
+    monkeypatch.setattr(reader, "draw_translation", lambda: None)
     ipc.commands.clear()
 
     reader.toggle_translation()

@@ -101,7 +101,7 @@ def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling(m
     reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
     reader._translate_on = True
     reader.declare_subtitle(SubtitleSecondaryLeased(1))
-    monkeypatch.setattr(reader, "_draw_translation", lambda: None)
+    monkeypatch.setattr(reader, "draw_translation", lambda: None)
 
     reader.toggle_overlay()
     reader.toggle_overlay()

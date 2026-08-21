@@ -257,7 +257,7 @@ def test_cycle_reverts_atomically_when_the_new_tokenizer_is_unknown(request):
 
     assert reader.profile is DEFAULT_PROFILE  # unchanged
     assert reader.tokenizer.name == "unidic" and reader.langs.main == "jp"
-    assert reader._profile_idx == 0  # cursor did not advance past the failed switch
+    assert reader.profile_index == 0  # cursor did not advance past the failed switch
 
 
 # --- the cache-clear vs episode-warm race (the carried P2) -----------------------------------------

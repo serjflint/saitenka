@@ -2,14 +2,14 @@
   "counts": {
     "alias": 1,
     "delegated": 1,
-    "delegator": 74,
+    "delegator": 76,
     "derived": 45,
     "init_lines": 456,
-    "self_delegator": 25,
+    "self_delegator": 23,
     "slice": 10,
-    "substantive": 197,
-    "substantive_lines": 2470,
-    "total": 353
+    "substantive": 195,
+    "substantive_lines": 2446,
+    "total": 351
   },
-  "reason": "init_lines enters the census for the first time \u2014 the composition root's length was never measured, so 456 is its current value, not growth"
+  "reason": ""
 }

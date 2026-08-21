@@ -410,7 +410,7 @@ def _scroll_and_close_tooltip(reader: Reader) -> bool:
         and reader.tip.view.state is not None
         and reader.tip.view.scroll > 0
     )
-    reader._teardown_tip()
+    reader.teardown_tip()
     reader.hover = -1
     return scrolled
 

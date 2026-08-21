@@ -112,7 +112,7 @@ from saitenka.app.bindings import (
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.config import ReaderOptions
-from saitenka.app.intents import Announce, DismissHover
+from saitenka.app.intents import Announce
 from saitenka.app.interaction_intents import InteractionCommand
 from saitenka.app.interaction_surfaces import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
@@ -582,7 +582,7 @@ class Reader:
         # The ordered cycle the live switcher (#254 D8) rotates through; a single entry (the default
         # path) makes cycle_profile a no-op. cli installs the real cycle via set_profile_cycle.
         self.profiles: tuple[Profile, ...] = (self.profile,)
-        self._profile_idx = 0
+        self.profile_index = 0
         # The raw CLI/config slang the switcher falls back to for a profile with no slang of its own
         # (the JP default), so cycling back to it re-selects the original track. Set by set_profile_cycle.
         self._profile_base_slang = "ja,jpn,jp"
@@ -690,7 +690,7 @@ class Reader:
         for name, retire in (
             (
                 SUBTITLE_DEACTIVATE_RESOURCE,
-                lambda: self.subtitle_pipeline.deactivate(self._subtitle_target()),
+                lambda: self.subtitle_pipeline.deactivate(self.subtitle_target()),
             ),
             (SUBTITLE_CLEAR_RESOURCE, lambda: self._clear_subtitle_pixels()),
             (SUBTITLE_CLOSE_RESOURCE, lambda: self._close_subtitle_raster()),
@@ -1035,7 +1035,7 @@ class Reader:
             is_skippable=self.tokenizer.is_skippable,
         )
 
-    def _subtitle_target(self) -> SubtitleTarget:
+    def subtitle_target(self) -> SubtitleTarget:
         """What the subtitle renderers act on. Built per call — `native_geometry` is installed
         after construction, so a target cached on the Reader would predate it.
 
@@ -1292,7 +1292,7 @@ class Reader:
             return
         log.debug("cue interaction retired: %s", reason)
         self._clear_cue_identity()
-        self._teardown_tip()
+        self.teardown_tip()
         self.hover = -1
         self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
 
@@ -1341,7 +1341,7 @@ class Reader:
         )
 
     # --- subtitle -----------------------------------------------------------------------------
-    def _teardown_tip(self) -> None:
+    def teardown_tip(self) -> None:
         """Tear down the hover stack unconditionally: hide TIP_ID/NESTED_ID, reset all tooltip
         state, and release any pause a tooltip took. Called by `retire_hover` AND `set_subtitle`, so
         a cue change while a tooltip is showing always clears it via the real path — unconditional
@@ -1392,14 +1392,14 @@ class Reader:
         provisional_navigation: bool = False,
     ) -> None:
         self.subtitle_pipeline.invalidate()
-        self.subtitle_pipeline.cue_changed(self._subtitle_target(), nonempty=bool(text.strip()))
+        self.subtitle_pipeline.cue_changed(self.subtitle_target(), nonempty=bool(text.strip()))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # any tooltip-owned pause is released. `retire_hover` will not do: it early-returns on
         # hover already -1, which does not imply the tip is down (`_show_tooltip` can be called
         # without a hover).
         with otel_metrics.traced("teardown_tip"):
-            self._teardown_tip()
+            self.teardown_tip()
         self.hover = -1
         self._annotation_hover = False
         self.sub_text = text
@@ -1568,7 +1568,7 @@ class Reader:
         self.token_cache.clear()
         if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
             return
-        self._teardown_tip()
+        self.teardown_tip()
         self.hover = -1
         self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
         norm = cue_key(self.sub_text)
@@ -1712,7 +1712,7 @@ class Reader:
         self.profiles = tuple(profiles) or (self.profile,)
         self._dict_scoper = dict_scoper
         self._profile_base_slang = base_slang
-        self._profile_idx = next(
+        self.profile_index = next(
             (i for i, p in enumerate(self.profiles) if p.name == self.profile.name), 0
         )
 
@@ -1725,7 +1725,7 @@ class Reader:
 
         fonts.set_primary_font(primary_font_for(self.profile.langs.main))
 
-    def _switch_to_profile(self, idx: int) -> None:
+    def switch_to_profile(self, idx: int) -> None:
         """Make profile ``idx`` live among the configured ``[profiles.*]`` at runtime (#254 D8).
         A no-op with a single configured profile (the default path). Resolves the new tokenizer FULLY
         before touching any live state, so an unresolvable profile leaves the old one intact (atomic
@@ -1751,7 +1751,7 @@ class Reader:
             except Exception:  # noqa: BLE001 — a rescope failure must not kill the switch; keep old dicts
                 self._toast(f"profile {new.name!r}: dictionary rescope failed", "warn")
                 return
-        self._profile_idx = idx
+        self.profile_index = idx
         self.profile = new
         self.langs = new.langs  # provider gating + identity read live off this
         self._apply_font_mode()  # switch Latin-first font order with the profile
@@ -1812,7 +1812,7 @@ class Reader:
         self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:
-        result = self.subtitle_pipeline.draw_current(self._subtitle_target())
+        result = self.subtitle_pipeline.draw_current(self.subtitle_target())
         if result is not None:
             # The write-back, here rather than inside the stage: the boxes and origin belong to the
             # cue that produced them, and this is the one place that owns them.
@@ -1823,7 +1823,7 @@ class Reader:
             self.native_geometry.sync_pixel_owner(self.subtitle_pipeline.renderer)
 
     def _clear_native_interaction(self) -> None:
-        self._teardown_tip()
+        self.teardown_tip()
         self.hover = -1
         self._word_store.dispatch(events.HoverWordForgotten())
         self.boxes = []
@@ -1835,10 +1835,10 @@ class Reader:
         owner = getattr(getattr(ownership, "owner", None), "value", None)
         if owner != "legacy":
             self.boxes = []
-        self.subtitle_pipeline.geometry_degraded(self._subtitle_target())
+        self.subtitle_pipeline.geometry_degraded(self.subtitle_target())
 
     def _use_native_subtitle_renderer(self) -> bool:
-        return self.subtitle_pipeline.renderer.use_native(self._subtitle_target())
+        return self.subtitle_pipeline.renderer.use_native(self.subtitle_target())
 
     def _native_ownership_undecided(self) -> bool:
         """True while a visibility assertion is in flight, so `_use_native_subtitle_renderer` said
@@ -2150,7 +2150,7 @@ class Reader:
         return ShowActions(
             select=lambda index: setattr(self, "hover", index),
             draw_cue=self._draw_subtitle,
-            teardown=self._teardown_tip,
+            teardown=self.teardown_tip,
             bind_keys=self._bind_tip_keys,
             seed_precomposed=self._seed_precomposed,
             freeze=lambda *, already_paused: tooltip._freeze_frame(
@@ -2920,7 +2920,7 @@ class Reader:
         self._run_mine_command(mine_intents.MineCommand.EPISODE)
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
-    def _setup_secondary(self) -> int | None:
+    def setup_secondary(self) -> int | None:
         return subtitle_modes.setup_secondary(self.track_ports)
 
     @property
@@ -2944,10 +2944,10 @@ class Reader:
     def _translation_visible(self) -> bool:
         # Two conditions, and not interchangeable: whether the user wants it, and whether
         # saitenka is drawing anything at all. Code deciding what to do once the surfaces come
-        # back needs the first without the second — see `_translation_wanted`.
-        return self.ov.visible and self._translation_wanted()
+        # back needs the first without the second — see `translation_wanted`.
+        return self.ov.visible and self.translation_wanted()
 
-    def _translation_wanted(self) -> bool:
+    def translation_wanted(self) -> bool:
         """Whether the user wants the secondary line, independent of whether anything is drawn.
 
         `toggle_overlay` decides what to do *after* the surfaces return, so it must not ask
@@ -2967,38 +2967,10 @@ class Reader:
 
     # --- session commands: pure reducer, executed here (WP5.3) --------------------------------
     def toggle_overlay(self) -> None:
-        self._run_session_command(session_intents.SessionCommand.TOGGLE_OVERLAY)
+        self._stateless.run(session_intents.SessionCommand.TOGGLE_OVERLAY)
 
     def cycle_profile(self) -> None:
-        self._run_session_command(session_intents.SessionCommand.CYCLE_PROFILE)
-
-    def _run_session_command(self, command: session_intents.SessionCommand) -> None:
-        inputs = session_intents.SessionInputs(
-            overlay_visible=self.ov.visible,
-            translation_wanted=self._translation_wanted(),
-            profile_count=len(self.profiles),
-            profile_index=self._profile_idx,
-        )
-        for effect in session_intents.reduce(command, inputs):
-            self._apply_session_effect(effect)
-
-    def _apply_session_effect(self, effect: session_intents.SessionEffect) -> None:
-        if isinstance(effect, DismissHover):
-            self.hover = -1
-            self._teardown_tip()
-        elif isinstance(effect, session_intents.SetSurfacesVisible):
-            self.lifecycle_surfaces.set_visible(visible=effect.visible)
-        elif isinstance(effect, session_intents.ReleaseSecondarySubtitles):
-            subtitle_modes.release_secondary(self.track_ports)
-        elif isinstance(effect, session_intents.SuspendSubtitles):
-            self.subtitle_pipeline.suspend_for_overlay(self._subtitle_target())
-        elif isinstance(effect, session_intents.ResumeSubtitles):
-            self.subtitle_pipeline.resume_after_overlay(self._subtitle_target())
-        elif isinstance(effect, session_intents.ShowTranslation):
-            self._setup_secondary()
-            self._draw_translation()
-        elif isinstance(effect, session_intents.SwitchProfile):
-            self._switch_to_profile(effect.index)
+        self._stateless.run(session_intents.SessionCommand.CYCLE_PROFILE)
 
     def configure_subtitle_mode(
         self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
@@ -3008,7 +2980,7 @@ class Reader:
             slang=slang,
             declare=self.declare_subtitle,
             activate=lambda sid: self.subtitle_pipeline.activate(
-                self._subtitle_target(), sid, draw=self._draw_subtitle
+                self.subtitle_target(), sid, draw=self._draw_subtitle
             ),
             secondary_sid=self._get("secondary-sid"),
             ipc=self.ipc,
@@ -3350,7 +3322,7 @@ class Reader:
     def _secondary_text(self) -> str:
         return translation.clean_secondary(self._prop("secondary-sub-text"))
 
-    def _draw_translation(self) -> None:
+    def draw_translation(self) -> None:
         text = self._secondary_text()
         self._translation.dispatch(events.TranslationDrawn(text))
         if not text:
@@ -3360,8 +3332,8 @@ class Reader:
         self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.TRANS)
 
     def _reveal_translation(self) -> None:
-        self._setup_secondary()
-        self._draw_translation()
+        self.setup_secondary()
+        self.draw_translation()
 
     def _hide_translation(self, *, release: bool) -> None:
         """Take the overlay down. `release` hands the secondary track back to mpv, which only the
@@ -3979,7 +3951,7 @@ class Reader:
         self._sync_mouse_capture()
         self._update_prefetch()
         if self._translation_visible() and self._secondary_text() != self._trans_text:
-            self._draw_translation()
+            self.draw_translation()
         # The active row tracks the loaded index, language and scorer as well as the cue, and those
         # change without a cue settling — so this is outside the early return below.
         sidebar.follow(self.sidebar_view)
@@ -4325,7 +4297,7 @@ class Reader:
             prepare_hover=self.prepare_hover_blocking,
             mark_ready=self._mark_interactive_ready,
             scroll_tip=self.scroll_tip,
-            setup_secondary=self._setup_secondary,
+            setup_secondary=self.setup_secondary,
             toggle_translation=self.toggle_translation,
             mine_current=self.mine_current,
             bulk_mine=self.bulk_mine,
@@ -4487,7 +4459,7 @@ class Reader:
         self.ipc.wake_session_runtime()
 
     def _on_ipc_reconnect(self) -> None:
-        self.subtitle_pipeline.connection_replaced(self._subtitle_target())
+        self.subtitle_pipeline.connection_replaced(self.subtitle_target())
 
     def close(self) -> CloseLedger:
         """Tear the session down. Every participant runs even if an earlier one raises.
@@ -4537,7 +4509,7 @@ class Reader:
                 # on the migrated path.
                 CloseStep(
                     "subtitle-deactivate",
-                    lambda: self.subtitle_pipeline.deactivate(self._subtitle_target()),
+                    lambda: self.subtitle_pipeline.deactivate(self.subtitle_target()),
                     fallback_after(
                         lambda: self._phase_performed(ClosePhase.RENDERING),
                         lambda: self.subtitle_pipeline,
