@@ -109,14 +109,18 @@ identity comparable without runtime state, and the decision that a given observa
 the installed cue identity. A conflict retires that identity in the same observation, before a later
 cue-dependent command in the same drain can use it.
 
-Pointer and pause facts are projected but their deltas stay unpublished (`LEGACY_OWNED`) while the
-legacy route still owns those behaviours.
+Every fact the projection sees is published. `LEGACY_OWNED` is the withhold-list that made that
+migration incremental — `POINTER` left it when hover moved off the interaction tick, `PAUSE` when
+watch time started accruing on the transition — and it is now empty, which is the end state rather
+than an oversight (`runtime/playback.py`).
 
-## Isolated runtime contracts
+## The runtime contracts
 
-The rest of the root `saitenka.runtime` package has no production caller yet. Its public objects
-define and test a small event/effect lifecycle independently of `Reader`, mpv, Pillow, libass,
-SQLite, and Anki:
+`saitenka.runtime` drives the production session: `app/session_routes.py` installs the reactor and
+registers the feature reducers it dispatches to (`poe arch-map` prints the live owner → feature →
+event table, which is the count rather than a figure kept here). What the package still *is* —
+definable and testable independently of `Reader`, mpv, Pillow, libass, SQLite and Anki — is the
+event/effect lifecycle itself:
 
 ```text
 EventEnvelope
