@@ -10,11 +10,11 @@ import pytest
 from util import FakeIPC, runtime_gateway
 
 from saitenka.app.controller import Reader
-from saitenka.app.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.effects import STARTUP_EFFECTS
 from saitenka.runtime.events import ConnectionReplaced, SessionStarting, StartPhase
+from saitenka.runtime.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 
 
 def test_every_phase_brings_up_exactly_one_thing_and_no_two_share_it() -> None:

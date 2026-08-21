@@ -3,7 +3,7 @@
   "startup": [
     {
       "id": "version-and-render-guard",
-      "source": "src/saitenka/app/lifecycle_start.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
         "call:GuardMainRender"
       ],
@@ -15,7 +15,7 @@
     },
     {
       "id": "initial-render-space",
-      "source": "src/saitenka/app/lifecycle_start.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
         "call:EstablishRenderSpace"
       ],
@@ -27,7 +27,7 @@
     },
     {
       "id": "observers-and-replay",
-      "source": "src/saitenka/app/lifecycle_start.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
         "call:StartPropertyObservation"
       ],
@@ -39,7 +39,7 @@
     },
     {
       "id": "bindings-and-input-sections",
-      "source": "src/saitenka/app/lifecycle_start.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
         "call:RegisterInputBindings"
       ],
@@ -51,7 +51,7 @@
     },
     {
       "id": "mined-seed-and-capabilities",
-      "source": "src/saitenka/app/lifecycle_start.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
         "call:SeedOptionalCollaborators"
       ],
@@ -63,7 +63,7 @@
     },
     {
       "id": "session-history",
-      "source": "src/saitenka/app/lifecycle_start.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
         "call:OpenSessionHistory"
       ],
@@ -75,7 +75,7 @@
     },
     {
       "id": "telemetry-and-startup-health",
-      "source": "src/saitenka/app/lifecycle_start.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
         "call:AttachSessionDiagnostics"
       ],
@@ -115,7 +115,7 @@
   "close": [
     {
       "id": "worker-and-capability-actors",
-      "source": "src/saitenka/app/lifecycle_close.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
         "call:CloseCapabilityActors",
         "call:CancelInteractionWork",
@@ -130,7 +130,7 @@
     },
     {
       "id": "input-capture",
-      "source": "src/saitenka/app/lifecycle_close.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
         "call:ReleaseInputCapture",
         "ref:event.phase"
@@ -143,7 +143,7 @@
     },
     {
       "id": "subtitle-and-ownership",
-      "source": "src/saitenka/app/lifecycle_close.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
         "call:CloseSubtitleRendering",
         "ref:event.phase"
@@ -156,7 +156,7 @@
     },
     {
       "id": "session-and-stores",
-      "source": "src/saitenka/app/lifecycle_close.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
         "call:CloseSessionStores",
         "ref:event.phase"
@@ -169,7 +169,7 @@
     },
     {
       "id": "surfaces",
-      "source": "src/saitenka/app/lifecycle_close.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
         "call:CloseSessionSurfaces",
         "call:CloseSessionOverlay",
@@ -183,7 +183,7 @@
     },
     {
       "id": "telemetry",
-      "source": "src/saitenka/app/lifecycle_close.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
         "call:DetachDiagnostics",
         "ref:event.phase"
@@ -196,7 +196,7 @@
     },
     {
       "id": "temporary-artifacts",
-      "source": "src/saitenka/app/lifecycle_close.py::_effects",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
         "call:RemoveSessionArtifacts",
         "ref:event.scratch"

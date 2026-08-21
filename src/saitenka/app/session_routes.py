@@ -18,8 +18,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app import interaction_intents, panel_intents, telemetry
 from saitenka.app.interaction_adapter import InteractionAdapter, InteractionHost
-from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
-from saitenka.app.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.app.panel_adapter import PanelAdapter, PanelHost
 from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.connection import ConnectionState, reduce_connection
@@ -93,6 +91,8 @@ from saitenka.runtime.interaction_slice import (
     TipNavFeature,
     interaction_slice_reducer,
 )
+from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+from saitenka.runtime.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.runtime.playback_slice import (
     PLAYBACK_FEATURE,
     PlaybackSlice,

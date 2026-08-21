@@ -11,7 +11,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests" / "fixtures" / "runtime_migration_manifest.json"
-APP = ROOT / "src" / "saitenka" / "app"
+#: Both packages, because a duty is evidence about a *reducer*, not about where its file sits.
+#: Scanning only `app/` made a duty vanish the moment its reducer moved to `runtime/` — the
+#: manifest read "missing evidence" for work that had, in fact, just landed where it belongs.
+SOURCES = (ROOT / "src" / "saitenka" / "app", ROOT / "src" / "saitenka" / "runtime")
 
 _OVERLAY_METHODS = {
     "hide",
@@ -357,7 +360,7 @@ def scan() -> tuple[set[Debt], set[str], dict[str, set[str]]]:
     debt: set[Debt] = set()
     symbols: set[str] = set()
     evidence: dict[str, set[str]] = {}
-    for path in sorted(APP.glob("**/*.py")):
+    for path in sorted(p for root in SOURCES for p in root.glob("**/*.py")):
         relative = path.relative_to(ROOT).as_posix()
         scanner = Scanner(relative)
         scanner.visit(ast.parse(path.read_text(encoding="utf-8"), filename=relative))

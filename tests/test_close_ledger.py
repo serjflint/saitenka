@@ -230,8 +230,8 @@ def test_a_session_without_a_runtime_still_closes_cleanly() -> None:
 def test_a_second_close_announcement_does_not_re_detach() -> None:
     """Latched on purpose: a stop racing an explicit close must not retire something an owner has
     since reinstalled. Close is idempotent by design here, not by luck."""
-    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
     from saitenka.runtime.events import SessionClosing
+    from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
     first = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing())
     second = reduce_lifecycle_close(first.state, SessionClosing())
@@ -243,8 +243,8 @@ def test_a_second_close_announcement_does_not_re_detach() -> None:
 def test_the_close_feature_ignores_the_events_it_shares_a_slot_with() -> None:
     """It sits in `Owner.SESSION`'s slice, which broadcasts — so every other session event reaches
     it too, and reacting to one would detach the gauges mid-session."""
-    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
     from saitenka.runtime.events import ConnectionReplaced, StartupReady
+    from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
     state = LifecycleCloseState()
     for event in (StartupReady(), ConnectionReplaced(1)):
@@ -283,9 +283,9 @@ def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() ->
 def test_the_artifacts_phase_is_separate_from_the_participants_phase() -> None:
     """Close is a sequence: the scratch dir goes only after everything that writes to it stopped,
     so one announcement for both phases would delete it while lanes were still draining."""
-    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
     from saitenka.runtime.effects import DetachDiagnostics, RemoveSessionArtifacts
     from saitenka.runtime.events import ClosePhase, SessionClosing
+    from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
     participants = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing())
     artifacts = reduce_lifecycle_close(
@@ -325,9 +325,9 @@ def test_the_surfaces_phase_closes_the_transport_after_the_removes_go_through_it
     """Order within the phase is the contract: the overlay removes are queued *through* the
     transport, so closing it first would strand them. A tuple's order is easy to lose in a
     refactor, hence an oracle rather than a comment."""
-    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
     from saitenka.runtime.effects import CloseSessionOverlay, CloseSessionSurfaces
     from saitenka.runtime.events import ClosePhase, SessionClosing
+    from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
     result = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing(ClosePhase.SURFACES))
 
@@ -482,9 +482,9 @@ def test_the_participants_phase_retires_the_input_capture_and_nothing_else_does(
     The capture is a write to mpv, so it has to go while the transport still works — before the
     surfaces phase closes it, and before diagnostics detach in the same tuple.
     """
-    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
     from saitenka.runtime.effects import ReleaseInputCapture
     from saitenka.runtime.events import ClosePhase, SessionClosing
+    from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
     state = LifecycleCloseState()
     seen = {}
@@ -617,9 +617,9 @@ def test_every_migrated_phase_retires_something_and_no_two_share_a_participant()
     Two phases naming the same resource would retire it twice — once early, against collaborators
     that are still live — and no single-duty test can see that.
     """
-    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
     from saitenka.app.session_routes import _RESOURCE_OF
     from saitenka.runtime.events import ClosePhase, SessionClosing
+    from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
     state = LifecycleCloseState()
     seen: list[str] = []
