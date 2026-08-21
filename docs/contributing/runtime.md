@@ -160,6 +160,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Exact host inventory | The checked-in per-module count of functions accepting `Reader` must match exactly; any difference fails the checker. |
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
+| Effect interpreter ownership | An owner's effects are applied by that owner's adapter, not by the host. A pure reducer or a stateless policy returns effects; the object that interprets them belongs to the feature. Purity relocates impurity, and absent this rule it relocates onto the object being retired — which is what `poe host-mass` measures. |
 
 The executable sources of truth are:
 
