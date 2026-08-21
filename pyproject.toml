@@ -766,6 +766,12 @@ host-arity-over = { shell = "uv run python tools/host_arity.py over", help = "Ho
 # and what those names resolve to underneath (seven names over one owner slice are one port, not
 # seven parameters). `--member` is the step before a codemod; its `--json` is the worklist.
 cluster-map = { shell = "uv run python tools/cluster_map.py", help = "What a module touches on the host, by fact — `--member NAME` for one member and its sites" }
+# GATE (in `all`) — the host's mass, ratcheted. `total` is the anti-laundering number: moving a body
+# into a module function and leaving a thin delegator behind shrinks the substantive split while the
+# host is unchanged, and gating only that would report the growth mode this repo prescribes as
+# progress. Members are discovered live (mixins, import-time attachment), never by parsing one file.
+host-mass = { shell = "uv run --extra full python tools/host_mass.py check" }
+host-mass-census = { shell = "uv run --extra full python tools/host_mass.py", help = "Members on the Reader by kind — substantive, delegator, property, field" }
 # GATE (in `all`) — `getattr(port, "method", fallback)` where the port ALWAYS has the method, so the
 # fallback is unreachable and the probe's only live effect is making a rename silent (a renamed timer
 # method disarms every lifecycle deadline, with nothing red). Resolves the receiver's type and asks
@@ -854,7 +860,7 @@ ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install 
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration", "host-arity", "port-probe", "reducer-purity"]
+all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration", "host-arity", "host-mass", "port-probe", "reducer-purity"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —
