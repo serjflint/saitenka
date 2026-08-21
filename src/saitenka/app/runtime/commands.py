@@ -1,4 +1,4 @@
-"""Pure script-message policy and the temporary legacy execution adapter."""
+"""Pure script-message policy, and the executor that runs the action bound to a command."""
 
 from __future__ import annotations
 

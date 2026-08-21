@@ -322,9 +322,6 @@ _Nested = PopupView
 class Reader:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
-    # Episode-tier state (app/reader_context.py) exposed under its historical field names so the ~15
-    # call-site modules keep working while they migrate onto ``reader.episode.*`` (#30 lifetime split);
-    # rebinding ``self.episode`` (#100 re-slot) resets all of it in one move, leak-free by construction.
     # The last `Delegated`. All five OSD surfaces are slice features now, so what is left here is
     # the tooltip's *panel* — two rendered popups, their cache and their build lanes — which is a
     # mutable object no reducer can hold. Every flat alias is gone: the lifetime containers are
@@ -356,8 +353,9 @@ class Reader:
         if legacy_kw:
             o = o.with_overrides(**legacy_kw)
         self.options = o
-        # Episode-lifetime state; the Delegated shims above expose its fields as ``reader.<field>``.
-        # A file change rebinds this (#100 re-slot) — see app/reader_context.py.
+        # Episode-lifetime state, addressed directly as ``episode.<field>`` — no shim stands in
+        # front of it. A file change rebinds this in one move (#100 re-slot), which is what makes
+        # the reset leak-free; see app/reader_context.py.
         self.episode = EpisodeContext()
         self.interaction = InteractionContext()  # hover/tooltip/reveal-scoped state
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
