@@ -1889,16 +1889,16 @@ def _link_reader(ipc):
     return r
 
 
-def _point_at_link(r, ipc):
-    # the body cross-reference link (skip the header's per-kanji `kanji:` links, which now sit first)
+def _point_at_link(r) -> Driver:
+    """Move onto the body cross-reference link; return the driver so the click follows the cursor.
+
+    The header's per-kanji `kanji:` links sit first and are skipped — this is the body link.
+    """
     lb = next(b for b in r.tip.view.state.windowed.link_boxes() if not b.query.startswith("kanji:"))
     sx, sy = r.tip.view.xy
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": sx + lb.x + lb.w / 2,
-        "y": sy + (lb.y - r.tip.view.scroll) + lb.h / 2,
-    }
-    return lb
+    return Driver(r, instant=False).move(
+        sx + lb.x + lb.w / 2, sy + (lb.y - r.tip.view.scroll) + lb.h / 2
+    )
 
 
 def test_click_cross_reference_navigates_base_in_place(monkeypatch):
@@ -1909,11 +1909,10 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
     ipc = FakeIPC()
     r = _link_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     assert r.hover_view().tip.state.windowed.link_boxes()  # the def body exposed a clickable link
     base = r.tip.view.state
-    _point_at_link(r, ipc)
-    r.on_click()
+    _point_at_link(r).click()
     assert r.hover_view().nested.state is None  # NOT a nested popup
     assert r.hover_view().tip.state is not None and r.hover_view().tip.state is not base
     assert tooltip.tip_back(r.tip_ports) is True and r.hover_view().tip.state is base
@@ -1951,7 +1950,7 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     r.tokens = [Token("観る", "観る", "みる", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     # the wildcard cross-ref in the body (skip the header's per-kanji `kanji:` links)
     lb = next(b for b in r.tip.view.state.windowed.link_boxes() if not b.query.startswith("kanji:"))
     assert "*" in lb.query  # the cross-ref is a wildcard pattern
@@ -1996,7 +1995,7 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     r.tokens = [Token("観る", "観る", "みる", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     body_links = [
         b
         for b in r.hover_view().tip.state.windowed.link_boxes()
@@ -2041,7 +2040,7 @@ def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
     r.tokens = [Token("考え", "考え", "かんがえ", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     links = r.tip.view.state.windowed.link_boxes()
     assert any(lb.query == "思し召し" for lb in links)  # the furigana'd cross-ref IS clickable
 
@@ -2079,11 +2078,10 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     r = _link_reader(ipc)
     r.scan_delay = 0.0  # would fire immediately if not suppressed
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
-    _point_at_link(r, ipc)  # cursor on the link cell
-    r._update_hover()
+    _hover_base_word(r)
+    ui = _point_at_link(r)  # cursor on the link cell
     assert r.hover_view().nested.state is None  # hover did NOT open a scan popup over the link
-    r.on_click()  # …a click navigates the base in place (no floating popup)
+    ui.click()  # …a click navigates the base in place (no floating popup)
     assert r.hover_view().nested.state is None and len(r.interaction.tip_nav.back) == 1
 
 
@@ -2107,12 +2105,11 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     r = _link_reader(ipc)
     r.anki = object()
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    _hover_base_word(r)
     events = []
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
-    _point_at_link(r, ipc)
-    r.on_click()
+    _point_at_link(r).click()
     assert (
         events == [] and len(r.interaction.tip_nav.back) == 1
     )  # navigated the base, no mine/speak fallthrough
@@ -2409,10 +2406,11 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
         r.lifecycle_surfaces, "present", lambda _img, *_a, oid=0, **_kw: shown.append(oid)
     )
     monkeypatch.setattr(r.lifecycle_surfaces, "remove", lambda oid, **_kw: hidden.append(oid))
-    r.set_hover(0)
+    ui = _hover_base_word(r)
     assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
     assert r._trans_text == "I want you to read this."
-    r.retire_hover()
+    ui.leave()  # the cursor leaves the video window…
+    assert _fire_dwell(ipc, "tooltip-hide")  # …and the tip lingers until its hide dwell is due
     assert OverlayId.TRANS in hidden  # leaving the word hid it again
 
 
@@ -2430,7 +2428,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     shown = []
     monkeypatch.setattr(r.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
-    r.set_hover(0)
+    _hover_base_word(r)
     assert OverlayId.TRANS not in shown  # translation stays on the manual `t` key
 
 
