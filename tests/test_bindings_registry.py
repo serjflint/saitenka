@@ -76,66 +76,66 @@ def test_binding_messages_and_handlers_correspond_exactly():
     assert not orphan, f"command handlers no binding can reach (dead handler / message): {orphan}"
 
 
-def test_every_temporary_command_binding_has_one_deletion_owner():
-    """Each permanent spec routes either to a reducer (migrated, no binding row left to delete)
-    or to exactly one temporary binding with a named deletion owner — never to both."""
+def test_every_command_spec_is_routed_and_keeps_its_owner_and_gates():
+    """Owner, cue requirement and help-modality per command, plus: the spec resolves to an action.
+
+    An unrouted spec is the quiet failure — the policy accepts the press, the outcome is `UNBOUND`,
+    and the key is documented as working. The golden carried a fifth column recording *how* each
+    command was routed while some were still imperative; every row read `migrated` long before this,
+    so it had stopped being able to fail and went with the machinery it measured.
+    """
     commands = Reader(FakeIPC()).commands
-    assert commands.migrated.isdisjoint(dict(commands.bindings))
     actual = {
-        spec.name: (
-            spec.owner.value,
-            spec.requires_cue,
-            spec.allowed_while_help_open,
-            commands.route(spec.name),
-        )
+        spec.name: (spec.owner.value, spec.requires_cue, spec.allowed_while_help_open)
         for spec in commands.policy.specs
     }
     expected = {
-        row[0]: (row[1], row[2] == "cue", row[3] == "help", row[4])
+        row[0]: (row[1], row[2] == "cue", row[3] == "help")
         for line in _COMMAND_ROUTE_CONTRACT.splitlines()
         if (row := line.split("|"))
     }
 
     assert actual == expected
+    assert commands.routed == commands.names(), "a spec'd command with no action is a dead key"
 
 
 _COMMAND_ROUTE_CONTRACT = """\
-saitenka-toggle-overlay|session|global|modal|migrated
-saitenka-cycle-profile|session|global|modal|migrated
-saitenka-toggle-hover-pause|session|global|modal|migrated
-saitenka-toggle-help|session|global|help|migrated
-saitenka-help-prev|session|global|help|migrated
-saitenka-help-next|session|global|help|migrated
-saitenka-help-close|session|global|help|migrated
-saitenka-toggle-subtitle-language|playback|global|modal|migrated
-saitenka-mark-subtitle-japanese|playback|global|modal|migrated
-saitenka-retry-subtitle-providers|playback|global|modal|migrated
-saitenka-translate|subtitle|cue|modal|migrated
-saitenka-toggle-annotations|subtitle|global|modal|migrated
-saitenka-copy-line|subtitle|cue|modal|migrated
-saitenka-sub-prev|subtitle|cue|modal|migrated
-saitenka-sub-next|subtitle|cue|modal|migrated
-saitenka-sub-replay|subtitle|cue|modal|migrated
-saitenka-sub-anchor|subtitle|global|modal|migrated
-saitenka-mine|interaction|cue|modal|migrated
-saitenka-mine-video|interaction|cue|modal|migrated
-saitenka-mine-all|interaction|cue|modal|migrated
-saitenka-toggle-bookmark|interaction|cue|modal|migrated
-saitenka-toggle-sidebar|interaction|global|modal|migrated
-saitenka-toggle-analysis|interaction|global|modal|migrated
-saitenka-preview|interaction|cue|modal|migrated
-saitenka-preview-close|interaction|global|modal|migrated
-saitenka-scroll-up|interaction|global|help|migrated
-saitenka-scroll-down|interaction|global|help|migrated
-saitenka-speak|interaction|cue|modal|migrated
-saitenka-copy|interaction|cue|modal|migrated
-saitenka-copy-click|interaction|cue|modal|migrated
-saitenka-click|interaction|cue|modal|migrated
-saitenka-kanji|interaction|cue|modal|migrated
-saitenka-tip-up|interaction|global|modal|migrated
-saitenka-tip-down|interaction|global|modal|migrated
-saitenka-tip-close|interaction|global|modal|migrated
-saitenka-sub-picker|interaction|global|modal|migrated"""
+saitenka-toggle-overlay|session|global|modal
+saitenka-cycle-profile|session|global|modal
+saitenka-toggle-hover-pause|session|global|modal
+saitenka-toggle-help|session|global|help
+saitenka-help-prev|session|global|help
+saitenka-help-next|session|global|help
+saitenka-help-close|session|global|help
+saitenka-toggle-subtitle-language|playback|global|modal
+saitenka-mark-subtitle-japanese|playback|global|modal
+saitenka-retry-subtitle-providers|playback|global|modal
+saitenka-translate|subtitle|cue|modal
+saitenka-toggle-annotations|subtitle|global|modal
+saitenka-copy-line|subtitle|cue|modal
+saitenka-sub-prev|subtitle|cue|modal
+saitenka-sub-next|subtitle|cue|modal
+saitenka-sub-replay|subtitle|cue|modal
+saitenka-sub-anchor|subtitle|global|modal
+saitenka-mine|interaction|cue|modal
+saitenka-mine-video|interaction|cue|modal
+saitenka-mine-all|interaction|cue|modal
+saitenka-toggle-bookmark|interaction|cue|modal
+saitenka-toggle-sidebar|interaction|global|modal
+saitenka-toggle-analysis|interaction|global|modal
+saitenka-preview|interaction|cue|modal
+saitenka-preview-close|interaction|global|modal
+saitenka-scroll-up|interaction|global|help
+saitenka-scroll-down|interaction|global|help
+saitenka-speak|interaction|cue|modal
+saitenka-copy|interaction|cue|modal
+saitenka-copy-click|interaction|cue|modal
+saitenka-click|interaction|cue|modal
+saitenka-kanji|interaction|cue|modal
+saitenka-tip-up|interaction|global|modal
+saitenka-tip-down|interaction|global|modal
+saitenka-tip-close|interaction|global|modal
+saitenka-sub-picker|interaction|global|modal"""
 
 
 # --- firing: a press actually runs the bound action -----------------------------------------------

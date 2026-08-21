@@ -142,10 +142,9 @@ from saitenka.app.reader_context import (
 )
 from saitenka.app.runtime import (
     CommandExecution,
+    CommandExecutor,
     CommandOutcome,
     CueCommandState,
-    LegacyCommandBinding,
-    LegacyCommandExecutor,
 )
 from saitenka.app.session_runtime import SessionEntry, SessionRuntime
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
@@ -3522,11 +3521,16 @@ class Reader:
         moves with it. Cumulative (anchors from the current delay), so a second anchor refines a first."""
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.ANCHOR_TIMING)
 
-    def _build_command_router(self) -> LegacyCommandExecutor:
+    def _build_command_router(self) -> CommandExecutor:
         """Assemble feature-owned actions once; handlers are bound and receive no god context."""
 
-        def action(method: Callable[[Reader], object]) -> Callable[[], None]:
+        def action(method: Callable[..., object]) -> Callable[[], None]:
             """Route to a `Reader` verb, resolved by name at call time.
+
+            Annotated by what it reads — `__name__` — and not as a `Reader` method, because a
+            parameter that names the host is a host parameter to the contract gate whether or not
+            an instance ever reaches it. `Reader.verb` is what every caller passes; a typo in one
+            raises at router construction, on the class.
 
             Late binding is deliberate: a keybind test overrides the verb on the *instance* and
             then presses the key, so a row that captured the bound method would route past the
@@ -3541,14 +3545,10 @@ class Reader:
         def interaction(command) -> Callable[[], None]:
             return lambda: self._run_interaction_command(command)
 
-        # Empty, and that is WP5's exit criterion: every command's decision lives in a pure
-        # reducer, so none carries a temporary compatibility binding. Kept rather than deleted
-        # because `LegacyCommandExecutor` goes with the driver in WP6, not before it.
-        handlers: dict[str, Callable[[], None]] = {}
-        # Migrated (WP4.2 / WP4.5 / WP5.3): the decision is a pure reducer — `subtitle_intents`,
-        # `runtime.help`, `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
-        # `interaction_intents`.
-        reducers = {
+        # Every row's decision is a pure reducer — `subtitle_intents`, `runtime.help`,
+        # `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
+        # `interaction_intents`. The verb below only carries the intent to one of them.
+        handlers: dict[str, Callable[[], None]] = {
             SUBTITLE_LANGUAGE_MSG: action(Reader.toggle_subtitle_language),
             SUBTITLE_MARK_JP_MSG: action(Reader.mark_current_subtitle_japanese),
             SUBTITLE_RETRY_MSG: action(Reader.retry_japanese_subtitles),
@@ -3586,13 +3586,7 @@ class Reader:
             COPY_CLICK_MSG: interaction(InteractionCommand.COPY_UNDER_CURSOR),
             OVERLAY_TOGGLE_MSG: action(Reader.toggle_overlay),
         }
-        return LegacyCommandExecutor(
-            {
-                name: LegacyCommandBinding(handler, "work-package-5")
-                for name, handler in handlers.items()
-            },
-            reducers=reducers,
-        )
+        return CommandExecutor(handlers)
 
     def _command_cue_state(self) -> CueCommandState:
         if not self._cue_retired:

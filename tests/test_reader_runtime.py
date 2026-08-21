@@ -5,23 +5,22 @@ from saitenka.app.bindings import SCROLL_UP_MSG
 from saitenka.app.reader_factory import ReaderServices, create_reader
 from saitenka.app.runtime import (
     COMMAND_SPECS,
+    CommandExecutor,
     CommandOutcome,
     CommandPolicy,
     CommandRejection,
     CommandSpec,
     CueCommandState,
-    LegacyCommandBinding,
-    LegacyCommandExecutor,
 )
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
 
 
-def test_legacy_command_executor_dispatches_accepted_feature_action():
+def test_the_executor_runs_the_action_bound_to_an_accepted_command():
     handled: list[str] = []
     policy = CommandPolicy((CommandSpec("mine", Owner.INTERACTION, requires_cue=True),))
-    executor = LegacyCommandExecutor(
-        {"mine": LegacyCommandBinding(lambda: handled.append("mined"), "work-package-5")},
+    executor = CommandExecutor(
+        {"mine": lambda: handled.append("mined")},
         policy=policy,
     )
 
@@ -31,6 +30,24 @@ def test_legacy_command_executor_dispatches_accepted_feature_action():
 
     assert result.outcome == CommandOutcome.EXECUTED
     assert handled == ["mined"]
+
+
+def test_a_spec_with_no_action_dispatches_to_unbound_rather_than_rejecting():
+    """The negative control for "every spec is routed" (tests/test_bindings_registry.py).
+
+    An unrouted command is not a rejection: the policy accepted it, so it is documented as
+    working, bound to a key, and does nothing. `UNBOUND` is what makes that visible in the
+    outcome stream instead of reading as a press that never arrived.
+    """
+    policy = CommandPolicy((CommandSpec("mine", Owner.INTERACTION, requires_cue=False),))
+    executor = CommandExecutor({}, policy=policy)
+
+    result = executor.dispatch(
+        UserCommand("mine"), cue_state=CueCommandState.ACTIVE, help_open=False
+    )
+
+    assert result.outcome == CommandOutcome.UNBOUND
+    assert result.rejection is None
 
 
 def test_command_policy_rejects_unknown_message_without_execution():
@@ -96,13 +113,13 @@ def test_command_policy_accepts_help_navigation_while_help_is_open():
     assert decision.intent is not None
 
 
-def test_legacy_command_failure_is_a_terminal_typed_outcome():
+def test_a_failing_action_is_a_terminal_typed_outcome():
     def fail() -> None:
         raise RuntimeError("boom")
 
     spec = CommandSpec("fail", Owner.SESSION, requires_cue=False)
-    executor = LegacyCommandExecutor(
-        {"fail": LegacyCommandBinding(fail, "work-package-5")},
+    executor = CommandExecutor(
+        {"fail": fail},
         policy=CommandPolicy((spec,)),
     )
 
@@ -122,8 +139,8 @@ def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request):
     reader = create_reader(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     spec = CommandSpec("fail", Owner.SESSION, requires_cue=False)
-    reader.commands = LegacyCommandExecutor(
-        {"fail": LegacyCommandBinding(fail, "work-package-5")},
+    reader.commands = CommandExecutor(
+        {"fail": fail},
         policy=CommandPolicy((spec,)),
     )
 
@@ -162,8 +179,8 @@ def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
     reader = create_reader(ipc)
     handled: list[str] = []
     spec = CommandSpec(SCROLL_UP_MSG, Owner.INTERACTION, requires_cue=False)
-    reader.commands = LegacyCommandExecutor(
-        {SCROLL_UP_MSG: LegacyCommandBinding(lambda: handled.append("scroll"), "work-package-5")},
+    reader.commands = CommandExecutor(
+        {SCROLL_UP_MSG: lambda: handled.append("scroll")},
         policy=CommandPolicy((spec,)),
     )
     try:
