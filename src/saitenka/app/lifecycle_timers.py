@@ -130,10 +130,8 @@ class LifecycleTimers:
                 self._closed = True
                 for kind in LifecycleTimerKind:
                     self._revisions[kind] += 1
-            cancel = getattr(self._port, "cancel_runtime_timer", None)
-            if cancel is not None:
-                for kind in LifecycleTimerKind:
-                    cancel(self._name(kind))
+            for kind in LifecycleTimerKind:
+                self._port.cancel_runtime_timer(self._name(kind))
 
     @staticmethod
     def _name(kind: LifecycleTimerKind) -> str:

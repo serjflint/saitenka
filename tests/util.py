@@ -273,6 +273,11 @@ class FakeIPC:
         self._session_loop = None
         self._runtime_gateway = None
         self.runtime_outcomes: list[object] = []
+        #: Both are on every `MpvIPC` from construction, so a stand-in that omits them is a fake
+        #: production would not recognise. They were reachable only through a `getattr(ipc, …, x)`
+        #: probe, which answered "absent" for this fake and for a rename alike.
+        self.connected_at: float | None = None  # set once the transport connects; never here
+        self._bytes_read = 0  # a fake reads nothing off a wire, and 0 is what that means
         #: Named timers scheduled through the runtime port, newest per name. Nothing fires on a
         #: wall clock — a test calls `fire_runtime_timer` so ordering stays deterministic.
         self.timers: dict[str, tuple[object, Callable[[object], None]]] = {}

@@ -1209,8 +1209,7 @@ class Reader:
             if completion.outcome is EffectOutcome.SUCCEEDED:
                 self._geometry_refresh_due(due)
 
-        schedule = getattr(self.ipc, "schedule_runtime_timer", None)
-        if schedule is None or not schedule(
+        if not self.ipc.schedule_runtime_timer(
             owner=Owner.SUBTITLE,
             identity=due,
             timer=_GEOMETRY_REFRESH_TIMER,
@@ -1239,9 +1238,7 @@ class Reader:
         if self._geometry_refresh.armed is None:
             return
         self._geometry_refresh = self._geometry_refresh.retire()
-        cancel = getattr(self.ipc, "cancel_runtime_timer", None)
-        if cancel is not None:
-            cancel(_GEOMETRY_REFRESH_TIMER)
+        self.ipc.cancel_runtime_timer(_GEOMETRY_REFRESH_TIMER)
 
     # --- subtitle navigation settle window (WP4.5) --------------------------------------------
     def open_settle_window(self) -> None:
@@ -1254,18 +1251,15 @@ class Reader:
             if completion.outcome is EffectOutcome.SUCCEEDED:
                 self._settle_due(identity)
 
-        schedule = getattr(self.ipc, "schedule_runtime_timer", None)
-        if schedule is None:
-            # No runtime timer port (tests, pre-run): never open a window we cannot retire.
-            self.episode.sub_settle = window.retire()
-            return
-        if not schedule(
+        if not self.ipc.schedule_runtime_timer(
             owner=Owner.SUBTITLE,
             identity=identity,
             timer=_SETTLE_TIMER,
             due_at=time.monotonic() + subnav_settle.SETTLE_SECONDS,
             on_finished=due,
         ):
+            # No gateway behind the port (tests, pre-run), or a full timer heap: either way, never
+            # open a window we cannot retire. The port answers False for both.
             self.episode.sub_settle = window.retire()
 
     def _settle_due(self, identity: subnav_settle.NavigationSettleDue) -> None:
@@ -1276,9 +1270,7 @@ class Reader:
         if not self.episode.sub_settle.open:
             return
         self.episode.sub_settle = self.episode.sub_settle.retire()
-        cancel = getattr(self.ipc, "cancel_runtime_timer", None)
-        if cancel is not None:
-            cancel(_SETTLE_TIMER)
+        self.ipc.cancel_runtime_timer(_SETTLE_TIMER)
 
     def _replace_subtitle_source(self, path: object = None, *, reason: str) -> None:
         self.retire_settle_window()
@@ -2622,8 +2614,7 @@ class Reader:
         if self.help.open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
-            submit = getattr(self.ipc, "command_async", self.ipc.command)
-            submit("keybind", binding.key, f"script-message {binding.spec.message}")
+            self.ipc.command_async("keybind", binding.key, f"script-message {binding.spec.message}")
 
     def _unbind_tip_keys(self) -> None:
         """Neutralise the tooltip keys so a leaked bind can't fire ``tab-prev``/etc. when no tooltip is
@@ -2637,8 +2628,7 @@ class Reader:
         if self.help.open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
-            submit = getattr(self.ipc, "command_async", self.ipc.command)
-            submit("keybind", binding.key, "ignore")
+            self.ipc.command_async("keybind", binding.key, "ignore")
 
     def _define_mouse_section(self) -> None:
         self._mouse.define(active_bindings(self.keys, "mouse"))
@@ -4128,9 +4118,7 @@ class Reader:
         self._publish_command_event(result.event())
 
     def _publish_command_event(self, event: CommandHandled) -> None:
-        publish = getattr(self.ipc, "publish_legacy_command_outcome", None)
-        if publish is not None:
-            publish(event)
+        self.ipc.publish_legacy_command_outcome(event)
 
     def arm_capability_refresh(self, seconds: float = 0.5) -> None:
         """Keep asking whether the optional services have come up, on a deadline of its own.
@@ -4227,7 +4215,7 @@ class Reader:
         if self._observing and self._playback.value("osd-dimensions") in (None, {}):
             return False
         self._interactive_ready = True
-        connected_at = getattr(self.ipc, "connected_at", None)
+        connected_at = self.ipc.connected_at  # None until the transport has connected once
         with otel_metrics.traced(
             "startup.interactive_ready",
             cue_pending=str(self._sub_pending is not None).lower(),
@@ -4271,7 +4259,7 @@ class Reader:
         draw regardless of subtitles. If the pipe is alive but there's simply no cue yet, note it once
         at debug. Lives in overlay.log / report; playback is unaffected."""
         secs = 8.0
-        bytes_read = getattr(self.ipc, "_bytes_read", -1)
+        bytes_read = self.ipc._bytes_read  # the read counter has no public reader
         osd_ok = self._prop("osd-dimensions") not in (None, {})
         if bytes_read == 0 or not osd_ok:
             log.warning(

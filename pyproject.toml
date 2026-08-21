@@ -762,6 +762,12 @@ runtime-status = { shell = "uv run --extra full python tools/runtime_migration_c
 # are 116 real ones. Ratchets down like the sibling gate; growth is the failure.
 host-arity = { shell = "uv run python tools/host_arity.py check" }
 host-arity-over = { shell = "uv run python tools/host_arity.py over", help = "Host-taking functions over ruff's max-args once converted, worst first — the WP5 queue" }
+# GATE (in `all`) — `getattr(port, "method", fallback)` where the port ALWAYS has the method, so the
+# fallback is unreachable and the probe's only live effect is making a rename silent (a renamed timer
+# method disarms every lifecycle deadline, with nothing red). Resolves the receiver's type and asks
+# the class; an unannotated receiver is reported, never counted. Baseline zero.
+port-probe = { shell = "uv run python tools/port_probe_census.py check" }
+port-probe-census = { shell = "uv run python tools/port_probe_census.py", help = "Every getattr probe in src, split dead / live / unresolved receiver" }
 # NOT in `all` (needs Node + a pinned Yomitan checkout; fetches py-fsrs) — the regenerate-and-diff sibling
 # of corpus-lock for GENERATED corpora (fsrs vectors, JP/FR transform differentials). corpus-lock guards
 # *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
@@ -838,7 +844,7 @@ ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install 
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration", "host-arity"]
+all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration", "host-arity", "port-probe"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —

@@ -50,9 +50,11 @@ def create_reader(
         profile=profile,
         tokenizer_warm=tokenizer_warm,
         # This factory is the composition layer, so it is where the correlated-command port is
-        # resolved. A session assembled here uses gateway egress; a Reader built directly (tests,
-        # prewarm) writes straight to mpv unless its caller says otherwise.
-        runtime_submit=getattr(ipc, "submit_runtime_mpv", None),
+        # handed over. A session assembled here uses gateway egress; a Reader built directly (tests,
+        # prewarm) writes straight to mpv unless its caller says otherwise. Named, not probed: the
+        # port is on every `MpvIPC`, so a probe here could only ever answer "renamed" as "absent",
+        # and absent silently moves every overlay write back onto the direct path.
+        runtime_submit=ipc.submit_runtime_mpv,
         # Same reasoning for the geometry provider: which implementation runs is composition's
         # call, not the Reader's. A Reader built directly gets whatever its caller injects.
         geometry_backend=_geometry_backend((options or ReaderOptions()).subtitle_geometry),
