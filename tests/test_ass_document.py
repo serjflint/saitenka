@@ -248,6 +248,69 @@ def test_a_differing_margin_still_changes_the_signature() -> None:
     )
 
 
+_SHIFT_DOC = """[Script Info]
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold,\
+ Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow,\
+ Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Sign,Yasashisa,60,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,\
+10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:02.00,Sign,,0,0,0,,{\\an8\\fad(200,200)}早い
+Dialogue: 0,0:00:30.00,0:00:32.50,Sign,,0,0,0,,遅い
+"""
+
+
+def test_shifting_dialogue_moves_only_events_from_the_boundary_on() -> None:
+    from saitenka.subtitles.ass import shift_ass_dialogue
+
+    out = shift_ass_dialogue(_SHIFT_DOC, delta_ms=4732, from_ms=20_000)
+
+    assert "Dialogue: 0,0:00:01.00,0:00:02.00,Sign,,0,0,0,,{\\an8\\fad(200,200)}早い" in out
+    assert "Dialogue: 0,0:00:34.73,0:00:37.23,Sign,,0,0,0,,遅い" in out
+
+
+def test_shifting_dialogue_leaves_the_typesetting_byte_identical() -> None:
+    """The whole reason a re-time stopped serializing cues to SRT: an ASS is chosen FOR its styles,
+    and the old path returned a SubRip body under a name that still said `.ass`."""
+    from saitenka.subtitles.ass import shift_ass_dialogue
+
+    out = shift_ass_dialogue(_SHIFT_DOC, delta_ms=1_000, from_ms=0)
+
+    for line in _SHIFT_DOC.splitlines():
+        if not line.startswith("Dialogue:"):
+            assert line in out
+
+
+def test_shifting_dialogue_clamps_the_pair_and_keeps_the_duration() -> None:
+    """A shift past zero clamps the event as a PAIR: clamping each end independently would collapse
+    it to an empty range, which `SubtitleEventId` rejects outright — a re-time must not be able to
+    produce a document that is not a legal one."""
+    from saitenka.subtitles.ass import shift_ass_dialogue
+
+    out = shift_ass_dialogue(_SHIFT_DOC, delta_ms=-9_999_999, from_ms=0)
+
+    assert "Dialogue: 0,0:00:00.00,0:00:01.00,Sign,,0,0,0,," in out  # 1s cue keeps its 1s
+    assert "Dialogue: 0,0:00:00.00,0:00:02.50,Sign,,0,0,0,," in out  # 2.5s cue keeps its 2.5s
+
+
+def test_shifting_dialogue_refuses_a_document_it_cannot_round_trip() -> None:
+    """A non-canonical event Format would be silently REORDERED by serialization, so the caller has
+    to keep the original instead — raising is what lets it."""
+    from saitenka.subtitles.ass import shift_ass_dialogue
+
+    doc = _SHIFT_DOC.replace(
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Vendor, Text",
+    )
+    with pytest.raises(UnsupportedAssEvent):
+        shift_ass_dialogue(doc, delta_ms=1_000, from_ms=0)
+
+
 def test_event_line_preserves_authored_leading_and_trailing_text_spaces() -> None:
     line = "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,  猫  "
     parsed = parse_ass_event_line(line, TRACK, source_order=0)

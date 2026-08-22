@@ -281,6 +281,56 @@ def parse_ass_event_line(
     )
 
 
+def shift_ass_dialogue(source: str, *, delta_ms: int, from_ms: int = 0) -> str:
+    """Shift every Dialogue event starting at or after ``from_ms`` by ``delta_ms``.
+
+    Everything else — script info, styles, fonts, comments, and the events this does not move —
+    stays byte-identical, so a re-time keeps the typesetting the file was chosen for. Re-timing used
+    to serialize cues to SRT instead, which discarded it and left a body its own extension no longer
+    described.
+
+    ``delta_ms`` is rounded to whole centiseconds (ASS's own timestamp resolution), so relative
+    timing between shifted events is preserved exactly rather than each rounding independently. A
+    shift that would take an event before zero clamps the PAIR, keeping its duration — clamping both
+    ends independently collapses the event to an empty range, which is not a legal event at all.
+
+    Raises `UnsupportedAssEvent` on a document whose event rows this cannot round-trip, so a caller
+    keeps the original rather than writing one it has damaged.
+    """
+    track = SubtitleTrackId("shift")
+    delta = round(delta_ms / 10) * 10
+    fields: Sequence[str] = _EVENT_FIELDS
+    in_events = False
+    out: list[str] = []
+    order = 0
+    for raw_line in source.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        ending = raw_line[len(line) :]
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_events = stripped.casefold() == "[events]"
+            fields = _EVENT_FIELDS
+        elif in_events and stripped.casefold().startswith("format:"):
+            fields = tuple(item.strip() for item in stripped.partition(":")[2].split(","))
+        elif in_events and stripped.startswith("Dialogue:"):
+            event = parse_ass_event_line(line.lstrip(), track, order, fields=fields)
+            order += 1
+            if event.identity.start_ms >= from_ms:
+                shift = max(delta, -event.identity.start_ms)
+                event = replace(
+                    event,
+                    identity=replace(
+                        event.identity,
+                        start_ms=event.identity.start_ms + shift,
+                        end_ms=event.identity.end_ms + shift,
+                    ),
+                )
+                out.append(serialize_ass_event_line(event) + ending)
+                continue
+        out.append(raw_line)
+    return "".join(out)
+
+
 def serialize_ass_event_line(event: RawSubtitleEvent) -> str:
     """Serialize the canonical V4+ event field order without touching raw text."""
     identity = event.identity

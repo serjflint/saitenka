@@ -409,6 +409,16 @@ def _current_external_sub(ipc) -> Path | None:
     return Path(ext) if ext else None
 
 
+def _published(sub: Path, retimed: Path) -> Path:
+    """Publish a re-time of a hand-picked entry into the resyncing cache slot, and load the
+    published copy — so pressing "sync from here" once survives the next launch instead of leaving
+    the drift to be re-corrected every session. Falls back to the re-timed file where there is no
+    slot to publish into (a `--sub-file`, a sibling next to the video)."""
+    from saitenka.app.subtitle_cache import publish_retimed
+
+    return publish_retimed(sub, retimed) or retimed
+
+
 def _start_resync_window(
     submit: FetchSubmitter,
     get: PropertyGet,
@@ -434,10 +444,10 @@ def _start_resync_window(
         out = resync_window(Path(video_path), sub, start_s=start_s)
         if out is None:  # window couldn't align → whole-file re-sync (in-place, returns sub)
             whole = resync_current(Path(video_path), sub)
-            return whole, f"subtitles re-synced: {whole.name}"
+            return _published(sub, whole), f"subtitles re-synced: {whole.name}"
         if out == sub:  # window already aligned here → nothing to swap
             return None, "subtitles already aligned here"
-        return out, f"subtitles re-timed from {int(start_s)}s"
+        return _published(sub, out), f"subtitles re-timed from {int(start_s)}s"
 
     start_fetch(
         submit,

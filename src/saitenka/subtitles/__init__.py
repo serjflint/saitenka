@@ -12,6 +12,7 @@ from saitenka.subtitles.ass import (
     parse_ass_styles,
     rewrite_ass_event,
     serialize_ass_event_line,
+    shift_ass_dialogue,
     source_primary_bgr_colors,
 )
 from saitenka.subtitles.ass_geometry import (
@@ -93,5 +94,6 @@ __all__ = [
     "prepare_ass_hit_map_frame",
     "rewrite_ass_event",
     "serialize_ass_event_line",
+    "shift_ass_dialogue",
     "source_primary_bgr_colors",
 ]
