@@ -44,15 +44,22 @@ def subs_cache_key(video: str | os.PathLike, title: str, episode, *, resync: boo
 
 
 def _slot_files(slot_dir: Path, slot: str) -> list[Path]:
-    """Every cached subtitle for *slot*, newest-modified first — normally exactly one (one slot per
+    """Every cached subtitle for *slot*, best first — normally exactly one (one slot per
     (video, mode), evicted on write). ``glob.escape`` so a release group like ``[Erai]`` in the slot
     isn't read as a glob character class. A stored sub always has a SINGLE extension, so ``stem == slot``
     keeps ``<slot>.srt``/``<slot>.ass`` while excluding the multi-suffix bookkeeping resync leaves in the
     same dir (``<slot>.synced.srt``, its ``.synced`` marker, ``<slot>.win.srt``) — otherwise the newest
     of those (an empty marker) would shadow the real file. A pre-#237 flat ``<slot>.srt`` still matches,
-    so old cache entries resolve with no migration."""
+    so old cache entries resolve with no migration.
+
+    Ranked by `format_rank` before mtime — the SAME ranking the jimaku auto-pick uses, so a slot that
+    kept both formats (eviction is best-effort: a sibling mpv still holds open survives the write)
+    cannot serve the one a fresh fetch would have rejected.
+    """
+    from saitenka.app.subtitle_artifact import format_rank
+
     matches = [p for p in slot_dir.glob(glob.escape(slot) + ".*") if p.is_file() and p.stem == slot]
-    return sorted(matches, key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted(matches, key=lambda p: (*format_rank(p.suffix), p.stat().st_mtime), reverse=True)
 
 
 def cached_subs(

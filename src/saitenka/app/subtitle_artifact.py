@@ -61,6 +61,17 @@ def resolve(track: dict | None, *, media_path: object) -> ArtifactResolution:
     return EmbeddedArtifact(str(media_path), int(ff_index), str(track.get("codec") or ""))
 
 
+def format_rank(suffix: str) -> tuple[bool, bool]:
+    """How much a subtitle format is worth to us, higher first.
+
+    The one ranking the jimaku auto-pick and the cache lookup share, so a cached slot can never
+    disagree with what a fresh fetch would have chosen. ASS wins: native-visible geometry accepts
+    nothing else, and every other consumer reads either.
+    """
+    ext = suffix.casefold()
+    return ext in {".srt", ".ass"}, ext == ".ass"
+
+
 def extract_spec(codec: str) -> tuple[str, tuple[str, ...]]:
     """(file suffix, ffmpeg ``-c:s`` args) for extracting an embedded sub of *codec*.
 

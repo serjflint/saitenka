@@ -50,6 +50,24 @@ def test_reextension_evicts_the_stale_sibling(monkeypatch, tmp_path):
     assert cache.cached_subs(video, "Show", 1) == second
 
 
+def test_a_slot_holding_both_formats_serves_the_one_a_fetch_would_have_picked(
+    monkeypatch, tmp_path
+):
+    """Eviction is best-effort (a sibling mpv still holds open survives the write), so a slot CAN
+    end up with both. Newest-mtime alone would then serve the `.srt` a fresh jimaku fetch has
+    rejected since it started preferring `.ass` — and native geometry cannot use it."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    ass = tmp_path / "chosen.ass"
+    ass.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+    stored = cache.store_subs(video, "Show", 1, ass)
+    # The stale sibling eviction could not remove: written after, so mtime favours it.
+    lingering = stored.with_suffix(".srt")
+    lingering.write_text("1\n00:00:01,000 --> 00:00:02,000\nold\n", encoding="utf-8")
+
+    assert cache.cached_subs(video, "Show", 1) == stored
+
+
 def test_glob_metacharacters_in_the_name_round_trip(monkeypatch, tmp_path):
     """A release group like ``[Erai]`` in the video stem lands in the slot name; the lookup escapes it
     so it isn't read as a glob character class (which would silently miss the cached file)."""

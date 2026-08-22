@@ -451,14 +451,15 @@ def _candidate_score(f: JimakuFile, episode: int | None, video: str | None) -> t
     parses it directly where an srt transcode injects tags that make it exit 1, and the cue index
     reads either. Preferring .srt cost the auto-pick exactly the format the geometry needs.
     """
+    from saitenka.app.subtitle_artifact import format_rank
+
     ep_hit = episode is not None and re.search(
         rf"(?<!\d){episode:02d}(?!\d)|(?<!\d){episode}(?!\d)", f.name
     )
     return (
         bool(ep_hit),
         _resolution_match(video, f.name),
-        f.ext in {".srt", ".ass"},
-        f.ext == ".ass",
+        *format_rank(f.ext),
         f.size,
     )
 
