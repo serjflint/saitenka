@@ -114,3 +114,21 @@ def _isolate_keyring(tmp_path, monkeypatch):
         yield
     finally:
         keyring.set_keyring(prev)
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Print the `pytest-randomly` seed even under `-q`, which hides the header that carries it.
+
+    Every gate task runs `-q`, so a randomized run that fails once reports an order nothing records —
+    and `--randomly-seed=<n>` is the only way to replay it. That cost a real investigation here: an
+    intermittent failure survived eighteen reproduction attempts because the seed was never printed.
+    Worker processes stay quiet; under `-n auto` the controller is the one with a terminal.
+    """
+    config = session.config
+    if hasattr(config, "workerinput"):
+        return
+    seed = config.getoption("randomly_seed", default=None)
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if seed is None or reporter is None:  # `-p no:randomly`, or no terminal to write to
+        return
+    reporter.write_line(f"randomly-seed: {seed}  (replay with --randomly-seed={seed})")

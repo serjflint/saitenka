@@ -36,9 +36,12 @@ from saitenka.app.dictionary import Dictionary
 # blanket lives in the opt-in `grow` group; skip the whole module in the default env (collection-safe).
 blanket = pytest.importorskip("blanket")
 
-# fabricated (eid, term, reading, glossary_json, tags) rows — what _entry_from_row decodes.
-ROW_OLD = (1, "古", "ふる", '["oldest — the eviction victim"]', "")
-ROW_NEW = (2, "新", "しん", '["a second, distinct entry"]', "")
+# Fabricated rows in the shape `_entry_from_row` decodes, which is the SELECT's column order:
+# (id, term, reading, glossary, tags, seq). Widening that query is invisible here until this
+# module runs, and it only runs with the opt-in `grow` group — #329 added `seq` and left these
+# five-wide, so both tests raised IndexError before reaching what they gate.
+ROW_OLD = (1, "古", "ふる", '["oldest — the eviction victim"]', "", 1000)
+ROW_NEW = (2, "新", "しん", '["a second, distinct entry"]', "", 1001)
 
 
 def _make_dict(tmp_path) -> Dictionary:

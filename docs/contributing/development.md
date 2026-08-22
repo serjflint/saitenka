@@ -13,10 +13,27 @@ engineering rules live upstream:
 
 ```bash
 git clone https://github.com/serjflint/saitenka.git
-cd saitenka/overlay
+cd saitenka
 uv sync                        # core + dev group: pillow, fugashi+unidic-lite, numpy…
 uv run --extra full pytest -q  # sanity: prints "X passed" (full pulls jmdict/deinflect/telemetry)
 ```
+
+## Testing against real mpv
+
+`uv run` covers the test suite, but the mpv plugin spawns whatever `saitenka` is on PATH — so a live
+session runs a release build unless you put the checkout there:
+
+```bash
+uv run poe install-editable    # this tree becomes `saitenka` on PATH
+```
+
+Every local package (`deinflect/`, `saitenka-dict/`, `ankiconnect-client/`, `libasslite/`) is wired
+as an editable path in `[tool.uv.sources]`, so the extras follow the working tree rather than PyPI.
+
+Then **fully quit and relaunch mpv**: the attach process is spawned once per session and holds the
+modules it imported, so an edit is not live until it restarts. `saitenka doctor` names the mismatch
+outright ("overlay last ran … but … is installed") and is the fastest check that the environment,
+libass, dictionaries and the plugin are all wired up.
 
 !!! note "Python is `uv`-only"
     Never invoke bare `python` / `pip` / `venv` / `pipx`. Use `uv run` / `uvx` / `uv add`. The lockfile
@@ -39,7 +56,6 @@ Once your dictionaries are imported (see [Install](../start/install.md)), the vi
 required argument — `--dict` / `--freq` / `--pitch` / known-decks all come from the config:
 
 ```bash
-cd saitenka/overlay
 uv run python examples/mpv_reader.py \
   "/path/to/anime.mkv" \
   --color --mine --start 600
