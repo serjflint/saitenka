@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787418110532,
+  "lastUpdate": 1787431135636,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -8471,6 +8471,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.193962,
             "range": "3 replicas; min 1.16241; max 1.39446; MAD 0.031552; worst 1.39446",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9a227494fa0f753e36efed5e9f5f5f956a3b33b1",
+          "message": "Merge pull request #413 from serjflint/fix/ci-runner-context\n\nfix(ci): stop using the runner context in a job-level env",
+          "timestamp": "2026-08-23T01:37:46+05:00",
+          "tree_id": "d22c2cef17af9fc88a607184e9a8b9d7cd385aca",
+          "url": "https://github.com/serjflint/saitenka/commit/9a227494fa0f753e36efed5e9f5f5f956a3b33b1"
+        },
+        "date": 1787431134457,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.40695,
+            "range": "3 replicas; min 6.36185; max 6.55789; MAD 0.045104",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.135636,
+            "range": "3 replicas; min 8.74576; max 9.25382; MAD 0.118185; worst 9.25382",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.638078,
+            "range": "3 replicas; min 18.5614; max 18.8347; MAD 0.076716",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.019058,
+            "range": "3 replicas; min 18.8132; max 20.0411; MAD 0.205862; worst 20.0411",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 17.002441,
+            "range": "3 replicas; min 16.0399; max 17.8104; MAD 0.808003",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.131464,
+            "range": "3 replicas; min 0.129325; max 0.133338; MAD 0.001874; worst 0.133338",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 38.92069,
+            "range": "3 replicas; min 38.7591; max 43.2576; MAD 0.161589; worst 43.2576",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.555779,
+            "range": "3 replicas; min 2.47747; max 2.78533; MAD 0.078305; worst 2.78533",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.098046,
+            "range": "3 replicas; min 0.982137; max 1.13492; MAD 0.036876; worst 1.13492",
             "unit": "ms"
           }
         ]
