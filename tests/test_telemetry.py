@@ -324,7 +324,10 @@ def test_a_deferred_span_ends_from_the_completion_not_the_submission(monkeypatch
     assert name == "mpv_effect"
     assert attributes["identity"] == "hover-pause"
     assert attributes["outcome"] == "succeeded"
-    assert "thread.id" in attributes and "session" in attributes
+    # `thread.id` is per-span (the SUBMITTING thread, which the completion's thread is not) and stays.
+    # `session` is one value per run and now lives in the document, not on every span.
+    assert "thread.id" in attributes
+    assert "session" not in attributes
 
 
 def test_a_deferred_span_is_inert_without_the_telemetry_extra(monkeypatch):

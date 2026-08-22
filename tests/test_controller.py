@@ -630,7 +630,9 @@ def test_sub_nav_span_and_cue_redraw_span_share_a_trace(monkeypatch, tmp_path):
     spans = {e["name"]: e for e in events if e.get("ph") == "X"}
     assert "sub_seek" in spans
     assert "cue_redraw" in spans
-    assert spans["sub_seek"]["args"]["trace_id"] == spans["cue_redraw"]["args"]["trace_id"]
+    # The edge itself, not a shared root id: "same trace" was also true of a root and a sibling it
+    # never called, and it is what the redraw being nested UNDER the seek has to survive.
+    assert spans["cue_redraw"]["args"]["parent_id"] == spans["sub_seek"]["args"]["span_id"]
 
 
 def test_reconcile_records_otel_sub_text_reconcile_metric(monkeypatch):

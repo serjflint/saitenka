@@ -50,6 +50,13 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
     end_ns = span.end_time or start_ns
     attrs = dict((span.attributes or {}).items())
     tid = attrs.pop("thread.id", 0)
+    attrs.pop("session", None)  # constant per file — written once into "otherData", not 4589 times
+    # `parent_id` names the edge, so `trace_id` (34 bytes, 10.6% of a real file) carries nothing a
+    # walk of span_id→parent_id doesn't: it only ever said "same root", and a root with one child
+    # says that twice. Emitted on children only — 73% of spans are alone in their trace.
+    ids: dict[str, object] = {"span_id": format(ctx.span_id, "016x") if ctx else ""}
+    if span.parent is not None:
+        ids["parent_id"] = format(span.parent.span_id, "016x")
     return {
         "name": span.name,
         "cat": "span",
@@ -58,11 +65,7 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
         "dur": max(end_ns - start_ns, 0) / 1000,
         "pid": 1,
         "tid": tid,
-        "args": {
-            "span_id": format(ctx.span_id, "016x") if ctx else "",
-            "trace_id": format(ctx.trace_id, "032x") if ctx else "",
-            **attrs,
-        },
+        "args": {**ids, **attrs},
     }
 
 
@@ -111,6 +114,9 @@ class CTFSpanProcessor(SpanProcessor):
         self._dropped = 0
         self._initialized = False
         self._last_sample = time.monotonic()
+        self._last_counter: dict[
+            str, float
+        ] = {}  # last WRITTEN value per series; see _sample_counter_events
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         if start_thread:
@@ -159,13 +165,27 @@ class CTFSpanProcessor(SpanProcessor):
                 self._write_events(events)
 
     def _sample_counter_events(self) -> list[dict[str, object]]:
+        """Only series whose value MOVED since the last sample. Perfetto holds a counter track's last
+        value until the next point, so re-emitting an unchanged one draws the identical line for 15%
+        of a trace file's bytes — 55 of 140 series in a real session never changed at all, several of
+        them one-shot startup measurements resampled every second for the whole run."""
         try:
             values = self._sample_fn() if self._sample_fn is not None else {}
         except Exception:
             log.debug("counter sample failed", exc_info=True)
             return []
         ts_ns = time.time_ns()
-        return [_counter_event(name, value, ts_ns) for name, value in values.items()]
+        moved = {n: v for n, v in values.items() if self._last_counter.get(n) != v}
+        self._last_counter.update(moved)
+        return [_counter_event(name, value, ts_ns) for name, value in moved.items()]
+
+    @staticmethod
+    def _other_data() -> bytes:
+        """Chrome-trace's document-level metadata slot. The session id belongs here, not stamped onto
+        every span: it is what ties the trace to ``overlay.log``, and it is one value per file."""
+        from saitenka.session import session_id
+
+        return msgspec.json.encode({"session": session_id()})
 
     def _write_events(self, events: list[dict[str, object]]) -> None:
         """One open + one write for the whole batch. First call (or after the file vanishes) creates the
@@ -189,7 +209,8 @@ class CTFSpanProcessor(SpanProcessor):
         if not self._initialized:
             self._path.parent.mkdir(parents=True, exist_ok=True)  # dir may have been cleaned too
             with self._path.open("wb") as f:
-                f.write(b'{"traceEvents":[' + chunk + self._CLOSING)
+                f.write(b'{"otherData":' + self._other_data() + b',"traceEvents":[' + chunk)
+                f.write(self._CLOSING)
             self._initialized = True
         else:
             with self._path.open("r+b") as f:

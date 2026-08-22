@@ -3832,16 +3832,16 @@ class Reader:
         against a half-updated identity. The drain is where the batch exists, so it coalesces."""
         self._settle_interaction()
         cue, self._pending_cue = self._pending_cue, None
-        # A reconcile that decides to do nothing used to be as silent as a geometry schedule that
-        # never started; the two together are what make a dropped cue traceable.
-        with otel_metrics.traced("cue_reconcile") as span:
-            span.set("cue_revision", self.cue_revision)
-            if cue is None:
-                span.set("outcome", "no-observation")
-                return
-            before = self.sub_text
+        # A settle that decides to do nothing stays visible, but as a count: the drain runs at mpv's
+        # observation rate, so a span per empty one was 39% of a trace file saying nothing.
+        if cue is None:
+            otel_metrics.record_cue_settle("no-observation")
+            return
+        before = self.sub_text
+        with otel_metrics.traced("cue_reconcile", cue_revision=str(self.cue_revision)) as span:
             self._reconcile_sub_text(cue.text)
-            span.set("outcome", "adopted" if self.sub_text != before else "reinstalled")
+            settled = "adopted" if self.sub_text != before else "reinstalled"
+            otel_metrics.record_cue_settle(settled, span)
 
     @property
     def cue_revision(self) -> int:

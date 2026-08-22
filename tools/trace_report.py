@@ -53,7 +53,16 @@ def _load_trace(src: Path) -> list[dict]:
     if raw is None:
         return []
     doc = json.loads(raw)
-    return doc.get("traceEvents", doc) if isinstance(doc, dict) else doc
+    if not isinstance(doc, dict):
+        return doc
+    events = doc.get("traceEvents", [])
+    # The session id moved out of every span's args into the document, where one-per-file values
+    # belong. Re-presented as a metadata event so readers that scan `args` find it either way —
+    # traces written before the move still carry it per-span.
+    other = doc.get("otherData")
+    if isinstance(other, dict) and other.get("session"):
+        events = [{"ph": "M", "name": "session", "args": dict(other)}, *events]
+    return events
 
 
 def _load_log(src: Path) -> list[dict]:

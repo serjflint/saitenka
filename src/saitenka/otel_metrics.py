@@ -106,6 +106,24 @@ hover_pause_release: Counter | None = None  # labeled outcome=resumed|nothing-ow
 hover_pause_claim: Counter | None = (
     None  # labeled outcome=sent|already-paused|observed-paused|policy-off
 )
+#: labeled outcome=no-observation|adopted|reinstalled. The settle runs once per event drain, and the
+#: drain runs at mpv's observation rate — `time-pos` alone is ~27/s, mouse motion several times that.
+#: Counted rather than spanned because a tick that finds no cue is a clock reading, not an event: as
+#: spans those were 39% of a whole trace file and 2873 of their 2902 instances said only this.
+cue_settles: Counter | None = None
+
+
+def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
+    """Record one settle outcome to the counter, and to *span* when the settle earned one. Both
+    writes live here so the count and the span can never disagree about what a settle decided —
+    and beside the instrument rather than on the Reader, which needs no member to hold a null check.
+    """
+    if span is not None:
+        span.set("outcome", outcome)
+    if cue_settles is not None:
+        cue_settles.add(1, {"outcome": outcome})
+
+
 # A correlated write is fire-and-forget at the call site, so nothing downstream separates a
 # command mpv ran in 5ms from one that sat queued for six seconds — and mpv's own log timestamps
 # when it RAN a command, never when we asked for it.
@@ -245,9 +263,8 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
         # tid scatters unrelated spans across a different synthetic "thread" row each, defeating the
         # point of a timeline view (found by actually opening a real trace in Perfetto and looking).
         span.set_attribute("thread.id", threading.get_native_id())
-        from saitenka.session import session_id
-
-        span.set_attribute("session", session_id())  # ties every span to the run in overlay.log
+        # No `session` here: it is one value for the whole run, so the exporter writes it once into
+        # the document's `otherData`. Stamped per span it was 5.5% of a real trace file.
         for k, v in attributes.items():
             span.set_attribute(k, v)
         # Per-thread CPU time across the span. wall (the span's dur) ≫ cpu_ms ⇒ the thread was
@@ -284,9 +301,6 @@ class DeferredSpan:
             return
         span = trace.get_tracer("saitenka.overlay").start_span(name)
         span.set_attribute("thread.id", threading.get_native_id())  # the SUBMITTING thread
-        from saitenka.session import session_id
-
-        span.set_attribute("session", session_id())
         for k, v in attributes.items():
             span.set_attribute(k, v)
         self._span = span
@@ -383,7 +397,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
-    global hover_route_decisions, hover_pause_release
+    global hover_route_decisions, hover_pause_release, cue_settles
 
     with _lock:
         _reader = reader
@@ -595,6 +609,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.hover.pause_claim",
             description="hover pause decisions (outcome=sent|already-paused|observed-paused|policy-off)",
         )
+        cue_settles = meter.create_counter(
+            "saitenka.cue.settles",
+            description="cue settles per event drain (outcome=no-observation|adopted|reinstalled)",
+        )
         mpv_effect_apply_ms = meter.create_histogram(
             "saitenka.mpv_effect.apply_ms",
             unit="ms",
@@ -642,7 +660,7 @@ def unregister() -> None:
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
-    global hover_route_decisions, hover_pause_release
+    global hover_route_decisions, hover_pause_release, cue_settles
 
     with _lock:
         _reader = None
@@ -709,6 +727,7 @@ def unregister() -> None:
         hover_route_decisions = None
         hover_pause_release = None
         hover_pause_claim = None
+        cue_settles = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
         prefetch_queue_depth = None
