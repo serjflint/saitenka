@@ -39,6 +39,11 @@ build/
 # render / test scratch
 out.png
 *.out.png
+# mpv writes these into the CWD on a screenshot, so a live test leaves one behind and the next
+# `git add -A` commits it — which is how a blank frame rode into an unrelated commit on #408.
+mpv-shot*.jpg
+mpv-shot*.png
+mpv-shot*.jpeg
 bench.json
 jank.json
 jank-bench.json
