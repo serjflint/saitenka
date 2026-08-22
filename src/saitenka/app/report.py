@@ -135,14 +135,15 @@ def _collect_config() -> dict[str, str]:
 
 
 def _collect_mpv_conf() -> dict[str, str]:
-    """mpv / mpv.net config (input-ipc-server, sub-auto, … — the exact things that break)."""
-    from saitenka.app.paths import mpv_conf_paths
+    """mpv / mpv.net config (input-ipc-server, sub-auto, … — the exact things that break), plus the
+    binding table: a pause we did not send is only excludable against the user's own binds."""
+    from saitenka.app.paths import mpv_conf_paths, mpv_input_conf_paths
 
     members: dict[str, str] = {}
-    for p in mpv_conf_paths():
+    for p in (*mpv_conf_paths(), *mpv_input_conf_paths()):
         if p.exists():
-            members[f"mpv/{p.parent.name}.{p.name}"] = p.read_text(
-                encoding="utf-8", errors="replace"
+            members[f"mpv/{p.parent.name}.{p.name}"] = _scrub_home(
+                p.read_text(encoding="utf-8", errors="replace")
             )
     return members
 
@@ -319,7 +320,7 @@ def _manifest(members: dict[str, str], *, include_log: bool, session: str | None
         "PRIVACY — read before sharing:",
         "  • API keys / tokens have been redacted from the config and log.",
         "  • This bundle is created locally and is NEVER uploaded anywhere by saitenka.",
-        "  • It DOES include your config, mpv.conf, and (unless --no-log) the overlay + mpv logs,",
+        "  • It DOES include your config, mpv.conf/input.conf, and (unless --no-log) the logs,",
         "    which may contain video filenames and mined sentences. Home paths contain your username.",
         "  • If mpv crashed, it includes mpv's own native crash report (crashes/player/) — process",
         "    and loaded-library detail about your machine, no saitenka data.",

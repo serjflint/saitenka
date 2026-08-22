@@ -63,6 +63,37 @@ def test_collect_includes_expected_members_and_redacts(monkeypatch, tmp_path):
     assert "NEVER uploaded" in members["MANIFEST.txt"]
 
 
+def test_collect_bundles_the_mpv_binding_table(monkeypatch, tmp_path):
+    """A command mpv attributes to a key binding is only excludable as ours against `input.conf`,
+    so the bundle has to carry it beside `mpv.conf` — reading it off the reporter's disk is not an
+    option once the report has left the machine."""
+    _hermetic(monkeypatch, tmp_path)
+    mpv_home = tmp_path / "mpvhome"
+    mpv_home.mkdir()
+    (mpv_home / "mpv.conf").write_text("hwdec=auto-safe\n")
+    (mpv_home / "input.conf").write_text(f"MBTN_LEFT cycle pause\np run {tmp_path}/tool\n")
+
+    members = report.collect(include_log=False)
+
+    assert members["mpv/mpvhome.input.conf"].startswith("MBTN_LEFT cycle pause")
+    assert "hwdec=auto-safe" in members["mpv/mpvhome.mpv.conf"]
+
+
+def test_collect_scrubs_home_from_the_binding_table(monkeypatch, tmp_path):
+    """Negative control for the test above: a bind naming a path under $HOME must not ship the
+    username, the same treatment every other bundled text gets."""
+    _hermetic(monkeypatch, tmp_path)
+    mpv_home = tmp_path / "mpvhome"
+    mpv_home.mkdir()
+    home = tmp_path / "home"
+    (mpv_home / "input.conf").write_text(f"F5 run {home}/scripts/thing.sh\n")
+
+    bundled = report.collect(include_log=False)["mpv/mpvhome.input.conf"]
+
+    assert str(home) not in bundled
+    assert "scripts/thing.sh" in bundled  # scrubbed, not dropped
+
+
 def test_collect_no_log_excludes_log(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
     members = report.collect(include_log=False)
