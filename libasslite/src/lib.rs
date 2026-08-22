@@ -362,6 +362,9 @@ impl AssRenderer {
     }
 
     #[pyo3(signature = (timestamp_ms, frame_size, storage_size, *, pixel_aspect=None, margins=(0, 0, 0, 0), use_margins=false, max_bitmap_bytes=None))]
+    // The arity is libass's `ass_set_frame_size`/`_storage_size`/`_pixel_aspect`/`_margins` surface,
+    // reached in one call because each is renderer state a caller must set together to get a frame.
+    #[allow(clippy::too_many_arguments)]
     fn render(
         &self,
         py: Python<'_>,

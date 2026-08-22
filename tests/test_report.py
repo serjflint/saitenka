@@ -202,7 +202,7 @@ def _player_crash(tmp_path: Path, name: str, body: str, *, age_s: float = 0.0) -
 def test_collect_bundles_the_players_native_crash_report(monkeypatch, tmp_path):
     """The frame that names *where* mpv died — the artifact two SIGBUS investigations needed and the
     bundle could not carry."""
-    monkeypatch.setattr(report.sys, "platform", "darwin")
+    monkeypatch.setattr(report.platform, "system", lambda: "Darwin")
     _hermetic(monkeypatch, tmp_path)
     _player_crash(
         tmp_path,
@@ -222,7 +222,7 @@ def test_collect_bundles_the_players_native_crash_report(monkeypatch, tmp_path):
 
 
 def test_collect_omits_player_crash_reports_from_another_day(monkeypatch, tmp_path):
-    monkeypatch.setattr(report.sys, "platform", "darwin")
+    monkeypatch.setattr(report.platform, "system", lambda: "Darwin")
     _hermetic(monkeypatch, tmp_path)
     _player_crash(tmp_path, "mpv-old.ips", "{}\n", age_s=report._PLAYER_CRASH_MAX_AGE_S + 60)
 
