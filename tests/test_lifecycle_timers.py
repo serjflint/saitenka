@@ -73,7 +73,7 @@ def test_toast_expiry_removes_the_lifecycle_surface() -> None:
     port = FakeTimerPort()
     reader.lifecycle_timers = LifecycleTimers(port)
 
-    reader._toast("saved", seconds=1.0)
+    reader.toast("saved", seconds=1.0)
     port.finish(port.history[-1])
 
     assert ("overlay-remove", OverlayId.TOAST) in ipc.commands

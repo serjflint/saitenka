@@ -191,7 +191,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     reader.session.backlog_store = store
     captures = []
     reader.episode.session_recorder = SimpleNamespace(record_capture=lambda: captures.append(True))
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
 
     reader.toggle_bookmark()
 
@@ -243,7 +243,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
     reader.sub_text = "English line"
     store = BacklogStore(tmp_path / "reader.sqlite")
     reader.session.backlog_store = store
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
 
     reader.toggle_bookmark()
 
@@ -256,7 +256,7 @@ def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
     ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
     reader = Reader(ipc)
     shown = []
-    monkeypatch.setattr(reader, "_toast", lambda *args: shown.append(args))
+    monkeypatch.setattr(reader, "toast", lambda *args: shown.append(args))
 
     reader.toggle_bookmark()
 

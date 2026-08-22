@@ -198,7 +198,7 @@ class _ParticleContentTokenizer(_FakeTokenizer):
         return token.pos == "助詞"
 
 
-def test_mine_target_follows_the_active_tokenizers_content_partition():
+def testmine_target_follows_the_active_tokenizers_content_partition():
     """The word ``mine_target`` picks is decided by ``reader.tokenizer.is_content``, not baked JP POS.
     Same tokens, two strategies → two different mined tokens; the unidic case is the JP negative
     control (the 名詞, never the 助詞)."""

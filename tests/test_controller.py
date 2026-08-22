@@ -343,7 +343,7 @@ def test_anchor_snaps_the_nearest_cue_start_to_the_playhead(monkeypatch):
     # One-press manual re-time: at playhead 9s the nearest cue is さん (@10s), so sub-delay shifts by
     # -1s to land it here — every later cue follows by the same offset (fixes residual auto-sync drift).
     r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r, "_toast", lambda *_a, **_k: None)
+    monkeypatch.setattr(r, "toast", lambda *_a, **_k: None)
     ipc.props["time-pos"] = 9.0
     ipc.props["sub-delay"] = 0.0
 
@@ -356,7 +356,7 @@ def test_anchor_is_cumulative_from_the_current_delay(monkeypatch):
     # A second anchor refines a first: from an existing +2s delay, snapping さん (@10s) to playhead 13s
     # sets an absolute delay of +3s (13 - 10), not +2 plus a fresh guess.
     r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r, "_toast", lambda *_a, **_k: None)
+    monkeypatch.setattr(r, "toast", lambda *_a, **_k: None)
     ipc.props["time-pos"] = 13.0
     ipc.props["sub-delay"] = 2.0
 
@@ -369,7 +369,7 @@ def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)
     messages: list[str] = []
-    monkeypatch.setattr(r, "_toast", lambda text, *_a: messages.append(text))
+    monkeypatch.setattr(r, "toast", lambda text, *_a: messages.append(text))
     r.episode.sub_index = None
 
     r._anchor_subtitles()
@@ -394,7 +394,7 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
 
     ipc = FakeIPC()
     r = Reader(ipc)
-    r._toast = lambda *_a, **_k: None  # instance-shadow the toast; assert the delay, not the OSD
+    r.toast = lambda *_a, **_k: None  # instance-shadow the toast; assert the delay, not the OSD
     r.episode.sub_index = CueIndex([Cue(s / 1000, s / 1000 + 1.0, "x") for s in sorted(starts_ms)])
     playhead, delay = playhead_ms / 1000, delay_ms / 1000
     ipc.props["time-pos"] = playhead
@@ -1323,7 +1323,7 @@ def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
     r._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
-    monkeypatch.setattr(r, "_toast", lambda *_args: None)
+    monkeypatch.setattr(r, "toast", lambda *_args: None)
     r.toggle_hover_pause()
     assert ("set_property", "pause", False) in ipc.commands
 
@@ -1331,7 +1331,7 @@ def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
 def test_hover_pause_toggle_changes_state_and_reports_it(monkeypatch):
     r = _reader_with_word(FakeIPC())
     messages = []
-    monkeypatch.setattr(r, "_toast", lambda text, _kind="ok": messages.append(text))
+    monkeypatch.setattr(r, "toast", lambda text, _kind="ok": messages.append(text))
     r.toggle_hover_pause()
     assert (r.pause_on_tooltip, messages) == (False, ["hover auto-pause: off"])
     r.toggle_hover_pause()
@@ -1345,7 +1345,7 @@ def test_hover_pause_toggle_preserves_external_pause(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r, "_toast", lambda *_args: None)
+    monkeypatch.setattr(r, "toast", lambda *_args: None)
     r.toggle_hover_pause()
     assert ("set_property", "pause", False) not in ipc.commands
 
@@ -1354,7 +1354,7 @@ def test_hover_pause_toggle_disables_future_hover_pause(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r, "_toast", lambda *_args: None)
+    monkeypatch.setattr(r, "toast", lambda *_args: None)
     r.toggle_hover_pause()
     Driver(r).move_to_word(0)
     assert ("set_property", "pause", True) not in ipc.commands
@@ -2256,7 +2256,7 @@ def test_no_mine_preview_suppresses_panel_and_toasts_instead(monkeypatch):
     shown, toasts = [], []
     monkeypatch.setattr(miner_ui, "preview_mined", lambda *a, **_k: shown.append(a))
     monkeypatch.setattr(miner_ui, "preview_existing", lambda *a, **_k: shown.append(a))
-    monkeypatch.setattr(r, "_toast", lambda text, *_a: toasts.append(text))
+    monkeypatch.setattr(r, "toast", lambda text, *_a: toasts.append(text))
 
     r._preview_mined(SimpleNamespace(expression="本命"), None, None)
     r._preview_existing(42, SimpleNamespace(expression="読む"), "exists")
@@ -2639,7 +2639,7 @@ def test_capture_media_failure_shows_toast(monkeypatch):
     monkeypatch.setattr(_M, "clip_audio", lambda *_a: (_ for _ in ()).throw(OSError("clip failed")))
     toasts = []
     monkeypatch.setattr(
-        r, "_toast", lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind))
+        r, "toast", lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind))
     )
 
     pic, audio = r._capture_media("test_base", "/fake/video.mkv")

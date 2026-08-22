@@ -970,7 +970,7 @@ class Reader:
         return subtitle_modes.TrackPorts(
             ipc=self.ipc,
             get=self._get,
-            toast=self._toast,
+            toast=self.toast,
             tracks=lambda: self._subtitle_tracks.current,
             declare=self.declare_subtitle,
             invalidate=self.invalidate_analysis,
@@ -1741,7 +1741,7 @@ class Reader:
         try:
             tok = get_tokenizer(new.tokenizer)
         except ValueError:
-            self._toast(f"profile {new.name!r}: unknown tokenizer {new.tokenizer!r}", "warn")
+            self.toast(f"profile {new.name!r}: unknown tokenizer {new.tokenizer!r}", "warn")
             return
         rescope = self._dict_scoper is not None
         new_dict_set = self.dict_set
@@ -1749,7 +1749,7 @@ class Reader:
             try:
                 new_dict_set = self._dict_scoper(new)  # type: ignore[misc]  # guarded by `rescope`
             except Exception:  # noqa: BLE001 — a rescope failure must not kill the switch; keep old dicts
-                self._toast(f"profile {new.name!r}: dictionary rescope failed", "warn")
+                self.toast(f"profile {new.name!r}: dictionary rescope failed", "warn")
                 return
         self.profile_index = idx
         self.profile = new
@@ -1770,7 +1770,7 @@ class Reader:
             # stale old-language cue under the new tokenizer would only flash garbage.
             self._retokenize_current_cue()
         self.warm_episode_tokens()
-        self._toast(f"profile: {new.name} ({new.langs.main})")
+        self.toast(f"profile: {new.name} ({new.langs.main})")
 
     def _switch_subtitle_track(self, new_slang: str) -> bool:
         """Re-select the mpv subtitle track for the new profile's language via the SAME path launch uses
@@ -1781,7 +1781,7 @@ class Reader:
         if new_slang == self.subtitle_slang:
             return False
         if not subtitle_modes.has_track_for_slang(self.ipc, new_slang):
-            self._toast(f"profile {self.profile.name!r}: no {new_slang!r} subtitle track", "warn")
+            self.toast(f"profile {self.profile.name!r}: no {new_slang!r} subtitle track", "warn")
             return False
         startup = subtitle_modes.select_initial(self.ipc, new_slang)
         self.configure_subtitle_mode(startup, slang=new_slang)
@@ -1922,7 +1922,7 @@ class Reader:
         self._run_hover_command(hover_intents.HoverCommand.COPY)
 
     def _copy_token(self, t) -> None:
-        tooltip.copy_token(self._toast, t)
+        tooltip.copy_token(self.toast, t)
 
     def copy_line(self) -> None:
         """Shift+C — copy the whole subtitle cue under the cursor (all its lines)."""
@@ -2059,7 +2059,7 @@ class Reader:
         return surfaces.ClickTarget(
             self.interaction,
             sub_picker.DownloadPorts(
-                self._toast,
+                self.toast,
                 self._submit_subtitle_fetch,
                 self._get,
                 self.lifecycle_surfaces,
@@ -2200,7 +2200,7 @@ class Reader:
             provenance=self._provenance,
             video_path=lambda: self._get("path"),
             tmp=self._tmp,
-            toast=self._toast,
+            toast=self.toast,
         )
 
     @property
@@ -2269,7 +2269,7 @@ class Reader:
             submit=self._sub_picker_submit,
             stop=self._stop,
             current_episode=lambda: self.episode,
-            toast=self._toast,
+            toast=self.toast,
         )
 
     @property
@@ -2288,7 +2288,7 @@ class Reader:
             en_sid=self.en_sid,
             tracks=self._get_sequence("track-list"),
             store=lambda: sidebar_module._ensure_store(self.session),
-            toast=self._toast,
+            toast=self.toast,
             record_capture=self._record_capture,
         )
 
@@ -2310,7 +2310,7 @@ class Reader:
             configure_picker=self.configure_sub_picker,
             fetch_japanese=self.fetch_japanese_subs_async,
             start_prefetch=self.start_prefetch,
-            toast=self._toast,
+            toast=self.toast,
         )
 
     @property
@@ -2345,7 +2345,7 @@ class Reader:
             nested_max_frac=self.nested_max_frac,
             peek_render_cache=self._peek_render_cache,
             schedule_flash_expiry=self.schedule_flash_expiry,
-            toast=self._toast,
+            toast=self.toast,
             request_engaged_tooltip=self._request_engaged_tooltip,
         )
 
@@ -2752,7 +2752,7 @@ class Reader:
             hovered_terms=self.interaction.hovered_word_meta.terms,
             preview=self.interaction.preview_panel,
             session_recorder=self.episode.session_recorder,
-            toast=self._toast,
+            toast=self.toast,
             mark_mined=self._mark_mined,
             mined_here=self._sidebar_mined_here,
             preview_existing=self._preview_existing,
@@ -2760,7 +2760,7 @@ class Reader:
             merge_mined=self.session.mined.update,
         )
 
-    def _mine(self, run: Callable[[MinerPorts], None]) -> None:
+    def mine(self, run: Callable[[MinerPorts], None]) -> None:
         """Run one mining operation against a freshly-read cue, or do nothing without a deck."""
         ports = self.miner_ports
         if ports is not None:
@@ -2773,7 +2773,7 @@ class Reader:
 
         sidebar.mine_active(self.sidebar_view)
 
-    def _mine_target(self) -> int | None:
+    def mine_target(self) -> int | None:
         return miner.mine_target(self.mine_cue)
 
     def _sentence_html(self) -> str:
@@ -2792,7 +2792,7 @@ class Reader:
     # --- panel commands: pure reducer, executed here (WP5.3) ----------------------------------
 
     # --- mining commands: pure reducer, executed here (WP5.3) ---------------------------------
-    def _has_active_cue(self) -> bool:
+    def has_active_cue(self) -> bool:
         """A cue with a path and timings is on screen — what a bookmark would capture."""
         return bool(
             self._get("path")
@@ -2801,49 +2801,8 @@ class Reader:
             and self.sub_text.strip()
         )
 
-    def _mine_inputs(self) -> mine_intents.MineInputs:
-        """Read the facts the mining commands decide from, once, before deciding."""
-        configured = bool(self.anki and self.mine_cfg)
-        return mine_intents.MineInputs(
-            has_active_cue=self._has_active_cue(),
-            configured=configured,
-            # The target is only asked for once mining is possible: `mine_target` inspects hover
-            # and cue state, which an unconfigured session has no reason to walk.
-            target=self._mine_target() if configured else None,
-        )
-
-    def _run_mine_command(self, command: mine_intents.MineCommand) -> None:
-        inputs = self._mine_inputs()
-        if not inputs.configured:
-            log.info(
-                "mine ignored: anki=%s mine_cfg=%s", self.anki is not None, bool(self.mine_cfg)
-            )
-        for effect in mine_intents.reduce(command, inputs):
-            self._apply_mine_effect(effect)
-
-    def _apply_mine_effect(self, effect: mine_intents.MineEffect) -> None:
-        if isinstance(effect, mine_intents.MineToken):
-            # Log the KEY-driven mine (still vs video) — without this, the trace can't tell a
-            # Ctrl+Shift+m video-mine from a plain one, and a keypress that reached the handler
-            # from one that never did.
-            log.info("mine: %r animated=%s", self.tokens[effect.index].surface, effect.animated)
-            with otel_metrics.traced("anki_mine", source="base") as span:
-                span.set("animated", bool(effect.animated))
-                self._mine(
-                    lambda p: miner.mine_token(
-                        p, self.tokens[effect.index], animated=effect.animated
-                    )
-                )
-        elif isinstance(effect, mine_intents.MineEpisode):
-            self._mine(miner.bulk_mine)
-        elif isinstance(effect, mine_intents.BookmarkCue):
-            backlog.capture_current(self.capture_ports)
-        elif isinstance(effect, Announce):
-            log.info("mine: no target word")
-            self._toast(effect.text, effect.kind)
-
     def mine_current(self, *, animated: bool | None = None) -> None:
-        self._run_mine_command(
+        self._stateless.run(
             mine_intents.MineCommand.WORD_VIDEO if animated else mine_intents.MineCommand.WORD
         )
 
@@ -2854,7 +2813,7 @@ class Reader:
 
     def _mine_token(self, tok, *, card=None) -> None:
         with otel_metrics.traced("anki_mine", source="nested"):
-            self._mine(lambda p: miner.mine_token(p, tok, card=card))
+            self.mine(lambda p: miner.mine_token(p, tok, card=card))
 
     def _mark_mined(self, expression: str) -> None:
         mined_feedback.mark_mined(
@@ -2872,7 +2831,7 @@ class Reader:
 
     def _preview_mined(self, card, tok, video, status: str = "mined") -> None:
         if not self.show_preview:
-            self._toast(f"mined {card.expression}")  # preview off → a terse confirmation instead
+            self.toast(f"mined {card.expression}")  # preview off → a terse confirmation instead
             return
         miner_ui.preview_mined(self.preview_ports, self.card_source, card, tok, video, status)
 
@@ -2881,11 +2840,11 @@ class Reader:
         expression is already in the deck (a different line/episode/anime)."""
         duplicate = self.interaction.preview_panel.dup_tok
         if duplicate is not None:
-            self._mine(lambda p: miner.mine_token(p, duplicate, force=True))
+            self.mine(lambda p: miner.mine_token(p, duplicate, force=True))
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         if not self.show_preview:
-            self._toast(f"already have {card.expression}")
+            self.toast(f"already have {card.expression}")
             return
         miner_ui.preview_existing(self.preview_ports, self.card_source, note_id, card, status)
 
@@ -2917,7 +2876,7 @@ class Reader:
         return ("", "") if ports is None else miner.capture_media(ports, base, video)
 
     def bulk_mine(self) -> None:
-        self._run_mine_command(mine_intents.MineCommand.EPISODE)
+        self._stateless.run(mine_intents.MineCommand.EPISODE)
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def setup_secondary(self) -> int | None:
@@ -3079,7 +3038,7 @@ class Reader:
         elif isinstance(effect, hover_intents.ResumePlayback):
             self._resume_after_hover_pause()
         elif isinstance(effect, Announce):
-            self._toast(effect.text, effect.kind)
+            self.toast(effect.text, effect.kind)
 
     @property
     def picker_store(self) -> PickerStore:
@@ -3270,7 +3229,7 @@ class Reader:
             subtitle_modes.begin_acquisition(
                 self._submit_subtitle_fetch,
                 self._get,
-                self._toast,
+                self.toast,
                 lambda: self.episode.subtitle,
                 self.ipc,
                 effect.media_path,
@@ -3300,7 +3259,7 @@ class Reader:
                 release=True
             )
         elif isinstance(effect, Announce):
-            self._toast(effect.text, effect.kind)
+            self.toast(effect.text, effect.kind)
 
     def toggle_subtitle_language(self) -> None:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_LANGUAGE)
@@ -3344,7 +3303,7 @@ class Reader:
         if release:
             subtitle_modes.release_secondary(self.track_ports)
 
-    def _toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
+    def toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
         img = render_toast(text, kind)
         x = (self.osd[0] - img.width) // 2
         y = round(self.osd[1] * 0.08)
@@ -3362,7 +3321,7 @@ class Reader:
         self._run_hover_command(hover_intents.HoverCommand.TOGGLE_PAUSE)
 
     def toggle_bookmark(self) -> None:
-        self._run_mine_command(mine_intents.MineCommand.BOOKMARK_CUE)
+        self._stateless.run(mine_intents.MineCommand.BOOKMARK_CUE)
 
     def toggle_sidebar(self) -> None:
         self._stateless.run(panel_intents.PanelCommand.TOGGLE_SIDEBAR)
@@ -4212,7 +4171,7 @@ class Reader:
             )
 
     def _seed_mined(self) -> None:
-        self._mine(miner.seed_mined)
+        self.mine(miner.seed_mined)
 
     # --- subtitle navigation (instant render, then seek) --------------------------------------
     @property

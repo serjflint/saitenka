@@ -171,7 +171,7 @@ def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
     return list(flag_vals or []) or list(cfg.get(key) or [])
 
 
-def default_mine_target(mine: dict) -> tuple[str, str]:
+def defaultmine_target(mine: dict) -> tuple[str, str]:
     """The ``(deck, model)`` a ``[mine]`` table implies with no explicit CLI flag: deck default
     ``Saitenka::Mining``; model an explicit ``model`` else the ``preset`` name (Lapis/Kiku) else Lapis.
     The single home for this derivation — ``_resolve_mine_model`` and the ``#254`` profile scoping both
@@ -186,7 +186,7 @@ def _mine_table(cfg: dict) -> dict:
     return mine if isinstance(mine, dict) else {}
 
 
-def _resolve_mine_target(
+def _resolvemine_target(
     cfg: dict, mine_deck: str | None, mine_model: str | None
 ) -> tuple[str, str]:
     """Effective ``(mine_deck, mine_model)`` for a run. ``cfg`` is ALREADY profile-scoped (by
@@ -195,7 +195,7 @@ def _resolve_mine_target(
     profile's, or the runtime top-level [mine] honoring ``--config``); an explicit flag wins. Resolving
     off the scoped runtime cfg — never an import-time baked default — is what fixes the ``--config
     other.toml`` + profile case where the old comparison-baseline misfired."""
-    deck, model = default_mine_target(_mine_table(cfg))
+    deck, model = defaultmine_target(_mine_table(cfg))
     return (deck if mine_deck is None else mine_deck, model if mine_model is None else mine_model)
 
 
@@ -1016,7 +1016,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         ident.profile_cycle,
     )
     # A not-passed --mine-deck/--mine-model (None) yields to the profile's own deck/model.
-    mine_deck, mine_model = _resolve_mine_target(cfg, mine_deck, mine_model)
+    mine_deck, mine_model = _resolvemine_target(cfg, mine_deck, mine_model)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
