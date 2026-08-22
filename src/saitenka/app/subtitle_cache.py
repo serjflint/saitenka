@@ -56,18 +56,36 @@ def _slot_files(slot_dir: Path, slot: str) -> list[Path]:
     kept both formats (eviction is best-effort: a sibling mpv still holds open survives the write)
     cannot serve the one a fresh fetch would have rejected.
     """
+    matches = [p for p in slot_dir.glob(glob.escape(slot) + ".*") if p.is_file() and p.stem == slot]
+    return sorted(matches, key=_rank, reverse=True)
+
+
+def _rank(path: Path) -> tuple:
     from saitenka.app.subtitle_artifact import format_rank
 
-    matches = [p for p in slot_dir.glob(glob.escape(slot) + ".*") if p.is_file() and p.stem == slot]
-    return sorted(matches, key=lambda p: (*format_rank(p.suffix), p.stat().st_mtime), reverse=True)
+    return (*format_rank(path.suffix), path.stat().st_mtime)
 
 
 def cached_subs(
     video: str | os.PathLike, title: str, episode, *, resync: bool = True
 ) -> Path | None:
+    """The best cached subtitle for this episode, or None.
+
+    A resyncing session also considers the ``-raw`` slot, because that is where the source PICKER
+    stores a file the user chose by hand (deliberately unsynced). Reading only the auto-fetch slot
+    made a deliberate pick last exactly one session: the next launch loaded whatever the auto-fetch
+    had left there, so an `.ass` chosen on purpose lost to a months-old `.srt` every time.
+
+    Both slots are ranked together by `_slot_files`' ordering — format first — so this cannot serve
+    a format a fresh fetch would have rejected.
+    """
     slot = _slot(video, title, episode, resync=resync)
-    if matches := _slot_files(subs_cache_dir(), slot):
-        return matches[0]
+    candidates = _slot_files(subs_cache_dir(), slot)
+    if resync:
+        candidates += _slot_files(subs_cache_dir(), _slot(video, title, episode, resync=False))
+        candidates.sort(key=_rank, reverse=True)
+    if candidates:
+        return candidates[0]
     if not resync:
         return None
     from saitenka.app.paths import cache_dir

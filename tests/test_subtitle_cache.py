@@ -68,6 +68,35 @@ def test_a_slot_holding_both_formats_serves_the_one_a_fetch_would_have_picked(
     assert cache.cached_subs(video, "Show", 1) == stored
 
 
+def test_a_hand_picked_sub_survives_the_next_launch(monkeypatch, tmp_path):
+    """The source picker stores unsynced (the `-raw` slot); startup looks up the resyncing slot. A
+    lookup that saw only its own slot made a deliberate pick last exactly one session — the next
+    launch loaded whatever the auto-fetch had left, so a chosen `.ass` lost to an older `.srt`."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    auto = tmp_path / "auto.srt"
+    auto.write_text("1\n00:00:01,000 --> 00:00:02,000\nauto\n", encoding="utf-8")
+    chosen = tmp_path / "chosen.ass"
+    chosen.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+
+    cache.store_subs(video, "Show", 1, auto)  # the auto fetch, resynced slot
+    picked = cache.store_subs(video, "Show", 1, chosen, resync=False)  # the picker
+
+    assert cache.cached_subs(video, "Show", 1) == picked
+
+
+def test_the_picker_slot_does_not_leak_into_a_lookup_that_wants_it_raw(monkeypatch, tmp_path):
+    """The negative control for the direction: a `resync=False` lookup stays in its own slot, so
+    widening the resyncing one did not merge the two."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    auto = tmp_path / "auto.ass"
+    auto.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+    cache.store_subs(video, "Show", 1, auto)  # resyncing slot only
+
+    assert cache.cached_subs(video, "Show", 1, resync=False) is None
+
+
 def test_glob_metacharacters_in_the_name_round_trip(monkeypatch, tmp_path):
     """A release group like ``[Erai]`` in the video stem lands in the slot name; the lookup escapes it
     so it isn't read as a glob character class (which would silently miss the cached file)."""
