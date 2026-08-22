@@ -22,6 +22,8 @@ import statistics
 import subprocess
 from typing import TYPE_CHECKING
 
+from saitenka.app import subtitle_artifact
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -29,19 +31,6 @@ log = logging.getLogger(__name__)
 
 # Text subtitle codecs we can extract as an alignment reference (image subs — pgs/dvdsub — can't align).
 _TEXT_SUB_CODECS = {"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"}
-
-
-def _reference_extract_spec(codec: str) -> tuple[str, list[str]]:
-    """(reference file suffix, ffmpeg ``-c:s`` args) for an embedded sub of *codec*. ASS/SSA are COPIED
-    to a native ``.ass`` — alass parses ASS directly, whereas ffmpeg's srt CONVERSION injects
-    ``<font>``/``<b>`` tags a strict SubRip parser rejects (live: ep02's embedded credits line
-    ``<b>Edição</b>`` → ``alass-cli`` exit 1 → subs left raw → several seconds late). subrip is copied
-    verbatim; anything else (mov_text/webvtt) converts to srt, which is clean for those codecs."""
-    if codec in {"ass", "ssa"}:
-        return ".ass", ["-c:s", "copy"]
-    if codec in {"subrip", "srt"}:
-        return ".srt", ["-c:s", "copy"]
-    return ".srt", ["-c:s", "srt"]
 
 
 # The reference language, in preference order: the ENGLISH dialogue track is what the overlay already
@@ -128,7 +117,7 @@ def _embedded_sub_reference(
             return None
         chosen = _pick_reference_stream(text)
         lang = str(chosen.get("tags", {}).get("language", "") or "und").lower()
-        suffix, codec_args = _reference_extract_spec(chosen.get("codec_name", ""))
+        suffix, codec_args = subtitle_artifact.extract_spec(chosen.get("codec_name", ""))
         ref = workdir / f"reference.{lang}{suffix}"
         extracted = subprocess.run(
             [ffmpeg, "-y", "-i", str(video), "-map", f"0:{chosen['index']}",

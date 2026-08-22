@@ -161,27 +161,6 @@ class TestCommandConstruction:
         _result, _out, cmds, _paths = self._run_with_tools(resync, tmp_path, available)
         assert cmds[0][0] == head
 
-    @pytest.mark.parametrize(
-        ("codec", "suffix", "codec_args"),
-        [
-            (
-                "ass",
-                ".ass",
-                ["-c:s", "copy"],
-            ),  # native ASS — alass parses it; srt-convert injects tags
-            ("ssa", ".ass", ["-c:s", "copy"]),
-            ("subrip", ".srt", ["-c:s", "copy"]),  # already SubRip — copy verbatim
-            ("mov_text", ".srt", ["-c:s", "srt"]),  # convert (clean for these codecs)
-            ("webvtt", ".srt", ["-c:s", "srt"]),
-            ("", ".srt", ["-c:s", "srt"]),  # unknown → safe default
-        ],
-    )
-    def test_reference_extract_spec_keeps_ass_native(self, codec, suffix, codec_args):
-        """An ASS embedded track is extracted as .ass (copied), NOT converted to srt — ffmpeg's srt
-        conversion injects <font>/<b> tags that make alass-cli exit 1 (the ep02-late root cause)."""
-        resync = _import_resync()
-        assert resync._reference_extract_spec(codec) == (suffix, codec_args)
-
     def test_split_penalty_adds_the_alass_flag(self):
         """resync_split_penalty threads to alass's --split-penalty (lower → splits more at the OP)."""
         resync = _import_resync()

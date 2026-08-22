@@ -37,6 +37,7 @@ class EmbeddedArtifact:
 
     media_path: str
     ff_index: int
+    codec: str = ""
 
 
 type Artifact = ExternalArtifact | EmbeddedArtifact
@@ -57,4 +58,20 @@ def resolve(track: dict | None, *, media_path: object) -> ArtifactResolution:
         return ArtifactUnavailable.EMBEDDED_STREAM_UNIDENTIFIED
     if not media_path:
         return ArtifactUnavailable.MEDIA_PATH_MISSING
-    return EmbeddedArtifact(str(media_path), int(ff_index))
+    return EmbeddedArtifact(str(media_path), int(ff_index), str(track.get("codec") or ""))
+
+
+def extract_spec(codec: str) -> tuple[str, tuple[str, ...]]:
+    """(file suffix, ffmpeg ``-c:s`` args) for extracting an embedded sub of *codec*.
+
+    ASS/SSA are COPIED to a native ``.ass``, never transcoded, for two independent reasons: ffmpeg's
+    srt conversion injects ``<font>``/``<b>`` tags a strict SubRip parser rejects (live: ep02's
+    ``<b>Edição</b>`` → ``alass-cli`` exit 1 → subs left several seconds late), and native-visible
+    geometry only accepts an authored ASS document — a transcode makes the track noninteractive.
+    subrip is copied verbatim; anything else (mov_text/webvtt) converts to srt, clean for those.
+    """
+    if codec in {"ass", "ssa"}:
+        return ".ass", ("-c:s", "copy")
+    if codec in {"subrip", "srt"}:
+        return ".srt", ("-c:s", "copy")
+    return ".srt", ("-c:s", "srt")

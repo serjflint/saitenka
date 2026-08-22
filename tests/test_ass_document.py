@@ -215,6 +215,39 @@ def test_event_line_requires_libass_dialogue_spelling(kind: str) -> None:
         parse_ass_event_line(line, TRACK, 0)
 
 
+@pytest.mark.parametrize(
+    "authored",
+    [
+        "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0,0,0,,{\\i1}こんにちは{\\i0}",
+        "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0000,0000,0000,,{\\i1}こんにちは{\\i0}",
+    ],
+)
+def test_margin_zero_padding_does_not_change_an_event_signature(authored: str) -> None:
+    """mpv reports margins zero-padded (`0000`) where a file on disk writes `0`, so this
+    normalization is the only reason an authored source ever matches what mpv says is on screen.
+    Verified against a real mpv 0.40 on an embedded ASS track extracted with ``-c:s copy``.
+    """
+    from saitenka.subtitles.ass_geometry import _event_signature
+
+    reported = "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0000,0000,0000,,{\\i1}こんにちは{\\i0}"
+
+    assert _event_signature(parse_ass_event_line(authored, TRACK, 0)) == _event_signature(
+        parse_ass_event_line(reported, TRACK, 0)
+    )
+
+
+def test_a_differing_margin_still_changes_the_signature() -> None:
+    """The negative control: normalization must not flatten margins into no signal at all."""
+    from saitenka.subtitles.ass_geometry import _event_signature
+
+    base = "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0,0,0,,猫"
+    moved = "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0,0,90,,猫"
+
+    assert _event_signature(parse_ass_event_line(base, TRACK, 0)) != _event_signature(
+        parse_ass_event_line(moved, TRACK, 0)
+    )
+
+
 def test_event_line_preserves_authored_leading_and_trailing_text_spaces() -> None:
     line = "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,  猫  "
     parsed = parse_ass_event_line(line, TRACK, source_order=0)
