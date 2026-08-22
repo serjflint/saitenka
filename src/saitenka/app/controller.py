@@ -2970,7 +2970,7 @@ class Reader:
 
         Whether anything is owed is the slice's answer, not a flag read here: both callers used to
         ask and then act, and the clearing happened at a third site."""
-        if not self._pause_store.dispatch(events.HoverPauseReleased()):
+        if not tooltip.release_frame(self._pause_store):
             return
         send_correlated(
             self.ipc,

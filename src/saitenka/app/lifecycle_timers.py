@@ -8,6 +8,7 @@ from enum import StrEnum
 from threading import Lock
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka import otel_metrics
 from saitenka.runtime import EffectOutcome, Owner
 
 if TYPE_CHECKING:
@@ -44,6 +45,17 @@ _OWNERS = {
     LifecycleTimerKind.NESTED_HIDE: Owner.INTERACTION,
     LifecycleTimerKind.SCAN_OPEN: Owner.INTERACTION,
 }
+
+
+def _count(counter: object, kind: LifecycleTimerKind, outcome: str) -> None:
+    """Armed and settled, separately, per kind.
+
+    One number cannot answer this: a deadline that is never scheduled and one that is scheduled and
+    never delivered leave the same evidence downstream — nothing happened. Splitting them is what
+    tells "the hover machine never asked to hide" from "it asked and the timer never came due".
+    """
+    if counter is not None:
+        counter.add(1, {"kind": kind.value, "outcome": outcome})  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,19 +112,24 @@ class LifecycleTimers:
 
             def finished(completion: EffectFinished) -> None:
                 if completion.outcome is not EffectOutcome.SUCCEEDED:
+                    _count(otel_metrics.lifecycle_timer_settled, kind, "failed")
                     return
                 with self._state_lock:
                     if self._closed or self._revisions[kind] != revision:
+                        _count(otel_metrics.lifecycle_timer_settled, kind, "fenced")
                         return
+                _count(otel_metrics.lifecycle_timer_settled, kind, "delivered")
                 callback()
 
-            return self._port.schedule_runtime_timer(
+            accepted = self._port.schedule_runtime_timer(
                 owner=_OWNERS.get(kind, Owner.SESSION),
                 identity=identity,
                 timer=self._name(kind),
                 due_at=self._clock() + delay_s,
                 on_finished=finished,
             )
+            _count(otel_metrics.lifecycle_timer_armed, kind, "accepted" if accepted else "refused")
+            return accepted
 
     def cancel(self, kind: LifecycleTimerKind) -> bool:
         with self._admission_lock:

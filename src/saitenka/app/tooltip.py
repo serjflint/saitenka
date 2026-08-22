@@ -110,6 +110,11 @@ def route_hover(ports: TipPorts, actions: HoverActions, event) -> None:
     later would act on a cursor position that has moved.
     """
     for decision in dispatch_hover(ports, event):
+        # Counted before performing: a poll that decides *nothing* as the cursor leaves is a
+        # different failure from one that decides to hide and the hide never lands, and downstream
+        # both look like a tooltip that stayed up.
+        if otel_metrics.hover_route_decisions is not None:
+            otel_metrics.hover_route_decisions.add(1, {"decision": type(decision).__name__})
         _perform(ports, actions, decision)
 
 
@@ -713,6 +718,19 @@ def _freeze_frame(ipc, prop, *, enabled: bool, already_paused: bool) -> bool:
         owner=Owner.PLAYBACK,
     )
     return True
+
+
+def release_frame(pause_store) -> bool:
+    """Ask the claim whether a resume is owed, and record the answer. `_freeze_frame`'s other half.
+
+    Host-free for the same reason that one is, and counted here rather than at the send: "the resume
+    never reached mpv" and "no resume was ever owed" are the same silence downstream, and only this
+    call knows which it was.
+    """
+    owed = bool(pause_store.dispatch(events.HoverPauseReleased()))
+    if otel_metrics.hover_pause_release is not None:
+        otel_metrics.hover_pause_release.add(1, {"outcome": "resumed" if owed else "nothing-owed"})
+    return owed
 
 
 def show_tooltip_impl(

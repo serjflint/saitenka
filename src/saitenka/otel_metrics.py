@@ -95,6 +95,14 @@ osd_paused_draw: Counter | None = (
     None  # overlay draws that landed while paused (the #8172 bug window)
 )
 osd_paused_nudge: Counter | None = None  # paused-OSD re-flushes issued to un-throttle mpv
+# A hover that pauses playback owes a resume, and a session where the resume never reaches mpv is
+# indistinguishable in the log from one where it was never owed. These three split that: which
+# lifecycle deadlines are armed vs delivered (nothing retires a hover if `tooltip-hide` never fires),
+# what the hover machine decided as the cursor left, and whether a teardown found a claim to release.
+lifecycle_timer_armed: Counter | None = None  # labeled kind=, outcome=accepted|refused
+lifecycle_timer_settled: Counter | None = None  # labeled kind=, outcome=delivered|fenced|failed
+hover_route_decisions: Counter | None = None  # labeled decision= (the machine's own class name)
+hover_pause_release: Counter | None = None  # labeled outcome=resumed|nothing-owed
 scroll_frame_jank: Counter | None = None  # scroll frames slower than SCROLL_JANK_THRESHOLD_MS
 # Persistent cross-session caches (#149). Their hit:miss ratio IS the "is the prewarm worth it?" signal:
 # a render_cache hit is a cold pathological hover direct-painted from disk (the 40-170ms → <2ms win); an
@@ -326,6 +334,8 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
+    global lifecycle_timer_armed, lifecycle_timer_settled
+    global hover_route_decisions, hover_pause_release
 
     with _lock:
         _reader = reader
@@ -517,6 +527,22 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_pixels.catastrophic_fallbacks",
             description="proved native-pixel failures committed to legacy subtitle pixels",
         )
+        lifecycle_timer_armed = meter.create_counter(
+            "saitenka.lifecycle_timer.armed",
+            description="lifecycle deadlines scheduled (kind=, outcome=accepted|refused)",
+        )
+        lifecycle_timer_settled = meter.create_counter(
+            "saitenka.lifecycle_timer.settled",
+            description="lifecycle deadlines that came due (kind=, outcome=delivered|fenced|failed)",
+        )
+        hover_route_decisions = meter.create_counter(
+            "saitenka.hover.route_decisions",
+            description="decisions the hover machine published per observation (decision=)",
+        )
+        hover_pause_release = meter.create_counter(
+            "saitenka.hover.pause_release",
+            description="teardowns that found a pause claim to release (outcome=)",
+        )
         subtitle_pixel_retry_exhausted = meter.create_counter(
             "saitenka.subtitle_pixels.retry_exhausted",
             description="native subtitle visibility retries exhausted without a proved owner",
@@ -553,6 +579,8 @@ def unregister() -> None:
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
+    global lifecycle_timer_armed, lifecycle_timer_settled
+    global hover_route_decisions, hover_pause_release
 
     with _lock:
         _reader = None
@@ -614,6 +642,10 @@ def unregister() -> None:
         subtitle_geometry_recoveries = None
         subtitle_pixel_catastrophic_fallbacks = None
         subtitle_pixel_retry_exhausted = None
+        lifecycle_timer_armed = None
+        lifecycle_timer_settled = None
+        hover_route_decisions = None
+        hover_pause_release = None
         prefetch_queue_depth = None
 
 
@@ -679,4 +711,22 @@ def _summarize_metric(metric) -> dict[str, object]:
             "max": dp_max,  # exact recorded max (the percentiles are bucket-bound estimates)
             **_percentiles(bucket_counts, points[0].explicit_bounds, dp_max, count),
         }
-    return {"value": sum(p.value for p in points)}
+    return {"value": sum(p.value for p in points), "by": _by_label(points)}
+
+
+def _by_label(points) -> dict[str, float]:
+    """Each label combination's own value, beside the total.
+
+    The total alone cannot answer what a labeled counter was added for. `lifecycle_timer.armed`
+    summed over every kind says some deadline was scheduled; the question is whether
+    `kind=tooltip-hide` ever was, and merging erases exactly the axis that discriminates. Empty for
+    an unlabeled counter, so its series is unchanged.
+    """
+    out: dict[str, float] = {}
+    for point in points:
+        attributes = point.attributes or {}
+        if not attributes:
+            continue
+        key = ",".join(f"{k}={attributes[k]}" for k in sorted(attributes))
+        out[key] = out.get(key, 0.0) + float(point.value)
+    return out

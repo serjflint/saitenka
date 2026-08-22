@@ -229,3 +229,37 @@ def test_active_gate_defaults_off_and_toggles():
     assert bool(gate) is True
     gate.set(value=False)
     assert bool(gate) is False
+
+
+def test_sample_counters_splits_a_labeled_counter_by_its_labels(tmp_path):
+    """A labeled counter's total is the one number its labels exist to refuse.
+
+    `lifecycle_timer.armed` summed over every kind says some deadline was scheduled; the question it
+    is instrumented for is whether `kind=tooltip-hide` ever was. Merging every data point — which
+    `snapshot()` must keep doing, since an unlabeled reader wants the total — erases exactly the axis
+    that discriminates, so the per-label series ride alongside rather than replacing it.
+    """
+    from saitenka import otel_metrics
+
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    otel_metrics.lifecycle_timer_armed.add(1, {"kind": "tooltip-hide", "outcome": "accepted"})
+    otel_metrics.lifecycle_timer_armed.add(2, {"kind": "hover-switch", "outcome": "refused"})
+
+    values = telemetry._sample_counters()
+
+    assert values["lifecycle_timer.armed"] == 3.0
+    assert values["lifecycle_timer.armed[kind=tooltip-hide,outcome=accepted]"] == 1.0
+    assert values["lifecycle_timer.armed[kind=hover-switch,outcome=refused]"] == 2.0
+
+
+def test_sample_counters_leaves_an_unlabeled_counter_as_one_series(tmp_path):
+    """The negative control for the split: no labels, no bracket series to sift through."""
+    from saitenka import otel_metrics
+
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    otel_metrics.panel_cache_hits.add(1)
+
+    values = telemetry._sample_counters()
+
+    assert values["panel_cache.hits"] == 1.0
+    assert not [name for name in values if name.startswith("panel_cache.hits[")]

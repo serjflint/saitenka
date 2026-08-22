@@ -122,7 +122,14 @@ def _metric_series(name: str, summary: dict, spanless: frozenset[str]) -> dict[s
     allowlist once silently dropped block_cache.* for a release."""
     value = summary.get("value")
     if isinstance(value, int | float):
-        return {name.removeprefix("saitenka."): float(value)}
+        base = name.removeprefix("saitenka.")
+        by = summary.get("by")
+        series = {base: float(value)}
+        if isinstance(by, dict):
+            # One series per label combination beside the total — a labeled counter's total is the
+            # one number that cannot answer what the labels were added to distinguish.
+            series.update({f"{base}[{label}]": float(v) for label, v in by.items()})
+        return series
     if "count" not in summary or name not in spanless:
         return {}
     base = name.removeprefix("saitenka.")
