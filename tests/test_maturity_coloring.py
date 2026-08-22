@@ -112,7 +112,7 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
     provider = RecordingRasterProvider(size=(10, 10))
     reader.renderer = SubtitleRenderer(provider)
 
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     reader.set_annotation_hover(revealed=True)
 
     assert [request.styles for request in provider.requests] == [None, reader.styles]

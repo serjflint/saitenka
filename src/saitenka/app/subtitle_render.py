@@ -2,7 +2,7 @@
 
 ``Reader.renderer`` holds a :class:`SubtitleRenderer` (the real blit); pass :class:`NullRenderer` to
 suppress the raster and assert state only — the public seam that replaces monkeypatching the private
-``_draw_subtitle`` (#50). The strategy takes the ``Reader`` as its host, matching the collaborator
+``draw_subtitle`` (#50). The strategy takes the ``Reader`` as its host, matching the collaborator
 pattern the other app modules use.
 """
 

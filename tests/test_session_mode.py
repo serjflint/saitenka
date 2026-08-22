@@ -93,7 +93,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
                 runtime=SessionRuntime(
                     _facts(
                         refresh_osd=self.refresh_osd,
-                        prop=self._prop,
+                        prop=self.observed_property,
                         get=self._get,
                         tokens=lambda: self.tokens,
                         is_content_token=lambda _t: True,
@@ -116,7 +116,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
         def _get(self, _name):
             return "猫"
 
-        def _prop(self, _name):
+        def observed_property(self, _name):
             return {"w": 1280, "h": 720}  # mpv has published its geometry
 
         def prepare_subtitle_blocking(self, _text: str) -> None:
@@ -166,12 +166,12 @@ class _GeometryReader:
     def refresh_osd(self) -> None:
         self.refreshed += 1
 
-    def _prop(self, _name):
+    def observed_property(self, _name):
         return {"w": 1920, "h": 1080} if self.remaining <= 0 else {}
 
 
 def _geometry_facts(reader) -> SessionFacts:
-    return _facts(refresh_osd=reader.refresh_osd, prop=reader._prop)
+    return _facts(refresh_osd=reader.refresh_osd, prop=reader.observed_property)
 
 
 def _geometry_acts(reader) -> SessionActs:

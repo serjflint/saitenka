@@ -49,14 +49,14 @@ _CORPUS = [f"語{i:03d}" for i in range(PANEL_CACHE_MAX + 24)]
 
 def _churn(r: Reader, term: str) -> bool:
     """One cold hover → scroll → nested → scroll → dismiss cycle via the real entry points. Setting
-    lines+tokens lets `_draw_subtitle` build a consistent box for token 0. Returns whether a nested
+    lines+tokens lets `draw_subtitle` build a consistent box for token 0. Returns whether a nested
     popup actually opened (so a test can assert the nested path was exercised)."""
     tok = Token(term, term, "ご", "名詞", 0, len(term))
     r.lines = [[tok]]
     r.tokens = [tok]
     # Draw first, then hover: the boxes have to exist before a cursor has anywhere to land. The old
     # `set_hover(0)` did both at once, which is why it could not be a move.
-    r._draw_subtitle()
+    r.draw_subtitle()
     ui = Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
         ui.wheel(1)

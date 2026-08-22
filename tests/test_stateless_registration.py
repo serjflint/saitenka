@@ -13,7 +13,7 @@ INTENTS = ROOT / "src/saitenka/app"
 #: Policies whose adapter still lives on `Reader`. Closed by being written down: a new
 #: `*_intents.py` is not on this list, so it fails until it registers. Only shrinks —
 #: `vibe/stateless-seam-plan.md` says what each is blocked on (the width of its host port).
-NOT_YET_REGISTERED = frozenset({"subtitle"})
+NOT_YET_REGISTERED: frozenset[str] = frozenset()
 
 
 def _policies() -> set[str]:

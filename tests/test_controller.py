@@ -281,12 +281,12 @@ def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch):
     stale = SeekCue(1, r.cue_revision)
     r.set_subtitle("犬も見る")  # the cue the step was decided against is gone
 
-    assert not r._seek_cue(stale)
+    assert not r.seek_cue(stale)
 
     assert not any(command and command[0] == "sub-seek" for command in ipc.commands)
     (decision,) = [span["attrs"] for span in spans if span["name"] == "sub_nav_identity"]
     assert decision["outcome"] == "superseded"  # dropped out loud, not silently
-    assert r._seek_cue(SeekCue(1, r.cue_revision))  # and the current cue still navigates
+    assert r.seek_cue(SeekCue(1, r.cue_revision))  # and the current cue still navigates
 
 
 def test_sub_seek_replay_sends_ipc_command():
@@ -2112,8 +2112,10 @@ def test_copy_line_copies_all_lines(monkeypatch):
         [Token("本命", "本命", "ほんめい", "名詞", 0, 2)],
         [Token("読む", "読む", "よむ", "動詞", 0, 2)],
     ]
+    from saitenka.app import subtitle_adapter
+
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda s: got.append(s))
     r.copy_line()
     assert got == ["本命\n読む"]  # the whole cue, line by line
 
@@ -2409,9 +2411,9 @@ def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
     r = _auto_trans_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.toggle_translation()  # force it ON with `t`
-    assert r._translate_on and r._translation_visible()
+    assert r.translate_on and r.translation_visible()
     r.retire_hover()  # …and it stays even with nothing hovered
-    assert r._translation_visible()
+    assert r.translation_visible()
 
 
 # --- JLPT pill on the tooltip (same signal as the subtitle underline) ------------------------------
@@ -2820,8 +2822,8 @@ def test_start_observing_registers_and_seeds_initial_state(request):
         "sub-delay",
     } <= observed
     # initial state was read once at startup
-    assert r._prop("pause") is True
-    assert r._prop("sub-text") == "字幕"
+    assert r.observed_property("pause") is True
+    assert r.observed_property("sub-text") == "字幕"
 
 
 def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch):
@@ -3336,7 +3338,7 @@ def test_a_refused_seek_is_reported_rather_than_discarded(caplog):
     ipc = RefusingIPC()
     r = Reader(ipc, prefetch=False, renderer=NullRenderer())
     with caplog.at_level(logging.WARNING, logger="saitenka.app.mpv_egress"):
-        r._seek_cue(SeekCue(1, r.cue_revision))
+        r.seek_cue(SeekCue(1, r.cue_revision))
 
     assert any("sub-seek" in record.getMessage() for record in caplog.records)
     r.close()

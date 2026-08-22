@@ -112,14 +112,12 @@ from saitenka.app.bindings import (
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.config import ReaderOptions
-from saitenka.app.intents import Announce
 from saitenka.app.interaction_intents import InteractionCommand
 from saitenka.app.interaction_surfaces import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
 from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 from saitenka.app.media import (
-    copy_clipboard,
     tts_available,
 )
 from saitenka.app.miner import MineCue, MinerPorts, tag_slug
@@ -410,7 +408,7 @@ class Reader:
                     clear_interaction=self._clear_native_interaction,
                     use_native=self._use_native_subtitle_renderer,
                     ownership_undecided=self._native_ownership_undecided,
-                    redraw=self._draw_subtitle,
+                    redraw=self.draw_subtitle,
                     publish=self._publish_geometry,
                     tokenize_lookahead=lambda text: native_subtitles._lookahead_tokenized(
                         text,
@@ -471,7 +469,7 @@ class Reader:
         if o.tooltip.annotation_mode not in {"full", "hover"}:
             raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
         self.annotation_mode: subtitle_intents.AnnotationMode = o.tooltip.annotation_mode
-        self._annotation_hover = False
+        self.annotation_hover = False
         # Visual-only: draw the kanji panel's big headword in the numbered stroke-order font. Set here
         # (the shared Reader init) so both the run and attach seams get it from one place; a pure render
         # flag threaded onto the kanji Entry, never gating what's looked up or the panel-cache identity.
@@ -754,7 +752,7 @@ class Reader:
         self.interaction.preview_store = self._preview_store
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
-        self._translation = TranslationStore(self.ipc)
+        self.translation_store = TranslationStore(self.ipc)
         self._hover_store.dispatch(
             events.HoverConfigured(
                 HoverDelays(
@@ -874,7 +872,7 @@ class Reader:
         """
         return self.ipc.query(prop)
 
-    def _get_text(self, prop: str) -> str | None:
+    def text_property(self, prop: str) -> str | None:
         value = self._get(prop)
         return value if isinstance(value, str) else None
 
@@ -974,7 +972,7 @@ class Reader:
             tracks=lambda: self._subtitle_tracks.current,
             declare=self.declare_subtitle,
             invalidate=self.invalidate_analysis,
-            translation_visible=self._translation_visible,
+            translation_visible=self.translation_visible,
             drop_index=self._drop_sub_index,
             rebuild_index=self.rebuild_sub_index,
             sample_cue=self._sample_cue_text,
@@ -1022,7 +1020,7 @@ class Reader:
     def _geometry_observation(self) -> native_subtitles.GeometryObservation:
         """The facts the geometry owner decides from, per operation — they all move per cue."""
         return native_subtitles.GeometryObservation(
-            prop=self._prop,
+            prop=self.observed_property,
             osd=self.osd,
             text=self.sub_text,
             tokens=self.tokens,
@@ -1046,7 +1044,7 @@ class Reader:
         return SubtitleTarget(
             ipc=self.ipc,
             get=self._get,
-            prop=self._prop,
+            prop=self.observed_property,
             surfaces=self.lifecycle_surfaces,
             refresh=(
                 (lambda: None)
@@ -1075,7 +1073,7 @@ class Reader:
             upgrade_pending=self._sub_pending is not None,
             annotation_degraded=self._annotation_degraded,
             annotation_visible=subtitle_raster.annotation_visible(
-                mode=self.annotation_mode, hover_annotation=self._annotation_hover
+                mode=self.annotation_mode, hover_annotation=self.annotation_hover
             ),
             hover=self.hover,
             hover_span=self.interaction.hovered_word_meta.span,
@@ -1103,7 +1101,7 @@ class Reader:
         for delta in effect.deltas:
             self._apply_playback_delta(delta)
 
-    def _prop(self, name: str) -> Any:
+    def observed_property(self, name: str) -> Any:
         """Latest value of a property: the observed (event-driven) state when observing, else a
         blocking get_property (tests / pre-run paths)."""
         if self._observing and self._playback.observes(name):
@@ -1151,7 +1149,7 @@ class Reader:
             subtitle_modes.on_primary_changed(self.track_ports, delta.sid)
         elif isinstance(delta, playback.SubtitleTimingChanged):
             if self.native_geometry is not None:
-                self.native_geometry.record_clock_change(self._prop)
+                self.native_geometry.record_clock_change(self.observed_property)
         elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
             self._arm_geometry_refresh()
         else:
@@ -1177,7 +1175,7 @@ class Reader:
             # just ended is exactly what the change delimits, and an idle runtime does no work.
             session_stats.accrue(
                 self.episode.session_recorder,
-                paused=bool(self._prop("pause")),
+                paused=bool(self.observed_property("pause")),
                 language=self.subtitle_language,
             )
         elif isinstance(delta, playback.PointerMoved):
@@ -1297,7 +1295,7 @@ class Reader:
         self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
 
     def refresh_osd(self) -> bool:
-        d = self._prop("osd-dimensions") or {}
+        d = self.observed_property("osd-dimensions") or {}
         w, h = int(d.get("w") or self.osd[0]), int(d.get("h") or self.osd[1])
         if (w, h) != self.osd and w > 0 and h > 0:
             self.osd = (w, h)
@@ -1372,7 +1370,11 @@ class Reader:
             self.episode.nav_provisional_cue_counted = False
         # Per-cue breadcrumb (low frequency): correlates mpv's sub-text change with the overlay draw +
         # paused-state in the report — the mpv-log-vs-overlay-log gap the paused-OSD bug lives in.
-        log.debug("sub-text change: %d chars, paused=%s", len(text.strip()), self._prop("pause"))
+        log.debug(
+            "sub-text change: %d chars, paused=%s",
+            len(text.strip()),
+            self.observed_property("pause"),
+        )
         # Seek-to-paint chain: this span covers everything below (teardown/tokenize/score/render/
         # upload) for one cue. Nests as a child of sub_nav's "sub_seek" span for the instant-nav
         # (Alt+←/→/↓) path, or of "sub_text_reconcile" for an mpv-driven change (native sub-seek /
@@ -1401,7 +1403,7 @@ class Reader:
         with otel_metrics.traced("teardown_tip"):
             self.teardown_tip()
         self.hover = -1
-        self._annotation_hover = False
+        self.annotation_hover = False
         self.sub_text = text
         # Invariant 13: the projection owns which cue is current, so a Reader-side decision about
         # it has to reach the projection too — otherwise the next changed cue fact reconciles mpv's
@@ -1433,7 +1435,7 @@ class Reader:
             self.boxes = []
             self._install_cue_identity(self._annotation_identity(cue_key(text)))
             self._cue_identity_ever_installed = True
-            self._draw_subtitle()
+            self.draw_subtitle()
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = cue_key(text)
@@ -1447,7 +1449,7 @@ class Reader:
             self._sub_pending = norm
             if self._dependencies_settled:
                 self._schedule_current_annotation(norm)
-            self._draw_subtitle()
+            self.draw_subtitle()
             return
         else:
             self._apply_tokenized_cue(self._tokenize_cue(norm))
@@ -1459,7 +1461,7 @@ class Reader:
         if self.native_geometry is not None:
             self.boxes = []
             self.native_geometry.schedule(self._geometry_observation())
-        self._draw_subtitle()
+        self.draw_subtitle()
 
     def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
         recorder = self.episode.session_recorder
@@ -1467,8 +1469,8 @@ class Reader:
             return
         identity = (
             self.subtitle_language,
-            self._prop("sub-start"),
-            self._prop("sub-end"),
+            self.observed_property("sub-start"),
+            self.observed_property("sub-end"),
             text,
         )
         if revise:
@@ -1519,11 +1521,11 @@ class Reader:
     def _annotation_identity(self, norm: str) -> cue_annotation.CueIdentity:
         return cue_annotation.CueIdentity(
             self._playback.media.source.value,
-            self._prop("sid"),
+            self.observed_property("sid"),
             self.subtitle_language,
             norm,
-            self._prop("sub-start"),
-            self._prop("sub-end"),
+            self.observed_property("sub-start"),
+            self.observed_property("sub-end"),
             self.episode.nav_idx if self.episode.nav_idx >= 0 else None,
         )
 
@@ -1576,7 +1578,7 @@ class Reader:
         if self.native_geometry is not None:
             self.native_geometry.invalidate(live=True)
         self._schedule_current_annotation(norm)
-        self._draw_subtitle()
+        self.draw_subtitle()
 
     def _publish_annotation(self, cue: TokenizedCue, identity: cue_annotation.CueIdentity) -> bool:
         if (
@@ -1590,7 +1592,7 @@ class Reader:
         self._annotation_degraded = False
         if self.native_geometry is not None:
             self.native_geometry.schedule(self._geometry_observation())
-        self._draw_subtitle()
+        self.draw_subtitle()
         return True
 
     def _annotation_disposition_for(
@@ -1804,14 +1806,14 @@ class Reader:
             self._sub_pending = norm
             self._annotation_degraded = False
             self._schedule_current_annotation(norm)
-            self._draw_subtitle()
+            self.draw_subtitle()
             return
         self._apply_tokenized_cue(self._tokenize_cue(cue_key(self.sub_text)))
         if self.native_geometry is not None:
             self.native_geometry.refresh(self._geometry_observation())
-        self._draw_subtitle()
+        self.draw_subtitle()
 
-    def _draw_subtitle(self) -> None:
+    def draw_subtitle(self) -> None:
         result = self.subtitle_pipeline.draw_current(self.subtitle_target())
         if result is not None:
             # The write-back, here rather than inside the stage: the boxes and origin belong to the
@@ -1910,10 +1912,10 @@ class Reader:
             and self.subtitle_language == MAIN_LANG
             and self.tokens
         )
-        if target == self._annotation_hover:
+        if target == self.annotation_hover:
             return
-        self._annotation_hover = target
-        self._draw_subtitle()
+        self.annotation_hover = target
+        self.draw_subtitle()
 
     def speak_hovered(self) -> None:
         self._stateless.run(hover_intents.HoverCommand.SPEAK)
@@ -1926,7 +1928,7 @@ class Reader:
 
     def copy_line(self) -> None:
         """Shift+C — copy the whole subtitle cue under the cursor (all its lines)."""
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.COPY_LINE)
+        self._stateless.run(subtitle_intents.SubtitleCommand.COPY_LINE)
 
     def copy_click(self) -> None:
         tooltip.copy_click(self.tip_ports, self.click_ports, self.hover_inputs)
@@ -1995,7 +1997,7 @@ class Reader:
             osd=self.osd,
             chrome_scale=self.chrome_scale,
             surfaces=self.lifecycle_surfaces,
-            video=self._get_text("path"),
+            video=self.text_property("path"),
             backlog=lambda: sidebar_module._ensure_store(self.session),
             mined=lambda: self.mined_store,
             mined_exists=self.session.mined_store is not None or mined_store.db_path().exists(),
@@ -2034,7 +2036,7 @@ class Reader:
         """
         return surfaces.HoverSuppression(
             self.interaction,
-            self._prop("mouse-pos"),
+            self.observed_property("mouse-pos"),
             self.retire_hover,
             lambda: self.set_annotation_hover(revealed=False),
         )
@@ -2044,7 +2046,7 @@ class Reader:
         """What a surface needs to decide whether it claims a coalesced wheel step."""
         return surfaces.WheelStep(
             self.interaction,
-            self._prop("mouse-pos"),
+            self.observed_property("mouse-pos"),
             lambda steps: self._run_help_command(self.help_page_command(steps)),
             self.redraw_sub_picker,
             self.sidebar_view,
@@ -2060,7 +2062,7 @@ class Reader:
             self.interaction,
             sub_picker.DownloadPorts(
                 self.toast,
-                self._submit_subtitle_fetch,
+                self.submit_subtitle_fetch,
                 self._get,
                 self.lifecycle_surfaces,
             ),
@@ -2105,7 +2107,7 @@ class Reader:
             speak_hovered=self.speak_hovered,
             click_preview=self._click_preview,
             cursor=lambda: self._get_mapping("mouse-pos") or None,
-            paused=lambda: self._prop("pause"),
+            paused=lambda: self.observed_property("pause"),
         )
 
     @property
@@ -2116,7 +2118,7 @@ class Reader:
         the routing turn, and the turn is what changes the first of them.
         """
         return HoverInputs(
-            mouse_pos=lambda: self._prop("mouse-pos"),
+            mouse_pos=lambda: self.observed_property("mouse-pos"),
             hit=self._hit,
             hover=lambda: self.hover,
             cue_state=self._cue_state,
@@ -2149,13 +2151,13 @@ class Reader:
         """What showing a hovered word does, bound. Paired with `tip_ports` and `panel_ports`."""
         return ShowActions(
             select=lambda index: setattr(self, "hover", index),
-            draw_cue=self._draw_subtitle,
+            draw_cue=self.draw_subtitle,
             teardown=self.teardown_tip,
             bind_keys=self._bind_tip_keys,
             seed_precomposed=self._seed_precomposed,
             freeze=lambda *, already_paused: tooltip._freeze_frame(
                 self.ipc,
-                self._prop,
+                self.observed_property,
                 enabled=self.pause_on_tooltip,
                 already_paused=already_paused,
             ),
@@ -2208,7 +2210,7 @@ class Reader:
         """What one speculative-warming pass reads. Paired with `head_probe`."""
         return prefetch.PrefetchPorts(
             enabled=bool(self.prefetch and self.dict_set is not None),
-            engaged=bool(self._prop("pause")) or self._mouse_in,
+            engaged=bool(self.observed_property("pause")) or self._mouse_in,
             state=self.prefetch_state,
             cues=prefetch.LookaheadCues(
                 self.episode.sub_index,
@@ -2276,7 +2278,7 @@ class Reader:
     def capture_ports(self) -> backlog.CapturePorts:
         """What a bookmark toggle samples the cue from — read now, so the write is this cue."""
         return backlog.CapturePorts(
-            video=self._get_text("path"),
+            video=self.text_property("path"),
             start=self._get_number("sub-start"),
             end=self._get_number("sub-end"),
             text=self.sub_text,
@@ -2319,7 +2321,7 @@ class Reader:
         return episode_reslot.WatchPorts(
             install_reslot_hook=self.install_reslot_hook,
             set_advance_hook=lambda hook: setattr(self, "advance_hook", hook),
-            prop=self._prop,
+            prop=self.observed_property,
             current_media_path=self.current_media_path,
         )
 
@@ -2746,7 +2748,7 @@ class Reader:
             mined_store=self.mined_store,
             ipc=self.ipc,
             scratch=self._tmp,
-            media_path=self._get_text("path"),
+            media_path=self.text_property("path"),
             playhead=self._get_number("time-pos") or 0.0,
             sentence_html=self._sentence_html(),
             hovered_terms=self.interaction.hovered_word_meta.terms,
@@ -2826,7 +2828,7 @@ class Reader:
         )
 
     # --- card preview (verify correctness / image / sound, one surface) — logic in app/miner_ui.py
-    def _sentence_lines(self) -> list[str]:
+    def sentence_lines(self) -> list[str]:
         return miner_ui.sentence_lines(self.lines)
 
     def _preview_mined(self, card, tok, video, status: str = "mined") -> None:
@@ -2883,24 +2885,24 @@ class Reader:
         return subtitle_modes.setup_secondary(self.track_ports)
 
     @property
-    def _translate_on(self) -> bool:
+    def translate_on(self) -> bool:
         """The manual translation hold, off `Owner.PRESENTATION`'s slice.
 
         The setter is a declaration, not a back door: assigning it is the same event the toggle
         sends, so a caller establishing this precondition takes the path production takes.
         """
-        return self._translation.current.held
+        return self.translation_store.current.held
 
-    @_translate_on.setter
-    def _translate_on(self, held: bool) -> None:
-        self._translation.dispatch(events.TranslationHeld(held))
+    @translate_on.setter
+    def translate_on(self, held: bool) -> None:
+        self.translation_store.dispatch(events.TranslationHeld(held))
 
     @property
     def _trans_text(self) -> str | None:
         """What the translation surface is showing. Read-only: it is set by drawing it."""
-        return self._translation.current.drawn
+        return self.translation_store.current.drawn
 
-    def _translation_visible(self) -> bool:
+    def translation_visible(self) -> bool:
         # Two conditions, and not interchangeable: whether the user wants it, and whether
         # saitenka is drawing anything at all. Code deciding what to do once the surfaces come
         # back needs the first without the second — see `translation_wanted`.
@@ -2910,19 +2912,19 @@ class Reader:
         """Whether the user wants the secondary line, independent of whether anything is drawn.
 
         `toggle_overlay` decides what to do *after* the surfaces return, so it must not ask
-        `_translation_visible` — that answers False precisely because the overlay is still hidden.
+        `translation_visible` — that answers False precisely because the overlay is still hidden.
         """
-        return self._translate_on or (self.auto_translate and self.hover >= 0)
+        return self.translate_on or (self.auto_translate and self.hover >= 0)
 
     def _sync_auto_translation(self) -> None:
         if not self.auto_translate:
             return
-        self._reveal_translation() if self._translation_visible() else self._hide_translation(
-            release=not self._translate_on
+        self.reveal_translation() if self.translation_visible() else self.hide_translation(
+            release=not self.translate_on
         )
 
     def toggle_translation(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION)
+        self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION)
 
     # --- session commands: pure reducer, executed here (WP5.3) --------------------------------
     def toggle_overlay(self) -> None:
@@ -2939,7 +2941,7 @@ class Reader:
             slang=slang,
             declare=self.declare_subtitle,
             activate=lambda sid: self.subtitle_pipeline.activate(
-                self.subtitle_target(), sid, draw=self._draw_subtitle
+                self.subtitle_target(), sid, draw=self.draw_subtitle
             ),
             secondary_sid=self._get("secondary-sid"),
             ipc=self.ipc,
@@ -2947,27 +2949,6 @@ class Reader:
         )
 
     # --- subtitle-owned commands: pure reducer, executed here (WP4.2) -------------------------
-    def _subtitle_inputs(self) -> subtitle_intents.SubtitleInputs:
-        """Read every fact the subtitle commands decide from, once, before deciding."""
-        from saitenka.app.subtitle_modes import _current_external_sub
-
-        index = self.episode.sub_index
-        playhead = self._prop("time-pos")
-        return subtitle_intents.SubtitleInputs(
-            tracks=subtitle_modes.discover_tracks(self.ipc, self.subtitle_slang),
-            active_sid=self._get("sid"),
-            language=self.subtitle_language,
-            annotation_mode=self.annotation_mode,
-            has_cue=bool(self.sub_text.strip()),
-            retry_in_flight=self.episode.subtitle.retry_active,
-            media_path=self._get_text("path"),
-            has_external_sub=_current_external_sub(self.ipc) is not None,
-            has_cue_lines=bool(self.lines),
-            cue_starts=tuple(cue.start for cue in index.cues) if index is not None else (),
-            playhead=None if playhead is None else float(playhead),
-            sub_delay=float(self._prop("sub-delay") or 0.0),
-            cue_revision=self.cue_revision,
-        )
 
     # --- hovered-word commands: pure reducer, executed here (WP5.3) ---------------------------
 
@@ -3165,90 +3146,45 @@ class Reader:
         elif isinstance(effect, help_machine.ShowHelpPage):
             self._redraw_help()
 
-    def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
-        for effect in subtitle_intents.reduce(command, self._subtitle_inputs()):
-            self._apply_subtitle_effect(effect)
-
-    def _apply_subtitle_effect(self, effect: subtitle_intents.SubtitleEffect) -> None:
-        if isinstance(effect, subtitle_intents.SelectTrack):
-            subtitle_modes.select_track(self.track_ports, effect.sid, effect.target)
-        elif isinstance(effect, subtitle_intents.AdoptCurrentAsTarget):
-            subtitle_modes.adopt_current_as_target(self.track_ports, effect.sid)
-        elif isinstance(effect, subtitle_intents.AcquireSubtitles):
-            subtitle_modes.begin_acquisition(
-                self._submit_subtitle_fetch,
-                self._get,
-                self.toast,
-                lambda: self.episode.subtitle,
-                self.ipc,
-                effect.media_path,
-                effect.source,
-            )
-        elif isinstance(effect, subtitle_intents.SetAnnotationMode):
-            self.annotation_mode = effect.mode
-            self._annotation_hover = False
-            if effect.redraw:
-                self._draw_subtitle()
-        elif isinstance(effect, subtitle_intents.SeekCue):
-            self._seek_cue(effect)
-        elif isinstance(effect, subtitle_intents.SetSubtitleDelay):
-            send_correlated(
-                self.ipc,
-                "sub-delay",
-                "set_property",
-                "sub-delay",
-                f"{effect.seconds:.3f}",
-                owner=Owner.SUBTITLE,
-            )
-        elif isinstance(effect, subtitle_intents.CopyCueText):
-            copy_clipboard("\n".join(self._sentence_lines()))
-        elif isinstance(effect, subtitle_intents.ToggleTranslation):
-            self._translation.dispatch(events.TranslationHeld(not self._translate_on))
-            self._reveal_translation() if self._translation_visible() else self._hide_translation(
-                release=True
-            )
-        elif isinstance(effect, Announce):
-            self.toast(effect.text, effect.kind)
-
     def toggle_subtitle_language(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_LANGUAGE)
+        self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_LANGUAGE)
 
     def mark_current_subtitle_japanese(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.MARK_CURRENT_JAPANESE)
+        self._stateless.run(subtitle_intents.SubtitleCommand.MARK_CURRENT_JAPANESE)
 
     def fetch_japanese_subs_async(self, fetch) -> None:
         subtitle_modes.start_fetch(
-            self._submit_subtitle_fetch, self._get, fetch, select_if_unchanged=True
+            self.submit_subtitle_fetch, self._get, fetch, select_if_unchanged=True
         )
 
     def configure_subtitle_retry(self, factory) -> None:
         subtitle_modes.configure_retry(self.episode.subtitle, factory)
 
     def retry_japanese_subtitles(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.RETRY_ACQUISITION)
+        self._stateless.run(subtitle_intents.SubtitleCommand.RETRY_ACQUISITION)
 
     def _secondary_text(self) -> str:
-        return translation.clean_secondary(self._prop("secondary-sub-text"))
+        return translation.clean_secondary(self.observed_property("secondary-sub-text"))
 
     def draw_translation(self) -> None:
         text = self._secondary_text()
-        self._translation.dispatch(events.TranslationDrawn(text))
+        self.translation_store.dispatch(events.TranslationDrawn(text))
         if not text:
             self.lifecycle_surfaces.remove(OverlayId.TRANS)
             return
         image, x, y = translation.render_translation(text, self.osd)
         self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.TRANS)
 
-    def _reveal_translation(self) -> None:
+    def reveal_translation(self) -> None:
         self.setup_secondary()
         self.draw_translation()
 
-    def _hide_translation(self, *, release: bool) -> None:
+    def hide_translation(self, *, release: bool) -> None:
         """Take the overlay down. `release` hands the secondary track back to mpv, which only the
         paths that own the reveal may do — an auto-reveal ending must not release a track the
         manual toggle is still holding."""
         self.lifecycle_surfaces.remove(OverlayId.TRANS)
-        self._translation.dispatch(events.TranslationDrawn(None))
+        self.translation_store.dispatch(events.TranslationDrawn(None))
         if release:
             subtitle_modes.release_secondary(self.track_ports)
 
@@ -3288,7 +3224,7 @@ class Reader:
         self._stateless.run(panel_intents.PanelCommand.TOGGLE_ANALYSIS)
 
     def toggle_annotation_mode(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
+        self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
 
     def toggle_help(self) -> None:
         self._run_help_command(HelpCommand.TOGGLE)
@@ -3331,13 +3267,13 @@ class Reader:
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
     def _navigate_previous(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.NAVIGATE_PREVIOUS)
+        self._stateless.run(subtitle_intents.SubtitleCommand.NAVIGATE_PREVIOUS)
 
     def _navigate_next(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.NAVIGATE_NEXT)
+        self._stateless.run(subtitle_intents.SubtitleCommand.NAVIGATE_NEXT)
 
     def _replay_cue(self) -> None:
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.REPLAY_CUE)
+        self._stateless.run(subtitle_intents.SubtitleCommand.REPLAY_CUE)
 
     def _anchor_subtitles(self) -> None:
         """One-press manual re-time: snap the sub cue nearest the playhead to start NOW. For when
@@ -3345,7 +3281,7 @@ class Reader:
         begins and press — mpv's ``sub-delay`` shifts so that cue lands here, and every later cue
         follows by the same offset. The overlay reads the delayed ``sub-text``, so the on-screen line
         moves with it. Cumulative (anchors from the current delay), so a second anchor refines a first."""
-        self._run_subtitle_command(subtitle_intents.SubtitleCommand.ANCHOR_TIMING)
+        self._stateless.run(subtitle_intents.SubtitleCommand.ANCHOR_TIMING)
 
     def _build_command_router(self) -> CommandExecutor:
         """Assemble feature-owned actions once; handlers are bound and receive no god context."""
@@ -3453,7 +3389,7 @@ class Reader:
         """
         if self.refresh_osd():
             if self.sub_text.strip():
-                self._draw_subtitle()
+                self.draw_subtitle()
             self._redraw_help()
             self._draw_analysis()
             # row capacity changed, so the active row may need re-centring
@@ -3682,7 +3618,7 @@ class Reader:
     def _cancel_render_ahead(self) -> None:
         tooltip_raster.cancel(self._render_ahead)
 
-    def _submit_subtitle_fetch(
+    def submit_subtitle_fetch(
         self,
         request: subtitle_modes.SubtitleFetchRequest,
         *,
@@ -3755,7 +3691,7 @@ class Reader:
             self._playback_store,
             self._subtitle_tracks,
             self._hover_store,
-            self._translation,
+            self.translation_store,
         ):
             store.dispatch(retired)
 
@@ -3764,12 +3700,12 @@ class Reader:
         """mpv's current file as an absolute path (``path`` is verbatim what was loaded, so resolve a
         relative one against ``working-directory``). None when nothing is loaded. Used by the reactive
         re-slot and the eof advance to key the #100 sibling resolver off the real filesystem path."""
-        raw = self._prop("path")
+        raw = self.observed_property("path")
         if not raw:
             return None
         p = Path(str(raw)).expanduser()
         if not p.is_absolute():
-            wd = self._prop("working-directory")
+            wd = self.observed_property("working-directory")
             if wd:
                 p = Path(str(wd)) / p
         return p
@@ -3858,7 +3794,7 @@ class Reader:
         self._feed_episode_annotation()
         self._sync_mouse_capture()
         self._update_prefetch()
-        if self._translation_visible() and self._secondary_text() != self._trans_text:
+        if self.translation_visible() and self._secondary_text() != self._trans_text:
             self.draw_translation()
         # The active row tracks the loaded index, language and scorer as well as the cue, and those
         # change without a cue settling — so this is outside the early return below.
@@ -4002,7 +3938,7 @@ class Reader:
         def due() -> None:
             session_stats.accrue(
                 self.episode.session_recorder,
-                paused=bool(self._prop("pause")),
+                paused=bool(self.observed_property("pause")),
                 language=self.subtitle_language,
             )
             self.arm_session_persist(seconds)
@@ -4077,7 +4013,7 @@ class Reader:
         """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
         presents it (mpv #8172; see Overlay.repaint). Only when paused: playing frames present on
         their own, and re-adding every tick would be wasteful."""
-        if self.ov.ops == ops_before or not self._prop("pause"):
+        if self.ov.ops == ops_before or not self.observed_property("pause"):
             return
 
         # Fails open: with no timer port the repaint runs inline. A nudge that never fires is a
@@ -4101,7 +4037,7 @@ class Reader:
         at debug. Lives in overlay.log / report; playback is unaffected."""
         secs = 8.0
         bytes_read = self.ipc._bytes_read  # the read counter has no public reader
-        osd_ok = self._prop("osd-dimensions") not in (None, {})
+        osd_ok = self.observed_property("osd-dimensions") not in (None, {})
         if bytes_read == 0 or not osd_ok:
             log.warning(
                 "IPC looks dead %.0fs after start (bytes from mpv=%d, osd-dimensions=%s) — mpv's "
@@ -4151,7 +4087,7 @@ class Reader:
     def load_sub_index(self, path) -> None:
         subnav.load_sub_index(self.nav_ports, path)
 
-    def _seek_cue(self, effect: subtitle_intents.SeekCue) -> bool:
+    def seek_cue(self, effect: subtitle_intents.SeekCue) -> bool:
         """Carry out a navigation step, unless the cue it was decided against is gone.
 
         "Previous" is meaningless without a cue to be previous *to*, so a step that outlives its
@@ -4186,7 +4122,7 @@ class Reader:
         """What a noninteractive drive observes. A property, so it is not a debt row."""
         return session_runtime.SessionFacts(
             refresh_osd=self.refresh_osd,
-            prop=self._prop,
+            prop=self.observed_property,
             get=self._get,
             tokens=lambda: self.tokens,
             is_content_token=lambda token: self.tokenizer.is_content(token),
@@ -4542,7 +4478,7 @@ class Reader:
         session_stats.start(
             self.episode,
             enabled=self.options.stats.enabled,
-            path=lambda: self._prop("path"),
+            path=lambda: self.observed_property("path"),
             arm=self.arm_session_persist,
         )
 

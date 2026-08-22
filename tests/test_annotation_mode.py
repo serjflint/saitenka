@@ -52,7 +52,7 @@ def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
     provider = RecordingRasterProvider(size=(10, 10))
     reader.renderer = SubtitleRenderer(provider)
 
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     reader.set_annotation_hover(revealed=True)
     reader.set_annotation_hover(revealed=False)
 
@@ -121,7 +121,7 @@ def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
     ipc = FakeIPC({"mouse-pos": {"hover": False, "x": 50, "y": 50}})
     reader = Reader(ipc, options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")))
     reader.tokens = [object()]
-    reader._annotation_hover = True
+    reader.annotation_hover = True
     states = []
     monkeypatch.setattr(
         reader, "renderer", _SpyRenderer(lambda rq: states.append(rq.annotation_visible))
@@ -136,7 +136,7 @@ def test_cue_change_resets_hover_only_presentation(monkeypatch):
     reader = Reader(
         FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
     )
-    reader._annotation_hover = True
+    reader.annotation_hover = True
     states = []
     monkeypatch.setattr(
         reader, "renderer", _SpyRenderer(lambda rq: states.append(rq.annotation_visible))

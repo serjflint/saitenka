@@ -203,7 +203,7 @@ def configure(
     )
     # Declare the track rather than let the renderer read it back. `select_initial` wrote `sid`
     # fire-and-forget moments ago, so mid-session (a live profile cycle) mpv has not echoed it yet
-    # and `_prop("sid")` still answers with the track being replaced — the selection would look
+    # and `observed_property("sid")` still answers with the track being replaced — the selection would look
     # unchanged and the pixels would stay owned on behalf of a track that is gone. When nothing was
     # written there is nothing to declare and the read is correct.
     sid = selected_sid(startup)

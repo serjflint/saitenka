@@ -104,7 +104,7 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
     reader._interaction_metadata_submit = lambda **kwargs: (
         submitted.append(kwargs["request"]) or True
     )
-    monkeypatch.setattr(reader, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(reader, "draw_subtitle", lambda: None)
 
     # Through the cursor, because the claim is about the *event thread*: the hit-test and the hover
     # decision run there too, and a `set_hover` call skips both of them.

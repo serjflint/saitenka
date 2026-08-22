@@ -109,7 +109,7 @@ def test_subtitle_fetch_runs_off_the_event_thread_and_publishes_directly(monkeyp
 
     monkeypatch.setattr(reader, "toast", lambda message, level: messages.append((message, level)))
     try:
-        subtitle_modes.start_fetch(reader._submit_subtitle_fetch, reader._get, fetch)
+        subtitle_modes.start_fetch(reader.submit_subtitle_fetch, reader._get, fetch)
         _drain_until(reader, lambda: bool(messages))
         assert worker_thread is not None and worker_thread != event_thread
         assert messages == [("provider: no match", "warn")]
@@ -178,14 +178,14 @@ def test_newer_explicit_subtitle_choice_supersedes_older_completion(tmp_path, mo
     newer.write_text("newer", encoding="utf-8")
 
     subtitle_modes.start_fetch(
-        reader._submit_subtitle_fetch,
+        reader.submit_subtitle_fetch,
         reader._get,
         lambda: (older, "older"),
         force_select=True,
         name="picker-download",
     )
     subtitle_modes.start_fetch(
-        reader._submit_subtitle_fetch,
+        reader.submit_subtitle_fetch,
         reader._get,
         lambda: (newer, "newer"),
         force_select=True,
@@ -213,7 +213,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
 
     monkeypatch.setattr(reader, "toast", lambda message, level: messages.append((message, level)))
     try:
-        subtitle_modes.start_fetch(reader._submit_subtitle_fetch, reader._get, fetch)
+        subtitle_modes.start_fetch(reader.submit_subtitle_fetch, reader._get, fetch)
         assert started.wait(1)
         reader._stop.set()
         ipc.close_runtime_job_lane("subtitle-fetch", timeout=0)
@@ -320,7 +320,7 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader._translate_on = True
+    reader.translate_on = True
     messages = []
     monkeypatch.setattr(reader, "toast", lambda text, *_args: messages.append(text))
     rebuilt = []
@@ -330,7 +330,7 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     reader.toggle_subtitle_language()
 
     assert reader.subtitle_language == "en"
-    assert reader._translate_on is True
+    assert reader.translate_on is True
     assert ("set_property", "sid", 1) in ipc.commands
     assert ("set_property", "secondary-sid", 2) in ipc.commands
     assert rebuilt == ["rebuilt"]
@@ -343,7 +343,7 @@ def test_language_switch_releases_secondary_before_selecting_its_track(monkeypat
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader._translate_on = True
+    reader.translate_on = True
     reader.declare_subtitle(SubtitleSecondaryLeased(1))
     ipc.props["secondary-sid"] = 1
     monkeypatch.setattr(reader, "toast", lambda *_args: None)
@@ -417,7 +417,7 @@ def test_primary_sid_event_updates_rendering_language():
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader._translate_on = True
+    reader.translate_on = True
     reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
     ipc.props["sid"] = 1
     ipc.commands.clear()

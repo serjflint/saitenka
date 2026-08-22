@@ -416,7 +416,7 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
     assert backend.requests
     assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
     ]
@@ -505,9 +505,9 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     ipc.commands.clear()
 
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
     ipc.props["sid"] = 6
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
     assert _visibility_asserts(ipc) == 2
     result.close()
@@ -520,10 +520,10 @@ def test_reconfiguring_the_same_track_does_not_reassert(tmp_path: Path) -> None:
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
     ipc.commands.clear()
 
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
     assert _visibility_asserts(ipc) == 0
     result.close()
@@ -563,7 +563,7 @@ def test_missing_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
     assert result.boxes == []
     result.close()
 
@@ -641,7 +641,7 @@ def test_navigation_lands_on_the_target_cue_under_either_renderer(
     settle_jobs(result, ipc)
     result.hover = 0
 
-    assert result._seek_cue(SeekCue(1, result.cue_revision))
+    assert result.seek_cue(SeekCue(1, result.cue_revision))
 
     assert result.sub_text == "犬も見る"  # the target cue, drawn from the index without waiting
     assert result.hover == -1  # …with the previous cue's interaction state gone
@@ -924,7 +924,7 @@ def test_non_ass_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
     assert result.boxes == []
     result.close()
 
@@ -966,7 +966,7 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
     try:
         ipc.set_property_error = "rejected"
         result.set_subtitle("猫を見る")
-        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
         renderer = result.subtitle_pipeline.renderer
         assert isinstance(renderer, NativeVisibleRenderer)
@@ -994,7 +994,7 @@ def test_ass_geometry_restores_hits_after_noninteractive_source_switch(tmp_path:
     result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
     assert result.boxes == []
 
     source = tmp_path / "episode.ass"
@@ -1470,13 +1470,13 @@ def test_unexpected_geometry_error_keeps_native_pixels(tmp_path: Path, monkeypat
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
-    def fail_render_inputs(_prop, _osd):
+    def fail_render_inputs(_observed_property, _osd):
         raise RuntimeError("unexpected profile failure")
 
     monkeypatch.setattr(result.native_geometry, "_render_inputs", fail_render_inputs)
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     assert backend.requests == []
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
@@ -1533,7 +1533,7 @@ def test_invalid_result_identity_removes_visible_native_focus(tmp_path: Path) ->
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
     focus_index = len(ipc.commands)
 
     backend.token_index_offset = len(result.tokens)
@@ -1555,7 +1555,7 @@ def test_empty_cue_removes_visible_native_focus(tmp_path: Path) -> None:
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     result.set_subtitle("")
 
@@ -1571,7 +1571,7 @@ def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     result.close()
 
@@ -2092,7 +2092,7 @@ def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, tr
     elif trigger == "reconnect":
         renderer.connection_replaced(result.subtitle_target())
     else:
-        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
     assert ipc.commands.count(("set_property", "sub-visibility", True)) <= 1
     assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
@@ -2117,7 +2117,7 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     ipc.set_property_error = "disconnected"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert any(command[0] == "overlay-add" for command in ipc.commands)
@@ -2135,7 +2135,7 @@ def _establish_native(result: Reader, ipc: FakeIPC, sid: int) -> NativeVisibleRe
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     result._sub_pending = None
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
     assert renderer.ownership_state.native_pixels_established
     return renderer
 
@@ -2187,7 +2187,7 @@ def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path
 
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     assert result.boxes
     assert any(command[0] == "overlay-add" for command in ipc.commands)
@@ -2286,7 +2286,7 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     ipc.overlay_add_error = "unsupported format"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result._draw_subtitle)
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None
@@ -2301,7 +2301,7 @@ def test_rejected_legacy_rehandoff_keeps_mpv_visible_and_retries(tmp_path: Path)
     ipc.set_property_exception = OSError("pipe closed")
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
     assert renderer.ownership_state.owner.value == "legacy"
     ipc.set_property_exception = None
     renderer.suspend_for_overlay(result.subtitle_target())

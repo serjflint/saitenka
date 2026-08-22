@@ -113,12 +113,12 @@ def test_rebinding_the_episode_retires_the_slots_with_the_container() -> None:
 
     reader = Reader(FakeIPC(), prefetch=False)
     try:
-        reader._translate_on = True
+        reader.translate_on = True
         reader._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
 
         reader.rebind_episode()
 
         assert reader._subtitle_tracks.current == SubtitleTrackState()
-        assert reader._translate_on  # the hold is the session's, and survives
+        assert reader.translate_on  # the hold is the session's, and survives
     finally:
         reader.close()

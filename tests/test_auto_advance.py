@@ -271,7 +271,10 @@ def test_advance_defers_to_mpv_when_a_playlist_entry_is_next():
     ipc.props["playlist-pos"] = 0
     ipc.props["playlist-count"] = 3
 
-    assert cli_run._advance_at_eof(reader._prop, reader.current_media_path, reader.ipc) is True
+    assert (
+        cli_run._advance_at_eof(reader.observed_property, reader.current_media_path, reader.ipc)
+        is True
+    )
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)
 
 
@@ -284,7 +287,10 @@ def test_advance_loadfiles_the_next_sibling_without_a_playlist(tmp_path):
     ipc.props["playlist-pos"] = 0
     ipc.props["playlist-count"] = 1  # single file, no playlist to advance
 
-    assert cli_run._advance_at_eof(reader._prop, reader.current_media_path, reader.ipc) is True
+    assert (
+        cli_run._advance_at_eof(reader.observed_property, reader.current_media_path, reader.ipc)
+        is True
+    )
     assert ("loadfile", str(tmp_path / "Show - 04.mkv")) in ipc.commands
 
 
@@ -296,7 +302,8 @@ def test_advance_holds_when_no_playlist_and_no_sibling(tmp_path):
     ipc.props["playlist-count"] = 1
 
     assert (
-        cli_run._advance_at_eof(reader._prop, reader.current_media_path, reader.ipc) is False
+        cli_run._advance_at_eof(reader.observed_property, reader.current_media_path, reader.ipc)
+        is False
     )  # hold the last frame (keep-open)
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)
 

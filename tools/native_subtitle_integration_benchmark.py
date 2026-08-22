@@ -389,7 +389,7 @@ def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, boo
     hit = reader._hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
     before = len(ipc.commands)
     reader.hover = box.index
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     commands = ipc.commands[before:]
     focus = (
         any(command[:3] == ("osd-overlay", 1_001, "ass-events") for command in commands)

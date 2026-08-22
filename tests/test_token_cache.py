@@ -145,9 +145,9 @@ def test_renderer_draws_plain_while_a_cue_is_pending():
     reader.renderer = SubtitleRenderer(provider)
 
     reader._sub_pending = "猫"
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     reader._sub_pending = None
-    reader._draw_subtitle()
+    reader.draw_subtitle()
 
     assert provider.styles == ["plain", "styled"]
 
@@ -181,7 +181,7 @@ def test_annotation_failure_keeps_plain_subtitle_on_later_redraw():
     reader._enable_async_annotation()
     reader._dependencies_settled = True
     reader.set_subtitle("猫")
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     reader.close()
 
     assert provider.styles == ["plain", "plain"]
