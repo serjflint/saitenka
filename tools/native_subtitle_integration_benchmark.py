@@ -181,7 +181,11 @@ def _functional_passes(report: dict, manifest: dict) -> bool:
         and report["completed"] == manifest["event_count"]
         and report["geometry_apply_count"] == report["ready_before_presented"]
         and report["hit_test_count"] == report["presented"]
-        and report["focus_draw_count"] == report["geometry_apply_count"]
+        # Against presentations, not applications: the two are sampled on opposite sides of the
+        # geometry lane's terminal, so the one cold cue that presents before its geometry lands
+        # separates them by exactly one with nothing wrong. Every presented cue drawing focus is
+        # both the stricter claim and the one that survives an asynchronous pipeline.
+        and report["focus_draw_count"] == report["presented"]
         and report["tooltip_open_count"] == report["presented"]
         and report["tooltip_scroll_count"] == report["presented"]
         and report["failures"] == 0
@@ -306,7 +310,30 @@ class _IPC(NoSessionRuntime):
         self.commands.append(args)
         if args and args[0] == "get_property":
             return {"error": "success", "data": self.props.get(args[1])}
+        if args[:1] == ("set_property",):
+            # A write mpv would honour has to be readable afterwards. Ownership of the subtitle
+            # pixels is decided by asserting `sub-visibility` and reading it back, so a fake that
+            # drops writes leaves that assertion permanently unresolved — and every geometry apply
+            # then declines, which reads as the native path producing nothing.
+            self.props[args[1]] = args[2]
+            return {"error": "success", "data": None}
         return {"error": "success", "data": None}
+
+    def query(self, name: str) -> object | None:
+        """Routed through `command`, not read off `props`: one read path, so the trial's command log
+        stays the record of everything the renderer actually asked mpv."""
+        return self.command("get_property", name).get("data")
+
+    def command_async(self, *args, **_kwargs):
+        """Uncorrelated egress, completed inline — again through `command`, so a keybind the tooltip
+        registers shows up in the same log as everything else."""
+        from concurrent.futures import Future
+
+        from saitenka.mpvio.ipc import IPCRequest
+
+        future: Future[dict] = Future()
+        future.set_result(self.command(*args))
+        return IPCRequest(0, 0, future)
 
     def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
         """Correlated egress, completed inline. Delivery goes through `command` so this fake's own
@@ -374,10 +401,17 @@ class _TallDictionary:
 
 
 def _present(reader: Reader, text: str, *, native: bool) -> bool:
+    """Whether the cue is presented with geometry behind it.
+
+    Observed, not taken from `apply`'s return: publication moved into the geometry lane's terminal,
+    so the snapshot this call would install is usually already installed and `apply` reports False
+    for it. Reading the return would count zero on a pipeline that is working perfectly.
+    """
     reader.set_subtitle(text)
     if native:
         assert reader.native_geometry is not None
-        return reader.native_geometry.apply(reader._geometry_observation())
+        reader.native_geometry.apply(reader._geometry_observation())
+        return bool(reader.boxes) and reader.native_geometry.fallback_reason is None
     return bool(reader.boxes)
 
 
@@ -403,7 +437,7 @@ def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, boo
 
 def _scroll_and_close_tooltip(reader: Reader) -> bool:
     opened = reader.tip.view.state is not None
-    reader._scroll_tip(1)
+    reader.scroll_tip(1)
     scrolled = (
         opened
         and reader._scrolled_this_tick
@@ -499,6 +533,12 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             baseline_latencies.append(baseline_wall)
             baseline_cpu_latencies.append(baseline_cpu)
+            # Outside every timed region on purpose: the presentation numbers above are the perf
+            # claim and must keep their cold cue, but whether a tooltip opens is a functional
+            # invariant, and leaving it to race the geometry lane makes it a property of the
+            # runner's speed. The wait costs the measurement nothing and the oracle everything.
+            assert native.native_geometry is not None
+            assert native.native_geometry.worker.wait_idle(timeout=30)
             started = time.perf_counter_ns()
             cpu_started = time.thread_time_ns()
             hit, focus, opened = _open_tooltip(native, native_ipc, native=True)

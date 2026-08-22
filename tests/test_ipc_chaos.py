@@ -381,13 +381,38 @@ def test_command_submitted_during_reconnect_cannot_cross_connection_epochs():
             self.closed = True
             self.ready.set()
 
+    class ObservedTransition:
+        """Reports when a submitter has read the transition flag.
+
+        `command_async` reads it before it takes any lock, so that read — not the thread merely being
+        started — is the moment the submitter is inside the reconnect window. Waiting for the read
+        instead of assuming it is what keeps the epoch fence, not the scheduler, under test.
+        """
+
+        def __init__(self) -> None:
+            self._event = threading.Event()
+            self.read_by_a_submitter = threading.Event()
+
+        def is_set(self) -> bool:
+            state = self._event.is_set()
+            self.read_by_a_submitter.set()
+            return state
+
+        def set(self) -> None:
+            self._event.set()
+
+        def clear(self) -> None:
+            self._event.clear()
+
     gate = GateLock()
+    transitioning = ObservedTransition()
     replacement = ReplyingTransport()
     ipc = MpvIPC("unused")
     ipc._transport = _ScriptedTransport()
     ipc._start_reader()
     assert ipc._closed.wait(1)
     ipc._events_lock = gate
+    ipc._transitioning = transitioning
     ipc._dial = lambda _path, _timeout: replacement
     reconnected = []
 
@@ -403,7 +428,8 @@ def test_command_submitted_during_reconnect_cannot_cross_connection_epochs():
         target=lambda: submitted.append(ipc.command_async("show-text", "late", 1))
     )
     submit_thread.start()
-    assert not submitted
+    assert transitioning.read_by_a_submitter.wait(1)
+    assert not submitted, "the reconnect still holds the write lock the submitter needs"
     gate.release.set()
     submit_thread.join(2)
     reconnect_thread.join(2)
