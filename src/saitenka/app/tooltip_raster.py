@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 class RasterPanel(Protocol):
     def viewport(self, scroll: int, view_h: int, *, scale: float = 1.0) -> object: ...
 
+    def warm_viewport(self, scroll: int, view_h: int) -> None: ...
+
     def render_ahead(
         self,
         scroll: int,
@@ -66,6 +68,12 @@ def run_render_ahead(request: object, cancelled: threading.Event) -> object:
     try:
         if request.scale > 1.0:
             request.panel.viewport(request.scroll, request.view_h, scale=request.scale)
+        if should_cancel():
+            return None
+        # The destination, before the lookahead past it. `render_ahead` starts a whole screen beyond
+        # the viewport, so without this nothing ever warms the bands the scroll actually lands on —
+        # and `apply_pending_scroll` waits on exactly those before it may publish.
+        request.panel.warm_viewport(request.scroll, request.view_h)
         if should_cancel():
             return None
         request.panel.render_ahead(

@@ -809,6 +809,22 @@ class WindowedPanel:
                         return False
             return True
 
+    def warm_viewport(self, scroll: int, view_h: int) -> None:
+        """Raster the 1× bands ``[scroll, scroll+view_h)`` needs, compositing nothing.
+
+        The counterpart to :meth:`viewport_warm`, for a worker: that predicate gates whether a scroll
+        may be published, and :meth:`render_ahead` only warms the bands *beyond* the viewport
+        (``overscan=view_h``), so nothing on the worker side ever warmed the band a jump landed on.
+        Not ``viewport()``, which also composites pixels no one reads.
+        """
+        with self._lock:
+            self._grow_prefix(scroll + view_h)
+            table = self._offsets.estimated_table()
+            start, end = table.visible_range(scroll, view_h)
+            for i in range(start, end):
+                row_top = table.starts[i]
+                self._ensure_bands(i, scroll - row_top, scroll + view_h - row_top)
+
     def viewport_warm(self, scroll: int, view_h: int) -> bool:
         """True when a 1x viewport can be assembled without rasterizing a band."""
         with self._lock:

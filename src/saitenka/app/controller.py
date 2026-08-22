@@ -2680,6 +2680,11 @@ class Reader:
                 # the panel's height. A warm frame is bands=0; the jank tail is the frames with bands>0.
                 span.set("bands", st.last_frame_rasters)
                 span.set("full_h", st.full_height)
+                # Where the wheel asked to be vs where the pixels are. The two diverging across a
+                # whole burst is the shape of a scroll that arrives and never lands — otherwise
+                # only inferable by cross-reading `scroll_request` outcomes.
+                span.set("scroll", self.tip.view.scroll)
+                span.set("desired", self.tip.view.desired_scroll)
                 # Crisp health per scroll frame: the display scale (does it jitter mid-scroll?) and the
                 # soft-fallback reason ("" = composited crisp) — so a soft run is attributable to a cause.
                 span.set("scale", f"{self.tip_scale.display:.4f}")
@@ -3611,6 +3616,19 @@ class Reader:
         for view in (self.tip.view, self.tip.nest):
             tooltip_panel.apply_pending_crisp(self.tip_ports, view)
 
+    def _publish_pending_popups(self) -> None:
+        """Show the newest scrolled-to viewport (and its crisp upgrade) as soon as its bands are warm.
+
+        Warmth is a property of the panel cache, not of any one job, so the turn asks — not the
+        completion. Asking only on completion means a burst never publishes: every notch supersedes
+        the job before it, the identity fence in `_finish_render_ahead` matches none of them, and
+        the tooltip holds one frame until the wheel stops (measured at 1–3.4s, or never when the
+        popup closes first). Both are no-ops unless a view is pending and warm.
+        """
+        for view in (self.tip.view, self.tip.nest):
+            tooltip_panel.apply_pending_scroll(self.tip_ports, view)
+            tooltip_panel.apply_pending_crisp(self.tip_ports, view)
+
     def _cancel_render_ahead(self) -> None:
         tooltip_raster.cancel(self._render_ahead)
 
@@ -3789,6 +3807,7 @@ class Reader:
         """
         self._feed_episode_annotation()
         self._sync_mouse_capture()
+        self._publish_pending_popups()
         self._update_prefetch()
         if self.translation_visible() and self._secondary_text() != self._trans_text:
             self.draw_translation()

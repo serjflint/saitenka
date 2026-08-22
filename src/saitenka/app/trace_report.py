@@ -65,6 +65,8 @@ _FIELDS = frozenset(
         "cold",
         "bands",
         "full_h",
+        "scroll",
+        "desired",
         "layout_backend",
         "job_id",
         "latency_ms",

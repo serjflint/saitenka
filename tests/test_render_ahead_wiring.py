@@ -5,11 +5,12 @@ from __future__ import annotations
 import contextlib
 import threading
 
+import pytest
 import util
 from util import ManualRenderAheadSubmitter
 
 from saitenka import otel_metrics
-from saitenka.app import prefetch, tooltip_raster
+from saitenka.app import prefetch, tooltip_panel, tooltip_raster
 from saitenka.app.config import ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.popups import Panel
@@ -32,6 +33,9 @@ class _RecordingPanel:
 
     def viewport(self, scroll, view_h, *, scale=1.0):
         self.calls.append(("viewport", scroll, view_h, scale))
+
+    def warm_viewport(self, scroll, view_h):
+        self.calls.append(("warm_viewport", scroll, view_h))
 
     def render_ahead(self, scroll, view_h, *, direction, should_cancel, scale=1.0):
         self.calls.append((scroll, view_h, direction, should_cancel(), scale))
@@ -134,8 +138,12 @@ def test_broker_completion_warms_the_requested_viewport():
     r.tip.view.state = panel  # type: ignore[assignment]
     r._request_render_ahead(r.tip.view, 1)
     r._render_ahead_submit.finish()
-    # warmed at the scroll pos, not cancelled, at the (bucketed) display scale — native bands (one panel)
-    assert panel.calls == [(120, 300, 1, False, r.tip_scale.raster)]
+    # the landing viewport first (what gates publication), then the lookahead past it — the latter at
+    # the (bucketed) display scale, not cancelled: native bands, one panel
+    assert panel.calls == [
+        ("warm_viewport", 120, 300),
+        (120, 300, 1, False, r.tip_scale.raster),
+    ]
 
 
 def test_stale_completion_from_a_word_switch_is_not_published():
@@ -269,3 +277,62 @@ def test_a_failed_terminal_sweeps_nothing(monkeypatch):
     r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert swept == []
+
+
+def test_a_wheel_burst_reaches_the_viewport_it_scrolled_to():
+    """Three notches with no paint between them: the wheel gets where it asked to go, and the pixels
+    follow. Live this stalled — the worker warmed only the bands PAST each landing, so the gate that
+    lets a scroll be published never opened for the one it landed on."""
+    r = _reader()
+    r.tip.view.scroll = 0
+    r.tip.view.desired_scroll = 0
+    r.tip.view.state = _tall_panel()
+
+    for _ in range(3):
+        tooltip_panel.scroll_view(r.tip_ports, r.tip.view, 150)
+    while r._render_ahead_submit.calls:
+        r._render_ahead_submit.finish()
+
+    assert (r.tip.view.desired_scroll, r.tip.view.scroll) == (450, 450)
+
+
+@pytest.mark.parametrize("notch", [90, 150, 400])
+def test_scrolling_down_and_back_up_returns_to_where_it_started(notch):
+    """Round-trip: N notches down then N back up lands on the original viewport, whatever the notch.
+
+    Direction-agnostic and position-agnostic, so it holds wherever the warm/cold boundary happens to
+    fall — the thing a fixed-offset assertion cannot say. `notch=400` overshoots the panel and comes
+    back off the clamp, which is where an off-by-a-step in the deferred publish would show.
+    """
+    r = _reader()
+    r.tip.view.scroll = 0
+    r.tip.view.desired_scroll = 0
+    r.tip.view.state = _tall_panel()
+
+    def burst(delta):
+        for _ in range(4):
+            tooltip_panel.scroll_view(r.tip_ports, r.tip.view, delta)
+            while r._render_ahead_submit.calls:
+                r._render_ahead_submit.finish()
+            r._settle_interaction()
+
+    burst(notch)
+    assert r.tip.view.scroll > 0  # a negative control that never moved would round-trip too
+    burst(-notch)
+
+    assert r.tip.view.scroll == 0
+
+
+def test_the_turn_publishes_a_scroll_no_completion_claimed():
+    """A burst supersedes its own jobs, so a completion carrying the newest scroll's identity is not
+    something the popup may wait for: the wheel can stop on a notch whose job was already cancelled.
+    Warmth belongs to the panel, not to a job, so the turn asks."""
+    r = _reader()
+    r.tip.view.scroll = 0
+    r.tip.view.state = _tall_panel()
+    r.tip.view.state.warm_viewport(300, r.tip.view.view_h)
+    r.tip.view.desired_scroll = 300  # warm and wanted, but no job will ever report it
+
+    r._settle_interaction()
+
+    assert r.tip.view.scroll == 300

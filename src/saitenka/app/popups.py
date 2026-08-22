@@ -381,6 +381,10 @@ class Panel:
     def viewport_warm(self, scroll: int, view_h: int) -> bool:
         return self.windowed.viewport_warm(scroll, view_h)
 
+    def warm_viewport(self, scroll: int, view_h: int) -> None:
+        """Raster what ``viewport_warm`` asks about, so a worker can open that gate."""
+        self.windowed.warm_viewport(scroll, view_h)
+
     def render_ahead(
         self, scroll: int, view_h: int, *, direction: int, should_cancel, scale: float = 1.0
     ) -> int:
