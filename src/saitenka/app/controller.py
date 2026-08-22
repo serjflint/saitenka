@@ -916,6 +916,10 @@ class Reader:
             osd,
             self._playback.value("sub-text"),
         )
+        # Same reason `sub-text` is reconciled by hand above: the seed publishes no delta, so a
+        # transient latched by the pre-observe blocking read (3642x2096 six ms before mpv settled on
+        # 3024x1898) would stand for the session, and every hit box is laid out against it.
+        self.refresh_osd()
         if osd is None:
             log.warning(
                 "osd-dimensions seed is None — mpv isn't returning get_property replies (dead pipe / "

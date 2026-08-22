@@ -3421,3 +3421,46 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
     by_reducer = resume_via(lambda r: HoverAdapter(r).apply(hover_intents.ResumePlayback()))
 
     assert by_cue == by_reducer == [("set_property", "pause", False)]
+
+
+def _seeded_reader(request, *, latched, settled):
+    """A Reader whose `self.osd` was latched pre-observe, then seeded from a settled `osd-dimensions`.
+
+    Driven through `start_observing` and a real gateway rather than by assigning `osd`: the transient
+    only reaches `self.osd` because `observed_property` falls through to a BLOCKING read before
+    observing begins, and that fall-through IS the mechanism under test.
+    """
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    ipc.props["osd-dimensions"] = latched
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    r = Reader(ipc)
+    request.addfinalizer(r.close)
+    r.refresh_osd()  # the pre-observe blocking read, mid mpv fullscreen animation
+    ipc.props["osd-dimensions"] = settled
+    r.start_observing()
+    return r
+
+
+def test_seeding_folds_the_settled_osd_over_a_transient_pre_observe_read(request):
+    """`self.osd` decides where every overlay lands; the geometry lays hit boxes out against the live
+    `osd-dimensions`. A real report caught the blocking read returning 3642x2096 six milliseconds
+    before mpv settled on 3024x1898.
+
+    Seeding publishes no delta, so nothing re-drives `refresh_render_space` afterwards. Without a
+    hand reconcile the transient stands for the whole session and every box is uniformly offset —
+    which is why the shift was per-launch luck rather than per-episode.
+    """
+    r = _seeded_reader(request, latched={"w": 3642, "h": 2096}, settled={"w": 3024, "h": 1898})
+
+    assert r.osd == (3024, 1898)
+
+
+def test_seeding_keeps_the_osd_when_mpv_reports_nothing(request):
+    """Negative control: the reconcile must not clobber a good size with a fallback. `refresh_osd`
+    already declines an absent/zero report, and the seed must not route around that guard."""
+    r = _seeded_reader(request, latched={"w": 1920, "h": 1080}, settled={})
+
+    assert r.osd == (1920, 1080)

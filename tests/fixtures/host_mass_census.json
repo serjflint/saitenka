@@ -8,8 +8,8 @@
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2343,
+    "substantive_lines": 2347,
     "total": 343
   },
-  "reason": "the close sequence retires the shared render pool: its ThreadPoolExecutor workers are not daemons on a free-threaded build, so the interpreter's atexit join held the process open after mpv died"
+  "reason": "the seed must reconcile osd-dimensions by hand: seeding publishes no delta, so a transient latched by the pre-observe blocking read stood for the whole session and every hit box was laid out against it (confirmed by geometry.frame_agreement mismatch=10)"
 }
