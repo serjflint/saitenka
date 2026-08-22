@@ -202,23 +202,18 @@ def test_visibility_off_removes_an_inflight_interaction_paint(monkeypatch):
         ipc.close()
 
 
-def test_a_repaint_never_rewrites_the_file_mpv_still_has_mapped():
-    """`overlay-add` takes a FILENAME and mpv keeps it mmapped until the overlay is replaced.
-    Rewriting that path opens O_TRUNC, so mpv's mapping is briefly past EOF — a SIGBUS in mpv, not
-    an error we can observe. A scroll repaints tens of times a second, which is where it bit."""
+def test_publishing_a_frame_leaks_no_files():
+    """One stable path per oid plus its staging name, however many frames a scroll publishes. What
+    makes that path safe to reuse is `tests/test_overlay_frame_publication.py` — the frame-identity
+    assertion that used to live here asserted the alternating-slot *implementation*, which was built
+    on a mechanism the crash reports refute."""
     ov = Overlay(_FakeIPC())
     physical = ov.physical_oid(OverlayId.TIP)
-    held: list[str | None] = [None]
-    written = []
     for shade in range(6):
-        # what mpv is mapped to going in, and what this repaint wrote — they must never be equal
-        before = held[-1]
         ov.show_bgra(np.full((64, 48, 4), shade, np.uint8), oid=OverlayId.TIP)
-        wrote = ov._live[physical][2]
-        written.append(wrote)
-        assert wrote != before, "a repaint truncated the file mpv still had mapped"
-        held.append(wrote)
 
-    # Two slots, not a file per frame: a scroll repaints tens of times a second and must not leak.
-    assert len(set(written)) == 2
-    assert all(Path(p).exists() for p in set(written))
+    published = Path(ov._live[physical][2])
+    assert published.exists()
+    assert not published.with_name(published.name + ".staging").exists()
+    ov.close()
+    assert not published.exists()

@@ -148,8 +148,9 @@ class Overlay:
         self.id_base = id_base
         self._runtime_submit = runtime_submit
         self._files: dict[int, Path] = {}
-        #: Two write slots per oid so a repaint never truncates the one mpv has mapped.
-        self._frame_slots: dict[int, tuple[Path, ...]] = {}
+        #: One stable path per oid, only ever published onto by rename — see :meth:`_write_frame`.
+        self._frame_paths: dict[int, Path] = {}
+        self._frame_lock = threading.Lock()
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
         self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
@@ -257,6 +258,7 @@ class Overlay:
             self.ops += 1
             path = self._files.pop(physical_oid, None)
             self.lifecycle_oids.discard(oid)
+        self._retire_frame_path(physical_oid)
         if path is not None and path.exists():
             path.unlink()
 
@@ -275,35 +277,41 @@ class Overlay:
         return {"error": "success"}
 
     def _write_frame(self, oid: int, data: bytes) -> Path:
-        """Write ``data`` to whichever of this oid's two slots mpv is NOT currently holding.
+        """Publish ``data`` at this oid's stable path by ``os.replace``, never by rewriting it.
 
-        `overlay-add` takes a filename and mpv keeps it MAPPED until the overlay is replaced or
-        removed. Rewriting that path opens O_TRUNC, so the mapping spends a moment past EOF — and a
-        touch there is a SIGBUS inside mpv, not an error we can observe. That is the crash this
-        replaced: mpv wedged on `overlay-add`, then died on signal 10 mid-scroll.
+        mpv reads the named file **inside** `overlay-add` (`cmd_overlay_add` → `_platform_memmove`,
+        the frame both SIGBUS reports fault in). Any in-place rewrite therefore races that read, and
+        a pagein against a file being truncated is a bus error inside mpv rather than an error we can
+        observe. A rename never mutates the inode mpv opened, so the race has no window left to hit —
+        which an alternating pair of slots could only ever narrow, since it cannot know when the read
+        happens. Two writers is what made the narrowed window reachable: `repaint` re-issues
+        `_live`'s tail from the reader thread, and it names the very slot the upload thread picks next.
 
-        Two slots rather than a fresh file per frame (the `prepare`/`commit_prepared` discipline):
-        `overlay-add` is synchronous, so once it returns mpv has taken the new file and released the
-        other one, and the alternation is safe by construction. Rewriting a file that already exists
-        at size reuses its blocks — 0.8 ms/frame against 3.2 ms for create-write-unlink, on the
-        upload path a scroll runs tens of times a second.
+        Cost is not why the old form was in place: interleaved, replace and in-place rewrite are both
+        ~0.7 ms p50 for a 2.5 MB frame here. The 0.8-vs-3.2 ms gap that chose in-place came from
+        timing each strategy in its own sequential block, which measures the page cache.
         """
-        slots = self._frame_slots.get(oid)
-        if slots is None:
-            slots = tuple(self._new_slot(oid) for _ in range(2))
-            self._frame_slots[oid] = slots
-        live = self._live.get(oid)
-        held = live[2] if live else None
-        path = next((p for p in slots if str(p) != held), slots[0])
-        path.write_bytes(data)
-        self._files[oid] = path
-        return path
+        with self._frame_lock:
+            path = self._frame_paths.get(oid)
+            if path is None:
+                path = self._frame_paths[oid] = self._new_frame_path(oid)
+            staging = path.with_name(path.name + ".staging")
+            staging.write_bytes(data)
+            Path(staging).replace(path)
+            self._files[oid] = path
+            return path
 
-    def _new_slot(self, oid: int) -> Path:
+    def _new_frame_path(self, oid: int) -> Path:
         with tempfile.NamedTemporaryFile(
             prefix=f"saitenka-osd-{oid}-", suffix=".bgra", delete=False
         ) as staged:
             return Path(staged.name)
+
+    def _retire_frame_path(self, oid: int) -> None:
+        with self._frame_lock:
+            path = self._frame_paths.pop(oid, None)
+        if path is not None:
+            path.with_name(path.name + ".staging").unlink(missing_ok=True)
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         label = _oid_label(oid)
@@ -389,6 +397,7 @@ class Overlay:
         self._live.pop(oid, None)
         self.ops += 1
         p = self._files.pop(oid, None)
+        self._retire_frame_path(oid)
         if p is not None and p.exists():
             p.unlink()
         return res
