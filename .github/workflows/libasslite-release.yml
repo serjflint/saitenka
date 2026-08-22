@@ -95,8 +95,6 @@ jobs:
     name: smoke wheel (${{ matrix.os }} ${{ matrix.py }})
     needs: [linux, native]
     runs-on: ${{ matrix.os }}
-    env:
-      VCPKG_DOWNLOADS: ${{ runner.temp }}/vcpkg-downloads
     strategy:
       fail-fast: false
       matrix:
@@ -121,7 +119,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$env:VCPKG_DOWNLOADS" | Out-Null
+          # Exported here rather than in a job-level `env:`: the `runner` context is not available
+          # there, and using it fails the WHOLE workflow at startup with no jobs and no error on the
+          # run itself. vcpkg reads VCPKG_DOWNLOADS from the environment, so it has to outlive this
+          # step -- $GITHUB_ENV gives it the job-wide scope the job-level `env:` was reaching for.
+          $downloads = "$env:RUNNER_TEMP/vcpkg-downloads"
+          "VCPKG_DOWNLOADS=$downloads" | Out-File $env:GITHUB_ENV -Append
+          New-Item -ItemType Directory -Force $downloads | Out-Null
           $revision = (git -C "$env:VCPKG_INSTALLATION_ROOT" rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $revision -cnotmatch '^[0-9a-f]{40}$') {
             throw "vcpkg revision is not a lowercase Git SHA"

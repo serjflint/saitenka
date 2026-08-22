@@ -230,7 +230,9 @@ def test_collect_omits_player_crash_reports_from_another_day(monkeypatch, tmp_pa
 
 
 def test_collect_omits_player_crash_reports_off_macos(monkeypatch, tmp_path):
-    monkeypatch.setattr(report.sys, "platform", "linux")
+    # `platform.system`, matching what the code reads: `sys.platform` is narrowed by the type
+    # checkers, so gating on it made every following line unreachable on a Linux `poe types`.
+    monkeypatch.setattr(report.platform, "system", lambda: "Linux")
     _hermetic(monkeypatch, tmp_path)
     _player_crash(tmp_path, "mpv-2026-08-22-144118.ips", "{}\n")
 

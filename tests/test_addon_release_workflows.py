@@ -1,4 +1,6 @@
 import json
+import re
+import sys
 import tomllib
 from pathlib import Path
 
@@ -193,6 +195,53 @@ def test_bundle_release_caches_only_pinned_source_downloads() -> None:
     }
 
 
+#: Contexts GitHub allows in `jobs.<id>.env`. `runner` is NOT among them — it only exists once a
+#: runner is assigned, i.e. from the steps down.
+_JOB_ENV_CONTEXTS = ("github", "needs", "strategy", "matrix", "vars", "inputs")
+
+
+def _job_env_context_uses() -> list[tuple[str, str, str, str]]:
+    """Every `(workflow, job, var, expression)` whose job-level env reads an unavailable context."""
+    return [
+        (path.name, job_name, var, context)
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        for job_name, job in (
+            yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}
+        ).items()
+        for var, value in ((job or {}).get("env") or {}).items()
+        for context in re.findall(r"\$\{\{\s*([a-zA-Z_]+)\.", str(value))
+        if context not in _JOB_ENV_CONTEXTS
+    ]
+
+
+def test_no_job_level_env_uses_the_runner_context() -> None:
+    """A context GitHub does not offer in `jobs.<id>.env` is a workflow VALIDATION error: the run
+    fails at startup with zero jobs, carries no error of its own, and the workflow is listed under
+    its filename instead of its `name:`. `ci.yml` and `libasslite-release.yml` both carried
+    `${{ runner.temp }}` there from 2026-08-16 until 2026-08-22 — six days in which the main gate
+    silently did not run at all, and a release tag could not build.
+
+    Checked across every workflow, not the two that broke: the failure is invisible in review and
+    the cost of finding it again is a dead CI nobody notices.
+    """
+    assert _job_env_context_uses() == []
+
+
+def test_the_job_env_context_check_can_fail(tmp_path: Path, monkeypatch) -> None:
+    """Negative control: the scan above is worthless if it cannot see the exact defect it exists
+    for, and a glob that silently matches nothing looks identical to a clean tree."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "broken.yml").write_text(
+        "name: broken\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+        "    env:\n      TMP: ${{ runner.temp }}/x\n    steps:\n      - run: 'true'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+
+    assert _job_env_context_uses() == [("broken.yml", "build", "TMP", "runner")]
+
+
 def test_windows_libass_jobs_cache_downloads_by_allowlisted_vcpkg_revision() -> None:
     observed = []
     for workflow_name, job in [("ci.yml", "libasslite"), ("libasslite-release.yml", "smoke")]:
@@ -204,7 +253,11 @@ def test_windows_libass_jobs_cache_downloads_by_allowlisted_vcpkg_revision() -> 
         observed.append(
             {
                 "workflow": workflow_name,
-                "downloads_env": workflow["jobs"][job]["env"]["VCPKG_DOWNLOADS"],
+                # Exported from the step, not declared in the job's `env` — see
+                # `test_no_job_level_env_uses_the_runner_context` for why that is not optional.
+                "downloads_exported": 'VCPKG_DOWNLOADS=$downloads" | Out-File $env:GITHUB_ENV'
+                in revision["run"],
+                "downloads_from_runner_temp": "$env:RUNNER_TEMP/vcpkg-downloads" in revision["run"],
                 "downloads_initialized": "New-Item -ItemType Directory -Force" in revision["run"],
                 "revision_if": revision["if"],
                 "revision_allowlisted": "^[0-9a-f]{40}$" in revision["run"],
@@ -215,7 +268,8 @@ def test_windows_libass_jobs_cache_downloads_by_allowlisted_vcpkg_revision() -> 
         )
 
     expected = {
-        "downloads_env": "${{ runner.temp }}/vcpkg-downloads",
+        "downloads_exported": True,
+        "downloads_from_runner_temp": True,
         "downloads_initialized": True,
         "revision_if": "runner.os == 'Windows'",
         "revision_allowlisted": True,

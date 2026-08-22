@@ -39,6 +39,7 @@ from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
+    from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
@@ -68,8 +69,12 @@ HAND_PICKED: list[tuple[str, str]] = [
 class FakeIPC(NoSessionRuntime):
     """Minimal mpv stand-in: fixed osd, no socket. overlay-add just writes a temp file (as mpv wants).
 
-    Refuses job lanes rather than lacking the port: the bench drives the Reader synchronously and
-    there is no gateway behind it."""
+    Refuses job lanes while no gateway is installed — the synchronous bench paths drive the Reader
+    themselves and want no background work. A path that MEASURES background work installs one (see
+    :func:`_runtime_ipc`), and then the ports delegate for real: refusing with a gateway present
+    would silently disable the very thing being measured, which is exactly what happened to
+    ``--timeline`` when prefetch moved onto registered job lanes.
+    """
 
     def __init__(self):
         self.props: dict[str, object] = {
@@ -77,6 +82,32 @@ class FakeIPC(NoSessionRuntime):
             "pause": False,
             "mouse-pos": {"hover": False, "x": -1, "y": -1},
         }
+        self._runtime_gateway = None
+
+    def install_runtime_ingress(self, _event_sink, _connection_sink, _session_loop, gateway):
+        self._runtime_gateway = gateway
+
+    def register_runtime_job_lane(self, name, policy, handler) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        self._runtime_gateway.register_job_lane(name, policy, handler)
+        return True
+
+    def submit_runtime_job(self, **kwargs) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.submit_job(**kwargs)
+
+    def close_runtime_job_lane(self, name, timeout: float = 2.0) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.close_job_lane(name, timeout)
+
+    def wake_session_runtime(self) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        self._runtime_gateway.mailbox.wake()
+        return True
 
     def command(self, *args):
         if args and args[0] == "get_property":
@@ -100,6 +131,22 @@ def _fake_ipc() -> MpvIPC:
     (no socket, headless bench) but isn't a subclass — cast documents that at the one boundary instead
     of a per-call-site ``# type: ignore``."""
     return cast("MpvIPC", FakeIPC())
+
+
+def _runtime_ipc() -> tuple[MpvIPC, MpvGateway]:
+    """A fake with a REAL gateway behind it, for a bench that measures BACKGROUND work.
+
+    Prefetch runs on a registered job lane, and `start_prefetch` returns early when the lane is
+    refused — so a bench that omits the gateway measures a Reader whose prefetch never starts, and
+    reports every hover as "the worker fell behind" when no worker exists. Close the gateway when
+    the run ends; its threads outlive the Reader otherwise.
+    """
+    from saitenka.mpvio.gateway import MpvGateway
+    from saitenka.runtime.mailbox import SessionMailbox
+
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox())
+    return cast("MpvIPC", ipc), gateway
 
 
 def _stats(samples: list[float]) -> dict:
@@ -134,13 +181,20 @@ def measure(fn, reps: int, warmup: int = 2) -> dict:
     return _stats(samples)
 
 
+def _gil_enabled() -> bool:
+    """Whether the GIL is on RIGHT NOW. Worth re-reading after the tokenizer loads: fugashi
+    re-enables it on import, so a reading taken at startup describes a runtime that no longer
+    exists."""
+    return bool(getattr(sys, "_is_gil_enabled", lambda: True)())
+
+
 def runtime_info() -> dict:
     """The runtime facts that make a benchmark number meaningful: whether this is a free-threaded
     build and whether the GIL is actually OFF right now (a C-extension like fugashi silently
     re-enables it on import — see AGENTS.md — which collapses worker scaling without any error), plus
     the worker capacity that scaling depends on. Recorded in every run so a result is never ambiguous
     about which runtime produced it."""
-    gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
+    gil_enabled = _gil_enabled()
     return {
         "python": sys.version.split()[0],
         "freethreaded_build": bool(sysconfig.get_config_var("Py_GIL_DISABLED")),
@@ -1541,8 +1595,11 @@ def run_timeline(
     ds.entry_for = traced_entry_for
 
     scorer = _timeline_scorer(vocab_words) if head_prefetch > 0 else None
+    # A REAL gateway: this whole benchmark is about what the background worker gets done during the
+    # idle gaps, and prefetch only starts once its job lane registers.
+    timeline_ipc, gateway = _runtime_ipc()
     reader = Reader(
-        _fake_ipc(),
+        timeline_ipc,
         dict_set=ds,
         scorer=scorer,
         prefetch=True,
@@ -1622,7 +1679,13 @@ def run_timeline(
             reader.retire_hover()
     finally:
         reader._stop.set()
+        gateway.close()  # its worker threads outlive the Reader otherwise
 
+    # `runtime_info()` ran before any tokenizer existed, so its GIL reading (and the worker count
+    # derived from it) predates fugashi silently re-enabling the GIL — the exact collapse its own
+    # docstring warns about. The Reader has since started prefetch, so take the count it ACTUALLY
+    # got: a header claiming 8 workers while 2 are running is what makes a miss count unreadable.
+    rt = {**rt, "prefetch_workers": reader.prefetch_state.workers, "gil_enabled": _gil_enabled()}
     gil_rc = finalize_runtime(rt, require_ft)
     idle_budget_ms = lookahead * dwell_s * 1000.0
     print(f"\nSaitenka overlay — TIMELINE: idle-paced session   ({tag})")
