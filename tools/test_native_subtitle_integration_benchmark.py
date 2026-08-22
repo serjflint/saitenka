@@ -31,7 +31,9 @@ def report() -> dict:
         "ready_before_presented": 100,
         "geometry_apply_count": 100,
         "hit_test_count": 101,
-        "focus_draw_count": 100,
+        # Every presented cue, including the cold one whose geometry lands after presentation: the
+        # tooltip opens later than `_present` samples, so focus tracks presentations, not readiness.
+        "focus_draw_count": 101,
         "tooltip_open_count": 101,
         "tooltip_scroll_count": 101,
         "retained_rss_growth_mib": 32.0,
