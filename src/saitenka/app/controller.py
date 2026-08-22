@@ -746,8 +746,8 @@ class Reader:
         # …and its eighth: what a lookup resolved about the hovered word, plus the `k` cycle over
         # its kanji. The cycle restarting on a new word was three `= 0` writes at three sites; a
         # new answer is the restart now, so a site that forgets cannot exist.
-        self._word_store = HoveredWordStore(self.ipc)
-        self.interaction.word_store = self._word_store
+        self.word_store = HoveredWordStore(self.ipc)
+        self.interaction.word_store = self.word_store
         # …and its ninth: the mined-card preview. Its rects and the clip's live `Popen` stay on the
         # panel beside it — a reducer can hold neither one paint's geometry nor a process.
         self._preview_store = PreviewStore(self.ipc)
@@ -1356,9 +1356,9 @@ class Reader:
         self.tip.view.key = None
         self.tip.tip_tok = self.tip.tip_inflected = None
         self._nav_store.dispatch(events.TipNavCleared())
-        self._word_store.dispatch(events.HoverWordForgotten())
+        self.word_store.dispatch(events.HoverWordForgotten())
         self._unbind_tip_keys()
-        self._resume_after_hover_pause()
+        self.resume_after_hover_pause()
         self._sync_auto_translation()
 
     def set_subtitle(
@@ -1825,7 +1825,7 @@ class Reader:
     def _clear_native_interaction(self) -> None:
         self.teardown_tip()
         self.hover = -1
-        self._word_store.dispatch(events.HoverWordForgotten())
+        self.word_store.dispatch(events.HoverWordForgotten())
         self.boxes = []
         self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
 
@@ -1916,12 +1916,12 @@ class Reader:
         self._draw_subtitle()
 
     def speak_hovered(self) -> None:
-        self._run_hover_command(hover_intents.HoverCommand.SPEAK)
+        self._stateless.run(hover_intents.HoverCommand.SPEAK)
 
     def copy_hovered(self) -> None:
-        self._run_hover_command(hover_intents.HoverCommand.COPY)
+        self._stateless.run(hover_intents.HoverCommand.COPY)
 
-    def _copy_token(self, t) -> None:
+    def copy_token(self, t) -> None:
         tooltip.copy_token(self.toast, t)
 
     def copy_line(self) -> None:
@@ -2335,7 +2335,7 @@ class Reader:
             tip=self.tip,
             pulse_store=self._pulse_store,
             pause_store=self._pause_store,
-            word_store=self._word_store,
+            word_store=self.word_store,
             scale=self.tip_scale,
             surfaces=self.interaction_surfaces,
             hover_store=self._hover_store,
@@ -2714,9 +2714,9 @@ class Reader:
 
     # --- kanji lookup mode ------------------------------------------------------------------------
     def kanji_current(self) -> None:
-        self._run_hover_command(hover_intents.HoverCommand.KANJI)
+        self._stateless.run(hover_intents.HoverCommand.KANJI)
 
-    def _open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
+    def open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
         nested_popup.open_kanji(self.tip_ports, self.panel_ports, ch, wx, wy, wh)
 
     def _hide_nested(self) -> None:
@@ -2970,38 +2970,8 @@ class Reader:
         )
 
     # --- hovered-word commands: pure reducer, executed here (WP5.3) ---------------------------
-    def _hover_inputs(self) -> hover_intents.HoverInputs:
-        """Read every fact the hovered-word commands decide from, once, before deciding."""
-        from saitenka.app.subtitles import box_for_token
-        from saitenka.model import is_ideograph
 
-        # The pause policy is read whether or not a word is hovered: toggling it is what a user
-        # does before hovering anything, so an early return on "nothing hovered" would silently
-        # hand the reducer a default of False and flip the setting the wrong way.
-        if not 0 <= self.hover < len(self.tokens):
-            return hover_intents.HoverInputs(
-                pause_on_tooltip=self.pause_on_tooltip,
-                paused_by_tooltip=self.interaction.hover_pause.held,
-            )
-        token = self.tokens[self.hover]
-        return hover_intents.HoverInputs(
-            hovered=True,
-            surface=token.surface,
-            reading=self._word_store.current.reading,
-            token_reading=token.reading,
-            kanji=tuple(char for char in token.surface if is_ideograph(char)),
-            kanji_index=self._word_store.current.kanji,
-            has_dictionaries=self.dict_set is not None,
-            anchored=box_for_token(self.boxes, self.hover) is not None,
-            pause_on_tooltip=self.pause_on_tooltip,
-            paused_by_tooltip=self.interaction.hover_pause.held,
-        )
-
-    def _run_hover_command(self, command: hover_intents.HoverCommand) -> None:
-        for effect in hover_intents.reduce(command, self._hover_inputs()):
-            self._apply_hover_effect(effect)
-
-    def _resume_after_hover_pause(self) -> None:
+    def resume_after_hover_pause(self) -> None:
         """Give playback back, if a tooltip is what took it. One path, because there were three: two
         reached mpv through a `getattr(ipc, "command_async", ipc.command)` duck-probe — invisible to
         the direct-write gate, and a fake missing the port silently took the other branch.
@@ -3018,27 +2988,6 @@ class Reader:
             False,  # noqa: FBT003  # mpv IPC wire value
             owner=Owner.PLAYBACK,
         )
-
-    def _apply_hover_effect(self, effect: hover_intents.HoverEffect) -> None:
-        from saitenka.app.media import speak
-        from saitenka.app.subtitles import box_for_token
-
-        if isinstance(effect, hover_intents.SpeakText):
-            speak(effect.text)
-        elif isinstance(effect, hover_intents.CopyToken):
-            self._copy_token(self.tokens[self.hover])
-        elif isinstance(effect, hover_intents.OpenKanji):
-            box = box_for_token(self.boxes, self.hover)
-            assert box is not None  # the reducer only opens against an anchored token
-            origin_x, origin_y = self.sub_origin
-            self._word_store.dispatch(events.HoverKanjiAdvanced())
-            self._open_kanji(effect.char, origin_x + box.x, origin_y + box.y, box.h)
-        elif isinstance(effect, hover_intents.SetHoverPause):
-            self.pause_on_tooltip = effect.enabled
-        elif isinstance(effect, hover_intents.ResumePlayback):
-            self._resume_after_hover_pause()
-        elif isinstance(effect, Announce):
-            self.toast(effect.text, effect.kind)
 
     @property
     def picker_store(self) -> PickerStore:
@@ -3318,7 +3267,7 @@ class Reader:
             self.lifecycle_surfaces.remove(TOAST_ID)
 
     def toggle_hover_pause(self) -> None:
-        self._run_hover_command(hover_intents.HoverCommand.TOGGLE_PAUSE)
+        self._stateless.run(hover_intents.HoverCommand.TOGGLE_PAUSE)
 
     def toggle_bookmark(self) -> None:
         self._stateless.run(mine_intents.MineCommand.BOOKMARK_CUE)

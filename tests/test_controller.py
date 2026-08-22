@@ -3399,6 +3399,7 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
     at the wire.
     """
     from saitenka.app import hover_intents
+    from saitenka.app.hover_adapter import HoverAdapter
 
     def resume_via(act) -> list[tuple]:
         ipc = FakeIPC()
@@ -3413,6 +3414,6 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
         return [c for c in ipc.commands[before:] if c[:2] == ("set_property", "pause")]
 
     by_cue = resume_via(lambda r: r.set_subtitle("別の字幕"))
-    by_reducer = resume_via(lambda r: r._apply_hover_effect(hover_intents.ResumePlayback()))
+    by_reducer = resume_via(lambda r: HoverAdapter(r).apply(hover_intents.ResumePlayback()))
 
     assert by_cue == by_reducer == [("set_property", "pause", False)]
