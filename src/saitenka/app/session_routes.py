@@ -247,6 +247,11 @@ WORKER_LANE_PARTICIPANTS = (
     "lanes:interaction-metadata",
     "lanes:mined-seed",
     "lanes:episode-analysis",
+    # Dead last, once every lane above has cancelled the work it owns. On a free-threaded build the
+    # shared render pool is a ThreadPoolExecutor whose workers are NOT daemons, so the interpreter's
+    # own atexit joins them: a raster still running here holds the process open after mpv is gone
+    # and the terminal never comes back. Measured at 6.1s for a single 6s task.
+    "lanes:render-pool",
 )
 
 #: Setup participants. Prefixed because the two halves are separate contracts, not two uses of one:

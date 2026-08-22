@@ -8,8 +8,8 @@
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2330,
+    "substantive_lines": 2343,
     "total": 343
   },
-  "reason": "scroll_frame reports which warmth predicate refused: publication asks the 1x tier while a hi-dpi blit composites from the native one, and nothing said which was cold"
+  "reason": "the close sequence retires the shared render pool: its ThreadPoolExecutor workers are not daemons on a free-threaded build, so the interpreter's atexit join held the process open after mpv died"
 }

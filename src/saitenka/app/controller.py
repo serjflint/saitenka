@@ -4566,6 +4566,18 @@ class Reader:
         def lane(name: str) -> Callable[[], object]:
             return lambda: close_lane(name, self._lane_remaining())
 
+        def _close_render_pool() -> None:
+            """Retire the shared render pool once every lane above has cancelled its work.
+
+            `wait=False`: the in-flight rasters poll `should_cancel` and the lanes have already set
+            it, so they land on their own — waiting here would spend the close budget on work whose
+            pixels nobody will see. Dropping the queue is the point; the interpreter's atexit join
+            is what turns a leftover raster into a process that outlives mpv.
+            """
+            from saitenka.parallel import shutdown_shared_executor
+
+            shutdown_shared_executor(wait=False)
+
         def start_lane_budget() -> None:
             # Armed here, not at table-build time: the 2s budget starts once the capabilities are
             # down, and computing it earlier would silently spend that window on their teardown.
@@ -4595,6 +4607,7 @@ class Reader:
                     lambda: mask_atlas_startup.close(self._mask_atlas_startup),
                     lane("mask-atlas-startup"),
                     lambda: mask_atlas_startup.uninstall(self.session.render_cache),
+                    _close_render_pool,
                     # The unconstrained tail. Each one's state was already retired by an earlier
                     # phase — the probes at CAPABILITIES, the metadata at PARTICIPANTS, the mined
                     # seed by the generation bump `close` opens with — so what is left is the
