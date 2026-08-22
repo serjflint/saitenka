@@ -200,6 +200,13 @@ Reports hover latency split **idle-warm** (the word's dictionary entries were al
 hover) vs. **cold** (decoded synchronously, on hover), plus the worker's **lead time** (enqueued-as-upcoming
 → decoded) against the idle budget it actually had (`lookahead × dwell`).
 
+> **The 2026-07-26 baseline below is not comparable to a current run.** Prefetch moved onto a
+> registered runtime job lane, and the bench's `FakeIPC` inherits `NoSessionRuntime`, whose
+> `register_runtime_job_lane` returns `False` — so `start_prefetch` returned early and every run
+> between that migration and 2026-08-22 measured a Reader with **no prefetch at all**, reporting the
+> resulting synchronous decodes as "the worker fell behind". The harness now installs a real gateway
+> (`_runtime_ipc`); re-baseline before comparing.
+
 Baseline — 2026-07-26, defaults (`--timeline-cues 80 --timeline-dwell-s 0.3 --timeline-lookahead 3`,
 900ms idle budget), 9 dicts + 9 freq + 1 pitch:
 
