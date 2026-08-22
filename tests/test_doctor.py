@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+import types
 
 import pytest
 
@@ -71,6 +72,19 @@ def test_subtitle_geometry_check_reports_optional_provider_failure(monkeypatch):
         "import_module",
         lambda _name: (_ for _ in ()).throw(ImportError("libasslite missing")),
     )
+
+    check = doc.check_subtitle_geometry()
+
+    assert check.status == "warn"
+    assert "mpv subtitles remain visible" in check.detail
+
+
+def test_subtitle_geometry_check_survives_a_namespace_package_shadow(monkeypatch):
+    """A bare `libasslite/` directory beside the CWD imports as an EMPTY PEP 420 namespace package:
+    the import succeeds and only the attribute reach fails. `saitenka setup` run from the repo root
+    crashed the whole doctor on it — one optional provider must cost one warn."""
+    monkeypatch.setattr(doc, "load_config", lambda: {"subtitle_geometry": {"native_visible": True}})
+    monkeypatch.setattr(doc.importlib, "import_module", lambda _name: types.ModuleType(_name))
 
     check = doc.check_subtitle_geometry()
 

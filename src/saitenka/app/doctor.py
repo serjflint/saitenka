@@ -678,7 +678,11 @@ def check_subtitle_geometry() -> Check:
             version = renderer.library_version()
         finally:
             renderer.close()
-    except (ImportError, OSError, RuntimeError, ValueError) as error:
+    # AttributeError belongs here: the import can SUCCEED and still yield nothing usable. A bare
+    # `libasslite/` directory beside the CWD is a PEP 420 namespace package, so `import` binds an
+    # empty module and only the attribute reach says so. Running `saitenka setup` from the repo root
+    # hit exactly that and crashed the whole doctor rather than warning on one check.
+    except (AttributeError, ImportError, OSError, RuntimeError, ValueError) as error:
         return Check(
             "subtitle-geometry",
             "warn",
