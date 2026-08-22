@@ -339,8 +339,8 @@ def test_a_notch_landing_mid_raster_still_leaves_the_destination_warm():
         def warm_viewport(self, scroll, view_h):
             reached.append(("destination", scroll, view_h))
 
-        def render_ahead(self, *_args, **_kwargs):
-            reached.append("lookahead")
+        def render_ahead(self, scroll, view_h, **_kwargs):
+            reached.append(("lookahead", scroll, view_h))
 
     request = tooltip_raster.RenderAheadRequest(SupersedingPanel(), 900, 300, 1, 1.75, superseded)
     tooltip_raster.run_render_ahead(request, threading.Event())
