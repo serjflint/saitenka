@@ -533,6 +533,12 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             baseline_latencies.append(baseline_wall)
             baseline_cpu_latencies.append(baseline_cpu)
+            # Outside every timed region on purpose: the presentation numbers above are the perf
+            # claim and must keep their cold cue, but whether a tooltip opens is a functional
+            # invariant, and leaving it to race the geometry lane makes it a property of the
+            # runner's speed. The wait costs the measurement nothing and the oracle everything.
+            assert native.native_geometry is not None
+            assert native.native_geometry.worker.wait_idle(timeout=30)
             started = time.perf_counter_ns()
             cpu_started = time.thread_time_ns()
             hit, focus, opened = _open_tooltip(native, native_ipc, native=True)
