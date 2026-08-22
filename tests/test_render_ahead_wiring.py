@@ -323,6 +323,34 @@ def test_scrolling_down_and_back_up_returns_to_where_it_started(notch):
     assert r.tip.view.scroll == 0
 
 
+def test_a_notch_landing_mid_raster_still_leaves_the_destination_warm():
+    """The native raster has no internal cancel point and costs ~13x the destination warm, so a
+    burst supersedes every job during it. Warming the destination first is what keeps publication
+    reachable — behind the raster, a burst starves the bands it is waiting on and no reordering of
+    the *gate* can help."""
+    superseded = threading.Event()
+    reached: list[tuple] = []
+
+    class SupersedingPanel(_RecordingPanel):
+        def viewport(self, scroll, view_h, *, scale=1.0):
+            reached.append(("native", scroll, view_h, scale))
+            superseded.set()  # a newer notch arrives mid-raster
+
+        def warm_viewport(self, scroll, view_h):
+            reached.append(("destination", scroll, view_h))
+
+        def render_ahead(self, *_args, **_kwargs):
+            reached.append("lookahead")
+
+    request = tooltip_raster.RenderAheadRequest(SupersedingPanel(), 900, 300, 1, 1.75, superseded)
+    tooltip_raster.run_render_ahead(request, threading.Event())
+
+    stages = [call[0] for call in reached]
+    assert stages[0] == "destination"
+    assert "native" in stages  # the crisp warm still gets its turn when nothing supersedes it
+    assert reached[0][1:] == (900, 300)  # ...at the scroll the job was raised for
+
+
 def test_the_turn_publishes_a_scroll_no_completion_claimed():
     """A burst supersedes its own jobs, so a completion carrying the newest scroll's identity is not
     something the popup may wait for: the wheel can stop on a notch whose job was already cancelled.

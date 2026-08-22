@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka import otel_metrics
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
@@ -63,17 +64,33 @@ def run_render_ahead(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, RenderAheadRequest):
         raise TypeError("invalid render-ahead request")
     should_cancel = lambda: cancelled.is_set() or request.superseded.is_set()  # noqa: E731
+    # How far the job got before a newer notch superseded it. A burst whose jobs never reach
+    # "destination" starves the bands publication waits on, and the gate's choice of cache stops
+    # mattering — the stage is what separates that from a gate pointed at the wrong tier.
+    with otel_metrics.traced(
+        "render_ahead", scale=f"{request.scale:.4f}", scroll=str(request.scroll)
+    ) as span:
+        return _warm(request, should_cancel, span)
+
+
+def _warm(request: RenderAheadRequest, should_cancel, span) -> object:
+    span.set("stage", "entry")
     if should_cancel():
         return None
     try:
-        if request.scale > 1.0:
-            request.panel.viewport(request.scroll, request.view_h, scale=request.scale)
+        # Cheapest-unblocking-first. The destination's 1x bands are what publication waits on and
+        # cost ~2ms; the native raster below buys only crispness and costs ~28ms with no internal
+        # cancel point. Ordered the other way, a notch landing mid-raster aborts the job before the
+        # 2ms ever runs — so a burst supersedes every job during the expensive half and the viewport
+        # it scrolled to is never warmed at all. Soft-now/crisp-later is the whole tier design;
+        # this is where the worker has to honour it.
+        request.panel.warm_viewport(request.scroll, request.view_h)
+        span.set("stage", "destination")
         if should_cancel():
             return None
-        # The destination, before the lookahead past it. `render_ahead` starts a whole screen beyond
-        # the viewport, so without this nothing ever warms the bands the scroll actually lands on —
-        # and `apply_pending_scroll` waits on exactly those before it may publish.
-        request.panel.warm_viewport(request.scroll, request.view_h)
+        if request.scale > 1.0:
+            request.panel.viewport(request.scroll, request.view_h, scale=request.scale)
+            span.set("stage", "native")
         if should_cancel():
             return None
         request.panel.render_ahead(
@@ -91,6 +108,7 @@ def run_render_ahead(request: object, cancelled: threading.Event) -> object:
                 should_cancel=should_cancel,
                 scale=1.0,
             )
+        span.set("stage", "lookahead")
     except Exception:
         log.debug("render-ahead failed", exc_info=True)
         raise

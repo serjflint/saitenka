@@ -464,8 +464,14 @@ def blit_panel(
         soft_reason=soft_reason or "n/a",
         scale=f"{ports.scale.display:.4f}",
         kind=compose_kind(oid, navigated=ports.nav_store.current.can_go_back),
-    ):
+    ) as span:
         view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
+        # A head served from the precomposed first view returns pixels having rastered NOTHING, so a
+        # show can leave the band cache as empty as it found it — and the next scroll then has no
+        # warm neighbour to land on. rasters=0 with blocks=0 is that case; it is invisible from the
+        # pixels, which look identical either way.
+        span.set("rasters", panel.windowed.last_frame_rasters)
+        span.set("blocks", panel.windowed.cached_blocks)
     return decorate_and_upload(ports, view, y0, full_h, xy, oid)
 
 

@@ -33,6 +33,7 @@ _SPAN_NAMES = frozenset(
         "tooltip_request",
         "scroll_frame",
         "scroll_request",
+        "render_ahead",
         "subtitle_geometry_cache",
     }
 )
@@ -67,6 +68,11 @@ _FIELDS = frozenset(
         "full_h",
         "scroll",
         "desired",
+        "warm",
+        "native_warm",
+        "stage",
+        "rasters",
+        "blocks",
         "layout_backend",
         "job_id",
         "latency_ms",
@@ -210,6 +216,7 @@ def latency_summary(records: Sequence[dict]) -> dict[str, dict]:
         "tooltip_request",
         "scroll_request",
         "scroll_frame",
+        "render_ahead",
         "subtitle_geometry_cache",
     ):
         selected = [record for record in records if record["name"] == name]

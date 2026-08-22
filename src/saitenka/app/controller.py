@@ -2683,8 +2683,18 @@ class Reader:
                 # Where the wheel asked to be vs where the pixels are. The two diverging across a
                 # whole burst is the shape of a scroll that arrives and never lands — otherwise
                 # only inferable by cross-reading `scroll_request` outcomes.
-                span.set("scroll", self.tip.view.scroll)
-                span.set("desired", self.tip.view.desired_scroll)
+                view = self.tip.view
+                span.set("scroll", view.scroll)
+                span.set("desired", view.desired_scroll)
+                # ...and which predicate refused, since publication asks the 1x tier while a hi-dpi
+                # blit composites from the native one. Both cold means the destination is starved;
+                # native warm with soft cold means the gate is pointed at the wrong cache.
+                vh = min(view.view_h, st.full_height)
+                span.set("warm", st.viewport_warm(view.desired_scroll, vh))
+                span.set(
+                    "native_warm",
+                    st.native_viewport_warm(view.desired_scroll, vh, self.tip_scale.raster),
+                )
                 # Crisp health per scroll frame: the display scale (does it jitter mid-scroll?) and the
                 # soft-fallback reason ("" = composited crisp) — so a soft run is attributable to a cause.
                 span.set("scale", f"{self.tip_scale.display:.4f}")
