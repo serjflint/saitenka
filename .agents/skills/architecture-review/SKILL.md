@@ -91,9 +91,11 @@ A **claim census** — the module's own statements about itself, each marked `ga
 `argued`, the classes in [`references/claim-classes.md`](references/claim-classes.md) — is what
 points it.
 
-- **In**: hand over the `argued` rows as **claims to attack**, never as findings to confirm. Priming
-  does not tunnel an isolated reviewer: the last run's two worst findings were off-agenda, and one
-  of its results was that a *census row was itself wrong*.
+- **In**: hand over the `argued` rows as **claims to attack**, never as findings to confirm. Whether
+  an agenda narrows a reviewer is **open** — one run says no (its two worst findings were off-agenda,
+  and one result was that a *census row was itself wrong*), and one run is one run. So check it every
+  time, and the check is cheap: **if every finding sits on the agenda, the agenda replaced the
+  review** — discard that run's ranking and re-run blind before acting on it.
 - **Out**: every "could not verify" row becomes a census row with its remedy, so it survives between
   runs instead of being re-derived.
 
