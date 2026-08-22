@@ -1,4 +1,4 @@
-"""Pure reducer for the subtitle-owned commands (WP4.2 of the runtime migration).
+"""Pure reducer for the subtitle-owned commands.
 
 The reducer receives an immutable snapshot of the facts a decision needs and returns typed
 effects. It performs no I/O, holds no state and never sees `Reader`; the executor in the

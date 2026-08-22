@@ -209,8 +209,8 @@ CUE_RETIRE_RESOURCE = "cue-identity-retire"
 #: Re-slotting onto a newly loaded file. A *starting* act — the episode is being established — so it
 #: goes in the start table beside the subtitle replay.
 RESLOT_PARTICIPANT = "start:episode-reslot"
-#: Running one arrived command. Neither verb fits: it starts nothing and retires nothing, and it is
-#: the only act so far whose effect has to say what it is about.
+#: Running one arrived command. Neither verb fits: it starts nothing and retires nothing, and its
+#: effect has to say what it is about.
 COMMAND_PERFORMER = "run:user-command"
 #: Applying what one reduced observation published. `Owner.PLAYBACK`'s outbox, delivered.
 PLAYBACK_DELTAS_PERFORMER = "apply:playback-deltas"

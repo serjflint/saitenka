@@ -23,11 +23,10 @@ if TYPE_CHECKING:
 
 
 class SubtitleHost(Protocol):
-    """This feature's whole host coupling — the widest port of the six, and deliberately visible.
+    """This feature's whole host coupling. See `PanelHost` for why it is spelled out.
 
-    Twenty members, three of them written. Every one is a fact or an act this feature already
-    owned; declaring them changes nothing about the coupling except that it can now be counted and
-    argued about. The number falls when `annotation_mode` and `annotation_hover` move to a slice,
+    Declaring these members changes nothing about the coupling except that it can be counted and
+    argued about. The port narrows when `annotation_mode` and `annotation_hover` move to a slice —
     not by hiding them behind a `Reader` parameter.
     """
 

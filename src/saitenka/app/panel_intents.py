@@ -1,4 +1,4 @@
-"""Pure reducer for the panel commands (WP5.3 of the runtime migration).
+"""Pure reducer for the panel commands.
 
 The panels — sidebar, episode analysis, subtitle picker, card preview — are each a surface the user
 opens and closes. The decision is thin, and the reason to state it anyway is that the one piece of

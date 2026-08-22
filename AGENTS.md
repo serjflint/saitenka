@@ -22,7 +22,8 @@ there), `docs/contributing/rendering.md` (renderer design), and `ARCHITECTURE.md
 - **`.agents/mcp/servers.json`** — canonical, agent-agnostic MCP server definitions (no shared cross-agent
   format exists); `agent-setup`'s `render.py` emits each agent's dialect. The generated `.mcp.json` is
   git-ignored.
-- **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
+- **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). `comments.md`
+  — what a comment must earn its place with, and the scar/echo/stale-count classes to cut;
   `searching.md` — the shell-search ban + escape-recovery (fork-bomb why + the enforcing `PreToolUse`
   hook: **Tooling** below). Claude Code auto-loads these via a git-ignored `.claude/rules -> ../.agents/rules`
   symlink (per worktree, like skills; a no-`paths:` rule loads globally — confirm via the

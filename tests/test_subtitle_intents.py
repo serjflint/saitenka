@@ -143,7 +143,7 @@ def test_the_reducer_never_mutates_its_inputs() -> None:
     assert given == inputs()
 
 
-# --- navigation, anchoring, copy, translation (WP4.5) ---------------------------------------------
+# --- navigation, anchoring, copy, translation ---------------------------------------------
 
 
 @pytest.mark.parametrize(

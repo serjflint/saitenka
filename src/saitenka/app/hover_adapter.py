@@ -24,9 +24,8 @@ if TYPE_CHECKING:
 class HoverHost(Protocol):
     """This feature's whole host coupling. See `PanelHost` for why it is spelled out.
 
-    Fifteen members, and two of them written — the widest port so far. That is the coupling that
-    was there all along, now countable: `hover` and `pause_on_tooltip` are host state this feature
-    owns in everything but location, and the number falls when they move to a slice of its own.
+    `hover` and `pause_on_tooltip` are host state this feature owns in everything but location; the
+    port narrows when they move to a slice of their own.
     """
 
     hover: int

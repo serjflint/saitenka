@@ -1,4 +1,4 @@
-"""Pure reducer for the capture commands (WP5.3 of the runtime migration).
+"""Pure reducer for the capture commands.
 
 Mining and bookmarking both answer "keep what is on screen for later", and both are gated on
 something being there to keep — so they share a reducer. Mining is also the runtime's one command

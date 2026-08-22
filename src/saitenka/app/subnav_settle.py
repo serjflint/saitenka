@@ -1,4 +1,4 @@
-"""The subtitle-navigation settle window as a revision-fenced named deadline (WP4.5).
+"""The subtitle-navigation settle window as a revision-fenced named deadline.
 
 Right after a manual sub-nav, mpv briefly re-reports two transient `sub-text` values: an empty
 blip, and the PRE-nav cue before the seek lands. Adopting either flashes the wrong line and

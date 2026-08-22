@@ -167,11 +167,10 @@ def test_a_closed_reactor_drops_the_event_instead_of_replaying_the_last_outbox(r
 def test_an_empty_routed_dispatch_does_not_mean_the_event_did_nothing(request) -> None:
     """`dispatch` returns two different things under one type, and this pins which is which.
 
-    Its seven peer stores hand back the routed slice's `published`; this one alone returns `()`,
-    because a routed playback turn has already applied its deltas through `ApplyPlaybackDeltas` and
-    returning them again would apply the turn twice. So `()` here means *handled elsewhere*, not
-    *nothing happened*, and `routed` is the only thing that tells a caller which — an asymmetry
-    worth a failing test the day someone unifies the four stores on their peers' shape.
+    Peer stores hand back the routed slice's `published`; this one alone returns `()`, because a
+    routed playback turn has already applied its deltas through `ApplyPlaybackDeltas` and returning
+    them again would apply the turn twice. So `()` here means *handled elsewhere*, not *nothing
+    happened*, and `routed` is what tells a caller which.
     """
     reader, _gateway = _reader_with_a_session_runtime(request)
     store = reader._playback_store

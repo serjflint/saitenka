@@ -1,4 +1,4 @@
-"""Provider-neutral legacy subtitle raster contract (WP4.3).
+"""Provider-neutral legacy subtitle raster contract.
 
 The reducer chooses plain versus styled intent and assembles an immutable request; a provider owns
 only raster preparation and returns an immutable result. Pillow, a fake, and a null provider all

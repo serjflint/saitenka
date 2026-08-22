@@ -22,8 +22,8 @@ HELP = UserCommand("saitenka-help", command_id=3)
 
 
 def test_a_command_rides_out_as_an_effect_carrying_itself() -> None:
-    """The one effect so far with a subject: two commands in one batch are the same act with
-    different arguments, so the reducer cannot leave the argument behind."""
+    """An effect with a subject: two commands in one batch are the same act with different
+    arguments, so the reducer cannot leave the argument behind."""
     result = reduce_user_command(CommandIntake(), HELP)
 
     assert result.effects == (RunUserCommand(HELP),)

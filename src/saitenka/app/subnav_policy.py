@@ -1,4 +1,4 @@
-"""Pure subtitle-navigation target selection (WP4.5).
+"""Pure subtitle-navigation target selection.
 
 Choosing which cue Alt+left/right/down lands on is a function of the parsed index and the facts
 already read from mpv. Keeping it separate from the render/seek that follows means the awkward

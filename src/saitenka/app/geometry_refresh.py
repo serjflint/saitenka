@@ -1,4 +1,4 @@
-"""Coalesced geometry-refresh scheduling (WP4.4).
+"""Coalesced geometry-refresh scheduling.
 
 A resize, seek or delay change publishes several observations in one batch, and each one changes a
 geometry input. Refreshing per observation would run libass several times for one visual change, so

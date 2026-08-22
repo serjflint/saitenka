@@ -99,8 +99,8 @@ class PlaybackReducer:
         return ReduceResult(reduced, effects=(ApplyPlaybackDeltas(reduced.published),))
 
 
-#: `Owner.PLAYBACK`'s only feature so far. Named once so the owner that registers it and the
-#: reader of the slot cannot spell it differently, exactly as `Owner.SESSION`'s keys are.
+#: Named once so the owner that registers it and the reader of the slot cannot spell it
+#: differently, exactly as `Owner.SESSION`'s keys are.
 PLAYBACK_FEATURE = "playback"
 
 

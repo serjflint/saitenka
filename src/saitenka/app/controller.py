@@ -1193,7 +1193,7 @@ class Reader:
             events.CueIdentityInstalled(identity.observed_start, identity.observed_end)
         )
 
-    # --- coalesced geometry refresh (WP4.4) ----------------------------------------------------
+    # --- coalesced geometry refresh ----------------------------------------------------
     def _arm_geometry_refresh(self) -> None:
         """Defer the refresh to a zero-delay deadline so one batch of input changes runs libass
         once, at the head of the next drain — after the whole batch has been observed."""
@@ -1238,7 +1238,7 @@ class Reader:
         self._geometry_refresh = self._geometry_refresh.retire()
         self.ipc.cancel_runtime_timer(_GEOMETRY_REFRESH_TIMER)
 
-    # --- subtitle navigation settle window (WP4.5) --------------------------------------------
+    # --- subtitle navigation settle window --------------------------------------------
     def open_settle_window(self) -> None:
         """Absorb mpv's mid-seek transients until the seek lands or the named deadline is due."""
         window = self.episode.sub_settle.begin()
@@ -2690,7 +2690,7 @@ class Reader:
         tooltip lane, so the seam lives on the Reader (no engaged-tooltip→tooltip import)."""
         return tooltip._navigated_panel(self.panel_style, query)
 
-    # --- pointer and tooltip navigation: pure reducer, executed here (WP5.3) -------------------
+    # --- what InteractionHost reads and calls ------------------------------------------
     @property
     def tip_can_go_back(self) -> bool:
         """A link-navigation step is available to pop — the fact, split from the act."""
@@ -2791,9 +2791,7 @@ class Reader:
     def _provenance(self, video) -> str:
         return miner.provenance(self._get_number("time-pos") or 0.0, video)
 
-    # --- panel commands: pure reducer, executed here (WP5.3) ----------------------------------
-
-    # --- mining commands: pure reducer, executed here (WP5.3) ---------------------------------
+    # --- what MineHost reads and calls -------------------------------------------------
     def has_active_cue(self) -> bool:
         """A cue with a path and timings is on screen — what a bookmark would capture."""
         return bool(
@@ -2926,7 +2924,7 @@ class Reader:
     def toggle_translation(self) -> None:
         self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION)
 
-    # --- session commands: pure reducer, executed here (WP5.3) --------------------------------
+    # --- what SessionHost reads and calls ----------------------------------------------
     def toggle_overlay(self) -> None:
         self._stateless.run(session_intents.SessionCommand.TOGGLE_OVERLAY)
 
@@ -2948,9 +2946,7 @@ class Reader:
             invalidate=self.invalidate_analysis,
         )
 
-    # --- subtitle-owned commands: pure reducer, executed here (WP4.2) -------------------------
-
-    # --- hovered-word commands: pure reducer, executed here (WP5.3) ---------------------------
+    # --- what HoverHost reads and calls ------------------------------------------------
 
     def resume_after_hover_pause(self) -> None:
         """Give playback back, if a tooltip is what took it. One path, because there were three: two

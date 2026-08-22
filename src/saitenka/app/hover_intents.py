@@ -1,4 +1,4 @@
-"""Pure reducer for the hovered-word commands (WP5.3 of the runtime migration).
+"""Pure reducer for the hovered-word commands.
 
 Speak, copy and kanji-lookup all answer the same first question — is there a word under the cursor
 — and then diverge. Deciding that once, from a snapshot, is what stops each command growing its own

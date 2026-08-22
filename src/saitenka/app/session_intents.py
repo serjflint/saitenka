@@ -1,4 +1,4 @@
-"""Pure reducer for the session-wide commands (WP5.3 of the runtime migration).
+"""Pure reducer for the session-wide commands.
 
 Hiding every saitenka surface is a short sequence whose *order* is the whole content: the tooltip
 has to go before the pixels do, the secondary track is released only once nothing is drawing it,

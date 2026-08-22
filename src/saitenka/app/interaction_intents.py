@@ -1,4 +1,4 @@
-"""Pure reducer for the pointer and tooltip-navigation commands (WP5.3).
+"""Pure reducer for the pointer and tooltip-navigation commands.
 
 Most of what these commands "decide" is really routing — which surface claims a wheel step, which
 popup a click lands in — and that already lives in `surfaces.SURFACES`, a topmost-first table. What

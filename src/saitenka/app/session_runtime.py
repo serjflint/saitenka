@@ -1,4 +1,4 @@
-"""The composition seam the noninteractive entry modes drive (WP5.5).
+"""The composition seam the noninteractive entry modes drive.
 
 Demo and screenshot used to reach straight into `Reader` and the IPC transport: a cue read was
 `reader._get("sub-text")`, a capture was `ipc.command("screenshot-to-file", ...)`. That coupling is
