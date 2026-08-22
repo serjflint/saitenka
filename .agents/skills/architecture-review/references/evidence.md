@@ -15,13 +15,13 @@ mechanism. A clean correlation is more suspicious, not less: the cleaner it is, 
 an artifact of how you counted.
 
 Three diagnoses from one past review, each stated confidently, each producing a specific
-recommendation that would have caused damage:
+recommendation that would have been acted on:
 
 | claimed | inferred from | actually | what settled it |
 | --- | --- | --- | --- |
-| a documentation convention was growing the host | two totals matching | the thing blamed had *fallen*; the growth was a different kind entirely | classifying every member by kind, rather than counting |
+| a documentation convention was growing the host | two totals matching | the thing blamed had *fallen*; the growth was a different kind entirely | `poe host-mass-census` — classifying every member by kind, rather than counting |
 | two competing runtimes, one unmigrated | one is called synchronously, the other through a mailbox | two *layers* that compose deliberately; the classification was already correct | reading the entry-point signatures |
-| review coverage explained a delivery difference | merged versus unmerged | neither side had ever been reviewed | one API query |
+| review coverage explained a delivery difference | merged versus unmerged | neither side had ever been reviewed | one `gh pr view --json reviews` query |
 
 The shape is identical each time: a surface correlation reported as a cause, without opening the
 thing it was about.
@@ -31,11 +31,11 @@ thing it was about.
 A repro that fires is not yet a mechanism. Shrink it until exactly one cause remains, because the
 mechanism is what the remedy gets built from and a confounded repro hands over the wrong one.
 
-Observed: a real finding — a frame flag that stayed set forever — was reported as caused by an
-unfiltered band enumeration. It had **two** independent causes, and the one named was the minor one;
-the dominant cause was an overscan mismatch, visible only once the other was held fixed. Both fixes
-were needed. A remedy built from the reported mechanism alone would have shipped, tested green, and
-left the bug.
+Observed (`a2b8f1c4`): a real finding — a frame flag that stayed set forever, re-uploading the
+tooltip every poll tick — was reported as caused by an unfiltered band enumeration. It had **two**
+independent causes, and the one named was the minor one; the dominant cause was an overscan
+mismatch, visible only once the other was held fixed. Both fixes were needed. A remedy built from the
+reported mechanism alone would have shipped, tested green, and left the bug.
 
 ## Your own measurement is admissible; label it
 
@@ -60,11 +60,13 @@ This also makes a finding falsifiable later. A finding nobody can re-check becom
 
 ## Declared, enforced, true
 
-Never collapse these. Prose is not gated: reference and constant checks pass on a page whose claims
-the code contradicted months ago, because they check references and constants, not claims.
+Never collapse these. Prose is not gated: `poe docs-refs` / `docs-consts` pass on a page whose claims
+the code contradicted months ago, because they check references and constants, not claims —
+`c1624d20` fixed two such claims on one invariants page.
 
 When quoting a meter, read what it *measures* first. A meter named for a concept usually covers a
-subset of it — and the summary line, not the docstring, is what gets quoted into the next document.
+subset of it (`7cee5043` — `reducer-purity` now says so in its own output), and the summary line, not
+the docstring, is what gets quoted into the next document.
 
 ## Rank speculation as speculation
 

@@ -112,7 +112,9 @@ the floor for every change; 3–6 are escalations, not replacements.
    a module under active feature work.
 7. **A migration landed, or the meters read green and something still feels wrong** → the
    **`architecture-review`** skill — an isolated reviewer judging fitness (not code) against the
-   product's goals. On a cadence, so drift is caught by schedule rather than by accident.
+   product's goals. On a cadence, so drift is caught by schedule rather than by accident; the run
+   reports and the claim census that carries between runs live in `.agents/architecture-review/`
+   (its `SPEC.md` owns that contract, the skill owns the judgement).
 
 ## Refactoring
 

@@ -21,6 +21,10 @@ have BENCHMARKS.md                 # where a performance claim is cited from
 have ARCHITECTURE.md               # the static view the review judges against the code
 have docs/contributing/runtime.md  # the invariant page — declared, ungated, and to be distrusted
 have pyproject.toml                # [tool.poe.tasks]: whether a rule is enforced or only declared
+have README.md                     # §0's yardstick: the reviewer derives the product's goals from it
+have .agents/rules/searching.md    # the shim ban §0 must restate, or the reviewer fork-bombs the box
+have .agents/architecture-review/SPEC.md     # where a run's report and the census live between runs
+have .agents/architecture-review/census.json # the agenda §3.1 hands over
 have .agents/skills/plan-migration/SKILL.md  # handoff for a finding about a conversion
 have .agents/skills/contribute/SKILL.md      # handoff for a finding driven to a PR
 if [ "$fail" -eq 0 ]; then echo "architecture-review smoke OK"; else echo "architecture-review smoke FAILED"; exit 1; fi

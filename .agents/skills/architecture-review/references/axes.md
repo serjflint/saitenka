@@ -85,7 +85,7 @@ that or merely failed to help. Second backend, second language, plugin API, swap
 
 ## 10. Were these the right principles at all
 
-The deepest axis, and the one to spend the most on.
+Spend the most here; a review that skips it has checked the execution and not the design.
 
 Argue the strongest case **against** the current model for this product. Then price the alternatives
 concretely — what each would have cost, what it would have bought, and what it would have made
