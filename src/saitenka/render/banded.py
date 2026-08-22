@@ -48,6 +48,11 @@ if TYPE_CHECKING:
 # vibe/windowed-raster-pr3-plan.md). Small rows (header/chip/freq) are one band — never split.
 _BAND_PX = 256
 
+# How many bands past the overscan `render_ahead` warms in one pass. Shared with `_retention_window`
+# rather than defaulted twice: the eviction bound and the lookahead reach are one policy, and the two
+# spelled separately is a cache that drops what a worker warmed a millisecond earlier.
+_AHEAD_BANDS = 4
+
 # Fail-fast guard: NATIVE (crisp) rasterisation must run on a WORKER, never the render loop. The main
 # path is structurally warm-only (it reads cached bands, never calls the raster leaf), so this only
 # CATCHES a regression. The predicate is main-PROCESS main-thread — a worker thread (different thread)
@@ -554,6 +559,17 @@ class WindowedPanel:
             return None
         return self._offsets.start(i) + cb.y
 
+    def _retention_window(self, scroll: int, view_h: int, overscan: int) -> tuple[int, int]:
+        """The content window a frame at ``scroll`` keeps bands for — the lookahead's whole reach.
+
+        Not the compose window: ``render_ahead`` starts at ``scroll + view_h + overscan`` and warms
+        ``_AHEAD_BANDS`` past it, so evicting at the compose boundary drops the bands the worker
+        just warmed and the next frame rasters them again. Bounded by the lookahead rather than by
+        the panel, so this stays O(viewport) however tall the entry is.
+        """
+        slack = overscan + _AHEAD_BANDS * _BAND_PX
+        return scroll - slack, scroll + view_h + slack
+
     def _evict(self, lo: int, hi: int) -> None:
         """Bound retained pixels to O(viewport) — per BAND, so even one pathologically tall row keeps
         only the bands overlapping ``[lo, hi)`` (the viewport±overscan), never the whole block. With no
@@ -683,22 +699,37 @@ class WindowedPanel:
         self, scroll: int, view_h: int, overscan: int
     ) -> tuple[list[tuple[tuple[int, int], CachedBlock, int]], bool]:
         """The cached bands covering ``[scroll, scroll+view_h)`` and whether any were missing. Under
-        lock; the returned blocks are immutable, so the caller may use them once it is released."""
+        lock; the returned blocks are immutable, so the caller may use them once it is released.
+
+        Counts a band as missing only when it would contribute PIXELS to this frame. It used to
+        report every uncached band of every row `visible_range` returned — three screens' worth at
+        the ``overscan=view_h`` the blit requests, plus a tall row's bands below the fold — so
+        `missed_last_assemble` was structurally true and `crisp_pending` re-armed on every poll
+        tick, against `viewport_warm` saying warm. Two predicates asking one question have to ask
+        it the same way, and clipping is what "in this frame" means.
+
+        `_row_band_spans`, not `_row_bands`: a non-body row taller than a band is stored as ONE
+        band, and the tiler would invent a second one that is missing forever.
+        """
         table = self._offsets.estimated_table()
         start, end = table.visible_range(scroll, view_h, overscan)
         plan: list[tuple[tuple[int, int], CachedBlock, int]] = []
         missing = False
         for i in range(start, end):
-            if not self._offsets.known(i):
-                missing = True
-                continue
             row_top = table.starts[i]
-            for b, y0, _y1 in _row_bands(self._offsets.height(i)):
+            if not self._offsets.known(i):
+                if _clip_band(row_top - scroll, table.ends[i] - row_top, view_h) is not None:
+                    missing = True
+                continue
+            for b, y0, y1 in self._row_band_spans(i):
+                band_top = row_top + y0 - scroll
+                if _clip_band(band_top, y1 - y0, view_h) is None:
+                    continue
                 block = self._blocks.get((i, b))
                 if block is None:
                     missing = True
                 else:
-                    plan.append(((i, b), block, row_top + y0 - scroll))
+                    plan.append(((i, b), block, band_top))
         return plan, missing
 
     def _assemble_warm_1x(self, scroll: int, view_h: int, overscan: int) -> np.ndarray:
@@ -719,6 +750,7 @@ class WindowedPanel:
             background = self._bg_bgra_value()
             self._last_frame_rasters = 0
             self._missed_last_assemble = missing
+            self._evict(*self._retention_window(scroll, view_h, overscan))
         out = np.empty((max(view_h, 1), self.width, 4), np.uint8)
         out[:] = background
         for key, block, band_top in plan:
@@ -1100,23 +1132,17 @@ class WindowedPanel:
                 self._trim_scaled()
 
     def viewport_warm(self, scroll: int, view_h: int) -> bool:
-        """True when a 1x viewport can be assembled without rasterizing a band."""
+        """True when a 1x viewport can be assembled without rasterizing a band.
+
+        A dry run of :meth:`_warm_plan`, not a second walk over the bands: this predicate and
+        ``missed_last_assemble`` answer one question, and answering it twice is what let them
+        disagree — `apply_pending_crisp` cleared on this one and re-armed on the other, every tick.
+        The plan clips, so the ``overscan`` it is asked for cannot change the answer.
+        """
         with self._lock:
-            if scroll == 0 and self._first_view is not None:
-                cached_h, _overscan, _array = self._first_view
-                if cached_h == view_h:
-                    return True
-            table = self._offsets.estimated_table()
-            start, end = table.visible_range(scroll, view_h, 0)
-            lo, hi = scroll, scroll + view_h
-            for i in range(start, end):
-                if not self._offsets.known(i):
-                    return False
-                row_top = table.starts[i]
-                for band, y0, y1 in self._row_band_spans(i):
-                    if row_top + y1 > lo and row_top + y0 < hi and (i, band) not in self._blocks:
-                        return False
-            return True
+            if scroll == 0 and self._first_view is not None and self._first_view[0] == view_h:
+                return True  # the composited head answers without touching a band
+            return not self._warm_plan(scroll, view_h, 0)[1]
 
     def _scaled_placements(self, v: _NativeView, *, warm_only: bool):
         """Yield ``(i, span, cb, band_top)`` for every visible native band, placed by CUMULATIVE device
@@ -1235,7 +1261,7 @@ class WindowedPanel:
         *,
         direction: int = 1,
         overscan: int = 0,
-        max_blocks: int = 4,
+        max_blocks: int = _AHEAD_BANDS,
         workers: int = 4,
         should_cancel: Callable[[], bool] | None = None,
         scale: float = 1.0,
