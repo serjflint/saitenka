@@ -278,3 +278,58 @@ def test_sample_counters_splits_a_labeled_histogram_by_its_labels(tmp_path):
     assert values["mpv_effect.apply_ms.count"] == 2.0
     assert values["mpv_effect.apply_ms[identity=hover-pause].max"] == 6000.0
     assert values["mpv_effect.apply_ms[identity=advance-loadfile].max"] == 4.0
+
+
+def test_a_deferred_span_ends_from_the_completion_not_the_submission(monkeypatch):
+    """The span an mpv effect needs: a `with` block would measure the admission and nothing else.
+
+    Stubbed rather than read back from a written trace: the tracer provider is process-global and
+    only the first `configure` in a process installs one, so an end-to-end read here would pass or
+    fail on test order. What is asserted is the contract this class exists for — the span is NOT made
+    the ambient parent of whatever the submitting thread does next, and it ends on the completion.
+    """
+    from saitenka import otel_metrics
+
+    ended: list[tuple[str, dict]] = []
+
+    class _Span:
+        def __init__(self, name):
+            self.name, self.attributes = name, {}
+
+        def set_attribute(self, key, value):
+            self.attributes[key] = value
+
+        def end(self):
+            ended.append((self.name, dict(self.attributes)))
+
+    class _Tracer:
+        def start_span(self, name):
+            return _Span(name)
+
+        def start_as_current_span(self, _name):  # pragma: no cover — asserted unreachable
+            raise AssertionError("a deferred span must not become the ambient parent")
+
+    class _Trace:
+        def get_tracer(self, _name):
+            return _Tracer()
+
+    monkeypatch.setattr(otel_metrics, "_resolve_trace_module", lambda: _Trace())
+
+    span = otel_metrics.DeferredSpan("mpv_effect", identity="hover-pause")
+    assert ended == [], "the span must stay open after the caller returns"
+    span.finish(outcome="succeeded")
+
+    assert len(ended) == 1
+    name, attributes = ended[0]
+    assert name == "mpv_effect"
+    assert attributes["identity"] == "hover-pause"
+    assert attributes["outcome"] == "succeeded"
+    assert "thread.id" in attributes and "session" in attributes
+
+
+def test_a_deferred_span_is_inert_without_the_telemetry_extra(monkeypatch):
+    """The negative control: every call site wraps unconditionally, so no extra must mean no crash."""
+    from saitenka import otel_metrics
+
+    monkeypatch.setattr(otel_metrics, "_resolve_trace_module", lambda: None)
+    otel_metrics.DeferredSpan("mpv_effect", identity="x").finish(outcome="succeeded")

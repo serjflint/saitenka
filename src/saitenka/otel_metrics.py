@@ -262,6 +262,44 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
             span.set_attribute("cpu_ms", round((time.thread_time() - cpu0) * 1000.0, 3))
 
 
+class DeferredSpan:
+    """A span whose end arrives on someone else's thread, later.
+
+    :func:`traced` cannot express a correlated mpv write: the caller returns the moment the effect is
+    admitted and the terminal outcome lands in a callback seconds later, so a `with` block would
+    measure the submission and nothing else. Started here, ended from the completion — which is what
+    puts the wait on the same timeline as the `tooltip_show` that caused it, instead of leaving it to
+    be reconstructed by aligning three clocks (overlay.log wall, mpv's relative, the trace's epoch).
+
+    Not `start_as_current_span`: the span must not become the ambient parent of whatever the
+    submitting thread does next, and it outlives that scope anyway.
+    """
+
+    __slots__ = ("_span",)
+
+    def __init__(self, name: str, **attributes: str) -> None:
+        trace = _resolve_trace_module()
+        if trace is None:
+            self._span: Any | None = None
+            return
+        span = trace.get_tracer("saitenka.overlay").start_span(name)
+        span.set_attribute("thread.id", threading.get_native_id())  # the SUBMITTING thread
+        from saitenka.session import session_id
+
+        span.set_attribute("session", session_id())
+        for k, v in attributes.items():
+            span.set_attribute(k, v)
+        self._span = span
+
+    def finish(self, **attributes: object) -> None:
+        if self._span is None:
+            return
+        for k, v in attributes.items():
+            self._span.set_attribute(k, v)
+        self._span.end()
+        self._span = None
+
+
 @contextmanager
 def instrumented(
     histogram: Histogram | None, span_name: str, *, emit_span: bool = True, **attributes: str

@@ -36,8 +36,10 @@ def send_correlated(ipc, identity: str, *command: object, owner: Owner = Owner.S
     call sites rather than by traffic.
     """
     submitted = time.perf_counter()
+    span = otel_metrics.DeferredSpan("mpv_effect", identity=identity, owner=owner.value)
 
     def finished(completion: EffectFinished) -> None:
+        span.finish(outcome=completion.outcome.value)
         if otel_metrics.mpv_effect_apply_ms is not None:
             otel_metrics.mpv_effect_apply_ms.record(
                 (time.perf_counter() - submitted) * 1000.0, {"identity": identity}

@@ -35,6 +35,7 @@ _SPAN_NAMES = frozenset(
         "scroll_request",
         "render_ahead",
         "subtitle_geometry_cache",
+        "mpv_effect",
     }
 )
 _FIELDS = frozenset(
@@ -218,6 +219,7 @@ def latency_summary(records: Sequence[dict]) -> dict[str, dict]:
         "scroll_frame",
         "render_ahead",
         "subtitle_geometry_cache",
+        "mpv_effect",
     ):
         selected = [record for record in records if record["name"] == name]
         values = sorted(
