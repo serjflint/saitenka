@@ -8,7 +8,11 @@ sequence" checkable rather than asserted.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
+import textwrap
+import time
 
 import pytest
 from util import FakeIPC
@@ -151,3 +155,64 @@ def test_a_force_killed_player_reports_no_exit_status(monkeypatch):
     )
 
     assert seen == [], "the kill was ours; reporting it as mpv's exit would be a false crash report"
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_the_watchdog_dumps_every_thread_and_forces_exit_on_a_hung_shutdown(tmp_path):
+    """A real interpreter, really hung, because that is the only state the device exists for.
+
+    In-process this cannot be tested: the assertion is about what happens *after* the test process
+    would have to have exited. The hang is the shape that shipped — a non-daemon pool worker whose
+    `concurrent.futures` atexit join outlives every close phase — and the dump has to name it from a
+    C timer thread, since by then the Python ones are frozen in finalization.
+    """
+    program = textwrap.dedent("""
+        import concurrent.futures, sys, time
+        from saitenka.app.player_supervisor import arm_exit_watchdog
+        concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(time.sleep, 60)
+        arm_exit_watchdog(1.0)
+        print("armed", flush=True)
+    """)
+    env = {**os.environ, "SAITENKA_CACHE_DIR": str(tmp_path / "cache")}
+    started = time.monotonic()
+    done = subprocess.run(
+        [sys.executable, "-c", program],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=25,
+        env=env,  # explicit: the dump location is this test's precondition, not conftest's
+    )
+    elapsed = time.monotonic() - started
+
+    assert done.returncode == 0
+    assert elapsed < 20, "the join would have held this for 60s without the watchdog"
+    assert "exit watchdog: forcing exit" in done.stderr, "the reason reaches the terminal"
+
+    dumps = list((tmp_path / "cache" / "crashes").glob("shutdown-hang-*.log"))
+    assert len(dumps) == 1, "a surviving dump is the record that this exit hung"
+    text = dumps[0].read_text()
+    assert "_python_exit" in text, "the dump names the join nothing on the Python side can observe"
+    assert "ThreadPoolExecutor" in text, "…and the worker it is waiting on"
+
+
+def test_a_clean_exit_leaves_no_shutdown_dump_behind(tmp_path):
+    """The negative control for the file's meaning: if a healthy run also left one, its presence in
+    a report would say nothing."""
+    program = textwrap.dedent("""
+        from saitenka.app.player_supervisor import arm_exit_watchdog
+        arm_exit_watchdog(30.0)
+    """)
+    env = {**os.environ, "SAITENKA_CACHE_DIR": str(tmp_path / "cache")}
+    done = subprocess.run(
+        [sys.executable, "-c", program],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=25,
+        env=env,  # explicit: the dump location is this test's precondition, not conftest's
+    )
+
+    assert done.returncode == 0
+    assert not list((tmp_path / "cache" / "crashes").glob("shutdown-hang-*.log"))

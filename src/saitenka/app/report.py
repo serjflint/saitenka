@@ -26,8 +26,11 @@ log = logging.getLogger(__name__)
 # Scrub ``key = "..."`` / ``token: ...`` / ``Authorization: Bearer <tok>`` style secrets from any text.
 # The ``(?:bearer|token)\s+`` skip is why ``Authorization: Bearer <tok>`` redacts the TOKEN, not the
 # word "Bearer" (a property test caught that).
+# The quote before the separator is what reaches JSON's ``"key": "…"``, and the bundle's largest
+# member (`telemetry/trace.json`) is JSON — the name had to touch ``=``/``:`` directly to match, so
+# every quoted form went through untouched.
 _SECRET_RE = re.compile(
-    r"(?i)\b(api[_-]?key|key|token|secret|password|authorization|bearer)\b(\s*[=:]\s*|\s+)"
+    r"(?i)\b(api[_-]?key|key|token|secret|password|authorization|bearer)\b(['\"]?\s*[=:]\s*|\s+)"
     r"(?:(?:bearer|token)\s+)?"
     r'["\']?([^\s"\']{6,})'
 )
@@ -197,15 +200,48 @@ def _collect_dict_inventory() -> dict[str, str]:
 
 
 def _collect_crashes() -> dict[str, str]:
-    """Recent crash reports (already redacted at write time; the whole point of capturing them)."""
+    """Recent crash reports (already redacted at write time; the whole point of capturing them), plus
+    any shutdown thread dump — a file that exists at all means an exit hung (see `arm_exit_watchdog`)."""
     from saitenka.app.paths import crash_dir
 
     members: dict[str, str] = {}
     cd = crash_dir()
     if cd.exists():
-        for c in sorted(cd.glob("crash-*.log"))[-5:]:
-            members[f"crashes/{c.name}"] = c.read_text(encoding="utf-8", errors="replace")
+        for pattern in ("crash-*.log", "shutdown-hang-*.log"):
+            for c in sorted(cd.glob(pattern))[-5:]:
+                members[f"crashes/{c.name}"] = c.read_text(encoding="utf-8", errors="replace")
     return members
+
+
+#: Where macOS files a crashed process's report. Linux (core dumps) and Windows (WER) have no
+#: comparable always-on text artifact, so this is deliberately macOS-only rather than a stub.
+_MACOS_CRASH_REPORTS = "Library/Logs/DiagnosticReports"
+
+#: Only reports from around the sessions this bundle covers; older ones are a different bug.
+_PLAYER_CRASH_MAX_AGE_S = 24 * 3600
+
+
+def _collect_player_crashes() -> dict[str, str]:
+    """mpv's own native crash reports.
+
+    A player killed by a signal leaves nothing useful on our side of the socket: the overlay log gets
+    an EOF and a signal number, which says *that* it died, never *where*. Both SIGBUS crashes behind
+    `47de5fa3` were only mechanised by the faulting frame in one of these files, and getting it meant
+    leaving the bundle — so the one artifact that could settle the question was the one a report
+    could not carry. The frames name mpv's own functions; the redactor handles the paths around them.
+    """
+    directory = Path.home() / _MACOS_CRASH_REPORTS
+    if sys.platform != "darwin" or not directory.is_dir():
+        return {}
+    cutoff = time.time() - _PLAYER_CRASH_MAX_AGE_S
+    recent = sorted(
+        (p for p in directory.glob("mpv-*.ips") if p.stat().st_mtime >= cutoff),
+        key=lambda p: p.stat().st_mtime,
+    )[-2:]
+    return {
+        f"crashes/player/{p.name}": redact(p.read_text(encoding="utf-8", errors="replace"))
+        for p in recent
+    }
 
 
 def _collect_telemetry() -> dict[str, str]:
@@ -267,6 +303,7 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
 
     members.update(_collect_dict_inventory())
     members.update(_collect_crashes())
+    members.update(_collect_player_crashes())
     members.update(_collect_telemetry())
 
     members["MANIFEST.txt"] = _manifest(members, include_log=include_log, session=session)
@@ -284,6 +321,8 @@ def _manifest(members: dict[str, str], *, include_log: bool, session: str | None
         "  • This bundle is created locally and is NEVER uploaded anywhere by saitenka.",
         "  • It DOES include your config, mpv.conf, and (unless --no-log) the overlay + mpv logs,",
         "    which may contain video filenames and mined sentences. Home paths contain your username.",
+        "  • If mpv crashed, it includes mpv's own native crash report (crashes/player/) — process",
+        "    and loaded-library detail about your machine, no saitenka data.",
         "  • It does NOT include dictionaries, your Anki collection, videos, or other scripts' code.",
         "",
         f"log included: {'yes' if include_log else 'no (--no-log)'}",

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +37,13 @@ REAP_TIMEOUT_S = 5.0
 #: (pyo3 taffylite/resvglite) can still keep the free-threaded interpreter from exiting, hanging the
 #: quit intermittently. Daemon, so a healthy exit never waits for it.
 WATCHDOG_DELAY_S = 3.0
+
+#: Grace between the thread dump and the force-exit. The watchdog is the last thing that runs, so
+#: killing first would destroy the only evidence of what it killed.
+DUMP_LEAD_S = 0.5
+
+#: Held open for the process lifetime — `faulthandler` writes to the descriptor, not the path.
+_dump_file = None
 
 
 class TerminalStep(StrEnum):
@@ -140,12 +148,58 @@ class PlayerSupervisor:
 
 def arm_exit_watchdog(delay: float) -> None:
     """Force process exit ``delay`` s from now if a stray/native thread stalls interpreter shutdown
-    after a clean teardown. Daemon, so it never delays a healthy exit."""
+    after a clean teardown, dumping every thread's stack first. Daemon, so a healthy exit never waits.
+
+    The dump is the point. Two shutdown hangs have been diagnosed by reasoning about which thread
+    *could* be holding the interpreter open; the second reasoned correctly (`cae6dff5`) and the hang
+    came back anyway, with the log ending on the same line and nothing to read. `faulthandler` writes
+    from a C timer thread, so it reports the stacks even once finalization has frozen the Python ones
+    — including the `_python_exit` join that no Python-level hook can observe about itself.
+
+    Nothing runs before ``os._exit`` but a raw ``write(2)``. A last resort that first has to acquire
+    the logging lock is not a last resort, and the run that armed this left no warning line at all —
+    which is the only reason its failure to fire was ambiguous rather than obvious.
+    """
     import os
 
+    dump_path = _arm_shutdown_dump(delay)
+
     def _force() -> None:
-        time.sleep(delay)
-        log.warning("exit watchdog: interpreter did not exit %.1fs after teardown — forcing", delay)
+        time.sleep(delay + DUMP_LEAD_S)
+        os.write(2, f"[saitenka] exit watchdog: forcing exit; threads: {dump_path}\n".encode())
         os._exit(0)
 
     threading.Thread(target=_force, name="saitenka-exit-watchdog", daemon=True).start()
+
+
+def _arm_shutdown_dump(delay: float) -> Path | None:
+    """Arm a whole-process thread dump, cancelled on a clean exit."""
+    import atexit
+    import faulthandler
+
+    from saitenka.app.paths import crash_dir
+
+    global _dump_file
+    try:
+        directory = crash_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / time.strftime("shutdown-hang-%Y%m%d-%H%M%S.log")
+        _dump_file = path.open("w", encoding="utf-8")
+    except OSError:
+        log.debug("shutdown thread dump unavailable", exc_info=True)
+        return None
+    faulthandler.dump_traceback_later(delay, file=_dump_file, exit=False)
+    atexit.register(_cancel_shutdown_dump, path)
+    return path
+
+
+def _cancel_shutdown_dump(path: Path) -> None:
+    """`atexit` is downstream of the non-daemon join that hangs, so this runs only when the exit was
+    clean — which is what makes a surviving file mean something rather than accumulate."""
+    import faulthandler
+
+    faulthandler.cancel_dump_traceback_later()
+    if _dump_file is not None:
+        _dump_file.close()
+    if path.exists() and path.stat().st_size == 0:
+        path.unlink()
