@@ -509,6 +509,11 @@ class MpvIPC:
             return self._dial(self.path, 1.0)
         except (OSError, FileNotFoundError) as e:
             log.info("mpv IPC reconnect: %s unavailable (%s) — mpv has quit", self.path, e)
+            # Spend the budget only on the drop it exists for: mpv.net's pipe vanishing while mpv
+            # RUNS, where the next dial connects. Nothing listening on the endpoint is the other
+            # fact — the peer is gone and this path never re-hosts it — so retrying only postpones
+            # the exit the log line above already announces (~7s of it, which reads as a hang).
+            self._reconnects_left = 0
             return None
 
     def _install_replacement(self, transport: Transport) -> tuple[bool, list[Future[dict]]]:
