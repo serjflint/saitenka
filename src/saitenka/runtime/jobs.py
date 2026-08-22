@@ -77,9 +77,10 @@ class NoSessionRuntime:
     decision, and the same refusal a live `MpvIPC` gives before its gateway is installed — so every
     feature already has a path for it.
 
-    Covers the ports a stand-in gets asked about: job lanes, lifecycle timers, and the session
-    resource registry. It grows whenever a probe becomes a call and the call finds a fake that never
-    declared the port.
+    Covers the ports a stand-in gets asked about: job lanes, lifecycle timers, the session resource
+    registry, event announcement and the session pump. Kept complete by
+    ``tests/test_runtime_stand_in.py`` rather than by this sentence — the promise to grow "whenever a
+    probe becomes a call" was made and then not kept, and the gaps surfaced one crash at a time.
     """
 
     def register_runtime_job_lane(self, _name: str, _policy: JobLanePolicy, _handler) -> bool:
@@ -123,6 +124,16 @@ class NoSessionRuntime:
 
     def route_session_presentation(self, _envelope: object | None) -> object | None:
         return None
+
+    def publish_runtime_event(self, _event: object) -> bool:
+        return False
+
+    def deliver_runtime_event(self, _event: object) -> bool:
+        return False
+
+    def receive_session(self, _timeout: float | None, _handle: Callable[[object], None]) -> None:
+        """No mailbox and no transport, so a turn has nothing to hand `_handle` — not an error."""
+        return
 
 
 def configure_lane(

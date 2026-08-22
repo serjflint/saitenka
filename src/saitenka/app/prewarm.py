@@ -53,9 +53,6 @@ class _PrewarmIPC(NoSessionRuntime):
             return {"data": self._osd}
         return {"data": None}
 
-    def receive_session(self, _timeout, _handle) -> None:
-        return None
-
 
 @dataclass(frozen=True, slots=True)
 class PrewarmPlan:
