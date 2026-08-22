@@ -112,7 +112,10 @@ class LifecycleTimers:
 
             def finished(completion: EffectFinished) -> None:
                 if completion.outcome is not EffectOutcome.SUCCEEDED:
-                    _count(otel_metrics.lifecycle_timer_settled, kind, "failed")
+                    # The outcome's own name, not one "failed" bucket: a deadline the next hover
+                    # cancelled and one the runtime refused read the same under a collapsed label,
+                    # and `scan-open` scoring 5/5 "failed" was the first thing to mislead here.
+                    _count(otel_metrics.lifecycle_timer_settled, kind, completion.outcome.value)
                     return
                 with self._state_lock:
                     if self._closed or self._revisions[kind] != revision:

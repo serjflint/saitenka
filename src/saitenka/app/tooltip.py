@@ -707,7 +707,22 @@ def _freeze_frame(ipc, prop, *, enabled: bool, already_paused: bool) -> bool:
     instantly, and the cue cannot be allowed to advance while the tooltip is still rendering. Its
     own span keeps the IPC cost attributable — ~5ms of round-trips against a build it now precedes.
     """
-    if not enabled or already_paused or prop("pause"):
+    # One `return False` covered three different answers, and the count of *sends* is what separates
+    # "we paused six times" from "we paused twice and something re-applied it" — the two readings the
+    # last report could not tell apart. `already-paused` (the claim's own view) and `observed-paused`
+    # (mpv's) are also split: they disagreeing is its own bug.
+    refusal = (
+        "policy-off"
+        if not enabled
+        else "already-paused"
+        if already_paused
+        else "observed-paused"
+        if prop("pause")
+        else ""
+    )
+    if otel_metrics.hover_pause_claim is not None:
+        otel_metrics.hover_pause_claim.add(1, {"outcome": refusal or "sent"})
+    if refusal:
         return False
     send_correlated(
         ipc,

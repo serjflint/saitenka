@@ -103,6 +103,14 @@ lifecycle_timer_armed: Counter | None = None  # labeled kind=, outcome=accepted|
 lifecycle_timer_settled: Counter | None = None  # labeled kind=, outcome=delivered|fenced|failed
 hover_route_decisions: Counter | None = None  # labeled decision= (the machine's own class name)
 hover_pause_release: Counter | None = None  # labeled outcome=resumed|nothing-owed
+hover_pause_claim: Counter | None = (
+    None  # labeled outcome=sent|already-paused|observed-paused|policy-off
+)
+# A correlated write is fire-and-forget at the call site, so nothing downstream separates a
+# command mpv ran in 5ms from one that sat queued for six seconds — and mpv's own log timestamps
+# when it RAN a command, never when we asked for it.
+mpv_effect_apply_ms: Histogram | None = None  # submitted → terminal outcome, labeled identity=
+mpv_effect_outcome: Counter | None = None  # labeled identity=, outcome=succeeded|…|not-admitted
 scroll_frame_jank: Counter | None = None  # scroll frames slower than SCROLL_JANK_THRESHOLD_MS
 # Persistent cross-session caches (#149). Their hit:miss ratio IS the "is the prewarm worth it?" signal:
 # a render_cache hit is a cold pathological hover direct-painted from disk (the 40-170ms → <2ms win); an
@@ -150,6 +158,7 @@ SPANLESS_HISTOGRAMS = frozenset(
     {
         "saitenka.ipc.roundtrip_ms",  # timed() only — no ipc span (would flood at poll cadence)
         "saitenka.block_cache.rendered_px",  # band pixel height — a measure, not a duration span
+        "saitenka.mpv_effect.apply_ms",  # no span: the wait happens after the caller returned
     }
 )
 
@@ -335,6 +344,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
     global lifecycle_timer_armed, lifecycle_timer_settled
+    global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release
 
     with _lock:
@@ -543,6 +553,19 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.hover.pause_release",
             description="teardowns that found a pause claim to release (outcome=)",
         )
+        hover_pause_claim = meter.create_counter(
+            "saitenka.hover.pause_claim",
+            description="hover pause decisions (outcome=sent|already-paused|observed-paused|policy-off)",
+        )
+        mpv_effect_apply_ms = meter.create_histogram(
+            "saitenka.mpv_effect.apply_ms",
+            unit="ms",
+            description="correlated command submitted to terminal outcome (identity=)",
+        )
+        mpv_effect_outcome = meter.create_counter(
+            "saitenka.mpv_effect.outcome",
+            description="correlated command terminal outcomes (identity=, outcome=)",
+        )
         subtitle_pixel_retry_exhausted = meter.create_counter(
             "saitenka.subtitle_pixels.retry_exhausted",
             description="native subtitle visibility retries exhausted without a proved owner",
@@ -580,6 +603,7 @@ def unregister() -> None:
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
     global lifecycle_timer_armed, lifecycle_timer_settled
+    global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release
 
     with _lock:
@@ -646,6 +670,9 @@ def unregister() -> None:
         lifecycle_timer_settled = None
         hover_route_decisions = None
         hover_pause_release = None
+        hover_pause_claim = None
+        mpv_effect_apply_ms = None
+        mpv_effect_outcome = None
         prefetch_queue_depth = None
 
 
@@ -710,8 +737,17 @@ def _summarize_metric(metric) -> dict[str, object]:
             "sum": total,
             "max": dp_max,  # exact recorded max (the percentiles are bucket-bound estimates)
             **_percentiles(bucket_counts, points[0].explicit_bounds, dp_max, count),
+            # Count and exact max per label, no percentiles: merging identities would say "some
+            # correlated command took six seconds" when the whole question is which one, and the
+            # exact max is the discriminator — a bucket-bound percentile is not.
+            "by": {_label_key(p): {"count": p.count, "max": p.max} for p in points if p.attributes},
         }
     return {"value": sum(p.value for p in points), "by": _by_label(points)}
+
+
+def _label_key(point) -> str:
+    attributes = point.attributes or {}
+    return ",".join(f"{k}={attributes[k]}" for k in sorted(attributes))
 
 
 def _by_label(points) -> dict[str, float]:

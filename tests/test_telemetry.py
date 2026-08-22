@@ -263,3 +263,18 @@ def test_sample_counters_leaves_an_unlabeled_counter_as_one_series(tmp_path):
 
     assert values["panel_cache.hits"] == 1.0
     assert not [name for name in values if name.startswith("panel_cache.hits[")]
+
+
+def test_sample_counters_splits_a_labeled_histogram_by_its_labels(tmp_path):
+    """Count and exact max per label — the identity is the whole question a slow effect raises."""
+    from saitenka import otel_metrics
+
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    otel_metrics.mpv_effect_apply_ms.record(6000.0, {"identity": "hover-pause"})
+    otel_metrics.mpv_effect_apply_ms.record(4.0, {"identity": "advance-loadfile"})
+
+    values = telemetry._sample_counters()
+
+    assert values["mpv_effect.apply_ms.count"] == 2.0
+    assert values["mpv_effect.apply_ms[identity=hover-pause].max"] == 6000.0
+    assert values["mpv_effect.apply_ms[identity=advance-loadfile].max"] == 4.0
