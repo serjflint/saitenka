@@ -88,6 +88,9 @@ class NoSessionRuntime:
     def submit_runtime_job(self, **_kwargs) -> bool:
         return False
 
+    def submit_runtime_mpv(self, **_kwargs) -> bool:
+        return False
+
     def close_runtime_job_lane(self, _name: str, _timeout: float = 2.0) -> bool:
         return False
 

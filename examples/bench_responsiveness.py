@@ -83,11 +83,16 @@ class FakeIPC(NoSessionRuntime):
             return {"data": self.props.get(args[1])}
         return {"data": None}
 
+    # Delegates rather than answering alongside `command`: two write paths for one channel is how a
+    # fake starts disagreeing with production about what was sent.
+    def command_async(self, *args):
+        return self.command(*args)
+
     def query(self, name: str) -> object | None:
         return self.props.get(name)
 
-    def drain_events(self, *_args, **_kwargs):
-        return []
+    def receive_session(self, _timeout, _handle) -> None:
+        """No socket, so a turn observes nothing. The bench drives the Reader by calling it."""
 
 
 def _fake_ipc() -> MpvIPC:
