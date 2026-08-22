@@ -22,6 +22,8 @@ class RasterPanel(Protocol):
 
     def warm_viewport(self, scroll: int, view_h: int) -> None: ...
 
+    def warm_native_viewport(self, scroll: int, view_h: int, scale: float) -> None: ...
+
     def render_ahead(
         self,
         scroll: int,
@@ -89,7 +91,7 @@ def _warm(request: RenderAheadRequest, should_cancel, span) -> object:
         if should_cancel():
             return None
         if request.scale > 1.0:
-            request.panel.viewport(request.scroll, request.view_h, scale=request.scale)
+            request.panel.warm_native_viewport(request.scroll, request.view_h, request.scale)
             span.set("stage", "native")
         if should_cancel():
             return None

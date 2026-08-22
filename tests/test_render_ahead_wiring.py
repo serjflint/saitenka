@@ -332,7 +332,7 @@ def test_a_notch_landing_mid_raster_still_leaves_the_destination_warm():
     reached: list[tuple] = []
 
     class SupersedingPanel(_RecordingPanel):
-        def viewport(self, scroll, view_h, *, scale=1.0):
+        def warm_native_viewport(self, scroll, view_h, scale):
             reached.append(("native", scroll, view_h, scale))
             superseded.set()  # a newer notch arrives mid-raster
 

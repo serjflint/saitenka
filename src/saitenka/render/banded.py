@@ -816,14 +816,47 @@ class WindowedPanel:
         may be published, and :meth:`render_ahead` only warms the bands *beyond* the viewport
         (``overscan=view_h``), so nothing on the worker side ever warmed the band a jump landed on.
         Not ``viewport()``, which also composites pixels no one reads.
+
+        Re-acquires the lock per ROW rather than holding it across the walk: this runs on the worker
+        while the main thread composites the frame the user is looking at, and one lock for the whole
+        warm makes that frame wait out the whole warm — measured at 2.2ms -> 8.0ms for a compose
+        raced against one. Same shape as ``_scaled_render_ahead``'s per-band acquire.
         """
         with self._lock:
             self._grow_prefix(scroll + view_h)
             table = self._offsets.estimated_table()
             start, end = table.visible_range(scroll, view_h)
-            for i in range(start, end):
-                row_top = table.starts[i]
+            rows = [(i, table.starts[i]) for i in range(start, end)]
+        for i, row_top in rows:
+            with self._lock:
                 self._ensure_bands(i, scroll - row_top, scroll + view_h - row_top)
+
+    def warm_native_viewport(self, scroll: int, view_h: int, scale: float) -> None:
+        """Raster the NATIVE bands ``[scroll, scroll+view_h)`` needs at ``scale``, compositing nothing.
+
+        What the render-ahead worker owes the crisp blit at a destination. Was
+        ``viewport(..., scale=scale)``, which assembles a device-sized image the worker discards and
+        holds the lock for the whole assembly; this warms the same bands one at a time.
+
+        Warms the per-band BGRA memo as well as the band itself. Dropping that half looked like the
+        same work — the crisp gate (`native_viewport_warm`) only asks about `_scaled_blocks` — but
+        the compose then rebuilds every band's BGRA on the main thread: 2.2ms -> 17.3ms.
+        """
+        v = _NativeView(scroll, view_h, 0, scale)
+        with self._lock:
+            table, start, end = self._scaled_visible(v)
+            lo, hi = scroll, scroll + view_h
+            targets = [
+                (i, span)
+                for i in range(start, end)
+                if self._offsets.known(i)
+                for span in self._row_band_spans(i)
+                if table.starts[i] + span[2] > lo and table.starts[i] + span[1] < hi
+            ]
+        for i, span in targets:
+            with self._lock:
+                cached = self._scaled_band(i, span, scale)
+                self._scaled_band_bgra((i, span[0], v.skey), cached, v)
 
     def viewport_warm(self, scroll: int, view_h: int) -> bool:
         """True when a 1x viewport can be assembled without rasterizing a band."""
