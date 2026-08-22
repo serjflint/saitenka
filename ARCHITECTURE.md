@@ -99,10 +99,31 @@ cli.create_app
         -> Reader
 ```
 
-Inside a `Reader`, mpv script messages go through a closed `CommandRouter`, which rejects duplicate
-names and so makes ordering and ownership independently testable. `Reader` still assembles that table
-from its feature methods, so this is an explicit internal composition seam rather than an open
-third-party plugin API.
+Inside a `Reader`, mpv script messages go through a closed `CommandExecutor`: a declared spec per
+command (owner, whether it needs a current cue) separate from the bound handler, so ordering and
+ownership are testable without a session. `Reader` assembles the handler half, which makes this an
+explicit internal composition seam rather than an open third-party plugin API.
+
+A feature joins the session on one of two layers, and which one follows from whether it needs a
+place to remember that does not exist yet.
+
+- **Stateful** — it owns a slice of `SessionState`, and `reduce(state, event)` returns the next
+  state plus effects.
+- **Stateless** — it is a pure policy over a snapshot, `reduce(command, inputs)`. Routing that
+  through the mailbox would add sequencing to a decision with nothing to sequence.
+
+Both join by registration rather than by a rewrite of the host, which is what makes the session
+extensible at all. Which files, and in what order, is
+[Adding a feature](docs/contributing/runtime.md#adding-a-feature).
+
+The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
+feature's adapter has to touch the live session, so it declares the host members it needs as a
+protocol instead of taking the host itself — which is also what keeps the count of `Reader`-taking
+functions at zero.
+
+**The known cost.** That protocol's width counts the state the feature has not moved into a slice of
+its own, and the widest ports are the ones that also write host state. Nothing gates the width, so
+it is a review judgement rather than a build failure; `poe arch-map` prints it.
 
 `saitenka.runtime` is a production package, not a separate contract: `session_routes.py` imports it,
 and a session with a gateway is driven by `SessionLoop` off the mailbox rather than by a poll. See
@@ -117,7 +138,9 @@ protocol-shaped class from being mistaken for production swappability.
 | Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
-| Reader commands | `CommandRouter` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
+| Reader commands | `CommandExecutor` | Explicit and unit-testable; the spec table is closed, the handler table is assembled inside `Reader`, and neither is externally injected. |
+| Stateful features | `SliceReducer` + `RouteKey` | Live: a reducer registers against the `(event, owner)` pairs it owns, and is pure by gate. |
+| Stateless features | `StatelessRouter` | Live: a policy registers by command type; its adapter's host protocol is the coupling, and its width is not gated. |
 | Session events and effects | `saitenka.runtime` | Live: the mailbox is the session's ingress, `SessionLoop` drives it, and effects return as correlated terminals. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |

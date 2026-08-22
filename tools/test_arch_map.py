@@ -103,3 +103,17 @@ def test_every_stateless_policy_is_reported_as_stateless():
         f"policies now threading state: {threading}. A reducer with state belongs in an owner "
         "slice (`SliceReducer({name: reducer})`), not in the host-driven policy layer."
     )
+
+
+def test_every_stateless_policy_reports_a_registration_and_a_port():
+    """The seam view's whole job. It said "there is no registration seam" for as long as that was
+    true, and a report that keeps saying so after the seam lands is worse than no report — it is a
+    confident wrong answer to the one question a new contributor asks."""
+    stateless = A.seams_view()["stateless"]
+    policies = {
+        p["module"].removeprefix("app/").removesuffix("_intents.py") for p in stateless["policies"]
+    }
+
+    assert stateless["seam"], "the seam exists; the view must name it"
+    assert policies and policies == set(stateless["registered"])
+    assert {p["port"].removesuffix("Host").lower() for p in stateless["ports"]} == policies

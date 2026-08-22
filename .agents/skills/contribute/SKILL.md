@@ -47,12 +47,18 @@ PoC feeds the review, a review finding sends you back to the design.
    artifact that would falsify it** — the signature, the AST classification, the API field. A
    clean correlation is more suspicious, not less. **State the discriminator in the finding**, so a
    later reader can check the claim without redoing the work.
-3. **Smallest coherent design, then a PoC that proves tractability.** Prefer an existing seam
+3. **Check the design against `ARCHITECTURE.md` before writing it.** Its "Composition and
+   extension seams" section says where a feature is *supposed* to plug in — which layer, which
+   registration, which gate will refuse you — and `docs/contributing/runtime.md` says how. A design
+   that needs a new host member or a `Reader` parameter is not blocked by a gate being fussy; it has
+   not found its layer. If the code genuinely wants a shape the document forbids, that is a finding
+   about the document — say so and update it in the same PR, rather than routing around it.
+4. **Smallest coherent design, then a PoC that proves tractability.** Prefer an existing seam
    over a new dispatcher condition. The PoC's offline verification — reconstruct the input,
    assert the module's **documented invariants**, and **measure the churn / blast-radius** —
    *is* the regression test (fails on base, passes on the branch). What the PoC prints is what
    the reviewer reads next.
-4. **Fresh adversarial review is a gate, not a formality.** Spawn a subagent that did **not**
+5. **Fresh adversarial review is a gate, not a formality.** Spawn a subagent that did **not**
    author the change; give it only the base, the diff, and the claimed validation — **no
    rationale**. Have it verify independently and classify P0–P3. Fix every P0/P1; resolve or
    explicitly accept each P2; **any code change invalidates the pass** → re-review on the new
@@ -62,7 +68,7 @@ PoC feeds the review, a review finding sends you back to the design.
    disagreement. Do not pretend this is always available or make it a validity condition: record the
    limitation and retain two genuinely isolated reviews. Deterministic gates such as `poe all` remain
    mandatory and family-immune. The canonical policy is `CONTRIBUTING.md` §4.
-5. **Package a lean, ready PR by default.** In this single-maintainer repo, a clean gated change is
+6. **Package a lean, ready PR by default.** In this single-maintainer repo, a clean gated change is
    ready to merge; draft status adds no value by itself. Use a draft only for genuine WIP, early CI,
    active collaboration, or an explicit request. File a separate issue only when the problem needs
    durable tracking beyond this PR; when used, make it self-contained and let the PR point to it rather

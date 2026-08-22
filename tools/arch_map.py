@@ -12,10 +12,11 @@ Four views, one concern each, in the order a reader needs them:
     static      what may import what, and whether the cycles are real
     ownership   who holds state, and which events reach them
     command     what a keypress reaches
-    seams       where a new feature registers — and where it cannot
+    seams       where a new feature registers, and what its adapter costs
 
-The last one is the reason this exists. A stateful feature registers by naming itself in a dict; a
-stateless one has no seam and lands as methods on the host. Nothing in the tree said so.
+The last one is the reason this exists. Both layers register, but only one of them is free: a
+stateless feature's adapter declares a host protocol, and that protocol's width is the state the
+feature never moved. No other artifact carries the per-feature number.
 
     uv run poe arch-map              # markdown, all four views
     uv run poe arch-map -- --json    # the same data, for a diff or a check
@@ -238,8 +239,54 @@ def ownership_view() -> dict:
     }
 
 
-def _reader_members() -> dict[str, list[str]]:
-    """The host's adapter surface, by role — the middle layer that has no home of its own."""
+def _adapter_ports() -> list[dict]:
+    """Each stateless feature's declared host surface, and how much of it it writes.
+
+    The width is the meter that matters after the seam exists: a port is the state the feature has
+    not moved into a slice of its own, so it falls when that state does — and it cannot be narrowed
+    by hiding it, because a `Reader` parameter is what the host inventory sits at zero to forbid.
+    """
+    ports = []
+    for path in sorted((SRC / "app").glob("*_adapter.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or not node.name.endswith("Host"):
+                continue
+            written = [n for n in node.body if isinstance(n, ast.AnnAssign)]
+            reads = [n for n in node.body if isinstance(n, ast.FunctionDef)]
+            ports.append(
+                {
+                    "port": node.name,
+                    "module": f"app/{path.name}",
+                    "members": len(written) + len(reads),
+                    "written": len(written),
+                }
+            )
+    return sorted(ports, key=lambda p: -p["members"])
+
+
+def _registered_policies() -> list[str]:
+    """Which policies the router actually owns. Built off a stub host: a registration needs no
+    live session, which is the point of the ports."""
+    from saitenka.app.session_routes import stateless_features
+
+    class _Stub:
+        def __getattr__(self, name: str) -> object:
+            return None
+
+    return sorted(
+        entry[1].__class__.__name__.removesuffix("Adapter").lower()
+        for entry in stateless_features(_Stub()).values()  # type: ignore[arg-type]
+    )
+
+
+def _host_residue() -> dict[str, list[str]]:
+    """What is left on the host in the adapter's shape — duties with no policy behind them.
+
+    Named by prefix, so it over-reports on purpose: `_apply_playback_delta` matches and is not a
+    stateless feature's interpreter at all. A prefix names a shape, never a family — which is the
+    error this whole migration kept making, so the report says so rather than implying a worklist.
+    """
     from saitenka.app.controller import Reader
 
     roles = collections.defaultdict(list)
@@ -247,11 +294,11 @@ def _reader_members() -> dict[str, list[str]]:
         if not callable(value) and not isinstance(value, property):
             continue
         if name.startswith("_run_") and name.endswith("_command"):
-            roles["drives a stateless policy"].append(name)
+            roles["runs a command"].append(name)
         elif name.startswith("_apply_"):
-            roles["interprets its effects"].append(name)
+            roles["applies something"].append(name)
         elif name.endswith("_inputs"):
-            roles["gathers its inputs"].append(name)
+            roles["gathers inputs"].append(name)
     return {role: sorted(names) for role, names in roles.items()}
 
 
@@ -294,14 +341,16 @@ def seams_view() -> dict:
                 )
             }
         )
-        adapter = _reader_members()
+        adapter = _host_residue()
 
     return {
         "stateful": {"registered": registered, "seam": "SliceReducer({name: reducer}) + RouteKey"},
         "stateless": {
             "policies": policies,
-            "seam": None,  # the finding: there is none
-            "adapter_on_host": adapter,
+            "seam": "StatelessRouter keyed by command type",
+            "registered": _registered_policies(),
+            "ports": _adapter_ports(),
+            "host_residue": adapter,
         },
     }
 
@@ -424,19 +473,44 @@ def markdown(state: dict) -> str:
         "",
         (
             "**Stateless** — a policy over a snapshot, no state threaded, so nothing to sequence"
-            " and the mailbox would only add a hop. **There is no registration seam**: its"
-            " extension point is a method on the host."
+            " and the mailbox would only add a hop. Seam:"
+            f" `{seams['stateless']['seam']}`, the counterpart to the stateful table."
         ),
         "",
-        "| module | signature | stateful |",
+        "| module | signature | registered |",
         "| --- | --- | --- |",
     ]
+    registered = set(seams["stateless"]["registered"])
     out += [
-        f"| `{p['module']}` | `{p['signature']}` | {'yes' if p['stateful'] else 'no'} |"
+        f"| `{p['module']}` | `{p['signature']}` |"
+        f" {'yes' if p['module'].removeprefix('app/').removesuffix('_intents.py') in registered else 'NO'} |"
         for p in seams["stateless"]["policies"]
     ]
-    out += ["", "The adapter that has nowhere else to live, on `Reader`:", ""]
-    for role, names in sorted(seams["stateless"]["adapter_on_host"].items()):
+    out += [
+        "",
+        (
+            "Each adapter declares the host members it needs as a protocol — never a `Reader`"
+            " parameter, which the host inventory sits at zero to forbid. The width is the state"
+            " the feature has not moved into a slice of its own, so it is a debt meter, not a"
+            " style complaint:"
+        ),
+        "",
+        "| port | module | host members | of which written |",
+        "| --- | --- | --- | --- |",
+    ]
+    out += [
+        f"| `{p['port']}` | `{p['module']}` | {p['members']} | {p['written']} |"
+        for p in seams["stateless"]["ports"]
+    ]
+    out += [
+        "",
+        (
+            "Left on the host in the same shape, by name prefix — a shape, not a family, so this"
+            " over-reports and is a place to look rather than a worklist:"
+        ),
+        "",
+    ]
+    for role, names in sorted(seams["stateless"]["host_residue"].items()):
         out.append(f"- **{role}** ({len(names)}): {', '.join(f'`{n}`' for n in names)}")
     out.append("")
     return "\n".join(out)

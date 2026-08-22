@@ -2,14 +2,65 @@
 
 Saitenka has two runtime packages with different jobs:
 
-- `saitenka.app.runtime` supplies the command table the production `Reader` decides with;
+- `saitenka.app.runtime` holds the per-command policy `Reader` consults before dispatch: who owns
+  a command, whether it needs a current cue, whether it survives with the help overlay open.
 - `saitenka.runtime` holds the runtime itself — events, effects, mailbox admission, effect
-  lifecycle, timers, the owner slices and the session loop. It is production, not a contract package:
-  `session_routes.py` composes it and a session with a gateway is driven from it.
+  lifecycle, timers, the owner slices and the session loop. `app/session_routes.py` composes it, and
+  a session with a gateway is driven from it.
 
-This page describes both as they exist on `main`. The whole-system module map remains in
-[Architecture](architecture.md); native subtitle ownership and its supported operating envelope are
-documented in [Native mpv subtitles](../usage/native-subtitles.md).
+This page describes both as they exist on `main`, and is the *how*: where to put a new feature and
+what will fail you if you put it elsewhere. Why the runtime is split this way is in
+[Architecture](architecture.md#composition-and-extension-seams);
+the whole-system module map remains in [Architecture](architecture.md); native subtitle ownership and
+its supported operating envelope are documented in
+[Native mpv subtitles](../usage/native-subtitles.md).
+
+## Adding a feature
+
+Paths are relative to `src/saitenka/`. The host is `Reader`, in `app/controller.py`.
+
+**Does it need a place to remember that does not exist yet?** Not "does it have state" — a toggle
+obviously does. An adapter may read *and write* the host members it declares, so a feature whose
+flag already lives somewhere is stateless. Only one that would have to create a new home for state
+is stateful, and it creates it in a slice.
+
+**No — every fact it needs already has a home.**
+
+1. `app/<feature>_intents.py` — the pure policy `reduce(command, inputs)`, a frozen
+   `<Feature>Inputs`, a closed `<Feature>Command` StrEnum, one dataclass per effect. Import nothing
+   that touches mpv, the display, or the host.
+2. `app/<feature>_adapter.py` — a `<Feature>Host` `Protocol` naming exactly the members you touch,
+   and an adapter over it exposing `inputs()` and `apply(effect)`.
+3. `app/session_routes.py` — a row in `stateless_features()`, and `<Feature>Host` on
+   `StatelessHost`'s bases. That function *is* the `StatelessRouter` table; there is no registry
+   beside it.
+
+**Yes — it needs a new place to remember.**
+
+1. `runtime/<feature>.py` — `reduce(state, event) -> ReduceResult` (`runtime/state.py`) and the
+   state dataclass, under the `Owner` (`runtime/effects.py`) whose slice it belongs to.
+2. `app/session_routes.py` — name it in that owner's `SliceReducer({...})` and add the
+   `RouteKey(EventType, Owner.X)` pairs that should reach it.
+
+**If a key triggers it**, three more edits, all required:
+
+- `app/bindings.py` — the `*_MSG` script-message constant **and** a `BindingSpec` row in `BINDINGS`
+  with a `key_attr`. The constant alone binds no key and shows nothing in the help overlay.
+- `app/runtime/commands.py` — a spec row. Not optional: `CommandExecutor` refuses at construction
+  if a handler has no spec. Commands are cue-dependent by default; `_CUE_INDEPENDENT` opts out and
+  `_HELP_COMMANDS` allows the command while help is open.
+- `app/controller.py` — one row in `Reader._build_command_router`. Use `interaction(YourCommand.X)`,
+  which routes through the stateless router; `action(Reader.verb)` is the older form and costs a new
+  `Reader` member, which `poe host-mass` refuses.
+
+Four gates enforce the above:
+
+| gate | what tripped it |
+| --- | --- |
+| `tests/test_stateless_registration.py` | An `app/*_intents.py` exposing `reduce` that nothing registers. |
+| `tests/test_reader_host_contract.py` | A function under `app/` takes a `Reader` **parameter**. Declare a `Protocol`. |
+| `poe host-mass` | You added a **member** to `Reader` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
+| `poe reducer-purity` | A **registered** stateful reducer branches on something outside `(state, event)`. Stateless policies are not in the route table and are not measured. |
 
 ## Production session
 
@@ -45,9 +96,10 @@ write would otherwise be queued and then discarded.
 takes one turn off the loop. A conflicting subtitle observation retires the active cue immediately,
 before a later cue-dependent command in the same batch can use its tokens or hit boxes.
 
-`CommandRouter` is a closed table of script-message handlers. Duplicate names are rejected, and the
-router distinguishes commands that require a current cue from session-wide commands. It is assembled
-by `Reader`, so it exposes a composition seam without creating another state owner.
+`CommandExecutor` splits the command table in two: `CommandPolicy` holds the closed spec set
+(`app/runtime/commands.py`) and rejects a duplicate name; `Reader` supplies the bound handlers and
+the executor refuses any handler with no spec. So ownership and cue eligibility are decided
+without a session, and the composition seam adds no second state owner.
 
 ## Background work and publication
 
@@ -109,10 +161,8 @@ identity comparable without runtime state, and the decision that a given observa
 the installed cue identity. A conflict retires that identity in the same observation, before a later
 cue-dependent command in the same drain can use it.
 
-Every fact the projection sees is published. `LEGACY_OWNED` is the withhold-list that made that
-migration incremental — `POINTER` left it when hover moved off the interaction tick, `PAUSE` when
-watch time started accruing on the transition — and it is now empty, which is the end state rather
-than an oversight (`runtime/playback.py`).
+Every fact the projection sees is published; `LEGACY_OWNED` in `runtime/playback.py` is the
+withhold-list for facts a downstream owner has not taken yet, and it is empty.
 
 ## The runtime contracts
 
@@ -141,10 +191,9 @@ first reserves terminal capacity. The reservation prevents unrelated traffic fro
 slot needed for that effect's completion. Sequence numbers preserve publication order across lanes.
 
 Refusing admission on the normal lane is a teardown, not a bound: the gateway turns `MailboxFull`
-into `CloseRequested("runtime-overloaded")`. So the lane first reclaims what the session no longer
-needs — a queued `time-pos` or `mouse-pos` another queued one already supersedes, both properties
-whose deltas the projection either never publishes or folds at drain. Anything else still stops the
-session, because the alternative is dropping a fact silently.
+into `CloseRequested("runtime-overloaded")`. So the lane first reclaims a queued observation that a
+later queued one already supersedes — value-latest properties only, enumerated in `mailbox.py`.
+Anything else still stops the session, because the alternative is dropping a fact silently.
 
 `SessionReactor` is deterministic: it passes one event at a time to a reducer, dispatches returned
 effects, validates completions against the accepted owner and identity, and rejects stale connection
@@ -167,11 +216,11 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Nonblocking startup clear | Interactive readiness does not wait for the startup OSD clear reply. |
 | Explicit close | Owned surfaces are removed, new work is rejected, and late identity-qualified results cannot republish closed UI. |
 | Closed behavior oracle | `BehaviorTrace` accepts only its enumerated, text-free event, state, and outcome vocabulary. |
-| Exact host inventory | The checked-in per-module count of functions accepting `Reader` must match exactly; any difference fails the checker. |
+| Exact host inventory | The checked-in per-module count of functions accepting a `Reader` **parameter** may not grow. The census is currently empty, so any such function under `app/` fails; a removal tightens the baseline in place rather than failing. Separate from `poe host-mass`, which counts `Reader`'s **members**. |
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
-| Effect interpreter ownership | An owner's effects are applied by that owner's adapter, not by the host. A pure reducer or a stateless policy returns effects; the object that interprets them belongs to the feature. Purity relocates impurity, and absent this rule it relocates onto the object being retired — which is what `poe host-mass` measures. |
-| Stateless registration | A stateless policy (`app/*_intents.py`) registers in `StatelessRouter` keyed by its command type, the counterpart to `SliceReducer` keyed by owner and event. Its adapter declares the host members it needs as a protocol — never a `Reader` parameter, which the host inventory is at zero to prevent. Unregistered policies are named in `tests/test_stateless_registration.py` and that list only shrinks. |
+| Effect interpreter ownership | An owner's effects are applied by that owner's adapter, never by the host. Both layers return effects; the object that interprets them belongs to the feature. |
+| Stateless registration | Every `app/*_intents.py` policy is reachable only through `StatelessRouter`, and its adapter's coupling to the host is declared rather than implicit. |
 
 The executable sources of truth are:
 
