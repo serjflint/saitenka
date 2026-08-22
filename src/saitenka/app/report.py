@@ -231,8 +231,11 @@ def _collect_player_crashes() -> dict[str, str]:
     leaving the bundle — so the one artifact that could settle the question was the one a report
     could not carry. The frames name mpv's own functions; the redactor handles the paths around them.
     """
+    # `platform.system()`, not `sys.platform`: the type checkers NARROW `sys.platform`, so comparing
+    # it makes every line below unreachable when checking for Linux — green on macOS, `types` failure
+    # on CI. This reads the same fact without the narrowing.
     directory = Path.home() / _MACOS_CRASH_REPORTS
-    if sys.platform != "darwin" or not directory.is_dir():
+    if platform.system() != "Darwin" or not directory.is_dir():
         return {}
     cutoff = time.time() - _PLAYER_CRASH_MAX_AGE_S
     recent = sorted(
