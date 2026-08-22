@@ -15,7 +15,7 @@ class LinkingDS:
     """A dict set whose entries carry BOTH CJK scan cells and an inline cross-reference link, so a
     tooltip built from it exercises scan-hit AND link-hit. ``search`` backs a wildcard navigation."""
 
-    def entry_for(self, _tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         return util.cjk_links_entry(4)
 
     def search(self, _pattern):
@@ -23,7 +23,7 @@ class LinkingDS:
 
 
 def hidpi_reader(scale: float) -> Reader:
-    """A headless reader whose OSD pins ``_tip_display_scale`` to ~``scale`` (osd_h / REF_H(1080)),
+    """A headless reader whose OSD pins ``tip_scale.display`` to ~``scale`` (osd_h / REF_H(1080)),
     one content token shown, crisp enabled — the fixture the crisp/native path needs."""
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token

@@ -22,6 +22,7 @@ import psutil
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.panel import Definition, Entry
+from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import (
     Cue,
     CueIndex,
@@ -272,7 +273,9 @@ def execute_trials(manifest: dict, library_path: Path | None, output: Path) -> d
     return summarize_trial_records(records, manifest)
 
 
-class _IPC:
+class _IPC(NoSessionRuntime):
+    """Headless stand-in: no gateway behind it, so it refuses lanes rather than lacking the port."""
+
     def __init__(self) -> None:
         self.commands: list[tuple] = []
         self.props = {
@@ -304,6 +307,23 @@ class _IPC:
         if args and args[0] == "get_property":
             return {"error": "success", "data": self.props.get(args[1])}
         return {"error": "success", "data": None}
+
+    def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
+        """Correlated egress, completed inline. Delivery goes through `command` so this fake's own
+        state simulation sees the write — a fake that skips it reports a stale readback."""
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        reply = self.command(*command)
+        on_finished(
+            EffectFinished(
+                EffectId(0),
+                Owner.SUBTITLE,
+                identity,
+                EffectOutcome.SUCCEEDED,
+                result=reply.get("data"),
+            )
+        )
+        return True
 
     def close(self) -> None:
         pass
@@ -357,7 +377,7 @@ def _present(reader: Reader, text: str, *, native: bool) -> bool:
     reader.set_subtitle(text)
     if native:
         assert reader.native_geometry is not None
-        return reader.native_geometry.apply(reader)
+        return reader.native_geometry.apply(reader._geometry_observation())
     return bool(reader.boxes)
 
 
@@ -369,7 +389,7 @@ def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, boo
     hit = reader._hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
     before = len(ipc.commands)
     reader.hover = box.index
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     commands = ipc.commands[before:]
     focus = (
         any(command[:3] == ("osd-overlay", 1_001, "ass-events") for command in commands)
@@ -377,20 +397,20 @@ def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, boo
         else True
     )
     reader._show_tooltip(box.index)
-    opened = reader._tip_state is not None
+    opened = reader.tip.view.state is not None
     return hit, focus, opened
 
 
 def _scroll_and_close_tooltip(reader: Reader) -> bool:
-    opened = reader._tip_state is not None
+    opened = reader.tip.view.state is not None
     reader._scroll_tip(1)
     scrolled = (
         opened
         and reader._scrolled_this_tick
-        and reader._tip_state is not None
-        and reader._tip_scroll > 0
+        and reader.tip.view.state is not None
+        and reader.tip.view.scroll > 0
     )
-    reader._teardown_tip()
+    reader.teardown_tip()
     reader.hover = -1
     return scrolled
 
@@ -419,9 +439,9 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         baseline.dict_set = _TallDictionary()
         native.dict_set = _TallDictionary()
         assert native.native_geometry is not None
-        native.native_geometry.set_source(source_path, reader=native)
+        native.native_geometry.set_source(source_path, live=True)
         index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
-        native._sub_index = index
+        native.episode.sub_index = index
         latencies: list[float] = []
         baseline_latencies: list[float] = []
         cpu_latencies: list[float] = []
@@ -520,7 +540,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             )
         )
         rss_after_profile_switch = process.memory_info().rss
-        native.native_geometry.set_source(None, reader=native)
+        native.native_geometry.set_source(None, live=True)
         source_clear_current = native.subtitle_pipeline.current is not None
         source_clear_hit_count = len(native.boxes)
     close_completed = backend.closed

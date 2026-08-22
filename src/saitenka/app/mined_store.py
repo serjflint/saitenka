@@ -186,13 +186,3 @@ class MinedCardStore:
     def all(self) -> list[MinedCard]:
         rows = self._con.execute("SELECT * FROM mined_card ORDER BY id").fetchall()
         return [self._card(row) for row in rows]
-
-
-def ensure_store(reader) -> MinedCardStore:
-    """Lazily open the Reader's session-scoped mined-card store (mirrors ``sidebar._ensure_store`` for
-    the backlog). The single seam both the mine-time writer (:mod:`saitenka.app.miner`) and the Mine-tab
-    reader (:mod:`saitenka.app.sidebar`) go through."""
-    store = reader._mined_store
-    if store is None:
-        store = reader._mined_store = MinedCardStore()
-    return store

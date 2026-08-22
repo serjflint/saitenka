@@ -21,7 +21,9 @@ from saitenka.runtime import (
     EffectOutcome,
     EventOrigin,
     ExpireEffect,
+    FileLoaded,
     Owner,
+    PropertyObserved,
     RawMpvEvent,
     SendMpvCommand,
     SessionMailbox,
@@ -44,7 +46,7 @@ class FakeIPC:
     def __init__(self) -> None:
         self.event_sink = None
         self.connection_sink = None
-        self.legacy_source = None
+        self.session_loop = None
         self.requests: list[IPCRequest] = []
         self.commands: list[tuple] = []
         self.reconnect_results: list[bool] = []
@@ -54,11 +56,17 @@ class FakeIPC:
         self.replay_entered: threading.Event | None = None
         self.replay_release: threading.Event | None = None
 
-    def install_runtime_ingress(self, event_sink, connection_sink, legacy_source, gateway) -> None:
+    def install_runtime_ingress(self, event_sink, connection_sink, session_loop, gateway) -> None:
         self.event_sink = event_sink
         self.connection_sink = connection_sink
-        self.legacy_source = legacy_source
+        self.session_loop = session_loop
         self.gateway = gateway
+
+    def drain(self, timeout: float | None = 0.0) -> list:
+        """One turn as a list — the loop pushes, so a test that wants a batch collects it."""
+        events: list = []
+        self.session_loop.receive(timeout, events.append)
+        return events
 
     def command_async(self, *_args, expected_connection_epoch=None) -> IPCRequest:
         if expected_connection_epoch not in {None, 0}:
@@ -173,14 +181,14 @@ def test_connection_loss_wakes_reconnect_and_replays_registered_observers() -> N
     deadline = time.monotonic() + 1
     events: list[object] = []
     while time.monotonic() < deadline and len(events) < 5:
-        events.extend(ipc.legacy_source())
+        events.extend(ipc.drain())
         time.sleep(0.001)
 
     assert events == [
         ConnectionLost(0),
         ConnectionReplaced(1),
-        {"event": "property-change", "name": "pause", "data": "pause"},
-        {"event": "file-loaded"},
+        PropertyObserved("pause", "pause"),
+        FileLoaded(),
         ConnectionReady(1),
     ]
     assert ipc.commands == [
@@ -207,10 +215,10 @@ def test_failed_reconnect_retries_only_when_named_timer_is_due() -> None:
     assert len(ipc.reconnect_results) == 1
     assert not ipc.reconnected.is_set()
 
-    ipc.legacy_source()
+    ipc.drain()
     assert not ipc.reconnected.is_set()
     clock.now += 0.05
-    ipc.legacy_source()
+    ipc.drain()
     assert ipc.reconnected.wait(1)
 
 
@@ -230,11 +238,10 @@ def test_legacy_router_reads_the_authoritative_mailbox_once() -> None:
     mailbox = SessionMailbox()
     ipc = FakeIPC()
     MpvGateway(ipc, mailbox)
-    event = {"event": "property-change", "name": "sub-text", "data": "猫"}
-    ipc.publish(event)
+    ipc.publish({"event": "property-change", "name": "sub-text", "data": "猫"})
 
-    assert ipc.legacy_source() == [event]
-    assert ipc.legacy_source() == []
+    assert ipc.drain() == [PropertyObserved("sub-text", "猫")]
+    assert ipc.drain() == []
 
 
 def test_legacy_router_preserves_typed_user_command() -> None:
@@ -243,7 +250,7 @@ def test_legacy_router_preserves_typed_user_command() -> None:
     MpvGateway(ipc, mailbox)
     ipc.publish({"event": "client-message", "args": ["saitenka-picker", "arg"]})
 
-    assert ipc.legacy_source() == [UserCommand("saitenka-picker", ("arg",), 0)]
+    assert ipc.drain() == [UserCommand("saitenka-picker", ("arg",), 0)]
 
 
 def test_gateway_publishes_legacy_command_terminal_outcome() -> None:
@@ -273,7 +280,7 @@ def test_gateway_publishes_legacy_command_terminal_outcome() -> None:
     [
         (CommandOutcome.EXECUTED, None),
         (CommandOutcome.FAILED, CommandReason.INTERNAL),
-        (CommandOutcome.SUPPRESSED, CommandReason.LEGACY_REPEAT),
+        (CommandOutcome.SUPPRESSED, CommandReason.COALESCED),
     ],
 )
 def test_command_terminal_slot_survives_normal_lane_saturation(outcome, reason) -> None:
@@ -299,13 +306,14 @@ def test_command_terminal_slot_survives_normal_lane_saturation(outcome, reason) 
 
 
 def test_gateway_preserves_events_buffered_before_installation() -> None:
+    """Buffered before the gateway existed, and still delivered — typed, because the gateway names
+    a file-load rather than passing the wire dict through."""
     ipc = MpvIPC("unused")
-    event = {"event": "file-loaded"}
     ipc._feed(b'{"event":"file-loaded"}\n')
 
     MpvGateway(ipc, SessionMailbox())
 
-    assert ipc.drain_events() == [event]
+    assert ipc.drain_events() == [FileLoaded()]
     ipc.close()
 
 
@@ -336,7 +344,7 @@ def test_exhausted_reconnect_requests_a_bounded_session_stop() -> None:
     deadline = time.monotonic() + 1
     while time.monotonic() < deadline:
         try:
-            ipc.legacy_source()
+            ipc.drain()
         except OSError as error:
             assert str(error) == "mpv-disconnected"
             return
@@ -391,20 +399,20 @@ def test_replaying_connection_blocks_commands_and_buffers_wire_events() -> None:
         1,
     )
     assert not gateway.dispatch(blocked)
-    assert ipc.legacy_source() == [ConnectionLost(0)]
+    assert ipc.drain() == [ConnectionLost(0)]
 
     ipc.replay_release.set()
     deadline = time.monotonic() + 1
     events: list[object] = []
     while time.monotonic() < deadline and not any(isinstance(x, ConnectionReady) for x in events):
-        events.extend(ipc.legacy_source())
+        events.extend(ipc.drain())
         time.sleep(0.001)
 
     assert events == [
         ConnectionReplaced(1),
-        {"event": "property-change", "name": "pause", "data": "pause"},
-        {"event": "file-loaded"},
-        {"event": "property-change", "name": "pause", "data": False},
+        PropertyObserved("pause", "pause"),
+        FileLoaded(),
+        PropertyObserved("pause", data=False),
         ConnectionReady(1),
     ]
 
@@ -430,7 +438,7 @@ def test_failed_candidate_never_publishes_a_replacement() -> None:
     observed: list[object] = []
     while time.monotonic() < deadline:
         try:
-            observed.extend(ipc.legacy_source())
+            observed.extend(ipc.drain())
         except OSError:
             break
         time.sleep(0.001)
@@ -497,11 +505,15 @@ def test_healthy_writer_lock_contention_does_not_drop_command() -> None:
         target=lambda: (entered.set(), requests.append(ipc.command_async("show-text", "ok", 1)))
     )
     thread.start()
-    assert entered.wait(1)
-    assert requests == []
+    # Generous deadlines: these guard a hang, and the thing being waited on is the SCHEDULER. Under
+    # the free-threaded suite at `-n auto` a 1s join is a budget, not a timeout — it fails on a busy
+    # machine and passes alone.
+    assert entered.wait(10)
+    assert requests == []  # still blocked on the lock this test holds
     ipc._write_lock.release()
-    thread.join(1)
+    thread.join(10)
 
+    assert not thread.is_alive(), "the writer never returned after the lock was released"
     assert requests and requests[0].accepted
     assert requests[0].connection_epoch == 0
     ipc.close()
@@ -618,9 +630,53 @@ def test_gateway_turns_inbound_overload_into_controlled_legacy_stop() -> None:
     ipc.publish({"event": "property-change", "name": "sub-text", "data": "猫"})
 
     try:
-        ipc.legacy_source()
+        ipc.drain()
     except OSError as error:
         assert str(error) == "runtime mailbox overloaded"
     else:  # pragma: no cover - bounded ingress contract
         raise AssertionError("mailbox overload did not stop the legacy session")
     assert gateway.snapshot.inbound_overloads == 1
+
+
+def test_a_position_backlog_does_not_stop_the_session() -> None:
+    """The other half of the overload contract above: a lane that fills with superseded values is
+    not the lane filling with work, and must not reach the same stop."""
+    mailbox = SessionMailbox(normal_capacity=2)
+    ipc = FakeIPC()
+    gateway = MpvGateway(ipc, mailbox)
+    for position in range(8):
+        ipc.publish({"event": "property-change", "name": "time-pos", "data": float(position)})
+
+    assert not mailbox.snapshot.close_requested
+    assert gateway.snapshot.inbound_overloads == 0
+    assert mailbox.receive_ready()[-1].payload == PropertyObserved("time-pos", 7.0)
+
+
+def test_a_correlated_write_reaches_the_wire_before_a_following_read() -> None:
+    """The premise `send_correlated` is built on, and which every non-awaited caller depends on:
+    the write is dispatched during the submit, not queued for the reactor, so a synchronous readback
+    right after it observes it. If it were deferred, `_add_and_select` would be followed by a
+    track-list read that cannot yet see the track it just added.
+    """
+    from saitenka.app.mpv_egress import send_correlated
+    from saitenka.runtime import Owner
+
+    order: list[str] = []
+
+    class Ledger(FakeIPC):
+        def command_async(self, *args, **kwargs) -> IPCRequest:
+            order.append(f"write:{args[0]}")
+            return super().command_async(*args, **kwargs)
+
+        def command(self, *args, **kwargs) -> dict:
+            order.append(f"read:{args[1]}")
+            return super().command(*args, **kwargs)
+
+    ipc = Ledger()
+    gateway = MpvGateway(ipc, SessionMailbox())
+    ipc.submit_runtime_mpv = gateway.submit_mpv  # type: ignore[attr-defined]
+
+    send_correlated(ipc, "sub-add-select", "sub-add", "/ep.srt", "select", owner=Owner.SUBTITLE)
+    ipc.command("get_property", "track-list")
+
+    assert order == ["write:sub-add", "read:track-list"]

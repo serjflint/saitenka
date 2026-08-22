@@ -13,6 +13,7 @@ from util import FakeIPC
 from saitenka.app import miner_ui
 from saitenka.app.card_preview import PreviewData
 from saitenka.app.controller import Reader
+from saitenka.runtime import events
 
 
 class _FakeProc:
@@ -36,31 +37,33 @@ def reader_with_clip(tmp_path, monkeypatch):
     clip = tmp_path / "clip.opus"
     clip.write_bytes(b"x")
     r = Reader(FakeIPC())
-    r.preview.last_preview = _preview_data()
-    r.preview.last_audio = clip
-    r.preview.rect = (0, 0, 200, 200)
-    r.preview.audio_rect = (10, 10, 40, 40)
-    r.preview.close_rect = (60, 10, 20, 20)
-    miner_ui.click_preview(r, 20, 20)  # ▶ → retains the handle
-    assert r.preview.audio_proc is proc  # precondition: a clip is 'playing'
+    r.interaction.preview_store.dispatch(events.PreviewShown(_preview_data(), clip))
+    panel = r.interaction.preview_panel
+    panel.rect = (0, 0, 200, 200)
+    panel.audio_rect = (10, 10, 40, 40)
+    panel.close_rect = (60, 10, 20, 20)
+    miner_ui.click_preview(r.preview_ports, 20, 20)  # ▶ → retains the handle
+    assert panel.audio_proc is proc  # precondition: a clip is 'playing'
     return r, proc, killed
 
 
 def test_play_button_retains_the_player_handle(reader_with_clip):
     r, proc, _killed = reader_with_clip
-    assert r.preview.audio_proc is proc  # the fire-and-forget Popen is now stoppable
+    assert (
+        r.interaction.preview_panel.audio_proc is proc
+    )  # the fire-and-forget Popen is now stoppable
 
 
 def test_second_play_press_replaces_the_clip_never_stacks(reader_with_clip, monkeypatch):
     r, first, killed = reader_with_clip
     second = _FakeProc()
     monkeypatch.setattr(miner_ui, "play_audio", lambda _p: second)
-    miner_ui.click_preview(r, 20, 20)  # ▶ again while the first still plays
-    assert first in killed and r.preview.audio_proc is second
+    miner_ui.click_preview(r.preview_ports, 20, 20)  # ▶ again while the first still plays
+    assert first in killed and r.interaction.preview_panel.audio_proc is second
 
 
 def _close_button(r: Reader) -> None:
-    miner_ui.click_preview(r, 65, 15)  # ✕ → hide_preview
+    miner_ui.click_preview(r.preview_ports, 65, 15)  # ✕ → hide_preview
 
 
 def _esc(r: Reader) -> None:
@@ -82,4 +85,4 @@ def test_every_dismiss_path_stops_the_clip(reader_with_clip, dismiss):
     r, proc, killed = reader_with_clip
     dismiss(r)
     assert proc in killed  # the clip was stopped, not left playing (#251)
-    assert r.preview.audio_proc is None  # handle cleared → nothing lingers
+    assert r.interaction.preview_panel.audio_proc is None  # handle cleared → nothing lingers

@@ -50,6 +50,111 @@ def test_reextension_evicts_the_stale_sibling(monkeypatch, tmp_path):
     assert cache.cached_subs(video, "Show", 1) == second
 
 
+def test_a_slot_holding_both_formats_serves_the_one_a_fetch_would_have_picked(
+    monkeypatch, tmp_path
+):
+    """Eviction is best-effort (a sibling mpv still holds open survives the write), so a slot CAN
+    end up with both. Newest-mtime alone would then serve the `.srt` a fresh jimaku fetch has
+    rejected since it started preferring `.ass` — and native geometry cannot use it."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    ass = tmp_path / "chosen.ass"
+    ass.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+    stored = cache.store_subs(video, "Show", 1, ass)
+    # The stale sibling eviction could not remove: written after, so mtime favours it.
+    lingering = stored.with_suffix(".srt")
+    lingering.write_text("1\n00:00:01,000 --> 00:00:02,000\nold\n", encoding="utf-8")
+
+    assert cache.cached_subs(video, "Show", 1) == stored
+
+
+def test_a_hand_picked_sub_survives_the_next_launch(monkeypatch, tmp_path):
+    """The source picker stores unsynced (the `-raw` slot); startup looks up the resyncing slot. A
+    lookup that saw only its own slot made a deliberate pick last exactly one session — the next
+    launch loaded whatever the auto-fetch had left, so a chosen `.ass` lost to an older `.srt`."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    auto = tmp_path / "auto.srt"
+    auto.write_text("1\n00:00:01,000 --> 00:00:02,000\nauto\n", encoding="utf-8")
+    chosen = tmp_path / "chosen.ass"
+    chosen.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+
+    cache.store_subs(video, "Show", 1, auto)  # the auto fetch, resynced slot
+    picked = cache.store_subs(video, "Show", 1, chosen, resync=False)  # the picker
+
+    assert cache.cached_subs(video, "Show", 1) == picked
+
+
+def test_the_picker_slot_does_not_leak_into_a_lookup_that_wants_it_raw(monkeypatch, tmp_path):
+    """The negative control for the direction: a `resync=False` lookup stays in its own slot, so
+    widening the resyncing one did not merge the two."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    auto = tmp_path / "auto.ass"
+    auto.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+    cache.store_subs(video, "Show", 1, auto)  # resyncing slot only
+
+    assert cache.cached_subs(video, "Show", 1, resync=False) is None
+
+
+def test_a_retime_gets_its_own_slot_and_destroys_neither_other(monkeypatch, tmp_path):
+    """ "Sync from here" pressed once should hold across launches. All three slots mean different
+    things — fetched, hand-picked, re-timed — so the re-time gets its own rather than overwriting a
+    file the user may want back, and wins the lookup by being newest at equal format."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    auto = tmp_path / "auto.ass"
+    auto.write_text("[Script Info]\n[Events]\nauto\n", encoding="utf-8")
+    chosen = tmp_path / "chosen.ass"
+    chosen.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+    fetched = cache.store_subs(video, "Show", 1, auto)
+    raw = cache.store_subs(video, "Show", 1, chosen, resync=False)
+    retimed = tmp_path / "chosen.win.ass"
+    retimed.write_text("[Script Info]\n[Events]\nretimed\n", encoding="utf-8")
+
+    published = cache.publish_retimed(raw, retimed)
+
+    assert published is not None
+    assert published.stem.endswith("-retimed")
+    assert raw.exists() and fetched.exists()  # neither artifact was destroyed
+    assert cache.cached_subs(video, "Show", 1) == published
+    assert published.read_text(encoding="utf-8").endswith("retimed\n")
+
+
+def test_pressing_sync_from_here_twice_refines_rather_than_accumulates(monkeypatch, tmp_path):
+    """A drifting source takes a press per drift point, so the slot has to be overwritten — a second
+    press must not leave `-retimed-retimed` behind, nor two files racing on mtime."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    chosen = tmp_path / "chosen.ass"
+    chosen.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+    raw = cache.store_subs(video, "Show", 1, chosen, resync=False)
+    first_src = tmp_path / "first.ass"
+    first_src.write_text("[Script Info]\n[Events]\nfirst\n", encoding="utf-8")
+    second_src = tmp_path / "second.ass"
+    second_src.write_text("[Script Info]\n[Events]\nsecond\n", encoding="utf-8")
+
+    first = cache.publish_retimed(raw, first_src)
+    assert first is not None
+    second = cache.publish_retimed(first, second_src)  # re-timing the re-time
+
+    assert second == first  # same slot, overwritten
+    assert second is not None
+    assert second.read_text(encoding="utf-8").endswith("second\n")
+
+
+def test_a_retime_outside_the_cache_has_no_slot_to_publish_into(monkeypatch, tmp_path):
+    """The negative control: a `--sub-file` or a sibling next to the video is not a cache entry, so
+    a re-time of it must stay where it is rather than inventing a slot."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    loose = tmp_path / "beside-the-video.ass"
+    loose.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
+    retimed = tmp_path / "beside-the-video.win.ass"
+    retimed.write_text("[Script Info]\n[Events]\nretimed\n", encoding="utf-8")
+
+    assert cache.publish_retimed(loose, retimed) is None
+
+
 def test_glob_metacharacters_in_the_name_round_trip(monkeypatch, tmp_path):
     """A release group like ``[Erai]`` in the video stem lands in the slot name; the lookup escapes it
     so it isn't read as a glob character class (which would silently miss the cached file)."""

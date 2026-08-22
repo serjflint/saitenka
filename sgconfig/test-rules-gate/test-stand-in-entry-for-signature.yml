@@ -1,0 +1,22 @@
+id: test-stand-in-entry-for-signature
+language: python
+severity: error
+message: >-
+  A stand-in `entry_for` must take the real one's signature — `(tok, inflected=None, *, extra_terms=())`.
+  Production expands a phrase on the interactive hover path and calls it with both keywords; a
+  positional-only stand-in raises TypeError there, and a test that never reaches that call stays green.
+note: >-
+  GATE rule (`poe test-lint-gate`, in `poe all`) — baseline-clean, so it blocks a NEW divergent fake,
+  not pre-existing debt. This exact divergence hid until a test moved off `_show_tooltip` onto the
+  cursor. `DictionarySet.entry_for` in `src/saitenka/app/dictionary.py` is the shape being matched.
+files:
+  - "tests/**/*.py"
+rule:
+  kind: function_definition
+  has:
+    field: name
+    regex: "^entry_for$"
+  not:
+    has:
+      kind: parameters
+      regex: '\*,\s*extra_terms'

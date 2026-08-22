@@ -1,0 +1,234 @@
+{
+  "censused": [
+    "src/saitenka/render/banded.py",
+    "src/saitenka/app/tooltip_panel.py",
+    "src/saitenka/runtime/jobs.py"
+  ],
+  "claims": [
+    {
+      "id": "B1",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "_render_band touches no shared state; the caller stores the result under the lock",
+      "class": 1,
+      "status": "gated",
+      "evidence": "sgconfig/rules/no-raster-under-panel-lock.yml (poe invariants, in all) + tests/test_windowed_prefetch.py::test_the_panel_lock_is_not_held_across_a_raster",
+      "settles": null
+    },
+    {
+      "id": "B2",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "guard_main_render covers every raster primitive; the main path is structurally warm-only",
+      "class": 9,
+      "status": "argued",
+      "evidence": "raises in _render_band, _scaled_band and _raster_scaled_band; tests/test_render_cache.py::test_the_raster_oracle_can_fire is the control",
+      "settles": "nothing asserts a NEW raster primitive consults the guard — an enumeration test over the raster leaves"
+    },
+    {
+      "id": "B3",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "_on_render_loop is correct for the free-threaded thread pool AND the GIL build's ProcessPoolExecutor",
+      "class": 3,
+      "status": "argued",
+      "evidence": "predicate is correct; the pool half guards nothing — the pool submits render_body_band, which never consults it, and _GUARD_MAIN_RENDER is a parent-process global a spawned child re-imports as False",
+      "settles": "assert _on_render_loop() is False inside a real pool subprocess, or delete the subprocess clause"
+    },
+    {
+      "id": "B4",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "viewport_warm and missed_last_assemble answer the same question",
+      "class": 6,
+      "status": "tested",
+      "evidence": "was falsified (two enumeration rules); fixed in a2b8f1c4, tests/test_warm_compose.py::test_the_warmth_predicate_agrees_with_the_frame_it_gates with a demonstrated negative control",
+      "settles": null
+    },
+    {
+      "id": "B5",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "viewport_bgra(warm_only=True) never rasters, on either branch",
+      "class": 5,
+      "status": "tested",
+      "evidence": "tests/test_render_cache.py::test_a_cold_nested_scroll_still_rasters_nothing_on_the_interactive_thread",
+      "settles": null
+    },
+    {
+      "id": "B6",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "last_frame_rasters counts bands rasterised synchronously in the most recent call",
+      "class": 7,
+      "status": "argued",
+      "evidence": "true, but only because the n0->delta window sits inside one RLock hold; _warm_row (a worker) bumps the same counter, and the stated reason at banded.py:331 is false",
+      "settles": "return the frame's numbers from the compose call instead of reading a panel-wide field, or name the counter for what it counts"
+    },
+    {
+      "id": "B7",
+      "module": "tests/test_render_cache.py",
+      "claim": "assert_no_interactive_raster counts rasters synchronously ON THE CALLING THREAD",
+      "class": 1,
+      "status": "argued",
+      "evidence": "single-thread-correct only — the counter is panel-wide; the oracle proves nobody rastered, not that this thread did not",
+      "settles": "same fix as B6"
+    },
+    {
+      "id": "B8",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "a duplicate raster from two threads racing one band is benign — last store wins",
+      "class": 8,
+      "status": "argued",
+      "evidence": "survives on pixels (CachedBlock frozen, _store/_add_geom dedup under the lock); falsified on meters — each duplicate bumps _sync_rasters, block_cache_misses and block_rendered_px",
+      "settles": "a concurrency test racing two warm_viewport calls on one panel; the lane is capacity=1, so it may never occur in production"
+    },
+    {
+      "id": "B9",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "a concurrent measure of one row costs a duplicate layout, never a wrong offset",
+      "class": null,
+      "status": "argued",
+      "evidence": "survives — window.py:139 set_height is a pure assignment + memo drop, and warm_measure_to re-checks known(i) under the lock",
+      "settles": "assert set_height idempotence in render/window.py's own tests, then cite it here"
+    },
+    {
+      "id": "B10",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "below _assemble_warm_bgra's snapshot everything is immutable — pixels and BGRA memos are replaced, never written through",
+      "class": 8,
+      "status": "argued",
+      "evidence": "survives an attack: to_bgra_array ends in np.ascontiguousarray so memos never alias, and the one in-place mutator receives a fresh array or a .copy()",
+      "settles": "an ast-grep rule forbidding in-place writes into self._bgra / self._scaled_bgra values"
+    },
+    {
+      "id": "B11",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "\"Call under self._lock\" (a precondition) is used distinctly from \"Under self._lock\" (acquires it)",
+      "class": 7,
+      "status": "argued",
+      "evidence": "no live precondition violation. Two annotations ARE misclassified: precompose says \"Under\" while acquiring, and _raster_scaled_band says \"lock-free half\" while acquiring the lock",
+      "settles": "one phrasing per meaning, then an ast-grep rule on the precondition form"
+    },
+    {
+      "id": "B12",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "a cold band rasters in ~9ms at real width (measured ~0.034ms/px), under the 16ms budget",
+      "class": 3,
+      "status": "argued",
+      "evidence": "unsupported — no band timing in BENCHMARKS.md, and the cited vibe/ plan is git-ignored scratch that no longer exists. Same for the four newer docstring numbers",
+      "settles": "a dated BENCHMARKS.md entry with the harness invocation, or delete the numbers"
+    },
+    {
+      "id": "B13",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "composite_window is byte-identical to cropping a one-shot compose_panel",
+      "class": null,
+      "status": "tested",
+      "evidence": "tests/test_banded_composite.py",
+      "settles": null
+    },
+    {
+      "id": "B14",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "WindowedPanel is byte-identical to cropping a one-shot render_panel",
+      "class": null,
+      "status": "tested",
+      "evidence": "tests/test_windowed_panel.py",
+      "settles": null
+    },
+    {
+      "id": "B15",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "_assemble_bgra is byte-identical to to_bgra_array(_composite_bands(...))",
+      "class": null,
+      "status": "tested",
+      "evidence": "the equivalence test in tests/test_banded_composite.py",
+      "settles": null
+    },
+    {
+      "id": "B16",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "_assemble_warm_1x — the main thread's only 1x compose — agrees with the rastering assembler",
+      "class": 8,
+      "status": "tested",
+      "evidence": "had no equivalence oracle at all; tests/test_warm_compose.py::test_the_warm_compose_matches_the_rastering_one_pixel_for_pixel, negative control demonstrated",
+      "settles": null
+    },
+    {
+      "id": "B17",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "_row_band_spans must match _ensure_bands",
+      "class": 1,
+      "status": "tested",
+      "evidence": "falsified — four query sites used the raw tiler; fixed in a2b8f1c4, tests/test_warm_compose.py::test_a_tall_non_body_row_is_one_band_to_every_reader",
+      "settles": null
+    },
+    {
+      "id": "B18",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "deriving the pool dispatch from the executor in hand makes a mismatch structurally impossible",
+      "class": null,
+      "status": "tested",
+      "evidence": "tests/test_windowed_prefetch.py::test_parallel_and_sequential_render_ahead_agree",
+      "settles": null
+    },
+    {
+      "id": "B19",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "precompose is idempotent; a differing view_h/overscan recomputes",
+      "class": null,
+      "status": "tested",
+      "evidence": "tests/test_windowed_prefetch.py",
+      "settles": null
+    },
+    {
+      "id": "B20",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "render_ahead warms one screen of overscan",
+      "class": 4,
+      "status": "argued",
+      "evidence": "falsified as prose — it defaults to overscan=0 and app/popups.py injects view_h. No production caller uses the default; only the prefetch tests do, so they exercise a threshold production never uses",
+      "settles": "default it here, or state that the caller owns it and fix the prefetch tests' overscan"
+    },
+    {
+      "id": "B21",
+      "module": "src/saitenka/app/tooltip_panel.py",
+      "claim": "apply_pending_crisp is a cheap warmth check per tick, never a re-blit-per-tick churn",
+      "class": 6,
+      "status": "tested",
+      "evidence": "falsified — the flag re-armed every tick from two independent causes; fixed in a2b8f1c4 with tests/test_warm_compose.py",
+      "settles": null
+    },
+    {
+      "id": "B22",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "eviction bounds retained pixels to O(viewport)",
+      "class": 1,
+      "status": "tested",
+      "evidence": "falsified — _evict was unreachable from the warm-only main thread; measured 0.51 to 3.29 MB over eight notches. Fixed in a2b8f1c4, tests/test_warm_compose.py::test_retained_pixels_stay_bounded_across_a_long_scroll",
+      "settles": null
+    },
+    {
+      "id": "B23",
+      "module": "ARCHITECTURE.md",
+      "claim": "Stage 6 describes how the tooltip renders a viewport",
+      "class": 1,
+      "status": "argued",
+      "evidence": "documents the pre-warm-only engine — the main thread rastering misses and evicting. docs-consts stays green because the constants table is accurate; the narrative is not gated",
+      "settles": "rewrite Stage 6 against the warm-only main thread, or point it at the module and stop restating it"
+    },
+    {
+      "id": "B24",
+      "module": "src/saitenka/render/banded.py",
+      "claim": "skeleton_frame provides a non-blocking progressive paint",
+      "class": null,
+      "status": "argued",
+      "evidence": "no production caller — definition and tests only",
+      "settles": "delete it, or wire it and say where"
+    },
+    {
+      "id": "J1",
+      "module": "src/saitenka/runtime/jobs.py",
+      "claim": "NoSessionRuntime covers every runtime port a stand-in gets asked about",
+      "class": 2,
+      "status": "tested",
+      "evidence": "the docstring promised to grow and did not; tests/test_runtime_stand_in.py censuses the surface from the call sites, negative control demonstrated in 16e07012",
+      "settles": null
+    }
+  ]
+}

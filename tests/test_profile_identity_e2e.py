@@ -12,6 +12,7 @@ subprocess/socket/filesystem, which these don't touch — mirrors test_subselect
 from __future__ import annotations
 
 import pytest
+import util
 
 from saitenka.app import subselect
 from saitenka.app.controller import Reader
@@ -27,22 +28,19 @@ from saitenka.app.tokenizer import register_tokenizer
 EN = {"id": 1, "type": "sub", "lang": "eng"}  # English-only file → no JP track, so the gate runs
 
 
-class _FakeIPC:
-    """Serves track-list/path and records commands — the same shape test_subselect drives
+class _FakeIPC(util.FakeIPC):
+    """Gateway-wired, serving track-list/path — the same fake test_subselect drives
     prepare_attach_startup through, so this exercises the REAL attach selection, not a stub of it."""
 
     def __init__(self, tracks=None, path=None):
-        self._tracks = tracks or []
-        self._path = path
-        self.calls: list[tuple] = []
+        super().__init__()
+        self.props["track-list"] = tracks or []
+        self.props["path"] = path
+        util.runtime_gateway(self)
 
-    def command(self, *args):
-        self.calls.append(args)
-        if args[:2] == ("get_property", "track-list"):
-            return {"data": self._tracks}
-        if args[:2] == ("get_property", "path"):
-            return {"data": self._path}
-        return {"data": None}
+    @property
+    def calls(self) -> list[tuple]:
+        return self.commands
 
 
 class _FakeLatin:

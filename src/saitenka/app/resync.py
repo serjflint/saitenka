@@ -22,6 +22,8 @@ import statistics
 import subprocess
 from typing import TYPE_CHECKING
 
+from saitenka.app import subtitle_artifact
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -29,19 +31,6 @@ log = logging.getLogger(__name__)
 
 # Text subtitle codecs we can extract as an alignment reference (image subs — pgs/dvdsub — can't align).
 _TEXT_SUB_CODECS = {"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"}
-
-
-def _reference_extract_spec(codec: str) -> tuple[str, list[str]]:
-    """(reference file suffix, ffmpeg ``-c:s`` args) for an embedded sub of *codec*. ASS/SSA are COPIED
-    to a native ``.ass`` — alass parses ASS directly, whereas ffmpeg's srt CONVERSION injects
-    ``<font>``/``<b>`` tags a strict SubRip parser rejects (live: ep02's embedded credits line
-    ``<b>Edição</b>`` → ``alass-cli`` exit 1 → subs left raw → several seconds late). subrip is copied
-    verbatim; anything else (mov_text/webvtt) converts to srt, which is clean for those codecs."""
-    if codec in {"ass", "ssa"}:
-        return ".ass", ["-c:s", "copy"]
-    if codec in {"subrip", "srt"}:
-        return ".srt", ["-c:s", "copy"]
-    return ".srt", ["-c:s", "srt"]
 
 
 # The reference language, in preference order: the ENGLISH dialogue track is what the overlay already
@@ -128,7 +117,7 @@ def _embedded_sub_reference(
             return None
         chosen = _pick_reference_stream(text)
         lang = str(chosen.get("tags", {}).get("language", "") or "und").lower()
-        suffix, codec_args = _reference_extract_spec(chosen.get("codec_name", ""))
+        suffix, codec_args = subtitle_artifact.extract_spec(chosen.get("codec_name", ""))
         ref = workdir / f"reference.{lang}{suffix}"
         extracted = subprocess.run(
             [ffmpeg, "-y", "-i", str(video), "-map", f"0:{chosen['index']}",
@@ -243,6 +232,12 @@ def _resync_command(
         "subtitle resync requires alass or ffsubsync; install alass (brew install alass)"
         " or ensure uvx is on PATH"
     )
+
+
+def _aligned_suffix(src: Path) -> str:
+    """The extension alass's output actually deserves. ASS/SSA go in as a normalized SRT (see
+    :func:`_alass_ready_source`) and come back as SRT, so only a genuine SRT keeps its own name."""
+    return ".srt" if src.suffix.casefold() in {".ass", ".ssa"} else src.suffix
 
 
 def _alass_ready_source(src: Path, workdir: Path) -> Path:
@@ -428,7 +423,11 @@ def maybe_resync(
 
     from saitenka import otel_metrics
 
-    out = src.with_name(src.stem + ".synced" + src.suffix)
+    # The aligner's OUTPUT format, not the source's: `_alass_ready_source` hands alass an SRT for an
+    # ASS body (alass does no conversion), so naming the result `.ass` produced SubRip text under an
+    # extension that lies — accepted by the geometry's suffix check, then unparseable. Honest `.srt`
+    # instead: the typesetting is still lost, but the file says so and the fallback path sees it.
+    out = src.with_name(src.stem + ".synced" + _aligned_suffix(src))
     # A span + INFO log per resync so a report shows whether it ran, its outcome, the shift it applied,
     # and — via the cue fingerprints — enough to replay it offline. Without this a silent fallback-to-raw
     # (tool missing/failed) and a real-but-zero-offset sync are indistinguishable — the ep03 "synced"
@@ -504,13 +503,49 @@ def _parse_cues(path: Path):
 
 
 def _persist_windowed(sub: Path, tmp: Path) -> Path:
-    """Write the re-timed result to a stable ``<base>.win.srt`` sibling (idempotent across repeated
+    """Write the re-timed result to a stable ``<base>.win<ext>`` sibling (idempotent across repeated
     presses — a second window on an already-windowed file reuses the same name, never ``.win.win``).
-    Never clobbers the original cache/``--sub-file``, so a bad window is one keypress from undone."""
+    Never clobbers the original cache/``--sub-file``, so a bad window is one keypress from undone.
+
+    The extension follows *tmp*, i.e. the format the re-time actually produced. Hardcoding ``.srt``
+    silently downgraded an ASS source to SubRip on every press."""
     stem = sub.stem.removesuffix(".win")
-    dest = sub.with_name(f"{stem}.win.srt")
+    dest = sub.with_name(f"{stem}.win{tmp.suffix}")
     shutil.copy2(str(tmp), str(dest))
     return dest
+
+
+def _retimed_document(sub: Path, cues, *, delta: float, boundary: float, workdir: Path) -> Path:
+    """The re-timed document to persist, in the SOURCE's own format.
+
+    An ASS source is shifted in place, so its styles, fonts and override tags survive a re-time —
+    serializing its cues to SRT discarded the typesetting the source was chosen for and produced a
+    body its own extension no longer described. Falls back to SRT for a document this cannot
+    round-trip, which is visible (geometry declines an `.srt`) rather than silent.
+    """
+    from saitenka.subtitles import Cue
+
+    if sub.suffix.casefold() == ".ass":
+        from saitenka.subtitles import UnsupportedAssEvent, shift_ass_dialogue
+
+        try:
+            shifted = shift_ass_dialogue(
+                sub.read_text(encoding="utf-8-sig"),
+                delta_ms=round(delta * 1000),
+                from_ms=round(boundary * 1000),
+            )
+        except (UnsupportedAssEvent, OSError, UnicodeDecodeError, ValueError) as error:
+            log.info("resync: ASS re-time falls back to SRT (%s)", error)
+        else:
+            dest = workdir / "result.ass"
+            dest.write_text(shifted, encoding="utf-8")
+            return dest
+    tmp = workdir / "result.srt"
+    _write_srt(
+        tmp,
+        [Cue(c.start + delta, c.end + delta, c.text) if c.start >= boundary else c for c in cues],
+    )
+    return tmp
 
 
 def _windowed_align(
@@ -595,7 +630,6 @@ def resync_window(
     ``<base>.win.srt`` path; ``sub`` unchanged when already aligned (no shift); or None on a hard failure
     (no reference / too few cues / tool failure), so the caller can fall back to a whole-file re-sync."""
     from saitenka import otel_metrics
-    from saitenka.subtitles import Cue
 
     if timeout is None:
         from saitenka.app.config import resolve_resync_timeout
@@ -655,13 +689,10 @@ def resync_window(
             if abs(delta) < 0.001:  # already aligned here → sub unchanged (distinct from failure)
                 span.set("outcome", "synced")
                 return sub
-            new_cues = [
-                Cue(c.start + delta, c.end + delta, c.text) if c.start >= boundary else c
-                for c in cues
-            ]
-            tmp = workdir / "result.srt"
-            _write_srt(tmp, new_cues)
-            out_path = _persist_windowed(sub, tmp)
+            out_path = _persist_windowed(
+                sub,
+                _retimed_document(sub, cues, delta=delta, boundary=boundary, workdir=workdir),
+            )
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
         span.set("outcome", "synced")

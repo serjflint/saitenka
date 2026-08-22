@@ -33,6 +33,20 @@ def _screenshot(ipc, path: Path) -> Image.Image:
     return Image.open(path).convert("RGB")
 
 
+def _targets_for(reader, x, y):
+    """The live check's view of `_hover_targets`, wired from the reader it is probing."""
+    from saitenka.app.tooltip import _hover_targets
+
+    return _hover_targets(
+        x,
+        y,
+        inside=True,
+        tip_rect=reader.tip.view.rect,
+        nest_rect=reader.tip.nest.rect,
+        hit=lambda hx, hy: reader._hit(hx, hy) if reader.tokens else -1,
+    )
+
+
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
@@ -46,7 +60,7 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
 
         _poll_until(
             reader,
-            lambda: reader._tip_rect is not None,
+            lambda: reader.tip.view.rect is not None,
             "a real mouse over a word did not show a tooltip",
         )
         ipc.command("screenshot-to-file", str(tmp / "live_hover.png"), "window")
@@ -59,7 +73,7 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
         )
 
         # a real keypress must reach the reader (mine key is bound) — drive it and drain
-        reader.poll_once()
+        reader.pump()
 
 
 @pytest.mark.live
@@ -69,7 +83,6 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
     shown tooltip, the base hit-test must report over_tip (keep the lease, don't hijack to a word
     under it), and a real left-click on the tooltip body must be captured (pause lease retained), not
     fall through to mpv. Regression guard for the windowed-renderer _tip_rect calc."""
-    from saitenka.app.tooltip import _hover_targets
     from saitenka.panel import Definition, Entry
 
     class _TallDS:
@@ -89,54 +102,56 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
 
     with _live_reader() as (_tmp, reader, ipc):
         reader.dict_set = _TallDS()  # rebuild the next hover's panel as a tall, scrolling tip
-        reader._panel_cache.clear()
+        reader.tip.panel_cache.clear()
         i = next(k for k, t in enumerate(reader.tokens) if t.is_content)
         box = next(b for b in reader.boxes if b.index == i)
         ox, oy = reader.sub_origin
         ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
-        _poll_until(reader, lambda: reader._tip_rect is not None, "hover did not show a tooltip")
+        _poll_until(
+            reader, lambda: reader.tip.view.rect is not None, "hover did not show a tooltip"
+        )
 
         # occlusion calc: the dead centre of the rendered tooltip must read over_tip (keep the lease),
         # NOT a word beneath it. This checks the windowed-renderer _tip_rect against the same OSD
         # coordinate space mpv reports mouse-pos in — the alignment the headless fakes can't see.
-        tx, ty, tw, th = reader._tip_rect
+        tx, ty, tw, th = reader.tip.view.rect
         cx, cy = int(tx + tw / 2), int(ty + th / 2)
-        over_word, over_tip, _nest = _hover_targets(reader, cx, cy, inside=True)
+        over_word, over_tip, _nest = _targets_for(reader, cx, cy)
         assert over_tip and over_word == -1, (
             f"cursor over the tooltip must read over_tip (occlusion); got over_tip={over_tip} "
-            f"over_word={over_word} — _tip_rect={reader._tip_rect} (windowed-renderer rect calc?)"
+            f"over_word={over_word} — _tip_rect={reader.tip.view.rect} (windowed-renderer rect calc?)"
         )
 
         # real cursor onto the tooltip → the lease holds (hover stays on the aimed word, not hijacked)
         ipc.command("mouse", cx, cy)
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         assert reader.hover == i, (
             f"resting on the tooltip must keep its lease; hover={reader.hover} aimed={i} "
-            f"(_tip_rect={reader._tip_rect})"
+            f"(_tip_rect={reader.tip.view.rect})"
         )
 
         # a real left-click on the tooltip body must be captured (tip stays), not fall through
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
-        assert reader._tip_rect is not None, (
+        assert reader.tip.view.rect is not None, (
             "a click on the tooltip must be captured, not tear it down"
         )
 
         # after scrolling the tall tip (windowed full_height converges here), the rect must still
         # match the drawn tip: its centre must read over_tip, not the word beneath.
-        reader._scroll_tip(round(reader.osd[1] * 0.3))
+        reader.scroll_tip(round(reader.osd[1] * 0.3))
         for _ in range(3):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
-        sx, sy, sw, sh = reader._tip_rect
-        word2, tip2, _ = _hover_targets(reader, int(sx + sw / 2), int(sy + sh / 2), inside=True)
+        sx, sy, sw, sh = reader.tip.view.rect
+        word2, tip2, _ = _targets_for(reader, int(sx + sw / 2), int(sy + sh / 2))
         assert tip2 and word2 == -1, (
             f"after scroll, tooltip centre must still read over_tip; got over_tip={tip2} "
-            f"over_word={word2} — _tip_rect={reader._tip_rect} (post-scroll windowed rect calc?)"
+            f"over_word={word2} — _tip_rect={reader.tip.view.rect} (post-scroll windowed rect calc?)"
         )
 
 
@@ -157,11 +172,11 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
 
         # baseline: no tooltip → saitenka's section is off → the rival owns the click and toggles pause
         ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC wire value
-        reader.poll_once()  # _sync_mouse_capture: nothing up → section stays disabled
+        reader.pump()  # _sync_mouse_capture: nothing up → section stays disabled
         ipc.command("mouse", 5, 5)  # bare video, no word
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         assert pause_state() is False, "rival forced MBTN_LEFT should toggle pause off the tooltip"
 
@@ -172,17 +187,17 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
         ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
         _poll_until(
             reader,
-            lambda: reader._tip_rect is not None and reader._mouse_captured,
+            lambda: reader.tip.view.rect is not None and reader._mouse_captured,
             "tooltip did not show / mouse section not captured",
         )
 
         # a click on the tooltip must reach saitenka, NOT the rival → pause unchanged
         ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC wire value
-        tx, ty, tw, th = reader._tip_rect
+        tx, ty, tw, th = reader.tip.view.rect
         ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):
-            reader.poll_once()
+            reader.pump()
             time.sleep(0.02)
         assert pause_state() is True, (
             "saitenka's forced section must capture the click, not the rival"
@@ -227,7 +242,7 @@ def test_live_sidebar_key_draws_and_removes_sidebar():
             reader, lambda: not reader.sidebar.open, "sidebar key did not close the sidebar"
         )
 
-        assert reader.sidebar.rect is None
+        assert reader.interaction.sidebar_panel.rect is None
         assert ImageChops.difference(opened, closed).getbbox() is not None
 
 
@@ -238,10 +253,10 @@ def test_live_help_key_draws_and_escape_closes_shortcut_reference():
         closed = _screenshot(ipc, tmp / "help-closed.png")
 
         ipc.command("keypress", "F1")
-        _poll_until(reader, lambda: reader._help_open, "F1 did not open shortcut help")
+        _poll_until(reader, lambda: reader.help.open, "F1 did not open shortcut help")
         opened = _screenshot(ipc, tmp / "help-open.png")
 
         ipc.command("keypress", "ESC")
-        _poll_until(reader, lambda: not reader._help_open, "Esc did not close shortcut help")
+        _poll_until(reader, lambda: not reader.help.open, "Esc did not close shortcut help")
 
         assert ImageChops.difference(opened, closed).getbbox() is not None

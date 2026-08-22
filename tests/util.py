@@ -16,6 +16,7 @@ import importlib.util
 import os
 import sys
 import threading
+import time
 from concurrent.futures import Future
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -24,14 +25,63 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from saitenka import otel_metrics
+from saitenka.app import tooltip_raster
 from saitenka.model import Theme
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest
 from saitenka.panel import Definition, Entry, Freq, panel_rows, render_panel
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 from saitenka.runtime.mailbox import SessionMailbox
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.render.layout_backend import LayoutBackend
+
+
+def await_ready(
+    ready: Callable[[], bool],
+    message: str,
+    *,
+    pump: Callable[[], None] = lambda: None,
+    timeout: float = 5.0,
+) -> None:
+    """Wait on a deadline for work happening on another thread.
+
+    Not `for _ in range(200): sleep(0.001)`. That is a *scheduling* budget wearing a timeout's
+    clothes: under the whole suite at `-n auto` the awaited thread can lose more than 200ms before
+    it is ever scheduled, so it fails on a busy machine and passes alone — which is why the ones it
+    bit never reproduced in isolation. A deadline fails just as fast when the work is genuinely
+    wedged and does not fail when the machine is merely busy, so the bound can be generous.
+
+    `pump` runs before each check and at least once, for a consumer that has to be driven.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        pump()
+        if ready():
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(message)
+        time.sleep(0.001)
+
+
+def drain_for(pump: Callable[[], None], *, seconds: float = 0.2) -> None:
+    """Drive a consumer for a wall-clock window, then let the caller assert nothing arrived.
+
+    The negative counterpart of `await_ready`, and a poll count is wrong here for the same reason:
+    `for _ in range(200): sleep(0.001)` is 200 *scheduling slots*, not 200ms, so on a busy machine
+    the thread that was supposed to get a chance to misbehave never ran and the test passes by not
+    having looked. A window is short by design — a negative can only ever be "not within this long".
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        pump()
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.001)
+
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
@@ -209,14 +259,58 @@ class FakeIPC:
 
     def __init__(self):
         self.events: list[dict] = []
+        #: The real transport lets a consumer WAIT for an event rather than ask repeatedly. A fake
+        #: that always returns instantly cannot tell a blocking loop from a spinning one, so it
+        #: mirrors the signal here — under a lock, like production, or an emit racing a drain is a
+        #: lost wake and the consumer sleeps through an event that already arrived.
+        self._event_arrived = threading.Event()
+        self._events_lock = threading.Lock()
         self.props: dict = {}
         self.commands: list[tuple] = []
         self.requests: list[IPCRequest] = []
         self._event_sink = None
         self._connection_sink = None
-        self._legacy_event_source = None
+        self._session_loop = None
         self._runtime_gateway = None
         self.runtime_outcomes: list[object] = []
+        #: Both are on every `MpvIPC` from construction, so a stand-in that omits them is a fake
+        #: production would not recognise. They were reachable only through a `getattr(ipc, …, x)`
+        #: probe, which answered "absent" for this fake and for a rename alike.
+        self.connected_at: float | None = None  # set once the transport connects; never here
+        self._bytes_read = 0  # a fake reads nothing off a wire, and 0 is what that means
+        #: Named timers scheduled through the runtime port, newest per name. Nothing fires on a
+        #: wall clock — a test calls `fire_runtime_timer` so ordering stays deterministic.
+        self.timers: dict[str, tuple[object, Callable[[object], None]]] = {}
+        #: Every schedule/cancel by timer name, in order. A ledger, not a live view: "retired
+        #: exactly once" is a statement about the calls, which `timers` alone cannot answer.
+        self.timer_log: list[tuple[str, str]] = []
+
+    def schedule_runtime_timer(self, *, timer: str, identity, on_finished, **_kwargs) -> bool:
+        self.timers[timer] = (identity, on_finished)
+        self.timer_log.append(("schedule", timer))
+        return True
+
+    def cancel_runtime_timer(self, timer: str) -> bool:
+        self.timer_log.append(("cancel", timer))
+        return self.timers.pop(timer, None) is not None
+
+    def timer_calls(self, timer: str) -> list[str]:
+        return [action for action, name in self.timer_log if name == timer]
+
+    def fire_runtime_timer(self, timer: str, *, outcome=None) -> bool:
+        """Deliver a scheduled timer's due event, as the gateway would."""
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        entry = self.timers.pop(timer, None)
+        if entry is None:
+            return False
+        identity, on_finished = entry
+        on_finished(
+            EffectFinished(
+                EffectId(0), Owner.SUBTITLE, identity, outcome or EffectOutcome.SUCCEEDED
+            )
+        )
+        return True
 
     def set_prop(self, name: str, value) -> None:
         """Simulate mpv: update the property AND emit a buffered property-change event."""
@@ -224,10 +318,12 @@ class FakeIPC:
         self.emit({"event": "property-change", "name": name, "data": value})
 
     def emit(self, event: dict) -> None:
-        if self._event_sink is None:
-            self.events.append(event)
-        else:
-            self._event_sink(event, 0)
+        with self._events_lock:
+            if self._event_sink is None:
+                self.events.append(event)
+            else:
+                self._event_sink(event, 0)
+            self._event_arrived.set()
 
     def pump(self) -> None:
         """Real IPC reads the socket here; the fake's events are queued directly."""
@@ -238,29 +334,129 @@ class FakeIPC:
             return {"data": self.props.get(args[1])}
         return {"data": None}
 
+    def probe(self, name: str) -> dict:
+        return self.command("get_property", name)
+
+    def query(self, name: str) -> object | None:
+        # Through `command`, like `command_async`: a subclass that simulates mpv state must see
+        # every read, and a fake with a second path for one channel reads as a production bug.
+        # The error check mirrors `MpvIPC.query` — a fake that answered past an error would let a
+        # caller depend on a payload production discards.
+        reply = self.probe(name)
+        if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
+            return None
+        return reply.get("data")
+
     def command_async(self, *args, expected_connection_epoch=None):
         del expected_connection_epoch
-        self.commands.append(args)
+        # Delegate to `command` rather than recording directly: mpv has one channel, and a subclass
+        # that simulates state (track selection, sub-add/remove) must see async writes too.
+        reply = self.command(*args)
         future: Future[dict] = Future()
-        future.set_result({"error": "success", "data": None})
+        future.set_result({"error": "success", **reply})
         request = IPCRequest(len(self.requests), 0, future)
         self.requests.append(request)
         return request
 
-    def drain_events(self, timeout: float | None = 0.0) -> list[dict]:
-        if self._legacy_event_source is not None:
-            return self._legacy_event_source(timeout)
-        evs, self.events = self.events, []
-        return evs
+    def receive_session(self, timeout: float | None, handle) -> None:
+        loop = self._session_loop
+        if loop is not None:
+            loop.receive(timeout, handle)
+            return
+        if timeout:
+            with self._events_lock:
+                pending = bool(self.events)
+            if not pending:
+                self._event_arrived.wait(timeout)
+        with self._events_lock:
+            evs, self.events = self.events, []
+            self._event_arrived.clear()
+        for event in evs:
+            handle(event)
 
-    def install_runtime_ingress(self, event_sink, connection_sink, legacy_event_source, gateway):
+    @property
+    def session_loop(self):
+        return self._session_loop
+
+    def drain_events(self, timeout: float | None = 0.0) -> list:
+        events: list = []
+        self.receive_session(timeout, events.append)
+        return events
+
+    def install_runtime_ingress(self, event_sink, connection_sink, session_loop, gateway):
         self._event_sink = event_sink
         self._connection_sink = connection_sink
-        self._legacy_event_source = legacy_event_source
+        self._session_loop = session_loop
         self._runtime_gateway = gateway
         for event in self.events:
             event_sink(event, 0)
         self.events = []
+
+    def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
+        """Register observers the way production does — through the gateway when one is wired.
+
+        Without this the fake forces `register_observer_set` down its no-gateway fallback, which
+        issues the same commands but never tells the gateway which observers exist, so reconnect
+        replay is silently not exercised.
+        """
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return {}
+        return gateway.register_observers(names)
+
+    def publish_runtime_event(self, event) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.publish_session_event(event)
+
+    def deliver_runtime_event(self, event) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.deliver_session_event(event)
+
+    def register_session_resource(self, name: str, resource: object) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        self._runtime_gateway.session_resources[name] = resource
+        return True
+
+    def submit_runtime_mpv(self, **kwargs) -> bool:
+        if self._runtime_gateway is not None:
+            return self._runtime_gateway.submit_mpv(**kwargs)
+        return self._submit_inline(**kwargs)
+
+    def _submit_inline(self, *, identity, command, on_finished, **_kwargs) -> bool:
+        """Run a correlated command and complete it before returning.
+
+        A fake without a gateway used to refuse the submit, which left every caller on a
+        synchronous fallback that production never takes. Completing inline keeps the egress
+        identical to production's while staying deterministic; delivery goes through `command` so
+        this fake's own mpv-state simulation sees the write, and reply errors map the way
+        `MpvGateway._reply` maps them.
+        """
+        from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
+
+        outcome, error, result = EffectOutcome.SUCCEEDED, None, None
+        try:
+            reply = self.command(*command)
+        except Exception:  # noqa: BLE001  # the gateway reports a dead pipe, it never raises
+            outcome, error = EffectOutcome.FAILED, EffectError.DISCONNECTED
+        else:
+            if isinstance(reply, dict):
+                result = reply.get("data")
+                if reply.get("error") not in {None, "success"}:
+                    outcome = EffectOutcome.FAILED
+                    error = {
+                        "disconnected": EffectError.DISCONNECTED,
+                        "timeout": EffectError.TIMEOUT,
+                        "overloaded": EffectError.OVERLOADED,
+                    }.get(reply.get("error"), EffectError.INVALID_RESULT)
+        on_finished(
+            EffectFinished(
+                EffectId(0), Owner.SUBTITLE, identity, outcome, result=result, error=error
+            )
+        )
+        return True
 
     def publish_legacy_command_outcome(self, outcome) -> None:
         if self._runtime_gateway is None:
@@ -284,6 +480,69 @@ class FakeIPC:
             return False
         return self._runtime_gateway.close_job_lane(name, timeout)
 
+    def wake_session_runtime(self) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        self._runtime_gateway.mailbox.wake()
+        return True
+
+    def close_session_runtime(self) -> bool:
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return False
+        reactor.close()
+        return True
+
+    def route_session_playback(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.PLAYBACK` port, including its no-reactor refusal.
+
+        A fake that always refused would keep every controller test on the Reader-owned store and
+        leave the routed path — the one production takes — exercised only where a test installs a
+        gateway by hand.
+        """
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.playback
+
+    def route_session_lifecycle(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.SESSION` port, refusal included — as above."""
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.session
+
+    def route_session_subtitle(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.SUBTITLE` port, refusal included — as above."""
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.subtitle
+
+    def route_session_interaction(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.INTERACTION` port, refusal included — as above."""
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.interaction
+
+    def route_session_presentation(self, envelope) -> object | None:
+        """Mirror the transport's `Owner.PRESENTATION` port, refusal included — as above."""
+        reactor = getattr(self._runtime_gateway, "session_reactor", None)
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return reactor.state.presentation
+
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
     """The ``{key: message}`` map mpv would hold after registration, reconstructed from the recorded
@@ -292,6 +551,15 @@ def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
     string — it can't fire the handler — so this is the seam :func:`press` dispatches through."""
     reg: dict[str, str] = {}
     for cmd in ipc.commands:
+        if len(cmd) >= 3 and cmd[0] == "define-section":
+            # The "global" scope installs as ONE section rather than a keybind per key. Parsed here
+            # so `press` dispatches through the same registry either way — a test asserting a
+            # shortcut works must not have to know which form registered it.
+            for line in str(cmd[2]).splitlines():
+                key, _, spec = line.partition(" ")
+                if spec.startswith("script-message "):
+                    reg[key] = spec.removeprefix("script-message ")
+            continue
         if len(cmd) >= 3 and cmd[0] == "keybind":
             key, spec = cmd[1], cmd[2]
             if isinstance(spec, str) and spec.startswith("script-message "):
@@ -303,7 +571,7 @@ def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
 
 def press(reader, ipc: FakeIPC, key: str) -> None:
     """Fire the handler bound to ``key`` through the REAL dispatch chain — a synthetic mpv
-    ``client-message`` drained by ``reader._drain_events()`` → ``_handle`` → ``_HANDLERS`` — the way an
+    ``client-message`` drained by ``reader._drain_events()`` → ``_handle`` → the command table — the way an
     actual keypress does. This is the hop FakeIPC can't simulate on its own (it echoes the bind, never
     fires it), so a test that only checks ``ipc.commands`` proves saitenka *sent* the bind, not that a
     press *runs* the action. Raises :class:`KeyError` if ``key`` isn't currently bound — a dead shortcut
@@ -345,6 +613,15 @@ class FakeTransport:
     def write(self, data: bytes) -> None:
         with self._cond:
             self.sent.extend(data)
+
+    def snapshot(self) -> bytes:
+        """What the client has written so far, copied under the lock.
+
+        The writer is another thread, so ``bytes(fake.sent)`` from the test races the ``extend``
+        that grows it — no-GIL has no bytecode-level shelter for the copy.
+        """
+        with self._cond:
+            return bytes(self.sent)
 
     def close(self) -> None:
         with self._cond:
@@ -537,3 +814,96 @@ PROFILES: list[Profile] = [
     Profile(Theme(), 384, "ruby_heavy"),  # dense inline furigana — Phase-B ruby-clearance shape
     Profile(Theme(scale=2.0), 384, "wide_cjk"),  # narrow + hi-dpi → the tallest kinsoku wrap
 ]
+
+
+class RecordingRasterProvider:
+    """A raster provider that records requests instead of rasterizing.
+
+    Proves the provider-neutral contract: the reducer's plain/styled choice and the request it
+    assembles are observable without Pillow, and a fake satisfies exactly what the shipping
+    provider does.
+
+    Pass ``delegate`` to record in front of a real provider instead of standing in for one — that is
+    how the same neutrality assertions run against ``PillowRasterProvider``, which records nothing
+    itself. Recording is the observation, not the substitution.
+    """
+
+    def __init__(self, size: tuple[int, int] = (20, 10), *, delegate=None) -> None:
+        self.requests: list = []
+        self.closed = False
+        self._size = size
+        self._delegate = delegate
+
+    def render(self, request):
+        from PIL import Image
+
+        from saitenka.app.subtitle_raster import SubtitleRasterResult
+
+        self.requests.append(request)
+        if self._delegate is not None:
+            return self._delegate.render(request)
+        return SubtitleRasterResult(Image.new("RGBA", self._size), ())
+
+    def close(self) -> None:
+        self.closed = True
+        if self._delegate is not None:
+            self._delegate.close()
+
+    @property
+    def styles(self) -> list[str]:
+        """The plain/styled decision behind each request, in order."""
+        return [request.style.value for request in self.requests]
+
+
+def record_spans(monkeypatch) -> list[dict]:
+    """Capture every ``traced(...)`` span (name + static attrs + in-block ``.set`` attrs) without
+    standing up an OTel provider — ``instrumented`` composes ``traced``, so this sees the real path."""
+    spans: list[dict] = []
+
+    @contextlib.contextmanager
+    def _fake_traced(name, **attrs):
+        rec = {"name": name, "attrs": dict(attrs)}
+        spans.append(rec)
+
+        class _Setter:
+            def set(self, key, value):
+                rec["attrs"][key] = value
+
+        yield _Setter()
+
+    monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
+    return spans
+
+
+class ManualRenderAheadSubmitter:
+    """Hold each render-ahead submission so a test fires its terminal when it chooses.
+
+    Lives here because two files need it: a second copy is how a harness and the thing it stands in
+    for drift, which this migration has now paid for five times.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return True
+
+    def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
+        call = self.calls.pop(0)
+        request = call["request"]
+        result = (
+            tooltip_raster.run_render_ahead(request, threading.Event())
+            if run and outcome is EffectOutcome.SUCCEEDED
+            else None
+        )
+        call["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                call["owner"],
+                call["identity"],
+                outcome,
+                result=result,
+                error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
+            )
+        )

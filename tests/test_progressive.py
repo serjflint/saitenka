@@ -8,12 +8,12 @@ import time
 from concurrent.futures import Future
 
 import pytest
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka import otel_metrics
+from saitenka.app import mined_seed as mined_seed_lane
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
-from saitenka.app.miner import Miner
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.mpvio.ipc import IPCRequest
@@ -56,21 +56,19 @@ def test_apply_deps_injects_and_stops_loading():
 def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    monkeypatch.setattr(Miner, "mined_expressions", lambda _anki, _cfg: {"猫"})
+    monkeypatch.setattr(mined_seed_lane, "mined_expressions", lambda _anki, _cfg: {"猫"})
     r = Reader(ipc)
     r.anki = object()
     r.mine_cfg = object()
     try:
         r._request_mined_seed()
-        for _ in range(200):
-            r._drain_events()
-            if r._mined:
-                break
-            time.sleep(0.001)
+        await_ready(
+            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+        )
 
-        assert r._mined == {"猫"}
-        assert r._mined_generation == 1
-        assert r._mined_seed_inflight is False
+        assert r.session.mined == {"猫"}
+        assert r.session.mined.generation == 1
+        assert r.mined_seed.inflight is False
     finally:
         r.close()
         gateway.close()
@@ -91,32 +89,29 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
             return {"古い"}
         return {"新しい"}
 
-    monkeypatch.setattr(Miner, "mined_expressions", fetch)
+    monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     r = Reader(ipc)
     r.anki = old_anki
     r.mine_cfg = object()
     try:
         r._request_mined_seed()
         assert old_started.wait(1)
-        r._mined_seed_generation += 1
-        r._mined_seed_inflight = False
+        r.mined_seed.restart()  # what replacing the deck does, through the lane's own verb
         r.anki = new_anki
         r._request_mined_seed()
-        for _ in range(200):
-            r._drain_events()
-            if r._mined:
-                break
-            time.sleep(0.001)
+        await_ready(
+            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+        )
 
-        assert r._mined == {"新しい"}
-        assert r._mined_generation == 1
+        assert r.session.mined == {"新しい"}
+        assert r.session.mined.generation == 1
         release.set()
-        for _ in range(200):
-            r._drain_events()
-            time.sleep(0.001)
+        # Not a wait: drain repeatedly to give a late result the chance to arrive, then prove it
+        # did not. A deadline helper would return on the first pass and assert nothing.
+        drain_for(r._drain_events)
 
-        assert r._mined == {"新しい"}
-        assert r._mined_generation == 1
+        assert r.session.mined == {"新しい"}
+        assert r.session.mined.generation == 1
     finally:
         r.close()
         gateway.close()
@@ -137,25 +132,24 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
             return None
         return {"猫"}
 
-    monkeypatch.setattr(Miner, "mined_expressions", fetch)
+    monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     try:
         r._request_mined_seed()
-        for _ in range(200):
-            r._drain_events()
-            if not r._mined_seed_inflight:
-                break
-            time.sleep(0.001)
-        assert r._mined == set()
+        await_ready(
+            lambda: not r.mined_seed.inflight,
+            "the failed seed never settled",
+            pump=r._drain_events,
+        )
+        assert r.session.mined == set()
 
-        r._mined_seed_next_due = 0.0
-        r._request_mined_seed()
-        for _ in range(200):
-            r._drain_events()
-            if r._mined:
-                break
-            time.sleep(0.001)
+        # The backoff is a named deadline now, so firing it *is* the retry — and asserting it was
+        # armed proves the failure path scheduled one rather than silently giving up.
+        assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
+        await_ready(
+            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+        )
 
-        assert attempts == 2 and r._mined == {"猫"}
+        assert attempts == 2 and r.session.mined == {"猫"}
     finally:
         r.close()
         gateway.close()
@@ -171,7 +165,7 @@ def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
     r = Reader(FakeIPC())
-    r._interaction_jobs.begin("tooltip")
+    r.tip.jobs.begin("tooltip")
 
     r.close()
 
@@ -194,49 +188,55 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(capsys, monke
 def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeypatch):
     """`[perf].prefetch_workers` > 0 pins the count on both builds (a RAM/coverage knob); 0 auto-sizes
     — min(8, cores-2) free-threaded (render parallelizes), 2 on a GIL build (extra workers only contend)."""
-    from types import SimpleNamespace
 
     from saitenka.app import prefetch
     from saitenka.app.tokenizer import UnidicTokenizer
 
-    def fake_reader(prefetch_workers: int) -> SimpleNamespace:
-        return SimpleNamespace(prefetch_workers=prefetch_workers, tokenizer=UnidicTokenizer())
+    def count(configured: int) -> int:
+        return prefetch.prefetch_worker_count(UnidicTokenizer(), configured)
 
     # explicit override wins regardless of build
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert prefetch.prefetch_worker_count(fake_reader(3)) == 3
+    assert count(3) == 3
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: False)
-    assert prefetch.prefetch_worker_count(fake_reader(3)) == 3
+    assert count(3) == 3
 
     # auto (0): GIL build stays at the low default
-    assert prefetch.prefetch_worker_count(fake_reader(0)) == prefetch._AUTO_WORKERS_GIL
+    assert count(0) == prefetch._AUTO_WORKERS_GIL
     # auto (0): free-threaded uses the flat free-threaded default (no cpu-count arithmetic)
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert prefetch.prefetch_worker_count(fake_reader(0)) == prefetch._AUTO_WORKERS_FREE_THREADED
+    assert count(0) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
-def test_owned_startup_hint_clears_after_the_first_completed_poll():
-    from saitenka.app.loading import show_startup_hint
+def test_owned_startup_hint_clears_after_the_first_completed_poll(request):
+    from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
-    r = Reader(ipc, startup_hint_lease=lease)
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
+    r = Reader(ipc)
+    request.addfinalizer(r.close)  # LIFO: the reader goes down before its gateway
     assert ("show-text", "", 1) not in ipc.commands
 
-    assert r.poll_once() is True
+    assert r.pump() is True
     assert r._interactive_ready is True
     assert ("show-text", "", 1) in ipc.commands
 
     before = ipc.commands.count(("show-text", "", 1))
-    r.poll_once()
+    r.pump()
     assert ipc.commands.count(("show-text", "", 1)) == before
 
 
-def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch):
-    from saitenka.app.loading import show_startup_hint
+def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch, request):
+    from saitenka.app.session_routes import install_session_reactor
 
     ipc = FakeIPC()
-    reader = Reader(ipc, startup_hint_lease=show_startup_hint(runtime_gateway(ipc)))
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
+    reader = Reader(ipc)
+    request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     clear = ("show-text", "", 1)
     observed = []
     monkeypatch.setattr(
@@ -246,13 +246,13 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     )
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
-    assert reader.poll_once() is True
+    assert reader.pump() is True
     assert observed == [False]
     assert clear in ipc.commands
 
 
-def test_unanswered_async_clear_does_not_delay_the_next_poll():
-    from saitenka.app.loading import show_startup_hint
+def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
+    from saitenka.app.session_routes import install_session_reactor
 
     class _AsyncFakeIPC(FakeIPC):
         def __init__(self):
@@ -267,15 +267,17 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll():
             return request
 
     ipc = _AsyncFakeIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
-    assert lease is not None
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = Reader(ipc, startup_hint_lease=lease)
+    reader = Reader(ipc)
+    request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
 
-    assert reader.poll_once() is True
+    assert reader.pump() is True
     assert ("show-text", "", 1) in ipc.commands
     assert ipc.requests[-1].future.done() is False
-    assert reader.poll_once() is True
+    assert reader.pump() is True
 
 
 def test_load_deps_async_marks_loading(monkeypatch):
@@ -284,7 +286,47 @@ def test_load_deps_async_marks_loading(monkeypatch):
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     r = Reader(FakeIPC())
     r.load_deps_async({})
-    assert r._loading is True  # spinner shows until the poll loop injects
+    assert r._loading is True  # spinner shows until the deps-ready deadline injects
+
+
+def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
+    """The build thread hands the value over and *arms* the injection; a tick used to discover it by
+    looking. The due event runs on the session turn, which is what makes the hand-off safe."""
+    import saitenka.app.reader_deps as rd
+
+    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    applied = []
+    monkeypatch.setattr(r, "_apply_deps", applied.append)
+
+    r.load_deps_async({})
+    await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed the injection")
+
+    assert applied == []  # arming is not applying
+    assert ipc.fire_runtime_timer("lifecycle:deps-ready")
+    assert len(applied) == 1
+
+    assert not ipc.fire_runtime_timer("lifecycle:deps-ready")  # one build, one injection
+    assert len(applied) == 1
+
+
+def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
+    """Ordering, and the whole hand-off: arming first would let the due event fire against a
+    `_pending_deps` that is still None, and the session would sit loading forever."""
+    import saitenka.app.reader_deps as rd
+
+    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    seen: list[object] = []
+    original = r.arm_deps_ready
+    monkeypatch.setattr(r, "arm_deps_ready", lambda: (seen.append(r._pending_deps), original())[1])
+
+    r.load_deps_async({})
+    await_ready(lambda: bool(seen), "the build thread never armed deps-ready")
+
+    assert seen and seen[0] is not None
 
 
 @pytest.mark.timeout(5)
@@ -329,7 +371,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     assert dictionary.started.wait(1)
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
-    assert reader.poll_once() is True
+    assert reader.pump() is True
     assert dispatched == [True]
     assert reader.tokens == [] and reader._sub_pending == "猫"
     assert dictionary.thread_id != threading.get_ident()
@@ -338,7 +380,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     assert dictionary.finished.wait(1)
     deadline = time.monotonic() + 1
     while not reader.tokens and time.monotonic() < deadline:
-        reader.poll_once()
+        reader.pump()
         time.sleep(0.001)
     try:
         assert [token.surface for token in reader.tokens] == ["猫"]

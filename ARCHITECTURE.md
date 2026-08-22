@@ -42,15 +42,15 @@ internal modules with explicit dependency contracts, not independently published
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
 - **`subtitles/`** — the pure subtitle seam: immutable cues and authored events, lossless ASS semantic
   spans and fail-closed token-color rewriting, SRT/ASS/VTT parsing, cue navigation, and provider-neutral
-  geometry request/snapshot contracts. `app/subtitle_pipeline.py` owns generation-safe bounded worker,
-  lookahead, and result-cache orchestration. Pillow remains the default; the opt-in external-ASS path
+  geometry request/snapshot contracts. `app/subtitle_pipeline.py` owns the generation fence that decides
+  whether a result may still be published; `app/subtitle_geometry_job.py` owns the lane queue, lookahead,
+  and result cache that reserve against it. Pillow remains the default; the opt-in external-ASS path
   wires `LibassGeometryBackend` while leaving mpv as the visible owner.
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
 - **`app/`** — the application layer. `controller.py`'s `Reader` is the production driver and
-  owns the mpv session lifecycle and interactive state. `app/runtime/` owns its closed command table
-  and ordered tick primitives;
+  owns the mpv session lifecycle and interactive state. `app/runtime/` owns its closed command table;
   `reader_factory.py` is the production `Reader` construction seam. `cli.py` owns process setup and
   Cyclopts registration, `commands/` owns domain command surfaces and attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
@@ -62,10 +62,11 @@ internal modules with explicit dependency contracts, not independently published
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py` (subtitle fetching).
-- **`runtime/`** — an isolated, test-only session contract package: closed events/effects, bounded
-  mailbox lanes with reserved terminal capacity, a deterministic lifecycle ledger, and named timers.
-  Production does not import it. The [runtime architecture](docs/contributing/runtime.md) describes
-  its relationship to the production loop and the maintained invariants.
+- **`runtime/`** — the session runtime: closed events/effects, bounded mailbox lanes with reserved
+  terminal capacity, a deterministic lifecycle ledger, named timers, the owner slices, and
+  `SessionLoop`, which drives the session off the mailbox. It knows nothing about `app/`; the edge
+  runs one way. The [runtime architecture](docs/contributing/runtime.md) describes its relationship
+  to `Reader` and the maintained invariants.
 - **Root leaf modules** — dependency-neutral types and policies shared across layers live directly in
   `saitenka` rather than a generic `utils` package: `model.py`, `bgra.py`, `fonts.py`, `mask_atlas.py`,
   `otel_metrics.py`, `parallel.py`, `resources.py`, `session.py`, and `version.py`. A root module should
@@ -98,12 +99,63 @@ cli.create_app
         -> Reader
 ```
 
-Inside a `Reader`, mpv script messages go through a closed `CommandRouter`, and each poll executes a
-named `TickPipeline`. Both reject duplicate names, which makes ordering and ownership independently
-testable. `Reader` still assembles those tables from its feature methods, so this is an explicit
-internal composition seam rather than an open third-party plugin API.
+Inside a `Reader`, mpv script messages go through a closed `CommandExecutor`: a declared spec per
+command (owner, whether it needs a current cue) separate from the bound handler, so ordering and
+ownership are testable without a session. `Reader` assembles the handler half, which makes this an
+explicit internal composition seam rather than an open third-party plugin API.
 
-The separate `saitenka.runtime` contract package is not part of this assembly. See
+A feature joins the session on one of two layers, and which one follows from whether it needs a
+place to remember that does not exist yet.
+
+- **Stateful** — it owns a slice of `SessionState`, and `reduce(state, event)` returns the next
+  state plus effects.
+- **Stateless** — it is a pure policy over a snapshot, `reduce(command, inputs)`. Routing that
+  through the mailbox would add sequencing to a decision with nothing to sequence.
+
+Both join by registration rather than by a rewrite of the host, which is what makes the session
+extensible at all. Which files, and in what order, is
+[Adding a feature](docs/contributing/runtime.md#adding-a-feature).
+
+```mermaid
+flowchart TB
+    key(["mpv script-message"]) --> exec["CommandExecutor<br/>spec + bound handler"]
+    exec -->|command type| srouter["StatelessRouter"]
+    obs(["mpv property change"]) --> mailbox["SessionMailbox"]
+    mailbox --> reactor["SessionReactor"]
+    reactor -->|"RouteKey(event, owner)"| slice["SliceReducer"]
+
+    subgraph L1["Stateless — decides over a snapshot"]
+        direction LR
+        gather["adapter.inputs()"] --> policy["intents.reduce<br/>pure"]
+        policy --> perform["adapter.apply()"]
+    end
+
+    subgraph L2["Stateful — owns a slice of SessionState"]
+        direction LR
+        reduce["runtime reducer<br/>pure, gated"] --> owner["owner's adapter"]
+    end
+
+    srouter --> L1
+    slice --> L2
+    gather -. "host protocol" .-> host[(Reader)]
+    perform -. "host protocol" .-> host
+    reduce --- state[(SessionState)]
+```
+
+The dotted edges are the whole asymmetry: the stateful half reaches its own slice, the stateless
+half reaches the host — but only through members its protocol names.
+
+The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
+feature's adapter has to touch the live session, so it declares the host members it needs as a
+protocol instead of taking the host itself — which is also what keeps the count of `Reader`-taking
+functions at zero.
+
+**The known cost.** That protocol's width counts the state the feature has not moved into a slice of
+its own, and the widest ports are the ones that also write host state. Nothing gates the width, so
+it is a review judgement rather than a build failure; `poe arch-map` prints it.
+
+`saitenka.runtime` is a production package, not a separate contract: `session_routes.py` imports it,
+and a session with a gateway is driven by `SessionLoop` off the mailbox rather than by a poll. See
 [Interactive runtime architecture](docs/contributing/runtime.md) for both runtime packages, their
 actual call boundaries, and the executable invariants.
 
@@ -115,8 +167,10 @@ protocol-shaped class from being mistaken for production swappability.
 | Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
-| Reader commands and ticks | `CommandRouter`, `TickPipeline` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
-| Session events and effects | `saitenka.runtime` | Test-only: mailbox, lifecycle ledger, and timers are characterized but not a production driver. |
+| Reader commands | `CommandExecutor` | Explicit and unit-testable; the spec table is closed, the handler table is assembled inside `Reader`, and neither is externally injected. |
+| Stateful features | `SliceReducer` + `RouteKey` | Live: a reducer registers against the `(event, owner)` pairs it owns, and is pure by gate. |
+| Stateless features | `StatelessRouter` | Live: a policy registers by command type; its adapter's host protocol is the coupling, and its width is not gated. |
+| Session events and effects | `saitenka.runtime` | Live: the mailbox is the session's ingress, `SessionLoop` drives it, and effects return as correlated terminals. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
@@ -293,9 +347,9 @@ handled as misses on every read path.
 ## Current production data flow (hover → lookup → render → mine)
 
 1. `MpvIPC`'s reader thread buffers observed properties and client messages while resolving correlated
-   reply futures directly. `Reader.poll_once` checks connection health, drains the buffered events,
-   then runs the named tick stages: expire surfaces, refresh OSD, reconcile subtitles, apply
-   background results, and update interaction.
+   reply futures directly. `SessionLoop` blocks on the mailbox — bounded by the earliest armed timer,
+   so an idle session with nothing armed does not wake at all — and hands each envelope to the
+   session's reactor and then, unless the reactor claimed it, to `Reader`'s turn.
 2. A new subtitle line is normalized, tokenized by the active profile, compound-merged against the
    dictionary capability, scored, and cached as a `TokenizedCue`. Subtitle rendering returns the
    visible word boxes used by the hover test.
@@ -580,7 +634,7 @@ baseline instead.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
 - **Composition is explicit at the application boundary.** `cli.py` registers commands and process
   policy; domain commands call launch use cases; `reader_factory.py` constructs `Reader`. Runtime
-  command and tick primitives never receive a god context, although `Reader` still owns their assembly.
+  command primitives never receive a god context, although `Reader` still owns their assembly.
 - **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
   sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`

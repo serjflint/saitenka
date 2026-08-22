@@ -97,3 +97,13 @@ class SurfaceRuntime:
     def snapshot(self, slot: str) -> SurfaceSnapshot | None:
         with self._lock:
             return self._slots.get(slot)
+
+    def settled(self) -> bool:
+        """True when every slot's latest request has been acknowledged.
+
+        "Staged" and "on screen" are different states, and a deterministic capture needs the
+        second: a screenshot taken while a slot is still PENDING photographs whatever was there
+        before it.
+        """
+        with self._lock:
+            return all(slot.status is not SurfaceStatus.PENDING for slot in self._slots.values())

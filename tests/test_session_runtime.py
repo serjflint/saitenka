@@ -7,6 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from saitenka.runtime import (
+    DEFAULT_RUNTIME_LIMITS,
     CancelEffect,
     CloseRequested,
     CommandHandled,
@@ -22,10 +23,13 @@ from saitenka.runtime import (
     EffectFinished,
     EffectId,
     EffectOutcome,
+    EmitDiagnostic,
     EventOrigin,
     ExpireEffect,
     MailboxFull,
     Owner,
+    OwnerSlice,
+    PropertyObserved,
     RawMpvEvent,
     ReduceResult,
     RoutedEvent,
@@ -38,6 +42,7 @@ from saitenka.runtime import (
     SessionReactor,
     SessionReducer,
     SessionState,
+    SliceReducer,
     StopSession,
     SubmitJob,
     TimerScheduler,
@@ -175,19 +180,19 @@ def test_connection_loss_has_epoch_coalesced_reserved_admission() -> None:
 def test_mailbox_coalesces_only_the_closed_input_allowlist() -> None:
     mailbox = SessionMailbox()
     first_mouse = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 1}),
+        PropertyObserved("mouse-pos", {"x": 1}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
         connection_epoch=1,
     )
     latest_mouse = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 2}),
+        PropertyObserved("mouse-pos", {"x": 2}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
         connection_epoch=1,
     )
     property_change = mailbox.publish(
-        RawMpvEvent("property-change", {"name": "sub-text"}),
+        PropertyObserved("sub-text", "\u3044\u3061"),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
         connection_epoch=1,
@@ -230,18 +235,46 @@ def test_mailbox_coalesces_production_scroll_names_without_losing_outcome_slots(
 def test_mailbox_does_not_coalesce_across_the_turn_quantum() -> None:
     mailbox = SessionMailbox()
     first = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 1}),
+        PropertyObserved("mouse-pos", {"x": 1}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
     )
     second = mailbox.publish(
-        RawMpvEvent("mouse-pos", {"x": 2}),
+        PropertyObserved("mouse-pos", {"x": 2}),
         origin=EventOrigin.MPV,
         traffic=TrafficClass.NORMAL,
     )
 
     assert mailbox.receive_ready(limit=1) == (first,)
     assert mailbox.receive_ready(limit=1) == (second,)
+
+
+def test_a_stalled_normal_lane_drops_superseded_positions_rather_than_the_session() -> None:
+    """`time-pos` fills the lane whenever the drain stalls — a mine with Anki down stalls it ~55 s.
+
+    Refusing admission there is not a bound, it is a teardown: the gateway turns `MailboxFull` into
+    `CloseRequested("runtime-overloaded")` and the overlay exits. And it exits over values the
+    projection publishes no delta for at all (`playback.py`, TIMING_PROPERTIES minus `sub-delay`),
+    so the backlog was dead before it was refused.
+    """
+    mailbox = SessionMailbox(normal_capacity=4)
+    kept = mailbox.publish(
+        RawMpvEvent("file-loaded"),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+    )
+    for position in range(10):
+        mailbox.publish(
+            PropertyObserved("time-pos", float(position)),
+            origin=EventOrigin.MPV,
+            traffic=TrafficClass.NORMAL,
+        )
+
+    drained = mailbox.receive_ready()
+    assert len(drained) == 4
+    assert drained[0] == kept
+    assert drained[-1].payload == PropertyObserved("time-pos", 9.0)
+    assert mailbox.snapshot.superseded_dropped == 7
 
 
 def test_terminal_reservation_survives_normal_lane_saturation() -> None:
@@ -432,6 +465,33 @@ def test_composed_reducer_fails_closed_on_internal_event_cycle() -> None:
         assert str(error) == "runtime internal-event limit exceeded"
     else:  # pragma: no cover - quiescence contract
         raise AssertionError("internal event cycle was not bounded")
+
+
+def test_the_declared_lifecycle_bound_is_the_one_the_mailbox_enforces() -> None:
+    """`RuntimeLimits` has to be load-bearing, not decorative.
+
+    It used to declare twelve bounds and enforce none, and one had already drifted — `mailbox_terminal`
+    said 128 while the mailbox ran at 64 — which nothing could detect, because a limit nobody applies
+    cannot disagree with anything. This fails if the policy and the lane ever separate again.
+    """
+    mailbox = SessionMailbox()
+
+    for _ in range(DEFAULT_RUNTIME_LIMITS.mailbox_lifecycle):
+        mailbox.publish(
+            RawMpvEvent("lifecycle"), origin=EventOrigin.LIFECYCLE, traffic=TrafficClass.LIFECYCLE
+        )
+
+    assert mailbox.snapshot.lifecycle == DEFAULT_RUNTIME_LIMITS.mailbox_lifecycle
+    try:
+        mailbox.publish(
+            RawMpvEvent("one too many"),
+            origin=EventOrigin.LIFECYCLE,
+            traffic=TrafficClass.LIFECYCLE,
+        )
+    except MailboxFull:
+        pass
+    else:  # pragma: no cover - the lane bound is the contract
+        raise AssertionError("the lifecycle lane admitted more than the declared policy")
 
 
 def test_runtime_limits_reject_nonpositive_resource_bound() -> None:
@@ -778,3 +838,94 @@ def test_closing_rejection_consumes_the_effect_id() -> None:
         assert str(error) == "effect ID already used: 1"
     else:  # pragma: no cover - effect lifecycle contract
         raise AssertionError("closing rejection reused an effect ID")
+
+
+# --- one owner slot, several features -----------------------------------------------------------
+#
+# An owner slot is a single object, so the second feature to join an owner would otherwise force a
+# rewrite of the first one's reducer. `SliceReducer` broadcasts, because neither available dispatch
+# key is sound: by event type, several features legitimately react to the same fact; by effect
+# ownership, `EffectFinished` names an `Owner` and not a feature.
+
+
+def _counter(tag: str):
+    """A feature reducer that records what it saw and emits one diagnostic naming itself."""
+
+    def reduce(state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, tuple)
+        return ReduceResult(
+            (*state, event), effects=(EmitDiagnostic(tag, Owner.SESSION, (("saw", tag),)),)
+        )
+
+    return reduce
+
+
+def test_every_feature_in_a_slot_sees_the_event_and_keeps_its_own_state() -> None:
+    slice_reducer = SliceReducer({"first": _counter("first"), "second": _counter("second")})
+    state = slice_reducer.initial({"first": (), "second": ()})
+    event = RawMpvEvent("stop")
+
+    result = slice_reducer(state, event)
+
+    assert isinstance(result.state, OwnerSlice)
+    # Each feature's state advanced independently — a shared slot must not merge them.
+    assert result.state.get("first") == (event,)
+    assert result.state.get("second") == (event,)
+    assert [effect.name for effect in result.effects] == ["first", "second"]
+
+
+def test_a_feature_that_ignores_an_event_does_not_lose_the_others_state() -> None:
+    """The failure this exists to catch: threading the slot wrong drops the untouched feature."""
+
+    def indifferent(state: object, _event: RuntimeEvent, /) -> ReduceResult:
+        return ReduceResult(state)
+
+    slice_reducer = SliceReducer({"active": _counter("active"), "idle": indifferent})
+    state = slice_reducer.initial({"active": (), "idle": ("untouched",)})
+
+    result = slice_reducer(state, RawMpvEvent("stop"))
+
+    assert isinstance(result.state, OwnerSlice)
+    assert result.state.get("idle") == ("untouched",)
+    assert len(result.state.get("active")) == 1
+
+
+def test_dispatch_order_follows_registration_not_the_initial_states() -> None:
+    """Effect order is observable (it is the command stream), so it must not depend on a dict
+    literal written elsewhere."""
+    slice_reducer = SliceReducer({"a": _counter("a"), "b": _counter("b")})
+
+    result = slice_reducer(slice_reducer.initial({"b": (), "a": ()}), RawMpvEvent("stop"))
+
+    assert [effect.name for effect in result.effects] == ["a", "b"]
+
+
+def test_a_feature_without_an_initial_state_is_refused_at_construction() -> None:
+    """Better here than as a `KeyError` on the first event of a session that already started."""
+    slice_reducer = SliceReducer({"a": _counter("a"), "b": _counter("b")})
+
+    try:
+        slice_reducer.initial({"a": ()})
+    except ValueError as error:
+        assert "exactly one initial state" in str(error)
+    else:  # pragma: no cover - slice construction contract
+        raise AssertionError("slice accepted a feature with no state")
+
+
+def test_installing_a_session_runtime_keeps_the_reactor_reachable() -> None:
+    """Close is a state transition the reactor owns, so something has to be able to reach it.
+
+    `install_session_runtime` used to drop `install_session_reactor`'s return value, so no entrypoint
+    ever held a reactor. That is why `SessionReactor.close()` and its reject-new-work latch have been
+    implemented and unreachable: `StopSession` dispatches to `close()` already, but nothing outside the
+    reactor could ask for the transition, and nothing could observe that it had happened.
+    """
+    from util import FakeIPC
+
+    from saitenka.app.session_routes import install_session_runtime
+
+    gateway = install_session_runtime(FakeIPC())
+    try:
+        assert isinstance(gateway.session_reactor, SessionReactor)
+    finally:
+        gateway.close()

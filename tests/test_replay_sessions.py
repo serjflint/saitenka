@@ -22,7 +22,7 @@ import util
 # oracle, so it asserts through exactly that check.
 from test_tooltip_statemachine import _NAV_QUERY, _assert_agrees, _fresh_reader
 
-from saitenka.app import tooltip
+from saitenka.app import nested_popup, tooltip, tooltip_panel
 
 Step = tuple[str, object]
 
@@ -58,21 +58,29 @@ SCENARIOS: dict[str, list[Step]] = {
 
 
 def _apply(reader, action: str, arg: object) -> None:
+    # `hover` and `scroll` enter below the input seam, for the reasons the state machine's own rules
+    # give: the fixture's tooltip covers words 1–2, and a scroll offset is what the oracle is about.
     if action == "hover":
         reader._show_tooltip(int(arg))  # type: ignore[arg-type]
     elif action == "scroll":
-        tooltip.scroll_tip(reader, int(arg))  # type: ignore[arg-type]
+        reader.scroll_tip(int(arg))  # type: ignore[arg-type]
     elif action == "navigate":
-        tooltip.navigate_tip(reader, _NAV_QUERY)
+        tooltip.navigate_tip(reader.tip_ports, reader.panel_ports, _NAV_QUERY)
     elif action == "back":
-        tooltip.tip_back(reader)
+        tooltip.tip_back(reader.tip_ports)
     elif action == "open_nested":
         tok = reader.tokens[0]
-        reader._open_nested(tok, tok.surface, 200.0, 200.0, 40.0)
+        nested_popup.open_nested(
+            reader.tip_ports,
+            reader.panel_ports,
+            tok,
+            tok.surface,
+            nested_popup.Anchor(200.0, 200.0, 40.0),
+        )
     elif action == "resize":
         scale = float(arg)  # type: ignore[arg-type]
-        reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes _raster_scale
-        tooltip.render_tip_view(reader)
+        reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
+        tooltip_panel.render_view(reader.tip_ports, reader.tip.view)
     else:  # pragma: no cover - guards a typo in a scenario table
         raise AssertionError(f"unknown action {action!r}")
 
@@ -93,5 +101,5 @@ def test_session_replay_keeps_the_seam_under_each_backend(scenario, backend_name
         _apply(reader, action, arg)
         # The render↔hit-test agreement holds after every transition, base panel and (when open) nested.
         _assert_agrees(reader, nested=False)
-        if reader._nest.state is not None:
+        if reader.tip.nest.state is not None:
             _assert_agrees(reader, nested=True)

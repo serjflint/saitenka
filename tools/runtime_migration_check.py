@@ -11,7 +11,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests" / "fixtures" / "runtime_migration_manifest.json"
-APP = ROOT / "src" / "saitenka" / "app"
+#: Both packages, because a duty is evidence about a *reducer*, not about where its file sits.
+#: Scanning only `app/` made a duty vanish the moment its reducer moved to `runtime/` — the
+#: manifest read "missing evidence" for work that had, in fact, just landed where it belongs.
+SOURCES = (ROOT / "src" / "saitenka" / "app", ROOT / "src" / "saitenka" / "runtime")
 
 _OVERLAY_METHODS = {
     "hide",
@@ -22,15 +25,10 @@ _OVERLAY_METHODS = {
     "show_bgra",
     "show_bgra_interactive",
 }
-_TICK_METHODS = {
-    "Reader._apply_background_results",
-    "Reader._expire_surfaces",
-    "Reader._reconcile_subtitles",
-    "Reader._refresh_surfaces",
-    "Reader._update_interaction",
-    "Reader.poll_once",
-    "Reader.run",
-}
+#: Emptied by WP6: the last two entries were the driver itself, and the tick pipeline they ran is
+#: deleted. Kept as an empty closed set rather than removed, so a stage reintroduced under one of
+#: these names is debt again rather than silently fine.
+_TICK_METHODS: set[str] = set()
 _AUTONOMOUS_DRAINS = {
     "src/saitenka/app/otel_export.py::CTFSpanProcessor._flush",
     "src/saitenka/app/prefetch.py::_try_head_prefetch_item",
@@ -39,10 +37,80 @@ _AUTONOMOUS_DEADLINES = {
     "src/saitenka/app/anki.py::wait_until_anki_up",
     "src/saitenka/app/otel_export.py::CTFSpanProcessor._flush",
 }
-_NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
-_DRIVER_SWITCH_SYMBOLS = {
-    "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard",
+#: The presentation adapters. `direct-overlay-mutation` means "a *feature* reaches past its layer
+#: and paints" — these two ARE the layer, and mutating the overlay is their whole job.
+#: `LifecycleSurfaces` is absent only because it happens to stage through `prepare`, which is not in
+#: `_OVERLAY_METHODS`; that is an accident of naming, not a different status. Anything added here
+#: must be the sole owner of a presentation slot's transactions, not merely a frequent painter.
+_PRESENTATION_ADAPTERS = {
+    "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra",
+    "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove",
+    # Whole-surface bulk operations: no per-slot transaction to fence, but presentation all the same.
+    "src/saitenka/app/lifecycle_surfaces.py::LifecycleSurfaces.set_visible",
+    "src/saitenka/app/lifecycle_surfaces.py::LifecycleSurfaces.repaint",
 }
+_NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
+#: Writes that CANNOT go through the egress gateway, with the reason each is permanent. Not debt and
+#: not deferral — a correlated command here would be wrong, so counting them keeps WP5's exit gate
+#: permanently unreachable and hides the rows that are still work.
+#:
+#: The bar for adding one: the caller needs the reply or the side effect BEFORE it returns, or the
+#: reactor is stopping and could never drain it. "It is awkward" is not on that list.
+_SYNCHRONOUS_BY_CONTRACT = {
+    # Runs from `close`: a queued command is never drained, and the forced section would outlive us
+    # still holding the mouse away from a detached mpv.
+    "src/saitenka/app/mouse_capture.py::MouseCapture.release",
+    # The caller reads the file mpv writes, so this one genuinely must be awaited.
+    "src/saitenka/app/media.py::screenshot",
+    # Same: the reply IS the capture's result, and the file must exist when it returns.
+    "src/saitenka/app/session_runtime.py::SessionRuntime.capture",
+    # `quit`, issued while the reactor is stopping — the entrypoint's terminal sequence, which is a
+    # declaration now rather than two hand-written `finally` blocks.
+    "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform",
+}
+#: mpv verbs that only READ. WP5's exit gate is phrased in terms of a direct *write* — a read has no
+#: terminal outcome to correlate, so routing one through the egress gateway buys nothing. Splitting
+#: the kind is what makes that gate answerable from the manifest instead of by eye.
+_MPV_READ_VERBS = {"get_property"}
+#: Emptied with the driver switch, like `_TICK_METHODS`: the one symbol it named is deleted. Kept as
+#: a closed empty set so a second driver reintroduced under a name here is debt again.
+_DRIVER_SWITCH_SYMBOLS: set[str] = set()
+#: What WP5 is allowed to leave behind, enumerated rather than described. Splitting it into three
+#: named sets is what makes WP5's exit ONE equality (`total == 20`) instead of a sentence with a
+#: tilde in it — a plan draft that said "~26" was wrong by four and nobody could tell.
+#:
+#: These are not exemptions: every row here is real debt that a LATER work package deletes. They are
+#: separated from WP5's denominator because WP5 cannot reach them, so counting them in its exit makes
+#: that exit permanently unreachable.
+#:
+#: Rows, not symbols. Five of these symbols carry a `reader-parameter` row as well, and that second
+#: row IS WP5's to convert — a symbol-keyed set would have quietly excused all five.
+_TERMINAL_DEBT: dict[str, frozenset[tuple[str, str]]] = {}
+#: Empty, and every group was DELETED rather than emptied — unlike `_TICK_METHODS` this set
+#: *excludes* rows rather than detecting them, so a group left behind would guard nothing:
+#:
+#:   * `driver-switch`, three visibility writes, correlated once `MpvIPC.close` started flushing its
+#:     write queue — without that barrier a teardown restore was queued and then discarded;
+#:   * `transport-reads`, ten property reads, retired by the typed query port (`MpvIPC.query`);
+#:   * `host-composition`, which is the story worth keeping.
+#:
+#: Four of `host-composition`'s rows were mis-filed, in the same way and for the same reason: this
+#: set is where "cannot be converted" lives, so a row parked here is a row nothing re-examines.
+#:
+#:   * `Miner.__init__` did not build or own the Reader, it read twenty-one of its members — a
+#:     feature value, and it converted as one;
+#:   * `load_deps_async` *injects into* a built Reader rather than building one, which is the
+#:     write-back category, not a composition root. Five members, cut facts-from-acts;
+#:   * `apply_deps` was deleted rather than converted: every line wrote a `Reader` field or called a
+#:     `Reader` act, so it moved onto the owner of that state;
+#:   * `SessionRuntime.__init__` held a Reader because it *drives* one — seven facts, nine acts.
+#:
+#: The last two were not debt at all. `Reader.__init__` and `create_reader` were flagged because
+#: their annotations *contain* the word: `options: ReaderOptions`, `services: ReaderServices`. See
+#: `_names_the_host`. A measurement bug is invisible while it lives in the set of things nobody
+#: expects to move — check the claim before adding a row, and re-check the ones already here.
+
+TERMINAL_TOTAL = sum(len(group) for group in _TERMINAL_DEBT.values())
 _DUTY_IDS = {
     "startup": {
         "version-and-render-guard",
@@ -74,6 +142,28 @@ _DUTY_IDS = {
 }
 
 
+#: Identifiers that ARE the host, spelled every way an annotation can carry it (bare, quoted,
+#: qualified, optional, in a union).
+_HOST_NAMES = {"Reader", "controller.Reader", "saitenka.app.controller.Reader"}
+
+
+def _names_the_host(annotation) -> bool:
+    """Does this annotation name the `Reader` itself — as opposed to merely containing the word.
+
+    A substring test read `options: ReaderOptions` and `services: ReaderServices` as host parameters
+    and filed both under terminal composition debt, where being unconvertible is the whole point, so
+    nothing ever re-examined them. `ReaderOptions` is a config dataclass; taking one is not holding
+    the host. Match the name, not the spelling.
+    """
+    if annotation is None:
+        return False
+    parts = [
+        piece.strip().strip('"').strip("'")
+        for piece in ast.unparse(annotation).replace("|", " ").split()
+    ]
+    return any(part in _HOST_NAMES for part in parts)
+
+
 @dataclass(frozen=True, slots=True, order=True)
 class Debt:
     kind: str
@@ -97,11 +187,33 @@ class Scanner(ast.NodeVisitor):
     def __init__(self, relative: str) -> None:
         self.relative = relative
         self.stack: list[str] = []
-        self.debt: set[Debt] = set()
+        self._debt: set[Debt] = set()
         self.symbols: set[str] = set()
         self.evidence: dict[str, set[str]] = {}
         self.call_order: dict[str, list[str]] = {}
         self.monotonic_locals: list[set[str]] = []
+        #: Attribute nodes that are a call's target. Keyed by identity because the AST has
+        #: no parent links and `visit_Call` runs before the walk reaches its own `func`.
+        self.called_attributes: set[int] = set()
+        #: Per symbol, one bool per direct `.command(...)` call: True when the verb only reads.
+        #: A symbol is a read row only if EVERY one of its calls is a read — a function that reads
+        #: and then writes is a write site, and the gate must see it as one.
+        self.mpv_calls: dict[str, list[bool]] = {}
+
+    @property
+    def debt(self) -> set[Debt]:
+        """Discovered debt, with each symbol's direct mpv calls folded in as one row.
+
+        Folded here rather than at each call site because the kind is a property of the SYMBOL, not
+        of one call: a function that reads the track list and then removes tracks is a write site,
+        and classifying per call would file it under both.
+        """
+        rows = set(self._debt)
+        rows.update(
+            Debt("direct-mpv-read" if all(reads) else "direct-mpv-command", source)
+            for source, reads in self.mpv_calls.items()
+        )
+        return rows
 
     def _symbol(self) -> str:
         return ".".join(self.stack) or "<module>"
@@ -113,7 +225,7 @@ class Scanner(ast.NodeVisitor):
         self.stack.append(node.name)
         self.symbols.add(self._source())
         if self._source() in _DRIVER_SWITCH_SYMBOLS:
-            self.debt.add(Debt("driver-switch", self._source()))
+            self._debt.add(Debt("driver-switch", self._source()))
         self.generic_visit(node)
         self.stack.pop()
 
@@ -128,7 +240,7 @@ class Scanner(ast.NodeVisitor):
         self.monotonic_locals.append(set())
         self.symbols.add(self._source())
         if ".".join(self.stack) in _TICK_METHODS:
-            self.debt.add(Debt("tick-stage", self._source()))
+            self._debt.add(Debt("tick-stage", self._source()))
         arguments = (
             *node.args.posonlyargs,
             *node.args.args,
@@ -138,15 +250,19 @@ class Scanner(ast.NodeVisitor):
         )
         annotations = [arg.annotation for arg in arguments]
         if any(argument.arg == "reader" for argument in arguments) or any(
-            annotation is not None and "Reader" in ast.unparse(annotation)
-            for annotation in annotations
+            _names_the_host(annotation) for annotation in annotations
         ):
-            self.debt.add(Debt("reader-parameter", self._source()))
+            self._debt.add(Debt("reader-parameter", self._source()))
         self.generic_visit(node)
         self.monotonic_locals.pop()
         self.stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute):
+            # A called `*_until` is a method, not a stored deadline. `SessionRunner.run_until` is
+            # the shape WP5.5 mandates, so the name heuristic below must not read it as the thing
+            # it replaces.
+            self.called_attributes.add(id(node.func))
         called = _dotted(node.func)
         if called:
             facts = self.evidence.setdefault(self._source(), set())
@@ -158,23 +274,35 @@ class Scanner(ast.NodeVisitor):
             ordered.append(label)
         if isinstance(node.func, ast.Attribute):
             receiver = _dotted(node.func.value)
-            if node.func.attr == "command" and receiver not in _NON_MPV_COMMAND_RECEIVERS:
-                self.debt.add(Debt("direct-mpv-command", self._source()))
-            if node.func.attr == "get_nowait" and self._source() not in _AUTONOMOUS_DRAINS:
-                self.debt.add(Debt("passive-result-drain", self._source()))
-            receiver_tail = receiver.rsplit(".", 1)[-1]
-            if node.func.attr in _OVERLAY_METHODS and (
-                receiver_tail == "ov" or "overlay" in receiver_tail
+            if (
+                node.func.attr == "command"
+                and receiver not in _NON_MPV_COMMAND_RECEIVERS
+                and self._source() not in _SYNCHRONOUS_BY_CONTRACT
             ):
-                self.debt.add(Debt("direct-overlay-mutation", self._source()))
+                verb = node.args[0] if node.args else None
+                read = isinstance(verb, ast.Constant) and verb.value in _MPV_READ_VERBS
+                self.mpv_calls.setdefault(self._source(), []).append(read)
+            if node.func.attr == "get_nowait" and self._source() not in _AUTONOMOUS_DRAINS:
+                self._debt.add(Debt("passive-result-drain", self._source()))
+            receiver_tail = receiver.rsplit(".", 1)[-1]
+            if (
+                node.func.attr in _OVERLAY_METHODS
+                and (receiver_tail == "ov" or "overlay" in receiver_tail)
+                and self._source() not in _PRESENTATION_ADAPTERS
+            ):
+                self._debt.add(Debt("direct-overlay-mutation", self._source()))
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         dotted = _dotted(node)
         if dotted:
             self.evidence.setdefault(self._source(), set()).add(f"ref:{dotted}")
-        if node.attr.endswith("_until") and self._source() not in _AUTONOMOUS_DEADLINES:
-            self.debt.add(Debt("polled-deadline", self._source()))
+        if (
+            node.attr.endswith("_until")
+            and id(node) not in self.called_attributes
+            and self._source() not in _AUTONOMOUS_DEADLINES
+        ):
+            self._debt.add(Debt("polled-deadline", self._source()))
         self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare) -> None:
@@ -190,7 +318,7 @@ class Scanner(ast.NodeVisitor):
         ) and any(
             isinstance(child, ast.Attribute) for part in operands for child in ast.walk(part)
         ):
-            self.debt.add(Debt("polled-deadline", self._source()))
+            self._debt.add(Debt("polled-deadline", self._source()))
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -232,7 +360,7 @@ def scan() -> tuple[set[Debt], set[str], dict[str, set[str]]]:
     debt: set[Debt] = set()
     symbols: set[str] = set()
     evidence: dict[str, set[str]] = {}
-    for path in sorted(APP.glob("**/*.py")):
+    for path in sorted(p for root in SOURCES for p in root.glob("**/*.py")):
         relative = path.relative_to(ROOT).as_posix()
         scanner = Scanner(relative)
         scanner.visit(ast.parse(path.read_text(encoding="utf-8"), filename=relative))
@@ -267,8 +395,16 @@ def failures(
     if not isinstance(debt_rows, list):
         return {"schema": ["debt must be a list"]}
     expected = set(starmap(Debt, debt_rows))
-    missing = sorted(item.encode() for item in expected - actual)
     added = sorted(item.encode() for item in actual - expected)
+    # A row that vanished is one of two very different things, and conflating them is what made
+    # every conversion cost a re-bless:
+    #   * its symbol is still here and no longer carries the debt -> a CONVERSION. That is the
+    #     migration working; `check` retires it from the denominator itself.
+    #   * its symbol is gone entirely -> the code was moved, renamed or deleted, which is exactly
+    #     how debt escapes the denominator without being fixed. Still a failure.
+    gone = expected - actual
+    retired = sorted(item.encode() for item in gone if item.source in symbols)
+    missing = sorted(item.encode() for item in gone if item.source not in symbols)
     duty_groups: list[list[dict[str, object]]] = []
     schema: list[str] = []
     ids: set[str] = set()
@@ -288,6 +424,7 @@ def failures(
                 "replacement",
                 "test",
                 "evidence",
+                "migrated",
             }:
                 schema.append(f"{group} duty has invalid fields: {duty.get('id', '<missing>')}")
             duty_id = duty.get("id")
@@ -295,11 +432,15 @@ def failures(
                 schema.append(f"duplicate or invalid duty id: {duty_id}")
             else:
                 ids.add(duty_id)
-            source = duty.get("source")
+            sources = _sources(duty)
             facts = duty.get("evidence")
-            if isinstance(source, str) and isinstance(facts, list):
+            if sources and isinstance(facts, list):
+                # Every named site must show every fact: a duty performed at two entrypoints is
+                # migrated when BOTH move, and "one of them still does it" is the state this
+                # census exists to make visible.
                 missing_evidence.extend(
-                    f"{duty_id}:{fact}"
+                    f"{duty_id}@{source}:{fact}"
+                    for source in sources
                     for fact in facts
                     if not isinstance(fact, str) or not _has_evidence(evidence, source, fact)
                 )
@@ -311,14 +452,25 @@ def failures(
     unresolved: list[str] = []
     for duties in duty_groups:
         for duty in duties:
-            source = duty.get("source")
-            if isinstance(source, str) and source not in symbols:
-                unresolved.append(source)
+            unresolved.extend(source for source in _sources(duty) if source not in symbols)
     unresolved.sort()
+    # A terminal row that stopped resolving is a rename or a move, and it silently lowers the number
+    # WP5's exit compares against. Deliberately NOT "must still be debt": converting one early is
+    # progress, and the set is a ceiling on what WP5 may leave, not a floor.
+    terminal_unresolved = sorted(
+        source
+        for group in _TERMINAL_DEBT.values()
+        for _kind, source in group
+        if source not in symbols
+    )
     result = {
+        # Reported, never a failure: `check` retires these itself. Kept in the payload so a run
+        # that quietly shrank the denominator still says which rows it retired.
+        "retired": retired,
         "missing": missing,
         "added": added,
         "unresolved": unresolved,
+        "terminal_unresolved": terminal_unresolved,
         "missing_evidence": sorted(missing_evidence),
         "schema": schema,
     }
@@ -336,15 +488,43 @@ def check() -> int:
     manifest = _load()
     actual, symbols, evidence = scan()
     problems = failures(manifest, actual, symbols, evidence)
+    retired = problems.pop("retired", [])
     if problems:
+        if retired:  # context for whatever else failed
+            problems["retired"] = retired
         print(json.dumps(problems, indent=2))
         return 1
+    if retired:
+        # The denominator only ever shrinks here, and re-blessing by hand for that was pure
+        # ceremony — every conversion cost two extra gate runs. The rewrite lands in the diff, so
+        # the commit still carries the evidence of what it retired.
+        manifest["debt"] = [[item.kind, item.source] for item in sorted(actual)]
+        MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        print(f"runtime-migration: retired {len(retired)} converted symbol(s)")
+        for row in retired:
+            print(f"  - {row}")
     print(
         "runtime-migration: OK "
         f"({len(actual)} debt symbols; "
         f"{sum(len(group) for group in duty_groups(manifest))} duties)"
     )
     return 0
+
+
+def _sources(duty: dict) -> tuple[str, ...]:
+    """The site(s) a duty is performed at.
+
+    A list, because a duty can be sourced at more than one entrypoint and a single string quietly
+    hid that: `transport` named only `run_impl`, so `attach`'s identical `ipc.close()` sat outside
+    the census entirely — converting `run` would have reported the duty migrated while attach still
+    did it by hand.
+    """
+    source = duty.get("source")
+    if isinstance(source, str):
+        return (source,)
+    if isinstance(source, list) and all(isinstance(item, str) for item in source):
+        return tuple(source)
+    return ()
 
 
 def duty_groups(manifest: dict[str, object]) -> list[list[object]]:
@@ -361,9 +541,52 @@ def show() -> int:
     return 0
 
 
+def status() -> int:
+    """Per-kind census against the blessed manifest — the migration's progress checklist.
+
+    Hand-maintained counts in planning docs drift the moment a slice lands, and the slice plan calls a
+    wrong denominator a gate failure. Read them from here instead of retyping them.
+    """
+    manifest = _load()
+    actual, _symbols, _evidence = scan()
+    rows = manifest.get("debt")
+    blessed: set[tuple[str, str]] = (
+        {(row[0], row[1]) for row in rows if isinstance(row, list)}
+        if isinstance(rows, list)
+        else set()
+    )
+    live = {(item.kind, item.source) for item in actual}
+    kinds = sorted({kind for kind, _ in blessed | live})
+    # `default=` because an empty census is now the expected state, and a report that crashes on
+    # success is a report nobody reaches for once it does.
+    labels = [*kinds, *(f"terminal/{name}" for name in _TERMINAL_DEBT), "WP5 converts"]
+    width = max((len(label) for label in labels), default=12)
+    for kind in kinds:
+        was = sum(1 for k, _ in blessed if k == kind)
+        now = sum(1 for k, _ in live if k == kind)
+        drift = "" if was == now else f"  ({now - was:+d} unblessed)"
+        print(f"{kind:<{width}}  {now:>4}{drift}")
+    all_duties = [duty for group in duty_groups(manifest) for duty in group]
+    duties = len(all_duties)
+    migrated = sum(1 for duty in all_duties if duty.get("migrated") is True)
+    print(f"{'':<{width}}  {'-' * 4}")
+    print(f"{'total':<{width}}  {len(live):>4}   {duties} duties")
+    terminal = {row for group in _TERMINAL_DEBT.values() for row in group}
+    print()
+    for name, group in sorted(_TERMINAL_DEBT.items()):
+        print(f"{'terminal/' + name:<{width}}  {len(group):>4}")
+    print(f"{'WP5 converts':<{width}}  {len(live - terminal):>4}")
+    print(f"{'WP5 exit':<{width}}  total == {TERMINAL_TOTAL}")
+    # The row census and the duty census measure different things, and only reporting the first is
+    # how "the migration is nearly done" gets said while nothing has moved onto the runtime.
+    print()
+    print(f"{'duties migrated':<{width}}  {migrated:>4} / {duties}")
+    return 0
+
+
 if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "check"
-    commands = {"bless": bless, "check": check, "show": show}
+    commands = {"bless": bless, "check": check, "show": show, "status": status}
     if command not in commands:
         print(f"unknown command: {command}", file=sys.stderr)
         raise SystemExit(2)

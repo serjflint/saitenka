@@ -1,0 +1,46 @@
+id: no-raster-under-panel-lock
+valid:
+  # the shape the engine uses now: decide locked, raster unlocked, store locked
+  - |
+    def _warm_row(self, i, lo, hi):
+        with self._lock:
+            missing = self._missing(i, lo, hi)
+        for b, y0, y1 in missing:
+            rendered = self._render_band(i, b, y0, y1)
+            with self._lock:
+                self._store(rendered)
+  # a cache lookup under the lock is exactly what it is for
+  - |
+    def viewport_warm(self, scroll, view_h):
+        with self._lock:
+            return (0, 0) in self._blocks
+  # rastering with no lock held at all
+  - |
+    def _raster(self, row, y0, y1):
+        img, scan, links = row.render_window(y0, y1)
+        return img
+valid_note: the lock may be held for cache membership, never for the work
+invalid:
+  # the regression: a band rastered inside the critical section
+  - |
+    def _ensure(self, i, b, y0, y1):
+        with self._lock:
+            rendered = self._render_band(i, b, y0, y1)
+            self._store(rendered)
+  # the layout walk under the lock — this one was 2.73ms of a 3.06ms total hold
+  - |
+    def _grow(self, i):
+        with self._lock:
+            height = row.measure()
+            self._offsets.set_height(i, height)
+  # the BGRA conversion under the lock, which cost as much as the raster
+  - |
+    def _band_bgra(self, key, cb, v):
+        with self._lock:
+            arr = to_bgra_array(canvas)
+            self._bgra[key] = arr
+  # a native band rastered inside the lock
+  - |
+    def _scaled(self, row, y0, y1, scale):
+        with self._lock:
+            img, scan, links = row.render_window(y0, y1, scale=scale)

@@ -13,6 +13,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+#: Slot modes. The plain slot ("") is what the providers fetched and resynced; `-raw` is a file the
+#: user picked by hand (deliberately unsynced); `-retimed` is what "sync from here" made of either.
+_RAW_MODE = "-raw"
+_RETIMED_MODE = "-retimed"
+
 
 def subs_cache_dir() -> Path:
     from saitenka.app.paths import cache_dir
@@ -32,7 +37,7 @@ def _slot(video: str | os.PathLike, title: str, episode, *, resync: bool = True)
         size = video_path.stat().st_size
     except OSError:
         size = 0
-    mode = "" if resync else "-raw"
+    mode = "" if resync else _RAW_MODE
     return sanitize_filename(f"{video_path.stem}-{title}-ep{episode}-{size}{mode}")
 
 
@@ -44,23 +49,50 @@ def subs_cache_key(video: str | os.PathLike, title: str, episode, *, resync: boo
 
 
 def _slot_files(slot_dir: Path, slot: str) -> list[Path]:
-    """Every cached subtitle for *slot*, newest-modified first — normally exactly one (one slot per
+    """Every cached subtitle for *slot*, best first — normally exactly one (one slot per
     (video, mode), evicted on write). ``glob.escape`` so a release group like ``[Erai]`` in the slot
     isn't read as a glob character class. A stored sub always has a SINGLE extension, so ``stem == slot``
     keeps ``<slot>.srt``/``<slot>.ass`` while excluding the multi-suffix bookkeeping resync leaves in the
     same dir (``<slot>.synced.srt``, its ``.synced`` marker, ``<slot>.win.srt``) — otherwise the newest
     of those (an empty marker) would shadow the real file. A pre-#237 flat ``<slot>.srt`` still matches,
-    so old cache entries resolve with no migration."""
+    so old cache entries resolve with no migration.
+
+    Ranked by `format_rank` before mtime — the SAME ranking the jimaku auto-pick uses, so a slot that
+    kept both formats (eviction is best-effort: a sibling mpv still holds open survives the write)
+    cannot serve the one a fresh fetch would have rejected.
+    """
     matches = [p for p in slot_dir.glob(glob.escape(slot) + ".*") if p.is_file() and p.stem == slot]
-    return sorted(matches, key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted(matches, key=_rank, reverse=True)
+
+
+def _rank(path: Path) -> tuple:
+    from saitenka.app.subtitle_artifact import format_rank
+
+    return (*format_rank(path.suffix), path.stat().st_mtime)
 
 
 def cached_subs(
     video: str | os.PathLike, title: str, episode, *, resync: bool = True
 ) -> Path | None:
+    """The best cached subtitle for this episode, or None.
+
+    A resyncing session considers all three slots, because two of them hold work the user asked for
+    by hand: ``-raw`` is what the source PICKER stored (deliberately unsynced), ``-retimed`` what
+    "sync from here" produced. Reading only the auto-fetch slot made either last exactly one
+    session — the next launch loaded whatever the providers had left there, so an `.ass` chosen on
+    purpose lost to a months-old `.srt` every time.
+
+    Ranked together by `_rank` — format first, then mtime — so this can neither serve a format a
+    fresh fetch would have rejected, nor an older file than the correction made of it.
+    """
     slot = _slot(video, title, episode, resync=resync)
-    if matches := _slot_files(subs_cache_dir(), slot):
-        return matches[0]
+    candidates = _slot_files(subs_cache_dir(), slot)
+    if resync:
+        for other in (_slot(video, title, episode, resync=False), slot + _RETIMED_MODE):
+            candidates += _slot_files(subs_cache_dir(), other)
+        candidates.sort(key=_rank, reverse=True)
+    if candidates:
+        return candidates[0]
     if not resync:
         return None
     from saitenka.app.paths import cache_dir
@@ -68,6 +100,36 @@ def cached_subs(
     # Default resync keys match the former Jimaku-only cache layout (always `.srt`).
     legacy = cache_dir() / "jimaku" / (slot + ".srt")
     return legacy if legacy.exists() else None
+
+
+def publish_retimed(sub: Path, retimed: Path) -> Path | None:
+    """Publish a re-time of a cached subtitle into this episode's ``-retimed`` slot.
+
+    Its own slot, not one of the existing two, because all three mean different things and none may
+    stand in for another: the plain slot is what the providers fetched and resynced, ``-raw`` is the
+    pristine file the user picked by hand, ``-retimed`` is what "sync from here" made of one of them.
+    Publishing over either would destroy an artifact the user may want back.
+
+    Created if absent, overwritten if not, so pressing the key twice refines rather than accumulates.
+    The lookup ranks all three together, so the re-time wins by being newest at equal format.
+
+    Only applies to a file already IN the cache — a re-time of a ``--sub-file`` or a sibling next to
+    the video has no slot to publish into and stays where it is. Returns the published path, or None
+    when there was nothing to publish to.
+    """
+    if sub.parent != subs_cache_dir():
+        return None
+    slot = sub.stem.removesuffix(_RAW_MODE).removesuffix(_RETIMED_MODE) + _RETIMED_MODE
+    destination = subs_cache_dir() / (slot + retimed.suffix.lower())
+    for stale in _slot_files(subs_cache_dir(), slot):
+        if stale != destination:
+            try:
+                stale.unlink()
+            except OSError:
+                log.debug("subtitle cache: could not evict %s", stale, exc_info=True)
+    shutil.copy2(str(retimed), str(destination))
+    log.info("subtitle cache: published re-timed %s", destination.name)
+    return destination
 
 
 def store_subs(

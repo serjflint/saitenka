@@ -7,40 +7,19 @@ assert the span fires with its low-cardinality attribute, via the sanctioned tra
 
 from __future__ import annotations
 
-import contextlib
+import util
+from util import record_spans
 
-from saitenka import otel_metrics
 from saitenka.app import backlog, sidebar
 from saitenka.app.controller import Reader
 from saitenka.app.subtitles import SidebarHitBox
+from saitenka.runtime import events
 
 
-def _record_spans(monkeypatch) -> list[dict]:
-    spans: list[dict] = []
-
-    @contextlib.contextmanager
-    def _fake_traced(name, **attrs):
-        rec = {"name": name, "attrs": dict(attrs)}
-        spans.append(rec)
-
-        class _Setter:
-            def set(self, key, value):
-                rec["attrs"][key] = value
-
-        yield _Setter()
-
-    monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
-    return spans
-
-
-class _FakeIPC:
+class _FakeIPC(util.FakeIPC):
     def __init__(self, props):
-        self.props = props
-
-    def command(self, *args):
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props)
 
 
 def _named(spans: list[dict], name: str) -> list[dict]:
@@ -49,45 +28,57 @@ def _named(spans: list[dict], name: str) -> list[dict]:
 
 def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     # A sidebar click emits a sidebar_click span tagged with the action kind — the click-latency signal.
-    spans = _record_spans(monkeypatch)
-    monkeypatch.setattr(
-        sidebar, "_activate_hit", lambda *_a: None
-    )  # isolate the span from the action
-    monkeypatch.setattr(sidebar, "redraw", lambda *_a: None)
+    spans = record_spans(monkeypatch)
+    monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
     reader = Reader(_FakeIPC({}))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (0, 0, 100, 100)
-    reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
+    reader.interaction.sidebar_panel.hits = (
+        SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),
+    )
+    # Inert actions instead of a stubbed internal: the port is the seam, so isolating the span
+    # from what the click does no longer means knowing the private name that does it.
+    inert = sidebar.SidebarActions(
+        seek=lambda *_a: None, bookmark=lambda: None, mine=lambda: None, open_mined=lambda _n: None
+    )
 
-    assert sidebar.on_click(reader, 10, 10) is True
+    assert sidebar.click(reader.sidebar_view, inert, 10, 10) is True
     (attrs,) = _named(spans, "sidebar_click")
     assert attrs["kind"] == "bookmark"
 
 
 def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     reader = Reader(_FakeIPC({}))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (0, 0, 100, 100)
-    reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
+    reader.interaction.sidebar_panel.hits = (
+        SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),
+    )
 
-    assert sidebar.on_click(reader, 50, 50) is True  # inside the panel, off every hitbox
+    assert (
+        sidebar.on_click(reader.click_target, 50, 50) is True
+    )  # inside the panel, off every hitbox
     assert _named(spans, "sidebar_click") == []
 
 
 def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     # capture_current's durable backlog write (main-thread SQLite) is spanned backlog_write[op=toggle].
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     video = tmp_path / "Show - 01.mkv"
     video.write_bytes(b"v")
     reader = Reader(
         _FakeIPC({"path": str(video), "sub-start": 1.0, "sub-end": 3.0, "track-list": []})
     )
     reader.sub_text = "猫です"
-    reader._backlog_store = backlog.BacklogStore(tmp_path / "backlog.sqlite")
+    reader.session.backlog_store = backlog.BacklogStore(tmp_path / "backlog.sqlite")
 
-    backlog.capture_current(reader)
+    backlog.capture_current(reader.capture_ports)
     (attrs,) = _named(spans, "backlog_write")
     assert attrs["op"] == "toggle"
 
@@ -96,16 +87,18 @@ def test_mined_store_write_is_spanned(monkeypatch):
     # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
     from types import SimpleNamespace
 
-    from saitenka.app import mined_store
-    from saitenka.app.miner import Miner
+    from saitenka.app import miner
 
-    spans = _record_spans(monkeypatch)
-    monkeypatch.setattr(
-        mined_store, "ensure_store", lambda _r: SimpleNamespace(record=lambda **_kw: None)
-    )
+    spans = record_spans(monkeypatch)
     reader = Reader(_FakeIPC({"sub-start": 1.0, "sub-end": 3.0}))
+    # Seed the store through the field the property initialises, rather than stubbing a seam: the
+    # property returns whatever is already there, so this is the same state a real open produces.
+    reader.session.mined_store = SimpleNamespace(record=lambda **_kw: None)  # type: ignore[assignment]  # local fake
     reader.mine_cfg = SimpleNamespace(deck="Mining")
     card = SimpleNamespace(expression="猫", reading="ねこ")
 
-    Miner(reader)._persist_mined(note_id=42, card=card, video="/x/Show - 01.mkv")
+    reader.anki = SimpleNamespace()  # `miner_ports` refuses to build without a deck to mine into
+    ports = reader.miner_ports
+    assert ports is not None
+    miner._persist_mined(ports, note_id=42, card=card, video="/x/Show - 01.mkv")
     assert len(_named(spans, "mined_store_write")) == 1

@@ -1,25 +1,27 @@
 """Runtime visibility for every Saitenka-owned OSD surface."""
 
+import util
 from PIL import Image
+from util import keybind_registry
 
 from saitenka.app.config import KeyOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.mpvio.osd import Overlay
+from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleTracksDiscovered
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self):
-        self.commands: list[tuple] = []
-        self.props = {"sub-visibility": False}  # osd-level left to mpv; toggle no longer manages it
+        super().__init__()
+        self.props["sub-visibility"] = False  # osd-level left to mpv; toggle no longer manages it
+        util.runtime_gateway(self)
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
+        reply = super().command(*args)
         if args[0] == "set_property":
             self.props[args[1]] = args[2]
-        return {"error": "success"}
+        return reply
 
 
 def _image(color: str = "red") -> Image.Image:
@@ -58,11 +60,7 @@ def test_alt_o_hides_saitenka_and_restores_native_subs():
     reader = Reader(ipc)
     reader.ov.show(_image(), oid=OverlayId.SUB)
     reader._register_keybinds()
-    bindings = {
-        command[1]: command[2].removeprefix("script-message ")
-        for command in ipc.commands
-        if command[0] == "keybind"
-    }
+    bindings = keybind_registry(ipc)
     ipc.commands.clear()
 
     reader._handle(bindings["Alt+o"])
@@ -91,20 +89,19 @@ def test_overlay_toggle_key_is_configurable():
 
     Reader(ipc, options=options)._register_keybinds()
 
-    bindings = {command[1] for command in ipc.commands if command[0] == "keybind"}
+    bindings = set(keybind_registry(ipc))
     assert "Ctrl+o" in bindings and "Alt+o" not in bindings
 
 
 def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling(monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
-    reader.jp_sid = 2
-    reader.en_sid = 1
+    reader.declare_subtitle(SubtitleTracksDiscovered(2, 1))
     reader._observing = True
-    reader._observed = {"sid": 2}
-    reader._translate_on = True
-    reader._translation_secondary_sid = 1
-    monkeypatch.setattr(reader, "_draw_translation", lambda: None)
+    reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
+    reader.translate_on = True
+    reader.declare_subtitle(SubtitleSecondaryLeased(1))
+    monkeypatch.setattr(reader, "draw_translation", lambda: None)
 
     reader.toggle_overlay()
     reader.toggle_overlay()

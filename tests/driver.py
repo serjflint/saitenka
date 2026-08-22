@@ -9,11 +9,16 @@ map screen coords → word/button), instead of poking ``set_hover`` / ``_show_to
 
 from __future__ import annotations
 
+#: The dwells `instant=True` zeroes. The two *hide* deadlines are deliberately absent: they run on
+#: `hide_delay`, which instant mode never zeroed, so a linger stays pending exactly as before.
+_INSTANT_DWELLS = ("lifecycle:hover-switch", "lifecycle:scan-open")
+
 
 class Driver:
     def __init__(self, reader, *, instant: bool = True):
         self.r = reader
         self.ipc = reader.ipc
+        self._instant = instant
         if instant:  # deterministic tests: no hover-switch or scan dwell to wait out
             self.r.hover_switch_delay = 0.0
             self.r.scan_delay = 0.0
@@ -23,6 +28,11 @@ class Driver:
         """Move the cursor to screen ``(x, y)`` and let the reader react (hover / scan / linger)."""
         self.ipc.props["mouse-pos"] = {"hover": hover, "x": x, "y": y}
         self.r._update_hover()
+        if self._instant:
+            # A zero delay used to mean the next clock comparison passed. A dwell is a deadline
+            # now, so the equivalent is delivering it — zero-delay is still a timer.
+            for timer in _INSTANT_DWELLS:
+                self.ipc.fire_runtime_timer(timer)
         return self
 
     def leave(self) -> Driver:
@@ -42,7 +52,7 @@ class Driver:
     def move_into_tip(self, dx: float = 0.5, dy: float = 0.5) -> Driver:
         """Move to a point inside the shown tooltip (fractions of its rect) — e.g. to scan an inner
         word or hit a body region."""
-        x, y, w, h = self.r._tip_rect
+        x, y, w, h = self.r.tip.view.rect
         return self.move(x + w * dx, y + h * dy)
 
     # --- clicks / wheel / keys (client-message path) ----------------------------------------------
@@ -58,7 +68,9 @@ class Driver:
 
     def wheel(self, steps: int) -> Driver:
         """Scroll the popup under the cursor by ``steps`` notches (down positive)."""
-        self.r._scroll_tip(steps * round(self.r.osd[1] * 0.12))
+        from saitenka.app import surfaces
+
+        self.r.scroll_tip(surfaces.tip_wheel_pixels(self.r.tip_scale.ref_h, steps))
         return self
 
     def key(self, msg: str) -> Driver:
@@ -73,8 +85,8 @@ class Driver:
 
     @property
     def tip_shown(self) -> bool:
-        return self.r._tip_rect is not None
+        return self.r.tip.view.rect is not None
 
     @property
     def nested_shown(self) -> bool:
-        return self.r._nest.state is not None
+        return self.r.tip.nest.state is not None

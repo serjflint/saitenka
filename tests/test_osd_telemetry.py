@@ -10,42 +10,22 @@ silently reverting to scale 1.0 (the help/stats/sidebar regression) would have t
 
 from __future__ import annotations
 
-import contextlib
 import threading
+from pathlib import Path
 
 import numpy as np
 import pytest
+import util
 from PIL import Image
+from util import record_spans
 
-from saitenka import otel_metrics
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.mpvio.ipc import MpvIPC
 from saitenka.mpvio.osd import Overlay
 
 
-class _FakeIPC:
-    def command(self, *_args):
-        return {"error": "success"}
-
-
-def _record_spans(monkeypatch) -> list[dict]:
-    """Capture every ``traced(...)`` span (name + static attrs + in-block ``.set`` attrs) without
-    standing up an OTel provider — ``instrumented`` composes ``traced``, so this sees the real path."""
-    spans: list[dict] = []
-
-    @contextlib.contextmanager
-    def _fake_traced(name, **attrs):
-        rec = {"name": name, "attrs": dict(attrs)}
-        spans.append(rec)
-
-        class _Setter:
-            def set(self, key, value):
-                rec["attrs"][key] = value
-
-        yield _Setter()
-
-    monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
-    return spans
+class _FakeIPC(util.FakeIPC):
+    pass
 
 
 def _uploads(spans: list[dict]) -> list[dict]:
@@ -53,7 +33,7 @@ def _uploads(spans: list[dict]) -> list[dict]:
 
 
 def test_show_tags_the_upload_span_with_oid_and_geometry(monkeypatch):
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     ov = Overlay(_FakeIPC())
     ov.show(Image.new("RGBA", (300, 200), (0, 0, 0, 0)), x=10, y=20, oid=OverlayId.HELP)
     (attrs,) = _uploads(spans)
@@ -63,7 +43,7 @@ def test_show_tags_the_upload_span_with_oid_and_geometry(monkeypatch):
 
 
 def test_show_bgra_tags_the_upload_span_with_oid_and_geometry(monkeypatch):
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     ov = Overlay(_FakeIPC())
     ov.show_bgra(np.zeros((120, 340, 4), dtype=np.uint8), x=1, y=2, oid=OverlayId.SIDEBAR)
     (attrs,) = _uploads(spans)
@@ -74,7 +54,7 @@ def test_show_bgra_tags_the_upload_span_with_oid_and_geometry(monkeypatch):
 def test_every_overlay_id_is_labelled_by_the_seam(monkeypatch):
     """The registry (OverlayId) is the SSOT of overlay events; each one drawn through the seam must
     surface under its own name, so adding a slot needs no new instrumentation and can't go dark."""
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     ov = Overlay(_FakeIPC())
     img = Image.new("RGBA", (64, 48), (0, 0, 0, 0))
     for member in OverlayId:
@@ -91,7 +71,7 @@ def test_geometry_tracks_ui_scale(monkeypatch):
     entries = (HelpEntry("Nav", "j", "down", None, "x"),)
 
     def _draw(scale: float) -> dict:
-        spans = _record_spans(monkeypatch)
+        spans = record_spans(monkeypatch)
         doc = build_document(entries, osd=(1920, 1080), footer="f", scale=scale)
         page = render_page(
             doc.pages[0], width=doc.width, height=doc.height, index=0, total=1, scale=scale
@@ -108,7 +88,7 @@ def test_geometry_tracks_ui_scale(monkeypatch):
 
 def test_a_bare_int_oid_falls_back_to_its_digits(monkeypatch):
     """A caller that passes a raw int (not an OverlayId) still gets a stable label, never a crash."""
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     Overlay(_FakeIPC()).show(Image.new("RGBA", (10, 10)), oid=7)
     assert _uploads(spans)[0]["oid"] == "7"
 
@@ -220,3 +200,20 @@ def test_visibility_off_removes_an_inflight_interaction_paint(monkeypatch):
         release.set()
         ov.close()
         ipc.close()
+
+
+def test_publishing_a_frame_leaks_no_files():
+    """One stable path per oid plus its staging name, however many frames a scroll publishes. What
+    makes that path safe to reuse is `tests/test_overlay_frame_publication.py` — the frame-identity
+    assertion that used to live here asserted the alternating-slot *implementation*, which was built
+    on a mechanism the crash reports refute."""
+    ov = Overlay(_FakeIPC())
+    physical = ov.physical_oid(OverlayId.TIP)
+    for shade in range(6):
+        ov.show_bgra(np.full((64, 48, 4), shade, np.uint8), oid=OverlayId.TIP)
+
+    published = Path(ov._live[physical][2])
+    assert published.exists()
+    assert not published.with_name(published.name + ".staging").exists()
+    ov.close()
+    assert not published.exists()

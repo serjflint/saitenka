@@ -224,7 +224,7 @@ def test_mpv_font_directory_contains_only_selected_fonts(tmp_path: Path) -> None
 
 def test_mpv_render_inputs_fail_closed_when_a_required_property_is_unavailable() -> None:
     class IPC:
-        def command(self, _command: str, name: str) -> dict[str, str]:
+        def probe(self, name: str) -> dict[str, str]:
             return {"error": "property unavailable" if name == "video-out-params" else "success"}
 
     with pytest.raises(AssertionError, match="video-out-params"):

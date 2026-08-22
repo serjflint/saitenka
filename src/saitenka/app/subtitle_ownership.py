@@ -2,6 +2,10 @@
 
 Geometry availability never selects the subtitle pixel renderer.  Only an explicit mode
 transition or a current assert-true/readback-false result may authorize legacy pixels.
+
+A source that can never produce geometry (an ``.srt``) is the former, not the latter: it enters as
+``LEGACY_OVERLAY`` on the selection change, because it is a property of the track rather than an
+outcome that could flip between cues.
 """
 
 from __future__ import annotations
@@ -11,6 +15,27 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 
 OWNERSHIP_RETRY_DELAYS_MS = (50, 250, 1_000)
+
+
+class AskMpv:
+    """No declared selection — go read `sid` from mpv.
+
+    A sentinel rather than `None`, because `None` is a real selection: a file with no subtitle track
+    is left untouched and its sid stays unset.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "ASK_MPV"
+
+
+#: What a caller passes when it has nothing to declare. A caller that just *wrote* `sid` passes the
+#: value it wrote: mpv echoes the property asynchronously, so re-reading it here returns the previous
+#: track and the change goes unnoticed (#P1, `subtitle_modes.configure`).
+ASK_MPV = AskMpv()
+
+type SelectedSid = int | str | AskMpv | None
 
 
 class Lifecycle(StrEnum):
@@ -201,7 +226,11 @@ def _ensure_mode(
     unavailable = state.owner == PixelOwner.LEGACY or state.retry_exhausted or state.retry_suspended
     already_native = state.native_pixels_established and not verify
     wrong_mode = verify and state.context.mode != OwnershipMode.NATIVE_VISIBLE
-    if unavailable or already_native or wrong_mode:
+    # Single-flight: a verify may not supersede an assertion still in flight. _assert_native mints a
+    # fresh effect_id and overwrites active_assertion_id, so the first assertion's result would then
+    # fail _assertion_result's identity check and be dropped — two effects, one owner.
+    in_flight = state.active_effect_kind == ActionKind.ASSERT_NATIVE_VISIBILITY
+    if unavailable or already_native or wrong_mode or (verify and in_flight):
         return state, ()
     return _assert_native(state) if verify else _start_mode(state)
 

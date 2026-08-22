@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import util
 
 from saitenka.mpvio import discover
 from saitenka.mpvio.osd import Overlay
@@ -87,13 +88,8 @@ def test_two_clients_share_one_socket():
 # --- id-base namespacing ---------------------------------------------------------------------
 
 
-class _RecIPC:
-    def __init__(self):
-        self.commands: list = []
-
-    def command(self, *args, **_kw):
-        self.commands.append(args)
-        return {"data": None}
+class _RecIPC(util.FakeIPC):
+    pass
 
 
 def test_overlay_id_base_offsets_overlay_ids():

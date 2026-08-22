@@ -612,6 +612,13 @@ jank-live = { shell = "SAITENKA_LIVE=1 uv run --extra full python examples/jank_
 # (release tag). `--no-project`: the orchestrator is stdlib-only and installs saitenka GLOBALLY, so it
 # needs no dev env. CI-only (the e2e install-smoke leg runs it across all 3 OSes) — NOT in `all`.
 install-smoke = { cmd = "uv run --no-project python tools/install_smoke.py" }
+# Put THIS tree on PATH as `saitenka`, which is what the mpv plugin spawns — live testing runs the
+# checkout, not a release. `[tool.uv.sources]` already maps deinflect / saitenka-dict /
+# ankiconnect-client / libasslite to editable local paths, so the extras pull the working tree too.
+# `subtitle-geometry-bundle` is deliberately absent: its wheel needs a staged native payload only CI
+# produces. A running mpv holds the modules it imported at launch, so an edit is not live until mpv
+# is fully quit and relaunched — "behaviour didn't change" is almost always a stale process.
+install-editable = { shell = "uv tool install --force --python 3.14t --editable '.[full,layout-engine,images,subtitle-geometry]'", help = "Put this checkout on PATH as `saitenka` for live mpv testing (relaunch mpv after)" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
@@ -755,6 +762,36 @@ corpus-lock = { shell = "uv run --extra full python tools/corpus_check.py check"
 # A vertical runtime slice must delete its old entries and re-bless the mechanically derived debt set;
 # startup, close, and entrypoint duties additionally resolve to live source symbols.
 runtime-migration = { shell = "uv run --extra full python tools/runtime_migration_check.py check" }
+runtime-status = { shell = "uv run --extra full python tools/runtime_migration_check.py status", help = "Per-kind runtime-debt census — read counts from here, never retype them into a doc" }
+# GATE (in `all`) — the runtime debt's *shape*, which its row count cannot see. Splits the
+# host-taking functions by the arity each would have once the host parameter is gone, counted
+# TRANSITIVELY: a forwarder must receive everything downstream, so 42 local breaches of `max-args`
+# are 116 real ones. Ratchets down like the sibling gate; growth is the failure.
+host-arity = { shell = "uv run python tools/host_arity.py check" }
+host-arity-over = { shell = "uv run python tools/host_arity.py over", help = "Host-taking functions over ruff's max-args once converted, worst first — the WP5 queue" }
+# NOT a gate — the map a migration's design step reads: what a module actually touches on the host,
+# and what those names resolve to underneath (seven names over one owner slice are one port, not
+# seven parameters). `--member` is the step before a codemod; its `--json` is the worklist.
+cluster-map = { shell = "uv run python tools/cluster_map.py", help = "What a module touches on the host, by fact — `--member NAME` for one member and its sites" }
+arch-map = { shell = "uv run --extra full python tools/arch_map.py", help = "The four architecture views ARCHITECTURE.md cannot hold: imports, ownership, commands, seams (`-- --json` for the data)" }
+# GATE (in `all`) — the host's mass, ratcheted. `total` is the anti-laundering number: moving a body
+# into a module function and leaving a thin delegator behind shrinks the substantive split while the
+# host is unchanged, and gating only that would report the growth mode this repo prescribes as
+# progress. Members are discovered live (mixins, import-time attachment), never by parsing one file.
+host-mass = { shell = "uv run --extra full python tools/host_mass.py check" }
+host-mass-census = { shell = "uv run --extra full python tools/host_mass.py", help = "Members on the Reader by kind — substantive, delegator, property, field" }
+# GATE (in `all`) — `getattr(port, "method", fallback)` where the port ALWAYS has the method, so the
+# fallback is unreachable and the probe's only live effect is making a rename silent (a renamed timer
+# method disarms every lifecycle deadline, with nothing red). Resolves the receiver's type and asks
+# the class; an unannotated receiver is reported, never counted. Baseline zero.
+port-probe = { shell = "uv run python tools/port_probe_census.py check" }
+# GATE (in `all`) — the "pure policy" invariant: a registered reducer must decide from (state, event)
+# alone. Discovers the reducers by walking the reactor's live route table, not by name, and splits a
+# reading that reaches a BRANCH (gated — two identical turns can diverge) from one that only stamps
+# an already-decided effect's id/deadline (reported). Baseline zero deciding.
+reducer-purity = { shell = "uv run --extra full python tools/reducer_purity.py check" }
+reducer-purity-census = { shell = "uv run --extra full python tools/reducer_purity.py", help = "Impure readings per registered reducer, deciding ones first" }
+port-probe-census = { shell = "uv run python tools/port_probe_census.py", help = "Every getattr probe in src, split dead / live / unresolved receiver" }
 # NOT in `all` (needs Node + a pinned Yomitan checkout; fetches py-fsrs) — the regenerate-and-diff sibling
 # of corpus-lock for GENERATED corpora (fsrs vectors, JP/FR transform differentials). corpus-lock guards
 # *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
@@ -831,7 +868,7 @@ ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install 
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration"]
+all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration", "host-arity", "host-mass", "port-probe", "reducer-purity"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —

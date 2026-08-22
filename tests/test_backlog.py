@@ -1,8 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import util
+from util import keybind_registry
+
 from saitenka.app.backlog import BacklogStore, Capture, normalize_match_name
 from saitenka.app.controller import Reader
+from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
 
 
 def _capture(path: Path, *, start: float = 1.0, jp: str = "猫です") -> Capture:
@@ -152,16 +156,10 @@ def test_global_summary_does_not_expose_cue_content(tmp_path):
     assert "jp_text" not in summary[0]
 
 
-class _IPC:
+class _IPC(util.FakeIPC):
     def __init__(self, props):
-        self.props = props
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props)
 
 
 def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, monkeypatch):
@@ -186,15 +184,14 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     )
     reader = Reader(ipc)
     reader.sub_text = "日本語"
-    reader.jp_sid = 3
-    reader.en_sid = 4
+    reader.declare_subtitle(SubtitleTracksDiscovered(3, 4))
     reader.tokens = [SimpleNamespace(surface="日本", lemma="日本")]
     reader.hover = 0
     store = BacklogStore(tmp_path / "reader.sqlite", clock=lambda: 10.0)
-    reader._backlog_store = store
+    reader.session.backlog_store = store
     captures = []
-    reader._session_recorder = SimpleNamespace(record_capture=lambda: captures.append(True))
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    reader.episode.session_recorder = SimpleNamespace(record_capture=lambda: captures.append(True))
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
 
     reader.toggle_bookmark()
 
@@ -226,7 +223,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     assert captures == [True]
     forbidden = {"seek", "sub-seek", "set_property", "screenshot-to-file"}
     assert not any(command[0] in forbidden for command in ipc.commands)
-    reader._session_recorder = None
+    reader.episode.session_recorder = None
     reader.close()
 
 
@@ -242,11 +239,11 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
         }
     )
     reader = Reader(ipc)
-    reader.subtitle_language = "en"
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.sub_text = "English line"
     store = BacklogStore(tmp_path / "reader.sqlite")
-    reader._backlog_store = store
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    reader.session.backlog_store = store
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
 
     reader.toggle_bookmark()
 
@@ -259,11 +256,11 @@ def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
     ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
     reader = Reader(ipc)
     shown = []
-    monkeypatch.setattr(reader, "_toast", lambda *args: shown.append(args))
+    monkeypatch.setattr(reader, "toast", lambda *args: shown.append(args))
 
     reader.toggle_bookmark()
 
-    assert reader._backlog_store is None
+    assert reader.session.backlog_store is None
     assert shown == [("no active cue to bookmark", "warn")]
 
 
@@ -273,5 +270,24 @@ def test_bookmark_key_is_configurable():
     ipc = _IPC({})
     reader = Reader(ipc, options=ReaderOptions(keys=KeyOptions(bookmark_key="Alt+q")))
     reader._register_keybinds()
-    binds = {command[1]: command[2] for command in ipc.commands if command[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"
+
+
+def test_a_bookmark_stores_the_cue_by_language_not_by_position():
+    """With English primary the roles swap, so filing them by position would record an English line
+    as the card's Japanese side — invisible until the card is reviewed."""
+    from saitenka.app.backlog import _cue_languages
+    from saitenka.app.languages import MAIN_LANG, SECOND_LANG
+
+    assert _cue_languages("日本語", "english", MAIN_LANG) == ("日本語", "english")
+    assert _cue_languages("english", "日本語", SECOND_LANG) == ("日本語", "english")
+
+
+def test_a_bookmark_with_no_secondary_track_still_records_the_primary():
+    """mpv answers empty for `secondary-sub-text` when no second track is loaded — the common case,
+    and it must not lose the line the user actually bookmarked."""
+    from saitenka.app.backlog import _cue_languages
+    from saitenka.app.languages import MAIN_LANG
+
+    assert _cue_languages("日本語", "", MAIN_LANG) == ("日本語", "")

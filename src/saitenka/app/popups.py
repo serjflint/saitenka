@@ -10,19 +10,201 @@ Reader's ``Delegated`` shims (the hover FSM and its tests stay untouched).
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
+from saitenka.app.interaction_jobs import InteractionJobs
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import numpy as np
 
-    from saitenka.app.render_cache import RenderCache
+    from saitenka.app.hover_store import HoverStore
+    from saitenka.app.interaction_surfaces import InteractionSurfaces
+    from saitenka.app.lifecycle_timers import LifecycleTimerKind
+    from saitenka.app.mined_set import MinedSet
+    from saitenka.app.prefetch import TipScale
+    from saitenka.app.render_cache import LoadedView, RenderCache
+    from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
+    from saitenka.app.tokenizer import Tokenizer
     from saitenka.model import Theme
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend
+    from saitenka.runtime.hover import Intent
+    from saitenka.runtime.interaction_slice import (
+        HoveredWordStore,
+        HoverPauseStore,
+        PulseStore,
+        TipNavStore,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TipPorts:
+    """Everything the popup blit, scroll and placement chain reaches the host for.
+
+    The chain spans `tooltip`, `tooltip_panel` and `nested_popup` and only ever wants the tip's own
+    state, the scale it draws at, and the collaborators it hands work to. It is the one port the
+    tooltip cluster has: everything outside this chain is the host under another name. Built as
+    `Reader.tip_ports`, so a caller still holding the host pays one member rather than the set.
+
+    `tip` is the live mutable `TooltipState`, not a copy: the chain writes scroll and crisp flags
+    back onto the view it was given, and a snapshot would silently drop those.
+    """
+
+    tip: TooltipState
+    scale: TipScale
+    surfaces: InteractionSurfaces
+    hover_store: HoverStore
+    #: The link-navigation back-stack, a slice feature of its own. Beside `tip` rather than on it:
+    #: the stack is frozen and `tip` is not, and a frozen fact inside a mutable bag invites a write.
+    nav_store: TipNavStore
+    #: The copy-flash pulse and the tooltip's claim on the playback pause. Both are decisions with
+    #: a refusal — a pulse whose expiry cannot be armed is not drawn, a resume is only owed if the
+    #: tooltip is what paused — so both are slice features rather than flags anyone can set.
+    pulse_store: PulseStore
+    pause_store: HoverPauseStore
+    #: What was resolved about the word under the cursor. Read through, never snapshotted onto the
+    #: port: a mine landing on the hovered term revises the answer and re-shows within one call.
+    word_store: HoveredWordStore
+    request_render_ahead: Callable[[PopupView, int], bool]
+    osd: tuple[int, int]
+    nested_max_frac: float
+    #: The in-RAM tier-2 head cache, read on the hover path. Never SQLite — see `Reader._peek_render_cache`.
+    peek_render_cache: Callable[[object], LoadedView | None]
+    #: Arms the deadline that ends a copy-flash pulse; `False` when nothing can arm one (a closing
+    #: session). The pulse is only drawn once its own retirement exists, so the port carries both.
+    schedule_flash_expiry: Callable[[], bool]
+    toast: Callable[..., None]
+    #: Hands a popup build to the engaged worker; `True` when it took it, and the caller then shows
+    #: nothing and waits for the typed completion.
+    request_engaged_tooltip: Callable[..., bool]
+
+
+@dataclass(frozen=True, slots=True)
+class HoverActions:
+    """What performing a hover decision does — the counterpart to `TipPorts`, as `SidebarActions`
+    is to `SidebarView`. The port carries the facts; this carries the acts.
+
+    The hysteresis machine decides and the applier performs, and until this existed the applier was
+    the only thing in the hover chain still holding the host — which pinned the routing cycle
+    (`route_hover` -> `_perform` -> `route_hover`) to it as well, since a cycle converts as a unit
+    or not at all.
+
+    `arm` takes the intent rather than a callback because the re-entry it schedules must resolve
+    through the host when it fires: a deadline that lands after an episode re-slot has to reach the
+    tip that exists then, and a callback closing over a port would reach the one that existed when
+    it was armed.
+    """
+
+    arm: Callable[[LifecycleTimerKind, float, Intent], bool]
+    cancel: Callable[[LifecycleTimerKind], None]
+    show_word: Callable[[int], None]
+    retire_word: Callable[[], None]
+    open_nested: Callable[[object], None]
+    reveal_annotation: Callable[[bool], None]
+    #: "The cursor is over the window" — read by prefetch as an engagement signal. An act rather
+    #: than a field write because it crosses an owner: the hover observes it, somebody else uses it.
+    publish_engagement: Callable[[bool], None]
+
+
+@dataclass(frozen=True, slots=True)
+class ClickPorts:
+    """What a click on a popup can do, and the two things it has to ask mpv first.
+
+    Separate from `HoverActions` because a click is not a hover decision: the hysteresis never mines
+    or speaks, and a value that carried both would be the union of two features rather than either.
+
+    `cursor` is `get`, not the `prop` `HoverInputs.mouse_pos` uses — deliberately, and they are not
+    interchangeable.
+    """
+
+    mine_token: Callable[..., None]
+    mine_current: Callable[[], None]
+    speak_hovered: Callable[[], None]
+    click_preview: Callable[[float, float], bool]
+    cursor: Callable[[], dict | None]
+    paused: Callable[[], object]
+
+
+@dataclass(frozen=True, slots=True)
+class HoverInputs:
+    """What the hover observation reads: the cursor, and the rendered cue it can be over.
+
+    Live rather than snapshotted where it has to be. `hover` is a callable because the routing this
+    feeds *changes* it, and the sampled span reports whether it did — a snapshot would answer with
+    the value from before the turn and report "unchanged" every time.
+
+    `tokens` and `boxes` are plain values: they belong to the cue being rendered and cannot change
+    inside one observation.
+    """
+
+    mouse_pos: Callable[[], dict | None]
+    hit: Callable[[float, float], int]
+    hover: Callable[[], int]
+    cue_state: Callable[[], str]
+    #: The cue's tokens as the tokenizer produced them — a `list` because the lookup the show chain
+    #: runs hands them straight to `Tokenizer.phrase_terms`, which takes one.
+    tokens: list[Token]
+    boxes: list[WordBox]
+    #: Where the cue was drawn — the boxes are relative to it, so a hit test needs both.
+    sub_origin: tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class WordLookup:
+    """What turning a hovered index into `HoverMetadata` reads, and where the async request goes.
+
+    Separate from `TipPorts` because none of it is the popup: it is the cue's tokens seen through
+    the dictionary, plus the four generations a completion has to still match. Those generations are
+    read here rather than passed along so that request and completion build the identity from one
+    place. Assembled field for field at both ends, a generation added to one and not the other reads
+    as a stale result and silently drops the tooltip.
+
+    `deferred` is the branch, not whether `submit` is set: `submit` also carries the retain-newest
+    queueing a lane still needs while one job is in flight, so a caller reading "no lane" off it
+    would skip that too. On the deterministic demo/screenshot path there is no lane and the chain
+    resolves the metadata inline instead of requesting it.
+    """
+
+    tokenizer: Tokenizer
+    dict_set: object
+    mined: MinedSet
+    prefetch_gen: int
+    dependency_gen: int
+    cue_identity: object
+    deferred: bool
+    submit: Callable[..., bool]
+
+
+@dataclass(frozen=True, slots=True)
+class ShowActions:
+    """What showing a hovered word does — the acts half of the `set_hover` -> `show_tooltip` chain.
+
+    `freeze` is one act rather than the IPC handle, the property reader and the config flag it is
+    built from: the chain only ever asks "pause for this hover, did I pause?", and carrying the
+    three parts would let a caller pause on its own terms.
+
+    `select` publishes which token index is hovered, including the `-1` that means none. It is an
+    act because the cue's own hit-testing reads it back, so a caller writing the field directly
+    would be publishing to a channel it does not own.
+    """
+
+    select: Callable[[int], None]
+    draw_cue: Callable[[], None]
+    teardown: Callable[[], None]
+    bind_keys: Callable[[], None]
+    seed_precomposed: Callable[[Panel, object, int], bool]
+    freeze: Callable[..., bool]
+    inflected: Callable[[int], str]
+    sync_translation: Callable[[], None]
+    #: Counts one dictionary lookup against the session, when a session is recording.
+    record_lookup: Callable[[], None]
 
 
 class Panel:
@@ -199,6 +381,19 @@ class Panel:
     def viewport_warm(self, scroll: int, view_h: int) -> bool:
         return self.windowed.viewport_warm(scroll, view_h)
 
+    def warm_viewport(self, scroll: int, view_h: int) -> None:
+        """Raster what ``viewport_warm`` asks about, so a worker can open that gate."""
+        self.windowed.warm_viewport(scroll, view_h)
+
+    @property
+    def missed_last_assemble(self) -> bool:
+        """The last warm-only compose left a band as background — warm it and re-blit."""
+        return self.windowed.missed_last_assemble
+
+    def warm_native_viewport(self, scroll: int, view_h: int, scale: float) -> None:
+        """Raster what ``native_viewport_warm`` asks about — the crisp blit's half."""
+        self.windowed.warm_native_viewport(scroll, view_h, scale)
+
     def render_ahead(
         self, scroll: int, view_h: int, *, direction: int, should_cancel, scale: float = 1.0
     ) -> int:
@@ -237,46 +432,140 @@ class PopupView:
         self.job_id: int | None = None
         self.job_kind = "tooltip"
         self.rect: tuple[int, int, int, int] | None = None  # screen rect, for hit-testing
-        self.hide_at = 0.0
         self.crisp_miss = ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
         self.crisp_pending = (
             False  # a soft first paint is up; poll upgrades to crisp once bands warm
         )
 
 
-class TooltipState:
-    """Runtime state of the base tooltip + its hover FSM — the big, hot interaction-scoped cluster:
-    the shown panel and its scroll/viewport/screen-rect, the in-place link-nav stack, the nested scan
-    popup, the scan/word dwell timers, the copy-flash pulse, the hovered word's reading/terms/kanji, and
-    the LRU panel cache. Grouped off the ``Reader`` god-object (#30); the ``Delegated`` shims keep every
-    historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/``_panel_cache`` name, so
-    the hover FSM woven through tooltip.py / nested_popup.py and its tests stay untouched."""
+class PanelCache:
+    """Bounded LRU of rendered panels, with the lock next to the data it guards.
 
-    def __init__(self) -> None:
-        self.paused_by_tip = False  # mpv was auto-paused by a tooltip show (resume on hide)
-        self.hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
+    The map, its bound and its lock are one object because the fetch-or-build-then-LRU-touch dance
+    around them otherwise gets written out once per caller — and two copies of a lock protocol is
+    one copy too many: the second is where the `move_to_end` outside the lock lives.
+    """
+
+    def __init__(self, limit: int, lock) -> None:
+        self._entries: OrderedDict = OrderedDict()
+        self._limit = limit
+        self._lock = lock
+
+    def __contains__(self, key) -> bool:
+        return key in self._entries
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def get(self, key):
+        """The entry without an LRU touch — for a caller only asking whether it is warm."""
+        return self._entries.get(key)
+
+    def discard(self, key) -> None:
+        """Drop one entry if present. Deliberate eviction (a benchmark forcing a cold paint), so no
+        eviction metric fires — that counter measures pressure, not a caller asking."""
+        with self._lock:
+            self._entries.pop(key, None)
+
+    def clear(self) -> None:
+        """Drop everything. A cold restart of the cache, not an eviction — no metric fires."""
+        with self._lock:
+            self._entries.clear()
+
+    def values(self):
+        return self._entries.values()
+
+    def get_or_build(self, key, build):
+        """Return the cached panel, building it OUTSIDE the lock if absent.
+
+        First-writer-wins on a race: two workers building the same panel produce equivalent results,
+        so the loser's is discarded rather than replacing a panel another view may already hold.
+        """
+        from saitenka import otel_metrics
+
+        cached = self._entries.get(key)
+        if cached is not None:
+            if otel_metrics.panel_cache_hits is not None:
+                otel_metrics.panel_cache_hits.add(1)
+            self.touch(key)
+            return cached
+        built = build()
+        with self._lock:
+            return self._setdefault(key, built)
+
+    def touch(self, key) -> None:
+        with self._lock:
+            try:
+                self._entries.move_to_end(key)
+            except KeyError:
+                pass  # evicted between the read and the touch — harmless
+
+    def setdefault(self, key, panel):
+        with self._lock:
+            return self._setdefault(key, panel)
+
+    def _setdefault(self, key, panel):
+        if key in self._entries:
+            self._entries.move_to_end(key)
+            return self._entries[key]
+        from saitenka import otel_metrics
+
+        while len(self._entries) >= self._limit:
+            self._entries.popitem(last=False)  # FIFO/LRU: oldest out
+            if otel_metrics.panel_cache_evictions is not None:
+                otel_metrics.panel_cache_evictions.add(1)
+        self._entries[key] = panel
+        return panel
+
+
+@dataclass(frozen=True, slots=True)
+class HoverMetadata:
+    """What a hover lookup resolved: the phrase it found and whether it is already mined."""
+
+    terms: tuple[str, ...] = ()
+    span: tuple[int, int] | None = None
+    mined: bool = False
+    group_mined: tuple[bool, ...] = ()
+
+
+#: No word is hovered, or its lookup was retired. Named so the clear path is one assignment rather
+#: than four literals a reader has to recognise as "empty".
+NO_HOVER_METADATA = HoverMetadata()
+
+
+def hovered_meta(store: HoveredWordStore) -> HoverMetadata:
+    """The hovered word's answer, narrowed. The slice carries it as `object` because `runtime` must
+    not name a dictionary term, and `None` is how it spells "nothing resolved" — this is the one
+    place that turns that back into the empty answer every reader already expects."""
+    meta = store.current.meta
+    return NO_HOVER_METADATA if meta is None else cast("HoverMetadata", meta)
+
+
+class TooltipState:
+    """What one paint of the tooltip stack produced, and the machinery that produces it.
+
+    The same cut the picker and the sidebar make: `Owner.INTERACTION`'s slice holds what was
+    *decided* — the hysteresis, the back-stack, the copy pulse, the pause claim, the hovered word's
+    answer — and this holds the two rendered popups, the source token the crisp pass re-renders
+    from, the LRU panel cache and the build lanes. None of those can live in a frozen slice: a
+    reducer carrying a cache makes the state differ from itself depending on what had been drawn,
+    and nothing here can release a job lane.
+
+    Grouped off the ``Reader`` god-object (#30)."""
+
+    def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
+        """`cache_lock` is shared with the Reader's other cache accounting, so it is injected."""
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
         # PopupView type + blit machinery as the nested popup. The historical flat names (_tip_state,
         # _tip_scroll, …) keep resolving here through the Reader's Delegated("tip.view", …) shims.
         self.view = PopupView(OverlayId.TIP)
-        # Yomitan-style in-place link nav: a clicked cross-reference pushes the prior view here; Esc pops.
-        self.tip_nav: list = []
         self.nest = PopupView(
             OverlayId.NESTED
         )  # nested scan popup (hover a word inside the tooltip)
-        self.scan_target: str | None = None  # scan-cell tail the cursor is settling on (dwell)
-        self.scan_since = 0.0  # when it became the target (dwell start)
-        self.word_target: int | None = (
-            None  # subtitle word the cursor is settling on (switch dwell)
-        )
-        self.word_since = 0.0
         self.last_mouse = (-1.0, -1.0)  # latest cursor pos — routes the wheel to the popup under it
-        self.flash_oid: int | None = None  # a popup pulsing a "copied" highlight border
-        self.flash_until = 0.0
-        self.hover_reading = ""  # dict-form reading of the hovered word, for TTS
-        self.hover_terms: tuple[str, ...] = ()  # multi-token terms starting at the hovered word
-        self.hover_span: tuple[int, int] | None = None  # token span the longest term covers
-        self.kanji_index = 0  # `k` cycles the hovered word's kanji
+        #: Samples the OTel hit-test histogram every `_HIT_TEST_SAMPLE_EVERY` poll ticks. Feature
+        #: -private: nothing outside the hover path has ever read it.
+        self.hit_test_tick = 0
         self.tip_keys_bound = False
         self.tip_tok: Token | None = None  # base tooltip's source token (for the crisp re-render)
         self.tip_inflected: str | None = (
@@ -285,7 +574,11 @@ class TooltipState:
         self.tip_show_cold = False  # was the last base-tooltip show a panel build (vs a cache hit)
         # LRU cache (OrderedDict keyed by PanelKey), bounded at panel_cache_max; each Panel keeps only its
         # windowed blocks (compressed) so the whole cache stays small. Evict LRU on overflow, not clear.
-        self.panel_cache: OrderedDict = OrderedDict()
+        self.panel_cache = PanelCache(panel_cache_max, cache_lock or threading.Lock())
+        # The tooltip's own bounded background work — the panel build and the scroll-ahead raster.
+        # Both lanes are speculative work for the panel this state describes, which is why a hover
+        # that supersedes cancels them together; on the Reader it read as session infrastructure.
+        self.jobs = InteractionJobs()
 
     @property
     def open(self) -> bool:

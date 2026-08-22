@@ -19,8 +19,10 @@ from saitenka.runtime import (
     EffectOutcome,
     EventOrigin,
     ExpireEffect,
+    FileLoaded,
     MailboxFull,
     Owner,
+    PropertyObserved,
     RawMpvEvent,
     RuntimeEvent,
     SendMpvCommand,
@@ -30,12 +32,15 @@ from saitenka.runtime import (
     UserCommand,
 )
 from saitenka.runtime.jobs import JobBroker, JobLanePolicy
+from saitenka.runtime.loop import SessionLoop
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.mpvio.ipc import IPCRequest, MpvIPC
-    from saitenka.runtime.legacy import LegacyRuntimeBridge
+    from saitenka.runtime.correlator import EffectCorrelator
+    from saitenka.runtime.diagnostics import RuntimeLedger
+    from saitenka.runtime.reactor import SessionReactor
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,50 +67,6 @@ class ConnectionPhase(StrEnum):
 
 
 _CANDIDATE_EVENT_LIMIT = 256
-
-
-class LegacyEventRouter:
-    """Temporary sole consumer that presents mailbox observations to Reader unchanged."""
-
-    def __init__(self, mailbox: SessionMailbox) -> None:
-        self._mailbox = mailbox
-        self._runtime_bridge: LegacyRuntimeBridge | None = None
-
-    def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None:
-        if self._runtime_bridge is not None:
-            raise RuntimeError("runtime bridge already installed")
-        self._runtime_bridge = bridge
-
-    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
-        if self._runtime_bridge is not None:
-            self._runtime_bridge.publish_due()
-        events: list[object] = []
-        if timeout is None or timeout > 0:
-            envelope = self._mailbox.receive(timeout=timeout)
-            if envelope is not None:
-                self._route(envelope.payload, events)
-        for envelope in self._mailbox.receive_ready():
-            self._route(envelope.payload, events)
-        return events
-
-    def _route(self, payload: RuntimeEvent, events: list[object]) -> None:
-        if isinstance(payload, CloseRequested):
-            reason = (
-                "runtime mailbox overloaded"
-                if payload.reason == "runtime-overloaded"
-                else payload.reason
-            )
-            raise OSError(reason)
-        if isinstance(payload, EffectFinished):
-            if self._runtime_bridge is not None:
-                self._runtime_bridge.handle_terminal(payload)
-            return
-        if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
-            events.append(payload.data)
-        elif isinstance(
-            payload, UserCommand | ConnectionLost | ConnectionReady | ConnectionReplaced
-        ):
-            events.append(payload)
 
 
 class MpvGateway:
@@ -136,26 +97,95 @@ class MpvGateway:
         self._reconnect_attempt = 0
         self._closed = False
         self._ready = False
-        router = LegacyEventRouter(mailbox)
+        #: Session resources whose *lifetime* the runtime owns, by name. Deliberately opaque:
+        #: `mpvio` must not import `app`, and only the app-side dispatcher knows what a name
+        #: means. An owner hands its resource over at construction and stops closing it itself.
+        self.session_resources: dict[str, object] = {}
+        #: The session's runtime census, set by whoever installs a reactor. Here rather than on the
+        #: reactor because the loop that counts unrouted events is not the reactor's to expose,
+        #: and the gateway is the one handle every entrypoint already holds.
+        self.session_ledger: RuntimeLedger | None = None
+        #: The session's reactor, once one is installed. Held because close is a *state transition*
+        #: the reactor owns (`StopSession` -> `close()`, and the reject-new-work latch behind it),
+        #: and a handle nobody keeps is a transition nothing can reach — which is why that path has
+        #: been implemented and unreachable since it landed.
+        self.session_reactor: object | None = None
+        from saitenka.runtime.correlator import EffectCorrelator
+
+        self._jobs = JobBroker(mailbox)
+        self._correlator = EffectCorrelator(
+            mailbox,
+            self,
+            job_adapter=self._jobs,
+            clock=clock,
+        )
+        self._loop = loop = SessionLoop(mailbox, self._correlator, clock=clock)
         ipc.install_runtime_ingress(
             self._publish_observation,
             self._publish_connection,
-            router.drain_events,
+            loop,
             self,
-        )
-        from saitenka.runtime.legacy import LegacyRuntimeBridge
-
-        self._jobs = JobBroker(mailbox)
-        self._legacy = LegacyRuntimeBridge(
-            mailbox,
-            self,
-            router,
-            job_adapter=self._jobs,
-            clock=clock,
         )
         with self._lock:
             self._ready = True
         self._start_pending_reconnect()
+
+    @property
+    def mailbox(self) -> SessionMailbox:
+        """The session's mailbox. Exposed for an observer to be constructed against — a consumer
+        must still go through `observe`, since the loop is the only sanctioned consumer."""
+        return self._mailbox
+
+    def claim_census(self) -> dict[str, tuple[int, int]]:
+        """What fraction of this session's envelopes the reactor owned — see the loop's copy."""
+        return self._loop.claim_census()
+
+    def observe(
+        self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
+    ) -> None:
+        """Let a `SessionReactor` see the session, and own the part of it `claims` accepts.
+
+        The gateway owns the mailbox's sole consumer, so this is the only place an observer can be
+        attached without splitting the envelope stream. See `SessionLoop.observe` for what
+        claiming means and why it is declared rather than derived.
+        """
+        self._loop.observe(reactor, claims)
+
+    def publish_session_event(self, event: RuntimeEvent) -> bool:
+        """Put a session-lifecycle fact on the mailbox for the reactor to route.
+
+        Lifecycle traffic, not normal: these are session-shaped announcements ("we are ready"),
+        and the normal lane is sized for the mpv event stream that can flood it.
+        """
+        with self._lock:
+            if self._closed:
+                return False
+        try:
+            self._mailbox.publish(
+                event,
+                origin=EventOrigin.LIFECYCLE,
+                traffic=TrafficClass.LIFECYCLE,
+                connection_epoch=self.connection_epoch,
+            )
+        except MailboxFull:
+            return False
+        return True
+
+    def deliver_session_event(self, event: RuntimeEvent) -> bool:
+        """Hand a session fact straight to the observing reactor, bypassing the mailbox.
+
+        For facts that arise *after* the session loop has stopped — close, above all. Publishing
+        one would need someone to drain it, and a drain during teardown runs a full domain turn
+        (cue settlement, reconcile) against half-closed collaborators. `handle` reads nothing but
+        the envelope, so this is the whole cost.
+        """
+        return self._loop.announce(event, self._clock(), self.connection_epoch)
+
+    def dispatch_effect(self, effect) -> bool:
+        """Perform one reactor-issued effect. Only the kinds an owner has actually migrated."""
+        if isinstance(effect, SendMpvCommand):
+            return self.dispatch(effect)
+        return False
 
     @property
     def connection_epoch(self) -> int:
@@ -163,24 +193,24 @@ class MpvGateway:
             return self._connection_epoch
 
     @property
-    def legacy(self) -> LegacyRuntimeBridge:
-        return self._legacy
+    def correlator(self) -> EffectCorrelator:
+        return self._correlator
 
     def submit_mpv(self, **kwargs) -> bool:
         """Submit one correlated command for a compatibility-owned runtime slice."""
-        return self._legacy.submit_mpv(**kwargs)
+        return self._correlator.submit_mpv(**kwargs)
 
     def schedule_timer(self, **kwargs) -> bool:
-        return self._legacy.schedule_timer(**kwargs)
+        return self._correlator.schedule_timer(**kwargs)
 
     def cancel_timer(self, timer: str) -> bool:
-        return self._legacy.cancel_timer(timer)
+        return self._correlator.cancel_timer(timer)
 
     def register_job_lane(self, name: str, policy: JobLanePolicy, handler) -> None:
         self._jobs.register(name, policy, handler)
 
     def submit_job(self, **kwargs) -> bool:
-        return self._legacy.submit_job(**kwargs)
+        return self._correlator.submit_job(**kwargs)
 
     def close_job_lane(self, name: str, timeout: float = 2.0) -> bool:
         return self._jobs.close_lane(name, timeout)
@@ -206,7 +236,7 @@ class MpvGateway:
             self._connection_phase = ConnectionPhase.CLOSED
             self._candidate_events.clear()
             thread = self._reconnect_thread
-        self._legacy.cancel_timer("mpv-reconnect")
+        self._correlator.cancel_timer("mpv-reconnect")
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=1.5)
 
@@ -329,8 +359,12 @@ class MpvGateway:
 
     def _observation_payload(self, message: dict, *, lock_held: bool) -> RuntimeEvent:
         name = str(message.get("event", "unknown"))
-        if name == "property-change" and message.get("name") == "mouse-pos":
-            name = "mouse-pos"
+        if name == "property-change":
+            # No epoch on the payload: `_publish_observation` has already dropped anything from a
+            # connection that is not the current one, and the projection applies its own fence.
+            return PropertyObserved(str(message.get("name", "")), message.get("data"))
+        if name == "file-loaded":
+            return FileLoaded()
         if name == "client-message":
             args = message.get("args")
             if lock_held:
@@ -510,7 +544,7 @@ class MpvGateway:
             elif completion.outcome is EffectOutcome.REJECTED:
                 self._request_close(retry_epoch)
 
-        if not self._legacy.schedule_timer(
+        if not self._correlator.schedule_timer(
             owner=Owner.SESSION,
             identity=ReconnectRetry(retry_epoch, attempt),
             timer="mpv-reconnect",

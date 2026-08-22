@@ -135,13 +135,22 @@ def _set_draw_geometry(span: otel_metrics.SpanSetter, x: int, y: int, w: int, h:
 class Overlay:
     """Manage one or more mpv OSD overlays keyed by id (0..63)."""
 
-    def __init__(self, ipc: MpvIPC, id_base: int = 1):
+    def __init__(self, ipc: MpvIPC, id_base: int = 1, *, runtime_submit=None):
         """``id_base`` shifts the physical mpv overlay ids so we can coexist with another script that
         owns the low ids (namespace hygiene). The controller keeps using its logical ids 1..6;
-        base 1 (default) is a no-op offset → byte-identical to before."""
+        base 1 (default) is a no-op offset → byte-identical to before.
+
+        ``runtime_submit`` is the correlated-command port, supplied by composition. It is a
+        constructor argument rather than something detected on ``ipc``, because a probe makes egress
+        depend on which methods a collaborator happens to expose: handing any fake the port would
+        silently move overlay writes onto the gateway and change what every caller observes."""
         self.ipc = ipc
         self.id_base = id_base
+        self._runtime_submit = runtime_submit
         self._files: dict[int, Path] = {}
+        #: One stable path per oid, only ever published onto by rename — see :meth:`_write_frame`.
+        self._frame_paths: dict[int, Path] = {}
+        self._frame_lock = threading.Lock()
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
         self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
@@ -165,7 +174,7 @@ class Overlay:
     ) -> None:
         from saitenka.runtime import EffectError, EffectFinished, EffectOutcome
 
-        submit = getattr(self.ipc, "submit_runtime_mpv", None)
+        submit = self._runtime_submit
         if submit is not None:
             accepted = submit(
                 owner=owner,
@@ -249,6 +258,7 @@ class Overlay:
             self.ops += 1
             path = self._files.pop(physical_oid, None)
             self.lifecycle_oids.discard(oid)
+        self._retire_frame_path(physical_oid)
         if path is not None and path.exists():
             path.unlink()
 
@@ -266,18 +276,42 @@ class Overlay:
             return self.ipc.command("overlay-add", oid, *tail)
         return {"error": "success"}
 
-    def _tempfile(self, oid: int) -> Path:
-        path = self._files.get(oid)
-        if path is None:
-            fd = tempfile.NamedTemporaryFile(  # noqa: SIM115  # path is process-lifetime, reused across calls
-                prefix=f"saitenka-osd-{oid}-",
-                suffix=".bgra",  # handle (mpv re-reads it)
-                delete=False,
-            )
-            path = Path(fd.name)
-            fd.close()
+    def _write_frame(self, oid: int, data: bytes) -> Path:
+        """Publish ``data`` at this oid's stable path by ``os.replace``, never by rewriting it.
+
+        mpv reads the named file **inside** `overlay-add` (`cmd_overlay_add` → `_platform_memmove`,
+        the frame both SIGBUS reports fault in). Any in-place rewrite therefore races that read, and
+        a pagein against a file being truncated is a bus error inside mpv rather than an error we can
+        observe. A rename never mutates the inode mpv opened, so the race has no window left to hit —
+        which an alternating pair of slots could only ever narrow, since it cannot know when the read
+        happens. Two writers is what made the narrowed window reachable: `repaint` re-issues
+        `_live`'s tail from the reader thread, and it names the very slot the upload thread picks next.
+
+        Cost is not why the old form was in place: interleaved, replace and in-place rewrite are both
+        ~0.7 ms p50 for a 2.5 MB frame here. The 0.8-vs-3.2 ms gap that chose in-place came from
+        timing each strategy in its own sequential block, which measures the page cache.
+        """
+        with self._frame_lock:
+            path = self._frame_paths.get(oid)
+            if path is None:
+                path = self._frame_paths[oid] = self._new_frame_path(oid)
+            staging = path.with_name(path.name + ".staging")
+            staging.write_bytes(data)
+            Path(staging).replace(path)
             self._files[oid] = path
-        return path
+            return path
+
+    def _new_frame_path(self, oid: int) -> Path:
+        with tempfile.NamedTemporaryFile(
+            prefix=f"saitenka-osd-{oid}-", suffix=".bgra", delete=False
+        ) as staged:
+            return Path(staged.name)
+
+    def _retire_frame_path(self, oid: int) -> None:
+        with self._frame_lock:
+            path = self._frame_paths.pop(oid, None)
+        if path is not None:
+            path.with_name(path.name + ".staging").unlink(missing_ok=True)
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         label = _oid_label(oid)
@@ -286,8 +320,7 @@ class Overlay:
             otel_metrics.upload_duration_ms, "upload", oid=label
         ) as span:
             data, w, h, stride = to_bgra(img)
-            path = self._tempfile(oid)
-            path.write_bytes(data)
+            path = self._write_frame(oid, data)
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
             res = self._add(oid, tail)
             _set_draw_geometry(span, x, y, w, h)
@@ -304,8 +337,7 @@ class Overlay:
         ) as span:
             buf = np.ascontiguousarray(bgra)
             h, w = buf.shape[:2]
-            path = self._tempfile(oid)
-            path.write_bytes(buf.tobytes())
+            path = self._write_frame(oid, buf.tobytes())
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
             res = self._add(oid, tail)
             _set_draw_geometry(span, x, y, w, h)
@@ -365,6 +397,7 @@ class Overlay:
         self._live.pop(oid, None)
         self.ops += 1
         p = self._files.pop(oid, None)
+        self._retire_frame_path(oid)
         if p is not None and p.exists():
             p.unlink()
         return res

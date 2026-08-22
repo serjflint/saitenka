@@ -217,8 +217,19 @@ def mpv_scripts_dirs() -> list[Path]:
 
 def mpv_conf_paths() -> list[Path]:
     """Candidate ``mpv.conf`` locations to inspect (doctor): mpv's own, plus mpv.net's on Windows."""
-    paths = [mpv_config_dir() / "mpv.conf"]
+    return _mpv_config_files("mpv.conf")
+
+
+def mpv_input_conf_paths() -> list[Path]:
+    """Candidate ``input.conf`` locations. mpv logs a command's origin only as a flag word, so a
+    command we did not send is attributable to a user bind — rather than to us — only with the
+    binding table in hand."""
+    return _mpv_config_files("input.conf")
+
+
+def _mpv_config_files(name: str) -> list[Path]:
+    paths = [mpv_config_dir() / name]
     net = mpvnet_config_dir()
     if net is not None:
-        paths.append(net / "mpv.conf")
+        paths.append(net / name)
     return paths

@@ -7,8 +7,8 @@ is a bare subtitle renderer — no FSRS/known coloring, no JLPT underlines, no f
 dictionary tooltips, no mining. Anki-dependent pieces degrade to None (logged) when Anki is closed,
 so a missing Anki never blocks attaching.
 
-``load_deps_async``/``apply_deps``/``draw_loading`` take ``reader: Reader`` (the AGENTS.md seam
-pattern) with thin delegating methods on Reader.
+``load_deps_async`` takes a ``DepsLoad`` port; injecting what it built is the Reader's own state
+transition and lives there.
 """
 
 from __future__ import annotations
@@ -16,13 +16,15 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import Future
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
+    from collections.abc import Callable
+
     from saitenka.app.fsrs import KnownSnap
 
 log = logging.getLogger(__name__)
@@ -481,73 +483,56 @@ def begin_deps_build(cfg: dict, build=None) -> Future[dict]:
     return fut
 
 
+@dataclass(frozen=True, slots=True)
+class DepsLoad:
+    """What starting a background dep load needs: say we are loading, and hand the result over.
+
+    Five members, cut facts-from-acts. `publish` and `announce` are deliberately two: the order
+    between them is the whole hand-off, and one combined act would hide which came first.
+    """
+
+    #: Draw plain subs and run the spinner until the build lands.
+    begin_loading: Callable[[], None]
+    #: Annotation goes off-thread for the duration — the build is holding the CPU.
+    enable_async_annotation: Callable[[], None]
+    #: Publish the built deps. Called from the *build* thread, so it must not act on them.
+    publish: Callable[[dict], None]
+    #: Arm the deadline that injects them on the session turn. Returns whether it armed; nothing
+    #: reads that, because with no timer the deps still land on the next session turn.
+    announce: Callable[[], object]
+
+
 def load_deps_async(
-    reader: Reader, cfg: dict, build=None, *, prebuilt: Future[dict] | None = None
+    ports: DepsLoad, cfg: dict, build=None, *, prebuilt: Future[dict] | None = None
 ) -> None:
-    """Wire a background dep build into the reader: when it lands, the session turn injects it on the
-    main thread (:func:`apply_deps`). Plain subs draw meanwhile; a named timer animates the spinner.
+    """Wire a background dep build into the session: when it lands, the session turn injects it on
+    the main thread (:func:`apply_deps`). Plain subs draw meanwhile; a named timer animates the spinner.
 
     ``prebuilt`` is a Future from a HOISTED :func:`begin_deps_build` (``run`` starts the build before
     mpv launches so it overlaps launch dead time); without it the build starts now (attach/plugin mode,
-    already well past mpv connect). The done-callback sets ``_pending_deps`` from the build thread — the
-    same cross-thread hand-off consumed by the session turn.
+    already well past mpv connect). The done-callback hands the result over from the build thread and
+    arms the deadline that injects it, so the injection still happens on the session turn.
 
     Callers should have already fired :func:`warm_tokenizer` on its own thread as early as possible."""
-    reader._loading = True
-    reader._enable_async_annotation()
-    reader._schedule_loading_frame(delay_s=0.0)
+    ports.begin_loading()
+    ports.enable_async_annotation()
     fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build)
-    fut.add_done_callback(lambda f: setattr(reader, "_pending_deps", f.result()))
+
+    def landed(finished: Future[dict]) -> None:
+        # Order matters and is the whole hand-off: publish the value, then say so. Announcing first
+        # would let the due event fire against deps that are still None.
+        ports.publish(finished.result())
+        ports.announce()
+
+    fut.add_done_callback(landed)
 
 
-def apply_deps(reader: Reader, deps: dict) -> None:
-    """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
-    reader._loading = False
-    from saitenka.app.lifecycle_timers import LifecycleTimerKind
-
-    reader.lifecycle_timers.cancel(LifecycleTimerKind.LOADING_FRAME)
-    reader.lifecycle_surfaces.remove(OverlayId.LOADING)
-    if reader._anki_capability is not None:
-        reader._anki_capability.close()
-    reader._mined_seed_generation += 1
-    reader._mined_seed_inflight = False
-    reader._mined_seed_done = False
-    reader._mined_seed_failures = 0
-    reader._mined_seed_next_due = 0.0
-    reader.scorer = deps.get("scorer")
-    reader.anki = deps.get("anki")
-    reader.mine_cfg = deps.get("mine_cfg")
-    reader.dict_set = deps.get("dict_set")
-    if reader.anki is not None:
-        from saitenka.app.anki import anki_reachable
-        from saitenka.app.capabilities import CapabilityProbe
-
-        reader._anki_capability = CapabilityProbe(
-            lambda: anki_reachable(timeout=reader.anki_ping_timeout),
-            name="anki",
-            ttl=reader.anki_ok_ttl,
-            retry=min(reader.anki_ok_ttl, 1.0),
-            timeout=max(reader.anki_ping_timeout * 2, 0.1),
-            max_retry=max(reader.anki_ok_ttl, 8.0),
-            submit=reader._capability_submit,
-        )
-        reader._anki_capability.request(force=True)
-    from saitenka.app import analysis_overlay
-
-    analysis_overlay.on_vocabulary_changed(reader)
-    reader._dependencies_changed()
-    reader.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
-    reader.warm_episode_tokens()  # deps arrived after the index built → warm the episode's cues now
-    reader._announce_runtime()  # workers are up now — print the banner with the real count (once)
-
-
-def draw_loading(reader: Reader) -> None:
+def draw_loading(surfaces, frame: int) -> None:
     """Draw one top-left spinner frame after its named timer becomes due."""
     from saitenka.app.loading import loading_image
 
-    img = loading_image("saitenka loading dictionaries", reader._load_frame)
-    reader._load_frame += 1
+    img = loading_image("saitenka loading dictionaries", frame)
     try:
-        reader.lifecycle_surfaces.present(img, 24, 24, oid=OverlayId.LOADING)
+        surfaces.present(img, 24, 24, oid=OverlayId.LOADING)
     except Exception:
         log.debug("loading spinner draw failed", exc_info=True)

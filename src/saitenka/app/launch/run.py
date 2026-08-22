@@ -11,19 +11,26 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from saitenka import otel_metrics
-from saitenka.app import session_stats
+from saitenka.app import player_supervisor
 from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config, subtitle_geometry_options
 from saitenka.app.continuity import resolve_sibling
-from saitenka.app.embedded_subs import build_sub_index_for_current_track
 from saitenka.app.jimaku import parse_filename
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
 from saitenka.app.profiles import resolve_launch_identity, resolve_profile
+from saitenka.app.session_runtime import SessionEntry, SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
+from saitenka.runtime import Owner
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from saitenka.app.episode_reslot import ReslotPorts, WatchPorts
 
 log = logging.getLogger(__name__)
 
@@ -164,7 +171,7 @@ def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
     return list(flag_vals or []) or list(cfg.get(key) or [])
 
 
-def default_mine_target(mine: dict) -> tuple[str, str]:
+def defaultmine_target(mine: dict) -> tuple[str, str]:
     """The ``(deck, model)`` a ``[mine]`` table implies with no explicit CLI flag: deck default
     ``Saitenka::Mining``; model an explicit ``model`` else the ``preset`` name (Lapis/Kiku) else Lapis.
     The single home for this derivation — ``_resolve_mine_model`` and the ``#254`` profile scoping both
@@ -179,7 +186,7 @@ def _mine_table(cfg: dict) -> dict:
     return mine if isinstance(mine, dict) else {}
 
 
-def _resolve_mine_target(
+def _resolvemine_target(
     cfg: dict, mine_deck: str | None, mine_model: str | None
 ) -> tuple[str, str]:
     """Effective ``(mine_deck, mine_model)`` for a run. ``cfg`` is ALREADY profile-scoped (by
@@ -188,7 +195,7 @@ def _resolve_mine_target(
     profile's, or the runtime top-level [mine] honoring ``--config``); an explicit flag wins. Resolving
     off the scoped runtime cfg — never an import-time baked default — is what fixes the ``--config
     other.toml`` + profile case where the old comparison-baseline misfired."""
-    deck, model = default_mine_target(_mine_table(cfg))
+    deck, model = defaultmine_target(_mine_table(cfg))
     return (deck if mine_deck is None else mine_deck, model if mine_model is None else mine_model)
 
 
@@ -460,16 +467,14 @@ def _launch_mpv_and_connect(
             from saitenka.app.procutil import kill_process_tree
 
             kill_process_tree(proc)
-            return None, None, None
-    from saitenka.mpvio.gateway import install_legacy_gateway
+            return None, None
+    # The hint is immediate feedback for the file-load wait: our overlay isn't built yet and the
+    # next steps block the main thread on mpv, so mpv's own OSD is the only surface that can show
+    # anything here. A screenshot capture must not carry the breadcrumb.
+    from saitenka.app.session_routes import install_session_runtime
 
-    gateway = install_legacy_gateway(ipc)
-    # Immediate feedback for the file-load wait: our overlay isn't built yet and the next steps block
-    # the main thread on mpv, so mpv's own OSD is the only surface that can show anything here.
-    from saitenka.app.loading import show_startup_hint
-
-    startup_hint_lease = show_startup_hint(gateway, screenshot=opts.screenshot)
-    return proc, ipc, startup_hint_lease
+    install_session_runtime(ipc, startup_hint=not opts.screenshot)
+    return proc, ipc
 
 
 def _build_run_options(cfg: dict, flags: RunFlags):
@@ -540,7 +545,6 @@ def _build_run_options(cfg: dict, flags: RunFlags):
         ),
         panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),
         perf=PerfOptions(
-            poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
             prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
@@ -552,7 +556,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
 
 
 def _start_run_provider_fetch(
-    reader,
+    ports: ReslotPorts,
     cfg: dict,
     video_path: Path,
     subs: RunSubtitleOptions,
@@ -576,9 +580,11 @@ def _start_run_provider_fetch(
         resync=subs.resync,
         tsukihime_config=tsukihime_cfg,
     )
-    configure_providers(reader, pcfg)  # shared with attach: manual re-sync retry + Ctrl+J picker
+    configure_providers(
+        ports.configure_retry, ports.configure_picker, pcfg
+    )  # shared with attach: manual re-sync retry + Ctrl+J picker
     if providers:
-        reader.fetch_japanese_subs_async(provider_fetch_factory(providers, pcfg)(str(video_path)))
+        ports.fetch_japanese(provider_fetch_factory(providers, pcfg)(str(video_path)))
 
 
 def _prefetch_sibling_subs(
@@ -635,35 +641,42 @@ def _auto_advance_enabled(cfg: dict, demo_word: str | None, screenshot: str | No
     return bool(watch.get("auto_advance"))
 
 
-def _mpv_has_next_playlist_entry(reader) -> bool:
+def _mpv_has_next_playlist_entry(pos: object, count: object) -> bool:
     """True when mpv has a further playlist entry to advance to on its own (autoload/explicit playlist).
     At mid-playlist EOF mpv advances NATIVELY (``--keep-open=yes`` only holds the FINAL entry), so on
     the eof edge we must NOT also loadfile — that would skip an episode. The reactive re-slot picks the
     native advance up via ``file-loaded`` regardless of whether auto-advance is on."""
-    pos = reader._prop("playlist-pos")
-    count = reader._prop("playlist-count")
     return isinstance(pos, int) and isinstance(count, int) and 0 <= pos < count - 1
 
 
-def _advance_at_eof(reader) -> bool:
+def _advance_at_eof(
+    prop: Callable[[str], object], current_media: Callable[[], Path | None], ipc
+) -> bool:
     """The eof-reached edge with auto-advance on. If mpv will advance itself (a playlist), defer —
     ``file-loaded`` drives the re-slot. Otherwise ``loadfile`` the next sibling (#100 resolver); its
     ``file-loaded`` re-slots too. Return False (hold the last frame via keep-open) when there's no
-    unambiguous next episode."""
-    if _mpv_has_next_playlist_entry(reader):
+    unambiguous next episode.
+
+    ``current_media`` is a callable, not a path: the hook outlives the episode it was installed for
+    and must resolve the sibling of whatever is playing when eof arrives.
+    """
+    if _mpv_has_next_playlist_entry(prop("playlist-pos"), prop("playlist-count")):
         return True  # mpv advances natively; the reactive re-slot follows on file-loaded
-    cur = reader.current_media_path()
+    cur = current_media()
     if cur is None:
         return False
     nxt = resolve_sibling(cur, 1)
     if nxt is None:
         return False  # no unambiguous next sibling → hold the last frame (keep-open)
-    reader.ipc.command("loadfile", str(nxt))  # file-loaded → reslot_hook re-slots the overlay
+    send_correlated(
+        ipc, "advance-loadfile", "loadfile", str(nxt), owner=Owner.PLAYBACK
+    )  # file-loaded → reslot_hook re-slots the overlay
     return True
 
 
-def _install_watch_hooks(
-    reader,
+def _install_watch_hooks(  # noqa: PLR0913 -- the session's ports plus the run's own options
+    ports: ReslotPorts,
+    watch: WatchPorts,
     cfg: dict,
     video_path: Path,
     tmp: Path,
@@ -683,11 +696,13 @@ def _install_watch_hooks(
         return
 
     def _reslot(path: Path) -> None:
-        reslot_to_current(reader, cfg, path, tmp, dur, subs)
+        reslot_to_current(ports, cfg, path, tmp, dur, subs)
 
-    reader.install_reslot_hook(_reslot, initial=video_path)
+    watch.install_reslot_hook(_reslot, initial=video_path)
     if auto_advance:
-        reader.advance_hook = lambda: _advance_at_eof(reader)
+        watch.set_advance_hook(
+            lambda: _advance_at_eof(watch.prop, watch.current_media_path, ports.ipc)
+        )
     # Warm episode 2's subs while episode 1 plays, so the first advance re-slots cache-warm (no cold gap).
     _prefetch_sibling_subs(
         cfg, video_path, enabled=auto_advance, jimaku_key=subs.jimaku_key, resync=subs.resync
@@ -695,7 +710,12 @@ def _install_watch_hooks(
 
 
 def reslot_to_current(
-    reader, cfg: dict, video_path: Path, tmp: Path, dur: int, subs: RunSubtitleOptions
+    ports: ReslotPorts,
+    cfg: dict,
+    video_path: Path,
+    tmp: Path,
+    dur: int,
+    subs: RunSubtitleOptions,
 ) -> None:
     """Re-index the overlay onto mpv's CURRENT (already-loaded) file — the reactive #100 re-slot fired
     from ``file-loaded``, so it covers a native autoload/playlist advance and our own eof loadfile
@@ -709,7 +729,7 @@ def reslot_to_current(
     from saitenka.app.subselect import remove_external_sub_tracks
     from saitenka.app.subtitle_modes import select_initial
 
-    ipc = reader.ipc
+    ipc = ports.ipc
     title, parsed_episode = parse_filename(video_path)
     # One span over the whole re-slot: it's a discrete, non-trivial cost on the reader thread (a cold
     # re-slot resolves+ffsubsync-resyncs subs, ~1.3s live), and its attributes make a wrong-track
@@ -725,10 +745,9 @@ def reslot_to_current(
             jimaku_title=title,
             episode=parsed_episode,
         )
-        session_stats.finish(
-            reader
-        )  # write the just-finished episode complete BEFORE the recorder resets
-        reader.rebind_episode()
+        # write the just-finished episode complete BEFORE the recorder resets
+        ports.finish_stats()
+        ports.rebind_episode()
         # drop the carried-over launch --sub-file (a prior episode's srt); a nonzero count each advance
         # is the carried-over-sub signature
         span.set("externals_dropped", remove_external_sub_tracks(ipc))
@@ -738,7 +757,16 @@ def reslot_to_current(
         jp_lang = next((part.strip() for part in subs.slang.split(",") if part.strip()), "jpn")
         for path, lang in ((sub_path, jp_lang), (en_sub_path, "eng")):
             if path is not None:
-                ipc.command("sub-add", str(path), "auto", "", lang)
+                send_correlated(
+                    ipc,
+                    f"reslot-sub-add:{lang}",
+                    "sub-add",
+                    str(path),
+                    "auto",
+                    "",
+                    lang,
+                    owner=Owner.SUBTITLE,
+                )
         startup = select_initial(ipc, subs.slang)
         span.set(
             "active", startup.active or "none"
@@ -751,15 +779,14 @@ def reslot_to_current(
             startup.tracks.jp_sid,
             startup.tracks.en_sid,
         )
-        build_sub_index_for_current_track(reader)
-        reader.configure_subtitle_mode(startup, slang=subs.slang)
-        session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
+        ports.rebuild_index()
+        ports.configure_mode(startup, slang=subs.slang)
+        ports.start_stats()  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
-            reader._toast(
-                "Fetching Japanese subtitles…"
-            )  # background fetch below; tell the user to wait
+            # background fetch below; tell the user to wait
+            ports.toast("Fetching Japanese subtitles…")
         _start_run_provider_fetch(
-            reader,
+            ports,
             cfg,
             video_path,
             subs,
@@ -768,7 +795,7 @@ def reslot_to_current(
             jimaku_title=title,
             episode=parsed_episode,
         )
-        reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
+        ports.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
         _prefetch_sibling_subs(  # warm episode N+1 so the next re-slot is cache-warm, not a cold fetch
             cfg, video_path, enabled=True, jimaku_key=subs.jimaku_key, resync=subs.resync
         )
@@ -865,65 +892,66 @@ def _build_run_deps(req: RunDepsRequest):
     return scorer, anki, mine_conf, dict_set
 
 
-def _wait_for_subtitle_text(reader, ipc, video: str | None) -> str:
-    """Sample sub-text; on a real file with nothing showing yet, hop forward via sub-seek until one
-    lands (or 80 tries elapse). Falls back to DEMO_LINE if nothing ever appears."""
-    reader.refresh_osd()
-    text = reader._get("sub-text") or ""
-    if not text and video:  # real file: hop to the next subtitle cue
-        for _ in range(80):
-            ipc.command("sub-seek", 1)
-            time.sleep(0.12)
-            text = reader._get("sub-text") or ""
-            if text:
-                break
-    return text or DEMO_LINE
+_CUE_SEARCH_SECONDS = 10.0
+
+#: How long a capture waits for every staged surface to be acknowledged before shooting.
+_PAINT_SETTLE_SECONDS = 2.0
+
+#: How long a demo waits for mpv to publish its window geometry before composing anything against
+#: it. A ceiling on a wait, not a nap: a demo on a warm machine passes through it immediately.
+_RENDER_SPACE_SECONDS = 5.0
 
 
-def _run_demo_actions(reader, ipc, demo: DemoSpec) -> None:
+def _demo_cue_text(runtime: SessionRuntime, video: str | None) -> str:
+    """The cue a demo hovers: whatever is showing, else one hopped to, else `DEMO_LINE`."""
+    runtime.await_render_space(timeout=_RENDER_SPACE_SECONDS)
+    if text := runtime.cue_text():
+        return text
+    if not video:  # no real file to seek through — nothing to wait for
+        return DEMO_LINE
+    return runtime.await_cue(timeout=_CUE_SEARCH_SECONDS) or DEMO_LINE
+
+
+def _run_demo_actions(runtime: SessionRuntime, demo: DemoSpec) -> None:
     for _ in range(demo.demo_scroll):
-        reader._scroll_tip(round(reader.osd[1] * 0.12))
+        runtime.scroll_tooltip()
     if demo.demo_translate:
-        reader._setup_secondary()
-        reader.toggle_translation()
-        time.sleep(0.3)
+        runtime.enable_translation()
+        runtime.await_paint(timeout=_PAINT_SETTLE_SECONDS)
     if demo.mine:
-        (reader.bulk_mine if demo.bulk else reader.mine_current)()
-        time.sleep(0.5)
+        runtime.mine(bulk=demo.bulk)
+        time.sleep(0.5)  # Anki round-trip, not a paint — no surface to wait on
     if demo.screenshot:
-        time.sleep(0.4)
-        r = ipc.command("screenshot-to-file", demo.screenshot, "window")
-        print("screenshot:", r, "->", demo.screenshot)
-        time.sleep(0.3)
+        runtime.await_paint(timeout=_PAINT_SETTLE_SECONDS)
+        print("screenshot:", runtime.capture(demo.screenshot), "->", demo.screenshot)
     else:
-        time.sleep(demo.seconds)
+        time.sleep(demo.seconds)  # hold the demo open; wall time is the point here
+
+
+def _execute_demo_session(runtime: SessionRuntime, demo: DemoSpec, *, video: str | None) -> None:
+    text = _demo_cue_text(runtime, video)
+    print("sub-text:", repr(text))
+    runtime.prepare_cue(text)
+    tokens = runtime.tokens()
+    idx = choose_demo_token(tokens, demo.demo_word or "読む", runtime.is_content_token)
+    print(f"demo hover → token[{idx}] = {tokens[idx].surface!r}")
+    runtime.prepare_hover(idx)
+    runtime.mark_ready()
+    _run_demo_actions(runtime, demo)
 
 
 def _execute_reader_session(
-    reader, ipc, demo: DemoSpec, *, video: str | None, translate_key: str
+    entry: SessionEntry, demo: DemoSpec, *, video: str | None, translate_key: str
 ) -> None:
     if demo.demo_word or demo.screenshot:
-        time.sleep(0.8)
-        text = _wait_for_subtitle_text(reader, ipc, video)
-        print("sub-text:", repr(text))
-        reader.prepare_subtitle_blocking(text)
-        target = demo.demo_word or "読む"
-        idx = next((i for i, t in enumerate(reader.tokens) if target in t.surface), None)
-        if idx is None:
-            idx = next(
-                (i for i, t in enumerate(reader.tokens) if reader.tokenizer.is_content(t)), 0
-            )
-        print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
-        reader.prepare_hover_blocking(idx)
-        reader._mark_interactive_ready()
-        _run_demo_actions(reader, ipc, demo)
+        _execute_demo_session(entry.runtime, demo, video=video)
     else:
         print(
             f"reader running — hover words; '{translate_key}' toggles the EN translation; "
             "Ctrl+C or quit mpv to stop."
         )
         log.info("session: mode=run")  # the mode a bundled report needs (vs attach/plugin)
-        reader.run()
+        entry.run()
 
 
 def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the extracted seam)
@@ -988,7 +1016,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         ident.profile_cycle,
     )
     # A not-passed --mine-deck/--mine-model (None) yields to the profile's own deck/model.
-    mine_deck, mine_model = _resolve_mine_target(cfg, mine_deck, mine_model)
+    mine_deck, mine_model = _resolvemine_target(cfg, mine_deck, mine_model)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
@@ -1066,7 +1094,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
     )
 
-    proc, ipc, startup_hint_lease = _launch_mpv_and_connect(
+    proc, ipc = _launch_mpv_and_connect(
         cfg,
         tmp,
         video_path,
@@ -1124,7 +1152,6 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 services=ReaderServices(scorer, anki, mine_conf, dict_set, tts_available()),
                 options=opts,
                 profile=active_profile,
-                startup_hint_lease=startup_hint_lease,
                 tokenizer_warm=tokenizer_warm,
             )
         else:
@@ -1134,7 +1161,6 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 ipc,
                 options=opts,
                 profile=active_profile,
-                startup_hint_lease=startup_hint_lease,
                 tokenizer_warm=tokenizer_warm,
             )
         reader.set_profile_cycle(
@@ -1144,7 +1170,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         with otel_metrics.traced("startup.subtitle_index"):
-            build_sub_index_for_current_track(reader)
+            reader.rebuild_sub_index()
         reader.load_deps_async(
             cfg, prebuilt=deps_future
         )  # the build has been running since pre-launch
@@ -1152,7 +1178,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     with otel_metrics.traced("startup.subtitle_mode_configure"):
         reader.configure_subtitle_mode(subtitle_startup, slang=slang)
     _start_run_provider_fetch(
-        reader,
+        reader.reslot_ports,
         cfg,
         video_path,
         subs,
@@ -1163,7 +1189,8 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     )
 
     _install_watch_hooks(
-        reader,
+        reader.reslot_ports,
+        reader.watch_ports,
         cfg,
         video_path,
         tmp,
@@ -1175,8 +1202,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     try:
         _execute_reader_session(
-            reader,
-            ipc,
+            reader.session_entry,
             DemoSpec(
                 demo_word=demo_word,
                 screenshot=screenshot,
@@ -1190,35 +1216,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             translate_key=translate_key,
         )
     finally:
-        try:
-            reader.close()
-            ipc.command("quit")
-            ipc.close()
-        except Exception:
-            log.debug("reader/ipc shutdown cleanup failed", exc_info=True)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            from saitenka.app.procutil import kill_process_tree
-
-            kill_process_tree(proc)  # mpv didn't quit → kill it + any children (no orphans)
-        else:
-            _log_mpv_exit(proc.returncode)  # only meaningful for a self-exit, not our force-kill
-    # Teardown is done + every store flushed above; a lingering native thread (pyo3 taffylite/resvglite)
-    # can still keep the free-threaded interpreter from actually exiting, hanging the quit intermittently.
-    # Arm a daemon watchdog that force-exits if we don't terminate promptly on our own.
-    _arm_exit_watchdog(3.0)
+        player_supervisor.PlayerSupervisor.owned(proc, on_exit_code=_log_mpv_exit).finalize(
+            reader, ipc
+        )
     return 0
-
-
-def _arm_exit_watchdog(delay: float) -> None:
-    """Force process exit ``delay`` s from now if a stray/native thread stalls interpreter shutdown after a
-    clean teardown. Daemon, so it never delays a healthy exit (it's killed the instant the process ends)."""
-    import os
-
-    def _force() -> None:
-        time.sleep(delay)
-        log.warning("exit watchdog: interpreter did not exit %.1fs after teardown — forcing", delay)
-        os._exit(0)
-
-    threading.Thread(target=_force, name="saitenka-exit-watchdog", daemon=True).start()

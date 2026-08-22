@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
     from saitenka.app.popups import Panel
     from saitenka.app.tokenize import Token
 
@@ -35,7 +34,7 @@ class TipView:
     state: Panel | None
     key: object | None
     rect: tuple[int, int, int, int] | None
-    hide_at: float
+    hide_pending: bool  # a linger deadline is armed
 
 
 @dataclass(frozen=True)
@@ -47,18 +46,21 @@ class HoverView:
     scan_target: str | None  # scan-cell tail the cursor is settling on
 
 
-def snapshot(reader: Reader) -> HoverView:
-    """Frozen point-in-time view of ``reader``'s hover stack."""
-    n = reader._nest
+def snapshot(
+    nest,
+    tip: TipView,
+    *,
+    paused: bool,
+    nav_idx: int,
+    scan_target: str | None,
+) -> HoverView:
+    """Frozen point-in-time view of the hover stack."""
     return HoverView(
-        nested=NestedView(state=n.state, word=n.word, token=n.token, key=n.key, rect=n.rect),
-        tip=TipView(
-            state=reader._tip_state,
-            key=reader._tip_key,
-            rect=reader._tip_rect,
-            hide_at=reader._hide_at,
+        nested=NestedView(
+            state=nest.state, word=nest.word, token=nest.token, key=nest.key, rect=nest.rect
         ),
-        paused=reader._paused_by_tip,
-        nav_idx=reader._nav_idx,
-        scan_target=reader._scan_target,
+        tip=tip,
+        paused=paused,
+        nav_idx=nav_idx,
+        scan_target=scan_target,
     )

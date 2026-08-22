@@ -1,1860 +1,302 @@
 {
-  "debt": [
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/commands/attach.py::_finish_attach_subtitle_startup"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/commands/attach.py::_install_attach_reslot_hook"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._anchor_subtitles"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._build_command_router.seek"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._define_mouse_section"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._get"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._reconcile_subtitles"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._register_keybinds.bind"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._release_mouse_capture"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader.toggle_hover_pause"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/embedded_subs.py::_selected_sub_track"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/help_overlay.py::_bind_help_keys"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/help_overlay.py::_restore_context_keys"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::_advance_at_eof"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::_run_demo_actions"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::_wait_for_subtitle_text"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::reslot_to_current"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::run_impl"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/media.py::current_timespan"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/media.py::screenshot"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/miner_ui.py::_grab_preview_keys"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/miner_ui.py::_release_preview_keys"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/sidebar.py::_open_mined"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/sidebar.py::_seek_hit"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subselect.py::_add_and_select"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subselect.py::fetch_jimaku"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subselect.py::remove_external_sub_tracks"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subselect.py::select_sub_track"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::_add_background_japanese"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::_replace_japanese_track"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::_reset_sub_delay"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::configure"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::release_secondary"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::select_initial"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::setup_secondary"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::sub_tracks"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::toggle"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._execute"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_focus"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_mpv_subtitles"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._set_native_visible"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.draw"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.suspend_for_overlay"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.resume_after_overlay"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.suspend_for_overlay"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/analysis_overlay.py::_show"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/analysis_overlay.py::toggle"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader.toggle_overlay"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/help_overlay.py::close_help"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/help_overlay.py::redraw"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/miner_ui.py::hide_preview"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/miner_ui.py::render_preview"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/nested_popup.py::hide_nested"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sidebar.py::redraw"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sidebar.py::toggle"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sub_picker.py::close_picker"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/sub_picker.py::redraw"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.clear"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.draw"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/tooltip.py::decorate_and_upload"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/translation.py::draw_translation"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/translation.py::sync_auto_translation"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/translation.py::toggle_translation"
-    ],
-    [
-      "driver-switch",
-      "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._expire_flash"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._request_mined_seed"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/popups.py::TooltipState.__init__"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/reader_context.py::EpisodeContext.__init__"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/sidebar.py::scroll"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/sidebar.py::update"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/subnav.py::reconcile_sub_text"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/subnav.py::sub_nav"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_linger_nested"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_linger_word_hover"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_open_scan_popup"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_switch_word_hover"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::decorate_and_upload"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::flash"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::_show"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::_unavailable"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::cue_result"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::on_index_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::on_vocabulary_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::redraw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::request"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::toggle"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/backlog.py::_cue_languages"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/backlog.py::capture_current"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/bindings.py::active_bindings"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/commands/attach.py::_attach_reslot"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/commands/attach.py::_finish_attach_subtitle_startup"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/commands/attach.py::_install_attach_reslot_hook"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/controller.py::Reader.__init__"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/embedded_subs.py::build_sub_index_for_current_track"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::_bind_help_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::_restore_context_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::close_help"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::document_for"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::open_help"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::redraw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::step"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::toggle"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/hover_snapshot.py::snapshot"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_advance_at_eof"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_execute_reader_session"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_install_watch_hooks"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_mpv_has_next_playlist_entry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_run_demo_actions"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_start_run_provider_fetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::_wait_for_subtitle_text"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/launch/run.py::reslot_to_current"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/mined_store.py::ensure_store"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner.py::Miner.__init__"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::_grab_preview_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::_release_preview_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::_stop_preview_audio"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::click_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::footer"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::hide_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::mark_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::media_image"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::media_tempfile"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::preview_existing"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::preview_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::render_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::replay_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::rerender_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::sentence_lines"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/miner_ui.py::show_preview"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._active_observation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._apply"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._consume_failure"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._degrade_geometry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._install_snapshot"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._observation_key"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._publish_cached"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._render_inputs"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._resolve_schedule_inputs"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._schedule"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry._snapshot_identities_are_valid"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.apply"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.invalidate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.record_clock_change"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.refresh"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.schedule"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.set_source"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::NativeSubtitleGeometry.sync_pixel_owner"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::_lookahead_tokenized"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::_subtitle_clock"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_cached_rows_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_engaged_open_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_open_engaged"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::_phrase_extra_terms"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::apply_nested_metadata"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::click_kanji_fallback"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::hide_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::kanji_current"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::nested_view_h"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_kanji"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_link"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::open_search"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::place_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/nested_popup.py::show_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_candidates"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_head_prefetch_items"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_head_prefetch_candidate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_lookahead_items"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_warm_episode_loop"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::cap_for"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::prefetch_worker_count"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::start_prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::tip_cap"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::upcoming_cue_texts"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::update_prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::warm_episode_tokens"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/reader_deps.py::apply_deps"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/reader_deps.py::draw_loading"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/reader_deps.py::load_deps_async"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/reader_factory.py::create_reader"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/session_stats.py::finish"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/session_stats.py::start"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/session_stats.py::tick"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_activate_hit"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_active_index"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_analysis_status"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_capacity"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_cue_parts"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_cue_statuses"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_ensure_store"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_entry_row"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_entry_text"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_matched_entry_rows"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_mine_rows"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_open_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_seek_hit"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_summary_rows"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_track_rows"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::contains"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::mark_active_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::on_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::on_index_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::redraw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::toggle"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::update"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_download"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_footer"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_rows"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::_start_listing"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::apply_listing"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::close_picker"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::configure"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::contains"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::on_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::open_picker"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::redraw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::toggle"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subnav.py::_get_float"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subnav.py::load_sub_index"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subnav.py::reconcile_sub_text"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subnav.py::sub_nav"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subselect.py::configure_providers"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_add_background_japanese"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_finish_retry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_primary_role"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_replace_japanese_track"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_reset_sub_delay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_sample_cue_text"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_start_provider_fetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::_start_resync_window"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::announce_track"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::apply_fetch_result"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::configure"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::configure_retry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::force_current_as_japanese"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::on_primary_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::release_secondary"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::retry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::setup_secondary"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::start_fetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::toggle"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.clear"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.draw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.activate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.clear"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.connection_replaced"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.cue_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.deactivate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.draw_current"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.geometry_degraded"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.poll_ownership"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.resume_after_overlay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.suspend_for_overlay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._assert_native"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._capture_restore_visibility"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._ensure_selection"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._execute"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_focus"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_mpv_subtitles"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._set_native_visible"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._stage_legacy"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.activate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.clear"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.connection_replaced"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.cue_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.deactivate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.degrade_geometry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.draw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.poll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.reassert"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.resume_after_overlay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.suspend_for_overlay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.use_native"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NullRenderer.clear"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NullRenderer.draw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.clear"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.draw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.resume_after_overlay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.suspend_for_overlay"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::SurfaceSpec.captures"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_help_state"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_never"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_no_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_no_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_picker_state"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_preview_state"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_sidebar_state"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_tip_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_tip_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::_tip_state"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::route_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::route_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/surfaces.py::wants_mouse_capture"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_apply_engaged_base"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_apply_engaged_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_blit_crisp_or_soft"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_blit_native"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_build_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_capture_tip_view"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_click_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_click_tip"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_compose_kind"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_hover_targets"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_install_navigated"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_linger_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_linger_word_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_mine_link"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_navigated_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_open_scan_popup"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_paint_from_cache"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_panel_cache_get"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_record_show_metrics"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_request_hover_metadata"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_restore_tip_view"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_switch_word_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_update_nested_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_update_word_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::anki_ok"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_engaged_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_engaged_nav"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_engaged_open"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_hover_metadata"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_pending_crisp"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_pending_scroll"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::blit_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::copy_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::copy_hovered"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::copy_token"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::decorate_and_upload"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::entry_for_tok"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::flash"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::group_mined_of"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_header_add"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_header_region"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_header_speaker"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_nested_add"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_nested_speaker"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_target"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::is_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::jlpt_pill"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::navigate_tip"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::on_click"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::panel_cache_setdefault"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::panel_for"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::panel_key"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::place_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::rareness_pill"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::render_tip_view"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::render_view"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::resolve_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::scan_hit"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::scroll_tip"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::scroll_view"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::set_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::show_tooltip"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::show_tooltip_impl"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::speak_hovered"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::tip_back"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::update_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::update_hover_impl"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::update_hover_instrumented"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::draw_translation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::secondary_text"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::setup_secondary"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::sync_auto_translation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::toggle_translation"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/translation.py::translation_visible"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader._apply_background_results"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader._expire_surfaces"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader._reconcile_subtitles"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader._refresh_surfaces"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader._update_interaction"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader.poll_once"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader.run"
-    ]
-  ],
+  "debt": [],
   "startup": [
     {
       "id": "version-and-render-guard",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
-        "call:overlay_version",
-        "call:guard_main_render"
+        "call:GuardMainRender"
       ],
       "target": "session-lifecycle",
       "work_package": "2",
       "replacement": "SessionStarted -> ValidateRenderContext",
-      "test": "startup rejects unsupported render threads before readiness"
+      "test": "startup rejects unsupported render threads before readiness",
+      "migrated": true
     },
     {
       "id": "initial-render-space",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self.refresh_osd"
+        "call:EstablishRenderSpace"
       ],
       "target": "mpv-gateway/playback-projection",
       "work_package": "1,4",
       "replacement": "RawMpvEvent -> PlaybackProjection",
-      "test": "initial replay publishes one coherent render-space revision"
+      "test": "initial replay publishes one coherent render-space revision",
+      "migrated": true
     },
     {
       "id": "observers-and-replay",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self.start_observing"
+        "call:StartPropertyObservation"
       ],
       "target": "mpv-gateway",
       "work_package": "1,2",
       "replacement": "RegisterObservers -> ObserverReplayCompleted",
-      "test": "reconnect replays every observer once before feature events"
+      "test": "reconnect replays every observer once before feature events",
+      "migrated": true
     },
     {
       "id": "bindings-and-input-sections",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self._register_keybinds"
+        "call:RegisterInputBindings"
       ],
       "target": "command-and-interaction-reducers",
       "work_package": "2,5",
       "replacement": "BindingIntent -> MpvCommand",
-      "test": "first client message is accepted before readiness clears"
+      "test": "first client message is accepted before readiness clears",
+      "migrated": true
     },
     {
       "id": "mined-seed-and-capabilities",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
-        "call:self._seed_mined",
-        "src/saitenka/app/controller.py::Reader._apply_capabilities|call:self._tts_capability.request",
-        "src/saitenka/app/controller.py::Reader._apply_capabilities|call:self._anki_capability.request",
-        "src/saitenka/app/controller.py::Reader._request_mined_seed|call:self._mined_seed_submit"
+        "call:SeedOptionalCollaborators"
       ],
       "target": "external-io-lanes",
       "work_package": "3,5",
       "replacement": "StartCapabilityJobs -> JobOutcome",
-      "test": "late capability results cannot mutate a retired episode"
+      "test": "late capability results cannot mutate a retired episode",
+      "migrated": true
     },
     {
       "id": "session-history",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
-        "call:session_stats.start"
+        "call:OpenSessionHistory"
       ],
       "target": "session-reducer",
       "work_package": "5",
       "replacement": "SessionStarted -> SessionPersistDue",
-      "test": "playback transitions accrue once and close persists the remainder"
+      "test": "playback transitions accrue once and close persists the remainder",
+      "migrated": true
     },
     {
       "id": "telemetry-and-startup-health",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/runtime/lifecycle_start.py::_effects",
       "evidence": [
-        "call:telemetry.set_gauge_provider",
-        "call:self._announce_runtime",
-        "call:self.lifecycle_timers.schedule"
+        "call:AttachSessionDiagnostics"
       ],
       "target": "lifecycle-diagnostics",
       "work_package": "2",
       "replacement": "RuntimeTurn -> DiagnosticEffect",
-      "test": "telemetry sampling cannot wake or mutate an idle runtime"
+      "test": "telemetry sampling cannot wake or mutate an idle runtime",
+      "migrated": true
     },
     {
       "id": "runtime-ready",
       "source": "src/saitenka/app/controller.py::Reader._mark_interactive_ready",
       "evidence": [
-        "call:self._startup_hint_lease.mark_ready",
-        "src/saitenka/app/controller.py::Reader.poll_once|call:self._mark_interactive_ready"
+        "call:self.ipc.publish_runtime_event",
+        "src/saitenka/app/controller.py::Reader.pump|call:self._mark_interactive_ready"
       ],
       "target": "lifecycle-readiness",
       "work_package": "5",
       "replacement": "StartupReady -> ClearStartupHint",
-      "test": "late hint acceptance clears exactly once after readiness"
+      "test": "late hint acceptance clears exactly once after readiness",
+      "migrated": true
     },
     {
       "id": "session-loop",
       "source": "src/saitenka/app/controller.py::Reader.run",
       "evidence": [
-        "call:self.poll_once",
-        "call:time.sleep",
-        "ref:self.poll_interval"
+        "ref:self.ipc.session_loop",
+        "call:loop.run"
       ],
-      "target": "session-runner",
+      "target": "session-loop",
       "work_package": "6",
-      "replacement": "SessionMailbox.receive -> SessionReactor.handle",
-      "test": "idle runtime blocks with zero domain turns"
+      "replacement": "SessionLoop.run -> SessionMailbox.receive -> SessionReactor.handle",
+      "test": "idle runtime blocks with zero domain turns",
+      "migrated": true
     }
   ],
   "close": [
     {
       "id": "worker-and-capability-actors",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self._tts_capability.close",
-        "call:self._anki_capability.close",
-        "call:self._interaction_jobs.cancel_all",
-        "call:hover_metadata.close",
-        "call:self._stop.set",
-        "call:close_lane:subtitle-fetch",
-        "call:close_lane:subtitle-picker",
-        "call:close_lane:cue-annotation",
-        "call:tooltip_raster.close",
-        "call:close_lane:tooltip-render-ahead",
-        "call:tooltip_engaged.close",
-        "call:close_lane:tooltip-engaged",
-        "call:prefetch.close",
-        "call:close_lane:speculative-prefetch",
-        "call:mask_atlas_startup.close",
-        "call:close_lane:mask-atlas-startup",
-        "call:mask_atlas_startup.uninstall",
-        "order:call:self._stop.set>call:close_lane:subtitle-fetch",
-        "order:call:close_lane:cue-annotation>call:shutil.rmtree",
-        "order:call:close_lane:tooltip-render-ahead>call:shutil.rmtree",
-        "order:call:close_lane:tooltip-engaged>call:shutil.rmtree",
-        "order:call:close_lane:speculative-prefetch>call:shutil.rmtree",
-        "order:call:close_lane:mask-atlas-startup>call:shutil.rmtree",
-        "call:self._annotation.close",
-        "order:call:prefetch.close>call:close_lane:speculative-prefetch",
-        "order:call:mask_atlas_startup.close>call:close_lane:mask-atlas-startup",
-        "order:call:close_lane:mask-atlas-startup>call:mask_atlas_startup.uninstall"
+        "call:CloseCapabilityActors",
+        "call:CancelInteractionWork",
+        "call:CloseWorkerLanes",
+        "ref:event.phase"
       ],
       "target": "job-broker-lanes",
       "work_package": "3,5",
       "replacement": "CloseParticipantRequested -> CloseParticipantOutcome",
-      "test": "each admitted job retires or is quarantined before closed"
+      "test": "each admitted job retires or is quarantined before closed",
+      "migrated": true
     },
     {
       "id": "input-capture",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self._release_mouse_capture"
+        "call:ReleaseInputCapture",
+        "ref:event.phase"
       ],
       "target": "interaction-close",
       "work_package": "5,6",
       "replacement": "ReleaseInputCapture -> MpvCommandOutcome",
-      "test": "close releases keys and mouse before gateway shutdown"
+      "test": "close releases keys and mouse before gateway shutdown",
+      "migrated": true
     },
     {
       "id": "subtitle-and-ownership",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self.subtitle_pipeline.deactivate",
-        "call:self.subtitle_pipeline.clear",
-        "call:self.subtitle_pipeline.close",
-        "call:self.native_geometry.close"
+        "call:CloseSubtitleRendering",
+        "ref:event.phase"
       ],
       "target": "subtitle-close",
       "work_package": "4,6",
       "replacement": "CloseSubtitleRuntime -> SubtitleCloseOutcome",
-      "test": "close restores pixel ownership before presentation removal"
+      "test": "close restores pixel ownership before presentation removal",
+      "migrated": true
     },
     {
       "id": "session-and-stores",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
-        "call:session_stats.finish",
-        "call:self._backlog_store.close",
-        "call:self._mined_store.close"
+        "call:CloseSessionStores",
+        "ref:event.phase"
       ],
       "target": "session-data-close",
       "work_package": "5,6",
       "replacement": "PersistSession -> DataCloseOutcome",
-      "test": "final accrual and stores close exactly once"
+      "test": "final accrual and stores close exactly once",
+      "migrated": true
     },
     {
       "id": "surfaces",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self.ov.close"
+        "call:CloseSessionSurfaces",
+        "call:CloseSessionOverlay",
+        "ref:event.phase"
       ],
       "target": "surface-runtime-close",
       "work_package": "2,4,5,6",
-      "replacement": "RemoveSurface -> SurfaceTransactionOutcome",
-      "test": "all stable surface slots are absent before gateway close"
+      "replacement": "CloseSessionSurfaces -> CloseSessionOverlay",
+      "test": "a session that handed its surfaces over does not also close them itself",
+      "migrated": true
     },
     {
       "id": "telemetry",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
-        "call:telemetry.set_gauge_provider"
+        "call:DetachDiagnostics",
+        "ref:event.phase"
       ],
       "target": "lifecycle-close",
       "work_package": "2,6",
       "replacement": "DetachDiagnostics -> CloseStepOutcome",
-      "test": "diagnostic gauges detach without a post-close callback"
+      "test": "diagnostic gauges detach without a post-close callback",
+      "migrated": true
     },
     {
       "id": "temporary-artifacts",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/runtime/lifecycle_close.py::_effects",
       "evidence": [
-        "call:shutil.rmtree"
+        "call:RemoveSessionArtifacts",
+        "ref:event.scratch"
       ],
       "target": "artifact-close",
       "work_package": "3,4,6",
       "replacement": "RemoveSessionArtifacts -> CloseStepOutcome",
-      "test": "temporary artifacts are removed after their providers stop or are quarantined"
+      "test": "temporary artifacts are removed after their providers stop or are quarantined",
+      "migrated": true
     },
     {
       "id": "transport",
-      "source": "src/saitenka/app/launch/run.py::run_impl",
+      "source": [
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform"
+      ],
       "evidence": [
-        "call:ipc.close"
+        "call:transport.close",
+        "ref:TerminalStep.TRANSPORT_CLOSE"
       ],
       "target": "mpv-gateway-close",
       "work_package": "6",
       "replacement": "CloseGateway -> GatewayClosed",
-      "test": "transport is the final in-runtime close participant"
+      "test": "transport is the final in-runtime close participant",
+      "migrated": true
     }
   ],
   "entrypoints": [
     {
       "id": "run-owned-player",
-      "source": "src/saitenka/app/launch/run.py::run_impl",
+      "source": [
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor.finalize"
+      ],
       "evidence": [
-        "call:reader.close",
-        "call:ipc.command:quit",
-        "call:ipc.close",
-        "call:proc.wait",
-        "call:kill_process_tree",
-        "call:_log_mpv_exit",
-        "call:_arm_exit_watchdog",
-        "order:call:reader.close>call:ipc.command:quit",
-        "order:call:ipc.command:quit>call:ipc.close",
-        "order:call:ipc.close>call:proc.wait",
-        "order:call:proc.wait>call:_arm_exit_watchdog:3.0",
-        "order:call:kill_process_tree>call:_arm_exit_watchdog:3.0"
+        "loop:self.steps=>call:self._perform",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:session.close",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:transport.command:quit",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:transport.close",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:self._reap",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:arm_exit_watchdog",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._reap|call:self.process.wait",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._reap|call:kill_process_tree",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._reap|call:self.on_exit_code"
       ],
       "target": "owned-session-composition",
       "work_package": "6",
       "replacement": "Closed -> OwnedProcessSupervisor.finalize",
-      "test": "owned run quits and kills before arming the watchdog"
+      "test": "owned run quits and kills before arming the watchdog",
+      "migrated": true
     },
     {
       "id": "attach-external-player",
-      "source": "src/saitenka/app/commands/attach.py::attach",
+      "source": [
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor.attached"
+      ],
       "evidence": [
-        "call:reader.close",
-        "call:ipc.close"
+        "call:cls",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:session.close",
+        "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform|call:transport.close"
       ],
       "target": "attached-session-composition",
       "work_package": "6",
       "replacement": "Closed -> detach transport only",
-      "test": "attach has no process-control capability"
+      "test": "attach has no process-control capability",
+      "migrated": true
     },
     {
       "id": "demo-owned-player",
-      "source": "src/saitenka/app/launch/run.py::_execute_reader_session",
+      "source": [
+        "src/saitenka/app/launch/run.py::_execute_demo_session"
+      ],
       "evidence": [
-        "call:reader._mark_interactive_ready",
-        "call:_run_demo_actions"
+        "call:runtime.mark_ready",
+        "order:call:runtime.prepare_hover>call:runtime.mark_ready",
+        "src/saitenka/app/launch/run.py::_demo_cue_text|call:runtime.await_render_space",
+        "src/saitenka/app/session_runtime.py::SessionRuntime.await_render_space|call:self.run_until"
       ],
       "target": "owned-session-composition",
       "work_package": "7",
-      "replacement": "run_until DemoReady -> owned close",
-      "test": "demo waits for readiness and uses the owned terminal sequence"
+      "replacement": "run_until render space -> mark_ready -> owned close",
+      "test": "demo waits for readiness and uses the owned terminal sequence",
+      "migrated": true
     },
     {
       "id": "screenshot-owned-player",
-      "source": "src/saitenka/app/launch/run.py::_execute_reader_session",
+      "source": [
+        "src/saitenka/app/launch/run.py::_run_demo_actions"
+      ],
       "evidence": [
         "ref:demo.screenshot",
-        "call:_run_demo_actions",
-        "src/saitenka/app/launch/run.py::_run_demo_actions|call:ipc.command:screenshot-to-file"
+        "call:runtime.await_paint",
+        "call:runtime.capture",
+        "order:call:runtime.await_paint>call:runtime.capture",
+        "src/saitenka/app/session_runtime.py::SessionRuntime.await_paint|call:self.run_until",
+        "src/saitenka/app/session_runtime.py::SessionRuntime.capture|call:self._ipc.command:screenshot-to-file"
       ],
       "target": "owned-session-composition",
       "work_package": "7",
-      "replacement": "run_until CaptureComplete -> owned close",
-      "test": "screenshot captures after readiness and uses the owned terminal sequence"
+      "replacement": "run_until painted -> capture -> owned close",
+      "test": "screenshot captures after readiness and uses the owned terminal sequence",
+      "migrated": true
     }
   ]
 }

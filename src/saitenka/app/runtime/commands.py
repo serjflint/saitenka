@@ -1,4 +1,4 @@
-"""Pure script-message policy and the temporary legacy execution adapter."""
+"""Pure script-message policy, and the executor that runs the action bound to a command."""
 
 from __future__ import annotations
 
@@ -93,12 +93,6 @@ class CommandDecision:
 
 
 @dataclass(frozen=True, slots=True)
-class LegacyCommandBinding:
-    handler: Callable[[], None]
-    deletion_owner: str
-
-
-@dataclass(frozen=True, slots=True)
 class CommandExecution:
     name: str
     owner: Owner | None
@@ -112,7 +106,7 @@ class CommandExecution:
         if self.outcome == CommandOutcome.FAILED:
             reason = CommandReason.INTERNAL
         elif self.outcome == CommandOutcome.SUPPRESSED:
-            reason = CommandReason.LEGACY_REPEAT
+            reason = CommandReason.COALESCED
         return CommandHandled(self.name, self.owner, self.outcome, self.command_id, reason)
 
     def coalesced_events(self, command_ids: tuple[int, ...]) -> tuple[CommandHandled, ...]:
@@ -138,28 +132,6 @@ class CommandExecution:
             )
             for command_id in command_ids
         )
-
-
-class LegacyPickerRepeatGuard:
-    """Drain-local compatibility guard deleted with the tick driver."""
-
-    def __init__(self, picker_name: str = SUB_PICKER_MSG) -> None:
-        self._picker_name = picker_name
-        self._previous: str | None = None
-
-    def inspect(self, command: UserCommand) -> CommandExecution | None:
-        previous, self._previous = self._previous, command.name
-        if command.name != self._picker_name or previous != self._picker_name:
-            return None
-        return CommandExecution(
-            command.name,
-            Owner.INTERACTION,
-            CommandOutcome.SUPPRESSED,
-            command_id=command.command_id,
-        )
-
-    def separate(self) -> None:
-        self._previous = None
 
 
 _CUE_INDEPENDENT = frozenset(
@@ -302,29 +274,37 @@ class CommandPolicy:
         )
 
 
-class LegacyCommandExecutor:
-    """Temporary synchronous adapter from accepted intents to bound feature actions."""
+class CommandExecutor:
+    """Decide a command against the policy, then run the action bound to it.
+
+    It used to carry a second map beside this one — `LegacyCommandBinding`, a temporary handler
+    with the work package that would delete it — because a command whose decision was still
+    imperative had nowhere else to live. Every command's decision is a reducer now, so that map
+    was empty at every construction in `src/` and the machinery around it (the deletion owner, the
+    "migrated commands must not keep a binding" guard, the `route`/`bindings` meters) was reporting
+    on a migration that had finished.
+    """
 
     def __init__(
         self,
-        bindings: Mapping[str, LegacyCommandBinding],
+        handlers: Mapping[str, Callable[[], None]],
         *,
         policy: CommandPolicy | None = None,
     ) -> None:
         self.policy = policy or CommandPolicy()
-        unknown = frozenset(bindings) - self.policy.names()
+        unknown = frozenset(handlers) - self.policy.names()
         if unknown:
-            raise ValueError(f"legacy bindings have no command spec: {sorted(unknown)!r}")
-        self._bindings = dict(bindings)
+            raise ValueError(f"command handlers have no command spec: {sorted(unknown)!r}")
+        self._handlers = dict(handlers)
 
     def names(self) -> frozenset[str]:
         return self.policy.names()
 
     @property
-    def bindings(self) -> tuple[tuple[str, str], ...]:
-        return tuple(
-            (name, binding.deletion_owner) for name, binding in sorted(self._bindings.items())
-        )
+    def routed(self) -> frozenset[str]:
+        """Spec'd names that actually resolve to an action. A spec outside this set dispatches to
+        `UNBOUND` — a key that is documented, accepted by the policy, and does nothing."""
+        return frozenset(self._handlers)
 
     def dispatch(
         self,
@@ -344,8 +324,8 @@ class LegacyCommandExecutor:
             )
         intent = decision.intent
         assert intent is not None
-        binding = self._bindings.get(intent.name)
-        if binding is None:
+        handler = self._handlers.get(intent.name)
+        if handler is None:
             return CommandExecution(
                 intent.name,
                 intent.owner,
@@ -353,7 +333,7 @@ class LegacyCommandExecutor:
                 command_id=intent.command_id,
             )
         try:
-            binding.handler()
+            handler()
         except Exception as error:  # noqa: BLE001  # failure is a typed terminal outcome
             return CommandExecution(
                 intent.name,

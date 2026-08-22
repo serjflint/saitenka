@@ -11,15 +11,14 @@ from __future__ import annotations
 import threading
 
 import pytest
-from PIL import Image
-from util import FakeIPC
+from util import FakeIPC, RecordingRasterProvider
 
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
-from saitenka.app.subtitles import SubtitleRender
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime.events import SubtitleLanguageChanged
 
 
 def _tok(surface: str) -> Token:
@@ -136,46 +135,28 @@ def test_repeated_line_is_a_cache_hit_and_skips_tokenization(monkeypatch):
 # --- renderer: plain vs annotated follows _sub_pending --------------------------------------------
 
 
-def test_renderer_draws_plain_while_a_cue_is_pending(monkeypatch):
+def test_renderer_draws_plain_while_a_cue_is_pending():
     reader = _reader(dict_set=_ExistsDS())
-    reader.renderer = SubtitleRenderer()
-    reader.subtitle_language = "jp"
+    reader.declare_subtitle(SubtitleLanguageChanged("jp"))
     reader.tokens = [_tok("猫")]
     reader.lines = [[_tok("猫")]]
     reader.sub_text = "猫"
-    drew: list[str] = []
-    stub = SubtitleRender(Image.new("RGBA", (20, 10)), [])
-    monkeypatch.setattr(
-        "saitenka.app.subtitle_render.render_plain_subtitle",
-        lambda *_a, **_k: drew.append("plain") or stub,
-    )
-    monkeypatch.setattr(
-        "saitenka.app.subtitle_render.render_subtitle",
-        lambda *_a, **_k: drew.append("annotated") or stub,
-    )
+    provider = RecordingRasterProvider()
+    reader.renderer = SubtitleRenderer(provider)
 
     reader._sub_pending = "猫"
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     reader._sub_pending = None
-    reader._draw_subtitle()
+    reader.draw_subtitle()
 
-    assert drew == ["plain", "annotated"]
+    assert provider.styles == ["plain", "styled"]
 
 
 @pytest.mark.timeout(5)
-def test_annotation_failure_keeps_plain_subtitle_on_later_redraw(monkeypatch):
+def test_annotation_failure_keeps_plain_subtitle_on_later_redraw():
     reader = _reader(dict_set=_ExistsDS())
-    reader.renderer = SubtitleRenderer()
-    drew: list[str] = []
-    stub = SubtitleRender(Image.new("RGBA", (20, 10)), [])
-    monkeypatch.setattr(
-        "saitenka.app.subtitle_render.render_plain_subtitle",
-        lambda *_a, **_k: drew.append("plain") or stub,
-    )
-    monkeypatch.setattr(
-        "saitenka.app.subtitle_render.render_subtitle",
-        lambda *_a, **_k: drew.append("annotated") or stub,
-    )
+    provider = RecordingRasterProvider()
+    reader.renderer = SubtitleRenderer(provider)
 
     class FailingTokenizer:
         def tokenize(self, _line: str):
@@ -200,7 +181,7 @@ def test_annotation_failure_keeps_plain_subtitle_on_later_redraw(monkeypatch):
     reader._enable_async_annotation()
     reader._dependencies_settled = True
     reader.set_subtitle("猫")
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     reader.close()
 
-    assert drew == ["plain", "plain"]
+    assert provider.styles == ["plain", "plain"]

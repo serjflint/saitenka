@@ -1,114 +1,75 @@
-"""Playback-neutral orchestration for the in-player shortcut reference."""
+"""The in-player shortcut reference: building its document, and rendering a page of it.
+
+Both are functions of the bindings and the screen, so they live here and can be checked at any size
+without a Reader. Whether the overlay is open and which page it shows is `Owner.INTERACTION`'s
+`help` slice (`runtime/help.py` decides, `interaction_slice` holds); drawing it is the Reader. The
+`SurfaceSpec` hooks take the registry's own ports, so nothing here holds the host.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app.bindings import active_bindings
-from saitenka.app.overlay_ids import OverlayId
 from saitenka.render.help import HelpEntry, build_document, render_page
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from saitenka.app.bindings import ActiveBinding
-    from saitenka.app.controller import Reader
+    from saitenka.app.surfaces import HoverSuppression, WheelStep
 
 
-@dataclass
-class HelpState:
-    """In-player shortcut-reference overlay: whether it is showing, and which page."""
-
-    open: bool = False
-    page: int = 0
-
-
-def _entry(binding: ActiveBinding) -> HelpEntry:
-    spec = binding.spec
-    return HelpEntry(spec.section, binding.key, spec.label, spec.context, spec.source)
-
-
-def document_for(reader: Reader):
-    visible = active_bindings(reader, "global", "tooltip", "mpv")
-    entries = tuple(_entry(binding) for binding in visible if binding.spec.show_in_help)
-    footer = f"{reader.help_key} / Esc close  ·  PgUp/PgDn or wheel"
-    return build_document(entries, osd=reader.osd, footer=footer, scale=reader.chrome_scale)
+def help_entries(bindings: Iterable[ActiveBinding]) -> tuple[HelpEntry, ...]:
+    """The rows the reference lists — every binding that opts into being shown."""
+    return tuple(
+        HelpEntry(
+            binding.spec.section,
+            binding.key,
+            binding.spec.label,
+            binding.spec.context,
+            binding.spec.source,
+        )
+        for binding in bindings
+        if binding.spec.show_in_help
+    )
 
 
-def redraw(reader: Reader) -> None:
-    if not reader._help_open:
-        return
-    document = document_for(reader)
-    reader._help_page = min(reader._help_page, len(document.pages) - 1)
-    page = document.pages[reader._help_page]
-    image = render_page(
-        page,
+def help_footer(close_key: str) -> str:
+    return f"{close_key} / Esc close  ·  PgUp/PgDn or wheel"
+
+
+def help_document(
+    bindings: Iterable[ActiveBinding], *, osd: tuple[int, int], close_key: str, scale: float
+):
+    """Paginate the reference for a screen. Pure: same bindings and size, same document."""
+    return build_document(
+        help_entries(bindings), osd=osd, footer=help_footer(close_key), scale=scale
+    )
+
+
+def page_image(document, index: int):
+    """Render page ``index`` of ``document``."""
+    return render_page(
+        document.pages[index],
         width=document.width,
         height=document.height,
-        index=reader._help_page,
+        index=index,
         total=len(document.pages),
         scale=document.scale,
     )
-    x = (reader.osd[0] - document.width) // 2
-    y = (reader.osd[1] - document.height) // 2
-    reader.ov.show(image, x, y, oid=OverlayId.HELP)
 
 
-def _bind_help_keys(reader: Reader) -> None:
-    for binding in active_bindings(reader, "help"):
-        message = binding.spec.message
-        if message is not None:
-            reader.ipc.command("keybind", binding.key, f"script-message {message}")
+# --- SurfaceSpec hooks: the surface registry calls these with the host, positionally ------------
 
 
-def _restore_context_keys(reader: Reader) -> None:
-    tooltip_by_key = {
-        binding.key: binding.spec.message for binding in active_bindings(reader, "tooltip")
-    }
-    for binding in active_bindings(reader, "help"):
-        message = tooltip_by_key.get(binding.key) if reader._tip_keys_bound else None
-        command = f"script-message {message}" if message else "ignore"
-        reader.ipc.command("keybind", binding.key, command)
-
-
-def open_help(reader: Reader) -> None:
-    if reader._help_open:
-        return
-    reader._help_open = True
-    reader._help_page = 0
-    _bind_help_keys(reader)
-    redraw(reader)
-
-
-def close_help(reader: Reader) -> None:
-    if not reader._help_open:
-        return
-    reader._help_open = False
-    reader.ov.hide(OverlayId.HELP)
-    _restore_context_keys(reader)
-    reader._help_page = 0
-
-
-def toggle(reader: Reader) -> None:
-    close_help(reader) if reader._help_open else open_help(reader)
-
-
-def step(reader: Reader, delta: int) -> None:
-    if not reader._help_open:
-        return
-    document = document_for(reader)
-    target = max(0, min(len(document.pages) - 1, reader._help_page + delta))
-    if target != reader._help_page:
-        reader._help_page = target
-        redraw(reader)
-
-
-def scroll(reader: Reader, steps: int) -> bool:
-    if not reader._help_open:
+def scroll(wheel: WheelStep, steps: int) -> bool:
+    """Help captures the wheel whenever it is open, whether or not it pages."""
+    if not wheel.interaction.help.open:
         return False
     if steps:
-        step(reader, 1 if steps > 0 else -1)
+        wheel.page_help(steps)
     return True
 
 
-def suppress_hover(reader: Reader) -> bool:
-    return reader._help_open
+def suppress_hover(suppression: HoverSuppression) -> bool:
+    return suppression.interaction.help.open

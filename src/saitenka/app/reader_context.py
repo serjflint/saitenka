@@ -13,7 +13,9 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, overload
 
-from saitenka.app.languages import MAIN_LANG
+from saitenka.app.mined_set import MinedSet
+from saitenka.app.popups import hovered_meta
+from saitenka.app.subnav_settle import SettleWindow
 
 # In-RAM ceiling for the tier-2 compressed-head cache. Independent of the disk ceiling
 # (``render_cache_max_mb``, which can be GBs): compressed heads are ~10× smaller than the BGRA arrays,
@@ -22,13 +24,33 @@ _MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
 
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
-    from saitenka.app.languages import Language
+    from saitenka.app.card_preview import PreviewPanel
     from saitenka.app.mined_store import MinedCardStore
+    from saitenka.app.popups import HoverMetadata, TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
+    from saitenka.app.sidebar import SidebarPanel
+    from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
-    from saitenka.subtitles import CueIndex
+    from saitenka.runtime.card_preview import CardPreview
+    from saitenka.runtime.help import HelpState
+    from saitenka.runtime.hover_pause import PauseClaim
+    from saitenka.runtime.interaction_slice import (
+        HelpStore,
+        HoveredWordStore,
+        HoverPauseStore,
+        PickerStore,
+        PreviewStore,
+        PulseStore,
+        SidebarStore,
+        TipNavStore,
+    )
+    from saitenka.runtime.picker import PickerState
+    from saitenka.runtime.pulse import PulseState
+    from saitenka.runtime.sidebar import SidebarState
+    from saitenka.runtime.tipnav import TipNavState
+    from saitenka.subtitles import Cue, CueIndex
 
 
 class Delegated[T]:
@@ -63,18 +85,15 @@ class Delegated[T]:
 
 
 class SubtitleSource:
-    """Subtitle acquisition + selection for one file: the chosen JP/EN tracks plus the background
-    provider-fetch and retry handshake. Reset whenever the episode changes."""
+    """The background provider-fetch and retry handshake for one file.
+
+    The *selection* it used to hold moved to `Owner.SUBTITLE`'s slice. What is left is the part no
+    reducer can take: a lock and the flag it guards."""
 
     def __init__(self) -> None:
-        self.jp_sid: int | None = None
-        self.en_sid: int | None = None
-        self.language: Language = MAIN_LANG
-        self.slang = "ja,jpn,jp"
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()
-        self.translation_secondary_sid: int | None = None  # the mpv sid feeding the EN reveal
 
 
 class EpisodeContext:
@@ -87,20 +106,82 @@ class EpisodeContext:
         # from mpv's slow video seek; the real sub-seek fires behind it and reconciles once it settles.
         self.sub_index: CueIndex | None = None
         self.nav_idx = -1  # last cue index jumped to (chaining hint; -1 = unknown)
-        self.sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
+        # While open, ignore mpv's mid-seek transient sub-text (app/subnav_settle.py).
+        self.sub_settle = SettleWindow()
         self.nav_prev_text = ""  # cue text showing right before a nav render (reconcile)
+        # The cue a nav jumped to, so a geometry decision uses the target line rather than whatever
+        # mpv is still showing mid-seek. Episode-scoped: a hint left over from the previous file
+        # would aim the first decision of the new one at a cue that is no longer anywhere.
+        self.geometry_cue_hint: Cue | None = None
         self.nav_provisional_cue_counted = False
         # durable per-session recorder (app/session_stats.py); None until stats start on file load
         self.session_recorder: SessionRecorder | None = None
 
 
 class InteractionContext:
-    """State scoped to the current on-screen interaction (hover/tooltip/reveal). Grows with the tooltip
-    cluster; for now it owns the EN-translation reveal toggle."""
+    """State scoped to the current on-screen interaction (hover/tooltip).
 
-    def __init__(self) -> None:
-        self.translate_on = False
-        self.trans_text: str | None = None
+    Gathers the five OSD surface states — help, sub_picker, sidebar, preview, tip — that
+    `app/surfaces.py` keeps a registry over. They are the INTERACTION owner's state; gathering them
+    here is what lets a surface hook stop taking the whole host to reach one of them.
+    """
+
+    #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the four need
+    #: constructor arguments this container has no business knowing. Declared here so the container
+    #: states its own shape rather than acquiring it from whoever writes first.
+    tip: TooltipState
+
+    #: The surfaces that have become slice features ask for their state rather than holding it.
+    #: Reached the same way as the others — `interaction.help`, `interaction.sub_picker` — so
+    #: nothing downstream can tell which of the five have moved yet.
+    help_store: HelpStore
+    picker_store: PickerStore
+    sidebar_store: SidebarStore
+    #: The tooltip's back-stack is a slice feature while the rest of `tip` is not, so this store
+    #: sits beside `tip` rather than on it — a mutable container holding a frozen fact would read
+    #: as writable at every call site that already writes its neighbours.
+    nav_store: TipNavStore
+    pulse_store: PulseStore
+    pause_store: HoverPauseStore
+    word_store: HoveredWordStore
+    preview_store: PreviewStore
+    preview_panel: PreviewPanel
+    #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
+    #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
+    picker_panel: PickerPanel
+    sidebar_panel: SidebarPanel
+
+    @property
+    def help(self) -> HelpState:
+        return self.help_store.current
+
+    @property
+    def sub_picker(self) -> PickerState:
+        return self.picker_store.current
+
+    @property
+    def sidebar(self) -> SidebarState:
+        return self.sidebar_store.current
+
+    @property
+    def tip_nav(self) -> TipNavState:
+        return self.nav_store.current
+
+    @property
+    def copy_pulse(self) -> PulseState:
+        return self.pulse_store.current
+
+    @property
+    def hover_pause(self) -> PauseClaim:
+        return self.pause_store.current
+
+    @property
+    def hovered_word_meta(self) -> HoverMetadata:
+        return hovered_meta(self.word_store)
+
+    @property
+    def preview(self) -> CardPreview:
+        return self.preview_store.current
 
 
 class RenderCacheState:
@@ -148,7 +229,10 @@ class SessionContext:
 
     def __init__(self, render_cache: RenderCacheState) -> None:
         self.render_cache = render_cache
-        self.mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
-        self.anki_cache: tuple[float, bool] = (0.0, False)  # (checked_at, reachable) — see _anki_ok
+        self.mined = MinedSet()  # card expressions already in the deck → header ⊕ becomes ✓
+        self.anki_cache: tuple[float, bool] = (
+            0.0,
+            False,
+        )  # (checked_at, reachable) — see tooltip_panel.anki_ok
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle
         self.mined_store: MinedCardStore | None = None  # lazy mined-card DB handle (#253)

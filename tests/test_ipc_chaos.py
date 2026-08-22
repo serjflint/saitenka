@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from saitenka.mpvio.ipc import _MAX_RECONNECTS, MpvIPC
+from saitenka.mpvio.ipc import MpvIPC
 from saitenka.mpvio.transport import UnixSocketTransport
 
 
@@ -443,13 +443,17 @@ def test_reconnect_once_does_not_run_after_intentional_close():
     assert not ipc.reconnect_once()
 
 
-def test_reconnect_once_consumes_one_bounded_failed_redial():
-    # A genuinely-gone mpv (quit): re-dials fail, so pump() consumes an attempt and surfaces the
-    # disconnect (the overlay exits) instead of looping forever.
+def test_a_refused_endpoint_spends_the_whole_reconnect_budget_at_once():
+    """A genuinely-gone mpv (quit): nothing is listening, so no later dial can succeed either.
+
+    The budget exists for mpv.net's pipe vanishing while mpv RUNS — a case where the next dial
+    connects. Spending it one attempt at a time here bought ~7s of ECONNREFUSED between mpv quitting
+    and saitenka exiting, which reads as a hang; an exhausted budget is what closes the session.
+    """
     ipc = MpvIPC("x")
 
     def _fail(_p, _t):
-        raise OSError("pipe gone")
+        raise ConnectionRefusedError(61, "Connection refused")
 
     ipc._dial = _fail
     ipc._transport = _ScriptedTransport()
@@ -457,7 +461,7 @@ def test_reconnect_once_consumes_one_bounded_failed_redial():
     assert ipc._closed.wait(1.0)
 
     assert not ipc.reconnect_once()
-    assert ipc._reconnects_left == _MAX_RECONNECTS - 1
+    assert ipc.reconnects_left == 0
 
 
 def test_stale_late_reply_does_not_answer_the_next_command():

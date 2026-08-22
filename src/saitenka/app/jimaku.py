@@ -442,17 +442,24 @@ def _resolution_match(video: str | None, sub_name: str) -> bool:
 
 
 def _candidate_score(f: JimakuFile, episode: int | None, video: str | None) -> tuple:
-    """Rank a candidate: episode number → matching release (resolution) → subtitle ext → .srt → size.
+    """Rank a candidate: episode number → matching release (resolution) → subtitle ext → .ass → size.
     Shared by :meth:`JimakuClient.fetch` (auto-pick = max) and :meth:`episode_files` (the picker's
-    best-first order), so the picker's top row is exactly what fetch would have grabbed."""
+    best-first order), so the picker's top row is exactly what fetch would have grabbed.
+
+    ASS wins the format tiebreak because it is the only one every consumer can use: native-visible
+    geometry accepts nothing else (an SRT leaves the episode unscannable for its whole run), alass
+    parses it directly where an srt transcode injects tags that make it exit 1, and the cue index
+    reads either. Preferring .srt cost the auto-pick exactly the format the geometry needs.
+    """
+    from saitenka.app.subtitle_artifact import format_rank
+
     ep_hit = episode is not None and re.search(
         rf"(?<!\d){episode:02d}(?!\d)|(?<!\d){episode}(?!\d)", f.name
     )
     return (
         bool(ep_hit),
         _resolution_match(video, f.name),
-        f.ext in {".srt", ".ass"},
-        f.ext == ".srt",
+        *format_rank(f.ext),
         f.size,
     )
 

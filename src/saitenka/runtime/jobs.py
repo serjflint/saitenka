@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime.effects import EffectError, EffectOutcome, SubmitJob
+from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, Owner, SubmitJob
 from saitenka.runtime.events import EffectFinished, EventOrigin
 
 if TYPE_CHECKING:
@@ -31,6 +31,123 @@ class JobLanePolicy:
 
 class JobHandler(Protocol):
     def __call__(self, request: object, cancelled: threading.Event) -> object: ...
+
+
+class JobSubmitter(Protocol):
+    """Hand work to a registered lane. Returns False when the lane refuses it.
+
+    One declaration, because eleven identical copies of it is eleven chances for the ingress to be
+    described differently in each feature that reaches it.
+    """
+
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool: ...
+
+
+class RuntimeJobPort(Protocol):
+    """The job-lane ingress every feature reaches the runtime through.
+
+    Declared so a stand-in has to *refuse* rather than simply not have the method. A
+    `getattr(ipc, "register_runtime_job_lane", None)` probe cannot tell a headless stand-in apart
+    from a renamed method, and the second reads as a silent feature-off.
+    """
+
+    def register_runtime_job_lane(self, name: str, policy: JobLanePolicy, handler) -> bool: ...
+
+    def submit_runtime_job(self, **kwargs) -> bool: ...
+
+    def close_runtime_job_lane(self, name: str, timeout: float = 2.0) -> bool: ...
+
+    def close_session_runtime(self) -> bool: ...
+
+    def wake_session_runtime(self) -> bool: ...
+
+
+class NoSessionRuntime:
+    """For a headless stand-in with no session behind it: the runtime ports answer, and say no.
+
+    Inherit it to mean it. Shared rather than repeated, because "there is no runtime here" is one
+    decision, and the same refusal a live `MpvIPC` gives before its gateway is installed — so every
+    feature already has a path for it.
+
+    Covers the ports a stand-in gets asked about: job lanes, lifecycle timers, the session resource
+    registry, event announcement and the session pump. Kept complete by
+    ``tests/test_runtime_stand_in.py`` rather than by this sentence — the promise to grow "whenever a
+    probe becomes a call" was made and then not kept, and the gaps surfaced one crash at a time.
+    """
+
+    def register_runtime_job_lane(self, _name: str, _policy: JobLanePolicy, _handler) -> bool:
+        return False
+
+    def submit_runtime_job(self, **_kwargs) -> bool:
+        return False
+
+    def submit_runtime_mpv(self, **_kwargs) -> bool:
+        return False
+
+    def close_runtime_job_lane(self, _name: str, _timeout: float = 2.0) -> bool:
+        return False
+
+    def close_session_runtime(self) -> bool:
+        return False
+
+    def wake_session_runtime(self) -> bool:
+        return False
+
+    def schedule_runtime_timer(self, **_kwargs) -> bool:
+        return False
+
+    def cancel_runtime_timer(self, _timer: str) -> bool:
+        return False
+
+    def register_session_resource(self, _name: str, _resource: object) -> bool:
+        return False
+
+    def route_session_lifecycle(self, _envelope: object | None) -> object | None:
+        return None
+
+    def route_session_playback(self, _envelope: object | None) -> object | None:
+        return None
+
+    def route_session_subtitle(self, _envelope: object | None) -> object | None:
+        return None
+
+    def route_session_interaction(self, _envelope: object | None) -> object | None:
+        return None
+
+    def route_session_presentation(self, _envelope: object | None) -> object | None:
+        return None
+
+    def publish_runtime_event(self, _event: object) -> bool:
+        return False
+
+    def deliver_runtime_event(self, _event: object) -> bool:
+        return False
+
+    def receive_session(self, _timeout: float | None, _handle: Callable[[object], None]) -> None:
+        """No mailbox and no transport, so a turn has nothing to hand `_handle` — not an error."""
+        return
+
+
+def configure_lane(
+    ipc: RuntimeJobPort, name: str, policy: JobLanePolicy, handler
+) -> JobSubmitter | None:
+    """Register one lane and hand back the submitter, or None if the ingress refuses it.
+
+    `None` is a declared refusal — no gateway, or the lane is already registered — and every caller
+    has a story for it. That is different from the port being absent, which is why this asks for the
+    method instead of probing for it.
+    """
+    if not ipc.register_runtime_job_lane(name, policy, handler):
+        return None
+    return ipc.submit_runtime_job
 
 
 @dataclass(slots=True)
@@ -134,6 +251,53 @@ class _Lane:
                     error=error,
                 )
             )
+
+
+class LocalJobLane:
+    """A lane whose terminals go straight back to the submitting feature, with no mailbox.
+
+    Admission, execution and cancellation are the broker's — only the terminal's destination
+    differs. It exists so a feature keeps ONE execution path whether or not the runtime gateway is
+    installed: a feature that runs a private thread for the un-gatewayed case has two
+    implementations of the same lane, and the untested one is the one that drifts.
+    """
+
+    def __init__(self, name: str, policy: JobLanePolicy, handler: JobHandler) -> None:
+        self._name = name
+        self._lock = threading.Lock()
+        self._callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
+        self._issued = 0
+        self._lane = _Lane(name, policy, handler, self._complete)
+
+    def submit(
+        self,
+        *,
+        owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool:
+        if lane != self._name:
+            return False
+        with self._lock:
+            self._issued += 1
+            effect_id = EffectId(self._issued)
+            self._callbacks[effect_id] = on_finished
+        if self._lane.admit(SubmitJob(effect_id, owner, identity, lane, request)):
+            return True
+        with self._lock:
+            self._callbacks.pop(effect_id, None)
+        return False
+
+    def close(self, timeout: float = 2.0) -> None:
+        self._lane.close(time.monotonic() + max(0.0, timeout))
+
+    def _complete(self, completion: EffectFinished) -> None:
+        with self._lock:
+            callback = self._callbacks.pop(completion.effect_id, None)
+        if callback is not None:
+            callback(completion)
 
 
 class JobBroker:

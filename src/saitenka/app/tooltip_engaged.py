@@ -9,12 +9,13 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka import otel_metrics
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.popups import Panel
+    from saitenka.app.prefetch import TipScale
     from saitenka.app.tokenize import Token
 
 log = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ class EngagedBackend(Protocol):
 
 class EngagedHost(Protocol):
     nested_max_frac: float
-    _raster_scale: float
+    tip_scale: TipScale
 
     def _panel_for(self, token, inflected, **kwargs) -> Panel: ...
 
@@ -121,23 +122,9 @@ class EngagedHost(Protocol):
 
     def _cap_for(self, fraction: float) -> int: ...
 
-    def _tip_cap(self) -> int: ...
-
     def _navigated_panel(self, query: str) -> Panel | None: ...
 
     def _engaged_open_panel(self, source: str, query: str, **kwargs) -> tuple | None: ...
-
-
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
 
 
 class ReaderEngagedBackend:
@@ -179,7 +166,7 @@ class ReaderEngagedBackend:
         view_h = min(panel.full_height, reader._cap_for(reader.nested_max_frac))
         if view_h <= 0 or should_cancel():
             return
-        scale = reader._raster_scale
+        scale = reader.tip_scale.raster
         if scale > 1.0:
             panel.viewport(0, view_h, overscan=view_h, scale=scale)
         if not should_cancel():
@@ -190,11 +177,11 @@ class ReaderEngagedBackend:
         panel = reader._navigated_panel(request.query)
         if panel is None or should_cancel():
             return panel
-        panel.render_head(reader._tip_cap())
-        view_h = min(panel.full_height, reader._tip_cap())
+        panel.render_head(reader.tip_scale.cap)
+        view_h = min(panel.full_height, reader.tip_scale.cap)
         if view_h <= 0 or should_cancel():
             return panel
-        scale = reader._raster_scale
+        scale = reader.tip_scale.raster
         if scale > 1.0:
             panel.viewport(0, view_h, overscan=view_h, scale=scale)
         if not should_cancel():
@@ -210,7 +197,7 @@ class ReaderEngagedBackend:
         view_h = min(panel.full_height, reader._cap_for(reader.nested_max_frac))
         if view_h <= 0:
             return
-        scale = reader._raster_scale
+        scale = reader.tip_scale.raster
         if scale > 1.0:
             panel.viewport(0, view_h, overscan=view_h, scale=scale)
         if not should_cancel():
@@ -254,14 +241,12 @@ def run_engaged(
 
 
 def configure_runtime_job(ipc, backend: EngagedBackend) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "tooltip-engaged",
         JobLanePolicy(capacity=1),
         lambda request, cancelled: run_engaged(request, cancelled, backend),
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def submit(

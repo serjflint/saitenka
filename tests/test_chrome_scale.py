@@ -8,19 +8,16 @@ only ever grows (an OSD at/under 1080p is unchanged — the goldens stay valid).
 
 from __future__ import annotations
 
-from saitenka.app import help_overlay
+import util
+
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
 
 REF_H = 1080
 
 
-class FakeIPC:
-    def command(self, *_args):
-        return {"data": None, "error": "success"}
-
-    def drain_events(self):
-        return []
+class FakeIPC(util.FakeIPC):
+    pass
 
 
 def _reader(scale: float) -> Reader:
@@ -47,7 +44,7 @@ def test_help_panel_is_larger_on_a_hi_dpi_osd_than_at_1080p():
     than at 1080p, instead of staying at the flat-ui_scale size that read as 'small'."""
     r = _reader(1.2)
     r.osd = (1920, 1080)
-    base = help_overlay.document_for(r)
+    base = r._help_document()
     r.osd = (3024, 1898)
-    hidpi = help_overlay.document_for(r)
+    hidpi = r._help_document()
     assert hidpi.width > base.width and hidpi.height > base.height

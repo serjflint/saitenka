@@ -229,3 +229,110 @@ def test_active_gate_defaults_off_and_toggles():
     assert bool(gate) is True
     gate.set(value=False)
     assert bool(gate) is False
+
+
+def test_sample_counters_splits_a_labeled_counter_by_its_labels(tmp_path):
+    """A labeled counter's total is the one number its labels exist to refuse.
+
+    `lifecycle_timer.armed` summed over every kind says some deadline was scheduled; the question it
+    is instrumented for is whether `kind=tooltip-hide` ever was. Merging every data point — which
+    `snapshot()` must keep doing, since an unlabeled reader wants the total — erases exactly the axis
+    that discriminates, so the per-label series ride alongside rather than replacing it.
+    """
+    from saitenka import otel_metrics
+
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    otel_metrics.lifecycle_timer_armed.add(1, {"kind": "tooltip-hide", "outcome": "accepted"})
+    otel_metrics.lifecycle_timer_armed.add(2, {"kind": "hover-switch", "outcome": "refused"})
+
+    values = telemetry._sample_counters()
+
+    assert values["lifecycle_timer.armed"] == 3.0
+    assert values["lifecycle_timer.armed[kind=tooltip-hide,outcome=accepted]"] == 1.0
+    assert values["lifecycle_timer.armed[kind=hover-switch,outcome=refused]"] == 2.0
+
+
+def test_sample_counters_leaves_an_unlabeled_counter_as_one_series(tmp_path):
+    """The negative control for the split: no labels, no bracket series to sift through."""
+    from saitenka import otel_metrics
+
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    otel_metrics.panel_cache_hits.add(1)
+
+    values = telemetry._sample_counters()
+
+    assert values["panel_cache.hits"] == 1.0
+    assert not [name for name in values if name.startswith("panel_cache.hits[")]
+
+
+def test_sample_counters_splits_a_labeled_histogram_by_its_labels(tmp_path):
+    """Count and exact max per label — the identity is the whole question a slow effect raises."""
+    from saitenka import otel_metrics
+
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    otel_metrics.mpv_effect_apply_ms.record(6000.0, {"identity": "hover-pause"})
+    otel_metrics.mpv_effect_apply_ms.record(4.0, {"identity": "advance-loadfile"})
+
+    values = telemetry._sample_counters()
+
+    assert values["mpv_effect.apply_ms.count"] == 2.0
+    assert values["mpv_effect.apply_ms[identity=hover-pause].max"] == 6000.0
+    assert values["mpv_effect.apply_ms[identity=advance-loadfile].max"] == 4.0
+
+
+def test_a_deferred_span_ends_from_the_completion_not_the_submission(monkeypatch):
+    """The span an mpv effect needs: a `with` block would measure the admission and nothing else.
+
+    Stubbed rather than read back from a written trace: the tracer provider is process-global and
+    only the first `configure` in a process installs one, so an end-to-end read here would pass or
+    fail on test order. What is asserted is the contract this class exists for — the span is NOT made
+    the ambient parent of whatever the submitting thread does next, and it ends on the completion.
+    """
+    from saitenka import otel_metrics
+
+    ended: list[tuple[str, dict]] = []
+
+    class _Span:
+        def __init__(self, name):
+            self.name, self.attributes = name, {}
+
+        def set_attribute(self, key, value):
+            self.attributes[key] = value
+
+        def end(self):
+            ended.append((self.name, dict(self.attributes)))
+
+    class _Tracer:
+        def start_span(self, name):
+            return _Span(name)
+
+        def start_as_current_span(self, _name):  # pragma: no cover — asserted unreachable
+            raise AssertionError("a deferred span must not become the ambient parent")
+
+    class _Trace:
+        def get_tracer(self, _name):
+            return _Tracer()
+
+    monkeypatch.setattr(otel_metrics, "_resolve_trace_module", lambda: _Trace())
+
+    span = otel_metrics.DeferredSpan("mpv_effect", identity="hover-pause")
+    assert ended == [], "the span must stay open after the caller returns"
+    span.finish(outcome="succeeded")
+
+    assert len(ended) == 1
+    name, attributes = ended[0]
+    assert name == "mpv_effect"
+    assert attributes["identity"] == "hover-pause"
+    assert attributes["outcome"] == "succeeded"
+    # `thread.id` is per-span (the SUBMITTING thread, which the completion's thread is not) and stays.
+    # `session` is one value per run and now lives in the document, not on every span.
+    assert "thread.id" in attributes
+    assert "session" not in attributes
+
+
+def test_a_deferred_span_is_inert_without_the_telemetry_extra(monkeypatch):
+    """The negative control: every call site wraps unconditionally, so no extra must mean no crash."""
+    from saitenka import otel_metrics
+
+    monkeypatch.setattr(otel_metrics, "_resolve_trace_module", lambda: None)
+    otel_metrics.DeferredSpan("mpv_effect", identity="x").finish(outcome="succeeded")

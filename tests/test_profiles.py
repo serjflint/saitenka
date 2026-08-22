@@ -3,6 +3,7 @@ the ``Profile``/``resolve_profile`` seam, and that the reader/provider gating ke
 active profile. Japanese stays the byte-identical default when nothing is configured."""
 
 import pytest
+import util
 
 from saitenka.app.controller import Reader
 from saitenka.app.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, ReaderLanguages
@@ -19,14 +20,10 @@ from saitenka.app.subtitle_providers import enabled_providers_for, register_prov
 from saitenka.app.tokenizer import register_tokenizer
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-
-    def command(self, *args):
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props or {})
 
 
 class _FakeLatinTokenizer:
@@ -365,7 +362,7 @@ def test_scoped_dicts_are_what_the_run_path_resolves():
     assert _resolve_names(None, cfg, "dicts") == ["Le Grand Robert"]  # profile dicts, not JP
 
 
-def test_profile_mine_targets_its_own_deck_model_and_fields_in_a_built_mineconfig():
+def test_profilemine_targets_its_own_deck_model_and_fields_in_a_built_mineconfig():
     """The end-to-end observable for D6: a MineConfig built from the profile-scoped [mine] targets the
     profile's deck/model/field-map — the deck a mined note lands in, and the fields it writes."""
     from saitenka.app.reader_deps import _mine_config_from
@@ -393,23 +390,23 @@ def test_profile_mine_targets_its_own_deck_model_and_fields_in_a_built_mineconfi
     assert mine_conf.fields == {"expression": "Mot", "sentence": "Phrase"}
 
 
-def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
+def test_defaultmine_target_prefers_explicit_then_preset_then_lapis():
     """The (deck, model) a [mine] table implies with no CLI flag — the shared default the run signature
     AND the profile-scoped fallback use so a profile's deck/model isn't clobbered by a still-default flag."""
-    from saitenka.app.launch.run import default_mine_target
+    from saitenka.app.launch.run import defaultmine_target
 
-    assert default_mine_target({}) == ("Saitenka::Mining", "Lapis")
-    assert default_mine_target({"preset": "Kiku"}) == ("Saitenka::Mining", "Kiku")
-    assert default_mine_target({"deck": "D", "model": "M", "preset": "Kiku"}) == ("D", "M")
+    assert defaultmine_target({}) == ("Saitenka::Mining", "Lapis")
+    assert defaultmine_target({"preset": "Kiku"}) == ("Saitenka::Mining", "Kiku")
+    assert defaultmine_target({"deck": "D", "model": "M", "preset": "Kiku"}) == ("D", "M")
 
 
 def _scope_and_mine(cfg, mine_deck, mine_model):
-    """The run seam, post-dedup: the shared identity spine scopes the cfg, then _resolve_mine_target
+    """The run seam, post-dedup: the shared identity spine scopes the cfg, then _resolvemine_target
     resolves the effective deck/model off it. Mirrors run_impl's two lines."""
-    from saitenka.app.launch.run import _resolve_mine_target
+    from saitenka.app.launch.run import _resolvemine_target
 
     scoped = resolve_launch_identity(cfg, profile_override=None, slang="ja,jpn,jp").cfg
-    deck, model = _resolve_mine_target(scoped, mine_deck, mine_model)
+    deck, model = _resolvemine_target(scoped, mine_deck, mine_model)
     return scoped, deck, model
 
 

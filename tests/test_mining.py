@@ -2,6 +2,7 @@
 
 import pytest
 
+from saitenka.app import miner
 from saitenka.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
 from saitenka.app.lookup import card_for
 from saitenka.app.media import AnimatedClip, Timespan, clip_audio
@@ -207,7 +208,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
-    assert anki.added == [] and "読む" in r._mined  # deduped, not added; ⊕→✓ flipped
+    assert anki.added == [] and "読む" in r.session.mined  # deduped, not added; ⊕→✓ flipped
 
 
 def test_build_note_card_format_uses_passed_markers():
@@ -349,6 +350,13 @@ def test_dedupe_escapes_special_chars_in_query():
 # --- Miner flow through fakes (Stage 8b tooling: cover the mine/dedupe/bulk paths) -----------------
 
 
+def _ports(reader):
+    """The mining value for the reader's current cue — what production builds per operation."""
+    ports = reader.miner_ports
+    assert ports is not None, "reader has no deck to mine into"
+    return ports
+
+
 class _FakeAnki:
     def __init__(self, existing=()):
         self.existing = list(existing)
@@ -385,7 +393,7 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     shown = []
     monkeypatch.setattr(
         r, "_preview_mined", lambda card, _tok, _video, _st="mined": shown.append(card.expression)
@@ -432,9 +440,10 @@ def _stub_capture(monkeypatch, *, animated_result):
 def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
     r = _capture_reader(tmp_path, animated_enabled=True)
     _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
-    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv")
+    pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".webp")  # the animated clip becomes the card image
-    assert r.preview.last_jpg is not None and str(r.preview.last_jpg).endswith(
+    captured = r.interaction.preview_panel.last_jpg
+    assert captured is not None and str(captured).endswith(
         ".jpg"
     )  # still kept for preview/fallback
 
@@ -442,7 +451,7 @@ def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
 def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch, tmp_path):
     r = _capture_reader(tmp_path, animated_enabled=True)
     _stub_capture(monkeypatch, animated_result=None)  # no animated encoder present
-    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv")
+    pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".jpg")  # falls back to the mpv still
 
 
@@ -450,20 +459,21 @@ def test_capture_media_animated_override_forces_clip_over_config_default(monkeyp
     # config default is OFF, but the per-mine override (the video-mine shortcut) forces the clip
     r = _capture_reader(tmp_path, animated_enabled=False)
     calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
-    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv", animated=True)
+    pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv", animated=True)
     assert calls and pic.endswith(".webp")  # the encode ran despite the config default being off
 
 
 def test_capture_media_still_only_when_animated_disabled(monkeypatch, tmp_path):
     r = _capture_reader(tmp_path, animated_enabled=False)
     calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
-    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv")
+    pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert calls == [] and pic.endswith(".jpg")  # animated off + no override → never encodes
 
 
 def test_capture_media_survives_a_timespan_read_error(monkeypatch, tmp_path):
     # A transient IPC error reading the cue timespan must NOT escape capture_media — in bulk_mine it would
-    # propagate to poll_once and tear the session down. The still is still captured (image-only mine).
+    # propagate out of the session loop and tear the session down. The still is still captured
+    # (image-only mine).
     import saitenka.app.miner as _M
 
     r = _capture_reader(tmp_path, animated_enabled=False)
@@ -474,7 +484,7 @@ def test_capture_media_survives_a_timespan_read_error(monkeypatch, tmp_path):
         raise OSError("broken pipe")
 
     monkeypatch.setattr(_M, "current_timespan", _boom)
-    pic, audio = r._miner.capture_media("saitenka_1", "/v.mkv")  # must not raise
+    pic, audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")  # must not raise
     assert pic.endswith(".jpg") and audio == ""  # still captured; audio skipped (no span)
 
 
@@ -490,7 +500,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
     tok = next(t for t in r.tokens if t.surface == "読む")
@@ -516,7 +526,7 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     r._mine_token(tok)
     assert anki.added == []  # dedupe: nothing added
     assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r._mined  # ⊕ flips to ✓
+    assert "読む" in r.session.mined  # ⊕ flips to ✓
 
 
 def test_preview_replay_key_is_tooltip_scoped():
@@ -528,8 +538,8 @@ def test_preview_replay_key_is_tooltip_scoped():
     from saitenka.app.controller import Reader
 
     r = Reader(FakeIPC(), anki=object(), mine_cfg=MineConfig())
-    global_msgs = {b.spec.message for b in active_bindings(r, "global")}
-    tooltip_msgs = {b.spec.message for b in active_bindings(r, "tooltip")}
+    global_msgs = {b.spec.message for b in active_bindings(r.keys, "global")}
+    tooltip_msgs = {b.spec.message for b in active_bindings(r.keys, "tooltip")}
     assert PREVIEW_MSG not in global_msgs
     assert PREVIEW_MSG in tooltip_msgs
 
@@ -546,16 +556,17 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
 
     ipc = FakeIPC()
     r = Reader(ipc, anki=object(), mine_cfg=MineConfig())
-    monkeypatch.setattr(miner_ui, "render_preview", lambda _r: None)  # skip the PIL render
+    # skip the PIL render
+    monkeypatch.setattr(miner_ui, "render_preview", lambda *_args: None)
     pv = PreviewData(
         "exists", "読む", "よむ", ["本を読む"], "読む", ["to read"], None, None, "deck"
     )
 
-    r._show_preview(pv, None)
+    miner_ui.show_preview(r.preview_ports, pv, None)
     assert ("keybind", "ESC", f"script-message {PREVIEW_CLOSE_MSG}") in ipc.commands
 
     r._handle(PREVIEW_CLOSE_MSG)
-    assert r.preview.last_preview is None  # Esc dismissed it
+    assert not r.interaction.preview.open  # Esc dismissed it
     assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
 
 
@@ -570,7 +581,7 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
     dup_status = []
     monkeypatch.setattr(
@@ -580,7 +591,7 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
 
     r._mine_token(tok)  # already in deck → nothing added, token remembered
     assert anki.added == []
-    assert r.preview.dup_tok is tok
+    assert r.interaction.preview_panel.dup_tok is tok
 
     r._add_duplicate()  # ＋ add anyway
     assert len(anki.added) == 1
@@ -632,9 +643,9 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("", ""))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     toasts = []
-    monkeypatch.setattr(r, "_toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
+    monkeypatch.setattr(r, "toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
     monkeypatch.setattr(r, "_mark_mined", lambda _expr: None)  # skip the view refresh
     r.bulk_mine()
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
@@ -675,12 +686,16 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("退いた")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _b, _v, **_k: ("", ""))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
-    handled = tooltip._mine_link(
-        r, LinkBox("mine:1", 0, 0, 10, 10), tok
-    )  # cards_for: のく=0, しりぞく=1
+    handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
+        r.dict_set,
+        r.interaction.hovered_word_meta.terms,
+        r._mine_token,
+        LinkBox("mine:1", 0, 0, 10, 10),
+        tok,
+    )
     assert handled
     f = anki.added[0]["fields"]
     assert (f["Expression"], f["ExpressionReading"]) == ("退く", "しりぞく")
@@ -717,7 +732,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     )
     r = Reader(ipc, anki=anki, mine_cfg=cfg, dict_set=ds)
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _b, _v, **_k: ("", ""))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -754,7 +769,7 @@ def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     r = Reader(ipc, anki=anki, mine_cfg=cfg)
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -776,7 +791,7 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     r = Reader(ipc, anki=anki, mine_cfg=cfg)
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -811,7 +826,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
         ipc, anki=anki, mine_cfg=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     )
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -830,7 +845,7 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -844,7 +859,7 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app import tooltip
+    from saitenka.app import tooltip_panel
     from saitenka.app.controller import Reader
     from saitenka.app.tokenize import Token
 
@@ -856,9 +871,14 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     ds = dicthelp.load_set([d])
     r = Reader(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
-    assert tooltip.group_mined_of(r, tok) == ()  # nothing mined yet → no per-group flags
-    r._mined.add("退く")
-    assert tooltip.group_mined_of(r, tok) == (True, True)  # both entries share expression 退く
+    assert (
+        tooltip_panel.group_mined_of(tok, r.session.mined, r.dict_set) == ()
+    )  # nothing mined yet → no per-group flags
+    r.session.mined.add("退く")
+    assert tooltip_panel.group_mined_of(tok, r.session.mined, r.dict_set) == (
+        True,
+        True,
+    )  # both entries share expression 退く
 
 
 def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
@@ -876,7 +896,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("", ""))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -904,7 +924,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("", ""))
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -927,3 +947,25 @@ def test_card_for_degrades_without_jamdict(monkeypatch):
     assert card.expression == "読む"
     assert card.glossary_html == ""
     lookup.card_data.cache_clear()  # don't leave the poisoned (jamdict-less) entry cached
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("mine:0", 0),
+        ("mine:3", 3),
+        ("それにしては", None),  # an ordinary cross-reference
+        ("mine:", None),
+        ("mine:abc", None),
+        ("mine:1.5", None),
+        (None, None),
+        (42, None),
+    ],
+)
+def test_a_stacked_entry_mine_link_is_read_without_breaking_navigation(query, expected):
+    """The ⊕ rides the normal link hit-test, so this runs on EVERY link click. A malformed suffix
+    has to read as "not a mine link" rather than raise, or one bad dictionary entry breaks
+    navigation for every link in the panel."""
+    from saitenka.app.tooltip import mine_index
+
+    assert mine_index(query) == expected

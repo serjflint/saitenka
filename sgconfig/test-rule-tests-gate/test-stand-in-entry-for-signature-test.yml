@@ -1,0 +1,15 @@
+id: test-stand-in-entry-for-signature
+valid:
+  # the protocol shape — what `DictionarySet.entry_for` actually is
+  - |
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):
+        return Entry(headword=tok.surface, defs=[])
+invalid:
+  # positional-only: production's `entry_for(tok, inflected=…, extra_terms=…)` raises TypeError here
+  - |
+    def entry_for(self, tok, _inflected=None):
+        return Entry(headword=tok.surface, defs=[])
+  # the keyword is named right but still positional — `extra_terms=` would bind nothing
+  - |
+    def entry_for(self, tok, inflected=None, extra_terms=()):
+        return Entry(headword=tok.surface, defs=[])

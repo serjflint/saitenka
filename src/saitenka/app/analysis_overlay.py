@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.app.episode_analysis import AnalysisKey, EpisodeAnalysis, analysis_key, analyze_cues
 from saitenka.app.languages import MAIN_LANG
-from saitenka.app.overlay_ids import OverlayId
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 log = logging.getLogger(__name__)
 
@@ -19,10 +18,9 @@ if TYPE_CHECKING:
     import threading
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.scoring import Scorer
     from saitenka.app.tokenizer import Tokenizer
-    from saitenka.subtitles import Cue
+    from saitenka.subtitles import Cue, CueIndex
 
 
 @dataclass
@@ -58,90 +56,72 @@ def run_analysis(request: object, cancelled: threading.Event) -> object:
         raise
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "episode-analysis",
         JobLanePolicy(capacity=2, workers=2),
         run_analysis,
-    ):
-        return None
-    return ipc.submit_runtime_job
-
-
-def _show(reader: Reader) -> None:
-    if not reader.analysis.open:
-        return
-    image = render_analysis(
-        reader.analysis.current,
-        reader.analysis.status,
-        osd=reader.osd,
-        close_key=reader.analysis_key,
-        scale=reader.chrome_scale,
     )
-    x = (reader.osd[0] - image.width) // 2
-    y = (reader.osd[1] - image.height) // 2
-    reader.ov.show(image, x, y, oid=OverlayId.ANALYSIS)
 
 
-def _unavailable(reader: Reader) -> bool:
-    # SSOT: analysis reads reader._sub_index.cues — the SAME parsed index the subtitle draw + hover
-    # render from — so availability is exactly "a JP index is loaded", nothing more. jp_sid (an mpv
-    # embedded-track id, used only for track SWITCHING) is None whenever the JP subs come from an
-    # external / extracted / jimaku .srt loaded straight into _sub_index — so gating on it wrongly
-    # reported "Japanese track unavailable" while we were visibly showing (and could analyse) those subs.
-    return reader.subtitle_language != MAIN_LANG or reader._sub_index is None
+def panel_image(state: AnalysisState, *, osd: tuple[int, int], close_key: str, scale: float):
+    """Render the panel for a screen. Pure: same state and size, same pixels."""
+    return render_analysis(state.current, state.status, osd=osd, close_key=close_key, scale=scale)
 
 
-def request(reader: Reader) -> None:
-    if _unavailable(reader):
-        reader.analysis.current = None
-        reader.analysis.status = "Japanese track unavailable"
-        reader.analysis.active_key = None
-        reader.analysis.pending = None
-        _show(reader)
+def unavailable(language: str, index: CueIndex | None) -> bool:
+    """Whether there is anything to analyse.
+
+    SSOT: analysis reads the SAME parsed index the subtitle draw and hover render from, so
+    availability is exactly "a JP index is loaded", nothing more. Deliberately not `jp_sid`, an mpv
+    embedded-track id used only for track SWITCHING — it is None whenever the JP subs came from an
+    external / extracted / jimaku .srt loaded straight into the index, and gating on it reported
+    "Japanese track unavailable" while those very subs were on screen and analysable.
+    """
+    return language != MAIN_LANG or index is None
+
+
+def request(
+    state: AnalysisState,
+    *,
+    language: str,
+    index: CueIndex | None,
+    loading: bool,
+    scorer: Scorer | None,
+    tokenizer: Tokenizer,
+) -> None:
+    """Bring ``state`` up to date for the current episode, queueing work if it is not cached.
+
+    Takes the feature's own state and the facts it decides from — not the session. The caller
+    presents afterwards, which is why no branch here draws.
+    """
+    if unavailable(language, index):
+        state.current = None
+        state.status = "Japanese track unavailable"
+        state.active_key = None
+        state.pending = None
         return
-    if reader._loading:
-        reader.analysis.current = None
-        reader.analysis.status = "Analyzing…"
-        _show(reader)
+    if loading:
+        state.current = None
+        state.status = "Analyzing…"
         return
-    index = reader._sub_index
     assert index is not None
-    key = analysis_key(index, reader.scorer)
-    cached = reader.analysis.cache.get(key)
+    key = analysis_key(index, scorer)
+    cached = state.cache.get(key)
     if cached is not None:
-        reader.analysis.current = cached
-        reader.analysis.status = "Ready"
-        reader.analysis.active_key = None
-        reader.analysis.pending = None
-        _show(reader)
+        state.current = cached
+        state.status = "Ready"
+        state.active_key = None
+        state.pending = None
         return
-    if key == reader.analysis.active_key:
-        _show(reader)
-        return
-    reader.analysis.generation += 1
-    generation = reader.analysis.generation
-    reader.analysis.active_key = key
-    reader.analysis.current = None
-    reader.analysis.status = "Analyzing…"
-    analysis_request = AnalysisRequest(tuple(index.cues), reader.scorer, reader.tokenizer)
-    reader.analysis.pending = (generation, key, analysis_request)
-    _show(reader)
-    if submit_pending(reader.analysis, reader._analysis_submit, reader._finish_analysis):
-        _show(reader)
+    if key == state.active_key:
+        return  # already running for exactly this episode and vocabulary
+    state.generation += 1
+    state.active_key = key
+    state.current = None
+    state.status = "Analyzing…"
+    state.pending = (state.generation, key, AnalysisRequest(tuple(index.cues), scorer, tokenizer))
 
 
 def submit_pending(
@@ -200,33 +180,22 @@ def finish(state: AnalysisState, completion: EffectFinished) -> bool:
     return True
 
 
-def toggle(reader: Reader) -> None:
-    reader.analysis.open = not reader.analysis.open
-    if not reader.analysis.open:
-        reader.ov.hide(OverlayId.ANALYSIS)
-        return
-    request(reader)
+def invalidate(state: AnalysisState, *, vocabulary_changed: bool = False) -> None:
+    """Retire whatever is running or shown, because its inputs moved.
+
+    A vocabulary change also drops the cache: the same episode scores differently once the known
+    set does, so a cached result for that key would be answering the old question.
+    """
+    if vocabulary_changed:
+        state.cache.clear()
+    state.generation += 1
+    state.active_key = None
+    state.pending = None
+    state.current = None
 
 
-def on_index_changed(reader: Reader) -> None:
-    reader.analysis.generation += 1
-    reader.analysis.active_key = None
-    reader.analysis.pending = None
-    reader.analysis.current = None
-    request(reader)
-
-
-def on_vocabulary_changed(reader: Reader) -> None:
-    reader.analysis.cache.clear()
-    on_index_changed(reader)
-
-
-def redraw(reader: Reader) -> None:
-    _show(reader)
-
-
-def cue_result(reader: Reader, cue_index: int):
-    result = reader.analysis.current
+def cue_result(result: EpisodeAnalysis | None, cue_index: int):
+    """The per-cue row for ``cue_index``, or None when the analysis does not cover it."""
     if result is None or not 0 <= cue_index < len(result.cues):
         return None
     return result.cues[cue_index]

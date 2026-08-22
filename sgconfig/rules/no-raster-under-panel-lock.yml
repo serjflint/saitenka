@@ -1,0 +1,29 @@
+id: no-raster-under-panel-lock
+language: python
+severity: error
+message: >-
+  No rasterising or pixel conversion inside `with self._lock:` — the panel lock guards cache
+  MEMBERSHIP (a lookup measures ~1us), and holding it across the work serialises the render-ahead
+  worker against the main thread's compose. Raster outside, store inside: `_render_band` already
+  promises it touches no shared state, and `_warm_row` / `_raster_scaled_band` /
+  `_compose_scaled_bgra` are the lock-free halves to call.
+note: >-
+  render/banded.py — a compose racing a warm measured 8.04ms against 2.13ms uncontended, while the
+  same worker load on a DIFFERENT panel cost nothing, so it was the lock and not the cores.
+files:
+  - "src/saitenka/render/**/*.py"
+rule:
+  any:
+    - pattern: $ROW.render_window($$$)
+    - pattern: $ROW.measure()
+    - pattern: to_bgra_array($$$)
+    - pattern: $SELF._render_band($$$)
+  inside:
+    kind: with_statement
+    stopBy: end
+    has:
+      kind: with_clause
+      stopBy: end
+      has:
+        pattern: self._lock
+        stopBy: end

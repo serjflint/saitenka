@@ -4,30 +4,28 @@ AND our own eof loadfile through one setup path; auto-advance only decides wheth
 
 from __future__ import annotations
 
+import util
+
 from saitenka.app import session_stats, subselect
 from saitenka.app.controller import Reader
 from saitenka.app.launch import run as cli_run
 from saitenka.app.subtitle_render import NullRenderer
+from saitenka.runtime.events import SubtitleTracksDiscovered
 
 
-class FakeIPC:
-    """Minimal mpv IPC stand-in; `props` feeds get_property, `pending_events` feeds drain_events,
-    records all commands. Models just enough of mpv's subtitle track model for the re-slot: `sub-add`
-    appends an external track (deselected under the "auto" flag — selection stays with `sid`),
-    `sub-remove` drops one, and `set_property sid` reselects — so a test can observe which srt the
-    re-slot ends up selecting."""
+class FakeIPC(util.FakeIPC):
+    """Models just enough of mpv's subtitle track model for the re-slot: `sub-add` appends an
+    external track (deselected under the "auto" flag — selection stays with `sid`), `sub-remove`
+    drops one, and `set_property sid` reselects, so a test can observe which srt the re-slot ends up
+    selecting. Everything else, including the correlated-egress port, comes from the shared fake."""
 
     def __init__(self):
-        self.events = []
+        super().__init__()
         self.pending_events: list[dict] = []
-        self.props: dict = {}
-        self.commands: list[tuple] = []
 
     def command(self, *args):
-        self.commands.append(args)
+        reply = super().command(*args)
         op = args[0] if args else None
-        if op == "get_property":
-            return {"data": self.props.get(args[1])}
         if op == "sub-add":
             tl = self.props.setdefault("track-list", [])
             select = (args[2] if len(args) > 2 else "select") == "select"
@@ -53,40 +51,40 @@ class FakeIPC:
                 if t.get("type") == "sub":
                     t["selected"] = t.get("id") == args[2]
             self.props["sid"] = args[2]
-        return {"data": None}
+        return reply
 
-    def pump(self):
-        pass
-
-    def drain_events(self):
+    def receive_session(self, _timeout, handle) -> None:
         evs, self.pending_events = self.pending_events, []
-        return evs
+        for event in evs:
+            handle(event)
 
 
-def test_maybe_advance_fires_once_per_eof_edge():
-    ipc = FakeIPC()
-    reader = Reader(ipc)
+def _observe_eof(reader, *, reached: bool) -> None:
+    """Drive EOF the way mpv does. The advance is delta-driven now, so a test that poked a method
+    and a clock would be exercising a path production no longer has."""
+    reader._observe_property("eof-reached", reached)
+
+
+def test_advance_fires_once_per_eof_edge():
+    """One-shot per file with no latch to maintain: a delta exists only when the value changed, so
+    mpv sitting paused at EOF republishing True is silence rather than a repeat advance."""
+    reader = Reader(FakeIPC())
     calls: list[int] = []
     reader.advance_hook = lambda: bool(calls.append(1))
 
-    ipc.props["eof-reached"] = True
-    reader._maybe_advance()
-    reader._maybe_advance()  # still at EOF → must NOT re-fire
+    _observe_eof(reader, reached=True)
+    _observe_eof(reader, reached=True)  # still at EOF → must NOT re-fire
     assert calls == [1]
 
-    ipc.props["eof-reached"] = False  # a fresh file cleared eof → re-arm
-    reader._maybe_advance()
-    ipc.props["eof-reached"] = True
-    reader._maybe_advance()
+    _observe_eof(reader, reached=False)  # a fresh file cleared eof → re-arm
+    _observe_eof(reader, reached=True)
     assert calls == [1, 1]
 
 
-def test_maybe_advance_is_a_noop_without_a_hook():
-    ipc = FakeIPC()
-    reader = Reader(ipc)
-    ipc.props["eof-reached"] = True
+def test_advance_is_a_noop_without_a_hook():
+    reader = Reader(FakeIPC())
 
-    reader._maybe_advance()  # attach/SyncPlay never installs a hook → nothing happens, no crash
+    _observe_eof(reader, reached=True)  # attach/SyncPlay installs no hook → nothing, no crash
 
 
 def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monkeypatch):
@@ -94,16 +92,26 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
     # closes+reopens the stats row and rebinds the leak-free EpisodeContext so no prior state leaks.
     ipc = FakeIPC()
     reader = Reader(ipc)
-    reader.jp_sid = 5  # dirty episode state that the re-slot must reset
+    # dirty episode state that the re-slot must reset
+    reader.declare_subtitle(SubtitleTracksDiscovered(5, None))
     episode_before = reader.episode
     cur = tmp_path / "Show 04.mkv"
     ipc.props["path"] = str(cur)
 
     started: list[str] = []
-    monkeypatch.setattr(session_stats, "finish", lambda _reader: None)
-    monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
+    monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
+    monkeypatch.setattr(
+        session_stats, "start", lambda _episode, *, path, **_kw: started.append(str(path()))
+    )
 
-    cli_run.reslot_to_current(reader, {}, cur, tmp_path, 0, cli_run.RunSubtitleOptions(slang="ja"))
+    cli_run.reslot_to_current(
+        reader.reslot_ports,
+        {},
+        cur,
+        tmp_path,
+        0,
+        cli_run.RunSubtitleOptions(slang="ja"),
+    )
 
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)  # mpv already loaded it
     assert reader.episode is not episode_before  # a fresh EpisodeContext…
@@ -136,11 +144,11 @@ def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
             "selected": True,
         },
     ]
-    monkeypatch.setattr(session_stats, "finish", lambda _reader: None)
-    monkeypatch.setattr(session_stats, "start", lambda _reader: None)
+    monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
+    monkeypatch.setattr(session_stats, "start", lambda *_a, **_kw: None)
 
     cli_run.reslot_to_current(
-        reader,
+        reader.reslot_ports,
         {},
         cur,
         tmp_path,
@@ -263,7 +271,10 @@ def test_advance_defers_to_mpv_when_a_playlist_entry_is_next():
     ipc.props["playlist-pos"] = 0
     ipc.props["playlist-count"] = 3
 
-    assert cli_run._advance_at_eof(reader) is True
+    assert (
+        cli_run._advance_at_eof(reader.observed_property, reader.current_media_path, reader.ipc)
+        is True
+    )
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)
 
 
@@ -276,7 +287,10 @@ def test_advance_loadfiles_the_next_sibling_without_a_playlist(tmp_path):
     ipc.props["playlist-pos"] = 0
     ipc.props["playlist-count"] = 1  # single file, no playlist to advance
 
-    assert cli_run._advance_at_eof(reader) is True
+    assert (
+        cli_run._advance_at_eof(reader.observed_property, reader.current_media_path, reader.ipc)
+        is True
+    )
     assert ("loadfile", str(tmp_path / "Show - 04.mkv")) in ipc.commands
 
 
@@ -287,7 +301,10 @@ def test_advance_holds_when_no_playlist_and_no_sibling(tmp_path):
     ipc.props["path"] = str(tmp_path / "Show - 09.mkv")
     ipc.props["playlist-count"] = 1
 
-    assert cli_run._advance_at_eof(reader) is False  # hold the last frame (keep-open)
+    assert (
+        cli_run._advance_at_eof(reader.observed_property, reader.current_media_path, reader.ipc)
+        is False
+    )  # hold the last frame (keep-open)
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)
 
 
@@ -297,7 +314,8 @@ def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path):
     ipc = FakeIPC()
     reader = Reader(ipc)
     cli_run._install_watch_hooks(
-        reader,
+        reader.reslot_ports,
+        reader.watch_ports,
         {},
         tmp_path / "Show 01.mkv",
         tmp_path,
@@ -314,7 +332,8 @@ def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path):
     ipc = FakeIPC()
     reader = Reader(ipc)
     cli_run._install_watch_hooks(
-        reader,
+        reader.reslot_ports,
+        reader.watch_ports,
         {},
         tmp_path / "Show 01.mkv",
         tmp_path,
@@ -347,12 +366,7 @@ def test_prefetch_warms_the_next_sibling(tmp_path, monkeypatch):
         resync=False,
     )
 
-    import time
-
-    for _ in range(200):  # daemon thread — poll until it runs, bounded
-        if fetched:
-            break
-        time.sleep(0.01)
+    util.await_ready(lambda: bool(fetched), "the prefetch daemon never ran")
     assert fetched == [4]  # warmed the NEXT episode, not the current one
 
 

@@ -122,15 +122,30 @@ def _metric_series(name: str, summary: dict, spanless: frozenset[str]) -> dict[s
     allowlist once silently dropped block_cache.* for a release."""
     value = summary.get("value")
     if isinstance(value, int | float):
-        return {name.removeprefix("saitenka."): float(value)}
+        base = name.removeprefix("saitenka.")
+        by = summary.get("by")
+        series = {base: float(value)}
+        if isinstance(by, dict):
+            # One series per label combination beside the total — a labeled counter's total is the
+            # one number that cannot answer what the labels were added to distinguish.
+            series.update({f"{base}[{label}]": float(v) for label, v in by.items()})
+        return series
     if "count" not in summary or name not in spanless:
         return {}
     base = name.removeprefix("saitenka.")
-    return {
+    series = {
         f"{base}.{stat}": float(summary[stat])
         for stat in ("count", "p50", "p95", "p99", "max")
         if isinstance(summary.get(stat), int | float)
     }
+    by = summary.get("by")
+    if isinstance(by, dict):
+        # Count and exact max per label. A labeled latency histogram merged across labels answers
+        # "something was slow", never which thing — and which thing is the entire reason it is labeled.
+        for label, stats in by.items():
+            series[f"{base}[{label}].count"] = float(stats["count"])
+            series[f"{base}[{label}].max"] = float(stats["max"])
+    return series
 
 
 def _sample_counters() -> dict[str, float]:

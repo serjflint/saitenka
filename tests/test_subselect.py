@@ -1,27 +1,31 @@
 """attach/plugin-mode subtitle selection: pick the JP track over the user's English-first mpv, or
-fetch jimaku when the file has no JP subs. A FakeIPC records commands and serves track-list/path."""
+fetch jimaku when the file has no JP subs.
+
+The fake is the shared gateway-wired one, so selection can be exercised through the runtime command
+path rather than a bare ``.command()`` recorder. ``calls``/``sets`` keep the assertions the file was
+written with.
+"""
 
 from __future__ import annotations
+
+import util
 
 from saitenka.app import subselect
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, tracks=None, path=None):
-        self._tracks = tracks or []
-        self._path = path
-        self.calls: list[tuple] = []
+        super().__init__()
+        self.props["track-list"] = tracks or []
+        self.props["path"] = path
+        util.runtime_gateway(self)
 
-    def command(self, *args):
-        self.calls.append(args)
-        if args[:2] == ("get_property", "track-list"):
-            return {"data": self._tracks}
-        if args[:2] == ("get_property", "path"):
-            return {"data": self._path}
-        return {"data": None}
+    @property
+    def calls(self) -> list[tuple]:
+        return self.commands
 
     def sets(self, prop):
-        return [a[2] for a in self.calls if a[:2] == ("set_property", prop)]
+        return [a[2] for a in self.commands if a[:2] == ("set_property", prop)]
 
 
 JP = {"id": 2, "type": "sub", "lang": "jpn"}
@@ -496,7 +500,8 @@ def test_provider_fetch_factory_defers_fetch_and_forwards_every_arg(monkeypatch)
 def test_configure_providers_wires_retry_and_picker():
     reader = _FakeReader()
     subselect.configure_providers(
-        reader,
+        reader.configure_subtitle_retry,
+        reader.configure_sub_picker,
         subselect.ProviderConfig(enabled_providers=("jimaku", "tsukihime"), tsukihime_config={}),
     )
     assert callable(reader.retry_factory)  # a force-refetch retry factory
@@ -505,7 +510,9 @@ def test_configure_providers_wires_retry_and_picker():
 
 def test_configure_providers_clears_retry_when_no_provider():
     reader = _FakeReader()
-    subselect.configure_providers(reader, subselect.ProviderConfig(enabled_providers=()))
+    subselect.configure_providers(
+        reader.configure_subtitle_retry, reader.configure_sub_picker, subselect.ProviderConfig()
+    )
     assert reader.retry_factory is None  # cleared, not left stale after a provider-off re-slot
     assert reader.picker_lister == "unset"  # picker never configured without a provider
 
@@ -520,7 +527,9 @@ def test_configure_providers_retry_forces_a_refetch(monkeypatch):
     )
     reader = _FakeReader()
     subselect.configure_providers(
-        reader, subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={})
+        reader.configure_subtitle_retry,
+        reader.configure_sub_picker,
+        subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={}),
     )
 
     reader.retry_factory("/v/x.mkv")()  # factory(video) → thunk → fetch_provider_path

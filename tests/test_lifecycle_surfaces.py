@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
+import util
 from PIL import Image
 
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
@@ -12,9 +13,16 @@ from saitenka.mpvio.osd import Overlay, PreparedOverlay
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner, SurfaceStatus
 
 
-class _DeferredIPC:
+class _DeferredIPC(util.FakeIPC):
+    """Holds correlated terminals until the test settles them by hand.
+
+    The one thing the shared fake deliberately cannot do — it completes inline — so this overrides
+    just that, and inherits every other port. A double defining the whole surface itself is how a
+    missing port silently sends production down a fallback branch.
+    """
+
     def __init__(self, *, accepted: bool = True) -> None:
-        self.commands: list[tuple[object, ...]] = []
+        super().__init__()
         self.pending: list[tuple[object, object]] = []
         self.accepted = accepted
         self.visible: set[int] = set()
@@ -27,10 +35,10 @@ class _DeferredIPC:
         self.pending.append((identity, on_finished))
         return True
 
-    def command(self, *_args):
-        self.commands.append(_args)
-        if _args[0] == "overlay-remove":
-            self.visible.discard(_args[1])
+    def command(self, *args):
+        if args and args[0] == "overlay-remove":
+            self.visible.discard(args[1])
+        super().command(*args)
         return {"error": "success"}
 
     def execute(self, index: int) -> None:
@@ -55,7 +63,7 @@ class _DeferredIPC:
 
 def test_close_places_final_remove_after_pending_add_before_attach_disconnect():
     ipc = _DeferredIPC()
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
     surfaces.present(Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.LOADING)
     ipc.execute(0)  # mpv applied the add, but its correlated completion is not drained yet
     assert ipc.visible == {OverlayId.LOADING}
@@ -71,7 +79,7 @@ def test_close_places_final_remove_after_pending_add_before_attach_disconnect():
 
 def test_late_present_ack_cannot_restore_removed_lifecycle_surface():
     ipc = _DeferredIPC()
-    overlay = Overlay(ipc)
+    overlay = Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv)
     surfaces = LifecycleSurfaces(overlay)
 
     surfaces.present(Image.new("RGBA", (2, 2), "white"), 4, 5, oid=OverlayId.TOAST)
@@ -86,7 +94,7 @@ def test_late_present_ack_cannot_restore_removed_lifecycle_surface():
 
 def test_rejected_surface_submission_is_terminally_failed():
     ipc = _DeferredIPC(accepted=False)
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
 
     surfaces.present(Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.LOADING)
 
@@ -135,7 +143,7 @@ def test_concurrent_preparation_cannot_reverse_slot_revision_dispatch():
 
 def test_queued_surface_revisions_keep_distinct_immutable_files():
     ipc = _DeferredIPC()
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
 
     surfaces.present(Image.new("RGBA", (1, 1), "white"), 0, 0, oid=OverlayId.LOADING)
     surfaces.present(Image.new("RGBA", (3, 2), "black"), 0, 0, oid=OverlayId.LOADING)
@@ -171,7 +179,7 @@ class _SubmissionFailureIPC(_DeferredIPC):
 
 def test_submission_exception_fails_revision_and_discards_staged_file():
     ipc = _SubmissionFailureIPC()
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
     surfaces.present(Image.new("RGBA", (1, 1)), 0, 0, oid=OverlayId.TOAST)
 
     assert surfaces.snapshot(OverlayId.TOAST).status is SurfaceStatus.FAILED
@@ -189,3 +197,71 @@ def test_remove_submission_exception_terminally_fails_revision():
     surfaces.remove(OverlayId.LOADING)
 
     assert surfaces.snapshot(OverlayId.LOADING).status is SurfaceStatus.FAILED
+
+
+def test_hiding_every_surface_and_showing_it_again_restores_what_was_there():
+    """`Alt+o`. Hiding retains each slot's desired state rather than forgetting it, so showing puts
+    the same surfaces back — a hide that dropped them would return the user to a blank overlay and
+    make them re-trigger every surface by hand.
+    """
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+    live_before = dict(overlay._live)
+
+    surfaces.set_visible(visible=False)
+    assert overlay.visible is False
+    assert ("overlay-remove", OverlayId.SUB) in ipc.commands
+
+    ipc.commands.clear()
+    surfaces.set_visible(visible=True)
+
+    assert overlay.visible is True
+    assert overlay._live == live_before
+    assert any(c[0] == "overlay-add" and c[1] == OverlayId.SUB for c in ipc.commands)
+
+
+def test_a_repeated_hide_is_not_re_issued():
+    """The toggle is driven by a reducer that may be asked twice; re-sending a hide would churn the
+    overlay slots for no change."""
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+
+    surfaces.set_visible(visible=False)
+    ipc.commands.clear()
+    surfaces.set_visible(visible=False)
+
+    assert ipc.commands == []
+
+
+def test_a_repaint_re_adds_the_live_surfaces_without_counting_as_a_change():
+    """The paused-nudge poke (mpv #8172). It must not bump the op counter the nudge arms off, or
+    each repaint would arm the next one and the session would nudge forever."""
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+    ops_before = overlay.ops
+    ipc.commands.clear()
+
+    surfaces.repaint()
+
+    assert any(c[0] == "overlay-add" and c[1] == OverlayId.SUB for c in ipc.commands)
+    assert overlay.ops == ops_before
+
+
+def test_a_repaint_while_hidden_draws_nothing():
+    """Re-adding a hidden surface would un-hide it — the toggle undone by a nudge."""
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc)
+    surfaces = LifecycleSurfaces(overlay)
+    overlay.show(Image.new("RGBA", (4, 4)), oid=OverlayId.SUB)
+    surfaces.set_visible(visible=False)
+    ipc.commands.clear()
+
+    surfaces.repaint()
+
+    assert ipc.commands == []

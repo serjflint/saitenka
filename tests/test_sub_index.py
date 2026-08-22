@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
+
 from saitenka.app.sub_index import load_index
 from saitenka.subtitles import Cue, CueIndex, parse_ass, parse_cues, parse_srt
 
@@ -153,6 +155,52 @@ def test_visibility_boundaries_are_unique_sorted_and_strictly_future():
     idx = CueIndex([Cue(1.0, 5.0, "a"), Cue(3.0, 7.0, "b"), Cue(7.0, 8.0, "c")])
 
     assert tuple(idx.boundaries_after(3.0)) == (5.0, 7.0, 8.0)
+
+
+def _overlapping() -> CueIndex:
+    """A sign held over a whole scene, with two dialogue cues inside it — ordinary authored ASS."""
+    return CueIndex([Cue(0.0, 10.0, "看板"), Cue(2.0, 4.0, "猫を見る"), Cue(3.0, 6.0, "犬も見る")])
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "position", "overlapping"),
+    [
+        (1.0, 0, 0),  # only the sign is up
+        (2.5, 1, 1),  # the sign plus the first line — the line is what the viewer just saw
+        (3.5, 2, 2),  # both lines and the sign; the newest line wins
+        (5.0, 2, 1),  # the first line has ended
+        (7.0, 0, 0),  # back to the sign alone
+    ],
+)
+def test_the_current_cue_in_an_overlap_is_the_most_recently_revealed_line(
+    timestamp: float, position: int, overlapping: int
+) -> None:
+    """The cue list is sorted by start, so "the first active cue" means "on screen longest". A sign
+    spanning a scene then answers for every moment inside it and navigation steps relative to the
+    sign rather than the dialogue being read."""
+    active = _overlapping().active_at(timestamp)
+
+    assert (active.position, active.overlapping) == (position, overlapping)
+
+
+def test_an_overlap_resolves_the_same_way_from_either_clock() -> None:
+    """`sub_start` and `time_pos` are two clocks for one question, and they used to disagree: one
+    scanned for an active cue, the other for the first cue still to end. Only the second is reached
+    in a gap, which is where they legitimately differ."""
+    index = _overlapping()
+
+    for timestamp in (1.0, 2.5, 3.5, 5.0, 7.0):
+        assert index.locate(sub_start=timestamp) == index.locate(time_pos=timestamp)
+
+
+def test_navigating_out_of_an_overlap_steps_from_the_line_being_read() -> None:
+    index = _overlapping()
+
+    current = index.locate(sub_start=2.5)
+
+    assert index.cues[current].text == "猫を見る"
+    assert index.cues[index.target(current, 1)].text == "犬も見る"  # not back to the sign
+    assert index.cues[index.target(current, -1)].text == "看板"
 
 
 # --- target: stepping prev/replay/next ---------------------------------------------------------

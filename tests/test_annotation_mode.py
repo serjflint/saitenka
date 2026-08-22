@@ -1,44 +1,42 @@
 """Learning-annotation visibility remains independent of tooltip and playback state."""
 
 import pytest
-from PIL import Image
+import util
+from util import RecordingRasterProvider, keybind_registry
 
 from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
 from saitenka.app.controller import Reader
-from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.subtitles import SubtitleRender
+from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.tooltip import update_hover_impl
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props or {})
 
 
-class _SpyRenderer:
-    """A draw strategy that records each draw (via a callback taking the reader) instead of
-    rasterizing — the public seam for tests that assert a redraw happened or captured state at draw."""
+class _SpyRenderer(NullRenderer):
+    """A draw strategy that records each draw request instead of rasterizing.
+
+    The callback receives the `DrawRequest`, which is what the renderer actually sees — asserting
+    against host attributes would be reaching back across the seam the request exists to close.
+    Inherits the inert renderer so it answers the whole protocol; only `draw` is interesting here.
+    """
 
     def __init__(self, on_draw):
         self._on_draw = on_draw
 
-    def draw(self, reader):
-        self._on_draw(reader)
+    def draw(self, request, _surfaces=None, _ipc=None, /, **_ports):
+        self._on_draw(request)
 
 
 def test_full_annotations_remain_the_default():
     reader = Reader(FakeIPC())
 
     assert reader.annotation_mode == "full"
-    assert reader.annotation_key == "Alt+a"
+    assert reader.keys.annotation_key == "Alt+a"
 
 
 def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
@@ -50,21 +48,16 @@ def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
     reader.tokens = [object()]
     reader.styles = ["scored"]
     reader.hover = 0
-    rendered = []
     monkeypatch.setattr(reader.ov, "show", lambda *_args, **_kwargs: None)
+    provider = RecordingRasterProvider(size=(10, 10))
+    reader.renderer = SubtitleRenderer(provider)
 
-    def render(*_args, **kwargs):
-        rendered.append(kwargs)
-        return SubtitleRender(Image.new("RGBA", (10, 10)), [])
-
-    monkeypatch.setattr("saitenka.app.subtitle_render.render_subtitle", render)
-
-    reader._draw_subtitle()
+    reader.draw_subtitle()
     reader.set_annotation_hover(revealed=True)
     reader.set_annotation_hover(revealed=False)
 
     assert reader.styles == ["scored"]
-    assert [(call["styles"], call["hover"]) for call in rendered] == [
+    assert [(request.styles, request.hover) for request in provider.requests] == [
         (None, None),
         (["scored"], 0),
         (None, None),
@@ -100,12 +93,13 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
         "set_annotation_hover",
         lambda *, revealed: calls.append(("style", revealed)),
     )
-    monkeypatch.setattr(reader, "set_hover", lambda index: calls.append(("tooltip", index)))
-
-    update_hover_impl(reader)
+    update_hover_impl(reader.tip_ports, reader.hover_actions, reader.hover_inputs)
 
     assert calls == [("style", True)]
-    assert reader._word_target == 1
+    # The switch is a decision the dwell has not made yet: the target is armed, the tooltip has not
+    # moved. No stub stands in for the build — nothing calls it.
+    assert reader._hover_store.current.hysteresis.word_target == 1
+    assert reader.hover == 0
 
 
 def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch):
@@ -127,13 +121,13 @@ def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
     ipc = FakeIPC({"mouse-pos": {"hover": False, "x": 50, "y": 50}})
     reader = Reader(ipc, options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")))
     reader.tokens = [object()]
-    reader._annotation_hover = True
+    reader.annotation_hover = True
     states = []
     monkeypatch.setattr(
-        reader, "renderer", _SpyRenderer(lambda rd: states.append(rd._annotation_hover))
+        reader, "renderer", _SpyRenderer(lambda rq: states.append(rq.annotation_visible))
     )
 
-    update_hover_impl(reader)
+    update_hover_impl(reader.tip_ports, reader.hover_actions, reader.hover_inputs)
 
     assert states == [False]
 
@@ -142,10 +136,10 @@ def test_cue_change_resets_hover_only_presentation(monkeypatch):
     reader = Reader(
         FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
     )
-    reader._annotation_hover = True
+    reader.annotation_hover = True
     states = []
     monkeypatch.setattr(
-        reader, "renderer", _SpyRenderer(lambda rd: states.append(rd._annotation_hover))
+        reader, "renderer", _SpyRenderer(lambda rq: states.append(rq.annotation_visible))
     )
 
     reader.set_subtitle("猫")
@@ -160,15 +154,15 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
     drawn = []
     toasts = []
     monkeypatch.setattr(
-        reader, "renderer", _SpyRenderer(lambda rd: drawn.append(rd.annotation_mode))
+        reader, "renderer", _SpyRenderer(lambda rq: drawn.append(rq.annotation_visible))
     )
-    monkeypatch.setattr(reader, "_toast", lambda text: toasts.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_a, **_k: toasts.append(text))
 
     reader.toggle_annotation_mode()
 
     assert (reader.annotation_mode, drawn, toasts) == (
         "hover",
-        ["hover"],
+        [False],  # hover-only with the cursor away -> annotations not visible in the request
         ["annotations: hover-only"],
     )
     assert not any(command[0] in {"set_property", "seek", "sub-seek"} for command in ipc.commands)
@@ -190,7 +184,7 @@ def test_annotation_key_is_configurable():
 
     Reader(ipc, options=options)._register_keybinds()
 
-    binds = {command[1]: command[2] for command in ipc.commands if command[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Ctrl+a"] == "script-message saitenka-toggle-annotations"
 
 

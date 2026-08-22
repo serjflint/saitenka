@@ -94,6 +94,55 @@ def test_only_current_false_readback_can_request_catastrophic_legacy() -> None:
     assert commit_actions == ()
 
 
+def test_a_verify_cannot_supersede_an_assertion_still_in_flight() -> None:
+    """Single-flight. _assert_native mints a fresh effect_id and overwrites active_assertion_id, so
+    a second assertion would orphan the first: its result then fails the identity check and is
+    dropped, leaving two `set sub-visibility` effects for one owner."""
+    context = OwnershipContext(0, 1, OwnershipMode.NATIVE_VISIBLE, "sid:2")
+    state, actions = reduce_ownership(
+        OwnershipState(context=context, nonempty=True), OwnershipEvent(EventKind.ENSURE_MODE)
+    )
+    in_flight = actions[-1].effect_id
+
+    verified, verify_actions = reduce_ownership(state, OwnershipEvent(EventKind.VERIFY_NATIVE))
+
+    assert verify_actions == ()
+    assert verified == state
+    # The first assertion's result is still the one that lands.
+    settled, _ = reduce_ownership(
+        verified,
+        OwnershipEvent(
+            EventKind.ASSERTION_RESULT,
+            context=context,
+            effect_id=in_flight,
+            visibility=Visibility.TRUE,
+        ),
+    )
+    assert settled.owner == PixelOwner.NATIVE
+
+
+def test_a_verify_after_the_assertion_settles_still_reasserts() -> None:
+    """Negative control: the guard must key on an in-flight assertion, not on ever having made one.
+    Widen it to `active_assertion_id is not None` and the legacy-staging path stops verifying."""
+    context = OwnershipContext(0, 1, OwnershipMode.NATIVE_VISIBLE, "sid:2")
+    state, actions = reduce_ownership(
+        OwnershipState(context=context, nonempty=True), OwnershipEvent(EventKind.ENSURE_MODE)
+    )
+    state, _ = reduce_ownership(
+        state,
+        OwnershipEvent(
+            EventKind.ASSERTION_RESULT,
+            context=context,
+            effect_id=actions[-1].effect_id,
+            visibility=Visibility.FALSE,
+        ),
+    )  # a FALSE readback keeps active_assertion_id set but hands off to STAGE_LEGACY
+
+    _, verify_actions = reduce_ownership(state, OwnershipEvent(EventKind.VERIFY_NATIVE))
+
+    assert [a.kind for a in verify_actions] == [ActionKind.ASSERT_NATIVE_VISIBILITY]
+
+
 def test_failed_legacy_stage_rolls_back_to_bounded_retry() -> None:
     context = OwnershipContext(0, 1, OwnershipMode.NATIVE_VISIBLE, "sid:2")
     state, actions = reduce_ownership(

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from collections import deque
@@ -187,7 +188,12 @@ def main() -> int:
     # per-worker import fan-out for a few files).
     pytest = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-m", TIER]
     cmd = [*pytest, "-n", "auto"] if selected is None else [*pytest, *selected]
-    return subprocess.run(cmd, cwd=ROOT, check=False).returncode
+    # `-m pytest` prepends cwd to sys.path; `poe test`'s pytest SCRIPT does not. The repo root holds
+    # sibling package checkouts (taffylite/, resvglite/, libasslite/), so without this the optional-
+    # extra probes (`find_spec("taffylite")`) hit those directories as empty namespace packages,
+    # enable matrix axes whose module has no code, and fail ~30 tests the gate correctly skips.
+    env = {**os.environ, "PYTHONSAFEPATH": "1"}
+    return subprocess.run(cmd, cwd=ROOT, check=False, env=env).returncode
 
 
 if __name__ == "__main__":

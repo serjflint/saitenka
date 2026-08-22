@@ -3,8 +3,11 @@ dropped/delayed frames. No mpv, no display — the humble-object part the real h
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+from saitenka.app import surfaces
 
 JANK_PATH = Path(__file__).resolve().parent.parent / "examples" / "jank_live.py"
 
@@ -76,31 +79,39 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
     mod = _jank_module()
 
     class Reader:
-        _tip_scroll = 0
         osd = (1920, 1080)
+        tip_scale = SimpleNamespace(ref_h=1080)
 
-        def _scroll_tip(self, delta):
-            self._tip_scroll += delta
+        def __init__(self):
+            self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
 
-        def poll_once(self):
+        def scroll_tip(self, delta):
+            self.tip.view.scroll += delta
+
+        def pump(self):
             return True
 
     reader = Reader()
     mod._scroll_four(reader)
-    assert reader._tip_scroll == 4 * round(1080 * 0.12)
+    # Through the shared conversion, not a second copy of the arithmetic: a hard-coded fraction
+    # here would keep passing after the wheel's step changed.
+    assert reader.tip.view.scroll == 4 * surfaces.tip_wheel_pixels(1080, 1)
 
 
 def test_scroll_workload_rejects_a_non_scrollable_tooltip():
     mod = _jank_module()
 
     class Reader:
-        _tip_scroll = 0
         osd = (1920, 1080)
+        tip_scale = SimpleNamespace(ref_h=1080)
 
-        def _scroll_tip(self, _delta):
+        def __init__(self):
+            self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
+
+        def scroll_tip(self, _delta):
             pass
 
-        def poll_once(self):
+        def pump(self):
             return True
 
     with pytest.raises(RuntimeError, match="did not advance"):

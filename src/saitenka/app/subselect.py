@@ -16,9 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
-from saitenka.app.subtitle_modes import (
-    lang_matches as _lang_matches,
-)
+from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_modes import (
     select_initial,
 )
@@ -33,6 +31,10 @@ from saitenka.app.subtitle_providers import (
     get_provider,
     register_provider,
 )
+from saitenka.app.subtitle_selection import (
+    lang_matches as _lang_matches,
+)
+from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,13 +64,15 @@ def select_sub_track(ipc, slang: str) -> int | None:
         for t in tracks:
             if _lang_matches(t.get("lang"), [want]):
                 sid = t.get("id")
-                ipc.command("set_property", "sid", sid)
+                send_correlated(
+                    ipc, "select-sub-track", "set_property", "sid", sid, owner=Owner.SUBTITLE
+                )
                 return sid
     return None
 
 
 def _add_and_select(ipc, sub_path: str | Path) -> None:
-    ipc.command("sub-add", str(sub_path), "select")
+    send_correlated(ipc, "sub-add-select", "sub-add", str(sub_path), "select", owner=Owner.SUBTITLE)
 
 
 def _subtitle_identity(
@@ -498,17 +502,17 @@ def provider_fetch_factory(
     return factory
 
 
-def configure_providers(reader, cfg: ProviderConfig) -> None:
+def configure_providers(configure_retry, configure_picker, cfg: ProviderConfig) -> None:
     """Wire the runtime provider surfaces shared by ``run`` and ``attach``: the manual re-sync retry (a
     force re-fetch) and the ``Ctrl+J`` source picker. Clears the retry to ``None`` when no provider is
     enabled, so a config with providers off can't leave a stale factory bound after a re-slot."""
-    reader.configure_subtitle_retry(
+    configure_retry(
         provider_fetch_factory(cfg.enabled_providers, cfg, force=True)
         if cfg.enabled_providers
         else None
     )
     if cfg.enabled_providers:
-        reader.configure_sub_picker(
+        configure_picker(
             lambda video: list_candidates(
                 video,
                 cfg.enabled_providers,
@@ -531,7 +535,7 @@ def fetch_jimaku(
 
     Returns ``(ok, status)`` so callers can fall back on failure. Usable
     standalone as the runtime "force jimaku" action (a keybind can call this mid-playback)."""
-    video = ipc.command("get_property", "path").get("data")
+    video = ipc.query("path")
     if not video:
         return False, "jimaku: mpv reports no file path — cannot fetch"
     sub_path, status = fetch_jimaku_path(
@@ -592,7 +596,7 @@ def remove_external_sub_tracks(ipc) -> int:
     before re-adding the current episode's srt. mpv carries a prior episode's external over a playlist
     advance AND auto-selects it, so on advance the overlay would show the old episode's lines (found
     live: ep2's srt selected on ep03 as "unknown language 10/11"). Ids are stable across removals."""
-    data = ipc.command("get_property", "track-list").get("data") or []
+    data = ipc.query("track-list") or []
     removed = 0
     for track in data:
         if track.get("type") == "sub" and track.get("external") and track.get("id") is not None:
@@ -601,7 +605,13 @@ def remove_external_sub_tracks(ipc) -> int:
                 track["id"],
                 track.get("external-filename"),
             )
-            ipc.command("sub-remove", track["id"])
+            send_correlated(
+                ipc,
+                f"reslot-sub-remove:{track['id']}",
+                "sub-remove",
+                track["id"],
+                owner=Owner.SUBTITLE,
+            )
             removed += 1
     return removed
 

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from pathlib import Path
 
 import pytest
@@ -15,7 +14,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from util import validate_ctf_document
+from util import await_ready, validate_ctf_document
 
 from saitenka.app.otel_export import CTFSpanProcessor, _span_to_ctf_event
 from saitenka.app.telemetry import ActiveGate
@@ -53,7 +52,10 @@ def test_ctf_event_shape():
     assert event["dur"] >= 0
     assert event["args"]["k"] == "v"
     assert len(event["args"]["span_id"]) == 16
-    assert len(event["args"]["trace_id"]) == 32
+    # A root span links to nothing, so it carries no edge and no trace id. `trace_id` is gone
+    # entirely: `parent_id` names the edge, and 34 bytes of "same root" was 10.6% of a real file.
+    assert "parent_id" not in event["args"]
+    assert "trace_id" not in event["args"]
 
 
 def test_ctf_event_tid_comes_from_thread_id_attribute_not_trace_id():
@@ -215,7 +217,8 @@ def test_sample_fn_writes_counter_tracks(tmp_path):
 
 def test_spans_and_counters_interleave_into_one_valid_document(tmp_path):
     path = tmp_path / "trace.json"
-    proc, _ = _on_gate(path=path, sample_fn=lambda: {"gil_enabled": 0.0}, interval=0.0)
+    values = iter([{"gil_enabled": 0.0}, {"gil_enabled": 1.0}])
+    proc, _ = _on_gate(path=path, sample_fn=lambda: next(values), interval=0.0)
     proc.on_end(_make_span())
     proc.force_flush()
     proc.on_end(_make_span())
@@ -223,6 +226,40 @@ def test_spans_and_counters_interleave_into_one_valid_document(tmp_path):
     data = json.loads(path.read_text(encoding="utf-8"))
     kinds = sorted(e["ph"] for e in data["traceEvents"])
     assert kinds == ["C", "C", "X", "X"]  # 2 spans, 2 counter samples, one valid document
+
+
+def test_an_unchanged_counter_is_not_re_emitted(tmp_path):
+    """Perfetto holds a counter track's last value until the next point, so a series that did not
+    move draws the identical line for its bytes. 55 of 140 series in a real session never moved at
+    all — several of them one-shot startup measurements resampled every second for the whole run."""
+    path = tmp_path / "trace.json"
+    proc, _ = _on_gate(path=path, sample_fn=lambda: {"steady": 7.0}, interval=0.0)
+    proc.force_flush()
+    proc.force_flush()
+    proc.force_flush()
+
+    points = [
+        e for e in json.loads(path.read_text(encoding="utf-8"))["traceEvents"] if e["ph"] == "C"
+    ]
+
+    assert [e["args"]["value"] for e in points] == [7.0]
+
+
+def test_a_counter_that_moves_is_re_emitted(tmp_path):
+    """Negative control for the test above — the dedup must key on the VALUE, not silence the series
+    after its first point."""
+    path = tmp_path / "trace.json"
+    values = iter([{"n": 1.0}, {"n": 1.0}, {"n": 2.0}])
+    proc, _ = _on_gate(path=path, sample_fn=lambda: next(values), interval=0.0)
+    proc.force_flush()
+    proc.force_flush()
+    proc.force_flush()
+
+    points = [
+        e for e in json.loads(path.read_text(encoding="utf-8"))["traceEvents"] if e["ph"] == "C"
+    ]
+
+    assert [e["args"]["value"] for e in points] == [1.0, 2.0]
 
 
 def test_sampling_respects_interval(tmp_path):
@@ -254,6 +291,23 @@ def test_writer_survives_a_failing_sample_fn(tmp_path):
 # --- live writer thread ----------------------------------------------------------------------
 
 
+def _settled_events(path) -> list[dict]:
+    """Events on disk, or `[]` while the writer is mid-rewrite.
+
+    The writer thread rewrites the whole document each flush, so a reader that lands between the
+    truncate and the last byte parses a fragment. Half a document is not "no events yet" to
+    `json`, it is `JSONDecodeError` — raised out of the *predicate*, which no deadline can catch
+    and which names a different test on every run. Treating a torn read as not-yet-ready is what
+    makes the wait a wait rather than a race the reader usually wins.
+    """
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["traceEvents"]
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+
 def test_live_writer_thread_exports_a_span(tmp_path):
     path = tmp_path / "trace.json"
     gate = ActiveGate()
@@ -261,13 +315,10 @@ def test_live_writer_thread_exports_a_span(tmp_path):
     proc = CTFSpanProcessor(path, gate, interval=0.05)
     try:
         proc.on_end(_make_span())
-        for _ in range(60):
-            if path.exists() and json.loads(path.read_text())["traceEvents"]:
-                break
-            time.sleep(0.05)
-        assert len(json.loads(path.read_text(encoding="utf-8"))["traceEvents"]) == 1
+        await_ready(lambda: bool(_settled_events(path)), "the writer thread never flushed the span")
     finally:
         proc.shutdown()
+    assert len(_settled_events(path)) == 1  # after shutdown: no writer left to tear the read
 
 
 def test_live_writer_thread_samples_counters_periodically(tmp_path):
@@ -276,16 +327,16 @@ def test_live_writer_thread_samples_counters_periodically(tmp_path):
     gate.set(value=True)
     proc = CTFSpanProcessor(path, gate, sample_fn=lambda: {"a": 1.0}, interval=0.05)
     try:
-        for _ in range(100):
-            if path.exists() and any(
-                e["ph"] == "C" for e in json.loads(path.read_text())["traceEvents"]
-            ):
-                break
-            time.sleep(0.02)
-        counters = [e for e in json.loads(path.read_text())["traceEvents"] if e["ph"] == "C"]
-        assert counters and all(e["name"] == "a" for e in counters)
+        # A deadline, not `for _ in range(100)`: that is a scheduling budget in a timeout's clothes,
+        # and under `test-ft` the writer thread loses it before it is ever scheduled.
+        await_ready(
+            lambda: any(e["ph"] == "C" for e in _settled_events(path)),
+            "the writer thread never sampled a counter",
+        )
     finally:
         proc.shutdown()
+    counters = [e for e in _settled_events(path) if e["ph"] == "C"]
+    assert counters and all(e["name"] == "a" for e in counters)
 
 
 def test_shutdown_flushes_the_tail(tmp_path):

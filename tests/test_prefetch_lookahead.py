@@ -1,6 +1,8 @@
 """Prefetch lookahead: WARM the next cues' words while the current line plays, and the cache-size /
 RSS gauges the telemetry interval sampler reports."""
 
+import util
+
 from saitenka.app import prefetch
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.controller import Reader
@@ -16,22 +18,10 @@ _SRT = (
 )
 
 
-class _FakeIPC:
+class _FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args and args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
-
-    def pump(self):
-        pass
-
-    def drain_events(self):
-        return []
+        super().__init__()
+        self.props.update(props or {})
 
 
 class _FakeDS:
@@ -40,7 +30,7 @@ class _FakeDS:
     def __init__(self):
         self.warmed = []
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         self.warmed.append(tok.surface)
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
@@ -50,7 +40,7 @@ def _reader(monkeypatch, *, lookahead, props=None):
     r = Reader(ipc, dict_set=_FakeDS())
     r.osd = (1280, 720)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r._sub_index = CueIndex(parse_srt(_SRT))
+    r.episode.sub_index = CueIndex(parse_srt(_SRT))
     r.prefetch_lookahead = lookahead
     return r
 
@@ -61,6 +51,13 @@ def _submitted_items(r):
     r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
     r._update_prefetch()
     return [entry["request"].item for entry in submitted]
+
+
+def _upcoming(r, n: int) -> list[str]:
+    """The next `n` cue texts, from the function that owns them rather than through the Reader."""
+    return prefetch.upcoming_cue_texts(
+        r.episode.sub_index, n, text=r.sub_text, preferred=r.episode.nav_idx
+    )
 
 
 def test_lookahead_warms_the_next_cues_words(monkeypatch):
@@ -107,7 +104,7 @@ def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
         return tokenize(text)
 
     monkeypatch.setattr(r.tokenizer, "tokenize", counted)
-    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, n: ["本"] * n)
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
     r.set_subtitle("本を読む")
     _submitted_items(r)
@@ -129,7 +126,7 @@ def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypat
             return [type("Style", (), {"tag": "known"})() for _token in tokens]
 
     r.scorer = _Scorer()
-    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, n: ["本"] * n)
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
     _submitted_items(r)
 
@@ -157,9 +154,9 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
     monkeypatch.setattr(r.tokenizer, "tokenize", lambda _text: tokens)
     monkeypatch.setattr(r.tokenizer, "is_content", lambda _token: True)
     monkeypatch.setattr(r, "_is_mined", is_mined)
-    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, _n: ["long"])
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["long"])
 
-    heads = prefetch._head_prefetch_items(r, 1, set())
+    heads = prefetch._head_prefetch_items(r.prefetch_ports, r.head_probe, 1, set())
 
     assert len(heads) == probes == 4
 
@@ -185,9 +182,9 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
     monkeypatch.setattr(r.tokenizer, "tokenize", lambda _text: tokens)
     monkeypatch.setattr(r.tokenizer, "is_content", lambda token: token.surface == "語")
     monkeypatch.setattr(r, "_is_mined", lambda _token: False)
-    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, _n: ["ordinary"])
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["ordinary"])
 
-    heads = prefetch._head_prefetch_items(r, 1, set())
+    heads = prefetch._head_prefetch_items(r.prefetch_ports, r.head_probe, 1, set())
 
     assert [item.token.surface for _priority, item in heads] == ["語"]
 
@@ -195,14 +192,14 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
 def test_upcoming_cue_texts_bounds_at_the_tail(monkeypatch):
     r = _reader(monkeypatch, lookahead=5)
     r.set_subtitle("水を飲む")  # last cue
-    assert r._upcoming_cue_texts(5) == []
+    assert _upcoming(r, 5) == []
 
 
 def test_upcoming_cue_texts_is_empty_without_an_index(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
-    r._sub_index = None
+    r.episode.sub_index = None
     r.set_subtitle("本を読む")
-    assert r._upcoming_cue_texts(2) == []
+    assert _upcoming(r, 2) == []
 
 
 def test_prefetch_lookahead_routes_through_reader_options():
@@ -218,10 +215,102 @@ def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
         def __init__(self, n):
             self.retained_nbytes = n
 
-    r._panel_cache["a"] = _Panel(100)
-    r._panel_cache["b"] = _Panel(250)
+    r.tip.panel_cache.setdefault("a", _Panel(100))
+    r.tip.panel_cache.setdefault("b", _Panel(250))
     monkeypatch.setattr(r.dict_set, "decoded_entry_count", lambda: 7, raising=False)
     gauges = r._telemetry_gauges()
     assert gauges["panel_cache.size"] == 2.0
     assert gauges["panel_cache.bytes"] == 350.0
     assert gauges["dict_cache.size"] == 7.0
+
+
+class _Content:
+    def __init__(self, skip=()):
+        self.skip = set(skip)
+
+    def is_content(self, token):
+        return token.surface not in self.skip
+
+
+def _tok(surface, lemma=None):
+    from saitenka.app.tokenize import Token
+
+    return Token(surface, lemma or surface, "", "名詞", 0, len(surface))
+
+
+def _style(tag):
+    return type("Style", (), {"tag": tag})()
+
+
+def test_lookahead_reads_the_cues_after_the_one_on_screen():
+    from saitenka.app.prefetch import upcoming_cue_texts
+    from saitenka.subtitles import CueIndex
+
+    index = CueIndex(parse_srt(_srt(["one", "two", "three", "four"])))
+
+    assert upcoming_cue_texts(index, 2, text="one", preferred=-1) == ["two", "three"]
+
+
+def test_lookahead_at_the_last_cue_has_nothing_to_warm():
+    from saitenka.app.prefetch import upcoming_cue_texts
+    from saitenka.subtitles import CueIndex
+
+    index = CueIndex(parse_srt(_srt(["one", "two"])))
+
+    assert upcoming_cue_texts(index, 3, text="two", preferred=-1) == []
+
+
+def test_lookahead_off_the_index_warms_nothing():
+    """A cue mpv is showing from a track we never indexed. Warming from index position 0 would
+    decode the start of the episode while the user is in the middle of it."""
+    from saitenka.app.prefetch import upcoming_cue_texts
+    from saitenka.subtitles import CueIndex
+
+    assert upcoming_cue_texts(None, 2, text="one", preferred=-1) == []
+    assert upcoming_cue_texts(CueIndex([]), 2, text="one", preferred=-1) == []
+    index = CueIndex(parse_srt(_srt(["one", "two"])))
+    assert upcoming_cue_texts(index, 2, text="not in this file", preferred=-1) == []
+
+
+def test_warming_puts_the_next_new_words_first():
+    """N+1 words are the likeliest hover and mine target, so they lead — everything else follows in
+    line order."""
+    from saitenka.app.prefetch import _candidates
+
+    tokens = [_tok("既知"), _tok("新出"), _tok("既知2")]
+    styles = [_style("known"), _style("n+1"), _style("known")]
+
+    assert [i for _p, i, _t in _candidates(tokens, styles, _Content())] == [1, 0, 2]
+
+
+def test_warming_skips_repeats_of_a_lemma_already_queued():
+    """The same word twice in one line is one warm — the cache is keyed by lemma, so the second
+    would decode nothing new and displace a word that would."""
+    from saitenka.app.prefetch import _candidates
+
+    tokens = [_tok("見る", "見る"), _tok("見た", "見る"), _tok("猫")]
+
+    assert len(_candidates(tokens, [], _Content())) == 2
+
+
+def test_warming_skips_what_the_tokenizer_calls_non_content():
+    from saitenka.app.prefetch import _candidates
+
+    tokens = [_tok("は"), _tok("猫")]
+
+    assert [t.surface for _p, _i, t in _candidates(tokens, [], _Content(skip={"は"}))] == ["猫"]
+
+
+def test_warming_a_line_with_no_styles_yet_still_queues_its_words():
+    """Scoring can lag the tokenization; treating a missing style row as "not N+1" keeps the warm
+    running rather than dropping the line."""
+    from saitenka.app.prefetch import _candidates
+
+    assert len(_candidates([_tok("猫"), _tok("犬")], [], _Content())) == 2
+
+
+def _srt(lines):
+    return "".join(
+        f"{n}\n00:00:{n:02d},000 --> 00:00:{n + 1:02d},000\n{text}\n\n"
+        for n, text in enumerate(lines, 1)
+    )

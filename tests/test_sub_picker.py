@@ -13,44 +13,32 @@ import threading
 import time
 
 import pytest
+import util
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
 from saitenka.app import sub_picker, subtitle_modes
-from saitenka.app.bindings import HELP_CLOSE_MSG, SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.runtime import (
-    CommandHandled,
-    CommandOutcome,
-    CommandReason,
     EffectOutcome,
     Owner,
+    events,
+    picker,
 )
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, **props):
-        self.commands: list[tuple] = []
-        self.events: list[dict] = []
-        self.runtime_outcomes: list[CommandHandled] = []
-        self.props: dict = {"osd-dimensions": {"w": 1920, "h": 1080}, **props}
+        super().__init__()
+        self.props.update({"osd-dimensions": {"w": 1920, "h": 1080}, **props})
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        if args[0] == "set_property":
+        # mpv reflects a set back on the next read; the picker's own tests depend on it.
+        if args and args[0] == "set_property":
             self.props[args[1]] = args[2]
-        return {"error": "success"}
-
-    def drain_events(self) -> list[dict]:
-        events, self.events = self.events, []
-        return events
-
-    def publish_legacy_command_outcome(self, outcome: CommandHandled) -> None:
-        self.runtime_outcomes.append(outcome)
+        return super().command(*args)
 
 
 def _reader(**props) -> tuple[Reader, FakeIPC]:
@@ -72,6 +60,31 @@ def _candidate(name: str, *, provider="jimaku", size=1000, match=False, download
 
 def _lister(candidates, warnings=()):
     return lambda _video: (list(candidates), list(warnings))
+
+
+def _open(reader: Reader) -> None:
+    """Put the picker up the way production does: through the slice that owns "open"."""
+    reader._picker_store.dispatch(events.PickerOpened())
+
+
+def _adopt(reader: Reader, *, candidates=(), warnings=(), error=None) -> None:
+    """Land a listing on the picker's current generation."""
+    sub_picker.apply_listing(
+        reader._picker_store,
+        reader.redraw_sub_picker,
+        reader.sub_picker.generation,
+        sub_picker.ListingResult(tuple(candidates), tuple(warnings), error),
+    )
+
+
+def _listed(reader: Reader) -> sub_picker.ListingResult:
+    return sub_picker.listing_of(reader.sub_picker)
+
+
+def _close(reader: Reader) -> None:
+    sub_picker.close_picker(
+        reader._picker_store, reader.interaction.picker_panel, reader.lifecycle_surfaces
+    )
 
 
 def _picker_adds(ipc: FakeIPC) -> list[tuple]:
@@ -107,18 +120,22 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
 
     reader.configure_sub_picker(lister)
     try:
-        sub_picker.open_picker(reader)
+        sub_picker.open_picker(
+            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+        )
         assert old_started.wait(1)
-        sub_picker.close_picker(reader)
-        sub_picker.open_picker(reader)
-        _drain_until(reader, lambda: bool(reader.sub_picker.candidates))
-        assert reader.sub_picker.candidates[0].name == "current.ass"
+        _close(reader)
+        sub_picker.open_picker(
+            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+        )
+        _drain_until(reader, lambda: bool(_listed(reader).candidates))
+        assert _listed(reader).candidates[0].name == "current.ass"
 
         old_release.set()
         _drain_until(reader, lambda: calls == 2)
         for _ in range(10):
             reader._drain_events()
-        assert reader.sub_picker.candidates[0].name == "current.ass"
+        assert _listed(reader).candidates[0].name == "current.ass"
     finally:
         old_release.set()
         reader.close()
@@ -183,7 +200,9 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
 
     reader.configure_sub_picker(lister)
     try:
-        sub_picker.open_picker(reader)
+        sub_picker.open_picker(
+            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+        )
         assert started.wait(1)
         reader.rebind_episode()
         assert reader.sub_picker.open is False
@@ -191,7 +210,7 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
         release.set()
         for _ in range(10):
             reader._drain_events()
-        assert reader.sub_picker.candidates == ()
+        assert _listed(reader).candidates == ()
     finally:
         release.set()
         reader.close()
@@ -214,18 +233,20 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
         _candidate("Show - 01 (Release).ass", provider="tsukihime", size=0),
     ]
     reader.configure_sub_picker(_lister(candidates))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)  # no real search thread
+    monkeypatch.setattr(
+        sub_picker, "_start_listing", lambda _v, _ports: None
+    )  # no real search thread
 
-    sub_picker.open_picker(reader)
+    sub_picker.open_picker(
+        reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+    )
     assert reader.sub_picker.open and reader.sub_picker.loading
 
-    sub_picker.apply_listing(
-        reader, reader.sub_picker.generation, sub_picker.ListingResult(tuple(candidates), ())
-    )
+    _adopt(reader, candidates=candidates)
 
     assert reader.sub_picker.loading is False
-    assert reader.sub_picker.candidates == tuple(candidates)
-    rows = sub_picker._rows(reader)
+    assert _listed(reader).candidates == tuple(candidates)
+    rows = sub_picker._rows(reader.sub_picker)
     assert [row.text for row in rows] == [c.name for c in candidates]
     assert rows[0].status == "jimaku · srt · match"  # provider · format · resolution-match
     assert rows[1].status == "tsukihime · ass"
@@ -236,33 +257,28 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
 def test_provider_warnings_are_shown_in_the_footer():
     reader, _ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    reader.sub_picker.open = True
+    _open(reader)
 
-    sub_picker.apply_listing(
+    _adopt(
         reader,
-        reader.sub_picker.generation,
-        sub_picker.ListingResult((_candidate("a.srt"),), ("tsukihime: search truncated",)),
+        candidates=(_candidate("a.srt"),),
+        warnings=("tsukihime: search truncated",),
     )
 
-    assert reader.sub_picker.warnings == ("tsukihime: search truncated",)
-    footer = sub_picker._footer(reader, total=1, shown=1)
+    assert _listed(reader).warnings == ("tsukihime: search truncated",)
+    footer = sub_picker._footer(reader.sub_picker, reader.keys.sub_picker_key, 1, 1)
     assert "tsukihime: search truncated" in footer
 
 
 def test_listing_error_is_shown_and_leaves_no_candidates():
     reader, _ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    reader.sub_picker.open = True
-    reader.sub_picker.loading = True
+    _open(reader)
 
-    sub_picker.apply_listing(
-        reader,
-        reader.sub_picker.generation,
-        sub_picker.ListingResult((), (), "subtitle search failed: boom"),
-    )
+    _adopt(reader, error="subtitle search failed: boom")
 
-    assert reader.sub_picker.error == "subtitle search failed: boom"
-    assert reader.sub_picker.candidates == ()
+    assert _listed(reader).error == "subtitle search failed: boom"
+    assert _listed(reader).candidates == ()
     assert sub_picker._message(reader.sub_picker) == "subtitle search failed: boom"
 
 
@@ -274,21 +290,22 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
         "[Nekomoe] Show - 01 [WebRip].srt",
         download=lambda: ran.append("dl") or ("/tmp/x.srt", "ok"),
     )
-    reader.sub_picker.candidates = (_candidate("other.ass"), chosen)
-    reader.sub_picker.open = True
-    sub_picker.redraw(reader)  # populates rect + per-row hitboxes
+    _open(reader)
+    _adopt(reader, candidates=(_candidate("other.ass"), chosen))
+    reader.redraw_sub_picker()  # populates rect + per-row hitboxes
 
     fetches: list[tuple] = []
     monkeypatch.setattr(
-        subtitle_modes, "start_fetch", lambda _r, do, **kw: fetches.append((do, kw))
+        subtitle_modes, "start_fetch", lambda _submit, _get, do, **kw: fetches.append((do, kw))
     )
 
-    rect = reader.sub_picker.rect
+    panel = reader.interaction.picker_panel
+    rect = panel.rect
     assert rect is not None
-    hit = next(h for h in reader.sub_picker.hits if h.kind == "picker-download" and h.value == 1)
+    hit = next(h for h in panel.hits if h.kind == "picker-download" and h.value == 1)
     gx, gy = rect[0] + hit.x + hit.w / 2, rect[1] + hit.y + hit.h / 2
 
-    assert sub_picker.on_click(reader, gx, gy) is True
+    assert sub_picker.on_click(reader.click_target, gx, gy) is True
     assert reader.sub_picker.open is False  # panel closes; the swap lands from broker completion
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
     assert len(fetches) == 1
@@ -303,45 +320,45 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
 def test_click_outside_the_panel_is_not_captured():
     reader, _ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    reader.sub_picker.candidates = (_candidate("a.srt"),)
-    reader.sub_picker.open = True
-    sub_picker.redraw(reader)
+    _open(reader)
+    _adopt(reader, candidates=(_candidate("a.srt"),))
+    reader.redraw_sub_picker()
 
-    assert sub_picker.on_click(reader, 0, 0) is False
+    assert sub_picker.on_click(reader.click_target, 0, 0) is False
 
 
 def test_scroll_only_fires_with_the_pointer_over_the_panel():
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    reader.sub_picker.open = True
-    reader.sub_picker.candidates = tuple(_candidate(f"{i}.srt") for i in range(20))
-    sub_picker.redraw(reader)
-    rect = reader.sub_picker.rect
+    _open(reader)
+    _adopt(reader, candidates=tuple(_candidate(f"{i}.srt") for i in range(20)))
+    reader.redraw_sub_picker()
+    rect = reader.interaction.picker_panel.rect
     assert rect is not None
 
-    ipc.props["mouse-pos"] = {"x": 0, "y": 0}
-    assert sub_picker.scroll(reader, 1) is False
+    ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
+    assert sub_picker.scroll(reader.wheel_step, 1) is False
     assert reader.sub_picker.scroll == 0
 
-    ipc.props["mouse-pos"] = {"x": rect[0] + 5, "y": rect[1] + 5}
-    assert sub_picker.scroll(reader, 1) is True
-    assert reader.sub_picker.scroll == sub_picker.ROWS_PER_WHEEL_STEP
+    ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
+    assert sub_picker.scroll(reader.wheel_step, 1) is True
+    assert reader.sub_picker.scroll == picker.ROWS_PER_WHEEL_STEP
 
 
 def test_suppress_hover_only_over_the_panel():
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    reader.sub_picker.open = True
-    reader.sub_picker.candidates = (_candidate("a.srt"),)
-    sub_picker.redraw(reader)
-    rect = reader.sub_picker.rect
+    _open(reader)
+    _adopt(reader, candidates=(_candidate("a.srt"),))
+    reader.redraw_sub_picker()
+    rect = reader.interaction.picker_panel.rect
     assert rect is not None
 
-    ipc.props["mouse-pos"] = {"x": rect[0] + 5, "y": rect[1] + 5}
-    assert sub_picker.suppress_hover(reader) is True
+    ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
+    assert sub_picker.suppress_hover(reader.hover_suppression) is True
 
-    ipc.props["mouse-pos"] = {"x": 0, "y": 0}
-    assert sub_picker.suppress_hover(reader) is False
+    ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
+    assert sub_picker.suppress_hover(reader.hover_suppression) is False
 
 
 def test_open_picker_wants_the_forced_mouse_section():
@@ -350,89 +367,21 @@ def test_open_picker_wants_the_forced_mouse_section():
     reader, _ipc = _reader(path="/v/ep.mkv")
     assert reader._wants_mouse_capture() is False
 
-    reader.sub_picker.open = True
+    _open(reader)
     assert reader._wants_mouse_capture() is True
 
 
 def test_toggle_closes_an_open_picker():
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.configure_sub_picker(_lister([]))
-    reader.sub_picker.open = True
+    _open(reader)
 
-    sub_picker.toggle(reader)
+    _close(reader) if reader.sub_picker.open else sub_picker.open_picker(
+        reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+    )
 
     assert reader.sub_picker.open is False
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
-
-
-def test_queued_picker_presses_open_once_after_startup(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert reader.sub_picker.open
-    assert len(_picker_adds(ipc)) == 1
-    assert ipc.runtime_outcomes[-1] == CommandHandled(
-        SUB_PICKER_MSG,
-        Owner.INTERACTION,
-        CommandOutcome.SUPPRESSED,
-        reason=CommandReason.LEGACY_REPEAT,
-    )
-
-
-def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
-    reader._help_open = True
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "client-message", "args": [HELP_CLOSE_MSG]},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert not reader._help_open
-    assert reader.sub_picker.open
-
-
-def test_file_load_separates_picker_toggle_batches(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "file-loaded"},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert not reader.sub_picker.open
-    assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
-
-
-def test_property_change_does_not_split_startup_picker_presses(monkeypatch):
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
-    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
-    ipc.events = [
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-        {"event": "property-change", "name": "time-pos", "data": 1.0},
-        {"event": "client-message", "args": [SUB_PICKER_MSG]},
-    ]
-
-    reader._drain_events()
-
-    assert reader.sub_picker.open
-    assert len(_picker_adds(ipc)) == 1
 
 
 @pytest.mark.parametrize(
@@ -441,3 +390,111 @@ def test_property_change_does_not_split_startup_picker_presses(monkeypatch):
 )
 def test_human_size(size, expected):
     assert sub_picker._human_size(size) == expected
+
+
+def test_the_panel_is_bounded_by_the_screen_it_is_drawn_on() -> None:
+    """Every dimension is derived from the OSD, which is exactly the arithmetic that stops tracking
+    a resize unnoticed. Checkable at any size now that it takes no session."""
+    from saitenka.app.sub_picker import ListingResult, picker_panel
+    from saitenka.runtime.picker import PickerState
+
+    state = PickerState(open=True, listing=ListingResult((_candidate("a.srt"),), ()))
+
+    for osd in ((1280, 720), (1920, 1080), (3024, 1898)):
+        _rendered, x, y, width, height = picker_panel(state, osd=osd, scale=1.0, close_key="Alt+p")
+
+        assert x >= 0 and x + width <= osd[0], f"{osd}: runs off horizontally"
+        assert y >= 0 and y + height <= osd[1], f"{osd}: runs off vertically"
+
+
+def test_the_footer_reports_the_visible_slice_of_a_scrolled_list() -> None:
+    """The user's only cue that the list continues past the panel."""
+    from saitenka.app.sub_picker import _footer
+    from saitenka.runtime.picker import PickerState
+
+    assert _footer(PickerState(scroll=4), "Alt+p", total=20, shown=6).startswith("5–10 / 20")
+
+
+def test_provider_warnings_replace_the_position_readout() -> None:
+    """A warning is the more useful thing to say in the same space, and losing it to a row count
+    would leave a partial listing looking complete."""
+    from saitenka.app.sub_picker import ListingResult, _footer
+    from saitenka.runtime.picker import PickerState
+
+    state = PickerState(listing=ListingResult((), ("jimaku timed out",)))
+
+    assert "jimaku timed out" in _footer(state, "Alt+p", total=20, shown=6)
+
+
+def _state(*, open_=True, generation=3):
+    return picker.PickerState(open=open_, generation=generation, loading=True)
+
+
+def _listing(*, candidates=("a",)):
+    return sub_picker.ListingResult(error=None, candidates=tuple(candidates), warnings=())
+
+
+def test_a_listing_for_the_open_generation_is_installed():
+    turn = picker.listed(_state(), 3, _listing())
+
+    assert turn.decisions == (picker.ListingAdopted(),)
+    assert sub_picker.listing_of(turn.state).candidates == ("a",)
+    assert turn.state.loading is False
+
+
+def test_a_listing_for_a_superseded_generation_is_dropped():
+    """Close-then-reopen while a listing is in flight. The result belongs to the closed picker, and
+    installing it would repopulate the one the user has since reopened with the old file's tracks."""
+    state = _state(generation=4)
+
+    turn = picker.listed(state, 3, _listing())
+
+    assert turn == picker.PickerTurn(state)  # untouched, not merely un-redrawn
+    assert turn.state.loading is True  # still waiting on its own listing, not silently marked done
+
+
+def test_a_listing_arriving_after_the_picker_closed_is_dropped():
+    state = _state(open_=False)
+
+    assert picker.listed(state, 3, _listing()) == picker.PickerTurn(state)
+
+
+def test_retiring_the_picker_bumps_the_generation_that_makes_a_listing_stale():
+    turn = picker.retired(_state(generation=3))
+
+    assert turn.decisions == (picker.PickerRetired(),)
+    assert turn.state.generation == 4
+    assert picker.listed(turn.state, 3, _listing()).decisions == ()
+
+
+def test_retiring_an_already_closed_picker_decides_nothing():
+    """Published so the caller can skip the surface removal — and the generation must not drift, or
+    a second close would invalidate a listing the reopened picker legitimately asked for."""
+    state = _state(open_=False, generation=3)
+
+    assert picker.retired(state) == picker.PickerTurn(state)
+
+
+def test_opening_starts_a_generation_that_no_listing_in_flight_can_claim():
+    """The bump is the whole reason the machine holds a number: a result for the picker that was up
+    a moment ago must not repopulate the one that is up now."""
+    before = _state(generation=3)
+
+    turn = picker.opened(before)
+
+    assert turn.state == picker.PickerState(open=True, generation=4, loading=True)
+    assert picker.listed(turn.state, 3, _listing()).decisions == ()
+
+
+def test_a_wheel_notch_stops_at_both_ends_rather_than_wrapping():
+    """A list that jumped from the last row back to the first on one more notch reads as a lost
+    scroll position, not as a feature."""
+    assert picker.clamp_scroll(0, -1, 10) == 0
+    assert picker.clamp_scroll(9, 1, 10) == 9
+    assert picker.clamp_scroll(0, 1, 10) == picker.ROWS_PER_WHEEL_STEP
+
+
+def test_an_empty_listing_has_nowhere_to_scroll():
+    """Before a listing lands there are no rows; scrolling to a positive offset would render blank."""
+    assert picker.clamp_scroll(0, 1, 0) == 0
+    assert picker.clamp_scroll(0, 1, 1) == 0

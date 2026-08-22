@@ -1,10 +1,9 @@
 """Episode analysis runs off-thread and its overlay never mutates playback."""
 
 import threading
-import time
 
 import pytest
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka.app import analysis_overlay
 from saitenka.app.bindings import ANALYSIS_MSG
@@ -13,7 +12,21 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
 from saitenka.app.wordlists import KnownWords
 from saitenka.render.analysis import render_analysis
+from saitenka.runtime.events import (
+    SubtitleLanguageChanged,
+    SubtitleStartupConfigured,
+    SubtitleTracksDiscovered,
+)
 from saitenka.subtitles import Cue, CueIndex
+
+
+def _toggle_analysis(reader) -> None:
+    """Flip the panel the way the panel reducer would.
+
+    `analysis_overlay.set_open` replaced `toggle` when the open/close decision moved to
+    `panel_intents`; these tests are about what opening and closing *do*, so they keep flipping.
+    """
+    reader.set_analysis_open(open=not reader.analysis.open)
 
 
 @pytest.fixture
@@ -21,21 +34,19 @@ def reader():
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     reader = Reader(ipc, scorer=Scorer(known=KnownWords.from_set(["本"])))
-    reader.jp_sid = 1
-    reader.subtitle_language = "jp"
-    reader._sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
+    reader.declare_subtitle(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
     yield reader
     reader.close()
     gateway.close()
 
 
 def _finish(reader: Reader) -> None:
-    for _ in range(200):
-        reader._drain_events()
-        if reader.analysis.active_key is None:
-            return
-        time.sleep(0.001)
-    raise AssertionError("analysis result was not published")
+    await_ready(
+        lambda: reader.analysis.active_key is None,
+        "analysis result was not published",
+        pump=reader._drain_events,
+    )
 
 
 def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader):
@@ -57,7 +68,8 @@ def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader):
 def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
     # Regression: JP subs from an external / extracted / jimaku .srt carry no mpv jp_sid, but _sub_index
     # holds the cues we render AND analyse — so analysis must run, not report "Japanese track unavailable".
-    reader.jp_sid = None  # external index → no embedded-track sid
+    # external index → no embedded-track sid
+    reader.declare_subtitle(SubtitleTracksDiscovered(None, reader.en_sid))
 
     reader._handle(ANALYSIS_MSG)
     assert reader.analysis.status == "Analyzing…"
@@ -67,7 +79,7 @@ def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
 
 
 def test_no_index_reports_unavailable(reader):
-    reader._sub_index = None  # the real SSOT for "no analysable JP cues"
+    reader.episode.sub_index = None  # the real SSOT for "no analysable JP cues"
 
     reader._handle(ANALYSIS_MSG)
     assert reader.analysis.status == "Japanese track unavailable"
@@ -75,19 +87,19 @@ def test_no_index_reports_unavailable(reader):
 
 
 def test_cache_hit_does_not_start_another_worker(reader):
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
     _finish(reader)
     generation = reader.analysis.generation
 
-    analysis_overlay.toggle(reader)
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
+    _toggle_analysis(reader)
 
     assert reader.analysis.generation == generation
     assert reader.analysis.current is not None
 
 
 def test_track_analysis_completes_while_overlay_is_closed(reader):
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     _finish(reader)
 
     assert reader.analysis.current is not None
@@ -98,29 +110,29 @@ def test_track_analysis_completes_while_overlay_is_closed(reader):
 def test_dependency_loading_defers_analysis_until_vocabulary_arrives(reader):
     reader._loading = True
 
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     assert reader.analysis.active_key is None
 
     reader._loading = False
-    analysis_overlay.on_vocabulary_changed(reader)
+    reader.invalidate_analysis(vocabulary_changed=True)
     _finish(reader)
     assert reader.analysis.current is not None
 
 
 def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
     _finish(reader)
 
-    analysis_overlay.on_vocabulary_changed(reader)
+    reader.invalidate_analysis(vocabulary_changed=True)
     assert reader.analysis.status == "Analyzing…"
     assert reader.analysis.generation == 3
     _finish(reader)
 
-    reader._sub_index = CueIndex([Cue(0, 1, "彼は映画を見る。")])
-    analysis_overlay.on_index_changed(reader)
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "彼は映画を見る。")])
+    reader.invalidate_analysis()
     assert reader.analysis.generation == 5
     _finish(reader)
-    assert analysis_overlay.cue_result(reader, 0) is not None
+    assert analysis_overlay.cue_result(reader.analysis.current, 0) is not None
 
 
 def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
@@ -139,16 +151,16 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
         return analyze_cues(cues, scorer, tokenizer)
 
     monkeypatch.setattr(analysis_overlay, "analyze_cues", analyze)
-    reader._sub_index = CueIndex([Cue(0, 1, "古い一")])
-    analysis_overlay.toggle(reader)
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "古い一")])
+    _toggle_analysis(reader)
     assert old_started[0].wait(1)
 
-    reader._sub_index = CueIndex([Cue(0, 1, "古い二")])
-    analysis_overlay.on_index_changed(reader)
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "古い二")])
+    reader.invalidate_analysis()
     assert old_started[1].wait(1)
 
-    reader._sub_index = CueIndex([Cue(0, 1, "新しい")])
-    analysis_overlay.on_index_changed(reader)
+    reader.episode.sub_index = CueIndex([Cue(0, 1, "新しい")])
+    reader.invalidate_analysis()
     assert reader.analysis.status == "Analyzing…"
 
     old_release.set()
@@ -156,16 +168,15 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
     current = reader.analysis.current
     assert current is not None
 
-    for _ in range(200):
-        reader._drain_events()
-        time.sleep(0.001)
+    # Not a wait — see the note in test_progressive: this proves nothing further arrives.
+    drain_for(reader._drain_events)
     assert reader.analysis.current is current
     assert newest_calls == 1
 
 
 def test_malformed_success_has_a_terminal_unavailable_state(reader, monkeypatch):
     monkeypatch.setattr(analysis_overlay, "analyze_cues", lambda *_args: object())
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
     _finish(reader)
 
     assert reader.analysis.current is None
@@ -178,7 +189,7 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
 
     monkeypatch.setattr(analysis_overlay, "analyze_cues", fail)
     with caplog.at_level("WARNING"):
-        analysis_overlay.toggle(reader)
+        _toggle_analysis(reader)
         _finish(reader)
 
     assert reader.analysis.current is None
@@ -187,9 +198,9 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
 
 
 def test_english_or_missing_japanese_track_is_unavailable(reader):
-    reader.subtitle_language = "en"
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
 
-    analysis_overlay.toggle(reader)
+    _toggle_analysis(reader)
 
     assert reader.analysis.status == "Japanese track unavailable"
     assert reader.analysis.current is None

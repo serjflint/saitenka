@@ -9,6 +9,7 @@ from saitenka.app.config import (
     load_config,
     resolve_resync_split_penalty,
     resolve_telemetry,
+    warn_retired,
 )
 
 
@@ -70,3 +71,19 @@ def test_resolve_telemetry_otel_sdk_disabled_wins_over_config(monkeypatch):
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
     cfg = {"telemetry": {"enabled": True}}
     assert resolve_telemetry(cfg).enabled is False
+
+
+def test_a_retired_key_is_named_rather_than_silently_ignored(caplog):
+    """A setting that stops working without saying so reads as "no effect on this machine", which
+    is the one diagnosis nothing in `doctor` can correct."""
+    with caplog.at_level("WARNING"):
+        assert warn_retired({"perf": {"poll_interval": 0.01}}) == ["poll_interval"]
+
+    assert "poll_interval" in caplog.text
+
+
+def test_a_config_that_sets_nothing_retired_warns_about_nothing(caplog):
+    with caplog.at_level("WARNING"):
+        assert warn_retired({"perf": {"prefetch_workers": 2}, "slang": "ja"}) == []
+
+    assert caplog.text == ""

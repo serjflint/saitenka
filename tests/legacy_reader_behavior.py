@@ -38,7 +38,7 @@ def _cue(reader: Reader) -> CueState:
 
 
 def _interaction(reader: Reader) -> InteractionState:
-    if reader._tip_rect is not None:
+    if reader.tip.view.rect is not None:
         return "tooltip"
     if reader.hover >= 0 and reader.boxes:
         return "hovered"

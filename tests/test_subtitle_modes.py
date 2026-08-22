@@ -6,28 +6,31 @@ import time
 from pathlib import Path
 
 import pytest
-from PIL import Image
 from util import FakeIPC as RuntimeFakeIPC
-from util import runtime_gateway
+from util import RecordingRasterProvider, runtime_gateway
 
-from saitenka.app import subtitle_modes
+from saitenka.app import subtitle_modes, subtitle_selection
 from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
-from saitenka.app.subtitles import SubtitleRender
+from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleSecondaryLeased
 from saitenka.subtitles import CueIndex, parse_srt
 
 
-class FakeIPC:
+class FakeIPC(RuntimeFakeIPC):
+    """Gateway-wired, and a small mpv track simulator on top: selecting a sid or adding/removing an
+    external track updates ``track-list`` the way mpv does, so selection policy is exercised against
+    state rather than against a recorded call list."""
+
     def __init__(self, tracks=()):
+        super().__init__()
         self.tracks = list(tracks)
-        self.props = {"track-list": self.tracks, "pause": False, "secondary-sid": "no"}
-        self.commands: list[tuple] = []
+        self.props.update({"track-list": self.tracks, "pause": False, "secondary-sid": "no"})
+        runtime_gateway(self)
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
+        reply = super().command(*args)
         if args[:2] == ("set_property", "sid"):
             self.props["sid"] = args[2]
             for track in self.tracks:
@@ -52,7 +55,7 @@ class FakeIPC:
                     track["selected"] = track["id"] == 9
         if args[0] == "sub-remove":
             self.tracks[:] = [t for t in self.tracks if t.get("id") != args[1]]
-        return {"data": None}
+        return reply
 
 
 JP = {"id": 2, "type": "sub", "lang": "jpn"}
@@ -104,9 +107,9 @@ def test_subtitle_fetch_runs_off_the_event_thread_and_publishes_directly(monkeyp
         worker_thread = threading.get_ident()
         return None, "provider: no match"
 
-    monkeypatch.setattr(reader, "_toast", lambda message, level: messages.append((message, level)))
+    monkeypatch.setattr(reader, "toast", lambda message, level: messages.append((message, level)))
     try:
-        subtitle_modes.start_fetch(reader, fetch)
+        subtitle_modes.start_fetch(reader.submit_subtitle_fetch, reader._get, fetch)
         _drain_until(reader, lambda: bool(messages))
         assert worker_thread is not None and worker_thread != event_thread
         assert messages == [("provider: no match", "warn")]
@@ -168,20 +171,22 @@ def test_newer_explicit_subtitle_choice_supersedes_older_completion(tmp_path, mo
     reader = Reader(ipc)
     jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
     older = tmp_path / "older.ass"
     newer = tmp_path / "newer.ass"
     older.write_text("older", encoding="utf-8")
     newer.write_text("newer", encoding="utf-8")
 
     subtitle_modes.start_fetch(
-        reader,
+        reader.submit_subtitle_fetch,
+        reader._get,
         lambda: (older, "older"),
         force_select=True,
         name="picker-download",
     )
     subtitle_modes.start_fetch(
-        reader,
+        reader.submit_subtitle_fetch,
+        reader._get,
         lambda: (newer, "newer"),
         force_select=True,
         name="picker-download",
@@ -206,9 +211,9 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
         assert release.wait(1)
         return None, "late"
 
-    monkeypatch.setattr(reader, "_toast", lambda message, level: messages.append((message, level)))
+    monkeypatch.setattr(reader, "toast", lambda message, level: messages.append((message, level)))
     try:
-        subtitle_modes.start_fetch(reader, fetch)
+        subtitle_modes.start_fetch(reader.submit_subtitle_fetch, reader._get, fetch)
         assert started.wait(1)
         reader._stop.set()
         ipc.close_runtime_job_lane("subtitle-fetch", timeout=0)
@@ -236,6 +241,23 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
         gateway.close()
 
 
+#: Every lane the LANES phase closes, in the order `WORKER_LANE_PARTICIPANTS` declares.
+_LANES_BEFORE_ARTIFACTS = [
+    "subtitle-fetch",
+    "subtitle-picker",
+    "subtitle-geometry",
+    "cue-annotation",
+    "tooltip-render-ahead",
+    "tooltip-engaged",
+    "speculative-prefetch",
+    "mask-atlas-startup",
+    "capabilities",
+    "interaction-metadata",
+    "mined-seed",
+    "episode-analysis",
+]
+
+
 def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
@@ -248,15 +270,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
 
     def remove_artifacts(_path, *, ignore_errors):
         assert ignore_errors
-        assert order == [
-            "subtitle-fetch",
-            "subtitle-picker",
-            "cue-annotation",
-            "tooltip-render-ahead",
-            "tooltip-engaged",
-            "speculative-prefetch",
-            "mask-atlas-startup",
-        ]
+        assert order == _LANES_BEFORE_ARTIFACTS
         order.append("artifacts")
 
     ipc.close_runtime_job_lane = close_lane
@@ -264,16 +278,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
 
     reader.close()
 
-    assert order == [
-        "subtitle-fetch",
-        "subtitle-picker",
-        "cue-annotation",
-        "tooltip-render-ahead",
-        "tooltip-engaged",
-        "speculative-prefetch",
-        "mask-atlas-startup",
-        "artifacts",
-    ]
+    assert order == [*_LANES_BEFORE_ARTIFACTS, "artifacts"]
 
 
 def test_startup_prefers_japanese_and_remembers_both_tracks():
@@ -315,22 +320,20 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader._translate_on = True
+    reader.translate_on = True
     messages = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_args: messages.append(text))
     rebuilt = []
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", rebuilt.append
-    )
+    monkeypatch.setattr(reader, "rebuild_sub_index", lambda: rebuilt.append("rebuilt"))
     ipc.commands.clear()
 
     reader.toggle_subtitle_language()
 
     assert reader.subtitle_language == "en"
-    assert reader._translate_on is True
+    assert reader.translate_on is True
     assert ("set_property", "sid", 1) in ipc.commands
     assert ("set_property", "secondary-sid", 2) in ipc.commands
-    assert rebuilt == [reader]
+    assert rebuilt == ["rebuilt"]
     assert not [c for c in ipc.commands if c[0] in {"seek", "sub-seek"}]
     assert not [c for c in ipc.commands if c[:2] == ("set_property", "pause")]
     assert messages == ["subtitles: English (1/2)"]
@@ -340,12 +343,12 @@ def test_language_switch_releases_secondary_before_selecting_its_track(monkeypat
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader._translate_on = True
-    reader._translation_secondary_sid = 1
+    reader.translate_on = True
+    reader.declare_subtitle(SubtitleSecondaryLeased(1))
     ipc.props["secondary-sid"] = 1
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     ipc.commands.clear()
 
@@ -361,10 +364,10 @@ def test_secondary_sid_event_does_not_change_primary_language():
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader.subtitle_language = "en"
-    reader._translation_secondary_sid = 2
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
+    reader.declare_subtitle(SubtitleSecondaryLeased(2))
 
-    subtitle_modes.on_primary_changed(reader, 2)
+    subtitle_modes.on_primary_changed(reader.track_ports, 2)
 
     assert reader.subtitle_language == "en"
 
@@ -374,7 +377,7 @@ def test_primary_track_event_shows_language_and_counter(monkeypatch):
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     messages = []
-    monkeypatch.setattr(reader, "_toast", lambda text: messages.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text: messages.append(text))
 
     reader._on_property_change({"name": "sid", "data": 1})
 
@@ -387,7 +390,7 @@ def test_hidden_translation_does_not_reserve_english_secondary():
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     ipc.commands.clear()
 
-    subtitle_modes.release_secondary(reader)
+    subtitle_modes.release_secondary(reader.track_ports)
 
     assert not [
         command for command in ipc.commands if command[:2] == ("set_property", "secondary-sid")
@@ -398,7 +401,7 @@ def test_translation_leases_english_only_while_visible(monkeypatch):
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    monkeypatch.setattr(reader, "_draw_translation", lambda: None)
+    monkeypatch.setattr(reader, "draw_translation", lambda: None)
     ipc.commands.clear()
 
     reader.toggle_translation()
@@ -414,8 +417,8 @@ def test_primary_sid_event_updates_rendering_language():
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader._translate_on = True
-    reader._observed = {"sid": 2}
+    reader.translate_on = True
+    reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
     ipc.props["sid"] = 1
     ipc.commands.clear()
 
@@ -430,7 +433,7 @@ def test_unavailable_language_keeps_current_mode(monkeypatch):
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     messages = []
-    monkeypatch.setattr(reader, "_toast", lambda text, kind="ok": messages.append((text, kind)))
+    monkeypatch.setattr(reader, "toast", lambda text, kind="ok": messages.append((text, kind)))
     ipc.commands.clear()
 
     reader.toggle_subtitle_language()
@@ -449,15 +452,14 @@ def test_english_primary_is_plain_and_noninteractive(monkeypatch):
         "tokenize",
         lambda _text: (_ for _ in ()).throw(AssertionError("English must not be tokenized")),
     )
-    monkeypatch.setattr(
-        "saitenka.app.subtitle_render.render_plain_subtitle",
-        lambda *_args, **_kwargs: SubtitleRender(Image.new("RGBA", (20, 10)), []),
-    )
+    provider = RecordingRasterProvider()
+    reader.renderer = SubtitleRenderer(provider)
 
     reader.set_subtitle("Readable English")
 
     assert reader.sub_text == "Readable English"
     assert reader.lines == [] and reader.tokens == [] and reader.boxes == []
+    assert provider.styles == ["plain"]
 
 
 def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, monkeypatch):
@@ -467,10 +469,8 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     messages = []
     rebuilt = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", rebuilt.append
-    )
+    monkeypatch.setattr(reader, "toast", lambda text, *_args: messages.append(text))
+    monkeypatch.setattr(reader, "rebuild_sub_index", lambda: rebuilt.append("rebuilt"))
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
     ipc.commands.clear()
@@ -481,7 +481,7 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
     assert ("sub-add", str(path), "auto", "", "jpn") in ipc.commands
     assert reader.jp_sid == 9 and reader.subtitle_language == "jp"
     assert ("set_property", "sid", 9) in ipc.commands
-    assert rebuilt == [reader]
+    assert rebuilt == ["rebuilt"]
     assert messages == ["Japanese subtitles ready"]
 
 
@@ -491,7 +491,7 @@ def test_startup_japanese_arrival_preserves_track_changed_during_fetch(tmp_path,
     reader = Reader(ipc)
     jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
 
@@ -508,9 +508,9 @@ def test_startup_japanese_arrival_is_selected_after_missing_both(tmp_path, monke
     reader = Reader(ipc)
     jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
@@ -532,9 +532,9 @@ def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypa
     reader = Reader(ipc)
     jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    monkeypatch.setattr(reader, "toast", lambda *_a: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
@@ -553,14 +553,14 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch):
     ipc.props["sub-delay"] = -7.5
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # jp mode
-    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    monkeypatch.setattr(reader, "toast", lambda *_a: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = Path(tmp_path / "episode.synced.srt")
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader, path, "resynced")
+    subtitle_modes._replace_japanese_track(reader.track_ports, path, "resynced")
 
     assert ("set_property", "sub-delay", 0.0) in ipc.commands
 
@@ -575,7 +575,7 @@ def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypat
     messages = []
     monkeypatch.setattr(
         reader,
-        "_toast",
+        "toast",
         lambda text, kind="ok": messages.append((text, kind)),
     )
 
@@ -611,7 +611,7 @@ def test_runtime_retry_reports_missing_provider_or_media(monkeypatch):
     messages = []
     monkeypatch.setattr(
         reader,
-        "_toast",
+        "toast",
         lambda text, kind="ok": messages.append((text, kind)),
     )
 
@@ -635,7 +635,7 @@ def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, m
     path = tmp_path / "episode.ja.srt"
     path.write_text("Japanese")
     messages = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_args: messages.append(text))
     reader.configure_subtitle_retry(lambda _video: lambda: (path, "tsukihime: added"))
     ipc.commands.clear()
 
@@ -663,16 +663,16 @@ def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypat
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # English fallback active
     assert reader.subtitle_language == "en"
     messages: list[str] = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_args: messages.append(text))
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = tmp_path / "episode.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
     ipc.commands.clear()
 
     subtitle_modes.apply_fetch_result(
-        reader,
+        reader.track_ports,
         subtitle_modes.SubtitleFetchResult(
             path=path,
             status="picker: chosen",
@@ -712,7 +712,7 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     assert reader.subtitle_language == "jp"
     messages = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_args: messages.append(text))
     reader.configure_subtitle_retry(  # the provider factory must NOT be called
         lambda _v: (_ for _ in ()).throw(AssertionError("queried providers on re-sync"))
     )
@@ -742,7 +742,7 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
         "jpn",
     ) in ipc.commands  # re-timed file re-selected
     assert reader.jp_sid == 9 and reader.subtitle_language == "jp"
-    assert reader._sub_index is not None  # rebuilt against the re-timed cues
+    assert reader.episode.sub_index is not None  # rebuilt against the re-timed cues
     # single-cue sub → window too small → falls back to a whole-file re-sync (still no provider query)
     assert "Re-timing subtitles from here…" in messages
 
@@ -762,7 +762,7 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
     ],
 )
 def test_lang_matches_prefix_rule_and_wildcard_edges(lang, wants, expected):
-    assert subtitle_modes.lang_matches(lang, wants) is expected
+    assert subtitle_selection.lang_matches(lang, wants) is expected
 
 
 def test_foreign_only_tracks_use_the_selected_one_as_primary():
@@ -812,11 +812,11 @@ def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path):
     )
     _select(ipc, 2)
 
-    subtitle_modes.on_primary_changed(reader, 2)
+    subtitle_modes.on_primary_changed(reader.track_ports, 2)
 
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 2
-    assert reader._sub_index is not None  # indexed from the dropped file
+    assert reader.episode.sub_index is not None  # indexed from the dropped file
 
 
 @pytest.mark.parametrize(
@@ -848,7 +848,7 @@ def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path):
     )
     _select(ipc, 3)
 
-    subtitle_modes.on_primary_changed(reader, 3)
+    subtitle_modes.on_primary_changed(reader.track_ports, 3)
 
     assert reader.subtitle_language == SECOND_LANG
     assert reader.en_sid == 3
@@ -864,7 +864,7 @@ def test_manual_switch_to_untagged_track_is_adopted_as_japanese():
     ipc.tracks.append({"id": 3, "type": "sub", "lang": ""})  # empty tag == untagged
     _select(ipc, 3)
 
-    subtitle_modes.on_primary_changed(reader, 3)
+    subtitle_modes.on_primary_changed(reader.track_ports, 3)
 
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 3
@@ -880,7 +880,7 @@ def test_newly_primary_english_tagged_track_is_secondary_not_japanese():
     ipc.tracks.append({"id": 5, "type": "sub", "lang": "eng"})
     _select(ipc, 5)
 
-    subtitle_modes.on_primary_changed(reader, 5)
+    subtitle_modes.on_primary_changed(reader.track_ports, 5)
 
     assert reader.subtitle_language == SECOND_LANG
     assert reader.en_sid == 5
@@ -893,7 +893,7 @@ def test_subs_turned_off_adopt_no_track():
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     before = reader.subtitle_language
 
-    subtitle_modes.on_primary_changed(reader, None)
+    subtitle_modes.on_primary_changed(reader.track_ports, None)
 
     assert reader.subtitle_language == before
     assert reader.jp_sid is None
@@ -912,14 +912,14 @@ def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatc
     )
     _select(ipc, 2)
     messages = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_a: messages.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_a: messages.append(text))
     monkeypatch.setattr(reader, "set_subtitle", lambda *_a: None)
 
     reader.mark_current_subtitle_japanese()
 
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 2
-    assert reader._sub_index is not None
+    assert reader.episode.sub_index is not None
     assert messages == ["Marked current subtitles as Japanese"]
 
 
@@ -927,7 +927,7 @@ def test_force_current_as_japanese_with_no_track_warns(monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
     messages = []
-    monkeypatch.setattr(reader, "_toast", lambda text, kind="ok": messages.append((text, kind)))
+    monkeypatch.setattr(reader, "toast", lambda text, kind="ok": messages.append((text, kind)))
 
     reader.mark_current_subtitle_japanese()
 
@@ -938,9 +938,9 @@ def test_announce_names_a_japanese_track(monkeypatch):
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     seen = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_args: seen.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_args: seen.append(text))
 
-    subtitle_modes.announce_track(reader, 2)
+    subtitle_modes.announce_track(reader.track_ports, 2)
 
     assert seen == ["subtitles: Japanese (2/2)"]
 
@@ -949,9 +949,9 @@ def test_announce_passes_through_an_unknown_language(monkeypatch):
     ipc = FakeIPC([{"id": 3, "type": "sub", "lang": "ger"}])
     reader = Reader(ipc)
     seen = []
-    monkeypatch.setattr(reader, "_toast", lambda text, *_args: seen.append(text))
+    monkeypatch.setattr(reader, "toast", lambda text, *_args: seen.append(text))
 
-    subtitle_modes.announce_track(reader, 3)
+    subtitle_modes.announce_track(reader.track_ports, 3)
 
     assert seen == ["subtitles: ger (1/1)"]
 
@@ -967,27 +967,27 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, m
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     old = _one_cue_index()
-    reader._sub_index = old
-    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    reader.episode.sub_index = old
+    monkeypatch.setattr(reader, "toast", lambda *_a: None)
     monkeypatch.setattr(  # the new track isn't resolvable at this instant
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader, path, "resynced")
+    subtitle_modes._replace_japanese_track(reader.track_ports, path, "resynced")
 
-    assert reader._sub_index is old  # cues retained across the unresolved switch
+    assert reader.episode.sub_index is old  # cues retained across the unresolved switch
 
 
 def test_load_sub_index_retains_prior_cues_on_parse_failure(tmp_path):
     reader = Reader(FakeIPC())
     old = _one_cue_index()
-    reader._sub_index = old
+    reader.episode.sub_index = old
 
     reader.load_sub_index(tmp_path / "missing.srt")  # unreadable → load_index returns None
 
-    assert reader._sub_index is old  # a failed parse never blanks a good index
+    assert reader.episode.sub_index is old  # a failed parse never blanks a good index
 
 
 def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_path, monkeypatch):
@@ -996,20 +996,20 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader.subtitle_language = SECOND_LANG  # English on screen
+    reader.declare_subtitle(SubtitleLanguageChanged(SECOND_LANG))  # English on screen
     replaced: list = []
     monkeypatch.setattr(
         subtitle_modes, "_replace_japanese_track", lambda *a, **_k: replaced.append(a)
     )
-    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    monkeypatch.setattr(reader, "toast", lambda *_a: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
     subtitle_modes.apply_fetch_result(
-        reader,
+        reader.track_ports,
         subtitle_modes.SubtitleFetchResult(
             path=path, status="resynced", select_if_unchanged=False, initial_sid=1, replace=True
         ),
@@ -1023,9 +1023,9 @@ def test_toggle_from_english_returns_to_japanese(monkeypatch):
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # JP active
-    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(reader, "toast", lambda *_args: None)
     monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
 
     reader.toggle_subtitle_language()  # JP → EN
@@ -1034,3 +1034,37 @@ def test_toggle_from_english_returns_to_japanese(monkeypatch):
 
     assert reader.subtitle_language == "jp"
     assert ("set_property", "sid", 2) in ipc.commands
+
+
+def test_language_id_samples_the_index_when_one_is_loaded():
+    """Content-based classification for an untagged track. The parsed index is preferred over mpv's
+    on-screen cue because one visible line is a coin flip and twenty are not."""
+    index = CueIndex(
+        parse_srt(
+            "1\n00:00:01,000 --> 00:00:02,000\n日本語\n\n2\n00:00:03,000 --> 00:00:04,000\n字幕\n"
+        )
+    )
+
+    assert subtitle_modes._sample_cue_text(index, "on screen") == "日本語 字幕"
+
+
+def test_language_id_falls_back_to_the_on_screen_cue():
+    assert subtitle_modes._sample_cue_text(None, "on screen") == "on screen"
+    assert subtitle_modes._sample_cue_text(CueIndex([]), "on screen") == "on screen"
+
+
+def test_language_id_survives_a_track_with_nothing_to_sample():
+    """mpv reports `sub-text` as None before a track resolves, and `looks_japanese("")` must be the
+    answer rather than an AttributeError on the startup path."""
+    assert subtitle_modes._sample_cue_text(None, "") == ""
+
+
+def test_language_id_bounds_how_many_cues_it_reads():
+    """A feature-length index is thousands of cues; classifying needs a handful."""
+    srt = "".join(
+        f"{n}\n00:00:{n:02d},000 --> 00:00:{n + 1:02d},000\n日{n}\n\n" for n in range(1, 31)
+    )
+
+    sample = subtitle_modes._sample_cue_text(CueIndex(parse_srt(srt)), "", limit=5)
+
+    assert sample.split() == ["日1", "日2", "日3", "日4", "日5"]

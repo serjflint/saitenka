@@ -35,6 +35,10 @@ def _hermetic(monkeypatch, tmp_path):
         "2026 INFO started\n2026 INFO jimaku key=SHOULDVANISH123\n"
     )
     monkeypatch.setenv("MPV_HOME", str(tmp_path / "mpvhome"))
+    # `_collect_player_crashes` reads under the home dir, so leaving HOME real would make every
+    # assertion here depend on whether mpv had crashed on the machine running the suite.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
 
     class _Rep:
         def to_json(self):
@@ -57,6 +61,37 @@ def test_collect_includes_expected_members_and_redacts(monkeypatch, tmp_path):
     assert "SHOULDVANISH123" not in members["overlay.log"]
     # manifest carries the privacy note
     assert "NEVER uploaded" in members["MANIFEST.txt"]
+
+
+def test_collect_bundles_the_mpv_binding_table(monkeypatch, tmp_path):
+    """A command mpv attributes to a key binding is only excludable as ours against `input.conf`,
+    so the bundle has to carry it beside `mpv.conf` — reading it off the reporter's disk is not an
+    option once the report has left the machine."""
+    _hermetic(monkeypatch, tmp_path)
+    mpv_home = tmp_path / "mpvhome"
+    mpv_home.mkdir()
+    (mpv_home / "mpv.conf").write_text("hwdec=auto-safe\n")
+    (mpv_home / "input.conf").write_text(f"MBTN_LEFT cycle pause\np run {tmp_path}/tool\n")
+
+    members = report.collect(include_log=False)
+
+    assert members["mpv/mpvhome.input.conf"].startswith("MBTN_LEFT cycle pause")
+    assert "hwdec=auto-safe" in members["mpv/mpvhome.mpv.conf"]
+
+
+def test_collect_scrubs_home_from_the_binding_table(monkeypatch, tmp_path):
+    """Negative control for the test above: a bind naming a path under $HOME must not ship the
+    username, the same treatment every other bundled text gets."""
+    _hermetic(monkeypatch, tmp_path)
+    mpv_home = tmp_path / "mpvhome"
+    mpv_home.mkdir()
+    home = tmp_path / "home"
+    (mpv_home / "input.conf").write_text(f"F5 run {home}/scripts/thing.sh\n")
+
+    bundled = report.collect(include_log=False)["mpv/mpvhome.input.conf"]
+
+    assert str(home) not in bundled
+    assert "scripts/thing.sh" in bundled  # scrubbed, not dropped
 
 
 def test_collect_no_log_excludes_log(monkeypatch, tmp_path):
@@ -149,3 +184,78 @@ def test_latest_session_is_none_for_a_pre_session_log():
 def test_manifest_surfaces_the_latest_session():
     out = report._manifest({"overlay.log": "x"}, include_log=True, session="140000-cc33")
     assert "latest session: 140000-cc33" in out
+
+
+def _player_crash(tmp_path: Path, name: str, body: str, *, age_s: float = 0.0) -> Path:
+    reports = tmp_path / "home" / report._MACOS_CRASH_REPORTS
+    reports.mkdir(parents=True, exist_ok=True)
+    path = reports / name
+    path.write_text(body)
+    if age_s:
+        import os
+
+        stamp = path.stat().st_mtime - age_s
+        os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_collect_bundles_the_players_native_crash_report(monkeypatch, tmp_path):
+    """The frame that names *where* mpv died — the artifact two SIGBUS investigations needed and the
+    bundle could not carry."""
+    monkeypatch.setattr(report.sys, "platform", "darwin")
+    _hermetic(monkeypatch, tmp_path)
+    _player_crash(
+        tmp_path,
+        "mpv-2026-08-22-144118.ips",
+        '{"app_name":"mpv"}\n{"exception":{"signal":"SIGBUS"},"key":"LEAKYKEY42",'
+        f'"procPath":"{Path.home()}/bin/mpv"}}\n',
+    )
+
+    members = report.collect(include_log=True)
+
+    assert "crashes/player/mpv-2026-08-22-144118.ips" in members
+    body = members["crashes/player/mpv-2026-08-22-144118.ips"]
+    assert "SIGBUS" in body, "the faulting signal is the reason this member exists"
+    # Same redactor as every other member: home paths scrubbed, JSON-quoted secrets scrubbed.
+    assert str(Path.home()) not in body and "<HOME>" in body
+    assert "LEAKYKEY42" not in body
+
+
+def test_collect_omits_player_crash_reports_from_another_day(monkeypatch, tmp_path):
+    monkeypatch.setattr(report.sys, "platform", "darwin")
+    _hermetic(monkeypatch, tmp_path)
+    _player_crash(tmp_path, "mpv-old.ips", "{}\n", age_s=report._PLAYER_CRASH_MAX_AGE_S + 60)
+
+    assert "crashes/player/mpv-old.ips" not in report.collect(include_log=True)
+
+
+def test_collect_omits_player_crash_reports_off_macos(monkeypatch, tmp_path):
+    monkeypatch.setattr(report.sys, "platform", "linux")
+    _hermetic(monkeypatch, tmp_path)
+    _player_crash(tmp_path, "mpv-2026-08-22-144118.ips", "{}\n")
+
+    assert not [m for m in report.collect(include_log=True) if m.startswith("crashes/player/")]
+
+
+def test_collect_bundles_a_shutdown_thread_dump(monkeypatch, tmp_path):
+    """A dump file exists only when an exit hung, so carrying it is how the next report says so."""
+    _hermetic(monkeypatch, tmp_path)
+    crashes = tmp_path / "cache" / "crashes"
+    crashes.mkdir(parents=True)
+    (crashes / "shutdown-hang-20260822-144132.log").write_text("Timeout (0:00:03)!\nThread 0x1 …\n")
+
+    members = report.collect(include_log=True)
+
+    assert "Timeout" in members["crashes/shutdown-hang-20260822-144132.log"]
+
+
+def test_redact_secrets_scrubs_json_quoted_keys():
+    """`telemetry/trace.json` and mpv's `.ips` are JSON; a name in quotes never reached the separator.
+
+    Scoped to the quoting, not the naming: an underscore-prefixed name (`jimaku_key`) still escapes,
+    in TOML as much as in JSON, because `\\b` does not fall between `u` and `k`. Widening the name
+    set trades that against redacting every `sort_key` in a trace, and is its own decision.
+    """
+    out = report._redact_secrets('{"api_key":"zzzzzzzz", "token": "abcdef123456"}')
+    assert "zzzzzzzz" not in out and "abcdef123456" not in out
+    assert out.count("<redacted>") == 2

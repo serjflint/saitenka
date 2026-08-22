@@ -8,6 +8,7 @@ from util import FakeIPC
 from saitenka.app import nested_popup
 from saitenka.app.controller import Reader
 from saitenka.app.tokenize import Token
+from saitenka.app.tokenizer import get_tokenizer
 from saitenka.model import LinkBox, ScanBox
 from saitenka.panel import Definition, Entry
 
@@ -34,14 +35,17 @@ def _tok(surface: str, start: int) -> Token:
 _SPLIT = [_tok("コン", 0), _tok("サート", 2)]  # unidic-style over-split of コンサート
 
 
+def _extra_terms(dict_set, tokens):
+    """The probe needs a dict set and a tokenizer, so it takes them — no session in the way."""
+    return nested_popup._phrase_extra_terms(tokens, dict_set=dict_set, tokenizer=get_tokenizer())
+
+
 def test_phrase_extra_terms_returns_the_longest_dictionary_match():
-    reader = Reader(FakeIPC(), dict_set=_DS())
-    assert nested_popup._phrase_extra_terms(reader, _SPLIT) == ("コンサート",)
+    assert _extra_terms(_DS(), _SPLIT) == ("コンサート",)
 
 
 def test_phrase_extra_terms_is_empty_when_the_dict_set_has_no_phrase_probe():
-    reader = Reader(FakeIPC(), dict_set=object())
-    assert nested_popup._phrase_extra_terms(reader, _SPLIT) == ()
+    assert _extra_terms(object(), _SPLIT) == ()
 
 
 class _RecordingDS:
@@ -66,7 +70,7 @@ def test_link_query_is_looked_up_whole_not_tokenized():
 
     ds = _RecordingDS()
     reader = Reader(FakeIPC(), dict_set=ds)
-    tooltip._navigated_panel(reader, "それにしては")
+    tooltip._navigated_panel(reader.panel_style, "それにしては")
     assert ds.seen == ["それにしては"]  # the WHOLE query reached the lookup, not それ
 
 
@@ -79,14 +83,15 @@ def test_open_link_navigates_the_whole_query(monkeypatch):
     reader.sub_origin = (0, 0)
     monkeypatch.setattr(reader, "renderer", NullRenderer())
     lb = LinkBox("それにつけても", 0, 0, 10, 10)
-    nested_popup.open_link(reader, lb, (0, 0), 0)  # no worker → synchronous open
+    nested_popup.open_link(
+        reader.tip_ports, reader.panel_ports, lb, (0, 0), 0
+    )  # no worker → synchronous open
     assert ds.seen == ["それにつけても"]  # the WHOLE query reached the lookup, not それ
-    assert reader._nest.word == "それにつけても"  # …and it's the shown nested word
+    assert reader.tip.nest.word == "それにつけても"  # …and it's the shown nested word
 
 
 def test_phrase_extra_terms_is_empty_off_a_known_phrase():
-    reader = Reader(FakeIPC(), dict_set=_DS())
-    assert nested_popup._phrase_extra_terms(reader, [_tok("犬", 0), _tok("猫", 1)]) == ()
+    assert _extra_terms(_DS(), [_tok("犬", 0), _tok("猫", 1)]) == ()
 
 
 def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
@@ -95,8 +100,13 @@ def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
     # Decouple from the live unidic split: the scan tail tokenises to コン + サート.
     monkeypatch.setattr(reader.tokenizer, "tokenize", lambda _s: _SPLIT)
 
-    nested_popup.show_nested(reader, ScanBox("コンサート", 0, 0, 20, 20))
+    nested_popup.show_nested(
+        reader.tip_ports,
+        reader.panel_ports,
+        reader.word_lookup,
+        ScanBox("コンサート", 0, 0, 20, 20),
+    )
 
-    assert reader._nest.state is not None, "a nested popup must open"
+    assert reader.tip.nest.state is not None, "a nested popup must open"
     # The longest match is stacked on the panel's identity — コンサート, not the bare コン.
-    assert reader._nest.key.phrase_terms == ("コンサート",)
+    assert reader.tip.nest.key.phrase_terms == ("コンサート",)

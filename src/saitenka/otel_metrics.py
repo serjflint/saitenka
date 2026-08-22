@@ -50,7 +50,7 @@ subtitle_geometry_extract_ms: Histogram | None = None
 subtitle_geometry_active_events: Histogram | None = None
 subtitle_geometry_eligible_tokens: Histogram | None = None
 subtitle_geometry_skipped_tokens: Histogram | None = None
-# Scroll-input → redraw-finished chain: wraps controller._scroll_tip end-to-end (banded/blit
+# Scroll-input → redraw-finished chain: wraps controller.scroll_tip end-to-end (banded/blit
 # re-render + OSD upload) for one wheel tick or TIP_UP/DOWN keypress — its duration IS the
 # scroll-to-photon latency a user would feel as stutter.
 scroll_frame_duration_ms: Histogram | None = None
@@ -95,6 +95,44 @@ osd_paused_draw: Counter | None = (
     None  # overlay draws that landed while paused (the #8172 bug window)
 )
 osd_paused_nudge: Counter | None = None  # paused-OSD re-flushes issued to un-throttle mpv
+# A hover that pauses playback owes a resume, and a session where the resume never reaches mpv is
+# indistinguishable in the log from one where it was never owed. These three split that: which
+# lifecycle deadlines are armed vs delivered (nothing retires a hover if `tooltip-hide` never fires),
+# what the hover machine decided as the cursor left, and whether a teardown found a claim to release.
+lifecycle_timer_armed: Counter | None = None  # labeled kind=, outcome=accepted|refused
+lifecycle_timer_settled: Counter | None = None  # labeled kind=, outcome=delivered|fenced|failed
+hover_route_decisions: Counter | None = None  # labeled decision= (the machine's own class name)
+hover_pause_release: Counter | None = None  # labeled outcome=resumed|nothing-owed
+hover_pause_claim: Counter | None = (
+    None  # labeled outcome=sent|already-paused|observed-paused|policy-off
+)
+#: labeled outcome=no-observation|adopted|reinstalled. The settle runs once per event drain, and the
+#: drain runs at mpv's observation rate — `time-pos` alone is ~27/s, mouse motion several times that.
+#: Counted rather than spanned because a tick that finds no cue is a clock reading, not an event: as
+#: spans those were 39% of a whole trace file and 2873 of their 2902 instances said only this.
+cue_settles: Counter | None = None
+#: labeled outcome=match|mismatch. The frame boxes are computed in and the surface they are drawn onto
+#: are read from `osd-dimensions` by two different paths, so they can diverge with no error anywhere:
+#: the output is simply wrong for the whole episode. This is the invariant, checked per decision.
+geometry_frame_agreement: Counter | None = None
+
+
+def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
+    """Record one settle outcome to the counter, and to *span* when the settle earned one. Both
+    writes live here so the count and the span can never disagree about what a settle decided —
+    and beside the instrument rather than on the Reader, which needs no member to hold a null check.
+    """
+    if span is not None:
+        span.set("outcome", outcome)
+    if cue_settles is not None:
+        cue_settles.add(1, {"outcome": outcome})
+
+
+# A correlated write is fire-and-forget at the call site, so nothing downstream separates a
+# command mpv ran in 5ms from one that sat queued for six seconds — and mpv's own log timestamps
+# when it RAN a command, never when we asked for it.
+mpv_effect_apply_ms: Histogram | None = None  # submitted → terminal outcome, labeled identity=
+mpv_effect_outcome: Counter | None = None  # labeled identity=, outcome=succeeded|…|not-admitted
 scroll_frame_jank: Counter | None = None  # scroll frames slower than SCROLL_JANK_THRESHOLD_MS
 # Persistent cross-session caches (#149). Their hit:miss ratio IS the "is the prewarm worth it?" signal:
 # a render_cache hit is a cold pathological hover direct-painted from disk (the 40-170ms → <2ms win); an
@@ -142,6 +180,7 @@ SPANLESS_HISTOGRAMS = frozenset(
     {
         "saitenka.ipc.roundtrip_ms",  # timed() only — no ipc span (would flood at poll cadence)
         "saitenka.block_cache.rendered_px",  # band pixel height — a measure, not a duration span
+        "saitenka.mpv_effect.apply_ms",  # no span: the wait happens after the caller returned
     }
 )
 
@@ -228,9 +267,8 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
         # tid scatters unrelated spans across a different synthetic "thread" row each, defeating the
         # point of a timeline view (found by actually opening a real trace in Perfetto and looking).
         span.set_attribute("thread.id", threading.get_native_id())
-        from saitenka.session import session_id
-
-        span.set_attribute("session", session_id())  # ties every span to the run in overlay.log
+        # No `session` here: it is one value for the whole run, so the exporter writes it once into
+        # the document's `otherData`. Stamped per span it was 5.5% of a real trace file.
         for k, v in attributes.items():
             span.set_attribute(k, v)
         # Per-thread CPU time across the span. wall (the span's dur) ≫ cpu_ms ⇒ the thread was
@@ -243,6 +281,41 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
             yield SpanSetter(span)
         finally:
             span.set_attribute("cpu_ms", round((time.thread_time() - cpu0) * 1000.0, 3))
+
+
+class DeferredSpan:
+    """A span whose end arrives on someone else's thread, later.
+
+    :func:`traced` cannot express a correlated mpv write: the caller returns the moment the effect is
+    admitted and the terminal outcome lands in a callback seconds later, so a `with` block would
+    measure the submission and nothing else. Started here, ended from the completion — which is what
+    puts the wait on the same timeline as the `tooltip_show` that caused it, instead of leaving it to
+    be reconstructed by aligning three clocks (overlay.log wall, mpv's relative, the trace's epoch).
+
+    Not `start_as_current_span`: the span must not become the ambient parent of whatever the
+    submitting thread does next, and it outlives that scope anyway.
+    """
+
+    __slots__ = ("_span",)
+
+    def __init__(self, name: str, **attributes: str) -> None:
+        trace = _resolve_trace_module()
+        if trace is None:
+            self._span: Any | None = None
+            return
+        span = trace.get_tracer("saitenka.overlay").start_span(name)
+        span.set_attribute("thread.id", threading.get_native_id())  # the SUBMITTING thread
+        for k, v in attributes.items():
+            span.set_attribute(k, v)
+        self._span = span
+
+    def finish(self, **attributes: object) -> None:
+        if self._span is None:
+            return
+        for k, v in attributes.items():
+            self._span.set_attribute(k, v)
+        self._span.end()
+        self._span = None
 
 
 @contextmanager
@@ -326,6 +399,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
+    global lifecycle_timer_armed, lifecycle_timer_settled
+    global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
+    global hover_route_decisions, hover_pause_release, cue_settles
+    global geometry_frame_agreement
 
     with _lock:
         _reader = reader
@@ -517,6 +594,43 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_pixels.catastrophic_fallbacks",
             description="proved native-pixel failures committed to legacy subtitle pixels",
         )
+        lifecycle_timer_armed = meter.create_counter(
+            "saitenka.lifecycle_timer.armed",
+            description="lifecycle deadlines scheduled (kind=, outcome=accepted|refused)",
+        )
+        lifecycle_timer_settled = meter.create_counter(
+            "saitenka.lifecycle_timer.settled",
+            description="lifecycle deadlines that came due (kind=, outcome=delivered|fenced|failed)",
+        )
+        hover_route_decisions = meter.create_counter(
+            "saitenka.hover.route_decisions",
+            description="decisions the hover machine published per observation (decision=)",
+        )
+        hover_pause_release = meter.create_counter(
+            "saitenka.hover.pause_release",
+            description="teardowns that found a pause claim to release (outcome=)",
+        )
+        hover_pause_claim = meter.create_counter(
+            "saitenka.hover.pause_claim",
+            description="hover pause decisions (outcome=sent|already-paused|observed-paused|policy-off)",
+        )
+        cue_settles = meter.create_counter(
+            "saitenka.cue.settles",
+            description="cue settles per event drain (outcome=no-observation|adopted|reinstalled)",
+        )
+        geometry_frame_agreement = meter.create_counter(
+            "saitenka.geometry.frame_agreement",
+            description="geometry frame vs the OSD surface it draws onto (outcome=match|mismatch)",
+        )
+        mpv_effect_apply_ms = meter.create_histogram(
+            "saitenka.mpv_effect.apply_ms",
+            unit="ms",
+            description="correlated command submitted to terminal outcome (identity=)",
+        )
+        mpv_effect_outcome = meter.create_counter(
+            "saitenka.mpv_effect.outcome",
+            description="correlated command terminal outcomes (identity=, outcome=)",
+        )
         subtitle_pixel_retry_exhausted = meter.create_counter(
             "saitenka.subtitle_pixels.retry_exhausted",
             description="native subtitle visibility retries exhausted without a proved owner",
@@ -553,6 +667,10 @@ def unregister() -> None:
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
+    global lifecycle_timer_armed, lifecycle_timer_settled
+    global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
+    global hover_route_decisions, hover_pause_release, cue_settles
+    global geometry_frame_agreement
 
     with _lock:
         _reader = None
@@ -614,6 +732,15 @@ def unregister() -> None:
         subtitle_geometry_recoveries = None
         subtitle_pixel_catastrophic_fallbacks = None
         subtitle_pixel_retry_exhausted = None
+        lifecycle_timer_armed = None
+        lifecycle_timer_settled = None
+        hover_route_decisions = None
+        hover_pause_release = None
+        hover_pause_claim = None
+        cue_settles = None
+        geometry_frame_agreement = None
+        mpv_effect_apply_ms = None
+        mpv_effect_outcome = None
         prefetch_queue_depth = None
 
 
@@ -678,5 +805,32 @@ def _summarize_metric(metric) -> dict[str, object]:
             "sum": total,
             "max": dp_max,  # exact recorded max (the percentiles are bucket-bound estimates)
             **_percentiles(bucket_counts, points[0].explicit_bounds, dp_max, count),
+            # Count and exact max per label, no percentiles: merging identities would say "some
+            # correlated command took six seconds" when the whole question is which one, and the
+            # exact max is the discriminator — a bucket-bound percentile is not.
+            "by": {_label_key(p): {"count": p.count, "max": p.max} for p in points if p.attributes},
         }
-    return {"value": sum(p.value for p in points)}
+    return {"value": sum(p.value for p in points), "by": _by_label(points)}
+
+
+def _label_key(point) -> str:
+    attributes = point.attributes or {}
+    return ",".join(f"{k}={attributes[k]}" for k in sorted(attributes))
+
+
+def _by_label(points) -> dict[str, float]:
+    """Each label combination's own value, beside the total.
+
+    The total alone cannot answer what a labeled counter was added for. `lifecycle_timer.armed`
+    summed over every kind says some deadline was scheduled; the question is whether
+    `kind=tooltip-hide` ever was, and merging erases exactly the axis that discriminates. Empty for
+    an unlabeled counter, so its series is unchanged.
+    """
+    out: dict[str, float] = {}
+    for point in points:
+        attributes = point.attributes or {}
+        if not attributes:
+            continue
+        key = ",".join(f"{k}={attributes[k]}" for k in sorted(attributes))
+        out[key] = out.get(key, 0.0) + float(point.value)
+    return out

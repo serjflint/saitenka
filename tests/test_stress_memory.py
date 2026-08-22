@@ -39,4 +39,4 @@ def test_sustained_churn_stays_within_memory_ceiling():
     for _ in range(_ROUNDS):
         for term in _CORPUS:
             _churn(r, term)
-    assert len(r._panel_cache) <= PANEL_CACHE_MAX
+    assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX

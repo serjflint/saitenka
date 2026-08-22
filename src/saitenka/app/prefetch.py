@@ -15,10 +15,12 @@ from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Container
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.scoring import Scorer
+    from saitenka.app.token_cache import TokenCache
     from saitenka.app.tokenize import Token
+    from saitenka.app.tokenizer import Tokenizer
     from saitenka.subtitles import CueIndex
 
 log = logging.getLogger(__name__)
@@ -143,8 +145,7 @@ class PrefetchWork:
 
 class PrefetchHost(Protocol):
     dict_set: PrefetchDictionary | None
-
-    def _tip_cap(self) -> int: ...
+    tip_scale: TipScale
 
     def _panel_for(self, token, inflected, **kwargs): ...
 
@@ -191,7 +192,7 @@ class HostPrefetchBackend:
 
     def _render_head(self, item: PrefetchItem | HeadPrefetchItem, should_cancel) -> bool:
         reader = self._reader
-        cap = reader._tip_cap()
+        cap = reader.tip_scale.cap
         panel = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
         if should_cancel():
             return False
@@ -217,7 +218,7 @@ def run_prefetch(work: object, cancelled: threading.Event, backend: HostPrefetch
         raise
 
 
-def prefetch_worker_count(reader: Reader) -> int:
+def prefetch_worker_count(tokenizer, configured: int) -> int:
     """An explicit ``[perf].prefetch_workers`` (>0) pins the count on both builds; ``0`` (auto) picks a
     flat per-build default (``_AUTO_WORKERS_FREE_THREADED`` / ``_AUTO_WORKERS_GIL``). Each worker is
     PERSISTENT and carries real per-thread RAM (SQLite page cache + FreeType faces + the free-threaded
@@ -232,31 +233,34 @@ def prefetch_worker_count(reader: Reader) -> int:
     for parallelism that never actually happens. Force the load now (its one-time cost lands at startup
     instead of on the first real subtitle line either way) so this reflects the GIL state that will
     actually hold for the session."""
-    reader.tokenizer.tokenize("")
-    if reader.prefetch_workers > 0:  # explicit [perf].prefetch_workers pins it on BOTH builds
-        return reader.prefetch_workers
+    tokenizer.tokenize("")
+    if configured > 0:  # explicit [perf].prefetch_workers pins it on BOTH builds
+        return configured
     return _AUTO_WORKERS_FREE_THREADED if gil_disabled() else _AUTO_WORKERS_GIL
 
 
-def start_prefetch(reader: Reader) -> None:
-    if not reader.prefetch or reader.dict_set is None:
+def start_prefetch(
+    ipc,
+    state: PrefetchState,
+    backend: HostPrefetchBackend,
+    tokenizer,
+    workers: int,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled:
         return
-    state = reader.prefetch_state
     if state.closed or state.submitter is not None:
         return
-    register = getattr(reader.ipc, "register_runtime_job_lane", None)
-    if register is None:
-        return
-    desired = prefetch_worker_count(reader)
-    backend = HostPrefetchBackend(reader)
-    if not register(
+    desired = prefetch_worker_count(tokenizer, workers)
+    if not ipc.register_runtime_job_lane(
         "speculative-prefetch",
         JobLanePolicy(capacity=desired, workers=desired),
         lambda request, cancelled: run_prefetch(request, cancelled, backend),
     ):
         return
     state.workers = desired
-    state.submitter = reader.ipc.submit_runtime_job
+    state.submitter = ipc.submit_runtime_job
 
 
 def _submit_pending(
@@ -348,24 +352,56 @@ def close(state: PrefetchState) -> None:
     state.inflight.clear()
 
 
-def _candidates(reader: Reader) -> list[tuple[int, int, Token]]:
+def _candidates(tokens, styles, tokenizer) -> list[tuple[int, int, Token]]:
     """This line's content words worth warming, N+1 first (likeliest hover / mine target),
     de-duplicated by lemma. Each entry is ``(priority, token_index, token)``."""
     seen: set[str] = set()
     items: list[tuple[int, int, Token]] = []
-    for i, t in enumerate(reader.tokens):
-        if not reader.tokenizer.is_content(t) or t.lemma in seen:
+    for i, t in enumerate(tokens):
+        if not tokenizer.is_content(t) or t.lemma in seen:
             continue
         seen.add(t.lemma)
-        np1 = bool(
-            reader.styles and i < len(reader.styles) and reader.styles[i].tag.startswith("n+1")
-        )
+        np1 = bool(styles and i < len(styles) and styles[i].tag.startswith("n+1"))
         items.append((0 if np1 else 1, i, t))
     items.sort(key=lambda x: x[0])
     return items
 
 
-def update_prefetch(reader: Reader) -> None:
+@dataclass(frozen=True, slots=True)
+class PrefetchPorts:
+    """What one speculative-warming pass reads: the cue on screen, whether the user looks engaged,
+    and where the queued work goes.
+
+    `engaged` is a fact rather than the pause property and the mouse flag it is derived from — the
+    pass only ever asks "is a hover imminent", and the two inputs answer that one question.
+    """
+
+    enabled: bool
+    engaged: bool
+    state: PrefetchState
+    cues: LookaheadCues
+    tokens: list[Token]
+    styles: object
+    tokenizer: Tokenizer
+    inflected: Callable[[int], str]
+    is_mined: Callable[[Token], bool]
+    finish: Callable[[EffectFinished], None]
+
+
+@dataclass(frozen=True, slots=True)
+class HeadProbe:
+    """What deciding a speculative HEAD render has to look at: the scorer that ranks a word, and the
+    panel cache that says it is already warm. Separate from `PrefetchPorts` because the head pass is
+    optional — without a scorer there is no ranking, and the warm pass runs anyway.
+    """
+
+    scorer: Scorer | None
+    panel_key: Callable[..., object]
+    panel_cache: Container[object]
+    lookahead: int
+
+
+def update_prefetch(ports: PrefetchPorts, head: HeadProbe) -> None:
     """Queue the current line's content words for background work every time the line (or engagement)
     changes — *engaged* (paused OR the cursor over the video) gets a viewport-first HEAD render (a
     hover is imminent); otherwise a cheap dict-only WARM (``full=False``): the video is just playing, but
@@ -375,50 +411,62 @@ def update_prefetch(reader: Reader) -> None:
 
     With ``prefetch_lookahead`` set, the next few cues' words are then WARMED too (dict-only) so the
     first hover after the line advances is already decoded."""
-    if not reader.prefetch or reader.dict_set is None:
+    if not ports.enabled:
         return
-    engaged = bool(reader._prop("pause")) or reader._mouse_in
-    key = (reader.sub_text, engaged)
-    if key == reader._prefetch_key:
+    key = (ports.cues.text, ports.engaged)
+    state = ports.state
+    if key == state.key:
         return
-    reader._prefetch_key = key
-    state = reader.prefetch_state
+    state.key = key
     gen = state.cancel()
-    cands = _candidates(reader)
+    cands = _candidates(ports.tokens, ports.styles, ports.tokenizer)
     jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem]] = []
     for _, i, t in cands:
         jobs.append(
             (
-                0 if engaged else 2,
-                PrefetchItem(gen, t, reader._inflected_surface(i), reader._is_mined(t), engaged),
+                0 if ports.engaged else 2,
+                PrefetchItem(gen, t, ports.inflected(i), ports.is_mined(t), ports.engaged),
             )
         )
-    if reader.prefetch_lookahead > 0:
-        jobs.extend(_lookahead_items(reader, gen, {t.lemma for _, _, t in cands}))
-    if reader.head_prefetch_lookahead > 0:
-        jobs.extend(_head_prefetch_items(reader, gen, {t.lemma for _, _, t in cands}))
-    schedule(state, jobs, reader._finish_speculative_prefetch)
+    if ports.cues.lookahead > 0:
+        jobs.extend(
+            _lookahead_items(ports.cues, ports.tokenizer, gen, {t.lemma for _, _, t in cands})
+        )
+    if head.lookahead > 0:
+        jobs.extend(_head_prefetch_items(ports, head, gen, {t.lemma for _, _, t in cands}))
+    schedule(state, jobs, ports.finish)
 
 
-def _lookahead_items(reader: Reader, gen: int, seen: set[str]) -> list[tuple[int, PrefetchItem]]:
+@dataclass(frozen=True, slots=True)
+class LookaheadCues:
+    """Which cues to warm ahead of the current one. One value, because these four are read together
+    and a mismatched set warms the wrong line — `preferred` only means anything against `index`."""
+
+    index: object
+    text: str
+    nav_index: int
+    lookahead: int
+
+
+def _lookahead_items(
+    cues: LookaheadCues, tokenizer, gen: int, seen: set[str]
+) -> list[tuple[int, PrefetchItem]]:
     """WARM (dict-only, never full, ``mined=False``) the content words of the next
     ``prefetch_lookahead`` cues — a future line is never *engaged* and never builds a header, so no
     main-thread jamdict/scorer work runs here. ``seen`` carries the current line's lemmas so a word
     already queued isn't warmed twice. No-op without an external sub index."""
     items: list[tuple[int, PrefetchItem]] = []
-    cue_limit = min(max(0, reader.prefetch_lookahead), _MAX_WARM_PENDING)
-    for text in upcoming_cue_texts(reader, cue_limit):
-        toks = reader.tokenizer.tokenize(text)
+    cue_limit = min(max(0, cues.lookahead), _MAX_WARM_PENDING)
+    for text in upcoming_cue_texts(cues.index, cue_limit, text=cues.text, preferred=cues.nav_index):
+        toks = tokenizer.tokenize(text)
         for i, t in enumerate(toks):
-            if not reader.tokenizer.is_content(t) or t.lemma in seen:
+            if not tokenizer.is_content(t) or t.lemma in seen:
                 continue
             seen.add(t.lemma)
             items.append(
                 (
                     3,
-                    PrefetchItem(
-                        gen, t, reader.tokenizer.inflected_in(toks, i), mined=False, full=False
-                    ),
+                    PrefetchItem(gen, t, tokenizer.inflected_in(toks, i), mined=False, full=False),
                 )
             )
             if len(items) >= _MAX_WARM_PENDING:
@@ -447,18 +495,18 @@ def _head_priority(tag: str) -> int | None:
 
 
 def _head_prefetch_candidate(
-    reader: Reader, gen: int, toks: list[Token], i: int, t: Token, styles
+    ports: PrefetchPorts, head: HeadProbe, gen: int, toks: list[Token], i: int, t: Token, styles
 ) -> tuple[int, HeadPrefetchItem] | None:
     """Is token `t` (at index `i`) worth a speculative head-render? None if not — either
     :func:`_head_priority` says no, it's already mined, or it's already warm in the panel cache."""
     priority = _head_priority(styles[i].tag)
     if priority is None:
         return None
-    if reader._is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
+    if ports.is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
         return None
-    inflected = reader.tokenizer.inflected_in(toks, i)
-    key = reader._panel_key(t, inflected, mined=False)
-    if key in reader._panel_cache:
+    inflected = ports.tokenizer.inflected_in(toks, i)
+    key = head.panel_key(t, inflected, mined=False)
+    if key in head.panel_cache:
         return None  # already warm (hovered earlier, or a prior speculative render)
     return priority, HeadPrefetchItem(gen, t, inflected, mined=False)
 
@@ -491,85 +539,121 @@ def _head_candidates_for_text(
 
 
 def _head_prefetch_items(
-    reader: Reader, gen: int, seen: set[str]
+    ports: PrefetchPorts, head: HeadProbe, gen: int, seen: set[str]
 ) -> list[tuple[int, HeadPrefetchItem]]:
     """Speculative HEAD render for a SELECTIVE subset of the next
     ``head_prefetch_lookahead`` cues' words: only ones :func:`_head_priority` judges worth the extra
     render cost over plain decode-warming, in priority order, bounded by ``head_queue_max`` (the
     transient-RSS cap — panel_cache's LRU only bounds RETAINED size). Needs a scorer for the n+1/
     known/freq signal; a no-op without one or a subtitle index."""
-    if reader.scorer is None:
+    if head.scorer is None:
         return []
     candidates: list[tuple[int, HeadPrefetchItem]] = []
     probe_budget = _MAX_HEAD_TOKEN_PROBES
-    cue_limit = min(max(0, reader.head_prefetch_lookahead), reader.prefetch_state.head_queue_max)
-    for text in upcoming_cue_texts(reader, cue_limit):
+    queue_max = ports.state.head_queue_max
+    cue_limit = min(max(0, head.lookahead), queue_max)
+    for text in upcoming_cue_texts(
+        ports.cues.index, cue_limit, text=ports.cues.text, preferred=ports.cues.nav_index
+    ):
         found, probes = _head_candidates_for_text(
             text,
             seen,
-            reader.tokenizer.tokenize,
-            reader.tokenizer.is_content,
-            reader.scorer.score_line,
+            ports.tokenizer.tokenize,
+            ports.tokenizer.is_content,
+            head.scorer.score_line,
             lambda toks, i, token, styles: _head_prefetch_candidate(
-                reader, gen, toks, i, token, styles
+                ports, head, gen, toks, i, token, styles
             ),
-            reader.prefetch_state.head_queue_max - len(candidates),
+            queue_max - len(candidates),
             probe_budget,
         )
         candidates.extend(found)
         probe_budget -= probes
-        if len(candidates) >= reader.prefetch_state.head_queue_max or probe_budget <= 0:
+        if len(candidates) >= queue_max or probe_budget <= 0:
             break
     candidates.sort(key=lambda candidate: candidate[0])
-    return [(1, item) for _priority, item in candidates[: reader.prefetch_state.head_queue_max]]
+    return [(1, item) for _priority, item in candidates[:queue_max]]
 
 
-def upcoming_cue_texts(reader: Reader, n: int) -> list[str]:
+def upcoming_cue_texts(index, n: int, *, text: str, preferred: int) -> list[str]:
     """Text of the ``n`` cues after the one on screen, from the external sub index (empty when there's
     no index, the line isn't located, or we're at the tail). Located by the displayed text alone — the
     reliable signal per :meth:`CueIndex.locate` — so it stays off the mpv IPC path."""
-    idx = reader._sub_index
-    if idx is None or not len(idx) or n <= 0:
+    if index is None or not len(index) or n <= 0:
         return []
-    current = idx.locate(text=reader.sub_text, preferred=reader._nav_idx)
+    current = index.locate(text=text, preferred=preferred)
     if current < 0:
         return []
-    return [idx.cues[i].text for i in range(current + 1, min(len(idx), current + 1 + n))]
+    return [index.cues[i].text for i in range(current + 1, min(len(index), current + 1 + n))]
 
 
-def warm_episode_tokens(reader: Reader) -> None:
+def warm_episode_tokens(ports: WarmPorts) -> None:
     """Fire-and-forget: tokenize EVERY cue of the current sub index into ``reader.token_cache`` on a
     background thread, so no cue pays cold tokenization mid-playback (the whole episode is warm ahead
     of playback, not just a short window). Best-effort — a key mismatch (mpv re-wrapping a line) just
     re-tokenizes that cue on demand; a track switch (new index object) supersedes a stale warm. No-op
     without prefetch, a dictionary, or an index; skips an index already warmed."""
-    idx = reader._sub_index
-    if not reader.prefetch or reader.dict_set is None or idx is None or reader._warmed_index is idx:
+    idx = ports.index
+    if not ports.enabled or idx is None or not ports.claim(idx):
         return
-    reader._warmed_index = idx
-    if reader._annotation_async:
-        reader._start_episode_annotation(idx)
+    if ports.annotate_async:
+        ports.start_annotation(idx)
         return
     threading.Thread(
-        target=lambda: _warm_episode_loop(reader, idx), name="saitenka-episode-warm", daemon=True
+        target=lambda: _warm_episode_loop(idx, ports=ports.loop),
+        name="saitenka-episode-warm",
+        daemon=True,
     ).start()
 
 
-def _warm_episode_loop(reader: Reader, idx: CueIndex) -> None:
+@dataclass(frozen=True, slots=True)
+class EpisodeWarmPorts:
+    """What the background warm keeps asking, never what it saw once.
+
+    Every member is a callable or a live object on purpose: the loop's whole job is to notice that
+    the ground moved under it — closing, a track switch, a profile swap — so a snapshot would turn
+    the supersede checks into three constants.
+    """
+
+    stop: threading.Event
+    token_cache: TokenCache
+    current_index: Callable[[], CueIndex | None]
+    normalise: Callable[[str], str]
+    tokenize: Callable[..., object]
+
+
+@dataclass(frozen=True, slots=True)
+class WarmPorts:
+    """What starting an episode warm decides on: whether there is anything to warm, which index, and
+    which of the two warm paths runs.
+
+    `claim` is one act rather than a read of the last-warmed index and a write of this one: the check
+    and the mark have to be indivisible, or two starts on the same index both warm it.
+    """
+
+    enabled: bool
+    index: CueIndex | None
+    claim: Callable[[CueIndex], bool]
+    annotate_async: bool
+    start_annotation: Callable[[CueIndex], None]
+    loop: EpisodeWarmPorts
+
+
+def _warm_episode_loop(idx: CueIndex, *, ports: EpisodeWarmPorts) -> None:
     warmed = 0
     # The generation this warm belongs to: a live profile swap (#254 D8) clears the cache and bumps it,
     # so a worker mid-tokenize with the OLD tokenizer can't put() a stale-language entry after the swap
     # — the gen is threaded into every put (dropped under the cache lock on mismatch) AND breaks the loop.
-    gen = reader.token_cache.generation
+    gen = ports.token_cache.generation
     for cue in list(idx.cues):
         if (
-            reader._stop.is_set()
-            or reader._sub_index is not idx
-            or reader.token_cache.generation != gen
+            ports.stop.is_set()
+            or ports.current_index() is not idx
+            or ports.token_cache.generation != gen
         ):
             return  # closing, a track switch replaced the index, or a profile swap → drop the stale warm
         try:
-            reader._tokenize_cue(reader._cue_norm(cue.text), generation=gen)
+            ports.tokenize(ports.normalise(cue.text), generation=gen)
             warmed += 1
         except Exception:
             log.debug("episode token warm failed for a cue", exc_info=True)  # never kill the warm
@@ -579,13 +663,13 @@ def _warm_episode_loop(reader: Reader, idx: CueIndex) -> None:
 # The tooltip's FIXED reference resolution. Tooltip geometry (width, viewport-height cap) is computed
 # against this, NOT the live OSD, so the persistent render cache is resolution-independent: a 1080p
 # prewarm hits at any playback resolution, and osd_h/REF_H scales the composited bitmap to the actual
-# display at upload time (Reader._tip_display_scale). The tooltip is a VIDEO-OVERLAY element that tracks
+# display at upload time (``TipScale.display``). The tooltip is a VIDEO-OVERLAY element that tracks
 # the vertical viewport, NOT the app-chrome ui_scale (its fonts are theme scale 1.0). Matches the
 # interaction goldens pinned at 1080p (scale 1.0 = the reference, unscaled).
 REF_W, REF_H = 1920, 1080
 
 
-def cap_for(reader: Reader, frac: float) -> int:  # noqa: ARG001 — reader kept for the call-site shape
+def cap_for(frac: float) -> int:
     """A viewport-height cap: ``frac`` of the REFERENCE height, clear of the header/footer margin.
     REFERENCE-based (not the live OSD, not ui_scale) so the tooltip render cache is resolution-independent;
     the display scale (osd_h/REF_H) then maps ``frac`` onto the ACTUAL viewport at upload."""
@@ -593,7 +677,44 @@ def cap_for(reader: Reader, frac: float) -> int:  # noqa: ARG001 — reader kept
     return min(round(REF_H * frac), REF_H - 2 * margin)
 
 
-def tip_cap(reader: Reader) -> int:
+def tip_cap(max_frac: float) -> int:
     """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
     own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
-    return cap_for(reader, reader.tip_max_frac)
+    return cap_for(max_frac)
+
+
+# The tooltip's reference width. ``REF_W * 0.36`` clamped to 640 — displayed width ≈ 0.59 × osd_h,
+# derived from the VERTICAL viewport, so it stays narrow on an ultra-wide (an osd_WIDTH formula would
+# not). Theme scale 1.0, like the fonts ``panel_rows`` draws it with.
+TIP_W = int(min(REF_W * 0.36, 640))
+
+# mpv's osd dimensions wobble a few px, which jitters osd_h/REF_H in the third decimal. Snapping the
+# raster scale to a bucket means that wobble reuses cached native bands instead of re-rastering.
+SCALE_BUCKET = 0.05
+
+
+@dataclass(frozen=True, slots=True)
+class TipScale:
+    """The tooltip's reference geometry and the one factor that maps it onto the live display.
+
+    ``width``, ``cap`` and ``ref_h`` are reference-space and do not move with the resolution — that is
+    what makes the render cache resolution-independent, so a 1080p prewarm hits at any playback size.
+    ``display`` and ``raster`` are the only two that do.
+    """
+
+    #: REFERENCE→display factor: ``osd_h / REF_H`` (1.0 at 1080p, 2.0 at 4K), or a fixed ``tip_scale``
+    #: preference. Applied to the composited BGRA at upload and inverted in the hit-test.
+    display: float
+    #: ``display`` snapped to ``SCALE_BUCKET`` — the scale the crisp path rasters, composites AND
+    #: inverts the hit-test at. All three must agree, so there is one bucketed value, not three.
+    raster: float
+    #: Max BASE viewport height, in reference pixels.
+    cap: int
+    width: int = TIP_W
+    ref_h: int = REF_H
+
+
+def tip_scale(osd_h: int, *, override: float, max_frac: float) -> TipScale:
+    """The whole tooltip scale boundary from the three inputs it actually depends on."""
+    display = override if override > 0 else osd_h / REF_H
+    return TipScale(display, round(display / SCALE_BUCKET) * SCALE_BUCKET, tip_cap(max_frac))

@@ -9,13 +9,15 @@ that forgets to declare shown-ness is exactly the #100 picker click-through bug)
 from __future__ import annotations
 
 import pytest
+import util
 
-from saitenka.app import help_overlay, sidebar, sub_picker, surfaces
+from saitenka.app import sidebar, surfaces
 from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.app.surfaces import SurfaceSpec
-from saitenka.runtime import UserCommand
+from saitenka.runtime import UserCommand, events
+from saitenka.runtime import sidebar as runtime_sidebar
 
 
 class _FakeState:
@@ -23,14 +25,10 @@ class _FakeState:
         self.open = open
 
 
-class _FakeIPC:
+class _FakeIPC(util.FakeIPC):
     def __init__(self, **props):
-        self.props = {"osd-dimensions": {"w": 1920, "h": 1080}, **props}
-
-    def command(self, *args):
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"error": "success"}
+        super().__init__()
+        self.props.update({"osd-dimensions": {"w": 1920, "h": 1080}, **props})
 
 
 def _spec(name: str, *, claims: set[str], calls: list[str], open: bool = False) -> SurfaceSpec:  # noqa: A002
@@ -128,38 +126,88 @@ def test_every_surface_state_exposes_open(spec):
 
 
 def test_scroll_command_routes_to_open_help(monkeypatch):
+    from saitenka.runtime.help import HelpCommand
+
     reader = Reader(_FakeIPC())
-    reader._help_open = True
+    reader._help_store.dispatch(
+        HelpCommand.TOGGLE
+    )  # the slice owns "open"; nothing else may set it
     steps: list[int] = []
-    monkeypatch.setattr(help_overlay, "step", lambda _reader, step: steps.append(step))
+    # The help surface routes the wheel into the help *command*; which page that is is the slice's.
+    monkeypatch.setattr(reader, "_run_help_command", lambda command: steps.append(command))
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert steps == [1]
+    assert steps == [HelpCommand.NEXT]
 
 
 def test_scroll_command_routes_to_open_picker(monkeypatch):
+    from saitenka.app.sub_picker import ListingResult
+    from saitenka.runtime import events, picker
+
     reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
-    reader.sub_picker.open = True
-    reader.sub_picker.rect = (0, 0, 100, 100)
     candidate = SubtitleCandidate(
         "provider", "name", 1, match=False, download=lambda: ("path", "ok")
     )
-    reader.sub_picker.candidates = (candidate,) * 20
-    monkeypatch.setattr(sub_picker, "redraw", lambda _reader: None)
+    reader._picker_store.dispatch(events.PickerOpened())
+    reader._picker_store.dispatch(
+        events.PickerListed(reader.sub_picker.generation, ListingResult((candidate,) * 20, ()))
+    )
+    reader.interaction.picker_panel.rect = (0, 0, 100, 100)
+    monkeypatch.setattr(reader, "redraw_sub_picker", lambda: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert reader.sub_picker.scroll == sub_picker.ROWS_PER_WHEEL_STEP
+    assert reader.sub_picker.scroll == picker.ROWS_PER_WHEEL_STEP
 
 
 def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (0, 0, 100, 100)
-    reader.sidebar.total = 100
-    monkeypatch.setattr(sidebar, "redraw", lambda _reader: None)
+    reader._sidebar_store.dispatch(events.SidebarShown(active=0, capacity=10))
+    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
+    reader.interaction.sidebar_panel.total = 100
+    monkeypatch.setattr(sidebar, "draw", lambda _view: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert reader.sidebar.scroll == sidebar.ROWS_PER_WHEEL_STEP
+    assert reader.sidebar.scroll == runtime_sidebar.ROWS_PER_WHEEL_STEP
+
+
+def test_the_registry_reads_shown_ness_without_a_reader() -> None:
+    """Occlusion is answerable from the INTERACTION context alone — no host anywhere in the chain.
+
+    `state_of` used to take the whole `Reader` to return one field, and because `SurfaceSpec` is one
+    shared signature, every accessor plus `captures` and `wants_mouse_capture` was a host-taking row
+    for it. Gathering the five surface states onto `InteractionContext` converted all of them at once.
+    Constructing the context directly is the proof: if any hook still reached past it, this cannot run.
+    """
+    from saitenka.app.card_preview import PreviewPanel
+    from saitenka.app.popups import TooltipState
+    from saitenka.app.reader_context import InteractionContext
+    from saitenka.app.sidebar import SidebarPanel
+    from saitenka.app.sub_picker import PickerPanel
+    from saitenka.app.surfaces import wants_mouse_capture
+    from saitenka.runtime.interaction_slice import (
+        HelpStore,
+        PickerStore,
+        PreviewStore,
+        SidebarStore,
+    )
+    from saitenka.runtime.jobs import NoSessionRuntime
+
+    interaction = InteractionContext()
+    # Two of the five are slice features now, so the context is given their stores rather than
+    # their states — and `NoSessionRuntime` is how a transport-less stand-in says "no reactor here".
+    interaction.help_store = HelpStore(NoSessionRuntime())
+    interaction.picker_store = PickerStore(NoSessionRuntime())
+    interaction.picker_panel = PickerPanel()
+    interaction.sidebar_store = SidebarStore(NoSessionRuntime())
+    interaction.sidebar_panel = SidebarPanel()
+    interaction.preview_store = PreviewStore(NoSessionRuntime())
+    interaction.preview_panel = PreviewPanel()
+    interaction.tip = TooltipState()
+
+    assert wants_mouse_capture(interaction) is False
+
+    interaction.sidebar_store.dispatch(events.SidebarShown(active=0, capacity=10))
+    assert wants_mouse_capture(interaction) is True

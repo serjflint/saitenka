@@ -67,18 +67,21 @@ class PreviewRender:
 
 
 @dataclass
-class PreviewState:
-    """The last-mined card's media plus the on-screen preview panel and its clickable regions.
+class PreviewPanel:
+    """What one paint of the preview produced, plus the media the mine captured for it.
 
-    Grouped so the Reader owns preview as one pluggable unit (app/miner_ui.py drives it); ``clear()``
-    is the single reset the dismiss path (``hide_preview``) and any re-show share, so nulling a rect
-    can't drift out of sync with the others."""
+    The same cut the picker and the sidebar make: `Owner.INTERACTION`'s slice holds what was
+    *decided* — what is composed, its clip, whether it is enlarged — and this holds the screen
+    rects the click handler tests against and the clip's live player, which no reducer can kill.
+
+    `last_jpg` / `last_audio` are the *mine's* output, not the shown preview's: the miner captures
+    them and the next `build_preview` reads them. The clip the shown preview replays is the slice's
+    — two lifetimes, so two fields, or a dismiss cannot drop one and keep the other.
+    """
 
     last_jpg: Path | None = None  # the mpv still (mining fallback image); drives the preview
-    last_audio: Path | str | None = None  # the mined cue clip, replayed by the ▶ button
+    last_audio: Path | str | None = None  # the clip the mine encoded, for the next preview built
     audio_proc: subprocess.Popen | None = None  # the ▶ clip's live player, killed on every dismiss
-    last_preview: PreviewData | None = None  # the currently-composed preview (None ⇒ hidden)
-    zoom: bool = False  # the screenshot is enlarged (toggled by clicking it)
     dup_tok: Token | None = None  # token behind an "exists" preview, for "add anyway"
     # Screen-space clickable regions of the shown panel (None when hidden / absent).
     rect: Rect | None = None
@@ -87,15 +90,8 @@ class PreviewState:
     image_rect: Rect | None = None
     dup_rect: Rect | None = None
 
-    @property
-    def open(self) -> bool:
-        """Shown iff a panel rect is placed — the uniform ``SurfaceState`` predicate the surface
-        registry (app/surfaces.py) reads for mouse-capture/routing."""
-        return self.rect is not None
-
     def clear(self) -> None:
-        """Dismiss: forget the composed preview and every clickable region in one move."""
-        self.last_preview = None
+        """Dismiss: forget every clickable region in one move."""
         self.rect = self.close_rect = None
         self.audio_rect = self.image_rect = self.dup_rect = None
 

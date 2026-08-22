@@ -1,6 +1,10 @@
 """Whole-episode subtitle sidebar behavior at the Reader seam."""
 
+import dataclasses
+
 import pytest
+import util
+from driver import Driver
 from PIL import Image
 
 from saitenka.app import sidebar
@@ -16,19 +20,15 @@ from saitenka.app.subtitles import (
     render_sidebar,
 )
 from saitenka.app.wordlists import KnownWords
+from saitenka.runtime import events
+from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
 from saitenka.subtitles import Cue, CueIndex
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props or {})
 
 
 class FakeOverlay:
@@ -48,9 +48,14 @@ def _reader(cue_count=20, *, active=0, props=None):
     reader = Reader(ipc)
     reader.ov = FakeOverlay()
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(cue_count)]
-    reader._sub_index = CueIndex(cues)
+    reader.episode.sub_index = CueIndex(cues)
     reader.sub_text = f"cue {active}"
     return reader, ipc
+
+
+def _view(reader, **overrides):
+    """The value production draws from, with the row-level facts a test pins stated explicitly."""
+    return dataclasses.replace(reader.sidebar_view, **overrides)
 
 
 def _capture_render(monkeypatch):
@@ -68,7 +73,7 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
     reader, ipc = _reader(active=12)
     calls = _capture_render(monkeypatch)
 
-    sidebar.toggle(reader)
+    (sidebar.hide if reader.sidebar.open else sidebar.show)(reader.sidebar_view)
 
     assert reader.sidebar.open is True
     assert [row.value for row in calls[-1][0]] == list(range(8, 17))
@@ -77,29 +82,38 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
 
 def test_active_row_uses_timing_to_disambiguate_repeated_text():
     reader, _ipc = _reader(props={"sub-start": 5.2, "time-pos": 5.3})
-    reader._sub_index = CueIndex([Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")])
+    reader.episode.sub_index = CueIndex([Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")])
     reader.sub_text = "same line"
 
-    assert sidebar._active_index(reader) == 1
+    assert (
+        sidebar._active_index(
+            reader.episode.sub_index,
+            reader.sub_text,
+            sub_start=reader._get("sub-start"),
+            time_pos=reader._get("time-pos"),
+            preferred=reader.episode.nav_idx,
+        )
+        == 1
+    )
 
 
 def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
-    reader, _ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
+    """The hold ends on its own deadline, and that deadline re-runs the follow itself. Waiting for
+    the next `update` would leave the sidebar off-target for as long as the cue happened to last."""
+    reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
     calls = _capture_render(monkeypatch)
-    now = [10.0]
-    monkeypatch.setattr(sidebar.time, "monotonic", lambda: now[0])
-    sidebar.toggle(reader)
-    reader.sidebar.rect = (900, 50, 360, 600)
+    (sidebar.hide if reader.sidebar.open else sidebar.show)(reader.sidebar_view)
+    reader.interaction.sidebar_panel.rect = (900, 50, 360, 600)
 
-    assert sidebar.scroll(reader, -3) is True
+    assert sidebar.scroll(reader.wheel_step, -3) is True
     held_scroll = reader.sidebar.scroll
     reader.sub_text = "cue 18"
-    sidebar.update(reader)
+    sidebar.follow(reader.sidebar_view)
     assert reader.sidebar.scroll == held_scroll
 
     before_expiry = len(calls)
-    now[0] = 12.0
-    sidebar.update(reader)
+    assert ipc.fire_runtime_timer("lifecycle:sidebar-manual-hold")
+
     assert reader.sidebar.scroll == 14
     assert len(calls) == before_expiry + 1
 
@@ -107,11 +121,13 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
 def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
     reader, ipc = _reader(active=3)
     _capture_render(monkeypatch)
-    reader.sidebar.open = True
-    reader.sidebar.rect = (100, 100, 400, 500)
-    reader.sidebar.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
+    reader.interaction.sidebar_panel.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
 
-    assert sidebar.on_click(reader, 110, 110) is True
+    assert sidebar.on_click(reader.click_target, 110, 110) is True
     assert ("set_property", "time-pos", 7.0) in ipc.commands
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
@@ -124,11 +140,13 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
     _capture_render(monkeypatch)
     invoked = []
     monkeypatch.setattr(reader, method, lambda: invoked.append(method))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (100, 100, 400, 500)
-    reader.sidebar.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
+    reader.interaction.sidebar_panel.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
 
-    sidebar.on_click(reader, 110, 110)
+    sidebar.on_click(reader.click_target, 110, 110)
 
     assert invoked == [method]
 
@@ -144,11 +162,15 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method,
     _capture_render(monkeypatch)
     invoked = []
     monkeypatch.setattr(reader, method, lambda: invoked.append(method))
-    reader.sidebar.open = True
-    reader.sidebar.rect = (100, 100, 400, 500)
-    reader.sidebar.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)  # row 3, no longer active
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
+    reader.interaction.sidebar_panel.hits = (
+        SidebarHitBox(kind, 3, 0, 0, 40, 40),
+    )  # row 3, no longer active
 
-    sidebar.on_click(reader, 110, 110)
+    sidebar.on_click(reader.click_target, 110, 110)
 
     assert invoked == [method]  # not the old silent no-op
 
@@ -164,23 +186,25 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
     monkeypatch.setattr(reader, "toggle_bookmark", lambda: invoked.append("toggle"))
 
     reader._handle(BOOKMARK_MSG)  # the Alt+b path
-    reader.sidebar.open = True
-    reader.sidebar.rect = (100, 100, 400, 500)
-    reader.sidebar.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
-    sidebar.on_click(reader, 110, 110)  # the sidebar-button path
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
+    reader.interaction.sidebar_panel.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
+    sidebar.on_click(reader.click_target, 110, 110)  # the sidebar-button path
 
     assert invoked == ["toggle", "toggle"]  # one flow, two entry points
 
 
 def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
-    reader.subtitle_language = "en"
+    reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.scorer = object()
     monkeypatch.setattr(
         reader.tokenizer, "tokenize", lambda _text: (_ for _ in ()).throw(AssertionError)
     )
 
-    rows, total = sidebar._track_rows(reader, 0, 1, 0)
+    rows, total = sidebar._track_rows(_view(reader, active=0), 0, 1)
 
     assert total == 1
     assert rows[0].parts == (("cue 0", sidebar.PLAIN),)
@@ -188,27 +212,29 @@ def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
 
 def test_rows_use_shared_episode_analysis_when_ready():
     reader, _ipc = _reader(cue_count=1)
-    reader._sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
+    reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
     reader.sub_text = "私は本を読む。"
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader.analysis.current = analyze_cues(
-        list(reader._sub_index.cues), reader.scorer, reader.tokenizer
+        list(reader.episode.sub_index.cues), reader.scorer, reader.tokenizer
     )
 
-    rows, _total = sidebar._track_rows(reader, 0, 1, 0)
+    rows, _total = sidebar._track_rows(_view(reader, active=0), 0, 1)
 
     assert rows[0].status == "N+1"
 
 
 def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
-    reader.jp_sid = 1
+    reader.declare_subtitle(SubtitleTracksDiscovered(1, reader.en_sid))
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
-    reader._sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
+    reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
     reader.analysis.current = analyze_cues(
-        list(reader._sub_index.cues), reader.scorer, reader.tokenizer
+        list(reader.episode.sub_index.cues), reader.scorer, reader.tokenizer
     )
-    reader.sidebar.open = True
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
     reader._loading = True
     calls = _capture_render(monkeypatch)
     monkeypatch.setattr(
@@ -224,14 +250,16 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
 
 def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):
     reader, ipc = _reader(props={"mouse-pos": {"x": 110, "y": 110}})
-    reader.sidebar.open = True
-    reader.sidebar.rect = (100, 100, 400, 500)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
     monkeypatch.setattr(
         "saitenka.app.tooltip.update_hover",
         lambda _reader: (_ for _ in ()).throw(AssertionError("tooltip reached")),
     )
 
-    reader._update_hover()
+    Driver(reader, instant=False).move(110, 110)
 
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
@@ -244,9 +272,9 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     entry = store.toggle_capture(
         Capture(str(original), 0.0, 0.8, jp_text="秘密の字幕", en_text="secret subtitle")
     )
-    reader._backlog_store = store
+    reader.session.backlog_store = store
 
-    rows = sidebar._summary_rows(reader)
+    rows = sidebar._summary_rows(reader.sidebar_view)
 
     candidate = next(row for row in rows if row.actions)
     assert candidate.actions == (SidebarAction("✓", "relink", entry.media_id),)
@@ -254,33 +282,41 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     assert store.entries_for_path(renamed) == []
 
     _capture_render(monkeypatch)
-    reader.sidebar.open = True
-    reader.sidebar.rect = (0, 0, 400, 500)
-    reader.sidebar.hits = (SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),)
-    sidebar.on_click(reader, 10, 10)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader.interaction.sidebar_panel.rect = (0, 0, 400, 500)
+    reader.interaction.sidebar_panel.hits = (
+        SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),
+    )
+    sidebar.on_click(reader.click_target, 10, 10)
 
     assert store.entries_for_path(renamed) == [entry]
     assert store.media(entry.media_id).original_basename == original.name
-    matched_rows = sidebar._summary_rows(reader)
+    matched_rows = sidebar._summary_rows(reader.sidebar_view)
     expanded = next(row for row in matched_rows if row.click_kind == "backlog-seek")
     assert (expanded.text, expanded.status) == ("秘密の字幕", "open")
 
-    reader.sidebar.rect = (0, 0, 400, 500)
-    reader.sidebar.hits = (SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),)
-    sidebar.on_click(reader, 10, 10)
+    reader.interaction.sidebar_panel.rect = (0, 0, 400, 500)
+    reader.interaction.sidebar_panel.hits = (
+        SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),
+    )
+    sidebar.on_click(reader.click_target, 10, 10)
     assert ("set_property", "time-pos", 0.0) in reader.ipc.commands
 
 
 def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, monkeypatch):
     video = tmp_path / "Show - 01.mkv"
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    reader.sidebar.open = True
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
     store = BacklogStore(tmp_path / "backlog.sqlite")
     entry = store.toggle_capture(Capture(str(video), 0.0, 0.8, jp_text="cue 0"))
-    reader._backlog_store = store
+    reader.session.backlog_store = store
     _capture_render(monkeypatch)
 
-    sidebar.mark_active_mined(reader)
+    sidebar.mine_active(reader.sidebar_view)
 
     assert store.entry(entry.id).status == "mined"
 
@@ -315,9 +351,9 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path):
         expression="犬",
         reading="いぬ",
     )
-    reader._mined_store = store
+    reader.session.mined_store = store
 
-    rows = sidebar._mine_rows(reader)
+    rows = sidebar._mine_rows(reader.sidebar_view)
 
     assert [(row.value, row.click_kind, row.status) for row in rows] == [
         (111, "mine-open", "mined"),
@@ -334,8 +370,8 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "absent.sqlite")
 
-    assert sidebar._mine_rows(reader) == []
-    assert reader._mined_store is None
+    assert sidebar._mine_rows(reader.sidebar_view) == []
+    assert reader.session.mined_store is None
     assert not (tmp_path / "absent.sqlite").exists()
 
 
@@ -353,14 +389,16 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
         expression="本",
         reading="ほん",
     )
-    reader._mined_store = store
+    reader.session.mined_store = store
     _capture_render(monkeypatch)
-    reader.sidebar.open = True
-    reader.sidebar.view = "mine"
-    reader.sidebar.rect = (0, 0, 400, 500)
-    reader.sidebar.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+    reader._sidebar_store.dispatch(events.SidebarViewSelected("mine"))
+    reader.interaction.sidebar_panel.rect = (0, 0, 400, 500)
+    reader.interaction.sidebar_panel.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
 
-    sidebar.on_click(reader, 10, 10)
+    sidebar.on_click(reader.click_target, 10, 10)
 
     assert ("set_property", "time-pos", 0.0) in ipc.commands  # seeks even with Anki down
 
@@ -380,17 +418,23 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
         expression="本",
         reading="ほん",
     )
-    reader._mined_store = store
+    reader.session.mined_store = store
     reader.anki = object()
     reader.mine_cfg = object()
     opened = []
     monkeypatch.setattr(
         miner_ui,
         "preview_existing",
-        lambda _r, nid, card, status: opened.append((nid, card.expression, status)),
+        lambda _ports, _src, nid, card, status: opened.append((nid, card.expression, status)),
     )
 
-    sidebar._open_mined(reader, 111)
+    sidebar._open_mined(
+        reader.sidebar_view,
+        reader.sidebar_actions,
+        reader.preview_ports,
+        reader.card_source,
+        111,
+    )
 
     assert opened == [(111, "本", "exists")]
 
@@ -436,3 +480,79 @@ def test_ui_scale_increases_sidebar_rows_and_reduces_capacity():
 
     assert enlarged.image.width > normal.image.width
     assert enlarged.row_capacity < normal.row_capacity
+
+
+def test_row_capacity_follows_the_screen_and_the_chrome_scale() -> None:
+    """A taller panel fits more rows; a larger chrome scale fits fewer of them in the same space.
+    Both are needed, and checking it takes no session now."""
+    from saitenka.app.sidebar import _capacity
+
+    assert _capacity((1920, 1080), 1.0) > _capacity((1920, 720), 1.0)
+    assert _capacity((1920, 1080), 2.0) < _capacity((1920, 1080), 1.0)
+    assert _capacity((640, 200), 1.0) >= 1  # never zero, however small the screen
+
+
+def test_cue_colours_are_recomputed_when_the_known_set_changes() -> None:
+    """The cache key carries the scorer's identity, not just the text: the same line scores
+    differently once the known-word set does, and a text-only key would serve the old colours."""
+    from saitenka.app.sidebar import _cue_parts
+
+    class Scorer:
+        def __init__(self, colour):
+            self.colour = colour
+
+        def score_line(self, tokens):
+            return [type("S", (), {"color": self.colour})() for _ in tokens]
+
+    class Tok:
+        def tokenize(self, line):
+            return [type("T", (), {"surface": line})()]
+
+    cache: dict = {}
+    cue = Cue(0.0, 1.0, "猫")
+    first = _cue_parts(cache, 0, cue, language="jp", scorer=Scorer((1, 1, 1, 1)), tokenizer=Tok())
+    second = _cue_parts(cache, 0, cue, language="jp", scorer=Scorer((9, 9, 9, 9)), tokenizer=Tok())
+
+    assert first != second
+
+
+def test_a_bookmark_falls_back_to_the_other_language() -> None:
+    """A capture may only have one side, and showing a blank row would read as a broken bookmark."""
+    from saitenka.app.backlog import BacklogEntry
+    from saitenka.app.sidebar import _entry_text
+
+    only_jp = BacklogEntry(
+        id=1,
+        media_id=1,
+        cue_start=0.0,
+        cue_end=1.0,
+        jp_text="猫を見る",
+        en_text="",
+        subtitle_track={},
+        hovered_surface=None,
+        hovered_lemma=None,
+        status="open",
+        created_at="",
+        updated_at="",
+    )
+
+    assert _entry_text(only_jp, "en") == "猫を見る"
+    assert _entry_text(only_jp, "jp") == "猫を見る"
+
+
+def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> None:
+    """Opening the tab must not materialise an empty store — it creates a file on disk.
+
+    `_cue_statuses` used to reach the host and guard `not video` itself. It takes a store now, so
+    the laziness moved to the caller, and a caller that builds the store before checking would open
+    a backlog for every video-less session. The guard is easy to lose and invisible when lost: the
+    statuses come back empty either way, and only the on-disk side effect differs.
+    """
+    reader, _ipc = _reader(props={"path": ""})
+    reader._sidebar_store.dispatch(
+        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+    )
+
+    sidebar.draw(reader.sidebar_view)
+
+    assert reader.session.backlog_store is None

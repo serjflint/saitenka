@@ -5,10 +5,10 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -30,27 +30,13 @@ def run_capability(request: object, cancelled: threading.Event) -> object:
         return False
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def configure_runtime_jobs(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "capabilities",
         JobLanePolicy(capacity=4, workers=4),
         run_capability,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 class CapabilityProbe:

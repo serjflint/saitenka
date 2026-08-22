@@ -3,29 +3,78 @@
 from __future__ import annotations
 
 import threading
-import time
-from collections import OrderedDict
 from dataclasses import dataclass
-from dataclasses import replace as dataclass_replace
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
-from saitenka.subtitles.geometry import GeometrySnapshot
+from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
-    from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest
-
-    GeometryRequestBuilder = Callable[[], GeometryRequest]
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+    from saitenka.app.subtitle_render import DrawResult, SubtitleTarget
+    from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
 
 
 class CurrentSubtitleRenderer(Protocol):
-    def draw(self, reader: Reader) -> object: ...
+    """One member per renderer, so the widest of them sets the signature for all.
 
-    def clear(self, reader: Reader) -> None: ...
+    That is precisely why the draw members take a request rather than a host: while `draw` took a
+    `Reader`, the native renderer could never be narrower than the legacy one it shares this
+    protocol with. The lifecycle members follow the same rule and take a `SubtitleTarget` — the
+    widest renderer was measured, and outside the draw request it reaches five host members.
+
+    **Total, deliberately.** The coordinator used to probe every lifecycle member with `getattr`
+    and skip it when absent, which no type checker can see: a renamed method, or a renderer that
+    never grew one, read as "this renderer does not do that" — a silent no-op indistinguishable
+    from a deliberate one. Every renderer answers every member now, and a renderer with no pixel
+    ownership to defend answers by doing nothing *on purpose*.
+    """
+
+    def draw(
+        self, request, surfaces=None, ipc=None, /, *, on_settled=None
+    ) -> DrawResult | None: ...
+
+    def clear(self, surfaces=None, ipc=None, /) -> None: ...
+
+    def close(self) -> None: ...
+
+    @property
+    def logged_first(self) -> bool:
+        """Whether a first-subtitle line has already been logged, for the caller to carry back."""
+        ...
+
+    def activate(self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV, /) -> bool:
+        """Take the pixels, idempotently. `False` means the caller must draw them itself.
+
+        Idempotent by contract: safe to call on any event without tracking whether it already did.
+        It absorbed the old `reassert`, and the precondition separating them — has the ground moved
+        under the established flag? — is *mostly* the renderer's own state. The exception is the
+        selection: a caller that has just written `sid` knows the new track and the renderer does
+        not, because mpv echoes the property asynchronously. That caller declares it.
+        """
+        ...
+
+    def deactivate(self, target: SubtitleTarget, /) -> None:
+        """Give the pixels back, at close."""
+        ...
+
+    def suspend_for_overlay(self, target: SubtitleTarget, /) -> None: ...
+
+    def resume_after_overlay(self, target: SubtitleTarget, /) -> None: ...
+
+    def cue_changed(self, target: SubtitleTarget, /, *, nonempty: bool) -> None: ...
+
+    def connection_replaced(self, target: SubtitleTarget, /) -> None: ...
+
+    def degrade_geometry(self, target: SubtitleTarget, /) -> None: ...
+
+    def use_native(self, target: SubtitleTarget, /) -> bool:
+        """Whether native geometry may be used. A renderer with no native pixel path answers
+        `True`: it has no ownership to prove, so it never withholds geometry."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,22 +99,6 @@ class GeometryResolution:
 class GeometryPrefetchResolution:
     snapshot: GeometrySnapshot | None
     error: Exception | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class GeometryWorkerStats:
-    submitted: int
-    superseded: int
-    completed: int
-    cache_hits: int
-    failures: int
-    ready_before_presented: int
-    presented: int
-    max_submit_us: int
-    prefetched: int
-    prefetch_dropped: int
-    result_cache_entries: int
-    prefetch_cache_entries: int
 
 
 class SubtitleModeCoordinator:
@@ -94,53 +127,55 @@ class SubtitleModeCoordinator:
     def renderer(self, renderer: CurrentSubtitleRenderer) -> None:
         self._renderer = renderer
 
-    def draw_current(self, reader: Reader) -> None:
-        self._renderer.draw(reader)
+    def draw_current(self, target: SubtitleTarget) -> DrawResult | None:
+        """Draw the current cue and hand the geometry back. The one place a draw is staged.
 
-    def clear(self, reader: Reader) -> None:
-        self._renderer.clear(reader)
+        Was spread across each renderer's `draw`. Collapsing it here is what makes the renderers
+        host-free: they share one protocol member, so the widest of them set the signature for all.
 
-    def activate(self, reader: Reader) -> None:
-        activate = getattr(self._renderer, "reassert", None) or getattr(
-            self._renderer, "activate", None
-        )
-        if activate is not None and activate(reader) is False:
-            self._renderer.draw(reader)
+        Returned rather than written back, for the reason the renderers return rather than assign:
+        the boxes and origin belong to the cue that produced them, and a write that happens
+        mid-render outlives a superseded cue. Doing it here as well is what stops this one function
+        from being the whole subtitle chain's reason to hold a host.
 
-    def geometry_degraded(self, reader: Reader) -> None:
-        degrade = getattr(self._renderer, "degrade_geometry", None)
-        if degrade is not None:
-            degrade(reader)
+        The request is built through `target.draw_request` and not passed in: the legacy stage needs
+        it built at stage time, not at snapshot time.
+        """
+        self._renderer.activate(target)
+        return self._renderer.draw(target.draw_request(), target.surfaces, target.ipc)
 
-    def cue_changed(self, reader: Reader, *, nonempty: bool) -> None:
-        changed = getattr(self._renderer, "cue_changed", None)
-        if changed is not None:
-            changed(reader, nonempty=nonempty)
+    def clear(self, surfaces: LifecycleSurfaces, ipc) -> None:
+        self._renderer.clear(surfaces, ipc)
 
-    def poll_ownership(self, reader: Reader) -> None:
-        poll = getattr(self._renderer, "poll", None)
-        if poll is not None:
-            poll(reader)
+    def activate(
+        self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV, *, draw: Callable[[], None]
+    ) -> None:
+        """Take the pixels; `draw` is what happens when the renderer refuses them.
 
-    def deactivate(self, reader: Reader) -> None:
-        deactivate = getattr(self._renderer, "deactivate", None)
-        if deactivate is not None:
-            deactivate(reader)
+        Handed in rather than reached for. `draw_current` writes `boxes` and `sub_origin` back onto
+        the host, so keeping it inline is what kept every caller of `activate` — `configure` above
+        all — reading a host it otherwise has no use for.
+        """
+        if self._renderer.activate(target, sid) is False:
+            draw()
 
-    def suspend_for_overlay(self, reader: Reader) -> None:
-        suspend = getattr(self._renderer, "suspend_for_overlay", None)
-        if suspend is not None:
-            suspend(reader)
+    def geometry_degraded(self, target: SubtitleTarget) -> None:
+        self._renderer.degrade_geometry(target)
 
-    def resume_after_overlay(self, reader: Reader) -> None:
-        resume = getattr(self._renderer, "resume_after_overlay", None)
-        if resume is not None:
-            resume(reader)
+    def cue_changed(self, target: SubtitleTarget, *, nonempty: bool) -> None:
+        self._renderer.cue_changed(target, nonempty=nonempty)
 
-    def connection_replaced(self, reader: Reader) -> None:
-        replaced = getattr(self._renderer, "connection_replaced", None)
-        if replaced is not None:
-            replaced(reader)
+    def deactivate(self, target: SubtitleTarget) -> None:
+        self._renderer.deactivate(target)
+
+    def suspend_for_overlay(self, target: SubtitleTarget) -> None:
+        self._renderer.suspend_for_overlay(target)
+
+    def resume_after_overlay(self, target: SubtitleTarget) -> None:
+        self._renderer.resume_after_overlay(target)
+
+    def connection_replaced(self, target: SubtitleTarget) -> None:
+        self._renderer.connection_replaced(target)
 
     @property
     def generation(self) -> int:
@@ -289,424 +324,9 @@ class SubtitleModeCoordinator:
             self._closed = True
             self._generation += 1
             self._current = None
+        # The renderer is a close participant alongside the geometry backend: quarantining geometry
+        # while the raster surface stays live leaves a late annotation able to publish pixels.
+        self._renderer.close()
         with self._backend_lock:
             if self._backend is not None:
                 self._backend.close()
-
-
-class SubtitleGeometryWorker:
-    """One worker, one pending slot, and a bounded result cache."""
-
-    def __init__(self, coordinator: SubtitleModeCoordinator, *, cache_max: int = 3) -> None:
-        if cache_max <= 0:
-            raise ValueError("geometry result cache bound must be positive")
-        self._coordinator = coordinator
-        self._cache_max = cache_max
-        self._cache: OrderedDict[str, GeometrySnapshot] = OrderedDict()
-        self._condition = threading.Condition()
-        self._pending: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None = None
-        self._prefetch_pending: OrderedDict[str, tuple[int, GeometryRequestBuilder]] = OrderedDict()
-        self._prefetched: OrderedDict[str, tuple[GeometryRequest, GeometrySnapshot]] = OrderedDict()
-        self._prefetch_inflight_key: str | None = None
-        self._prefetch_waiters: dict[str, GeometryReservation] = {}
-        self._provenance: OrderedDict[str, str] = OrderedDict()
-        self._history_lossy = False
-        self._epoch_cause: str | None = None
-        self._busy = False
-        self._closed = False
-        self._submitted = 0
-        self._superseded = 0
-        self._completed = 0
-        self._cache_hits = 0
-        self._failures = 0
-        self._ready_before_presented = 0
-        self._presented = 0
-        self._max_submit_us = 0
-        self._prefetched_count = 0
-        self._prefetch_dropped = 0
-        self._thread = threading.Thread(
-            target=self._run,
-            name="saitenka-subtitle-geometry",
-            daemon=True,
-        )
-        self._thread.start()
-
-    @property
-    def generation(self) -> int:
-        return self._coordinator.generation
-
-    def submit(self, request: GeometryRequest) -> bool:
-        return self.submit_job(request.generation, lambda: request)
-
-    def submit_job(
-        self,
-        generation: int,
-        build: GeometryRequestBuilder,
-        *,
-        work_key: str | None = None,
-    ) -> bool:
-        started = time.perf_counter_ns()
-        reservation = self._coordinator.reserve(generation)
-        if reservation is None:
-            return False
-        with self._condition:
-            if self._closed:
-                return False
-            self._submitted += 1
-            if work_key is not None and work_key in self._prefetch_pending:
-                self._prefetch_pending.pop(work_key)
-                if self._pending is not None:
-                    self._superseded += 1
-                self._pending = (reservation, build, work_key)
-                self._condition.notify()
-                elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
-                self._max_submit_us = max(self._max_submit_us, elapsed_us)
-                return True
-            if work_key is not None and work_key == self._prefetch_inflight_key:
-                if work_key in self._prefetch_waiters:
-                    self._superseded += 1
-                self._prefetch_waiters[work_key] = reservation
-                elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
-                self._max_submit_us = max(self._max_submit_us, elapsed_us)
-                return True
-            if self._pending is not None:
-                self._superseded += 1
-            self._pending = (reservation, build, work_key)
-            self._condition.notify()
-            elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
-            self._max_submit_us = max(self._max_submit_us, elapsed_us)
-        return True
-
-    def prefetch(self, key: str, generation: int, build: GeometryRequestBuilder) -> bool:
-        if generation != self._coordinator.generation:
-            return False
-        with self._condition:
-            if self._closed or key in self._prefetched:
-                return False
-            self._prefetch_pending.pop(key, None)
-            self._prefetch_pending[key] = (generation, build)
-            while len(self._prefetch_pending) > self._cache_max:
-                dropped, _item = self._prefetch_pending.popitem(last=False)
-                self._prefetch_dropped += 1
-                self._remember_provenance(dropped, "prefetch-superseded")
-            self._condition.notify()
-            return True
-
-    def _remember_provenance(self, key: str, reason: str) -> None:
-        self._provenance.pop(key, None)
-        self._provenance[key] = reason
-        while len(self._provenance) > self._cache_max:
-            self._provenance.popitem(last=False)
-            self._history_lossy = True
-
-    def prefetch_miss_reason(self, key: str) -> str:
-        with self._condition:
-            if key in self._prefetch_pending or key == self._prefetch_inflight_key:
-                return "prefetch-pending"
-            recent = self._provenance.get(key)
-            if recent is not None:
-                return recent
-            if self._epoch_cause is not None:
-                cause, self._epoch_cause = self._epoch_cause, None
-                return cause
-            return "provenance-unknown" if self._history_lossy else "first-seen"
-
-    def publish_prefetched(self, key: str, generation: int) -> GeometryRequest | None:
-        reservation = self._coordinator.reserve(generation)
-        if reservation is None:
-            return None
-        with self._condition:
-            cached = self._prefetched.pop(key, None)
-            if cached is None:
-                return None
-            self._prefetched[key] = cached
-        request, result = cached
-        rebound_request = dataclass_replace(request, generation=generation)
-        rebound_result = dataclass_replace(result, generation=generation)
-        ticket = self._coordinator.bind(reservation, rebound_request)
-        if ticket is None or not self._coordinator.publish(ticket, rebound_result):
-            return None
-        with self._condition:
-            self._cache_hits += 1
-            self._completed += 1
-        return rebound_request
-
-    def invalidate_cache(self, *, cause: str | None = None) -> None:
-        with self._condition:
-            self._superseded += len(self._prefetch_waiters)
-            self._cache.clear()
-            self._prefetched.clear()
-            self._prefetch_pending.clear()
-            self._prefetch_waiters.clear()
-            self._prefetch_inflight_key = None
-            self._provenance.clear()
-            self._history_lossy = False
-            self._epoch_cause = cause
-
-    def invalidate(self, *, cause: str | None = None) -> int:
-        generation = self._coordinator.invalidate()
-        self.invalidate_cache(cause=cause)
-        return generation
-
-    def _cached(self, request: GeometryRequest) -> GeometrySnapshot | None:
-        key = request.cache_key()
-        with self._condition:
-            result = self._cache.pop(key, None)
-            if result is None:
-                return None
-            self._cache[key] = result
-        return GeometrySnapshot(
-            request.generation,
-            request.track_id,
-            request.frame_id,
-            request.timestamp_ms,
-            request.variant,
-            result.tokens,
-        )
-
-    def _store(self, request: GeometryRequest, result: GeometrySnapshot) -> None:
-        key = request.cache_key()
-        with self._condition:
-            self._cache.pop(key, None)
-            self._cache[key] = result
-            while len(self._cache) > self._cache_max:
-                self._cache.popitem(last=False)
-
-    def _idle(self) -> None:
-        self._busy = False
-        self._condition.notify_all()
-
-    def _drop_prefetch(self, key: str, error: Exception | None = None) -> None:
-        with self._condition:
-            waiter = self._prefetch_waiters.pop(key, None)
-            self._prefetch_inflight_key = None
-            self._prefetch_dropped += 1
-        failure_recorded = bool(
-            waiter is not None
-            and error is not None
-            and self._coordinator.record_error(waiter, error)
-        )
-        with self._condition:
-            if waiter is not None:
-                if failure_recorded:
-                    self._failures += 1
-                else:
-                    self._superseded += 1
-            self._idle()
-
-    def _process_prefetch(self, item: tuple[str, tuple[int, GeometryRequestBuilder]]) -> None:
-        key, (generation, build) = item
-        try:
-            request = build()
-        except Exception as error:  # noqa: BLE001 -- a promoted waiter turns this into a failure
-            self._drop_prefetch(key, error)
-            return
-        if generation != self._coordinator.generation:
-            self._drop_prefetch(key)
-            return
-        outcome = self._coordinator.render_prefetch_outcome(request)
-        waiter = self._cache_prefetch_outcome(key, generation, request, outcome.snapshot)
-        published, failure_recorded = self._resolve_prefetch_waiter(waiter, request, outcome)
-        with self._condition:
-            if waiter is not None:
-                if published:
-                    self._completed += 1
-                    self._cache_hits += 1
-                elif failure_recorded:
-                    self._failures += 1
-                else:
-                    self._superseded += 1
-            self._idle()
-
-    def _cache_prefetch_outcome(
-        self,
-        key: str,
-        generation: int,
-        request: GeometryRequest,
-        result: GeometrySnapshot | None,
-    ) -> GeometryReservation | None:
-        with self._condition:
-            waiter = self._prefetch_waiters.pop(key, None)
-            self._prefetch_inflight_key = None
-            if result is None or generation != self._coordinator.generation:
-                self._prefetch_dropped += 1
-                return waiter
-            self._prefetched.pop(key, None)
-            self._prefetched[key] = (request, result)
-            self._store(request, result)
-            self._prefetched_count += 1
-            while len(self._prefetched) > self._cache_max:
-                evicted, _cached = self._prefetched.popitem(last=False)
-                self._remember_provenance(evicted, "evicted")
-            return waiter
-
-    def _resolve_prefetch_waiter(
-        self,
-        waiter: GeometryReservation | None,
-        request: GeometryRequest,
-        outcome: GeometryPrefetchResolution,
-    ) -> tuple[bool, bool]:
-        if waiter is None:
-            return False, False
-        if outcome.error is not None:
-            return False, self._coordinator.record_error(waiter, outcome.error)
-        if outcome.snapshot is None:
-            return False, False
-        rebound_request = dataclass_replace(request, generation=waiter.generation)
-        rebound_result = dataclass_replace(outcome.snapshot, generation=waiter.generation)
-        ticket = self._coordinator.bind(waiter, rebound_request)
-        return (
-            ticket is not None and self._coordinator.publish(ticket, rebound_result),
-            False,
-        )
-
-    def _finish_current(self, *, published: bool, failure_recorded: bool = False) -> None:
-        with self._condition:
-            if published:
-                self._completed += 1
-            elif failure_recorded:
-                self._failures += 1
-            else:
-                self._superseded += 1
-            self._idle()
-
-    def _finish_build_error(self, *, recorded: bool) -> None:
-        with self._condition:
-            if recorded:
-                self._failures += 1
-            else:
-                self._superseded += 1
-            self._idle()
-
-    def _process_current(
-        self, item: tuple[GeometryReservation, GeometryRequestBuilder, str | None]
-    ) -> None:
-        reservation, build, _work_key = item
-        try:
-            request = build()
-        except Exception as error:  # noqa: BLE001 -- source preparation is optional
-            self._finish_build_error(recorded=self._coordinator.record_error(reservation, error))
-            return
-        ticket = self._coordinator.bind(reservation, request)
-        if ticket is None:
-            self._finish_current(published=False)
-            return
-        cached = self._cached(ticket.request)
-        if cached is not None:
-            published = self._coordinator.publish(ticket, cached)
-            with self._condition:
-                self._cache_hits += 1
-        else:
-            outcome = self._coordinator.resolve_outcome(ticket)
-            published = outcome.snapshot is not None
-            if outcome.snapshot is not None:
-                self._store(ticket.request, outcome.snapshot)
-            self._finish_current(
-                published=published,
-                failure_recorded=outcome.failure_recorded,
-            )
-            return
-        self._finish_current(published=published)
-
-    def _next_work(
-        self,
-    ) -> tuple[
-        tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None,
-        tuple[str, tuple[int, GeometryRequestBuilder]] | None,
-    ]:
-        with self._condition:
-            while self._pending is None and not self._prefetch_pending and not self._closed:
-                self._condition.wait()
-            if self._closed:
-                return None, None
-            pending = self._pending
-            if pending is not None:
-                self._pending = None
-                prefetch = None
-            else:
-                prefetch = self._prefetch_pending.popitem(last=False)
-                self._prefetch_inflight_key = prefetch[0]
-            self._busy = True
-            return pending, prefetch
-
-    def _run(self) -> None:
-        while True:
-            pending, prefetch = self._next_work()
-            if self._closed:
-                return
-            if pending is not None:
-                self._process_current(pending)
-            else:
-                assert prefetch is not None
-                self._process_prefetch(prefetch)
-
-    def mark_presented(self, request: GeometryRequest) -> bool:
-        current = self._coordinator.current
-        ready = current is not None and (
-            current.generation,
-            current.track_id,
-            current.frame_id,
-            current.timestamp_ms,
-            current.variant,
-        ) == (
-            request.generation,
-            request.track_id,
-            request.frame_id,
-            request.timestamp_ms,
-            request.variant,
-        )
-        with self._condition:
-            self._presented += 1
-            self._ready_before_presented += int(ready)
-        return ready
-
-    def mark_not_ready(self) -> None:
-        with self._condition:
-            self._presented += 1
-
-    @property
-    def stats(self) -> GeometryWorkerStats:
-        with self._condition:
-            return GeometryWorkerStats(
-                self._submitted,
-                self._superseded,
-                self._completed,
-                self._cache_hits,
-                self._failures,
-                self._ready_before_presented,
-                self._presented,
-                self._max_submit_us,
-                self._prefetched_count,
-                self._prefetch_dropped,
-                len(self._cache),
-                len(self._prefetched),
-            )
-
-    def wait_idle(self, timeout: float = 5.0) -> bool:
-        deadline = time.monotonic() + timeout
-        with self._condition:
-            while (
-                self._pending is not None or self._prefetch_pending or self._busy
-            ) and not self._closed:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return False
-                self._condition.wait(remaining)
-            return self._pending is None and not self._prefetch_pending and not self._busy
-
-    def close(self) -> None:
-        with self._condition:
-            if self._closed:
-                return
-            self._closed = True
-            self._pending = None
-            self._prefetch_pending.clear()
-            self._prefetch_waiters.clear()
-            self._prefetch_inflight_key = None
-            self._prefetched.clear()
-            self._cache.clear()
-            self._condition.notify_all()
-        self._thread.join(timeout=5)
-        if self._thread.is_alive():
-            raise RuntimeError("subtitle geometry worker did not stop")
-        self._coordinator.close()

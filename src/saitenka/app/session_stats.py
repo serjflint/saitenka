@@ -20,12 +20,12 @@ from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.controller import Reader
     from saitenka.app.episode_analysis import EpisodeAnalysis
+    from saitenka.app.reader_context import EpisodeContext
 
 log = logging.getLogger(__name__)
 _DB_PATH_OVERRIDE: Path | None = None
-_PERSIST_INTERVAL = 5.0
+PERSIST_INTERVAL = 5.0
 
 
 def db_path() -> Path:
@@ -265,7 +265,13 @@ class SessionRecorder:
         self.snapshot = replace(self.snapshot, **changes)
         self.writer.submit(self.snapshot)
 
-    def tick(self, *, paused: bool, language: str) -> None:
+    def accrue(self, *, paused: bool, language: str) -> None:
+        """Close the segment that just ended and open the next.
+
+        Called on a transition — pause, language, close — not on a tick. Elapsed time is measured
+        from the previous call either way, so what changes is only *when* the measurement is taken:
+        a runtime with no ticks still accrues correctly, and an idle one does no work at all.
+        """
         now = self._clock()
         elapsed = max(0.0, now - self._last_tick)
         watch = self.snapshot.watch_seconds
@@ -285,7 +291,7 @@ class SessionRecorder:
             self.snapshot = replace(
                 self.snapshot, watch_seconds=watch, jp_seconds=jp, en_seconds=en
             )
-            if now - self._last_persist >= _PERSIST_INTERVAL:
+            if now - self._last_persist >= PERSIST_INTERVAL:
                 self.writer.submit(self.snapshot)
                 self._last_persist = now
 
@@ -311,7 +317,7 @@ class SessionRecorder:
             self._publish(mined_count=self.snapshot.mined_count + count)
 
     def finish(self, *, analysis: EpisodeAnalysis | None = None) -> SessionSnapshot:
-        self.tick(paused=True, language=self._last_language)
+        self.accrue(paused=True, language=self._last_language)
         self._publish(
             ended_at=self._wall_clock(),
             completed=True,
@@ -321,25 +327,40 @@ class SessionRecorder:
         return self.snapshot
 
 
-def start(reader: Reader) -> None:
-    if reader._session_recorder is not None or not reader.options.stats.enabled:
+def start(
+    episode: EpisodeContext,
+    *,
+    enabled: bool,
+    path: Callable[[], object],
+    arm: Callable[[float], object],
+) -> None:
+    """Open this episode's history row, if history is on and one is not open already.
+
+    `path` is a callable so that a disabled session never asks mpv for it — the identity read is
+    behind the same guard the row is.
+    """
+    if episode.session_recorder is not None or not enabled:
         return
     try:
-        reader._session_recorder = SessionRecorder(str(reader._prop("path") or ""))
+        episode.session_recorder = SessionRecorder(str(path() or ""))
     except (OSError, sqlite3.Error):
         log.warning("session history unavailable", exc_info=True)
+        return
+    arm(PERSIST_INTERVAL)
 
 
-def tick(reader: Reader) -> None:
-    recorder = reader._session_recorder
+def accrue(recorder: SessionRecorder | None, *, paused: bool, language: str) -> None:
+    """Accrue the watch-time segment that just ended, at a transition."""
     if recorder is not None:
-        recorder.tick(paused=bool(reader._prop("pause")), language=reader.subtitle_language)
+        recorder.accrue(paused=paused, language=language)
 
 
-def finish(reader: Reader) -> str | None:
-    recorder = reader._session_recorder
+def finish(recorder: SessionRecorder | None, analysis: EpisodeAnalysis | None = None) -> str | None:
+    """Close a recorder's row and render its summary, or None when nothing was recording.
+
+    Takes the recorder rather than the host: retiring the host's field is the host's business, and
+    a close participant that reaches into a `Reader` cannot be driven by the session runtime.
+    """
     if recorder is None:
         return None
-    reader._session_recorder = None
-    snapshot = recorder.finish(analysis=reader.analysis.current)
-    return summary(snapshot)
+    return summary(recorder.finish(analysis=analysis))

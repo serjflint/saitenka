@@ -5,12 +5,14 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_pipeline import (
     GeometryResolution,
     GeometryTicket,
-    SubtitleGeometryWorker,
     SubtitleModeCoordinator,
 )
+from saitenka.app.subtitle_render import NullRenderer
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.subtitles import (
     GeometryRequest,
     GeometrySnapshot,
@@ -23,12 +25,18 @@ from saitenka.subtitles import (
 )
 
 
-class FakeCurrentRenderer:
-    def __init__(self) -> None:
-        self.drawn_host: object | None = None
+class FakeCurrentRenderer(NullRenderer):
+    """Inherits the inert renderer so it answers the whole protocol; records what crosses the seam."""
 
-    def draw(self, reader: object) -> None:
-        self.drawn_host = reader
+    def __init__(self) -> None:
+        self.drawn: object | None = None
+        self.closed = False
+
+    def draw(self, request: object, _surfaces=None, _ipc=None, /, **_ports) -> None:
+        self.drawn = request
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeGeometryBackend:
@@ -208,32 +216,43 @@ def test_geometry_values_are_immutable() -> None:
 
 
 def test_coordinator_delegates_current_renderer() -> None:
+    """The coordinator hands the renderer a request, not the host it built it from.
+
+    `object()` no longer stands in for a reader: the point of the seam is that the renderer never
+    sees one, so the double asserts on what crosses it instead.
+    """
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+
     renderer = FakeCurrentRenderer()
-    coordinator = SubtitleModeCoordinator(renderer)
-    host = object()
+    reader = Reader(FakeIPC(), prefetch=False, renderer=renderer)
+    coordinator = reader.subtitle_pipeline
+    coordinator.renderer = renderer
 
-    coordinator.draw_current(host)  # type: ignore[arg-type]
+    coordinator.draw_current(reader.subtitle_target())
 
-    assert renderer.drawn_host is host
+    assert renderer.drawn is not None
+    assert renderer.drawn is not reader
+    assert renderer.drawn.osd == reader.osd
+    reader.close()
 
 
-def test_worker_drops_superseded_pending_request(monkeypatch) -> None:
-    start = threading.Event()
-    run = SubtitleGeometryWorker._run
-
-    def delayed_run(worker: SubtitleGeometryWorker) -> None:
-        assert start.wait(1.0)
-        run(worker)
-
-    monkeypatch.setattr(SubtitleGeometryWorker, "_run", delayed_run)
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+def test_worker_drops_superseded_pending_request() -> None:
+    """Only one current request waits at a time: a newer one replaces the queued older one rather
+    than queueing behind it, so the older never reaches the lane at all."""
+    backend = BlockingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     first = request(coordinator.generation, 1_250)
     second = request(coordinator.generation, 1_300)
 
+    # Occupy the lane so both currents queue rather than executing on arrival.
+    assert worker.prefetch("blocking", coordinator.generation, lambda: request(0, 1_100))
+    assert backend.entered.wait(1)
     assert worker.submit(first)
     assert worker.submit(second)
-    start.set()
+    backend.release.set()
     assert worker.wait_idle()
 
     assert coordinator.current is not None
@@ -537,6 +556,122 @@ def test_worker_reports_loss_aware_prefetch_miss_provenance() -> None:
     release.set()
     assert worker.wait_idle()
     worker.close()
+
+
+def test_a_gatewayed_session_runs_geometry_on_the_broker_lane(request) -> None:
+    """The composition seam, pinned. `configure_runtime_job` resolves the lane once here; if it
+    silently returned None the worker would fall back to its local lane and production geometry
+    would never reach the broker — bounded admission and close would both be someone else's.
+    """
+    from util import FakeIPC, runtime_gateway
+
+    from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, configure_runtime_job
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    ipc.install_runtime_ingress(lambda *_a: None, lambda *_a: None, None, gateway)
+
+    submit = configure_runtime_job(ipc)
+
+    assert submit is not None
+    assert ipc.close_runtime_job_lane(GEOMETRY_LANE, 1.0)  # registered, and closeable by name
+
+
+def test_an_ungatewayed_session_still_executes_geometry() -> None:
+    """Negative control for the lane resolution: without a broker the worker owns a local lane, so
+    there is one execution path rather than a silently disabled feature."""
+    from util import FakeIPC
+
+    from saitenka.app.subtitle_geometry_job import configure_runtime_job
+
+    assert configure_runtime_job(FakeIPC()) is None
+
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, submit=None)
+
+    assert worker.submit(request(coordinator.generation)) and worker.wait_idle()
+
+    assert coordinator.current is not None
+    worker.close()
+
+
+class SaturatedLane:
+    """A lane that refuses admission while ``full``, and otherwise runs the job inline.
+
+    Refusal is what the broker answers at capacity, and it is the one arm no other test reaches —
+    every fake so far admits everything. The worker has to read it as dropped work rather than as
+    work in flight, or one refusal wedges the queue for the rest of the session.
+    """
+
+    def __init__(self) -> None:
+        self.full = True
+        self.admitted = 0
+
+    def __call__(self, *, owner, identity, lane, request, on_finished) -> bool:  # noqa: ARG002
+        if self.full:
+            return False
+        self.admitted += 1
+        request.worker.execute(request)
+        on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+        return True
+
+
+class DeferredLane(SaturatedLane):
+    """A lane that admits the job and holds it, so a test picks what lands before it executes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held: list[tuple[object, object, object]] = []
+
+    def __call__(self, *, owner, identity, lane, request, on_finished) -> bool:  # noqa: ARG002
+        self.held.append((request, identity, on_finished))
+        return True
+
+    def run_one(self, owner) -> None:
+        job, identity, on_finished = self.held.pop(0)
+        job.worker.execute(job)
+        on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+
+
+def test_a_refused_lane_admission_drops_the_work_without_wedging_the_queue() -> None:
+    lane = SaturatedLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, submit=lane)
+
+    assert worker.submit(request(coordinator.generation))  # reserved, then refused admission
+
+    assert lane.admitted == 0
+    assert coordinator.current is None
+    assert worker.stats.superseded == 1  # counted as dropped, not left pending
+
+    lane.full = False
+    assert worker.submit(request(coordinator.generation))
+
+    assert lane.admitted == 1
+    assert coordinator.current is not None  # nothing believed a job was still in flight
+    worker.close()
+
+
+def test_a_job_that_executes_after_close_publishes_nothing_and_takes_no_successor() -> None:
+    """Close quarantine, driven at the lane rather than at the coordinator.
+
+    A job already admitted cannot be recalled, so the contract is about what its result is allowed
+    to do on arrival — a session that has torn down its surface must not have pixels handed to it
+    by work it started before.
+    """
+    lane = DeferredLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, submit=lane)
+    assert worker.submit(request(coordinator.generation))
+    assert lane.held  # admitted, not yet executed
+
+    worker.close()
+    lane.run_one(Owner.SUBTITLE)
+
+    assert coordinator.current is None
+    assert not worker.submit(request(coordinator.generation))
+    assert not lane.held  # and the terminal admitted no successor behind it
 
 
 def test_new_epoch_reports_its_invalidation_cause_once() -> None:

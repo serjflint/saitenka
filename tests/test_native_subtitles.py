@@ -6,15 +6,22 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
+import util
 from dirty_equals import IsPartialDict
+from driver import Driver
+from util import record_spans
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
-from saitenka.app.subtitle_render import NativeVisibleRenderer
+from saitenka.app.subtitle_intents import SeekCue
+from saitenka.app.subtitle_ownership import PixelOwner
+from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
+from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, events
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
     Cue,
@@ -53,10 +60,15 @@ ASS_TWO = (
 )
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
+    """Defers job and command delivery so a test controls when each completes, and injects mpv
+    errors. Those overrides are deliberate; inheriting is what supplies the ports it does NOT
+    specialise — a double defining only what its author needed is how production ends up on a
+    fallback branch it never takes in a real session."""
+
     def __init__(self) -> None:
-        self.commands: list[tuple] = []
-        self.props = {
+        super().__init__()
+        self.props |= {
             "sid": 2,
             "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
             "sub-start": 1.0,
@@ -85,6 +97,135 @@ class FakeIPC:
         self.set_property_exception: Exception | None = None
         self.overlay_add_error: str | None = None
         self.get_property_error: str | None = None
+        self.correlate_commands = False
+        self.submitted: list[tuple] = []
+        self.job_lanes: dict[str, object] = {}
+        self.pending_jobs: list[tuple] = []
+
+    def register_runtime_job_lane(self, name, policy, handler) -> bool:  # noqa: ARG002
+        # Geometry only. Every lane in the session probes for this port at composition, so accepting
+        # any name would move annotation, tooltip raster and prefetch onto lanes too — five
+        # subsystems this file does not exercise, changing when their results land.
+        if name != "subtitle-geometry":
+            return False
+        self.job_lanes[name] = handler
+        return True
+
+    def submit_runtime_job(self, *, owner, identity, lane, request, on_finished) -> bool:
+        """Run one lane job inline, then QUEUE its terminal for the next drain.
+
+        The work runs inline so results are deterministic without threads. The terminal must not
+        be, though: the broker publishes it to the mailbox, so it reaches the host on a later drain,
+        never re-entering the call that submitted it. Delivering it inline collapses the window in
+        which a cue is scheduled but not yet published — a real state the host spends time in, and
+        one several tests exist to pin.
+        """
+        from saitenka.runtime import EffectError, EffectOutcome
+
+        handler = self.job_lanes.get(lane)
+        if handler is None:
+            return False
+        outcome, error = EffectOutcome.SUCCEEDED, None
+        try:
+            handler(request, threading.Event())
+        except Exception:  # noqa: BLE001  # the broker turns a handler failure into an outcome
+            outcome, error = EffectOutcome.FAILED, EffectError.INTERNAL
+        self.pending_jobs.append(
+            (on_finished, EffectFinished(EffectId(0), owner, identity, outcome, error=error))
+        )
+        return True
+
+    def deliver_runtime_jobs(self) -> int:
+        """Drain queued lane terminals, including any a terminal itself produces."""
+        delivered = 0
+        while self.pending_jobs:
+            on_finished, completion = self.pending_jobs.pop(0)
+            on_finished(completion)
+            delivered += 1
+        return delivered
+
+    def close_runtime_job_lane(self, name, timeout=2.0) -> bool:  # noqa: ARG002
+        return self.job_lanes.pop(name, None) is not None
+
+    def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
+        """Admit a correlated command, completing it inline unless the test wants to place the
+        terminal itself.
+
+        Inline is the default so a test that does not care about ownership timing reads exactly as
+        it did when the command was synchronous. `correlate_commands = True` queues instead, which
+        is the only way to observe the mid-flight window or place a late result.
+        """
+        self.submitted.append((identity, command, on_finished))
+        if not self.correlate_commands:
+            self.deliver_runtime_mpv()
+        return True
+
+    def deliver_runtime_mpv(self, *, match=None, outcome=None, result=None) -> bool:
+        """Complete the oldest outstanding correlated command, or the oldest matching `match`.
+
+        `match` names the property or overlay a test means (checked against every element of the
+        command), because more than one subsystem correlates its writes and a positional "the next
+        one" would silently retarget whenever another starts.
+
+        Delivery runs it through `command`, not around it: a fake whose correlated path skips its
+        own mpv-state simulation reports a stale readback, which presents as a production ownership
+        regression rather than as the fake-only fault it is.
+        """
+        from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
+
+        index = next(
+            (
+                i
+                for i, (_identity, command, _cb) in enumerate(self.submitted)
+                if match is None or match in command
+            ),
+            None,
+        )
+        if index is None:
+            return False
+        identity, command, on_finished = self.submitted.pop(index)
+        outcome = outcome or EffectOutcome.SUCCEEDED
+        error = None
+        if outcome is EffectOutcome.SUCCEEDED:
+            try:
+                reply = self.command(*command)
+            except Exception:  # noqa: BLE001  # the gateway reports a dead pipe, it never raises
+                outcome, error = EffectOutcome.FAILED, EffectError.DISCONNECTED
+            else:
+                if result is None and isinstance(reply, dict):
+                    result = reply.get("data")
+                if isinstance(reply, dict) and reply.get("error") not in {None, "success"}:
+                    # Same mapping the real gateway applies (`MpvGateway._reply`); a fake that
+                    # collapses every reply error to one code hides which failure a caller saw.
+                    outcome = EffectOutcome.FAILED
+                    error = {
+                        "disconnected": EffectError.DISCONNECTED,
+                        "timeout": EffectError.TIMEOUT,
+                        "overloaded": EffectError.OVERLOADED,
+                    }.get(reply.get("error"), EffectError.INVALID_RESULT)
+        on_finished(
+            EffectFinished(
+                EffectId(0), Owner.SUBTITLE, identity, outcome, result=result, error=error
+            )
+        )
+        return True
+
+    def schedule_runtime_timer(self, *, timer, identity, due_at, on_finished, **_kwargs) -> bool:
+        self.timers[timer] = (identity, due_at, on_finished)
+        return True
+
+    def cancel_runtime_timer(self, timer) -> bool:
+        return self.timers.pop(timer, None) is not None
+
+    def fire_runtime_timer(self, timer) -> bool:
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        entry = self.timers.pop(timer, None)
+        if entry is None:
+            return False
+        identity, _due_at, on_finished = entry
+        on_finished(EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED))
+        return True
 
     def command(self, *args):
         self.commands.append(args)
@@ -184,19 +325,84 @@ class _AllSkippableTokenizer(_SingleTokenizer):
         return True
 
 
-def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
+def reader(
+    tmp_path: Path, *, correlated_surfaces: bool = False, native_visible: bool = True
+) -> tuple[Reader, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
     ipc = FakeIPC()
     backend = FakeBackend()
     options = ReaderOptions(
-        subtitle_geometry=SubtitleGeometryOptions(native_visible=True),
+        subtitle_geometry=SubtitleGeometryOptions(native_visible=native_visible),
         prefetch=False,
     )
-    result = Reader(ipc, options=options, geometry_backend=backend)
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
+    # Overlay egress is a composition decision, so the surface path is only correlated when a test
+    # asks for it; without it the overlay writes run inline, as they do with no gateway.
+    result = Reader(
+        ipc,
+        options=options,
+        geometry_backend=backend,
+        runtime_submit=ipc.submit_runtime_mpv if correlated_surfaces else None,
+    )
+    # Native geometry exists exactly when the mode does — the legacy renderer lays its own boxes out
+    # and has no provider to schedule against.
+    assert (result.native_geometry is not None) == native_visible
+    if result.native_geometry is not None:
+        result.native_geometry.set_source(source)
     return result, ipc, backend
+
+
+def settle_jobs(result: Reader, ipc: FakeIPC) -> None:
+    """Let the geometry lane finish and deliver its terminals.
+
+    Two steps because they are two facts: the work completing, and the host being told. The broker
+    publishes a completion to the mailbox, so the host learns on a later drain — which is why a cue
+    can be scheduled and not yet published, and why this is not folded into `wait_idle`. A legacy
+    session has no lane at all, so there is nothing to settle.
+    """
+    if result.native_geometry is None:
+        return
+    assert result.native_geometry.worker.wait_idle()
+    ipc.deliver_runtime_jobs()
+
+
+def visible_pixel_changes(ipc: FakeIPC) -> list[tuple[object, object]]:
+    """Every moment the command trace changed what the user can actually see.
+
+    Neither a raw trace nor a final-state fold answers "did the picture move": the trace fails on a
+    repaint that re-sends the payload already on screen, and the fold cannot see a flicker — a
+    change and a change back land on the same final state. So the sequence of *effective* writes is
+    the observable, and an unchanged suffix is the claim.
+    """
+    state: dict[object, object] = {}
+    changes: list[tuple[object, object]] = []
+    for command in ipc.commands:
+        if command[:2] == ("set_property", "sub-visibility"):
+            key, value = "sub-visibility", command[2]
+        elif command and command[0] == "osd-overlay":
+            key, value = ("osd-overlay", command[1]), command[2:]
+        elif command and command[0] in {"overlay-add", "overlay-remove"}:
+            key, value = ("overlay", command[1]), command
+        else:
+            continue
+        if state.get(key, object()) != value:
+            state[key] = value
+            changes.append((key, value))
+    return changes
+
+
+def settle_geometry(result: Reader, ipc: FakeIPC) -> None:
+    """Advance past the batch boundary the way the next drain would.
+
+    Geometry-input changes arm one zero-delay deadline rather than refreshing per observation, so
+    a test that changes an input has to let that deadline come due before asserting on the request
+    the backend received.
+    """
+    # Production order: the deadline armed during one drain comes due as an envelope at the head of
+    # the next, and cue reconciliation settles at that drain's end. Firing after settling would let
+    # reconciliation retire the deadline before it is ever delivered.
+    ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    result._settle_cue_observation()
 
 
 def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Path) -> None:
@@ -204,13 +410,13 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     assert backend.requests
     assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
     ]
@@ -237,8 +443,8 @@ def test_visible_cue_cache_miss_keeps_native_pixels_until_geometry_is_ready(tmp_
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.boxes == []
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert result.boxes
     result.close()
 
@@ -281,21 +487,45 @@ def test_missing_ass_full_property_disables_only_native_geometry(tmp_path: Path)
     result.close()
 
 
+def _visibility_asserts(ipc) -> int:
+    return sum(1 for command in ipc.commands if command == ("set_property", "sub-visibility", True))
+
+
 def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path) -> None:
+    """A new track means the established flag is about pixels from the old one, so it is re-proved.
+
+    The trigger is the selection moving, not the call: `activate` is idempotent by contract, and a
+    caller cannot know whether the ground moved under it.
+    """
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.commands.clear()
 
-    result.subtitle_pipeline.activate(result)
-    result.subtitle_pipeline.activate(result)
+    ipc.props["sid"] = 5
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    ipc.props["sid"] = 6
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
-    commands = [
-        command for command in ipc.commands if command == ("set_property", "sub-visibility", True)
-    ]
-    assert len(commands) == 2
+    assert _visibility_asserts(ipc) == 2
+    result.close()
+
+
+def test_reconfiguring_the_same_track_does_not_reassert(tmp_path: Path) -> None:
+    """The negative control, and the reason the renderer decides rather than the caller: a repeat
+    with nothing changed must not spend an mpv round-trip proving what it already proved."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    ipc.props["sid"] = 5
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    ipc.commands.clear()
+
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+
+    assert _visibility_asserts(ipc) == 0
     result.close()
 
 
@@ -309,7 +539,7 @@ def test_same_session_reconnect_reasserts_native_and_preserves_restore_baseline(
     ipc.props["sub-visibility"] = False
     ipc.commands.clear()
 
-    renderer.connection_replaced(result)
+    renderer.connection_replaced(result.subtitle_target())
 
     assert renderer.ownership_state.owner.value == "native"
     assert renderer.ownership_state.context.connection_epoch == 1
@@ -325,21 +555,23 @@ def test_missing_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     result.native_geometry.set_source(tmp_path / "missing.ass")
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    result.native_geometry.apply(result._geometry_observation())
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
     assert result.native_geometry.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
     assert result.boxes == []
     result.close()
 
 
-def test_oversized_source_keeps_native_pixels_before_provider_work(tmp_path: Path) -> None:
-    result, ipc, backend = reader(tmp_path)
+def test_oversized_source_hands_the_pixels_to_legacy_without_provider_work(tmp_path: Path) -> None:
+    """Too large is a property of the file, so it selects the renderer — but it must still not cost
+    a provider round trip, which is what this asserts beyond the owner."""
+    result, _ipc, backend = reader(tmp_path)
     source = tmp_path / "oversized.ass"
     source.write_bytes(b"x" * (MAX_ASS_SOURCE_BYTES + 1))
     assert result.native_geometry is not None
@@ -349,8 +581,157 @@ def test_oversized_source_keeps_native_pixels_before_provider_work(tmp_path: Pat
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-too-large"
     assert backend.requests == []
-    assert result.native_geometry.status.owner == "native"
-    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert result.native_geometry.status.owner == "legacy"
+    result.close()
+
+
+def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> None:
+    """WP4.3's gate, asserted on the owner itself rather than on the absence of a write.
+
+    Whether hit boxes exist is an interaction fact; who owns the pixels is a visibility fact. The
+    pure FSM keeps them apart, but that is not evidence the system does — the Reader-side degrade
+    path clears `boxes` and drives the FSM in the same call, which is exactly where the two would
+    get welded together.
+    """
+    result, ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE
+    assert result.boxes
+
+    backend.error = RuntimeError("font provider unavailable")
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
+
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE  # unproved boxes go, pixels stay
+    assert not renderer.ownership_state.geometry_ready
+    assert result.boxes == []
+
+    backend.error = None
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE  # recovery does not re-own either
+    assert result.boxes
+    result.close()
+
+
+@pytest.mark.parametrize("native_visible", [True, False], ids=["native", "legacy"])
+def test_navigation_lands_on_the_target_cue_under_either_renderer(
+    tmp_path: Path, *, native_visible: bool
+) -> None:
+    """WP4.5's one navigation interaction contract, replayed under both renderers.
+
+    Which renderer owns the pixels is a visibility decision; where a navigation key lands the user
+    is not. The two paths diverge everywhere below that — native publishes a hit map from a
+    provider, legacy lays the boxes out itself — so a navigation regression in one is invisible to
+    every test written against the other.
+    """
+    result, ipc, _backend = reader(tmp_path, native_visible=native_visible)
+    result.episode.sub_index = CueIndex([Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")])
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    result.hover = 0
+
+    assert result.seek_cue(SeekCue(1, result.cue_revision))
+
+    assert result.sub_text == "犬も見る"  # the target cue, drawn from the index without waiting
+    assert result.hover == -1  # …with the previous cue's interaction state gone
+    assert [token.surface for token in result.tokens] == ["犬", "も", "見る"]
+    assert ("sub-seek", "1") in [command[:2] for command in ipc.commands if len(command) >= 2]
+    result.close()
+
+
+def test_every_geometry_cache_miss_reports_a_bounded_text_free_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WP4.4's observability obligation, as two claims rather than one.
+
+    A miss with no reason is the silent give-up this gate exists to forbid, so each one names why —
+    and the four here are four different whys, not one repeated. A hit needs no reason and carries
+    none.
+
+    The second claim is the reason's vocabulary. A cache key is derived from cue text and a source
+    path, which makes this the one diagnostic on the path with a route to that content, so each
+    reason has to come from the closed set rather than describe what was actually looked up.
+    """
+    from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
+
+    spans = record_spans(monkeypatch)
+    result, ipc, _backend = reader(tmp_path)
+    text = "猫を見る"
+    assert result.native_geometry is not None
+
+    result.set_subtitle(text)  # the artifact was installed moments ago
+    settle_jobs(result, ipc)
+    result.native_geometry.schedule(result._geometry_observation())  # same epoch, key never cached
+    settle_jobs(result, ipc)
+    result.native_geometry.invalidate(live=True)  # a render input moved
+    result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+    second = tmp_path / "other.ass"
+    second.write_bytes(ASS)
+    result.native_geometry.set_source(second)  # a different artifact entirely
+    result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+
+    misses = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_cache"]
+    assert {attrs["outcome"] for attrs in misses} == {"miss"}
+    assert [attrs["reason"] for attrs in misses] == [
+        GeometryCacheReason.SOURCE_CHANGED,
+        GeometryCacheReason.FIRST_SEEN,
+        GeometryCacheReason.RENDER_INPUT_CHANGED,
+        GeometryCacheReason.SOURCE_CHANGED,
+    ]
+    exported = {str(value) for attrs in misses for value in attrs.values()}
+    assert not any(text in value or str(tmp_path) in value for value in exported)
+    result.close()
+
+
+def test_a_late_valid_hit_map_restores_interaction_without_changing_visible_pixels(
+    tmp_path: Path,
+) -> None:
+    """WP4.4's positive case, which quarantining stale results does not cover.
+
+    Retiring a late result is only half the contract: a result that is late but still *valid* for
+    the cue on screen has to be taken. The failure mode it guards is the mirror of the quarantine —
+    a restore that repaints, so the user sees the cue flicker to prove a hit map they never see.
+    """
+    result, ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    settle_jobs(result, ipc)
+    assert result.boxes
+
+    # A provider failure retires the hit boxes for the cue that is still displayed.
+    backend.error = RuntimeError("font provider unavailable")
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
+    assert result.boxes == []
+    degraded = visible_pixel_changes(ipc)
+
+    # The retry lands while that same cue is still on screen: interaction comes back…
+    backend.error = None
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry.status.geometry_ready
+    assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
+    assert visible_pixel_changes(ipc) == degraded  # …and nothing the user can see moved
     result.close()
 
 
@@ -358,26 +739,60 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     result.hover = 0
-    result._paused_by_tip = True
+    result._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     ipc.commands.clear()
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
 
-    assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
-    assert not result.native_geometry.apply(result)
+    assert result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
 
     assert ("set_property", "pause", False) not in ipc.commands
     assert result.hover == 0
     assert result.boxes == []
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result._paused_by_tip = False
+    result._pause_store.dispatch(events.HoverPauseReleased())
+    result.close()
+
+
+def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path) -> None:
+    """The other half of WP4.3's "removes unproved hit boxes only".
+
+    A miss and a provider failure reach the same degrade, but from opposite sides: the failure
+    arrives with a verdict, the miss only says "not yet". The miss is the one that runs on every
+    ordinary cue, and it is the one that degrades *before* the work is even queued — so if the
+    removal were ever wider than the boxes, this is the path the user would feel it on.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready
+    result._sub_pending = None
+    result.hover = 0
+    result._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
+    ipc.commands.clear()
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+
+    assert result.native_geometry.schedule(
+        result._geometry_observation()
+    )  # degrades on the miss, before the lane runs
+
+    assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
+    assert result.boxes == []
+    assert result.hover == 0
+    assert ("set_property", "pause", False) not in ipc.commands
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    result._pause_store.dispatch(events.HoverPauseReleased())
     result.close()
 
 
@@ -385,20 +800,20 @@ def test_failed_provider_keeps_native_pixels_while_recovery_is_pending(tmp_path:
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
-    assert not result.native_geometry.apply(result)
+    assert result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
     ipc.commands.clear()
     backend.error = None
     ipc.props["sub-start"] = None
     ipc.props["sub-end"] = None
 
-    result.native_geometry.refresh(result)
+    result.native_geometry.refresh(result._geometry_observation())
 
     assert result.native_geometry.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
@@ -411,18 +826,18 @@ def test_completed_provider_failure_survives_refresh_before_apply(tmp_path: Path
     backend.error = RuntimeError("font provider unavailable")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     ipc.props["sub-start"] = None
     ipc.props["sub-end"] = None
     ipc.commands.clear()
 
-    result.native_geometry.refresh(result)
+    result.native_geometry.refresh(result._geometry_observation())
 
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
     assert result.native_geometry.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert not result.native_geometry.apply(result)
+    assert not result.native_geometry.apply(result._geometry_observation())
     result.close()
 
 
@@ -433,8 +848,8 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
     backend.error = RuntimeError("font provider unavailable")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert not result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
     original_tokenizer = result.tokenizer
     result.use_tokenizer(_AllSkippableTokenizer())
     ipc.commands.clear()
@@ -449,8 +864,8 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
     result.use_tokenizer(original_tokenizer)
     ipc.commands.clear()
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    assert not result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
     assert result.native_geometry.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
@@ -461,14 +876,14 @@ def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path)
     backend.error = RuntimeError("font provider unavailable")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert not result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
     ipc.commands.clear()
 
     result.set_subtitle("")
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    assert not result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
 
     assert result.native_geometry.status.owner == "native"
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
@@ -477,19 +892,19 @@ def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path)
 
 
 def test_blank_interval_does_not_repeat_provider_failure_diagnostic(tmp_path: Path, caplog) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
     assert result.native_geometry is not None
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
         result.set_subtitle("猫を見る")
-        assert result.native_geometry.worker.wait_idle()
-        assert not result.native_geometry.apply(result)
+        settle_jobs(result, ipc)
+        assert not result.native_geometry.apply(result._geometry_observation())
         result.set_subtitle("")
         result.set_subtitle("猫を見る")
-        assert result.native_geometry.worker.wait_idle()
-        assert not result.native_geometry.apply(result)
+        settle_jobs(result, ipc)
+        assert not result.native_geometry.apply(result._geometry_observation())
 
     assert [record.getMessage() for record in caplog.records] == [
         ("native subtitle interaction unavailable: geometry-provider-failed detail=provider-error")
@@ -497,21 +912,23 @@ def test_blank_interval_does_not_repeat_provider_failure_diagnostic(tmp_path: Pa
     result.close()
 
 
-def test_non_ass_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None:
-    result, ipc, backend = reader(tmp_path)
+def test_a_non_ass_source_is_drawn_by_legacy_and_stays_scannable(tmp_path: Path) -> None:
+    """The point of handing an unusable source to legacy: an .srt keeps its hit boxes.
+
+    It used to keep mpv's pixels and produce none, which left the episode unscannable for its whole
+    run — the boxes here are the whole reason the renderer switches."""
+    result, _ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
-    result.native_geometry.set_source(tmp_path / "episode.srt", reader=result)
+    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
-    assert backend.requests == []
-    assert result.native_geometry.status.owner == "native"
-    assert ("set_property", "sub-visibility", False) not in ipc.commands
-    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert backend.requests == []  # no provider work for a source it can never accept
+    assert result.native_geometry.status.owner == "legacy"
     result._sub_pending = None
-    result._draw_subtitle()
-    assert result.boxes == []
+    result.draw_subtitle()
+    assert result.boxes != []
     result.close()
 
 
@@ -528,8 +945,8 @@ def test_unsupported_transition_is_not_counted_as_provider_failure(tmp_path: Pat
     try:
         assert result.native_geometry is not None
         source = tmp_path / "episode.srt"
-        result.native_geometry.set_source(source, reader=result)
-        result.native_geometry.set_source(source, reader=result)
+        result.native_geometry.set_source(source, live=True)
+        result.native_geometry.set_source(source, live=True)
 
         failures = otel_metrics.snapshot().get("saitenka.subtitle_geometry.failures")
         assert failures is None or failures["value"] == 0
@@ -552,7 +969,7 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
     try:
         ipc.set_property_error = "rejected"
         result.set_subtitle("猫を見る")
-        result.subtitle_pipeline.activate(result)
+        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
         renderer = result.subtitle_pipeline.renderer
         assert isinstance(renderer, NativeVisibleRenderer)
@@ -561,8 +978,8 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
             otel_metrics.snapshot()["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
         )
         ipc.set_property_error = None
-        renderer.suspend_for_overlay(result)
-        renderer.resume_after_overlay(result)
+        renderer.suspend_for_overlay(result.subtitle_target())
+        renderer.resume_after_overlay(result.subtitle_target())
 
         assert renderer.ownership_state.owner.value == "legacy"
         assert (
@@ -574,22 +991,59 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
         provider.shutdown()
 
 
-def test_ass_geometry_restores_hits_after_noninteractive_source_switch(tmp_path: Path) -> None:
+def test_a_source_geometry_can_never_use_hands_the_pixels_to_legacy(tmp_path: Path) -> None:
+    """An .srt otherwise leaves mpv drawing with no hit boxes for the whole episode — unscannable,
+    and unrecoverable without changing tracks. The reason is a property of the source, so this
+    selects a renderer once per track rather than reacting to a geometry outcome."""
+    result, _ipc, _backend = reader(tmp_path)
+    renderer = NativeVisibleRenderer()
+    result.subtitle_pipeline.renderer = renderer
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
+    result.sub_text = "猫を見る"
+
+    result.subtitle_pipeline.draw_current(result.subtitle_target())
+
+    assert renderer.ownership_state.context.mode.value == "legacy-overlay"
+    result.close()
+
+
+def test_the_track_load_reset_does_not_hand_the_pixels_to_legacy(tmp_path: Path) -> None:
+    """`set_source(None)` is the reset every track load runs before the real source arrives, so
+    treating it as unsupported would flap the renderer twice per episode. The negative control for
+    the test above: `subtitle-source-unavailable` is deliberately not an unsupported-source reason.
+    """
+    result, _ipc, _backend = reader(tmp_path)
+    renderer = NativeVisibleRenderer()
+    result.subtitle_pipeline.renderer = renderer
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(None, live=True)
+    result.sub_text = "猫を見る"
+
+    result.subtitle_pipeline.draw_current(result.subtitle_target())
+
+    assert renderer.ownership_state.context.mode.value == "native-visible"
+    result.close()
+
+
+def test_switching_from_an_srt_to_an_ass_returns_the_pixels_to_native(tmp_path: Path) -> None:
+    """The switch is per selection and reversible: an unusable source parks the pixels with legacy,
+    and selecting an authored `.ass` takes them back rather than latching the fallback."""
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
-    result.native_geometry.set_source(tmp_path / "episode.srt", reader=result)
+    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
-    assert result.boxes == []
+    result.draw_subtitle()
+    assert result.native_geometry.status.owner == "legacy"
 
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
-    result.native_geometry.set_source(source, reader=result)
+    result.native_geometry.set_source(source, live=True)
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert backend.requests
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert result.native_geometry.status.fallback_reason is None
@@ -602,19 +1056,21 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     source.write_bytes(ASS_TWO)
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert len(backend.requests) == 2
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.set_subtitle("")
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed.update({"sub-text": "", "sub-start": None, "sub-end": None})
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed_all(
+        result._playback, {"sub-text": "", "sub-start": None, "sub-end": None}
+    )
 
     result._on_property_change({"name": "sub-delay", "data": -6.0})
-    result._reconcile_subtitles()
+    result._settle_cue_observation()
 
     assert len(backend.requests) == 2
     result._observing = False
@@ -632,7 +1088,7 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
 
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 2
     stats = result.native_geometry.worker.stats
     assert (stats.ready_before_presented, stats.presented) == (1, 2)
@@ -645,16 +1101,16 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     source.write_bytes(ASS_TWO)
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     backend.error = RuntimeError("font provider unavailable")
     ipc.props["osd-dimensions"] = {"w": 1279, "h": 720}
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    assert not result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result._geometry_observation())
     assert result.native_geometry.status.owner == "native"
     backend.error = None
     ipc.props.update(
@@ -676,7 +1132,7 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     assert result.native_geometry.status.fallback_reason is None
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -696,13 +1152,13 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
     )
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 5.0, "猫を見る"), Cue(3.0, 7.0, "犬も見る")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 5.0, "猫を見る"), Cue(3.0, 7.0, "犬も見る")))
     first = "Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0000,0000,0000,,猫を見る"
     second = "Dialogue: 1,0:00:03.00,0:00:07.00,Default,,0000,0000,0000,,犬も見る"
     ipc.props.update({"sub-text/ass-full": first, "sub-end": 5.0})
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 3
     ipc.commands.clear()
 
@@ -715,7 +1171,7 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
         }
     )
     result.set_subtitle("猫を見る\n犬も見る")
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.props.update(
         {
             "sub-text/ass-full": second,
@@ -726,7 +1182,7 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
     )
     result.set_subtitle("犬も見る")
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 3
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
@@ -734,14 +1190,14 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
 
 
 def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在")))
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 1
     assert result.native_geometry.status.fallback_reason is None
     result.close()
@@ -750,7 +1206,7 @@ def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path
 def test_native_lookahead_uses_the_single_annotation_coordinator(
     tmp_path: Path, monkeypatch
 ) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(
         ASS.replace(
@@ -761,7 +1217,7 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     )
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
+    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
 
     def submit(**kwargs) -> bool:
         completion = result._annotation_executor.run(kwargs["request"], threading.Event())
@@ -786,7 +1242,7 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     )
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert any(request.timestamp_ms == 4_001 for request in backend.requests)
     result.close()
@@ -813,7 +1269,7 @@ def test_geometry_request_uses_delay_adjusted_subtitle_timestamp(
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[0].timestamp_ms == expected_timestamp_ms
     result.close()
@@ -839,8 +1295,8 @@ def test_sub_delay_property_event_records_the_derived_subtitle_clock(
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["time-pos"] = 11.25
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed(result._playback, "time-pos", 11.25)
 
     result._on_property_change({"name": "sub-delay", "data": 10.0})
 
@@ -875,9 +1331,10 @@ def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["time-pos"] = None
-    result._observed["sub-start"] = None
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed_all(
+        result._playback, {"time-pos": None, "sub-start": None}
+    )
 
     result._on_property_change({"name": "sub-delay", "data": 10.0})
 
@@ -886,16 +1343,16 @@ def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
 
 
 def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result._geometry_cue_hint = Cue(4.0, 6.0, "犬も見る")
+    result.episode.geometry_cue_hint = Cue(4.0, 6.0, "犬も見る")
 
     result.set_subtitle("犬も見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[0].frame_id.active_event_ids[0].start_ms == 4_000
     result.close()
@@ -905,12 +1362,12 @@ def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     old_generation = result.subtitle_pipeline.generation
     ipc.commands.clear()
 
-    result.native_geometry.set_source(None, reader=result)
+    result.native_geometry.set_source(None, live=True)
 
     assert result.subtitle_pipeline.generation == old_generation + 1
     assert result.subtitle_pipeline.current is None
@@ -918,24 +1375,24 @@ def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path:
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.boxes == []
-    assert not result.native_geometry.apply(result)
+    assert not result.native_geometry.apply(result._geometry_observation())
     result.close()
 
 
 def test_tokenizer_change_rebuilds_geometry_after_new_tokens_land(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(result.boxes) > 1
 
     result.use_tokenizer(_SingleTokenizer())
     result._retokenize_current_cue()
 
     assert result.boxes == []
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(result.boxes) == len(backend.requests[-1].palette) == 1
     result.close()
 
@@ -966,12 +1423,12 @@ def test_unpaintable_full_width_space_is_not_required_from_libass(tmp_path: Path
 
     result.set_subtitle("猫　犬")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert [entry.token_index for entry in backend.requests[0].palette] == [0, 2]
     assert result.native_geometry.status.eligible_tokens == 2
     assert result.native_geometry.status.skipped_tokens == 1
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert [box.index for box in result.boxes] == [0, 2]
     result.close()
 
@@ -987,14 +1444,14 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
     )
     result.use_tokenizer(_WhitespaceTokenizer())
     result.set_subtitle("猫　犬")
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.commands.clear()
 
-    result.set_hover(2)
+    Driver(result).move_to_word(2)
 
     assert result.hover == 2
-    assert result._tip_state is not None
+    assert result.tip.view.state is not None
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
     ]
@@ -1012,10 +1469,10 @@ def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: 
     result._show_tooltip(0)
 
     assert result.hover == -1
-    assert result._tip_state is None
+    assert result.tip.view.state is None
     result.hover = 0
-    kanji_current(result)
-    assert result._kanji_index == 0
+    kanji_current(result.tip_ports, result.panel_ports, result.hover_inputs)
+    assert result.interaction.word_store.current.kanji == 0
     result.close()
 
 
@@ -1040,11 +1497,11 @@ def test_simultaneous_ass_events_publish_event_aware_hit_geometry(tmp_path: Path
 
     result.set_subtitle("猫\n犬")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert [event.source_order for event in backend.requests[0].frame_id.active_event_ids] == [0, 1]
     assert {entry.event_id.source_order for entry in backend.requests[0].palette} == {0, 1}
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(result.boxes) == len(backend.requests[0].palette)
     result.close()
 
@@ -1053,13 +1510,13 @@ def test_unexpected_geometry_error_keeps_native_pixels(tmp_path: Path, monkeypat
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
-    def fail_render_inputs(_reader):
+    def fail_render_inputs(_observed_property, _osd):
         raise RuntimeError("unexpected profile failure")
 
     monkeypatch.setattr(result.native_geometry, "_render_inputs", fail_render_inputs)
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     assert backend.requests == []
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
@@ -1074,34 +1531,34 @@ def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: 
     backend.error = RuntimeError("boom")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
-    assert not result.native_geometry.apply(result)
+    assert not result.native_geometry.apply(result._geometry_observation())
     clears = ipc.commands.count(("osd-overlay", 1001, "none", ""))
-    assert not result.native_geometry.apply(result)
+    assert not result.native_geometry.apply(result._geometry_observation())
     assert ipc.commands.count(("osd-overlay", 1001, "none", "")) == clears
 
-    result.native_geometry.set_source(None, reader=result)
+    result.native_geometry.set_source(None, live=True)
     assert result.subtitle_pipeline.last_error is None
     assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
     result.close()
 
 
 def test_repeated_provider_failure_emits_one_transition_diagnostic(tmp_path: Path, caplog) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
     assert result.native_geometry is not None
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
         result.set_subtitle("猫を見る")
-        assert result.native_geometry.worker.wait_idle()
-        result.native_geometry.apply(result)
+        settle_jobs(result, ipc)
+        result.native_geometry.apply(result._geometry_observation())
         result.subtitle_pipeline.invalidate()
         result.native_geometry.worker.invalidate_cache()
-        assert result.native_geometry.schedule(result)
-        assert result.native_geometry.worker.wait_idle()
-        result.native_geometry.apply(result)
+        assert result.native_geometry.schedule(result._geometry_observation())
+        settle_jobs(result, ipc)
+        result.native_geometry.apply(result._geometry_observation())
 
     assert [record.getMessage() for record in caplog.records] == [
         ("native subtitle interaction unavailable: geometry-provider-failed detail=provider-error")
@@ -1113,19 +1570,19 @@ def test_invalid_result_identity_removes_visible_native_focus(tmp_path: Path) ->
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
     focus_index = len(ipc.commands)
 
     backend.token_index_offset = len(result.tokens)
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.schedule(result._geometry_observation())
+    settle_jobs(result, ipc)
 
-    assert not result.native_geometry.apply(result)
+    assert not result.native_geometry.apply(result._geometry_observation())
     assert result.boxes == []
     assert ("osd-overlay", 1001, "none", "") in ipc.commands[focus_index:]
     result.close()
@@ -1135,10 +1592,10 @@ def test_empty_cue_removes_visible_native_focus(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     result.set_subtitle("")
 
@@ -1151,14 +1608,139 @@ def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     result.close()
 
     assert ("osd-overlay", 1001, "none", "") in ipc.commands
+
+
+def test_a_geometry_schedule_that_never_starts_names_the_missing_input(tmp_path: Path) -> None:
+    """The four preconditions in _resolve_schedule_inputs used to return a bare None, so a schedule
+    that never ran left no trace in logs or telemetry — which is why the repeated-text gap below took
+    an hour to locate. Not a degrade: pixels and ownership are untouched, only the silence was wrong."""
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result.set_subtitle("猫を見る")
+    result.tokens = []  # annotation has not landed yet: inputs are not assembled
+
+    traced: list[tuple[str, int]] = []
+    result.native_geometry._trace_unscheduled = lambda reason, revision: traced.append(  # type: ignore[method-assign]
+        (reason, revision)
+    )
+    assert result.native_geometry.schedule(result._geometry_observation()) is False
+
+    # The revision is what lets a dropped schedule be matched to the observation that armed it.
+    assert traced == [("no-tokens", result.cue_revision)]
+    result.close()
+
+
+def _correlated_reader(tmp_path: Path):
+    """A reader whose ownership assertion goes through the gateway, so the test places the terminal.
+
+    The renderer's `use_native` answers "not yet" until the readback lands, which is the whole
+    behavioural difference from the synchronous trio every other test in this file exercises.
+    """
+    result, ipc, backend = reader(tmp_path)
+    ipc.correlate_commands = True
+    return result, ipc, backend
+
+
+def test_an_undecided_assertion_defers_publishing_instead_of_degrading(tmp_path: Path) -> None:
+    result, _ipc, _backend = _correlated_reader(tmp_path)
+    assert result.native_geometry is not None
+
+    result.set_subtitle("猫を見る")
+
+    # Mid-flight: no answer yet. Degrading here is the regression this asserts against — it would
+    # mark geometry rejected for the lack of a reply and never publish hit boxes.
+    assert result._native_ownership_undecided()
+    assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
+    assert result.boxes == []
+    result.close()
+
+
+def test_a_geometry_result_that_lands_while_ownership_is_undecided_is_not_lost(
+    tmp_path: Path,
+) -> None:
+    """The geometry worker can finish before the ownership terminal does.
+
+    `_apply` consumes the snapshot before it learns ownership is undecided, so deferring alone
+    would drop that result on the floor and no later drain would rebuild it — the confirmation has
+    to re-drive the refresh. This is the case that makes the re-drive load-bearing rather than
+    defensive.
+    """
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    assert result.native_geometry is not None
+    result.set_subtitle("猫を見る")
+
+    settle_jobs(result, ipc)
+    assert (
+        result.native_geometry.status.geometry_ready
+    )  # the lane terminal published it is False  # deferred: no answer to publish against
+    # Deferring is not degrading — recording a rejection here is the regression.
+    assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
+
+    ipc.props["sub-visibility"] = True  # mpv now reports what the write asked for
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the set_property terminal
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the get_property readback
+    assert not result._native_ownership_undecided()
+
+    assert result.native_geometry.status.geometry_ready
+    assert result.native_geometry.fallback_reason is None
+    assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
+    result.close()
+
+
+def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Path) -> None:
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    result.set_subtitle("猫を見る")
+
+    # mpv accepted the write and still reports FALSE — the case the readback exists for, and the
+    # reason the write's own outcome cannot stand in for it.
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the set_property terminal
+    ipc.props["sub-visibility"] = False  # ...and mpv did not honour it
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the get_property readback
+
+    assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
+    assert not result._native_ownership_undecided()
+    result.close()
+
+
+def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -> None:
+    from saitenka.runtime import EffectOutcome
+
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    result.set_subtitle("猫を見る")
+
+    assert ipc.deliver_runtime_mpv(match="sub-visibility", outcome=EffectOutcome.REJECTED)
+
+    # A refused write still reads back — mpv's actual state decides ownership, not our write's
+    # outcome, and the readback is what can still prove legacy.
+    assert [
+        command for _identity, command, _cb in ipc.submitted if "sub-visibility" in command
+    ] == [("get_property", "sub-visibility")]
+    assert ipc.deliver_runtime_mpv()
+    assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
+    result.close()
+
+
+def test_only_one_assertion_is_in_flight_across_a_reassert(tmp_path: Path) -> None:
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    visibility = [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c]
+    assert len(visibility) == 1
+
+    # Through the fact, not a verb: an overlay release is the production trigger for a
+    # re-verification with the selection unchanged.
+    result.subtitle_pipeline.renderer.resume_after_overlay(result.subtitle_target())
+
+    # A second assertion would orphan the first's effect id and leave a terminal nobody retires.
+    assert [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c] == visibility
+    result.close()
 
 
 def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path: Path) -> None:
@@ -1173,12 +1755,18 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     )
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
 
+    # Drive the first cue as an observation, not a set_subtitle call: reconciliation reads the cue
+    # from the projection now, so a cue the projection never saw settles as empty and the next
+    # observation retires a cue this test never installed there.
     result._observing = True
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    ipc.props["sub-text"] = "猫を見る"
+    result._on_property_change({"name": "sub-text", "data": "猫を見る"})
+    result._settle_cue_observation()
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+
     ipc.props.update(
         {
             "sub-text": "猫を見る",
@@ -1188,17 +1776,22 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
             "time-pos": 4.2,
         }
     )
+    # mpv pushes the new authored row as its own observation; the old tick stage used to pull it
+    # through the ass-full probe instead, which let this test skip it.
+    result._on_property_change(
+        {"name": "sub-text/ass-full", "data": ipc.props["sub-text/ass-full"]}
+    )
     result._on_property_change({"name": "sub-start", "data": 4.0})
     result._on_property_change({"name": "sub-end", "data": 6.0})
     assert result.boxes == []
 
-    result._reconcile_subtitles()
+    settle_geometry(result, ipc)
 
     assert result.boxes == []
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[-1].frame_id.active_event_ids[0].start_ms == 4_000
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -1208,18 +1801,18 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     original_boxes = list(result.boxes)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["sub-text"] = result.sub_text
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed(result._playback, "sub-text", result.sub_text)
     ipc.commands.clear()
 
     result._on_property_change({"name": "sub-start", "data": None})
     result._on_property_change({"name": "sub-end", "data": None})
-    result._reconcile_subtitles()
+    settle_geometry(result, ipc)
 
     assert result.boxes == original_boxes
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
@@ -1227,7 +1820,7 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
 
     result._on_property_change({"name": "sub-start", "data": 1.0})
     result._on_property_change({"name": "sub-end", "data": 3.0})
-    result._reconcile_subtitles()
+    settle_geometry(result, ipc)
 
     assert result.boxes == original_boxes
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
@@ -1241,13 +1834,13 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     native_boxes = list(result.boxes)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["sub-text"] = result.sub_text
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed(result._playback, "sub-text", result.sub_text)
     ipc.commands.clear()
 
     result._on_property_change(
@@ -1258,7 +1851,7 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     )
     result._on_property_change({"name": "sub-start", "data": None})
     result._on_property_change({"name": "sub-end", "data": None})
-    result._reconcile_subtitles()
+    settle_geometry(result, ipc)
 
     assert native_boxes
     assert result.boxes == []
@@ -1327,10 +1920,10 @@ def test_mpv_empty_style_override_normalization_is_supported(tmp_path: Path) -> 
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -1354,14 +1947,14 @@ def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> Non
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     request = backend.requests[-1]
     assert request.frame_size == (3024, 1898)
     assert request.storage_size == (1920, 1080)
     assert request.margins == (98, 99, 0, 0)
     assert request.use_margins is False
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -1371,7 +1964,7 @@ def test_authored_ass_force_margins_is_forwarded(tmp_path: Path) -> None:
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[-1].use_margins is True
     result.close()
@@ -1381,15 +1974,68 @@ def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) ->
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+
+    before = len(backend.requests)
+    assert backend.requests[-1].use_margins is False  # the input the change is about to flip
 
     ipc.props["options/sub-ass-force-margins"] = True
     result._on_property_change({"name": "options/sub-ass-force-margins", "data": True})
-    assert result.native_geometry.worker.wait_idle()
+    ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    settle_jobs(result, ipc)
 
+    # Assert the NEXT request carries the changed input, not that some request ever did: the
+    # observation key covers the render profile, so a changed input must produce a new request.
+    assert len(backend.requests) > before
     assert backend.requests[-1].use_margins is True
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    result.close()
+
+
+def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> None:
+    """A resize publishes several inputs together. Each one used to set a dirty flag drained by
+    the tick; they now share one deadline, so the batch costs one refresh instead of one per
+    property."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    ipc.timers.clear()
+
+    result._on_property_change({"name": "options/sub-pos", "data": 95.0})
+    first = result._geometry_refresh.armed
+    result._on_property_change({"name": "options/sub-scale", "data": 1.5})
+    result._on_property_change({"name": "options/sub-use-margins", "data": True})
+
+    assert first is not None
+    assert result._geometry_refresh.armed is first  # both later changes coalesced into it
+    assert list(ipc.timers) == ["subtitle:geometry-refresh"]
+
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    assert result._geometry_refresh.armed is None  # retired by its own due event
+    result.close()
+
+
+def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> None:
+    """The tick drain refreshed only while the pipeline generation held. The deadline keeps that
+    guard: a refresh armed for the old track is cancelled rather than left to fire against the
+    replacement."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+
+    ipc.props["options/sub-pos"] = 95.0
+    result._on_property_change({"name": "options/sub-pos", "data": 95.0})
+    assert result._geometry_refresh.armed is not None
+
+    result._on_property_change({"name": "sid", "data": 3})
+
+    assert result._geometry_refresh.armed is None
+    assert "subtitle:geometry-refresh" not in ipc.timers
     result.close()
 
 
@@ -1400,7 +2046,7 @@ def test_osd_and_video_pixel_aspects_are_composed(tmp_path: Path) -> None:
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[-1].pixel_aspect == pytest.approx(1.5)
     result.close()
@@ -1422,15 +2068,15 @@ def test_ass_video_aspect_override_falls_back_with_observed_value(tmp_path: Path
 
 
 def test_non_utf8_ass_has_stable_fallback_reason(tmp_path: Path) -> None:
-    result, _ipc, _backend = reader(tmp_path)
+    result, ipc, _backend = reader(tmp_path)
     source = tmp_path / "legacy.ass"
     source.write_bytes(ASS + b"\xff")
     assert result.native_geometry is not None
-    result.native_geometry.set_source(source, reader=result)
+    result.native_geometry.set_source(source, live=True)
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    result.native_geometry.apply(result._geometry_observation())
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-encoding-unsupported"
     result.close()
@@ -1447,14 +2093,13 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
-        renderer.cue_changed(result, nonempty=True)
+        renderer.cue_changed(result.subtitle_target(), nonempty=True)
         assert renderer.ownership_state.owner.value == "unknown"
-        renderer.draw(result)
-        now[0] = 0.049
-        renderer.poll(result)
+        result.subtitle_pipeline.draw_current(result.subtitle_target())
+        # The retry is a named deadline now: nothing happens until it is due.
+        assert ipc.timers["subtitle:ownership-retry"][1] == pytest.approx(0.05)
         assert ipc.commands.count(("set_property", "sub-visibility", True)) == 1
-        now[0] = 0.05
-        renderer.poll(result)
+        assert ipc.fire_runtime_timer("subtitle:ownership-retry")
 
     assert ipc.commands.count(("set_property", "sub-visibility", True)) == 2
     assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
@@ -1465,12 +2110,43 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     result.close()
 
 
+@pytest.mark.parametrize("trigger", ["empty-cue", "reconnect", "mode-change"])
+def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, trigger: str) -> None:
+    """WP4.3's "exactly one ownership result", driven at all four triggers rather than the
+    activation path alone.
+
+    "Exactly one" overstates it, and the empty cue is why: it settles ownership without asking mpv
+    anything, because nothing about the pixels changed. The contract that holds across all of them
+    is *at most* one assertion per trigger and one owner at the end — two writes to
+    `sub-visibility` from one trigger are what orphan an assertion and strand the pixels.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    ipc.commands.clear()
+
+    if trigger == "empty-cue":
+        renderer.cue_changed(result.subtitle_target(), nonempty=False)
+    elif trigger == "reconnect":
+        renderer.connection_replaced(result.subtitle_target())
+    else:
+        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+
+    assert ipc.commands.count(("set_property", "sub-visibility", True)) <= 1
+    assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE
+    assert not renderer.assertion_in_flight  # nothing left orphaned behind the result
+    result.close()
+
+
 def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     ipc.command(
         "set_property",
@@ -1480,13 +2156,66 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     ipc.commands.clear()
     ipc.set_property_error = "disconnected"
 
-    result.subtitle_pipeline.activate(result)
+    ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.boxes
     box = result.boxes[0]
     assert result._hit(result.sub_origin[0] + box.x + 1, result.sub_origin[1] + box.y + 1) == 0
+    result.close()
+
+
+def _establish_native(result: Reader, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
+    """Own the pixels for `sid`, the way a session that has been playing a track already does."""
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    ipc.props["sid"] = sid
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    result._sub_pending = None
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    assert renderer.ownership_state.native_pixels_established
+    return renderer
+
+
+def test_a_reconfigure_reasserts_before_mpv_echoes_the_selected_track(tmp_path: Path) -> None:
+    """A live profile cycle must not leave the pixels owned on behalf of the track it replaced.
+
+    `configure` runs a few statements after `select_initial` writes `sid` fire-and-forget, so mpv has
+    not echoed the property yet and a renderer that reads it back still sees the OUTGOING track. It
+    would conclude the selection had not moved and — with `native_pixels_established` still true from
+    the old track — do nothing at all. So the selection is declared by the caller that wrote it.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    renderer = _establish_native(result, ipc, sid=1)
+    before = renderer.ownership_state.context.ownership_epoch
+
+    startup = SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
+    result.configure_subtitle_mode(startup)
+
+    assert ipc.props["sid"] == 1  # the echo has not landed: reading it back would see the old track
+    assert renderer.ownership_state.context.ownership_epoch > before
+    assert "5" in (renderer.ownership_state.context.selection or "")
+    result.close()
+
+
+def test_reconfiguring_the_same_track_spends_nothing(tmp_path: Path) -> None:
+    """The negative control for the above: declaring the track already selected is not a change.
+
+    Without this, "declare the selection" could be satisfied by bumping the epoch unconditionally,
+    which re-proves ownership on every reconfigure and costs a round-trip per profile cycle.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    renderer = _establish_native(result, ipc, sid=5)
+    before = renderer.ownership_state.context.ownership_epoch
+
+    result.configure_subtitle_mode(
+        SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
+    )
+
+    assert renderer.ownership_state.context.ownership_epoch == before
     result.close()
 
 
@@ -1498,11 +2227,84 @@ def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path
 
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
 
     assert result.boxes
     assert any(command[0] == "overlay-add" for command in ipc.commands)
     assert renderer.ownership_state.owner.value == "legacy"
+    result.close()
+
+
+def test_an_overtaken_subtitle_surface_never_acknowledges_over_the_current_one(
+    tmp_path: Path,
+) -> None:
+    """The revision fence, which is why the surface is a transaction and not a bare write.
+
+    Two cues can have overlay-adds in flight at once. If the older one's acknowledgement were
+    accepted it would mark the slot present at a revision the newer cue has already replaced, and
+    the stale bitmap would be the one the runtime believes is on screen.
+    """
+    from saitenka.app.overlay_ids import OverlayId
+    from saitenka.runtime.surfaces import SurfaceStatus
+
+    result, ipc, _backend = reader(tmp_path, correlated_surfaces=True)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    result.set_subtitle("猫を見る")
+    ipc.correlate_commands = True
+
+    def stage():
+        return renderer._fallback.draw(
+            result._draw_request(), result.lifecycle_surfaces, result.ipc
+        )
+
+    older, newer = stage(), stage()
+    assert older is not None and newer is not None  # an open surface always mints a transaction
+    older, newer = older.transaction, newer.transaction
+    assert older is not None and newer is not None
+    assert newer.revision > older.revision
+
+    assert ipc.deliver_runtime_mpv(match="overlay-add")  # the older commit, now overtaken
+    snapshot = result.lifecycle_surfaces.snapshot(OverlayId.SUB)
+    assert snapshot is not None
+    assert snapshot.status is SurfaceStatus.PENDING
+    assert snapshot.acknowledged_revision != older.revision
+
+    assert ipc.deliver_runtime_mpv(match="overlay-add")  # the newer commit
+    snapshot = result.lifecycle_surfaces.snapshot(OverlayId.SUB)
+    assert snapshot is not None
+    assert snapshot.status is SurfaceStatus.PRESENT
+    assert snapshot.acknowledged_revision == newer.revision
+    result.close()
+
+
+def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: Path) -> None:
+    """The ordering rule this slice exists for.
+
+    Taking legacy ownership before our own pixels are acknowledged is what lets the hide run
+    against an unproved surface, leaving the frame with no subtitle at all — absent pixels, which
+    WP4.3 forbids. So the overlay commit gates the ownership transition, not the other way round.
+    Before this slice `_reply_accepted(draw(...))` was `True` the moment `draw` returned.
+    """
+    result, ipc, _backend = reader(tmp_path, correlated_surfaces=True)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    result.set_subtitle("猫を見る")
+    ipc.commands.clear()
+
+    ipc.correlate_commands = True
+    renderer.resume_after_overlay(result.subtitle_target())
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the visibility write
+    ipc.props["sub-visibility"] = False  # mpv refuses to keep its subtitles visible
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # readback FALSE: hand to legacy
+
+    pending = [command for _identity, command, _cb in ipc.submitted]
+    assert any(command[0] == "overlay-add" for command in pending)
+    assert renderer.ownership_state.owner != PixelOwner.LEGACY  # the commit is still outstanding
+
+    assert ipc.deliver_runtime_mpv(match="overlay-add")  # the overlay commit lands
+
+    assert renderer.ownership_state.owner == PixelOwner.LEGACY
     result.close()
 
 
@@ -1512,8 +2314,8 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     assert isinstance(renderer, NativeVisibleRenderer)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.command(
         "set_property",
         "sub-visibility",
@@ -1523,7 +2325,8 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     ipc.set_property_error = "disconnected"
     ipc.overlay_add_error = "unsupported format"
 
-    result.subtitle_pipeline.activate(result)
+    ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
+    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None
@@ -1538,14 +2341,14 @@ def test_rejected_legacy_rehandoff_keeps_mpv_visible_and_retries(tmp_path: Path)
     ipc.set_property_exception = OSError("pipe closed")
     result.set_subtitle("猫を見る")
     result._sub_pending = None
-    result._draw_subtitle()
+    result.draw_subtitle()
     assert renderer.ownership_state.owner.value == "legacy"
     ipc.set_property_exception = None
-    renderer.suspend_for_overlay(result)
+    renderer.suspend_for_overlay(result.subtitle_target())
     ipc.commands.clear()
     ipc.overlay_add_error = "unsupported format"
 
-    renderer.resume_after_overlay(result)
+    renderer.resume_after_overlay(result.subtitle_target())
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None
@@ -1578,10 +2381,10 @@ def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     ipc.set_property_error = "disconnected"
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     failures = [
         attributes
@@ -1597,13 +2400,13 @@ def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
 
 
 def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    result.native_geometry.apply(result._geometry_observation())
 
     assert result._telemetry_gauges() == IsPartialDict(
         **{
@@ -1613,4 +2416,423 @@ def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> Non
             "subtitle_geometry.presented": 1.0,
         }
     )
+    result.close()
+
+
+def test_the_subtitle_clock_is_the_video_time_less_the_delay():
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    video_time, sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(12.5, 0.5, None)
+
+    assert (video_time, sub_delay, subtitle_time) == (12.5, 0.5, 12.0)
+    assert timestamp_ms == 12_000  # the ms key the geometry cache is keyed on
+
+
+def test_a_missing_delay_reads_as_no_offset():
+    """mpv answers None for `sub-delay` before a track resolves; that is zero, not unavailable."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    assert _subtitle_clock(4.0, None, None) == (4.0, 0.0, 4.0, 4_000)
+
+
+def test_a_missing_time_pos_falls_back_to_the_cue_start():
+    """`sub-start` is the cue's own time, so the video time is reconstructed by re-adding the delay."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    assert _subtitle_clock(None, 0.25, 8.0) == (8.25, 0.25, 8.0, 8_000)
+
+
+def test_a_clock_with_neither_a_position_nor_a_cue_start_is_unavailable():
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    with pytest.raises(ValueError, match="unavailable"):
+        _subtitle_clock(None, 0.0, None)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_clock_is_rejected_rather_than_cached(bad: float):
+    """A NaN timestamp would key a cache entry nothing can ever match again."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    with pytest.raises(ValueError, match="finite"):
+        _subtitle_clock(bad, 0.0, None)
+    with pytest.raises(ValueError, match="finite"):
+        _subtitle_clock(1.0, bad, None)
+
+
+def test_a_delay_that_runs_the_clock_before_the_file_starts_is_rejected():
+    """A large positive `sub-delay` near the start puts the subtitle clock behind 0:00, which no cue
+    can occupy — better a raised timing error than a negative cache key."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    with pytest.raises(ValueError, match="non-negative"):
+        _subtitle_clock(1.0, 5.0, None)
+
+    assert _subtitle_clock(5.0, 5.0, None)[2] == 0.0  # exactly zero is fine
+
+
+def _snapshot(pairs, active=None):
+    """A geometry snapshot carrying exactly `pairs` of (event_id, token_index)."""
+    from saitenka.subtitles.document import (
+        SubtitleEventId,
+        SubtitleFrameId,
+        SubtitleTrackId,
+    )
+
+    track = SubtitleTrackId("track")
+    listed = pairs if active is None else active
+    numbers = {p[0] for p in pairs} | {p[0] for p in listed}
+    events = {n: SubtitleEventId(track, n * 1000, n * 1000 + 900, 0, n) for n in numbers}
+    frame = SubtitleFrameId(track, tuple(events[n] for n in sorted({p[0] for p in listed})))
+    return GeometrySnapshot(
+        1,
+        track,
+        frame,
+        0,
+        "full",
+        tuple(
+            TokenGeometry(events[event], index, Rect(index * 60, 600, 50, 40))
+            for event, index in pairs
+        ),
+    )
+
+
+def _valid(snapshot, token_count: int) -> bool:
+    from saitenka.app.native_subtitles import NativeSubtitleGeometry
+
+    return NativeSubtitleGeometry._snapshot_identities_are_valid(snapshot, token_count)
+
+
+def test_geometry_matching_the_tokenized_cue_is_installable():
+    assert _valid(_snapshot([(0, 0), (0, 1), (1, 2)]), token_count=3)
+
+
+def test_a_live_cue_with_no_paintable_tokens_is_installable():
+    """A cue that is on screen but tokenized to nothing paintable (punctuation only) is a real
+    state, not a malformed snapshot — every guard vacuously holds. It cannot be expressed as a frame
+    with no events: `SubtitleFrameId` rejects that, so an on-screen cue always lists one."""
+    assert _valid(_snapshot([], active=[(0, 0)]), token_count=0)
+
+
+def test_a_repeated_token_index_is_rejected():
+    """Two boxes for one token: whichever lands second wins the hit test, so a click on that word
+    can resolve to geometry the other box drew."""
+    assert not _valid(_snapshot([(0, 0), (1, 0)]), token_count=2)
+
+
+def test_a_repeated_event_and_token_pair_is_rejected():
+    assert not _valid(_snapshot([(0, 0), (0, 0)]), token_count=2)
+
+
+def test_geometry_for_an_event_the_frame_no_longer_lists_is_rejected():
+    """The overlapping-cue case: the snapshot carries boxes for a cue that has since ended, and
+    painting them puts hit regions over words that are no longer on screen."""
+    stale = _snapshot([(0, 0), (1, 1)], active=[(0, 0)])
+
+    assert not _valid(stale, token_count=2)
+
+
+@pytest.mark.parametrize("index", [-1, 2, 99])
+def test_a_token_index_outside_the_cue_is_rejected(index: int):
+    """The snapshot and the tokenizer disagree about how many tokens this cue has — the exact shape
+    a mid-flight cue change produces, and the one that would index past `reader.tokens`."""
+    assert not _valid(_snapshot([(0, index)]), token_count=2)
+
+
+def test_the_bound_is_the_token_count_not_the_box_count():
+    """Two boxes against a one-token cue is out of range, even though the indices are unique and the
+    events are live — the count that matters is the cue's, not the snapshot's."""
+    assert _valid(_snapshot([(0, 0), (0, 1)]), token_count=2)
+    assert not _valid(_snapshot([(0, 0), (0, 1)]), token_count=1)
+
+
+def _visibility(reply):
+    """What the ownership FSM concludes from one `sub-visibility` read."""
+
+    class _Ipc(util.FakeIPC):
+        def command(self, *_args):
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+    return NativeVisibleRenderer()._read_visibility(_Ipc())
+
+
+def test_mpv_reporting_its_subtitles_hidden_is_proof_native_owns_the_pixels():
+    from saitenka.app.subtitle_ownership import Visibility
+
+    assert _visibility({"error": "success", "data": False}) is Visibility.FALSE
+    assert _visibility({"error": "success", "data": True}) is Visibility.TRUE
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        OSError("socket gone"),
+        RuntimeError("gateway down"),
+        {"error": "property unavailable"},
+        # The case the error check exists for: mpv reports a failure AND still carries a data
+        # field. Reading the payload past the error would take that `False` as legacy proof.
+        {"error": "property unavailable", "data": False},
+        "not a dict",
+        None,
+    ],
+)
+def test_an_unreadable_boundary_is_unknown_and_never_legacy_proof(reply: object):
+    """The asymmetry the whole handoff rests on. FALSE means mpv confirmed it stopped drawing, so
+    legacy may take the pixels; anything we could not read must not be mistaken for that, or a dead
+    socket hands ownership away and the frame ends up with no subtitle at all.
+    """
+    from saitenka.app.subtitle_ownership import Visibility
+
+    assert _visibility(reply) is Visibility.UNKNOWN
+
+
+def _box(index, x, y, w=20, h=30):
+    from saitenka.app.subtitles import WordBox
+
+    return WordBox(index, x, y, w, h)
+
+
+def test_the_highlight_spans_a_whole_multi_token_term():
+    """コンサート over the over-split コン. The tooltip shows the whole term, so highlighting only the
+    hovered morpheme would underline half of what the user is reading."""
+    from saitenka.app.subtitle_render import FOCUS_PAD, focus_rect
+
+    boxes = [_box(0, 0, 100), _box(1, 20, 100), _box(2, 40, 100)]
+
+    assert focus_rect(boxes, 0, (0, 2)) == (0, 100, 40 + 2 * FOCUS_PAD, 30 + 2 * FOCUS_PAD)
+
+
+def test_the_highlight_covers_only_the_hovered_word_without_a_span():
+    from saitenka.app.subtitle_render import FOCUS_PAD, focus_rect
+
+    boxes = [_box(0, 0, 100), _box(1, 20, 100)]
+
+    assert focus_rect(boxes, 1, None) == (20, 100, 20 + 2 * FOCUS_PAD, 30 + 2 * FOCUS_PAD)
+
+
+def test_a_span_over_two_lines_covers_both():
+    """A term wrapped across the cue's two lines: the union is the bounding box, so the highlight
+    is one rectangle covering the gap rather than two disjoint pieces."""
+    from saitenka.app.subtitle_render import focus_rect
+
+    rect = focus_rect([_box(0, 200, 100), _box(1, 0, 140)], 0, (0, 2))
+
+    assert rect is not None
+    _left, top, _w, height = rect
+    assert top == 100
+    assert height >= 70  # spans down to the second line's bottom edge
+
+
+def test_nothing_is_hovered_means_nothing_is_highlighted():
+    from saitenka.app.subtitle_render import focus_rect
+
+    assert focus_rect([_box(0, 0, 100)], -1, None) is None
+
+
+def test_a_span_whose_boxes_are_gone_highlights_nothing():
+    """The cue was re-rendered under the hover, so the retained indices no longer address anything.
+    An empty union would be a zero-size rect at the origin — a highlight in the corner of the video.
+    """
+    from saitenka.app.subtitle_render import focus_rect
+
+    assert focus_rect([_box(0, 0, 100)], 0, (5, 9)) is None
+
+
+def test_the_subtitle_sits_centred_above_the_bottom_margin():
+    from saitenka.app.subtitle_render import place_subtitle
+
+    assert place_subtitle((400, 80), (1920, 1080), 60) == ((1920 - 400) // 2, 1080 - 80 - 60)
+
+
+def test_the_placement_tracks_the_video_size_not_a_fixed_resolution():
+    from saitenka.app.subtitle_render import place_subtitle
+
+    hd = place_subtitle((400, 80), (1920, 1080), 60)
+    retina = place_subtitle((400, 80), (3024, 1898), 60)
+
+    assert retina[0] > hd[0] and retina[1] > hd[1]
+
+
+_SUPPORTED_SETTINGS = {
+    "sub-ass-override": "no",
+    "sub-ass-scale-with-window": False,
+    "sub-scale": 1.0,
+    "sub-pos": 100.0,
+    "sub-use-margins": True,
+    "sub-ass-force-margins": False,
+    "sub-ass-video-aspect-override": None,
+    "sub-ass-use-video-data": "all",
+    "sub-ass-vsfilter-aspect-compat": None,
+    "sub-ass-style-overrides": None,
+    "sub-font-provider": "auto",
+    "embeddedfonts": False,
+    "sub-fonts-dir": None,
+}
+_OSD = {"w": 1920, "h": 1080, "mt": 0, "mb": 0, "ml": 0, "mr": 0, "par": 1.0}
+_VIDEO = {"w": 1920, "h": 1080, "par": 1.0}
+
+
+def _inputs(*, osd=None, video=None, **settings):
+    from saitenka.app.native_subtitles import render_inputs_of
+
+    return render_inputs_of(
+        {**_OSD, **(osd or {})},
+        {**_VIDEO, **(video or {})},
+        {**_SUPPORTED_SETTINGS, **settings},
+        fallback_size=(1280, 720),
+    )
+
+
+def test_a_default_mpv_render_configuration_supports_native_geometry():
+    result = _inputs()
+
+    assert result.frame_size == (1920, 1080)
+    assert result.storage_size == (1920, 1080)
+    assert result.pixel_aspect == 1.0
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("sub-scale", 1.5),  # scales the text away from the geometry we computed
+        ("sub-pos", 50.0),  # moves it up the frame
+        ("sub-use-margins", False),
+        ("sub-ass-override", "force"),
+        ("sub-ass-scale-with-window", True),
+        ("sub-ass-use-video-data", "aspect-only"),
+        ("sub-font-provider", "fontconfig"),  # different glyphs, so different boxes
+        ("embeddedfonts", True),
+        ("sub-fonts-dir", "/fonts"),
+        ("sub-ass-style-overrides", ["Default.FontSize=60"]),
+    ],
+)
+def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: str, value: object):
+    """Every one of these has the same consequence: our boxes would be computed against a frame mpv
+    is not drawing into, so hit regions land beside the words rather than on them. The error names
+    the setting because a user who set it needs to know which one to undo."""
+    with pytest.raises(ValueError, match=name):
+        _inputs(**{name: value})
+
+
+def test_the_osd_surface_wins_over_the_reported_video_size():
+    """Subtitles are composited onto the OSD surface, so that is the frame the boxes belong to —
+    a letterboxed video reports a different size and would offset every box by the bars."""
+    result = _inputs(osd={"w": 1920, "h": 1080}, video={"w": 1280, "h": 720})
+
+    assert result.frame_size == (1920, 1080)
+    assert result.storage_size == (1280, 720)
+
+
+def test_a_missing_osd_size_falls_back_to_the_players_own():
+    result = _inputs(osd={"w": None, "h": None})
+
+    assert result.frame_size == (1280, 720)
+
+
+def test_margins_that_swallow_the_frame_are_rejected():
+    """Margins at or beyond the frame leave no area to lay text into; the geometry that came back
+    would be for a zero- or negative-sized region."""
+    with pytest.raises(ValueError, match="osd-margins"):
+        _inputs(osd={"mt": 600, "mb": 600})
+    with pytest.raises(ValueError, match="osd-margins"):
+        _inputs(osd={"ml": -1})
+
+
+@pytest.mark.parametrize("par", [-1.0, float("nan"), float("inf")])
+def test_a_meaningless_pixel_aspect_is_rejected(par: float):
+    with pytest.raises(ValueError, match="pixel-aspect"):
+        _inputs(video={"par": par})
+
+
+def test_an_unreported_pixel_aspect_means_square_pixels():
+    """mpv reports 0 for a par it does not know, and square is the right assumption — so the
+    `<= 0` rejection above can only ever fire for a NEGATIVE value, never for zero."""
+    assert _inputs(video={"par": 0}).pixel_aspect == 1.0
+    assert _inputs(osd={"par": 0}, video={"par": 2.0}).pixel_aspect == 2.0
+
+
+def test_the_profile_changes_when_any_setting_does():
+    """The profile keys the geometry cache. Two different render configurations sharing a key would
+    serve one's boxes for the other's frame."""
+    assert _inputs().profile != _inputs(**{"sub-ass-force-margins": True}).profile
+
+
+def test_the_legacy_renderer_restores_the_visibility_it_found_at_close(tmp_path: Path) -> None:
+    """The teardown write that kept `deactivate` synchronous — correlated now, and it still lands.
+
+    `activate` records what mpv held before hiding its subtitles and close puts it back. That is the
+    one thing a user notices about a session that ended, and nothing asserted it: the native
+    renderer's own restore was covered, the fallback's was not.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    ipc.props["sub-visibility"] = True
+    renderer = SubtitleRenderer()
+    result.subtitle_pipeline.renderer = renderer
+
+    assert renderer.activate(result.subtitle_target()) is True
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    ipc.commands.clear()
+
+    result.close()
+
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+
+
+def _decision_spans(monkeypatch) -> list[dict[str, object]]:
+    """Record every `subtitle_geometry_decision` span's attributes."""
+    from saitenka import otel_metrics
+
+    spans: list[dict[str, object]] = []
+
+    class _Span:
+        def __init__(self, attributes: dict[str, object]) -> None:
+            self.attributes = attributes
+
+        def set(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    @contextmanager
+    def record(name: str, **attributes: str):
+        values: dict[str, object] = dict(attributes)
+        if name == "subtitle_geometry_decision":
+            spans.append(values)
+        yield _Span(values)
+
+    monkeypatch.setattr(otel_metrics, "traced", record)
+    return spans
+
+
+def test_geometry_records_the_frame_it_shares_with_the_osd_surface(tmp_path, monkeypatch) -> None:
+    """Boxes are laid out in the frame `osd-dimensions` reports; they are drawn onto the surface the
+    host latched in `self.osd`. Nothing downstream compares the two, and when they differ the output
+    is not degraded but silently wrong — every box carries the same offset."""
+    spans = _decision_spans(monkeypatch)
+    result, ipc, _backend = reader(tmp_path)
+    result.osd = (1280, 720)  # agrees with the fake's osd-dimensions
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    framed = [s for s in spans if "frame_width" in s]
+    assert framed, "no decision reached the frame branch"
+    assert all(s["host_osd"] == "(1280, 720)" for s in framed)
+    assert all("frame_disagreement" not in s for s in framed)
+    result.close()
+
+
+def test_a_frame_that_disagrees_with_the_osd_surface_is_recorded(tmp_path, monkeypatch) -> None:
+    """Negative control for the test above — the oracle has to catch the divergence it exists for,
+    or the match assertion is only proving that both sides read the same fake."""
+    spans = _decision_spans(monkeypatch)
+    result, ipc, _backend = reader(tmp_path)
+    result.osd = (3574, 2074)  # the host latched a surface `osd-dimensions` never reported
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    framed = [s for s in spans if "frame_width" in s]
+    assert framed, "no decision reached the frame branch"
+    assert any(s.get("frame_disagreement") == "(1280, 720)_vs_(3574, 2074)" for s in framed)
     result.close()

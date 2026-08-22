@@ -27,13 +27,13 @@ def _reader(*, dict_set=None) -> Reader:
     reader = Reader(FakeIPC(), dict_set=dict_set)
     reader.osd = (1280, 720)
     reader.renderer = NullRenderer()
-    reader._sub_index = CueIndex(parse_srt(_SRT))
+    reader.episode.sub_index = CueIndex(parse_srt(_SRT))
     return reader
 
 
 def test_warm_loop_caches_every_cue():
     reader = _reader(dict_set=_ExistsDS())
-    prefetch._warm_episode_loop(reader, reader._sub_index)
+    prefetch._warm_episode_loop(reader.episode.sub_index, ports=reader.warm_ports.loop)
     assert len(reader.token_cache) == len(_CUES)
     for cue in _CUES:
         assert reader.token_cache.get(cue) is not None
@@ -41,7 +41,7 @@ def test_warm_loop_caches_every_cue():
 
 def test_warmed_cue_is_a_hit_with_no_retokenization(monkeypatch):
     reader = _reader(dict_set=_ExistsDS())
-    prefetch._warm_episode_loop(reader, reader._sub_index)
+    prefetch._warm_episode_loop(reader.episode.sub_index, ports=reader.warm_ports.loop)
 
     monkeypatch.setattr(
         reader.tokenizer,
@@ -55,10 +55,14 @@ def test_warmed_cue_is_a_hit_with_no_retokenization(monkeypatch):
 
 def test_warm_loop_stops_when_the_index_was_replaced():
     reader = _reader(dict_set=_ExistsDS())
-    stale = reader._sub_index
-    reader._sub_index = CueIndex(parse_srt(_SRT))  # a track switch installed a new index object
+    stale = reader.episode.sub_index
+    reader.episode.sub_index = CueIndex(
+        parse_srt(_SRT)
+    )  # a track switch installed a new index object
 
-    prefetch._warm_episode_loop(reader, stale)  # warming the OLD index must no-op
+    prefetch._warm_episode_loop(
+        stale, ports=reader.warm_ports.loop
+    )  # warming the OLD index must no-op
 
     assert len(reader.token_cache) == 0
 
@@ -71,7 +75,7 @@ def test_launcher_is_a_noop_without_a_dictionary():
 
 def test_launcher_skips_an_already_warmed_index():
     reader = _reader(dict_set=_ExistsDS())
-    reader._warmed_index = reader._sub_index  # already warmed (or in flight)
+    reader._warmed_index = reader.episode.sub_index  # already warmed (or in flight)
     # Would raise if it re-entered the loop and re-tokenized; the guard returns before the thread.
     reader.warm_episode_tokens()
-    assert reader._warmed_index is reader._sub_index
+    assert reader._warmed_index is reader.episode.sub_index

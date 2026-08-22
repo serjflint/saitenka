@@ -6,8 +6,9 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka import otel_metrics
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
-from saitenka.runtime.jobs import JobLanePolicy
+from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
 if TYPE_CHECKING:
     import threading
@@ -18,6 +19,10 @@ log = logging.getLogger(__name__)
 
 class RasterPanel(Protocol):
     def viewport(self, scroll: int, view_h: int, *, scale: float = 1.0) -> object: ...
+
+    def warm_viewport(self, scroll: int, view_h: int) -> None: ...
+
+    def warm_native_viewport(self, scroll: int, view_h: int, scale: float) -> None: ...
 
     def render_ahead(
         self,
@@ -57,27 +62,37 @@ class RenderAheadState:
     closed: bool = False
 
 
-class JobSubmitter(Protocol):
-    def __call__(
-        self,
-        *,
-        owner: Owner,
-        identity: object,
-        lane: str,
-        request: object,
-        on_finished: Callable[[EffectFinished], None],
-    ) -> bool: ...
-
-
 def run_render_ahead(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, RenderAheadRequest):
         raise TypeError("invalid render-ahead request")
     should_cancel = lambda: cancelled.is_set() or request.superseded.is_set()  # noqa: E731
+    # How far the job got before a newer notch superseded it. A burst whose jobs never reach
+    # "destination" starves the bands publication waits on, and the gate's choice of cache stops
+    # mattering — the stage is what separates that from a gate pointed at the wrong tier.
+    with otel_metrics.traced(
+        "render_ahead", scale=f"{request.scale:.4f}", scroll=str(request.scroll)
+    ) as span:
+        return _warm(request, should_cancel, span)
+
+
+def _warm(request: RenderAheadRequest, should_cancel, span) -> object:
+    span.set("stage", "entry")
     if should_cancel():
         return None
     try:
+        # Cheapest-unblocking-first. The destination's 1x bands are what publication waits on and
+        # cost ~2ms; the native raster below buys only crispness and costs ~28ms with no internal
+        # cancel point. Ordered the other way, a notch landing mid-raster aborts the job before the
+        # 2ms ever runs — so a burst supersedes every job during the expensive half and the viewport
+        # it scrolled to is never warmed at all. Soft-now/crisp-later is the whole tier design;
+        # this is where the worker has to honour it.
+        request.panel.warm_viewport(request.scroll, request.view_h)
+        span.set("stage", "destination")
+        if should_cancel():
+            return None
         if request.scale > 1.0:
-            request.panel.viewport(request.scroll, request.view_h, scale=request.scale)
+            request.panel.warm_native_viewport(request.scroll, request.view_h, request.scale)
+            span.set("stage", "native")
         if should_cancel():
             return None
         request.panel.render_ahead(
@@ -95,6 +110,7 @@ def run_render_ahead(request: object, cancelled: threading.Event) -> object:
                 should_cancel=should_cancel,
                 scale=1.0,
             )
+        span.set("stage", "lookahead")
     except Exception:
         log.debug("render-ahead failed", exc_info=True)
         raise
@@ -102,14 +118,12 @@ def run_render_ahead(request: object, cancelled: threading.Event) -> object:
 
 
 def configure_runtime_job(ipc) -> JobSubmitter | None:
-    register = getattr(ipc, "register_runtime_job_lane", None)
-    if register is None or not register(
+    return configure_lane(
+        ipc,
         "tooltip-render-ahead",
         JobLanePolicy(capacity=1),
         run_render_ahead,
-    ):
-        return None
-    return ipc.submit_runtime_job
+    )
 
 
 def request(

@@ -70,7 +70,7 @@ def _flow_row(
 INFLECTION_BG: RGBA = (91, 191, 106, 255)
 
 # Header top-right icon strip: [ ⊕ add ][gap][ 🔊 speaker ]. Kept as constants so the drawing and the
-# click hit-test (controller._hit_header_add) agree on one geometry.
+# click hit-test (tooltip.hit_header_add) agree on one geometry.
 _SPK_SIZE = 30
 _ADD_SIZE = 26
 _ICON_TOP = 8

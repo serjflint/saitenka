@@ -8,11 +8,12 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from saitenka import otel_metrics
 from saitenka.app import cue_annotation
 from saitenka.app.subtitle_geometry_diagnostics import (
+    GeometryCacheReason,
     GeometryOutcome,
     geometry_error_code,
     geometry_failure_reason,
@@ -31,11 +32,13 @@ from saitenka.subtitles import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
+    from typing import SupportsFloat
 
-    from saitenka.app.controller import Reader
-    from saitenka.app.subtitle_pipeline import SubtitleGeometryWorker
+    from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
+    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.token_cache import TokenizedCue
     from saitenka.app.tokenize import Token
+    from saitenka.subtitles import Cue, CueIndex
     from saitenka.subtitles.geometry import GeometrySnapshot
 
 log = logging.getLogger(__name__)
@@ -65,6 +68,16 @@ _PENDING_REASONS = frozenset(
         "subtitle-geometry-cache-miss",
         "subtitle-observation-pending",
         "subtitle-timing-unavailable",
+    }
+)
+# Sources geometry can never accept, however long it waits — wrong format, too large, not UTF-8.
+# `subtitle-source-unavailable` is deliberately absent: `set_source(None)` is also the reset every
+# track load runs, so switching on it would flap the renderer twice per episode.
+_UNSUPPORTED_SOURCE_REASONS = frozenset(
+    {
+        "subtitle-source-encoding-unsupported",
+        "subtitle-source-not-authored-ass",
+        "subtitle-source-too-large",
     }
 )
 
@@ -118,16 +131,25 @@ def _frame_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
     )
 
 
-def _lookahead_tokenized(reader: Reader, text: str) -> TokenizedCue:
-    norm = reader._cue_norm(text)
-    coordinator = reader._annotation
-    if reader._annotation_async and coordinator is not None:
-        return coordinator.resolve(
-            reader._annotation_key(norm),
-            reader._annotation_inputs(norm),
-            priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
-        )
-    return reader._tokenize_cue(norm)
+def _lookahead_tokenized(
+    text: str,
+    *,
+    normalise: Callable[[str], str],
+    coordinator: cue_annotation.CueAnnotationCoordinator | None,
+    annotation_key: Callable[[str], cue_annotation.AnnotationWorkKey],
+    annotation_inputs: Callable[[str], cue_annotation.AnnotationInputs],
+    tokenize: Callable[[str], TokenizedCue],
+) -> TokenizedCue:
+    """Tokenize an off-screen cue. `coordinator` is `None` when the async path is off — the caller
+    owns that config, so the switch does not travel here as a second flag."""
+    norm = normalise(text)
+    if coordinator is None:
+        return tokenize(norm)
+    return coordinator.resolve(
+        annotation_key(norm),
+        annotation_inputs(norm),
+        priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
+    )
 
 
 def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
@@ -171,9 +193,51 @@ def _pixel_aspect(osd: Mapping[str, object], video: Mapping[str, object]) -> flo
     return value
 
 
-def _subtitle_clock(reader: Reader, fallback: float | None) -> tuple[float, float, float, int]:
-    raw_time = reader._prop("time-pos")
-    raw_delay = reader._prop("sub-delay")
+def render_inputs_of(
+    osd: Mapping[str, object],
+    video: Mapping[str, object],
+    settings: Mapping[str, object],
+    *,
+    fallback_size: tuple[int, int],
+) -> _RenderInputs:
+    """Whether mpv's current render configuration lets us key geometry off it, and the frame it
+    implies. Raises `ValueError` naming what disqualified it.
+
+    This is the gate on native geometry, and everything it rejects has the same consequence: our
+    boxes would be computed against a frame mpv is not drawing into, so hit regions land beside the
+    words. `sub-scale`, `sub-pos` and the margin flags all move the text; the font settings change
+    which glyphs get laid out; a non-finite or non-positive pixel aspect makes the mapping
+    meaningless. `osd-dimensions` is preferred over the reported OSD size because it is the surface
+    subtitles are actually composited onto.
+    """
+
+    def _dim(source: Mapping[str, object], key: str, default: int) -> int:
+        return int(cast("int | float | str", source.get(key) or default))
+
+    frame_size = (_dim(osd, "w", fallback_size[0]), _dim(osd, "h", fallback_size[1]))
+    storage_size = (_dim(video, "w", frame_size[0]), _dim(video, "h", frame_size[1]))
+    margins = _frame_margins(osd)
+    unsupported = _unsupported_render_inputs(settings)
+    if unsupported:
+        raise ValueError(", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported))
+    _validate_frame(frame_size, margins)
+    return _RenderInputs(
+        frame_size,
+        storage_size,
+        _pixel_aspect(osd, video),
+        margins,
+        cast("bool", settings["sub-ass-force-margins"]),
+        tuple(sorted((name, repr(value)) for name, value in settings.items())),
+    )
+
+
+def _subtitle_clock(
+    raw_time: SupportsFloat | None, raw_delay: SupportsFloat | None, fallback: float | None
+) -> tuple[float, float, float, int]:
+    """Video time, `sub-delay`, and the delay-adjusted subtitle time (plus its ms key) from mpv's two
+    raw properties. Rejects a clock the geometry can't be keyed off — non-finite or negative — rather
+    than let a garbage timestamp reach the cache; `fallback` is `sub-start`, used when mpv has no
+    `time-pos` yet."""
     sub_delay = 0.0 if raw_delay is None else float(raw_delay)
     if raw_time is None:
         if fallback is None:
@@ -243,11 +307,65 @@ class _ScheduleInputs:
     observation_key: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class GeometryPorts:
+    """What the geometry owner asks the session to do, and the pipeline it defers to.
+
+    Bound once, at construction, rather than reached for per call: the geometry owner is a
+    session-lived collaborator, so a port that could change between calls would mean a different
+    session, not a different frame. That is what separates it from `SubtitleTarget`, whose members
+    are live facts and must be snapshotted per operation.
+    """
+
+    pipeline: SubtitleModeCoordinator
+    degrade: Callable[[], None]
+    clear_interaction: Callable[[], None]
+    use_native: Callable[[], bool]
+    ownership_undecided: Callable[[], bool]
+    redraw: Callable[[], None]
+    #: Hand the hit boxes (and, when the cue is installed, its origin) to whoever presents them.
+    #: The geometry owner IS the publisher of these — unlike a renderer, which returns them so a
+    #: superseded cue cannot write over a live one. Here the generation fence is what orders them.
+    publish: Callable[[list[WordBox], tuple[int, int] | None], None]
+    #: Tokenize a cue that is not on screen, for the lookahead. Session-lived, like the rest here;
+    #: the *active* tokenizer is not, because a profile switch replaces it.
+    tokenize_lookahead: Callable[[str], TokenizedCue]
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryObservation:
+    """The live facts one geometry decision is made from, snapshotted per operation.
+
+    Cut by contract: mpv-read (`prop`), presentation (`osd`), cue identity and nav (`text`,
+    `index`, `normalise`, `nav_index`, `cue_hint`, `cue_revision`), and the rendered cue
+    (`tokens`, `lines`). `is_skippable` is the dictionary's, and it travels here rather than in
+    the ports because a profile switch replaces the tokenizer mid-session.
+
+    Eleven members. That is a feature value, the size the sidebar's is — and the count is what
+    says this module is one feature and `tooltip`, at ninety-two, is not yet.
+    """
+
+    prop: Callable[[str], Any]
+    osd: tuple[int, int]
+    text: str
+    tokens: list[Token]
+    lines: list[list[Token]]
+    index: CueIndex | None
+    normalise: Callable[[str], str]
+    nav_index: int
+    cue_hint: Cue | None
+    cue_revision: int
+    is_skippable: Callable[[Token], bool]
+
+
 class NativeSubtitleGeometry:
-    def __init__(self, worker: SubtitleGeometryWorker, *, lookahead: int = 2) -> None:
+    def __init__(
+        self, worker: SubtitleGeometryWorker, ports: GeometryPorts, *, lookahead: int = 2
+    ) -> None:
         if lookahead < 0:
             raise ValueError("subtitle geometry lookahead must be non-negative")
         self.worker = worker
+        self._ports = ports
         self.lookahead = lookahead
         self.source_path: Path | None = None
         self._source_bytes: bytes | None = None
@@ -265,6 +383,7 @@ class NativeSubtitleGeometry:
         self._last_transition: str | None = None
         self._last_recovery: str | None = None
         self._last_render_inputs: _RenderInputs | None = None
+        self._last_host_osd: tuple[int, ...] | None = None
         self._failure_diagnostic: tuple[str, str | None] | None = None
 
     def _skipped_tokens(self) -> int:
@@ -274,8 +393,7 @@ class NativeSubtitleGeometry:
             + self._last_selection.skipped_unpaintable
         )
 
-    def sync_pixel_owner(self, reader: Reader) -> None:
-        renderer = reader.subtitle_pipeline.renderer
+    def sync_pixel_owner(self, renderer) -> None:
         ownership = getattr(renderer, "ownership_state", None)
         owner = getattr(getattr(ownership, "owner", None), "value", self._owner)
         if owner != self._owner:
@@ -323,8 +441,37 @@ class NativeSubtitleGeometry:
                 span.set("storage_height", render.storage_size[1])
                 span.set("pixel_aspect", render.pixel_aspect)
                 span.set("margins", repr(render.margins))
+                self._record_frame_agreement(span, render.frame_size)
             if target_owner != self._owner:
                 span.set("owner_transition", f"{self._owner}_to_{target_owner}")
+
+    def _record_frame_agreement(
+        self, span: otel_metrics.SpanSetter, frame: tuple[int, int]
+    ) -> None:
+        """Do the boxes and the surface they land on agree about the frame?
+
+        A mismatch is not a degraded mode — it is silently wrong output: every box takes the same
+        scale-and-offset error, so hit regions and the highlight sit beside the words for the whole
+        episode. Recorded on every decision because the divergence is invisible otherwise; the two
+        sizes reach a report only as `frame_*` (live `osd-dimensions`) and an `osd_probe` that fires
+        just on a change, and neither says whether they were equal when it mattered.
+        """
+        host = self._last_host_osd
+        if host is None:
+            return
+        agree = tuple(host[:2]) == frame
+        span.set("host_osd", repr(tuple(host[:2])))
+        if not agree:
+            span.set("frame_disagreement", f"{frame}_vs_{tuple(host[:2])}")
+            log.warning(
+                "geometry frame %r disagrees with the OSD surface %r — every box is offset",
+                frame,
+                tuple(host[:2]),
+            )
+        if otel_metrics.geometry_frame_agreement is not None:
+            otel_metrics.geometry_frame_agreement.add(
+                1, {"outcome": "match" if agree else "mismatch"}
+            )
 
     def _transition_owner(
         self,
@@ -452,11 +599,9 @@ class NativeSubtitleGeometry:
             owner=self._owner,
         )
 
-    def _degrade_geometry(
-        self, reader: Reader, reason: str, *, error_code: str | None = None
-    ) -> None:
-        reader._degrade_native_subtitle_geometry()
-        renderer = reader.subtitle_pipeline.renderer
+    def _degrade_geometry(self, reason: str, *, error_code: str | None = None) -> None:
+        self._ports.degrade()
+        renderer = self._ports.pipeline.renderer
         ownership = getattr(renderer, "ownership_state", None)
         owner = getattr(getattr(ownership, "owner", None), "value", self._owner)
         self._set_fallback(reason, error_code=error_code)
@@ -480,6 +625,16 @@ class NativeSubtitleGeometry:
             source_epoch=self._source_epoch,
         )
 
+    @property
+    def source_unsupported(self) -> bool:
+        """Whether this track can never produce geometry, so legacy should own its pixels.
+
+        A stable property of the *source*, not a geometry outcome — which is what lets it select a
+        renderer without breaking the rule that geometry availability may not. It moves only when
+        the source does, so the switch happens once per track and never between cues.
+        """
+        return self.fallback_reason in _UNSUPPORTED_SOURCE_REASONS
+
     def observe_ass_full_reply(self, reply: Mapping[str, object]) -> None:
         error = reply.get("error")
         if error == "success":
@@ -489,11 +644,17 @@ class NativeSubtitleGeometry:
         elif error in {"property not found", "unknown property"}:
             self.ass_full_capability = AssFullCapability.UNSUPPORTED
 
-    def set_source(self, path: Path | None, *, reader: Reader | None = None) -> None:
-        if reader is not None:
-            self._consume_failure(reader)
+    def set_source(self, path: Path | None, *, live: bool = False) -> None:
+        """Point at a new authored source.
+
+        `live` says a running session is switching, so whatever the old source left on screen has
+        to be retired. It used to be spelled by passing the host and testing it for `None` — a
+        parameter whose only use was its own presence, which reads as a dependency and is a flag.
+        """
+        if live:
+            self._consume_failure()
         self._source_epoch += 1
-        self.worker.invalidate(cause="source-changed")
+        self.worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
         self.source_path = None
         self._source_bytes = None
         self._last_snapshot = None
@@ -504,9 +665,9 @@ class NativeSubtitleGeometry:
         self._eligible_tokens = 0
         self._last_render_inputs = None
         self._failure_diagnostic = None
-        if reader is not None:
-            reader._clear_native_interaction()
-            reader._degrade_native_subtitle_geometry()
+        if live:
+            self._ports.clear_interaction()
+            self._ports.degrade()
         if path is None:
             self._set_fallback("subtitle-source-unavailable")
         elif path.suffix.casefold() != ".ass":
@@ -527,23 +688,25 @@ class NativeSubtitleGeometry:
 
     def invalidate(
         self,
-        reader: Reader | None = None,
         *,
-        cause: str = "render-input-changed",
+        live: bool = False,
+        cause: GeometryCacheReason = GeometryCacheReason.RENDER_INPUT_CHANGED,
     ) -> None:
-        if reader is not None:
-            self._consume_failure(reader)
+        """Drop the cached geometry. `live` retires the interaction it was backing — see
+        `set_source`."""
+        if live:
+            self._consume_failure()
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
         self._published_key = None
         self.worker.invalidate(cause=cause)
-        if reader is not None:
-            reader._clear_native_interaction()
+        if live:
+            self._ports.clear_interaction()
 
-    def refresh(self, reader: Reader) -> None:
-        identity = self._observation_key(reader)
-        snapshot = reader.subtitle_pipeline.current
+    def refresh(self, seen: GeometryObservation) -> None:
+        identity = self._observation_key(seen)
+        snapshot = self._ports.pipeline.current
         if (
             identity is not None
             and identity == self._published_key
@@ -551,22 +714,24 @@ class NativeSubtitleGeometry:
             and snapshot is self._last_snapshot
         ):
             active_events = len(snapshot.frame_id.active_event_ids)
-            if reader._prop("sub-start") is None or reader._prop("sub-end") is None:
+            if seen.prop("sub-start") is None or seen.prop("sub-end") is None:
                 self._set_pending_with_current_geometry(active_events=active_events)
             else:
                 self._set_ready(active_events=active_events)
             return
-        self.invalidate(reader)
-        if reader.sub_text.strip():
-            self.schedule(reader)
+        self.invalidate(live=True)
+        if seen.text.strip():
+            self.schedule(seen)
 
     @staticmethod
-    def record_clock_change(reader: Reader) -> None:
+    def record_clock_change(prop) -> None:
         with otel_metrics.traced("subtitle_geometry_clock") as span:
             try:
-                raw_start = reader._prop("sub-start")
+                raw_start = prop("sub-start")
                 video_time, sub_delay, subtitle_time, _timestamp_ms = _subtitle_clock(
-                    reader, None if raw_start is None else float(raw_start)
+                    prop("time-pos"),
+                    prop("sub-delay"),
+                    None if raw_start is None else float(raw_start),
                 )
             except (TypeError, ValueError):
                 span.set("outcome", "invalid")
@@ -649,18 +814,18 @@ class NativeSubtitleGeometry:
             )
         )
 
-    def _observation_key(self, reader: Reader) -> str | None:
+    def _observation_key(self, seen: GeometryObservation) -> str | None:
         path = self.source_path
-        active_rows = reader._prop("sub-text/ass-full")
+        active_rows = seen.prop("sub-text/ass-full")
         if path is None or not isinstance(active_rows, str) or not active_rows.strip():
             return None
         try:
-            render = self._render_inputs(reader)
+            render = self._render_inputs(seen.prop, seen.osd)
             cue = _CueInputs(
                 0,
                 1,
                 0,
-                reader.sub_text,
+                seen.text,
                 active_rows,
                 render.frame_size,
                 render.storage_size,
@@ -669,9 +834,7 @@ class NativeSubtitleGeometry:
                 render.use_margins,
                 render.profile,
             )
-            token_identity = tuple(
-                (token.surface, token.start, token.end) for token in reader.tokens
-            )
+            token_identity = tuple((token.surface, token.start, token.end) for token in seen.tokens)
             return repr((self._key(path, cue), token_identity))
         except (TypeError, ValueError):
             return None
@@ -724,54 +887,46 @@ class NativeSubtitleGeometry:
         )
 
     @staticmethod
-    def _render_inputs(reader: Reader) -> _RenderInputs:
-        video = reader._prop("video-out-params") or {}
-        osd = reader._prop("osd-dimensions") or {}
-        frame_size = (int(osd.get("w") or reader.osd[0]), int(osd.get("h") or reader.osd[1]))
-        storage_size = (int(video.get("w") or frame_size[0]), int(video.get("h") or frame_size[1]))
-        margins = _frame_margins(osd)
-        settings = {
-            "sub-ass-override": reader._prop("options/sub-ass-override"),
-            "sub-ass-scale-with-window": reader._prop("options/sub-ass-scale-with-window"),
-            "sub-scale": reader._prop("options/sub-scale"),
-            "sub-pos": reader._prop("options/sub-pos"),
-            "sub-use-margins": reader._prop("options/sub-use-margins"),
-            "sub-ass-force-margins": reader._prop("options/sub-ass-force-margins"),
-            "sub-ass-video-aspect-override": reader._prop("options/sub-ass-video-aspect-override"),
-            "sub-ass-use-video-data": reader._prop("options/sub-ass-use-video-data"),
-            "sub-ass-vsfilter-aspect-compat": reader._prop(
-                "options/sub-ass-vsfilter-aspect-compat"
-            ),
-            "sub-ass-style-overrides": reader._prop("options/sub-ass-style-overrides"),
-            "sub-font-provider": reader._prop("options/sub-font-provider"),
-            "embeddedfonts": reader._prop("options/embeddedfonts"),
-            "sub-fonts-dir": reader._prop("options/sub-fonts-dir"),
-        }
-        unsupported = _unsupported_render_inputs(settings)
-        if unsupported:
-            raise ValueError(
-                ", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported)
-            )
-        _validate_frame(frame_size, margins)
-        return _RenderInputs(
-            frame_size,
-            storage_size,
-            _pixel_aspect(osd, video),
-            margins,
-            cast("bool", settings["sub-ass-force-margins"]),
-            tuple(sorted((name, repr(value)) for name, value in settings.items())),
+    def _render_inputs(prop: Callable[[str], Any], osd) -> _RenderInputs:
+        """Read the sixteen mpv properties native geometry depends on, then decide.
+
+        Takes the property reader and the OSD size rather than the host: those two are all it ever
+        wanted, and a shim that takes the whole `Reader` cannot be driven by the session runtime.
+        """
+        return render_inputs_of(
+            prop("osd-dimensions") or {},
+            prop("video-out-params") or {},
+            {
+                name: prop(f"options/{name}")
+                for name in (
+                    "sub-ass-override",
+                    "sub-ass-scale-with-window",
+                    "sub-scale",
+                    "sub-pos",
+                    "sub-use-margins",
+                    "sub-ass-force-margins",
+                    "sub-ass-video-aspect-override",
+                    "sub-ass-use-video-data",
+                    "sub-ass-vsfilter-aspect-compat",
+                    "sub-ass-style-overrides",
+                    "sub-font-provider",
+                    "embeddedfonts",
+                    "sub-fonts-dir",
+                )
+            },
+            fallback_size=osd,
         )
 
     def _prefetch(
         self,
-        reader: Reader,
+        seen: GeometryObservation,
         path: Path,
         track_id: SubtitleTrackId,
         generation: int,
         render_inputs: _RenderInputs,
         after_ms: int,
     ) -> None:
-        index = reader._sub_index
+        index = seen.index
         if index is None or self.lookahead == 0:
             return
         source = self._source_bytes
@@ -805,12 +960,12 @@ class NativeSubtitleGeometry:
             queued_keys.add(key)
 
             def build(inputs: _CueInputs = inputs) -> GeometryRequest:
-                tokenized = _lookahead_tokenized(reader, inputs.text)
+                tokenized = self._ports.tokenize_lookahead(inputs.text)
                 selection = self._annotations(
                     inputs.text,
                     tokenized.lines,
                     tokenized.tokens,
-                    reader.tokenizer.is_skippable,
+                    seen.is_skippable,
                 )
                 if not selection.annotations:
                     raise ValueError("prefetched frame has no interaction-eligible tokens")
@@ -826,14 +981,13 @@ class NativeSubtitleGeometry:
             if len(queued_keys) >= self.lookahead:
                 break
 
-    def schedule(self, reader: Reader) -> bool:
+    def schedule(self, seen: GeometryObservation) -> bool:
         try:
-            return self._schedule(reader)
+            return self._schedule(seen)
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
             self.worker.mark_not_ready()
             reason, code = geometry_failure_reason(error)
             self._degrade_geometry(
-                reader,
                 reason,
                 error_code=code,
             )
@@ -841,70 +995,103 @@ class NativeSubtitleGeometry:
 
     def _active_observation(
         self,
-        reader: Reader,
+        seen: GeometryObservation,
         source: bytes,
         track_id: SubtitleTrackId,
         start: float,
         end: float,
         active_rows: object,
     ) -> tuple[float, float, int, str] | None:
-        hint = reader._geometry_cue_hint
+        hint = seen.cue_hint
         if hint is not None:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
-            if semantic_text != reader._cue_norm(reader.sub_text):
-                self._degrade_geometry(reader, "subtitle-observation-pending")
+            if semantic_text != seen.normalise(seen.text):
+                self._degrade_geometry("subtitle-observation-pending")
                 return None
             return hint.start, hint.end, timestamp_ms, rows
         if not isinstance(active_rows, str) or not active_rows.strip():
-            self._degrade_geometry(reader, "subtitle-ass-full-unavailable")
+            self._degrade_geometry("subtitle-ass-full-unavailable")
             return None
         try:
-            _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(reader, start)
+            _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
+                seen.prop("time-pos"), seen.prop("sub-delay"), start
+            )
         except (TypeError, ValueError):
-            self._degrade_geometry(reader, "subtitle-timing-unavailable")
+            self._degrade_geometry("subtitle-timing-unavailable")
             return None
-        if reader._sub_index is not None:
-            position = reader._sub_index.locate(
-                text=reader.sub_text,
+        if seen.index is not None:
+            position = seen.index.locate(
+                text=seen.text,
                 sub_start=start,
                 time_pos=subtitle_time,
-                preferred=reader._nav_idx,
+                preferred=seen.nav_index,
             )
             if position >= 0:
-                indexed = reader._sub_index.cues[position]
-                if indexed.text == reader.sub_text:
+                indexed = seen.index.cues[position]
+                if indexed.text == seen.text:
                     start, end = indexed.start, indexed.end
         return start, end, timestamp_ms, active_rows
 
-    def _resolve_schedule_inputs(self, reader: Reader) -> _ScheduleInputs | None:
+    def _trace_unscheduled(self, reason: str, cue_revision: int) -> None:
+        """Name a geometry schedule that never started. Not a degrade: the inputs are not assembled
+        yet, so pixels and ownership are untouched — only the silence is the bug. The revision is
+        what ties a dropped schedule back to the observation that armed the refresh."""
+        with otel_metrics.traced("subtitle_geometry_inputs") as span:
+            span.set("reason", reason)
+            span.set("cue_revision", cue_revision)
+        log.debug("geometry schedule skipped: %s (cue revision %d)", reason, cue_revision)
+
+    def _unassembled_input(self, *, cue_text: str, has_tokens: bool) -> str | None:
+        """Which of the four schedule preconditions is not met yet, if any. These are "inputs not
+        assembled", not a failure — name which and do not degrade."""
+        if self.source_path is None:
+            return "no-source-path"
+        if self._source_bytes is None:
+            return "no-source-bytes"
+        if not cue_text.strip():
+            return "no-cue-text"
+        if not has_tokens:
+            return "no-tokens"
+        return None
+
+    def _resolve_schedule_inputs(self, seen: GeometryObservation) -> _ScheduleInputs | None:
         path = self.source_path
         source = self._source_bytes
-        if path is None or source is None or not reader.sub_text.strip() or not reader.tokens:
+        unassembled = self._unassembled_input(cue_text=seen.text, has_tokens=bool(seen.tokens))
+        if unassembled is not None or path is None or source is None:
+            # Every other exit below records a reason; this one used to return a bare None, so a
+            # geometry schedule that never ran was invisible in the logs and in telemetry.
+            self._trace_unscheduled(unassembled or "no-source-path", seen.cue_revision)
             return None
         if self.ass_full_capability == AssFullCapability.UNSUPPORTED:
-            self._degrade_geometry(reader, "subtitle-ass-full-unsupported")
+            self._degrade_geometry("subtitle-ass-full-unsupported")
             return None
         try:
-            render = self._render_inputs(reader)
+            render = self._render_inputs(seen.prop, seen.osd)
         except (TypeError, ValueError) as error:
             self.worker.mark_not_ready()
             self._set_fallback("subtitle-render-input-unsupported", log_detail=str(error))
-            reader._degrade_native_subtitle_geometry()
+            self._ports.degrade()
             return None
         self._last_render_inputs = render
-        active_rows = reader._prop("sub-text/ass-full")
+        # The frame boxes are computed in comes from the LIVE `osd-dimensions`; the surface they are
+        # drawn onto is the host's latched `self.osd`, which only `refresh_osd` moves and only when it
+        # already differs. `seen.osd` is merely this path's fallback, so the two can diverge silently
+        # and every box then carries the same scale-and-offset error.
+        self._last_host_osd = tuple(seen.osd) if seen.osd else None
+        active_rows = seen.prop("sub-text/ass-full")
         if isinstance(active_rows, str):
             self.ass_full_capability = AssFullCapability.SUPPORTED
-        start = reader._prop("sub-start")
-        end = reader._prop("sub-end")
+        start = seen.prop("sub-start")
+        end = seen.prop("sub-end")
         if start is None or end is None:
-            self._degrade_geometry(reader, "subtitle-observation-pending")
+            self._degrade_geometry("subtitle-observation-pending")
             return None
-        generation = reader.subtitle_pipeline.generation
-        track_id = SubtitleTrackId(f"sid:{reader._prop('sid')}:{path.resolve()}")
+        generation = self._ports.pipeline.generation
+        track_id = SubtitleTrackId(f"sid:{seen.prop('sid')}:{path.resolve()}")
         active = self._active_observation(
-            reader, source, track_id, float(start), float(end), active_rows
+            seen, source, track_id, float(start), float(end), active_rows
         )
         if active is None:
             return None
@@ -913,7 +1100,7 @@ class NativeSubtitleGeometry:
             round(start * 1_000),
             round(end * 1_000),
             timestamp_ms,
-            reader.sub_text,
+            seen.text,
             rows,
             render.frame_size,
             render.storage_size,
@@ -930,10 +1117,10 @@ class NativeSubtitleGeometry:
             render,
             cue,
             self._key(path, cue),
-            self._observation_key(reader),
+            self._observation_key(seen),
         )
 
-    def _publish_cached(self, reader: Reader, inputs: _ScheduleInputs) -> bool:
+    def _publish_cached(self, seen: GeometryObservation, inputs: _ScheduleInputs) -> bool:
         cached = self.worker.publish_prefetched(inputs.key, inputs.generation)
         if cached is None:
             return False
@@ -941,12 +1128,14 @@ class NativeSubtitleGeometry:
             self._pending_key = (inputs.generation, inputs.observation_key)
         self._eligible_tokens = len(cached.palette)
         self.worker.mark_presented(cached)
-        if not reader._use_native_subtitle_renderer():
-            self._degrade_geometry(reader, "mpv-sub-visibility-rejected")
+        if not self._ports.use_native():
+            if self._ports.ownership_undecided():
+                return True  # the assertion's terminal re-drives the refresh
+            self._degrade_geometry("mpv-sub-visibility-rejected")
             return True
         self._set_ready(active_events=len(cached.frame_id.active_event_ids))
         self._prefetch(
-            reader,
+            seen,
             inputs.path,
             inputs.track_id,
             inputs.generation,
@@ -955,14 +1144,14 @@ class NativeSubtitleGeometry:
         )
         return True
 
-    def _schedule(self, reader: Reader) -> bool:
+    def _schedule(self, seen: GeometryObservation) -> bool:
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
-        inputs = self._resolve_schedule_inputs(reader)
+        inputs = self._resolve_schedule_inputs(seen)
         if inputs is None:
             return False
         with otel_metrics.traced("subtitle_geometry_cache") as span:
-            cache_hit = self._publish_cached(reader, inputs)
+            cache_hit = self._publish_cached(seen, inputs)
             stats = self.worker.stats
             span.set("outcome", "hit" if cache_hit else "miss")
             if not cache_hit:
@@ -971,28 +1160,33 @@ class NativeSubtitleGeometry:
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
         if cache_hit:
+            # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
+            # a cached cue would sit unapplied until some later miss happened to land.
+            self.apply(seen)
             return True
         try:
             selection = self._annotations(
-                reader.sub_text,
-                reader.lines,
-                reader.tokens,
-                reader.tokenizer.is_skippable,
+                seen.text,
+                seen.lines,
+                seen.tokens,
+                seen.is_skippable,
             )
         except ValueError:
             self.worker.mark_not_ready()
-            self._degrade_geometry(reader, "subtitle-token-annotation-invalid")
+            self._degrade_geometry("subtitle-token-annotation-invalid")
             return False
         self._last_selection = selection
         self._eligible_tokens = len(selection.annotations)
         if not selection.annotations:
-            reader.boxes = []
+            self._ports.publish([], None)
             self.worker.mark_not_ready()
-            if reader._use_native_subtitle_renderer():
+            if self._ports.use_native():
                 self._published_key = inputs.observation_key
                 self._set_ready()
                 return True
-            self._degrade_geometry(reader, "mpv-sub-visibility-rejected")
+            if self._ports.ownership_undecided():
+                return False  # the assertion's terminal re-drives the refresh
+            self._degrade_geometry("mpv-sub-visibility-rejected")
             return False
 
         def build() -> GeometryRequest:
@@ -1004,15 +1198,25 @@ class NativeSubtitleGeometry:
                 selection.annotations,
             )
 
-        accepted = self.worker.submit_job(inputs.generation, build, work_key=inputs.key)
+        def settled() -> None:
+            """The lane terminal is what publishes the result — nothing polls for it."""
+            self.apply(seen)
+
+        # Everything the result will be judged against is established BEFORE the work is queued.
+        # These used to run after, which reads fine while a completion is guaranteed to be later —
+        # and silently wipes the result the moment one is not, because `_degrade_geometry` clears
+        # the very boxes the completion just published.
+        if inputs.observation_key is not None:
+            self._pending_key = (inputs.generation, inputs.observation_key)
+        self._submitted_at = (inputs.generation, time.perf_counter())
+        self.worker.mark_not_ready()
+        self._degrade_geometry("subtitle-geometry-cache-miss")
+        accepted = self.worker.submit_job(
+            inputs.generation, build, work_key=inputs.key, on_settled=settled
+        )
         if accepted:
-            if inputs.observation_key is not None:
-                self._pending_key = (inputs.generation, inputs.observation_key)
-            self._submitted_at = (inputs.generation, time.perf_counter())
-            self.worker.mark_not_ready()
-            self._degrade_geometry(reader, "subtitle-geometry-cache-miss")
             self._prefetch(
-                reader,
+                seen,
                 inputs.path,
                 inputs.track_id,
                 inputs.generation,
@@ -1021,45 +1225,61 @@ class NativeSubtitleGeometry:
             )
         return accepted
 
-    def apply(self, reader: Reader) -> bool:
+    def apply(self, seen: GeometryObservation) -> bool:
         try:
-            return self._apply(reader)
+            return self._apply(seen)
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
             reason, code = geometry_failure_reason(error)
             self._degrade_geometry(
-                reader,
                 reason,
                 error_code=code,
             )
             return False
 
-    def _consume_failure(self, reader: Reader) -> None:
-        error = reader.subtitle_pipeline.consume_error()
+    def _consume_failure(self) -> None:
+        error = self._ports.pipeline.consume_error()
         if error is None:
             return
         reason, code = geometry_failure_reason(error)
         if error.startswith("subtitle-source-"):
             reason = error
         self._degrade_geometry(
-            reader,
             reason,
             error_code=code if not reason.startswith("subtitle-source-") else None,
         )
 
     @staticmethod
-    def _snapshot_identities_are_valid(reader: Reader, snapshot: GeometrySnapshot) -> bool:
+    def _snapshot_identities_are_valid(snapshot: GeometrySnapshot, token_count: int) -> bool:
+        """Whether a worker's geometry can be painted against the cue currently tokenized.
+
+        Each guard rejects a different way the snapshot and the cue can disagree: a repeated token
+        index would paint one box twice; an event the frame no longer lists is geometry for a cue
+        that has gone; and an index past ``token_count`` is a box for a token this cue does not
+        have. Any of them paints a hit region over the wrong word.
+
+        There was a fourth, rejecting a repeated ``(event, token)`` pair. It could never fire:
+        equal pairs have equal indices, so the index guard already rejected them.
+        """
         identities = [(item.event_id, item.token_index) for item in snapshot.tokens]
         indices = [token_index for _event_id, token_index in identities]
         active_events = set(snapshot.frame_id.active_event_ids)
         return bool(
-            len(identities) == len(set(identities))
-            and len(indices) == len(set(indices))
+            len(indices) == len(set(indices))
             and all(event_id in active_events for event_id, _token_index in identities)
-            and all(0 <= index < len(reader.tokens) for index in indices)
+            and all(0 <= index < token_count for index in indices)
         )
 
-    def _install_snapshot(self, reader: Reader, snapshot: GeometrySnapshot) -> None:
-        reader.boxes = [
+    def _install_snapshot(self, snapshot: GeometrySnapshot) -> list[WordBox]:
+        """Retain ``snapshot`` and return its boxes; the caller owns writing them onto the host.
+
+        The origin is the caller's to set to (0, 0) alongside: these boxes are already in frame
+        coordinates, so a leftover subtitle origin would offset every hit region by it.
+        """
+        self._last_snapshot = snapshot
+        if self._pending_key is not None and self._pending_key[0] == snapshot.generation:
+            self._published_key = self._pending_key[1]
+        self._pending_key = None
+        return [
             WordBox(
                 item.token_index,
                 item.bounds.x,
@@ -1069,11 +1289,6 @@ class NativeSubtitleGeometry:
             )
             for item in snapshot.tokens
         ]
-        reader.sub_origin = (0, 0)
-        self._last_snapshot = snapshot
-        if self._pending_key is not None and self._pending_key[0] == snapshot.generation:
-            self._published_key = self._pending_key[1]
-        self._pending_key = None
 
     def _record_ready_latency(self, generation: int) -> None:
         if (
@@ -1086,23 +1301,25 @@ class NativeSubtitleGeometry:
             )
         self._submitted_at = None
 
-    def _apply(self, reader: Reader) -> bool:
-        snapshot = reader.subtitle_pipeline.current
+    def _apply(self, seen: GeometryObservation) -> bool:
+        snapshot = self._ports.pipeline.current
         if snapshot is None:
-            self._consume_failure(reader)
+            self._consume_failure()
             return False
         if snapshot is self._last_snapshot:
             return False
-        if not self._snapshot_identities_are_valid(reader, snapshot):
-            self._degrade_geometry(reader, "geometry-token-identity-invalid")
+        if not self._snapshot_identities_are_valid(snapshot, len(seen.tokens)):
+            self._degrade_geometry("geometry-token-identity-invalid")
             return False
-        self._install_snapshot(reader, snapshot)
+        self._ports.publish(self._install_snapshot(snapshot), (0, 0))
         self._record_ready_latency(snapshot.generation)
-        if not reader._use_native_subtitle_renderer():
+        if not self._ports.use_native():
+            if self._ports.ownership_undecided():
+                return False  # the assertion's terminal re-drives the refresh
             self._set_fallback("mpv-sub-visibility-rejected")
             return False
         self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
-        reader._draw_subtitle()
+        self._ports.redraw()
         return True
 
     def close(self) -> None:

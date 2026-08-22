@@ -1,15 +1,17 @@
 """L1 interface tests — moves/clicks/wheel driven through the REAL mouse-pos / hit-test path.
 
 These use the :class:`Driver` (tests/driver.py) so they read as interaction scripts and go through
-``_hit`` / ``on_click`` / ``_scan_hit`` — the same code a real cursor drives — rather than calling
+``_hit`` / ``on_click`` / ``scan_hit`` — the same code a real cursor drives — rather than calling
 ``set_hover`` / ``_show_tooltip`` directly. (Live real-mpv input injection is L3: tests/test_live_mpv.py.)
 """
 
 from __future__ import annotations
 
+import pytest
 from driver import Driver
 from util import FakeIPC
 
+from saitenka.app.bindings import TIP_CLOSE_MSG
 from saitenka.app.controller import Reader
 from saitenka.panel import Definition, Entry
 
@@ -101,7 +103,10 @@ def test_tooltip_show_span_attributes_the_cold_hover(monkeypatch):
     assert show.attrs["cold"] is True  # first hover of this word builds the panel
     assert show.attrs["chars"] >= 1
     assert show.attrs["full_h"] > 0
-    assert show.attrs["bands"] >= 1  # a cold first paint rasters at least one band
+    # 0, not >=1: the first paint composes the cached/offline head and paints background where a
+    # band is missing. Every tier is warm-only on the interactive thread now, so this attribute
+    # reads "did the main thread violate that", and the answer must always be no.
+    assert show.attrs["bands"] == 0
 
 
 def test_subtitle_render_span_is_emitted(monkeypatch):
@@ -182,11 +187,11 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
 def test_main_flow_renders_at_4k_without_caches():
     # Cache-free AND scale ≠ 1: the reference-render → display-upscale path must stand on its own.
     r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
-    r.osd = (3840, 2160)  # 4K → _tip_display_scale 2.0, no prebuilt caches (hermetic)
+    r.osd = (3840, 2160)  # 4K → tip_scale.display 2.0, no prebuilt caches (hermetic)
     r.set_subtitle("本命を読む")
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert ui.tip_shown and r._tip_rect is not None
+    assert ui.tip_shown and r.tip.view.rect is not None
 
 
 def test_tooltip_keeps_lease_over_occluded_word(monkeypatch):
@@ -221,12 +226,14 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
     ui = Driver(r)
     ui.move_to_word(0)
-    assert r._hover_terms == ("本命を",)
-    assert r._hover_span == (0, 2), (
+    assert r.interaction.hovered_word_meta.terms == ("本命を",)
+    assert r.interaction.hovered_word_meta.span == (0, 2), (
         "the highlight must span the hovered token and its phrase partner"
     )
     ui.move_to_word(2)  # switch to 読む — a word with no following phrase term
-    assert r._hover_span is None and r._hover_terms == ()
+    assert (
+        r.interaction.hovered_word_meta.span is None and r.interaction.hovered_word_meta.terms == ()
+    )
 
 
 def test_phrase_reaches_panel_lookup(monkeypatch):
@@ -267,8 +274,8 @@ def test_move_inside_tooltip_opens_nested_scan_popup():
 
 def test_full_stress_chain_through_the_hit_test_path():
     # The --stress bench chain (show → scroll → nested → scroll → dismiss) validated as ONE accumulating
-    # session through the REAL hit-test path (_hit / _scan_hit). The correctness twin test_stress.py runs
-    # the same chain but via direct _show_tooltip/_show_nested entry points, bypassing hit-testing — this
+    # session through the REAL hit-test path (_hit / scan_hit). The correctness twin test_stress.py runs
+    # the same chain but via direct _show_tooltip/show_nested entry points, bypassing hit-testing — this
     # is the only test that drives the whole chain the way a cursor does.
     r = _reader()
     ui = Driver(r)  # instant → no dwell to wait out
@@ -278,9 +285,9 @@ def test_full_stress_chain_through_the_hit_test_path():
     assert ui.tip_shown, "hover shows the tooltip"
 
     ui.move_into_tip(0.5, 0.5)  # cursor over the tip so the wheel routes to it
-    before = r._tip_scroll
+    before = r.tip.view.scroll
     ui.wheel(1)
-    assert r._tip_scroll > before, "wheel over the tip scrolls it (hit-test-routed)"
+    assert r.tip.view.scroll > before, "wheel over the tip scrolls it (hit-test-routed)"
 
     ui.move_into_tip(0.5, 0.6)  # rest on an inner word → nested scan popup
     assert ui.nested_shown, "hovering inside the body opens the nested popup"
@@ -292,7 +299,7 @@ def test_full_stress_chain_through_the_hit_test_path():
     ui.move_to_word(j)  # switch base word through hit-test → the nested popup is dropped
     assert ui.hover == j and not ui.nested_shown, "switching words drops the nested popup"
 
-    r._tip_close_or_back()  # the Esc/close gesture tears the base tooltip down
+    ui.key(TIP_CLOSE_MSG)  # the Esc/close gesture tears the base tooltip down
     assert not ui.tip_shown, "closing dismisses the base tooltip — the whole session unwinds"
 
 
@@ -306,7 +313,7 @@ def test_empty_body_click_does_nothing(monkeypatch):
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     # click low in the body, away from the ⊕/🔊 header buttons
-    x, y, w, h = r._tip_rect
+    x, y, w, h = r.tip.view.rect
     ui.move(x + w * 0.5, y + h - 6).click()
     assert events == [], "a click in an empty body area must not mine or speak"
 
@@ -316,29 +323,27 @@ def test_wheel_scrolls_the_tooltip():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     ui.move_into_tip(0.5, 0.5)  # cursor over the tip so the wheel routes to it
-    before = r._tip_scroll
+    before = r.tip.view.scroll
     ui.wheel(1)  # one notch down
-    assert r._tip_scroll > before, "wheeling over a scrollable tooltip must scroll it down"
+    assert r.tip.view.scroll > before, "wheeling over a scrollable tooltip must scroll it down"
 
 
 def test_scroll_warms_native_bands_ahead_at_hidpi():
     # One-panel: a scroll must warm the NEXT native bands off the main thread (render-ahead), so continued
     # scrolling composites crisp without a synchronous raster (the old bug: only the first band was crisp).
-    from saitenka.app import tooltip
-
     r = _reader()
     submitted = []
     r._render_ahead_submit = lambda **kwargs: submitted.append(kwargs) or True
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
-    Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
-    assert r._tip_state.full_height > r._tip_view_h  # scrollable
-    tooltip.scroll_tip(r, 200)  # what the wheel drives
-    assert r._tip_scroll > 0  # scrolled
+    ui = Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
+    assert r.tip.view.state.full_height > r.tip.view.view_h  # scrollable
+    ui.wheel(1)
+    assert r.tip.view.scroll > 0  # scrolled
     pending = r._render_ahead.pending
     assert pending is not None
     req = pending[1]
     assert (
-        req is not None and req.scroll == r._tip_scroll and req.direction == 1
+        req is not None and req.scroll == r.tip.view.scroll and req.direction == 1
     )  # warm follows scroll
 
 
@@ -364,11 +369,11 @@ def test_golden_base_and_nested_render():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert r.hover_view().tip.state is not None
-    assert_golden(_full_panel_image(r._tip_state), "interaction_base_tooltip.png", tol=3.0)
+    assert_golden(_full_panel_image(r.tip.view.state), "interaction_base_tooltip.png", tol=3.0)
 
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
     assert r.hover_view().nested.state is not None
-    assert_golden(_full_panel_image(r._nest.state), "interaction_nested_popup.png", tol=3.0)
+    assert_golden(_full_panel_image(r.tip.nest.state), "interaction_nested_popup.png", tol=3.0)
 
 
 def test_link_click_navigates_the_base_tooltip_in_place_with_back():
@@ -380,16 +385,16 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown
-    base = r._tip_state
+    base = r.tip.view.state
 
-    tooltip.navigate_tip(r, "本命")  # what _click_tip routes a link to
-    assert r._tip_state is not None and r._tip_state is not base
-    assert len(r._tip_nav) == 1, "the previous view is pushed for back"
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")  # what _click_tip routes a link to
+    assert r.tip.view.state is not None and r.tip.view.state is not base
+    assert len(r.interaction.tip_nav.back) == 1, "the previous view is pushed for back"
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
 
-    assert tooltip.tip_back(r) is True
-    assert r._tip_state is base and r._tip_nav == []
-    assert tooltip.tip_back(r) is False, "no history left → caller falls through to close"
+    assert tooltip.tip_back(r.tip_ports) is True
+    assert r.tip.view.state is base and r.interaction.tip_nav.back == ()
+    assert tooltip.tip_back(r.tip_ports) is False, "no history left → caller falls through to close"
 
 
 def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
@@ -399,12 +404,12 @@ def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
     ui = Driver(r)
     i = _content_word(r)
     ui.move_to_word(i)
-    tooltip.navigate_tip(r, "本命")
-    assert r._tip_nav
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
+    assert r.interaction.tip_nav.back
 
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
     ui.move_to_word(j)  # a newly hovered word abandons the link-navigation
-    assert r._tip_nav == []
+    assert r.interaction.tip_nav.back == ()
 
 
 def test_esc_steps_back_through_navigation_then_closes():
@@ -413,13 +418,72 @@ def test_esc_steps_back_through_navigation_then_closes():
     ui.move_to_word(_content_word(r))
     from saitenka.app import tooltip
 
-    tooltip.navigate_tip(r, "本命")
-    tooltip.navigate_tip(r, "読む")
-    assert len(r._tip_nav) == 2
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
+    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
+    assert len(r.interaction.tip_nav.back) == 2
 
-    r._tip_close_or_back()
-    assert len(r._tip_nav) == 1 and ui.tip_shown
-    r._tip_close_or_back()
-    assert r._tip_nav == [] and ui.tip_shown
-    r._tip_close_or_back()  # at the root → close
+    ui.key(TIP_CLOSE_MSG)
+    assert len(r.interaction.tip_nav.back) == 1 and ui.tip_shown
+    ui.key(TIP_CLOSE_MSG)
+    assert r.interaction.tip_nav.back == () and ui.tip_shown
+    ui.key(TIP_CLOSE_MSG)  # at the root → close
     assert not ui.tip_shown
+
+
+def _targets(mx, my, *, inside=True, tip=None, nest=None, word=7):
+    from saitenka.app.tooltip import _hover_targets
+
+    return _hover_targets(
+        mx, my, inside=inside, tip_rect=tip, nest_rect=nest, hit=lambda _x, _y: word
+    )
+
+
+def test_a_popup_occludes_the_word_drawn_underneath_it():
+    """The popups are drawn ON TOP of the subtitle, so a point inside one is not also a hit on the
+    word beneath. The regression: a tooltip for the lower line of a two-line cue is placed up over
+    the upper line, and without this the base hit-test still saw that covered word —
+    `hover_switch_delay` only *delayed* the hijack rather than preventing it.
+    """
+    assert _targets(50, 50, tip=(0, 0, 100, 100)) == (-1, True, False)
+    assert _targets(50, 50, nest=(0, 0, 100, 100)) == (-1, False, True)
+
+
+def test_a_point_outside_every_popup_falls_through_to_the_word():
+    assert _targets(500, 500, tip=(0, 0, 100, 100)) == (7, False, False)
+
+
+def test_a_cursor_outside_the_video_is_over_nothing():
+    """`inside` is False when mpv reports the pointer off the video surface. Nothing is hovered
+    there — not even a popup whose rectangle the coordinates happen to fall inside."""
+    assert _targets(50, 50, inside=False, tip=(0, 0, 100, 100)) == (-1, False, False)
+
+
+def test_the_nested_popup_and_the_tooltip_can_both_claim_a_shared_point():
+    """The nested popup is anchored over the base tooltip, so their rectangles overlap by design.
+    Both read as hovered; which one acts is the caller's topmost-first decision, not this one's."""
+    assert _targets(50, 50, tip=(0, 0, 100, 100), nest=(40, 40, 100, 100)) == (-1, True, True)
+
+
+@pytest.mark.parametrize(
+    ("mouse_pos", "expected"),
+    [
+        ({"x": 50, "y": 50}, True),
+        ({"x": 500, "y": 50}, False),
+        ({}, False),  # mpv answers without x/y before the pointer has entered the window
+        (None, False),  # …and answers nothing at all when it has no surface yet
+    ],
+)
+def test_a_panel_claims_only_a_pointer_it_can_actually_see(mouse_pos: object, *, expected: bool):
+    """Missing coordinates must read as outside. Defaulting them to the origin would let a panel
+    anchored at the top-left swallow a pointer that is not there — and the sidebar and picker are
+    both anchored at an edge."""
+    from saitenka.model import claims_pointer
+
+    assert claims_pointer((0, 0, 100, 100), mouse_pos, open_=True) is expected
+
+
+def test_a_closed_or_unplaced_panel_claims_nothing():
+    from saitenka.model import claims_pointer
+
+    assert claims_pointer((0, 0, 100, 100), {"x": 50, "y": 50}, open_=False) is False
+    assert claims_pointer(None, {"x": 50, "y": 50}, open_=True) is False

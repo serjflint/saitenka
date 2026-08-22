@@ -3,11 +3,13 @@ from __future__ import annotations
 import threading
 import time
 
+from driver import Driver
 from util import FakeIPC
 
 from saitenka.app import hover_metadata
 from saitenka.app.controller import Reader
 from saitenka.app.hover_metadata import HoverMetadataKey, HoverMetadataRequest
+from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
@@ -96,13 +98,17 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
 
     reader = Reader(FakeIPC(), dict_set=Dictionary())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
+    reader.sub_origin = (0, 0)
+    reader.boxes = [WordBox(0, 100, 100, 40, 40)]
     submitted = []
     reader._interaction_metadata_submit = lambda **kwargs: (
         submitted.append(kwargs["request"]) or True
     )
-    monkeypatch.setattr(reader, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(reader, "draw_subtitle", lambda: None)
 
-    reader.set_hover(0)
+    # Through the cursor, because the claim is about the *event thread*: the hit-test and the hover
+    # decision run there too, and a `set_hover` call skips both of them.
+    Driver(reader).move_to_word(0)
 
     assert len(submitted) == 1
-    assert reader._tip_state is None
+    assert reader.tip.view.state is None

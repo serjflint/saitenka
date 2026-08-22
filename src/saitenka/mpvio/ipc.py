@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     from saitenka.runtime import CommandHandled
+    from saitenka.runtime.loop import SessionLoop
 
     class RuntimeGateway(Protocol):
         def close(self) -> None: ...
@@ -38,6 +39,22 @@ if TYPE_CHECKING:
         def register_observers(self, names: tuple[str, ...]) -> dict[str, dict]: ...
 
         def publish_legacy_outcome(self, outcome: CommandHandled) -> None: ...
+
+        def publish_session_event(self, event) -> bool: ...
+        def deliver_session_event(self, event) -> bool: ...
+
+        session_resources: dict[str, object]
+
+        #: The session's reactor once one is installed. `object` because the protocol describes what
+        #: the transport may ask of a gateway, and importing the reactor here would make the
+        #: transport depend on the runtime it is deliberately independent of.
+        session_reactor: object | None
+
+        #: Same reasoning as `session_reactor`: named so the transport can wake a blocked receiver,
+        #: `object` so the transport does not import the runtime's mailbox to say so. Read-only,
+        #: because the gateway exposes it as a property and a settable member would not match.
+        @property
+        def mailbox(self) -> object: ...
 
         def submit_mpv(self, **kwargs) -> bool: ...
 
@@ -103,6 +120,9 @@ _MAX_RECONNECTS = 30
 # the poll loop for command()'s full timeout, _MAX_RECONNECTS times over. Bail fast instead → exit.
 _RECONNECT_PROBE_S = 2.0
 _OUTBOUND_MAX = 256
+# How long `close` waits for the queued writes to leave. Generous against a healthy socket (these
+# are a few dozen bytes each) and short enough that a wedged one costs a pause, not a hang.
+_CLOSE_FLUSH_TIMEOUT = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,17 +148,21 @@ class MpvIPC:
             0  # total bytes the reader thread got from mpv (0 = never read → pipe dead)
         )
         self._events: list[dict] = []  # async events (property-change, client-message, …)
+        #: Signalled whenever an event lands, so a consumer can WAIT for one instead of asking
+        #: forty times a second. The reader thread is the only producer; `drain_events` clears it
+        #: under the same lock it empties the buffer under, so a wake can never be lost.
+        self._event_arrived = threading.Event()
         self._events_lock = threading.Lock()
         self._event_sink: Callable[[dict, int], None] | None = None
         self._connection_sink: Callable[[str, int], None] | None = None
-        self._legacy_event_source: Callable[[float | None], list[object]] | None = None
+        self._session_loop: SessionLoop | None = None
         self._runtime_gateway: RuntimeGateway | None = None
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
-        self._outbound: queue.Queue[tuple[int, int, bytes, Future[dict]] | None] = queue.Queue(
-            maxsize=_OUTBOUND_MAX
-        )
+        self._outbound: queue.Queue[
+            tuple[int, int, bytes, Future[dict]] | threading.Event | None
+        ] = queue.Queue(maxsize=_OUTBOUND_MAX)
         self._next_request_id = 0
         self._connection_epoch = 0
         self._transitioning = threading.Event()
@@ -248,8 +272,10 @@ class MpvIPC:
                 sink = self._event_sink
                 if sink is not None:
                     sink(dict(msg), connection_epoch)
+                    self._event_arrived.set()
                     return
                 self._events.append(msg)
+                self._event_arrived.set()
             return
         request_id = msg.get("request_id")
         if not isinstance(request_id, int):
@@ -289,18 +315,26 @@ class MpvIPC:
                 continue
             if item is None:
                 return
-            epoch, request_id, data, future = item
-            if future.done():
+            if isinstance(item, threading.Event):
+                # A flush barrier: FIFO means everything queued ahead of it has already been handed
+                # to the transport (or failed), which is the whole guarantee `_flush_outbound` sells.
+                item.set()
                 continue
-            closed = None
-            try:
-                transport, closed = self._write_target(epoch)
-                transport.write(data)
-            except OSError as error:
-                log.warning("mpv IPC: queued write failed (%s) — disconnected", error)
-                self._reject_write(request_id, future, "disconnected")
-                if closed is not None:
-                    closed.set()
+            self._write_one(item)
+
+    def _write_one(self, item: tuple[int, int, bytes, Future[dict]]) -> None:
+        epoch, request_id, data, future = item
+        if future.done():
+            return
+        closed = None
+        try:
+            transport, closed = self._write_target(epoch)
+            transport.write(data)
+        except OSError as error:
+            log.warning("mpv IPC: queued write failed (%s) — disconnected", error)
+            self._reject_write(request_id, future, "disconnected")
+            if closed is not None:
+                closed.set()
 
     def _reject_write(self, request_id: int, future: Future[dict], error: str) -> None:
         with self._pending_lock:
@@ -363,6 +397,39 @@ class MpvIPC:
                     self._bytes_read,
                 )
                 return {"error": "timeout"}
+
+    def probe(self, name: str) -> dict:
+        """The whole reply for one property — for the question the value cannot answer.
+
+        mpv distinguishes "property not found" from "property is unavailable": a build that lacks a
+        feature from one that has not produced it yet. That answer is the error string, so a
+        capability probe reads the reply and everything else reads `query`.
+        """
+        return self.command("get_property", name)
+
+    def query(self, name: str) -> object | None:
+        """The value mpv reports for one property, or `None` when it does not answer.
+
+        Total, and the transport's job rather than each feature's: a read is a capability the
+        transport has, not a command a feature composes out of a verb string and a `.get("data")`
+        tail. Every caller spelled that tail itself, and each one guessed differently about a reply
+        carrying an error.
+
+        `None` conflates unset with unanswered because mpv reports an unset property as a null value
+        — there was never a distinction here to lose. A caller that needs one reads `probe`, or
+        issues a correlated read whose terminal carries an outcome.
+
+        A failed reply answers `None` even when it carries a `data` field, which mpv does: reading
+        the payload past the error is how a dead socket's stale `false` becomes a fact. One caller
+        checked for this and the other nine spelled a bare `.get("data")`.
+        """
+        try:
+            reply = self.probe(name)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
+            return None
+        return reply.get("data")
 
     def _pop_pending(self, epoch: int | None = None) -> list[Future[dict]]:
         with self._pending_lock:
@@ -442,6 +509,11 @@ class MpvIPC:
             return self._dial(self.path, 1.0)
         except (OSError, FileNotFoundError) as e:
             log.info("mpv IPC reconnect: %s unavailable (%s) — mpv has quit", self.path, e)
+            # Spend the budget only on the drop it exists for: mpv.net's pipe vanishing while mpv
+            # RUNS, where the next dial connects. Nothing listening on the endpoint is the other
+            # fact — the peer is gone and this path never re-hosts it — so retrying only postpones
+            # the exit the log line above already announces (~7s of it, which reads as a hang).
+            self._reconnects_left = 0
             return None
 
     def _install_replacement(self, transport: Transport) -> tuple[bool, list[Future[dict]]]:
@@ -494,20 +566,55 @@ class MpvIPC:
             return False
         return True
 
-    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
-        """Return and clear buffered async events (collected by the reader thread)."""
-        if self._legacy_event_source is not None:
-            return self._legacy_event_source(timeout)
+    def receive_session(self, timeout: float | None, handle: Callable[[object], None]) -> None:
+        """Take one turn of this session's events, handing each to `handle` in arrival order.
+
+        Two ingresses behind one call: the mailbox when a gateway owns this session, and the
+        reader thread's buffer when none does. The branch is here rather than at each caller
+        because which one a session has is not something a consumer of events can act on.
+        """
+        loop = self._session_loop
+        if loop is not None:
+            loop.receive(timeout, handle)
+            return
+        if timeout:
+            self._await_event(timeout)
         with self._events_lock:
             buffered, self._events = self._events, []
-            evs: list[object] = list(buffered)
-        return evs
+            self._event_arrived.clear()
+        for event in buffered:
+            handle(event)
+
+    @property
+    def session_loop(self) -> SessionLoop | None:
+        """The loop driving this session, or `None` when no gateway owns it."""
+        return self._session_loop
+
+    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
+        """Collect one turn as a list, for a caller that is not the session's consumer."""
+        events: list[object] = []
+        self.receive_session(timeout, events.append)
+        return events
+
+    def _await_event(self, timeout: float | None) -> None:
+        """Block until an event lands, the connection drops, or the timeout passes.
+
+        Checking the buffer first is what makes this safe against a lost wake: the flag is cleared
+        only while holding the lock that empties the buffer, so "flag clear" always means "buffer
+        empty" and never "an event arrived and nobody noticed".
+        """
+        with self._events_lock:
+            if self._events:
+                return
+        if self._closed.is_set():
+            return
+        self._event_arrived.wait(timeout)
 
     def install_runtime_ingress(
         self,
         event_sink: Callable[[dict, int], None],
         connection_sink: Callable[[str, int], None],
-        legacy_event_source: Callable[[float | None], list[object]],
+        session_loop: SessionLoop,
         gateway: RuntimeGateway,
     ) -> None:
         """Switch event ownership to a mailbox while the legacy consumer still drives policy."""
@@ -517,7 +624,7 @@ class MpvIPC:
                 event_sink(dict(event), self._connection_epoch)
             self._event_sink = event_sink
             self._connection_sink = connection_sink
-            self._legacy_event_source = legacy_event_source
+            self._session_loop = session_loop
             self._runtime_gateway = gateway
         if self._closed.is_set() and not self._intentional:
             connection_sink("lost", self._connection_epoch)
@@ -526,6 +633,37 @@ class MpvIPC:
         gateway = self._runtime_gateway
         if gateway is not None:
             gateway.publish_legacy_outcome(outcome)
+
+    def publish_runtime_event(self, event) -> bool:
+        """Announce a session fact to the runtime. False when no gateway owns this session."""
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.publish_session_event(event)
+
+    def deliver_runtime_event(self, event) -> bool:
+        """Announce a session fact the mailbox can no longer carry, because nothing will drain it.
+
+        Close is the case: the session loop has stopped, so `publish_runtime_event` would sit
+        there. False when no gateway owns this session.
+        """
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.deliver_session_event(event)
+
+    def register_session_resource(self, name: str, resource: object) -> bool:
+        """Hand a resource's teardown to the runtime. False when no gateway owns this session.
+
+        The owner keeps using it; what moves is *when it closes*. A False here is what keeps the
+        caller's own fallback teardown honest — a `Reader` built without a runtime still has to
+        close what it made.
+        """
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.session_resources[name] = resource
+        return True
 
     def submit_runtime_mpv(self, **kwargs) -> bool:
         gateway = self._runtime_gateway
@@ -564,13 +702,121 @@ class MpvIPC:
             return False
         return gateway.close_job_lane(name, timeout)
 
+    def wake_session_runtime(self) -> bool:
+        """Release a blocked mailbox receiver. False when there is no runtime.
+
+        Not a close and not an event: the stop flag lives on the Reader and another thread sets it,
+        so a receiver blocked on the mailbox has to be let go before it can look. Today the poll
+        interval bounds that wait; this is what lets the interval go.
+        """
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.mailbox.wake()  # type: ignore[attr-defined]  # `object` by design — see RuntimeGateway
+        return True
+
+    def close_session_runtime(self) -> bool:
+        """Ask the session's reactor for the closed transition. False when there is no reactor.
+
+        Through the port, like every other runtime call, rather than by reaching into the gateway:
+        the reactor is the session's, and `Reader` knows the session only through this transport.
+        """
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return False
+        reactor.close()  # type: ignore[attr-defined]  # `object` by design — see RuntimeGateway
+        return True
+
+    def route_session_playback(self, envelope: object | None) -> object | None:
+        """Route one envelope to the session's reactor and hand back `SessionState.playback`.
+
+        A `None` envelope reads the slot without routing; `None` back means there is no reactor,
+        and the caller then owns the slice itself. `object` at this boundary for the same reason
+        `session_reactor` is: the transport must not depend on the runtime vocabulary.
+        """
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.playback  # type: ignore[attr-defined]  # `object` by design
+
+    def route_session_lifecycle(self, envelope: object | None) -> object | None:
+        """`Owner.SESSION`'s half of the same port. See `route_session_playback`.
+
+        Named for what the slot holds — the startup hint, the two lifecycle sequences, the
+        connection — rather than for the owner, whose name would repeat.
+        """
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.session  # type: ignore[attr-defined]  # `object` by design
+
+    def route_session_subtitle(self, envelope: object | None) -> object | None:
+        """`Owner.SUBTITLE`'s half of the same port. See `route_session_playback`."""
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.subtitle  # type: ignore[attr-defined]  # `object` by design
+
+    def route_session_interaction(self, envelope: object | None) -> object | None:
+        """`Owner.INTERACTION`'s half of the same port. See `route_session_playback`."""
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.interaction  # type: ignore[attr-defined]  # `object` by design
+
+    def route_session_presentation(self, envelope: object | None) -> object | None:
+        """`Owner.PRESENTATION`'s half of the same port. See `route_session_playback`."""
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)  # type: ignore[attr-defined]  # `object` by design
+        return reactor.state.presentation  # type: ignore[attr-defined]  # `object` by design
+
     def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         gateway = self._runtime_gateway
         if gateway is None:
             return {}
         return gateway.register_observers(names)
 
+    def _flush_outbound(self, timeout: float) -> bool:
+        """Wait, bounded, until every accepted write has reached the transport.
+
+        The close barrier the teardown writes need. `command_async` only *queues* — the writer
+        thread does the socket — and `close` drops the transport and pushes a sentinel the writer
+        returns on, so anything still queued is discarded. A synchronous `command` never noticed
+        because waiting for the reply implied the bytes had left; a correlated fire-and-forget
+        issued during close has no such implication, and the restore of the user's `sub-visibility`
+        is exactly that write.
+
+        Bounded rather than joined: a wedged socket must not hold the session open, and a restore
+        that misses its bound is a visible subtitle setting, not a hang.
+        """
+        if self._closed.is_set() or not self._writer.is_alive():
+            return False
+        barrier = threading.Event()
+        try:
+            self._outbound.put_nowait(barrier)
+        except queue.Full:
+            return False
+        return barrier.wait(timeout)
+
     def close(self) -> None:
+        self._flush_outbound(_CLOSE_FLUSH_TIMEOUT)
         with self._write_lock:
             self._intentional = (
                 True  # a real shutdown, not a dropped pipe — never publish a re-dial

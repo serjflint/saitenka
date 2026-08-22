@@ -7,15 +7,38 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime.effects import (
+    ApplyPlaybackDeltas,
     AsyncEffect,
+    AttachSessionDiagnostics,
     CancelEffect,
+    CancelInteractionWork,
+    CloseCapabilityActors,
+    CloseSessionOverlay,
+    CloseSessionStores,
+    CloseSessionSurfaces,
+    CloseSubtitleRendering,
+    CloseWorkerLanes,
     CoreControl,
+    DetachDiagnostics,
+    DispatchedEffect,
     Effect,
     EffectError,
     EffectId,
     EffectOutcome,
     EmitDiagnostic,
+    EstablishRenderSpace,
     ExpireEffect,
+    GuardMainRender,
+    OpenSessionHistory,
+    RegisterInputBindings,
+    ReleaseInputCapture,
+    RemoveSessionArtifacts,
+    ReplaySubtitleSelection,
+    ReslotEpisode,
+    RetireCueIdentity,
+    RunUserCommand,
+    SeedOptionalCollaborators,
+    StartPropertyObservation,
     StopSession,
 )
 from saitenka.runtime.events import (
@@ -43,7 +66,7 @@ class Reducer[StateT](Protocol):
 
 
 class EffectDispatcher(Protocol):
-    def __call__(self, effect: AsyncEffect, /) -> bool: ...
+    def __call__(self, effect: DispatchedEffect, /) -> bool: ...
 
 
 class ControlDispatcher(Protocol):
@@ -83,6 +106,15 @@ class SessionReactor[StateT]:
         self._highest_effect_id = -1
 
     @property
+    def state(self) -> StateT:
+        """The reduced state, without the diagnostic bundle around it.
+
+        `snapshot` sorts the pending-effect table on every read, which is the wrong cost for a
+        caller that reads an owner's slot on the observation path.
+        """
+        return self._state
+
+    @property
     def snapshot(self) -> ReactorSnapshot[StateT]:
         return ReactorSnapshot(
             self._state,
@@ -109,6 +141,14 @@ class SessionReactor[StateT]:
                 return
             payload = completion
         self._reduce(payload)
+
+    def owns(self, effect_id: EffectId) -> bool:
+        """Did this reactor dispatch that effect and is it still awaiting its completion?
+
+        The ownership question a *caller* needs, distinct from `_finish`'s: the answer decides
+        whether a completion is also somebody else's to run.
+        """
+        return effect_id in self._pending
 
     def run_until_idle(self) -> int:
         turns = 0
@@ -163,6 +203,41 @@ class SessionReactor[StateT]:
             return
         if isinstance(effect, StopSession):
             self.close()
+            return
+        if isinstance(
+            effect,
+            GuardMainRender
+            | EstablishRenderSpace
+            | StartPropertyObservation
+            | RegisterInputBindings
+            | SeedOptionalCollaborators
+            | OpenSessionHistory
+            | AttachSessionDiagnostics
+            | DetachDiagnostics
+            | ReleaseInputCapture
+            | CloseCapabilityActors
+            | CancelInteractionWork
+            | CloseWorkerLanes
+            | CloseSubtitleRendering
+            | CloseSessionStores
+            | CloseSessionSurfaces
+            | CloseSessionOverlay
+            | RemoveSessionArtifacts
+            | ReplaySubtitleSelection
+            | ReslotEpisode
+            | RetireCueIdentity
+            | RunUserCommand
+            | ApplyPlaybackDeltas,
+        ):
+            # Fire-and-forget, like `StopSession`: a lifecycle effect carries no ID because there
+            # is nothing to correlate a completion to. Reserving a terminal for one would leave a
+            # reservation nothing ever retires, and close is when that matters least and costs most.
+            #
+            # Spelled out rather than read off `FireAndForget`, which would drift: narrowing needs
+            # a literal union here, and the alias' `__value__` defeats it. `test_reactor.py` pins
+            # the two together — an effect that misses this branch falls through to the async path
+            # and dies on the `effect_id` it does not carry.
+            self._dispatch(effect)
             return
         if isinstance(effect, (CancelEffect, ExpireEffect)):
             if self._control is not None:
@@ -224,7 +299,10 @@ class SessionReactor[StateT]:
     def _finish(self, completion: EffectFinished) -> EffectFinished | None:
         accepted = self._pending.get(completion.effect_id)
         if accepted is None:
-            self._mailbox.retire_terminal(completion.effect_id)
+            # Never retire an effect this reactor did not dispatch. Retiring is a claim of
+            # ownership, and the loser of that race does not find out: the other owner's
+            # `retire_terminal` returns False, indistinguishable from "already handled", so it
+            # drops the completion and whatever awaited it waits forever.
             return None
         if not self._mailbox.retire_terminal(completion.effect_id):
             return None

@@ -22,7 +22,8 @@ there), `docs/contributing/rendering.md` (renderer design), and `ARCHITECTURE.md
 - **`.agents/mcp/servers.json`** — canonical, agent-agnostic MCP server definitions (no shared cross-agent
   format exists); `agent-setup`'s `render.py` emits each agent's dialect. The generated `.mcp.json` is
   git-ignored.
-- **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
+- **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). `comments.md`
+  — what a comment must earn its place with, and the scar/echo/stale-count classes to cut;
   `searching.md` — the shell-search ban + escape-recovery (fork-bomb why + the enforcing `PreToolUse`
   hook: **Tooling** below). Claude Code auto-loads these via a git-ignored `.claude/rules -> ../.agents/rules`
   symlink (per worktree, like skills; a no-`paths:` rule loads globally — confirm via the
@@ -109,6 +110,11 @@ the floor for every change; 3–6 are escalations, not replacements.
    (isolated reviewer, artifact only, P0–P3) is the high-quality gate before a human's eyes.
 6. **Idle time, nothing in flight** → the **Sharpen** / **Grow** loops (fix / write tests) — never against
    a module under active feature work.
+7. **A migration landed, or the meters read green and something still feels wrong** → the
+   **`architecture-review`** skill — an isolated reviewer judging fitness (not code) against the
+   product's goals. On a cadence, so drift is caught by schedule rather than by accident; the run
+   reports and the claim census that carries between runs live in `.agents/architecture-review/`
+   (its `SPEC.md` owns that contract, the skill owns the judgement).
 
 ## Refactoring
 
@@ -121,6 +127,9 @@ the floor for every change; 3–6 are escalations, not replacements.
   rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched. LibCST
   lives in the opt-in `codemod` dependency group (its pyo3 build has no free-threaded 3.15t wheel, so it's
   kept out of the default `dev` env): run codemods with `uv run --group codemod <script>`.
+- **Price a migration before starting it.** A conversion spanning many call sites gets its unit price,
+  its leverage device (and the rejected ones), and a retirement meter beside its debt meter, on day 1
+  — the **`plan-migration`** skill (`.agents/skills/plan-migration/`) is the procedure.
 - **Extract behind a stable seam.** Move logic into a new module as functions taking the host
   (`def f(reader: Reader)`) and leave thin delegating methods, so the public API is unchanged and both
   mypy and basedpyright stay green (a `self: Subclass` mixin trips mypy's supertype rule). Repoint any
@@ -203,6 +212,15 @@ Consult it when adding or rewriting a test.
   `all`) binds each corpus's case census (count + key-set hash) to a committed manifest, so a re-vendor /
   re-gen that drops or mutates cases fails until the manifest is **deliberately re-blessed**
   (`python tools/corpus_check.py show`) — same discipline as a golden re-bless.
+- **Establish a precondition through the path production uses.** Reaching past the seam to *set up*
+  state is the quiet way to test a state the runtime cannot reach. It stays green until a migration
+  moves the source of truth, then fails somewhere else entirely — the setup's owner is never in the
+  traceback. So when the assertion reads state downstream of a seam, drive the setup *through* that
+  seam: a cue arrives by observing `sub-text`, not by calling `set_subtitle` (the projection owns cue
+  identity, and the Reader-side writer does not publish to it). Convenience back doors are fine for a
+  test that stays on one side of the seam they bypass. The same divergence bites fakes: a `Fake*` with
+  two write paths for one channel (`command_async` recording directly instead of delegating to
+  `command`) reads as a production regression.
 - **`monkeypatch` is the sanctioned seam, `mock` is not.** Injecting a fake or repointing an extracted
   symbol via `monkeypatch.setattr` is correct and normal here (see **Refactoring**). Do **not** reach
   for `unittest.mock`/`MagicMock` to fake *internal* behaviour — construct the real collaborator or use

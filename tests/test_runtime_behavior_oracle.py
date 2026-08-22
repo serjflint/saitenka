@@ -10,7 +10,7 @@ from util import FakeIPC, runtime_gateway
 
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
-from saitenka.app.loading import show_startup_hint
+from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.mpvio.ipc import IPCRequest
@@ -36,20 +36,22 @@ class _AsyncHintIPC(FakeIPC):
         return request
 
 
-def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch) -> None:
+def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, request) -> None:
     ipc = _AsyncHintIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
-    assert lease is not None
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = Reader(ipc, startup_hint_lease=lease, renderer=NullRenderer())
+    reader = Reader(ipc, renderer=NullRenderer())
+    request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     dispatched: list[bool] = []
     monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
     trace = LegacyReaderTrace(reader)
 
-    assert reader.poll_once()
+    assert reader.pump()
     trace.observe("first-input", outcome="dispatched-before-ready-clear")
-    assert reader.poll_once()
+    assert reader.pump()
     trace.observe("next-turn", outcome="clear-reply-not-required")
 
     assert dispatched == [True]
@@ -94,9 +96,18 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
             {"event": "client-message", "args": ["saitenka-copy-line"]},
         )
     )
+    # Reconciliation now runs at the drain's batch boundary rather than on the next tick, so the
+    # conflict phase is observed from inside the drain — after every event in the batch was
+    # processed against the retired cue, before the replacement settles. Same three phases, real
+    # boundaries; snapshotting after the drain would only ever see the settled state.
+    settle = reader._settle_cue_observation
+
+    def traced_settle() -> None:
+        trace.observe("cue-conflict", outcome="input-rejected")
+        settle()
+
+    monkeypatch.setattr(reader, "_settle_cue_observation", traced_settle)
     reader._drain_events()
-    trace.observe("cue-conflict", outcome="input-rejected")
-    reader._reconcile_subtitles()
     trace.observe("cue-reconciled", outcome="replacement-active")
 
     assert copied == []
@@ -138,21 +149,21 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
     renderer = NativeVisibleRenderer()
     reader = Reader(ipc, prefetch=False, renderer=renderer)
     reader.sub_text = "active"
-    reader.subtitle_pipeline.cue_changed(reader, nonempty=True)
+    reader.subtitle_pipeline.cue_changed(reader.subtitle_target(), nonempty=True)
     trace = LegacyReaderTrace(reader)
     trace.observe("native-cue", outcome="pixels-established")
 
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
-    renderer.use_native(reader)
+    renderer.use_native(reader.subtitle_target())
     reader.hover = 0
-    renderer.draw(reader)
+    reader.subtitle_pipeline.draw_current(reader.subtitle_target())
     trace.observe("geometry-ready", outcome="interaction-ready")
     reader.boxes = []
-    renderer.degrade_geometry(reader)
+    renderer.degrade_geometry(reader.subtitle_target())
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
-    renderer.use_native(reader)
-    renderer.draw(reader)
+    renderer.use_native(reader.subtitle_target())
+    reader.subtitle_pipeline.draw_current(reader.subtitle_target())
     trace.observe("geometry-recovered", outcome="interaction-ready")
 
     assert [record["pixels"] for record in trace.records()] == [

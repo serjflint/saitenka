@@ -79,6 +79,50 @@ def _install(source: str, *, subtitle_geometry: bool) -> None:
         sys.exit(f"uv tool install failed:\n{out.stdout}\n{out.stderr}")
 
 
+def _editable_install_present() -> bool:
+    """Is the shared `saitenka` uv tool currently an EDITABLE install of a checkout?
+
+    `uv tool install` has one namespace per tool name, so this smoke necessarily evicts whatever is
+    there — including the dev's `poe install-editable`, which is the binary mpv spawns. That is
+    silent, and the next live test then runs a release wheel on the GIL build with no extras: no
+    libasslite means no scan boxes, which reads as a product regression rather than a clobbered
+    PATH. Detect it so `main` can put it back.
+    """
+    out = _run(["uv", "tool", "dir"])
+    if out.returncode != 0:
+        return False
+    # uv's own receipt, not a guessed `.pth` name: the editable marker the build backend writes is
+    # backend-specific (`_editable_impl_saitenka.pth` here) and would rot silently.
+    receipt = Path(out.stdout.strip()) / "saitenka" / "uv-receipt.toml"
+    return receipt.exists() and "editable" in receipt.read_text(encoding="utf-8")
+
+
+def _restore_editable() -> None:
+    print("restoring the editable install this smoke evicted…")
+    # `--python 3.14t` is not a preference: without it uv picks the default interpreter, and the dev
+    # gets their free-threaded install silently swapped for a GIL one — which `doctor` reports as
+    # ~3.8x of lost render parallelism and would quietly skew any timing measured afterwards.
+    out = _run(
+        [
+            "uv",
+            "tool",
+            "install",
+            "--force",
+            "--python",
+            "3.14t",
+            "--editable",
+            f"{OVERLAY}[full,layout-engine,images,subtitle-geometry]",
+        ]
+    )
+    if (
+        out.returncode != 0
+    ):  # never fail the smoke over the restore — say so and let the dev redo it
+        print(
+            "WARNING: could not restore the editable install; run `uv run poe install-editable` "
+            f"before live-testing.\n{out.stdout}\n{out.stderr}"
+        )
+
+
 def _resolve_exe() -> Path:
     bindir = _run(["uv", "tool", "dir", "--bin"]).stdout.strip()
     if bindir and (exe := Path(bindir) / EXE_NAME).exists():
@@ -144,13 +188,18 @@ def main() -> None:
     )
     a = ap.parse_args()
 
+    had_editable = _editable_install_present()
     _install(a.source, subtitle_geometry=a.subtitle_geometry)
     exe = _resolve_exe()
     print(f"installed entrypoint: {exe}")
-    _check_help(exe)
-    _check_setup_dry_run(exe)
-    _check_doctor(exe, a.expect_tools)
-    print("install-smoke PASSED")
+    try:
+        _check_help(exe)
+        _check_setup_dry_run(exe)
+        _check_doctor(exe, a.expect_tools)
+        print("install-smoke PASSED")
+    finally:
+        if had_editable:  # also on failure: a red smoke must not leave the dev env wrecked either
+            _restore_editable()
 
 
 if __name__ == "__main__":

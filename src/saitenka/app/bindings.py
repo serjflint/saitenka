@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
+    from saitenka.app.config import KeyOptions
 
 MINE_MSG = "saitenka-mine"
 MINE_VIDEO_MSG = "saitenka-mine-video"
@@ -51,6 +51,22 @@ Requirement = Literal["always", "anki", "tts"]
 # "mouse"-scoped bindings live in this FORCED mpv input section, enabled only while a saitenka surface
 # is up (controller._sync_mouse_capture) so clicks/wheel outrank other scripts' forced MBTN_LEFT.
 MOUSE_SECTION = "saitenka-mouse"
+
+# "global"-scoped bindings live in this DEFAULT-priority section. One `define-section` rather than a
+# `keybind` per key: the batch runs before the reactor drains, and one correlated command carries one
+# terminal instead of ~24 competing for the mailbox's reservations. Default (not forced) priority is
+# what `keybind` itself gives, so a user's input.conf shadows these exactly as it did before.
+GLOBAL_SECTION = "saitenka-global"
+
+
+def section_contents(bindings) -> str:
+    """mpv input-section source for ``bindings`` — one ``KEY script-message <msg>`` line each.
+
+    The command must stay ONE string per line: split args silently kill the binding, which is the
+    same trap the per-key `keybind` form had.
+    """
+    lines = [f"{b.key} script-message {b.spec.message}" for b in bindings if b.spec.message]
+    return "\n".join(lines) + "\n" if lines else ""
 
 
 @dataclass(frozen=True)
@@ -330,7 +346,7 @@ BINDINGS: tuple[BindingSpec, ...] = (
 )
 
 
-def active_bindings(reader: Reader, *scopes: Scope) -> tuple[ActiveBinding, ...]:
+def active_bindings(keys: KeyOptions, *scopes: Scope) -> tuple[ActiveBinding, ...]:
     """Resolve configured keys for the given scopes. A binding is ALWAYS returned once its key is set —
     ``spec.requires`` ("anki"/"tts") is advisory metadata, NOT a registration gate: the action's handler
     (``mine_current``/``bulk_mine``/``speak_hovered``) checks the dep live and no-ops with a toast if
@@ -342,7 +358,7 @@ def active_bindings(reader: Reader, *scopes: Scope) -> tuple[ActiveBinding, ...]
     for spec in BINDINGS:
         if wanted and spec.scope not in wanted:
             continue
-        key = getattr(reader, spec.key_attr) if spec.key_attr else spec.key
+        key = getattr(keys, spec.key_attr) if spec.key_attr else spec.key
         if key:
             out.append(ActiveBinding(str(key), spec))
     return tuple(out)

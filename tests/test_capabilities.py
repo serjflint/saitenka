@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, await_ready, runtime_gateway
 
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.controller import Reader
@@ -13,11 +13,7 @@ from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcom
 
 
 def _await_result(probe: CapabilityProbe) -> None:
-    for _ in range(200):
-        if probe.value is not None:
-            return
-        time.sleep(0.001)
-    raise AssertionError("capability probe did not publish")
+    await_ready(lambda: probe.value is not None, "capability probe did not publish")
 
 
 def test_capability_probe_deduplicates_and_publishes_snapshot():
@@ -65,10 +61,14 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     def run() -> bool:
         nonlocal calls
         calls += 1
+        # Generous, because these bound a WEDGE, not a timeout: the first probe must still be stuck
+        # when the replacement publishes. At 1s under `-n auto` it can expire on its own before the
+        # test gets there, unwedge, and publish False — the failure looks like a rejected-late-result
+        # bug and is really the fixture giving up early.
         if calls == 1:
-            first.wait(1)
+            first.wait(30)
             return False
-        second.wait(1)
+        second.wait(30)
         return True
 
     probe = CapabilityProbe(run, name="test", ttl=30, retry=1, timeout=5, clock=lambda: clock[0])
@@ -81,6 +81,7 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     assert probe.value is True and calls == 2
 
     first.set()
+    # Not a wait: let the unwedged first probe finish and prove its stale result is still rejected.
     time.sleep(0.01)
     assert probe.value is True
 
@@ -111,15 +112,13 @@ def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
     reader = Reader(FakeIPC())
     token = Token("猫", "猫", "ネコ", "名詞", 0, 1)
     try:
-        before = panel_key(reader, token, "猫")
+        before = panel_key(reader.panel_ports, token, "猫")
         reader._apply_capabilities()
         release.set()
-        for _ in range(200):
-            reader._apply_capabilities()
-            if reader._tts_ok:
-                break
-            time.sleep(0.001)
-        after = panel_key(reader, token, "猫")
+        await_ready(
+            lambda: reader._tts_ok, "tts probe never published", pump=reader._apply_capabilities
+        )
+        after = panel_key(reader.panel_ports, token, "猫")
 
         assert before.tts_ok is False
         assert after.tts_ok is True
@@ -144,17 +143,26 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
         assert finished.wait(1.0)
         assert reader._tts_ok is False
 
-        for _ in range(200):
+        def deliver() -> None:
             reader._drain_events()
             reader._apply_capabilities()
-            if reader._tts_ok:
-                break
-            time.sleep(0.001)
+
+        await_ready(
+            lambda: reader._tts_ok, "capability event never reached the reader", pump=deliver
+        )
 
         assert reader._tts_ok is True
     finally:
         reader.close()
         gateway.close()
+
+
+#: How long the first probe stays wedged before letting go on its own. Short on purpose — the
+#: replacement's result is only accepted once the call it replaced has finished.
+_WEDGE_TIMEOUT = 1.0
+#: Bounds a hang, never a race: far past what the work needs, because a test that passes only on an
+#: idle machine is the defect this replaced.
+_REPLACEMENT_TIMEOUT = 10.0
 
 
 def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
@@ -164,13 +172,19 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
     assert submit is not None
     clock = [0.0]
     releases = {"tts": threading.Event(), "anki": threading.Event()}
+    started = {"tts": threading.Event(), "anki": threading.Event()}
     calls = {"tts": 0, "anki": 0}
 
     def make_probe(name: str):
         def probe() -> bool:
             calls[name] += 1
             if calls[name] == 1:
-                releases[name].wait(1.0)
+                started[name].set()
+                # Self-releases, and must: the wedge has to end for the *replacement's* terminal to
+                # be accepted, so holding it for the whole assertion deadlocks the very thing being
+                # measured. Retry timing runs off the injected clock, so this cannot re-fire the
+                # probe on wall time — it only bounds how long the first call blocks.
+                releases[name].wait(_WEDGE_TIMEOUT)
                 return False
             return True
 
@@ -187,9 +201,22 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
     probes = tuple(make_probe(name) for name in ("tts", "anki"))
     try:
         assert all(probe.request() for probe in probes)
+        # Wait for the probes to actually be RUNNING before replacing them. Submitting is not
+        # starting: the lane admits the job, and under load a worker may not pick it up for a while.
+        # If the replacement is submitted first, a worker can run IT first — and this fake decides
+        # "am I the wedge?" from a call counter, so the replacement would take the wedge branch,
+        # return False, and the generation fence would correctly accept that False. The runtime
+        # promises no ordering between a superseded job and its replacement, so the test must not
+        # assume one. (This was a real flake: ~4 in 12 suite runs, only under load.)
+        for name, running in started.items():
+            assert running.wait(_WEDGE_TIMEOUT), f"{name} probe never started"
         clock[0] = 6.0
         assert all(probe.request() for probe in probes)
-        for _ in range(200):
+        # A deadline, not a fixed number of 1 ms sleeps: the replacement runs on a lane thread, and
+        # under `-n auto` the old 200 ms budget expired before it was ever scheduled. The wait is a
+        # timeout guarding a hang, so it may be generous — what it must not be is a race.
+        deadline = time.monotonic() + _REPLACEMENT_TIMEOUT
+        while time.monotonic() < deadline:
             ipc.drain_events()
             if all(probe.value is True for probe in probes):
                 break

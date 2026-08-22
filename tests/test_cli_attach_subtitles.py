@@ -1,19 +1,18 @@
 from pathlib import Path
 
+import util
+
 from saitenka.app import subselect
 from saitenka.app.commands import attach as attach_commands
+from saitenka.app.episode_reslot import ReslotPorts
 from saitenka.app.subtitle_modes import SubtitleStartup, SubtitleTracks
+from saitenka.runtime.events import SubtitleTracksDiscovered
 
 
-class IPC:
+class IPC(util.FakeIPC):
     def __init__(self):
-        self.commands: list[tuple] = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[:2] == ("get_property", "path"):
-            return {"data": "/videos/Show - 01.mkv"}
-        return {"data": None}
+        super().__init__()
+        self.props["path"] = "/videos/Show - 01.mkv"
 
 
 class Reader:
@@ -31,11 +30,30 @@ class Reader:
     def configure_sub_picker(self, lister):
         self.picker_lister = lister
 
+    def rebuild_sub_index(self):
+        self.rebuilt = True
+
+    @property
+    def reslot_ports(self):
+        """The same shape `Reader.reslot_ports` builds — the seam these hooks are driven through."""
+        return ReslotPorts(
+            ipc=None,
+            finish_stats=lambda: None,
+            start_stats=lambda: None,
+            rebind_episode=lambda: None,
+            rebuild_index=self.rebuild_sub_index,
+            configure_mode=lambda *_a, **_kw: None,
+            configure_retry=self.configure_subtitle_retry,
+            configure_picker=self.configure_sub_picker,
+            fetch_japanese=self.fetch_japanese_subs_async,
+            start_prefetch=lambda: None,
+            toast=lambda *_a, **_kw: None,
+        )
+
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):
     reader, ipc = Reader(), IPC()
     calls = []
-    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _reader: None)
 
     def fetch(video, providers, **kwargs):
         calls.append((video, providers, kwargs["tsukihime_config"]))
@@ -44,7 +62,7 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
     monkeypatch.setattr(subselect, "fetch_provider_path", fetch)
 
     attach_commands._finish_attach_subtitle_startup(
-        reader,
+        reader.reslot_ports,
         ipc,
         None,
         subselect.ProviderConfig(
@@ -67,12 +85,11 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
     assert calls[-1][0] == "/videos/Show - 02.mkv"
 
 
-def test_attach_configures_retry_even_when_startup_fetch_is_unneeded(monkeypatch):
+def test_attach_configures_retry_even_when_startup_fetch_is_unneeded():
     reader, ipc = Reader(), IPC()
-    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _reader: None)
 
     attach_commands._finish_attach_subtitle_startup(
-        reader,
+        reader.reslot_ports,
         ipc,
         None,
         subselect.ProviderConfig(enabled_providers=("tsukihime",), resync=False),
@@ -84,12 +101,12 @@ def test_attach_configures_retry_even_when_startup_fetch_is_unneeded(monkeypatch
     assert ipc.commands == []
 
 
-class _TrackIPC:
+class _TrackIPC(util.FakeIPC):
     """Models mpv's current path + a track-list carrying the previous episode's external sub."""
 
     def __init__(self):
-        self.commands: list[tuple] = []
-        self.props: dict = {
+        super().__init__()
+        self.props |= {
             "path": "/videos/Show - 03.mkv",
             "track-list": [
                 {"type": "sub", "id": 1, "lang": "en", "selected": False},
@@ -104,14 +121,11 @@ class _TrackIPC:
         }
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        if args[0] == "sub-remove":
+        if args and args[0] == "sub-remove":
             self.props["track-list"] = [
                 t for t in self.props["track-list"] if t.get("id") != args[1]
             ]
-        return {"data": None}
+        return super().command(*args)
 
 
 def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(monkeypatch):
@@ -123,15 +137,17 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
 
     ipc = _TrackIPC()
     reader = RealReader(ipc)
-    reader.jp_sid = 99  # stale prior-episode state the re-slot must clear
+    # stale prior-episode state the re-slot must clear
+    reader.declare_subtitle(SubtitleTracksDiscovered(99, None))
     episode_before = reader.episode
 
     started: list[str] = []
-    monkeypatch.setattr(session_stats, "finish", lambda _r: None)
-    monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
-    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _r: None)
+    monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
+    monkeypatch.setattr(
+        session_stats, "start", lambda _episode, *, path, **_kw: started.append(str(path()))
+    )
     monkeypatch.setattr(reader, "start_prefetch", lambda: None)
-    monkeypatch.setattr(reader, "_toast", lambda *_a, **_k: None)
+    monkeypatch.setattr(reader, "toast", lambda *_a, **_k: None)
     # new episode carries English only → prepare_attach_startup defers a jimaku fetch
     monkeypatch.setattr(
         subselect,
@@ -146,7 +162,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     monkeypatch.setattr(reader, "fetch_japanese_subs_async", lambda fetch: background.append(fetch))
 
     attach_commands._attach_reslot(
-        reader,
+        reader.reslot_ports,
         ipc,
         Path("/videos/Show - 03.mkv"),
         subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={}, jimaku=True),

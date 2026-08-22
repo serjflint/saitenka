@@ -235,7 +235,16 @@ def test_subs_cache_roundtrip(monkeypatch, tmp_path):
     assert jimaku.cached_subs(video, "Show", 1) is None  # → miss, re-fetch
 
 
-def test_subs_cache_separates_resync_modes(monkeypatch, tmp_path):
+def test_subs_cache_resync_modes_are_separate_but_a_hand_pick_is_visible(monkeypatch, tmp_path):
+    """The `-raw` slot is written ONLY by the source picker (`subselect.py:176,214`), so it means
+    "the user chose this by hand". A resyncing lookup therefore sees it — otherwise a deliberate
+    pick survives exactly one session — while the raw lookup stays confined to its own slot.
+
+    The trade this accepts: a picked source is unsynced by design (the picker's premise is that the
+    user selected a natively co-timed release), so a mistimed pick now persists across launches
+    instead of being replaced by the auto-fetched+resynced file. `Ctrl+Shift+T` force-refetches past
+    it.
+    """
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
     video = tmp_path / "Show - 01.mkv"
     video.write_bytes(b"video")
@@ -245,7 +254,7 @@ def test_subs_cache_separates_resync_modes(monkeypatch, tmp_path):
     raw = jimaku.store_subs(video, "Show", 1, src, resync=False)
 
     assert jimaku.cached_subs(video, "Show", 1, resync=False) == raw
-    assert jimaku.cached_subs(video, "Show", 1, resync=True) is None
+    assert jimaku.cached_subs(video, "Show", 1, resync=True) == raw
 
 
 def test_subs_cache_reads_legacy_jimaku_entry(monkeypatch, tmp_path):

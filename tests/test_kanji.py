@@ -5,7 +5,8 @@ import json
 import zipfile
 
 import dicthelp
-from util import FakeIPC, assert_golden
+from driver import Driver
+from util import FakeIPC, assert_golden, keybind_registry
 
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NullRenderer
@@ -199,7 +200,7 @@ def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
 def test_k_key_bound_globally():
     ipc = FakeIPC()
     Reader(ipc)._register_keybinds()
-    binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert "k" in binds and binds["k"].startswith("script-message ")
 
 
@@ -207,7 +208,7 @@ def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     toasts = []
-    monkeypatch.setattr(r, "_toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
+    monkeypatch.setattr(r, "toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
     r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
     assert r.hover_view().nested.state is None
     r.tokens = [Token("よむ", "よむ", "よむ", "動詞", 0, 2)]
@@ -229,20 +230,15 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.set_hover(0)
+    ui = Driver(r)
+    ui.move_to_word(0)  # base tooltip through hit-testing, not a poke
     # find the scan cell whose tail starts with 本
-    sb = next(b for b in r._tip_state.windowed.scan_boxes() if b.text.startswith("本"))
+    sb = next(b for b in r.tip.view.state.windowed.scan_boxes() if b.text.startswith("本"))
     # make the term lookup miss so the fallback triggers (本 has no term entry in this fixture… it
     # actually might tokenize to 本 with a lemma the dict lacks — force the miss deterministically)
     monkeypatch.setattr(type(ds), "has_term", lambda _self, *_forms: False)
-    sx, sy = r._tip_xy
-    ipc = r.ipc
-    ipc.props["mouse-pos"] = {
-        "hover": True,
-        "x": sx + sb.x + sb.w / 2,
-        "y": sy + (sb.y - r._tip_scroll) + sb.h / 2,
-    }
-    r.on_click()
+    sx, sy = r.tip.view.xy
+    ui.move(sx + sb.x + sb.w / 2, sy + (sb.y - r.tip.view.scroll) + sb.h / 2).click()
     assert r.hover_view().nested.state is not None
     assert r.hover_view().nested.word == "本"  # the kanji entry, via the nested-popup route
     assert r.hover_view().nested.token is None  # a kanji panel has no minable token

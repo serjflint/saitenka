@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, cast
 
 from saitenka.app.tokenize import Token
 from saitenka.mask_atlas import REFERENCE_SCALE
+from saitenka.runtime.jobs import NoSessionRuntime
 
 if TYPE_CHECKING:
     from saitenka.app.render_cache import RenderCache
@@ -34,9 +35,15 @@ _CHECKPOINT_EVERY = 2000  # rastered words between heartbeats (WAL truncate + pr
 _PLATEAU_MIN_NEW = 64  # a checkpoint adding fewer new masks than this counts as "dry"
 
 
-class _PrewarmIPC:
+class _PrewarmIPC(NoSessionRuntime):
     """A no-socket mpv stand-in: a fixed OSD and inert commands, so a headless Reader can build panels
-    without a running mpv (mirrors the benchmark's FakeIPC)."""
+    without a running mpv (mirrors the benchmark's FakeIPC).
+
+    There is no session here — no socket, no gateway, no events to reduce — so it **refuses** the
+    runtime job port rather than lacking it. Prewarm renders on its own `ThreadPoolExecutor`; a lane
+    would be a second, unowned pool. The refusal is the same one a live `MpvIPC` gives before its
+    gateway is installed, so every feature already has a path for it.
+    """
 
     def __init__(self, width: int, height: int):
         self._osd = {"w": width, "h": height}
@@ -45,9 +52,6 @@ class _PrewarmIPC:
         if args and args[0] == "get_property" and len(args) > 1 and args[1] == "osd-dimensions":
             return {"data": self._osd}
         return {"data": None}
-
-    def drain_events(self):
-        return []
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +241,7 @@ class _PrewarmJob:
                 self.skipped += 1
             return  # both caches already have it (incremental / resumable) — skip the expensive build
         try:
-            cap = r._tip_cap()
+            cap = r.tip_scale.cap
             st = r._panel_for(tok, term, min_h=cap, mined=False)
             if not already and st.full_height >= self.gate:
                 # Render CACHE: only NON-TRIVIAL (≥ gate) not-yet-stored heads — the big cache stays
@@ -273,8 +277,8 @@ class _PrewarmJob:
             return
         if not ref_done:
             try:
-                r._panel_for(tok, term, min_h=r._tip_cap(), mined=False).precompose_head(
-                    r._tip_cap()
+                r._panel_for(tok, term, min_h=r.tip_scale.cap, mined=False).precompose_head(
+                    r.tip_scale.cap
                 )
             except Exception:  # a single pathological entry must never abort the whole prebuild
                 log.debug("prewarm(atlas ref) failed for %r", term, exc_info=True)
@@ -294,7 +298,7 @@ class _PrewarmJob:
         if self.native_scale <= 1.0 or self.atlas is None:
             return
         try:
-            cap = r._tip_cap()
+            cap = r.tip_scale.cap
             st = r._panel_for(tok, term, min_h=cap, mined=False)
             st.viewport(
                 0, cap, scale=self.native_scale

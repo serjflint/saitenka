@@ -1,0 +1,15 @@
+{
+  "counts": {
+    "alias": 1,
+    "delegated": 1,
+    "delegator": 93,
+    "derived": 45,
+    "init_lines": 456,
+    "self_delegator": 6,
+    "slice": 10,
+    "substantive": 187,
+    "substantive_lines": 2348,
+    "total": 343
+  },
+  "reason": "the subtitle target carries whether the source can ever produce geometry, so an .srt selects the renderer that can draw its hit boxes instead of leaving the episode unscannable"
+}

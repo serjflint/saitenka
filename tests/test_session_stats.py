@@ -37,8 +37,8 @@ def test_recorder_aggregates_events_and_language_time():
         writer=writer,
     )
 
-    recorder.tick(paused=False, language="jp")
-    recorder.tick(paused=False, language="en")
+    recorder.accrue(paused=False, language="jp")
+    recorder.accrue(paused=False, language="en")
     recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
     recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
     recorder.record_lookup()
@@ -177,16 +177,17 @@ def test_analysis_snapshot_reuses_shared_result_without_cues():
     )
 
 
-def test_disabled_reader_does_not_touch_ipc():
-    reader = SimpleNamespace(
-        _session_recorder=None,
-        options=SimpleNamespace(stats=SimpleNamespace(enabled=False)),
-        _prop=lambda _name: (_ for _ in ()).throw(AssertionError("IPC touched")),
+def test_disabled_stats_does_not_touch_ipc():
+    episode = SimpleNamespace(session_recorder=None)
+
+    start(
+        episode,
+        enabled=False,
+        path=lambda: (_ for _ in ()).throw(AssertionError("IPC touched")),
+        arm=lambda _seconds: None,
     )
 
-    start(reader)
-
-    assert reader._session_recorder is None
+    assert episode.session_recorder is None
 
 
 def test_stats_command_lists_complete_and_incomplete_sessions(tmp_path, monkeypatch, capsys):

@@ -199,13 +199,14 @@ def test_download_writes_bytes_to_dest(monkeypatch, tmp_path):
 # --- fetch orchestration + best-file scoring ------------------------------------------------------
 
 
-def test_fetch_picks_episode_match_srt_over_ass(monkeypatch, tmp_path):
-    """Best file = episode-in-name > .srt/.ass > .srt > largest. A huge off-episode file must lose to
-    the small on-episode .srt."""
+def test_fetch_picks_the_episode_match_and_prefers_ass(monkeypatch, tmp_path):
+    """Best file = episode-in-name > .srt/.ass > .ass > largest. A huge off-episode file must lose to
+    the small on-episode one, and the format tiebreak goes to ASS: native-visible geometry accepts
+    nothing else, so auto-picking the .srt left the whole episode unscannable."""
     files = [
-        jimaku.JimakuFile("Show - 01.ass", "u-ass", 10),
-        jimaku.JimakuFile("Show - 01.srt", "u-srt", 5),
-        jimaku.JimakuFile("Show - 99.srt", "u-big", 9_999),
+        jimaku.JimakuFile("Show - 01.ass", "u-ass", 5),
+        jimaku.JimakuFile("Show - 01.srt", "u-srt", 10),
+        jimaku.JimakuFile("Show - 99.ass", "u-big", 9_999),
     ]
     picked: dict = {}
     monkeypatch.setattr(
@@ -218,7 +219,7 @@ def test_fetch_picks_episode_match_srt_over_ass(monkeypatch, tmp_path):
         lambda _self, jf, _d: picked.setdefault("jf", jf) or tmp_path / jf.name,
     )
     _client().fetch("Show", 1, tmp_path)
-    assert picked["jf"].url == "u-srt"
+    assert picked["jf"].url == "u-ass"  # smaller than the .srt, and off-episode size cannot win
 
 
 def test_fetch_prefers_the_release_matching_the_video_resolution(monkeypatch, tmp_path):

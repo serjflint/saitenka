@@ -9,6 +9,9 @@ logs.
 
 ### Fixed
 
+- **Exiting Saitenka reliably restores mpv's own subtitle visibility.** Teardown writes are flushed to
+  the socket before the connection is dropped, so the setting a session found is the setting it leaves —
+  previously the last write could still be queued when the transport went away.
 - **Hovering and tooltip scrolling no longer wait on optional services or mpv IPC.** Phrase/mining
   metadata, Anki and TTS capability checks, tooltip raster preparation, file staging, and transport
   writes now run behind bounded session workers. Rapid hover and wheel input is newest-wins, while
@@ -21,8 +24,6 @@ logs.
   replies and `saitenka trace-report` make the startup critical path diagnosable without subtitle text.
 - **Native subtitle scanning no longer crashes on sparse hit boxes.** Tooltip and kanji anchors now
   resolve the box by token identity when punctuation or whitespace has no interactive geometry.
-- **Queued subtitle-picker shortcuts no longer cancel each other during startup.** Repeated Ctrl+J
-  messages buffered in one IPC batch coalesce into one visible picker transition.
 - **Native subtitle styling no longer flashes back to the standard renderer.** mpv pixel ownership now
   survives cue transitions, cache misses, delay changes, unsupported geometry, and provider failures;
   unproved hit boxes disappear and return asynchronously without changing subtitle style. Only a current

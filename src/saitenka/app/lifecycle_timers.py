@@ -8,6 +8,7 @@ from enum import StrEnum
 from threading import Lock
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka import otel_metrics
 from saitenka.runtime import EffectOutcome, Owner
 
 if TYPE_CHECKING:
@@ -20,6 +21,41 @@ class LifecycleTimerKind(StrEnum):
     STARTUP_HEALTH = "startup-health"
     LOADING_FRAME = "loading-frame"
     TOAST_EXPIRY = "toast-expiry"
+    FLASH_EXPIRY = "flash-expiry"
+    SIDEBAR_MANUAL_HOLD = "sidebar-manual-hold"
+    MINED_SEED_RETRY = "mined-seed-retry"
+    MOUSE_CAPTURE_REASSERT = "mouse-capture-reassert"
+    PAUSED_REPAINT = "paused-repaint"
+    SESSION_PERSIST = "session-persist"
+    DEPS_READY = "deps-ready"
+    CAPABILITY_REFRESH = "capability-refresh"
+    #: Hover dwell. Interaction-owned, but the same mechanism: one deadline per kind, latest wins.
+    #: A second implementation of revision-fenced named timers is the divergence this avoids.
+    HOVER_SWITCH = "hover-switch"
+    TOOLTIP_HIDE = "tooltip-hide"
+    NESTED_HIDE = "nested-hide"
+    SCAN_OPEN = "scan-open"
+
+
+#: Deadlines are owned by the subsystem whose work they retire, and the owner reaches the gateway
+#: on every scheduled effect — so it is a property of the kind, not of the scheduler.
+_OWNERS = {
+    LifecycleTimerKind.HOVER_SWITCH: Owner.INTERACTION,
+    LifecycleTimerKind.TOOLTIP_HIDE: Owner.INTERACTION,
+    LifecycleTimerKind.NESTED_HIDE: Owner.INTERACTION,
+    LifecycleTimerKind.SCAN_OPEN: Owner.INTERACTION,
+}
+
+
+def _count(counter: object, kind: LifecycleTimerKind, outcome: str) -> None:
+    """Armed and settled, separately, per kind.
+
+    One number cannot answer this: a deadline that is never scheduled and one that is scheduled and
+    never delivered leave the same evidence downstream — nothing happened. Splitting them is what
+    tells "the hover machine never asked to hide" from "it asked and the timer never came due".
+    """
+    if counter is not None:
+        counter.add(1, {"kind": kind.value, "outcome": outcome})  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +65,14 @@ class LifecycleTimerIdentity:
 
 
 class RuntimeTimerPort(Protocol):
+    """The timer ingress. Asked for, not probed for.
+
+    Both calls used to go through `getattr(port, name, None)` with a False fallback, which cannot
+    tell a port that does not schedule timers from one whose method was renamed — the second reads
+    as "this session has no timers" and silently disarms every lifecycle deadline in the process.
+    Every implementor, production and fake, already answers both.
+    """
+
     def schedule_runtime_timer(self, **kwargs) -> bool: ...
 
     def cancel_runtime_timer(self, timer: str) -> bool: ...
@@ -68,22 +112,27 @@ class LifecycleTimers:
 
             def finished(completion: EffectFinished) -> None:
                 if completion.outcome is not EffectOutcome.SUCCEEDED:
+                    # The outcome's own name, not one "failed" bucket: a deadline the next hover
+                    # cancelled and one the runtime refused read the same under a collapsed label,
+                    # and `scan-open` scoring 5/5 "failed" was the first thing to mislead here.
+                    _count(otel_metrics.lifecycle_timer_settled, kind, completion.outcome.value)
                     return
                 with self._state_lock:
                     if self._closed or self._revisions[kind] != revision:
+                        _count(otel_metrics.lifecycle_timer_settled, kind, "fenced")
                         return
+                _count(otel_metrics.lifecycle_timer_settled, kind, "delivered")
                 callback()
 
-            schedule = getattr(self._port, "schedule_runtime_timer", None)
-            if schedule is None:
-                return False
-            return schedule(
-                owner=Owner.SESSION,
+            accepted = self._port.schedule_runtime_timer(
+                owner=_OWNERS.get(kind, Owner.SESSION),
                 identity=identity,
                 timer=self._name(kind),
                 due_at=self._clock() + delay_s,
                 on_finished=finished,
             )
+            _count(otel_metrics.lifecycle_timer_armed, kind, "accepted" if accepted else "refused")
+            return accepted
 
     def cancel(self, kind: LifecycleTimerKind) -> bool:
         with self._admission_lock:
@@ -91,8 +140,7 @@ class LifecycleTimers:
                 if self._closed:
                     return False
                 self._revisions[kind] += 1
-            cancel = getattr(self._port, "cancel_runtime_timer", None)
-            return False if cancel is None else cancel(self._name(kind))
+            return self._port.cancel_runtime_timer(self._name(kind))
 
     def close(self) -> None:
         with self._admission_lock:
@@ -102,10 +150,8 @@ class LifecycleTimers:
                 self._closed = True
                 for kind in LifecycleTimerKind:
                     self._revisions[kind] += 1
-            cancel = getattr(self._port, "cancel_runtime_timer", None)
-            if cancel is not None:
-                for kind in LifecycleTimerKind:
-                    cancel(self._name(kind))
+            for kind in LifecycleTimerKind:
+                self._port.cancel_runtime_timer(self._name(kind))
 
     @staticmethod
     def _name(kind: LifecycleTimerKind) -> str:

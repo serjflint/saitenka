@@ -27,6 +27,14 @@ if TYPE_CHECKING:
     from saitenka.model import Style
 
 
+def cue_key(text: str) -> str:
+    """A cue's cache key: mpv's sub-text with ASS/CR line breaks normalized to ``\\n``.
+
+    The SAME transform for a live cue and a warmed one, or an episode-prefetched line misses.
+    """
+    return text.replace("\\N", "\n").replace("\r", "")
+
+
 @dataclass(frozen=True, slots=True)
 class TokenizedCue:
     """One cue's fully-resolved render inputs: the per-source-line token lists (row-major), the flat

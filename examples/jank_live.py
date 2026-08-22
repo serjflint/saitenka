@@ -89,16 +89,18 @@ def to_bench_json(result: dict) -> list[dict]:
 
 
 def _counter(ipc, prop: str) -> int:
-    data = ipc.command("get_property", prop).get("data")
+    data = ipc.query(prop)
     return int(data) if isinstance(data, (int, float)) else 0
 
 
 def _scroll_four(reader) -> None:
-    before = reader._tip_scroll
+    from saitenka.app import surfaces
+
+    before = reader.tip.view.scroll
     for _ in range(4):
-        reader._scroll_tip(round(reader.osd[1] * 0.12))
-        reader.poll_once()
-    if reader._tip_scroll == before:
+        reader.scroll_tip(surfaces.tip_wheel_pixels(reader.tip_scale.ref_h, 1))
+        reader.pump()
+    if reader.tip.view.scroll == before:
         raise RuntimeError("live scroll workload did not advance the tooltip viewport")
 
 
@@ -133,13 +135,13 @@ def run(*, settle_s: float = 0.4) -> dict:
                 return False
 
         reader.dict_set = TallDS()
-        reader._panel_cache.clear()
+        reader.tip.panel_cache.clear()
 
         def sample(step: str, interaction_ms: float = 0.0) -> None:
             # let playback advance so any overlay-induced VO delay accrues before we read the counters
             deadline = time.perf_counter() + settle_s
             while time.perf_counter() < deadline:
-                reader.poll_once()
+                reader.pump()
                 time.sleep(0.02)
             samples.append(
                 {
@@ -172,16 +174,16 @@ def run(*, settle_s: float = 0.4) -> dict:
         def hover() -> None:
             ipc.command("mouse", cx, cy)  # tooltip composites; pause lease engages
 
-        sample("hover", timed(hover, lambda: reader._tip_rect is not None))
+        sample("hover", timed(hover, lambda: reader.tip.view.rect is not None))
 
         sample("scroll", timed(lambda: _scroll_four(reader)))
 
-        if reader._tip_rect is not None:  # nested popup over an inner word
-            tx, ty, tw, th = reader._tip_rect
+        if reader.tip.view.rect is not None:  # nested popup over an inner word
+            tx, ty, tw, th = reader.tip.view.rect
 
             def nested() -> None:
                 ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
-                reader.poll_once()
+                reader.pump()
 
             nested()
             sample("nested")
@@ -190,14 +192,14 @@ def run(*, settle_s: float = 0.4) -> dict:
             for k in range(len(reader.boxes)):
                 b = reader.boxes[k]
                 ipc.command("mouse", int(ox + b.x + b.w / 2), int(oy + b.y + b.h / 2))
-                reader.poll_once()
+                reader.pump()
 
         sweep()
         sample("sweep")
 
         def dismiss() -> None:
             ipc.command("mouse", 5, 5)
-            reader.poll_once()
+            reader.pump()
 
         dismiss()
         sample("dismiss")

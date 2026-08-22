@@ -1,4 +1,10 @@
-"""Temporary Reader-thread driver for typed effects during runtime migration."""
+"""The session's effect correlator: issue, pair with a deadline, complete.
+
+Every effect that has a reply — an mpv command, a timer, a job — is issued here and completed
+here, because correlation is one fact: the ID the mailbox reserved, the callback waiting on it, and
+the deadline timer paired with it are three views of one outstanding effect. Split across owners,
+a completion would have to be broadcast to find out whose it was.
+"""
 
 from __future__ import annotations
 
@@ -35,22 +41,17 @@ class CommandAdapter(Protocol):
     def expire(self, control) -> None: ...
 
 
-class TerminalRouter(Protocol):
-    def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None: ...
-
-
 class JobAdapter(Protocol):
     def dispatch(self, effect: SubmitJob) -> bool: ...
 
 
-class LegacyRuntimeBridge:
-    """Drive typed command/deadline effects from the legacy Reader turn."""
+class EffectCorrelator:
+    """Issue correlated effects and complete them; hold the timer heap they are paired against."""
 
     def __init__(
         self,
         mailbox: SessionMailbox,
         command_adapter: CommandAdapter,
-        router: TerminalRouter,
         *,
         job_adapter: JobAdapter | None = None,
         clock: Callable[[], float] = time.monotonic,
@@ -60,13 +61,11 @@ class LegacyRuntimeBridge:
         self._job_adapter = job_adapter
         self._clock = clock
         self._lock = threading.Lock()
-        self._next_effect = 0
         self._callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._timer_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._job_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._deadlines = DeadlineRegistry()
         self._timers = TimerScheduler()
-        router.install_runtime_bridge(self)
 
     def submit_job(
         self,
@@ -203,6 +202,10 @@ class LegacyRuntimeBridge:
         with self._lock:
             self._timer_callbacks[effect_id] = on_finished
             replaced = self._timers.schedule(effect)
+        # The loop blocks under `next_deadline`, which this may have just moved earlier. A receiver
+        # already blocked under the old one would sleep past the new timer, so it is released to
+        # recompute. Armed from inside a turn — the usual case — nobody is blocked and this is free.
+        self._mailbox.wake()
         if replaced is not None:
             self._mailbox.publish_terminal(
                 replaced,
@@ -222,6 +225,16 @@ class LegacyRuntimeBridge:
             connection_epoch=None,
         )
         return True
+
+    @property
+    def next_deadline(self) -> float | None:
+        """When the earliest pending timer is due, or ``None`` when none is armed.
+
+        The bound a blocked receiver waits under. Without it the loop has to guess an interval and
+        wake that often to ask whether a timer has come due — the tick this migration removes.
+        """
+        with self._lock:
+            return self._timers.next_deadline
 
     def publish_due(self) -> None:
         with self._lock:
@@ -269,17 +282,11 @@ class LegacyRuntimeBridge:
             self._command_adapter.expire(expire)
 
     def _allocate_pair(self) -> tuple[EffectId, EffectId]:
-        with self._lock:
-            target = EffectId(self._next_effect)
-            timer = EffectId(self._next_effect + 1)
-            self._next_effect += 2
+        target, timer = self._mailbox.allocate_effects(2)
         return target, timer
 
     def _allocate_one(self) -> EffectId:
-        with self._lock:
-            effect = EffectId(self._next_effect)
-            self._next_effect += 1
-        return effect
+        return self._mailbox.allocate_effect()
 
     def _reserve_pair(self, target: EffectId, timer: EffectId) -> bool:
         if not self._mailbox.reserve_terminal(target):

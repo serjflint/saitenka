@@ -9,8 +9,10 @@ gate. The *performance* side of the same scenario lives in examples/bench_respon
 
 from __future__ import annotations
 
+from driver import Driver
 from util import FakeIPC
 
+from saitenka.app import nested_popup
 from saitenka.app.config import TooltipOptions
 from saitenka.app.controller import NESTED_ID, TIP_ID, Reader
 from saitenka.app.tokenize import Token
@@ -23,7 +25,7 @@ class _TallDS:
     """A dict that returns a multi-section entry tall enough to scroll and dense enough to yield
     scan boxes (so nested popups open) — the shape that stresses the panel machinery."""
 
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         para = "とても長い定義の本文で" * 8  # CJK run → many per-char scan cells, wraps + scrolls
         return Entry(
             headword=tok.surface,
@@ -47,23 +49,28 @@ _CORPUS = [f"語{i:03d}" for i in range(PANEL_CACHE_MAX + 24)]
 
 def _churn(r: Reader, term: str) -> bool:
     """One cold hover → scroll → nested → scroll → dismiss cycle via the real entry points. Setting
-    lines+tokens lets set_hover/_draw_subtitle build a consistent box for token 0. Returns whether a
-    nested popup actually opened (so a test can assert the nested path was exercised)."""
+    lines+tokens lets `draw_subtitle` build a consistent box for token 0. Returns whether a nested
+    popup actually opened (so a test can assert the nested path was exercised)."""
     tok = Token(term, term, "ご", "名詞", 0, len(term))
     r.lines = [[tok]]
     r.tokens = [tok]
-    r.set_hover(0)  # draws the subtitle (builds boxes) + shows the tip; set_hover(-1) tears it down
+    # Draw first, then hover: the boxes have to exist before a cursor has anywhere to land. The old
+    # `set_hover(0)` did both at once, which is why it could not be a move.
+    r.draw_subtitle()
+    ui = Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
-        r._scroll_tip(round(r.osd[1] * 0.12))
-    st = r._tip_state
+        ui.wheel(1)
+    st = r.tip.view.state
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
     if boxes:
-        r._show_nested(boxes[len(boxes) // 3])  # nested popup on an inner cell
-        opened = r._nest.state is not None
-        r._scroll_tip(round(r.osd[1] * 0.12))  # scroll while nested is up
+        nested_popup.show_nested(
+            r.tip_ports, r.panel_ports, r.word_lookup, boxes[len(boxes) // 3]
+        )  # nested popup on an inner cell
+        opened = r.tip.nest.state is not None
+        ui.wheel(1)  # nested is up
         r._hide_nested()
-    r.set_hover(-1)  # dismiss the whole stack
+    r.retire_hover()  # dismiss the whole stack
     return opened
 
 
@@ -74,17 +81,17 @@ def test_sustained_churn_evicts_and_stays_clean():
     nested_seen = 0
     for term in _CORPUS:  # fill past the cap → eviction
         nested_seen += _churn(r, term)
-    assert len(r._panel_cache) <= PANEL_CACHE_MAX, (
-        f"cache overflowed its LRU cap mid-fill: {len(r._panel_cache)}"
+    assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX, (
+        f"cache overflowed its LRU cap mid-fill: {len(r.tip.panel_cache)}"
     )
     for term in _CORPUS[:8]:  # revisit the earliest (now-evicted) entries → cold rebuild, no crash
         nested_seen += _churn(r, term)
 
     assert nested_seen > 0, "nested popups never opened — the nested path wasn't exercised"
-    assert len(r._panel_cache) <= PANEL_CACHE_MAX, (
-        f"panel cache overflowed its LRU cap: {len(r._panel_cache)}"
+    assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX, (
+        f"panel cache overflowed its LRU cap: {len(r.tip.panel_cache)}"
     )
-    # after the final set_hover(-1) the whole hover stack must be torn down
+    # after the final retire_hover() the whole hover stack must be torn down
     assert r.hover_view().tip.state is None
     assert r.hover_view().nested.state is None  # nested popup cleared
     assert r.hover == -1

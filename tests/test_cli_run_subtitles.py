@@ -4,6 +4,7 @@ from pathlib import Path
 
 from saitenka.app import jimaku as jimaku_mod
 from saitenka.app import subselect, subtitle_cache
+from saitenka.app.episode_reslot import ReslotPorts
 from saitenka.app.launch import run as cli_run
 
 
@@ -174,6 +175,23 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
         def configure_sub_picker(self, lister):
             self.picker_lister = lister
 
+        @property
+        def reslot_ports(self):
+            """The shape `Reader.reslot_ports` builds — the seam the fetch is driven through."""
+            return ReslotPorts(
+                ipc=None,
+                finish_stats=lambda: None,
+                start_stats=lambda: None,
+                rebind_episode=lambda: None,
+                rebuild_index=lambda: None,
+                configure_mode=lambda *_a, **_kw: None,
+                configure_retry=self.configure_subtitle_retry,
+                configure_picker=self.configure_sub_picker,
+                fetch_japanese=self.fetch_japanese_subs_async,
+                start_prefetch=lambda: None,
+                toast=lambda *_a, **_kw: None,
+            )
+
     def fetch(video, providers, **_kwargs):
         calls.append((video, providers))
         return tmp_path / "episode.ja.srt", "tsukihime: added episode.ja.srt"
@@ -182,7 +200,7 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
     reader = Reader()
 
     cli_run._start_run_provider_fetch(
-        reader,
+        reader.reslot_ports,
         {"jimaku": {"enabled": True}, "tsukihime": {"enabled": True}},
         tmp_path / "old.mkv",
         cli_run.RunSubtitleOptions(slang="ja,jpn,jp"),

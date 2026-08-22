@@ -299,7 +299,12 @@ def _load(path: Path) -> tuple[list[dict], list[dict]]:
     """Trace events + log lines from a report zip/dir, or a bare trace.json file."""
     if path.is_file() and path.suffix == ".json":
         doc = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        events = doc.get("traceEvents", doc) if isinstance(doc, dict) else doc
+        if not isinstance(doc, dict):
+            return doc, []
+        events = doc.get("traceEvents", [])
+        other = doc.get("otherData")  # see tr._load_trace — session moved out of per-span args
+        if isinstance(other, dict) and other.get("session"):
+            events = [{"ph": "M", "name": "session", "args": dict(other)}, *events]
         return events, []
     return tr._load_trace(path), tr._load_log(path)
 

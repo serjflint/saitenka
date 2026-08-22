@@ -2,6 +2,7 @@
 Reader-owned swappable seam a profile switch (#254) flips."""
 
 import pytest
+import util
 
 from saitenka.app.controller import Reader
 from saitenka.app.token_cache import TokenizedCue
@@ -21,16 +22,10 @@ from saitenka.app.tokenizer import (
 )
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, props=None):
-        self.props = props or {}
-        self.commands = []
-
-    def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+        super().__init__()
+        self.props.update(props or {})
 
 
 class _FakeTokenizer:
@@ -164,7 +159,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
     reader.use_tokenizer(spy)
     reader.tokens = [Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
 
-    tooltip.resolve_hover(reader, 0)
+    tooltip.resolve_hover(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
 
     assert "phrase_terms" in spy.calls
 
@@ -180,7 +175,7 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     reader.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
 
-    nested_popup.open_link(reader, lb, (0, 0), 0)
+    nested_popup.open_link(reader.tip_ports, reader.panel_ports, lb, (0, 0), 0)
 
     assert "query_token" in spy.calls
 
@@ -203,23 +198,23 @@ class _ParticleContentTokenizer(_FakeTokenizer):
         return token.pos == "助詞"
 
 
-def test_mine_target_follows_the_active_tokenizers_content_partition():
+def testmine_target_follows_the_active_tokenizers_content_partition():
     """The word ``mine_target`` picks is decided by ``reader.tokenizer.is_content``, not baked JP POS.
     Same tokens, two strategies → two different mined tokens; the unidic case is the JP negative
     control (the 名詞, never the 助詞)."""
-    from saitenka.app.miner import Miner
+    from saitenka.app.miner import mine_target
 
     particle = Token("は", "は", "は", "助詞", 0, 1)
     noun = Token("本", "本", "ほん", "名詞", 1, 2)
 
     jp = Reader(FakeIPC())
     jp.tokens = [particle, noun]
-    assert Miner(jp).mine_target() == 1  # unidic: the noun is the content word
+    assert mine_target(jp.mine_cue) == 1  # unidic: the noun is the content word
 
     swapped = Reader(FakeIPC())
     swapped.use_tokenizer(_ParticleContentTokenizer())
     swapped.tokens = [particle, noun]
-    assert Miner(swapped).mine_target() == 0  # swapped: the particle is now "content"
+    assert mine_target(swapped.mine_cue) == 0  # swapped: the particle is now "content"
 
 
 def test_use_tokenizer_swaps_strategy_and_clears_cache():
