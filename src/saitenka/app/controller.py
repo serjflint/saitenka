@@ -1057,6 +1057,7 @@ class Reader:
             ),
             draw_request=self._draw_request,
             source=None if geometry is None else geometry.source_path,
+            native_unsupported=geometry is not None and geometry.source_unsupported,
         )
 
     def _draw_request(self) -> DrawRequest:

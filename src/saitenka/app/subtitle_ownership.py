@@ -2,6 +2,10 @@
 
 Geometry availability never selects the subtitle pixel renderer.  Only an explicit mode
 transition or a current assert-true/readback-false result may authorize legacy pixels.
+
+A source that can never produce geometry (an ``.srt``) is the former, not the latter: it enters as
+``LEGACY_OVERLAY`` on the selection change, because it is a property of the track rather than an
+outcome that could flip between cues.
 """
 
 from __future__ import annotations

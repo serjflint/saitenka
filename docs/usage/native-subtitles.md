@@ -101,11 +101,18 @@ unavailable native runtime make that frame noninteractive while mpv keeps render
 drained in one mpv poll are evaluated together, so intermediate `sub-start`/`sub-end`/ASS-row updates do
 not cause a transient pixel-owner decision.
 
-The standard renderer is catastrophic recovery, not geometry fallback. Saitenka uses it only after a
-current visibility transaction tries to show mpv subtitles and reads back `sub-visibility=false` for a
-nonempty selection. A rejected set without that current false readback, or a timed-out, stale, or
-unreadable readback, leaves ownership unknown and uses a bounded retry instead of risking duplicate
-subtitle pixels.
+A geometry *outcome* never selects the renderer, but a subtitle *source* does. When the selected track
+can never produce geometry — not an authored `.ass`, oversized, or not UTF-8 — Saitenka draws that
+track with the standard renderer instead, so an `.srt` stays scannable rather than leaving the episode
+with mpv's pixels and no hit boxes. The decision is made once per track selection, from a property of
+the source that cannot change under it, so the standard renderer still never flashes between cues.
+Selecting an authored `.ass` returns to the native path.
+
+Beyond that, the standard renderer is catastrophic recovery, not geometry fallback. Saitenka uses it
+only after a current visibility transaction tries to show mpv subtitles and reads back
+`sub-visibility=false` for a nonempty selection. A rejected set without that current false readback, or
+a timed-out, stale, or unreadable readback, leaves ownership unknown and uses a bounded retry instead
+of risking duplicate subtitle pixels.
 
 Geometry is prepared when the cue or render space changes and for a small lookahead window. Hovering,
 scanning, and scrolling reuse those boxes, so interactive 60 FPS behavior does not require rendering

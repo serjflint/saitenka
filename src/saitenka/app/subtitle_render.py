@@ -347,10 +347,10 @@ class SubtitleTarget:
     path reads fifteen presentation facts — every renderer in the module reaches exactly these.
     Two contracts, mpv-read and presentation, plus the two things the geometry owner is asked for.
 
-    `refresh` and `source` rather than the geometry object, because handing the object over would
-    also hand over `refresh(reader)`, which takes the host: the member would smuggle back in what
-    the cut removes. `refresh` is a no-op when there is no geometry owner, which is the same guard
-    the call site used to spell inline.
+    `refresh`, `source` and `native_unsupported` rather than the geometry object, because handing
+    the object over would also hand over `refresh(reader)`, which takes the host: the member would
+    smuggle back in what the cut removes. `refresh` is a no-op when there is no geometry owner,
+    which is the same guard the call site used to spell inline.
     """
 
     ipc: SubtitleEgress
@@ -360,6 +360,9 @@ class SubtitleTarget:
     refresh: Callable[[], None]
     draw_request: Callable[[], DrawRequest]
     source: object = None
+    #: This source can never produce geometry (see `NativeSubtitleGeometry.source_unsupported`).
+    #: A snapshot, not a callable: it is read inside the same call that builds the target.
+    native_unsupported: bool = False
 
 
 class NullRenderer(NoPixelOwnership):
@@ -797,10 +800,20 @@ class NativeVisibleRenderer:
         if selection == self._selection:
             return
         self._selection = selection
+        # A source geometry can never accept (an .srt, say) would otherwise leave the episode with
+        # mpv's pixels and no hit boxes for its whole run. Choosing the mode HERE is what keeps the
+        # module rule intact — "geometry availability never selects the renderer": this is a
+        # property of the source, evaluated once per selection, not a geometry outcome that could
+        # flip between cues.
+        mode = (
+            OwnershipMode.LEGACY_OVERLAY
+            if target.native_unsupported
+            else OwnershipMode.NATIVE_VISIBLE
+        )
         context = OwnershipContext(
             self._state.context.connection_epoch,
             self._state.context.ownership_epoch + 1,
-            OwnershipMode.NATIVE_VISIBLE,
+            mode,
             selection,
         )
         self._state, actions = reduce_ownership(

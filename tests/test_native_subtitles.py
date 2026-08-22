@@ -568,8 +568,10 @@ def test_missing_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     result.close()
 
 
-def test_oversized_source_keeps_native_pixels_before_provider_work(tmp_path: Path) -> None:
-    result, ipc, backend = reader(tmp_path)
+def test_oversized_source_hands_the_pixels_to_legacy_without_provider_work(tmp_path: Path) -> None:
+    """Too large is a property of the file, so it selects the renderer — but it must still not cost
+    a provider round trip, which is what this asserts beyond the owner."""
+    result, _ipc, backend = reader(tmp_path)
     source = tmp_path / "oversized.ass"
     source.write_bytes(b"x" * (MAX_ASS_SOURCE_BYTES + 1))
     assert result.native_geometry is not None
@@ -579,8 +581,7 @@ def test_oversized_source_keeps_native_pixels_before_provider_work(tmp_path: Pat
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-too-large"
     assert backend.requests == []
-    assert result.native_geometry.status.owner == "native"
-    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert result.native_geometry.status.owner == "legacy"
     result.close()
 
 
@@ -911,21 +912,23 @@ def test_blank_interval_does_not_repeat_provider_failure_diagnostic(tmp_path: Pa
     result.close()
 
 
-def test_non_ass_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None:
-    result, ipc, backend = reader(tmp_path)
+def test_a_non_ass_source_is_drawn_by_legacy_and_stays_scannable(tmp_path: Path) -> None:
+    """The point of handing an unusable source to legacy: an .srt keeps its hit boxes.
+
+    It used to keep mpv's pixels and produce none, which left the episode unscannable for its whole
+    run — the boxes here are the whole reason the renderer switches."""
+    result, _ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
     result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
-    assert backend.requests == []
-    assert result.native_geometry.status.owner == "native"
-    assert ("set_property", "sub-visibility", False) not in ipc.commands
-    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert backend.requests == []  # no provider work for a source it can never accept
+    assert result.native_geometry.status.owner == "legacy"
     result._sub_pending = None
     result.draw_subtitle()
-    assert result.boxes == []
+    assert result.boxes != []
     result.close()
 
 
@@ -988,14 +991,51 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
         provider.shutdown()
 
 
-def test_ass_geometry_restores_hits_after_noninteractive_source_switch(tmp_path: Path) -> None:
+def test_a_source_geometry_can_never_use_hands_the_pixels_to_legacy(tmp_path: Path) -> None:
+    """An .srt otherwise leaves mpv drawing with no hit boxes for the whole episode — unscannable,
+    and unrecoverable without changing tracks. The reason is a property of the source, so this
+    selects a renderer once per track rather than reacting to a geometry outcome."""
+    result, _ipc, _backend = reader(tmp_path)
+    renderer = NativeVisibleRenderer()
+    result.subtitle_pipeline.renderer = renderer
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
+    result.sub_text = "猫を見る"
+
+    result.subtitle_pipeline.draw_current(result.subtitle_target())
+
+    assert renderer.ownership_state.context.mode.value == "legacy-overlay"
+    result.close()
+
+
+def test_the_track_load_reset_does_not_hand_the_pixels_to_legacy(tmp_path: Path) -> None:
+    """`set_source(None)` is the reset every track load runs before the real source arrives, so
+    treating it as unsupported would flap the renderer twice per episode. The negative control for
+    the test above: `subtitle-source-unavailable` is deliberately not an unsupported-source reason.
+    """
+    result, _ipc, _backend = reader(tmp_path)
+    renderer = NativeVisibleRenderer()
+    result.subtitle_pipeline.renderer = renderer
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(None, live=True)
+    result.sub_text = "猫を見る"
+
+    result.subtitle_pipeline.draw_current(result.subtitle_target())
+
+    assert renderer.ownership_state.context.mode.value == "native-visible"
+    result.close()
+
+
+def test_switching_from_an_srt_to_an_ass_returns_the_pixels_to_native(tmp_path: Path) -> None:
+    """The switch is per selection and reversible: an unusable source parks the pixels with legacy,
+    and selecting an authored `.ass` takes them back rather than latching the fallback."""
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
     result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
     result._sub_pending = None
     result.draw_subtitle()
-    assert result.boxes == []
+    assert result.native_geometry.status.owner == "legacy"
 
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)

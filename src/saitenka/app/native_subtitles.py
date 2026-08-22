@@ -70,6 +70,16 @@ _PENDING_REASONS = frozenset(
         "subtitle-timing-unavailable",
     }
 )
+# Sources geometry can never accept, however long it waits — wrong format, too large, not UTF-8.
+# `subtitle-source-unavailable` is deliberately absent: `set_source(None)` is also the reset every
+# track load runs, so switching on it would flap the renderer twice per episode.
+_UNSUPPORTED_SOURCE_REASONS = frozenset(
+    {
+        "subtitle-source-encoding-unsupported",
+        "subtitle-source-not-authored-ass",
+        "subtitle-source-too-large",
+    }
+)
 
 
 class AssFullCapability(StrEnum):
@@ -614,6 +624,16 @@ class NativeSubtitleGeometry:
             last_recovery=self._last_recovery,
             source_epoch=self._source_epoch,
         )
+
+    @property
+    def source_unsupported(self) -> bool:
+        """Whether this track can never produce geometry, so legacy should own its pixels.
+
+        A stable property of the *source*, not a geometry outcome — which is what lets it select a
+        renderer without breaking the rule that geometry availability may not. It moves only when
+        the source does, so the switch happens once per track and never between cues.
+        """
+        return self.fallback_reason in _UNSUPPORTED_SOURCE_REASONS
 
     def observe_ass_full_reply(self, reply: Mapping[str, object]) -> None:
         error = reply.get("error")

@@ -8,8 +8,8 @@
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2347,
+    "substantive_lines": 2348,
     "total": 343
   },
-  "reason": "the seed must reconcile osd-dimensions by hand: seeding publishes no delta, so a transient latched by the pre-observe blocking read stood for the whole session and every hit box was laid out against it (confirmed by geometry.frame_agreement mismatch=10)"
+  "reason": "the subtitle target carries whether the source can ever produce geometry, so an .srt selects the renderer that can draw its hit boxes instead of leaving the episode unscannable"
 }
