@@ -26,6 +26,30 @@ recommendation that would have caused damage:
 The shape is identical each time: a surface correlation reported as a cause, without opening the
 thing it was about.
 
+## Reproduce one cause at a time
+
+A repro that fires is not yet a mechanism. Shrink it until exactly one cause remains, because the
+mechanism is what the remedy gets built from and a confounded repro hands over the wrong one.
+
+Observed: a real finding — a frame flag that stayed set forever — was reported as caused by an
+unfiltered band enumeration. It had **two** independent causes, and the one named was the minor one;
+the dominant cause was an overscan mismatch, visible only once the other was held fixed. Both fixes
+were needed. A remedy built from the reported mechanism alone would have shipped, tested green, and
+left the bug.
+
+## Your own measurement is admissible; label it
+
+`BENCHMARKS.md` or a profiler run is the standard, but for a claim nobody has measured, a harness you
+write is often the only way to settle it. That is fine, with two conditions.
+
+**Name the harness** — what it stands in for, and what it cannot see. A number from a fake transport
+is a number about the fake transport.
+
+**Keep it out of the verdict until it reaches a production path.** A per-tick cost measured against a
+stand-in belongs in the finding with its harness named, and in "could not verify" with the live run
+that would confirm it. Stated bare in a verdict, it reads as measured behaviour of the shipped app,
+and that is the sentence that gets quoted onward.
+
 ## State the discriminator
 
 Every finding names the check that separates it from its most plausible innocent explanation, so a

@@ -33,6 +33,11 @@ rationale judges the story rather than the artifact. Hand it the repo and the ax
 Give it the product, not your summary of the design — tell it to derive the goals itself from
 `README.md`, the docs site and the CLI. Those goals are the yardstick for every judgement.
 
+**Scope is a choice, not a default.** Whole-repo on a cadence, so drift is caught by schedule. A
+*named module plus its collaborators* right after a migration lands — the depth buys findings in
+seams a broad pass skims, at the cost of anything cross-cutting. Say which one you are running; a
+scoped review that reports like a whole-repo one overclaims by omission.
+
 ## 1. Establish declared vs enforced vs true
 
 These come apart, and the gap is where the findings are.
@@ -46,6 +51,11 @@ These come apart, and the gap is where the findings are.
 Prose is not gated here. `poe docs-refs` / `docs-consts` check references and constants, never
 claims — so an invariant page can carry a statement the code has contradicted for months and stay
 green. Assume at least one does; the last run found two in one file.
+
+A test's existence does not move a claim to **enforced**. A test that has never been shown to fail
+against the thing it guards is `declared`, in test form — two written here passed against their own
+target regression, and a whole tier's tests drove the code path production had stopped taking.
+Ask what the test would have to see to fail.
 
 ## 2. Work the axes
 
@@ -74,6 +84,22 @@ latter as coupling sends someone to break up a package that was never coupled.
 Performance claims cite `BENCHMARKS.md` or a profiler run. An unmeasured latency claim is ranked as
 speculation or dropped.
 
+## 3b. Give the reviewer an agenda, take one back
+
+A review with no agenda rediscovers the terrain by hand every run and finds whatever it trips over.
+A **claim census** — the module's own statements about itself, each marked `gated` / `tested` /
+`argued`, the classes in [`references/claim-classes.md`](references/claim-classes.md) — is what
+points it.
+
+- **In**: hand over the `argued` rows as **claims to attack**, never as findings to confirm. Priming
+  does not tunnel an isolated reviewer: the last run's two worst findings were off-agenda, and one
+  of its results was that a *census row was itself wrong*.
+- **Out**: every "could not verify" row becomes a census row with its remedy, so it survives between
+  runs instead of being re-derived.
+
+Isolation is unchanged. A reviewer handed the answer judges the story — the failure §0 exists to
+prevent. Handed a list of suspects, it does the opposite.
+
 ## 4. Hold the standard of evidence
 
 [`references/evidence.md`](references/evidence.md) is the full contract. The three rules that carry it:
@@ -88,8 +114,15 @@ speculation or dropped.
 ## 5. Report
 
 Verdict (a few sentences) · findings ranked P0→P3, each with axis, failure scenario, discriminator,
-remedy · **what is genuinely good**, specifically — an all-negative review is a failed review and
-gets ignored · what you would cut, with the loss · the principles answer · what you could not verify.
+**age**, remedy · **what is genuinely good**, specifically — an all-negative review is a failed
+review and gets ignored · what you would cut, with the loss · the principles answer · what you could
+not verify.
+
+**Age** is one clause per finding: is this new, or has it always been true? `git log -S` on the
+line, or the commit that introduced the caller. It changes the rank (a regression from the work
+under review is live, and someone is running it), and it changes the remedy — two P0/P1 findings
+from the last run were days old, both from the migration being reviewed, which made the real finding
+*that migration's tests never drove the path it shipped*.
 
 Findings that survive become issues or a plan; findings about a *conversion* hand off to
 **plan-migration**, and a single change driven to a PR hands off to **contribute**.
