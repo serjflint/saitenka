@@ -68,7 +68,14 @@ markdown_extensions:
       permalink: true
   - pymdownx.details
   - pymdownx.keys
-  - pymdownx.superfences
+  # Mermaid rather than a checked-in image: a diagram that does not diff in review is a diagram
+  # that goes stale silently, and GitHub renders the same fence, so ARCHITECTURE.md reads correctly
+  # both on the site and in the repo.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji:

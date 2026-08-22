@@ -116,6 +116,35 @@ Both join by registration rather than by a rewrite of the host, which is what ma
 extensible at all. Which files, and in what order, is
 [Adding a feature](docs/contributing/runtime.md#adding-a-feature).
 
+```mermaid
+flowchart TB
+    key(["mpv script-message"]) --> exec["CommandExecutor<br/>spec + bound handler"]
+    exec -->|command type| srouter["StatelessRouter"]
+    obs(["mpv property change"]) --> mailbox["SessionMailbox"]
+    mailbox --> reactor["SessionReactor"]
+    reactor -->|"RouteKey(event, owner)"| slice["SliceReducer"]
+
+    subgraph L1["Stateless — decides over a snapshot"]
+        direction LR
+        gather["adapter.inputs()"] --> policy["intents.reduce<br/>pure"]
+        policy --> perform["adapter.apply()"]
+    end
+
+    subgraph L2["Stateful — owns a slice of SessionState"]
+        direction LR
+        reduce["runtime reducer<br/>pure, gated"] --> owner["owner's adapter"]
+    end
+
+    srouter --> L1
+    slice --> L2
+    gather -. "host protocol" .-> host[(Reader)]
+    perform -. "host protocol" .-> host
+    reduce --- state[(SessionState)]
+```
+
+The dotted edges are the whole asymmetry: the stateful half reaches its own slice, the stateless
+half reaches the host — but only through members its protocol names.
+
 The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
 feature's adapter has to touch the live session, so it declares the host members it needs as a
 protocol instead of taking the host itself — which is also what keeps the count of `Reader`-taking
