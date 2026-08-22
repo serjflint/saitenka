@@ -11,6 +11,7 @@ silently reverting to scale 1.0 (the help/stats/sidebar regression) would have t
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -199,3 +200,25 @@ def test_visibility_off_removes_an_inflight_interaction_paint(monkeypatch):
         release.set()
         ov.close()
         ipc.close()
+
+
+def test_a_repaint_never_rewrites_the_file_mpv_still_has_mapped():
+    """`overlay-add` takes a FILENAME and mpv keeps it mmapped until the overlay is replaced.
+    Rewriting that path opens O_TRUNC, so mpv's mapping is briefly past EOF — a SIGBUS in mpv, not
+    an error we can observe. A scroll repaints tens of times a second, which is where it bit."""
+    ov = Overlay(_FakeIPC())
+    physical = ov.physical_oid(OverlayId.TIP)
+    held: list[str | None] = [None]
+    written = []
+    for shade in range(6):
+        # what mpv is mapped to going in, and what this repaint wrote — they must never be equal
+        before = held[-1]
+        ov.show_bgra(np.full((64, 48, 4), shade, np.uint8), oid=OverlayId.TIP)
+        wrote = ov._live[physical][2]
+        written.append(wrote)
+        assert wrote != before, "a repaint truncated the file mpv still had mapped"
+        held.append(wrote)
+
+    # Two slots, not a file per frame: a scroll repaints tens of times a second and must not leak.
+    assert len(set(written)) == 2
+    assert all(Path(p).exists() for p in set(written))

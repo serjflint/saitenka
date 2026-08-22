@@ -148,6 +148,8 @@ class Overlay:
         self.id_base = id_base
         self._runtime_submit = runtime_submit
         self._files: dict[int, Path] = {}
+        #: Two write slots per oid so a repaint never truncates the one mpv has mapped.
+        self._frame_slots: dict[int, tuple[Path, ...]] = {}
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
         self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
@@ -272,18 +274,36 @@ class Overlay:
             return self.ipc.command("overlay-add", oid, *tail)
         return {"error": "success"}
 
-    def _tempfile(self, oid: int) -> Path:
-        path = self._files.get(oid)
-        if path is None:
-            fd = tempfile.NamedTemporaryFile(  # noqa: SIM115  # path is process-lifetime, reused across calls
-                prefix=f"saitenka-osd-{oid}-",
-                suffix=".bgra",  # handle (mpv re-reads it)
-                delete=False,
-            )
-            path = Path(fd.name)
-            fd.close()
-            self._files[oid] = path
+    def _write_frame(self, oid: int, data: bytes) -> Path:
+        """Write ``data`` to whichever of this oid's two slots mpv is NOT currently holding.
+
+        `overlay-add` takes a filename and mpv keeps it MAPPED until the overlay is replaced or
+        removed. Rewriting that path opens O_TRUNC, so the mapping spends a moment past EOF — and a
+        touch there is a SIGBUS inside mpv, not an error we can observe. That is the crash this
+        replaced: mpv wedged on `overlay-add`, then died on signal 10 mid-scroll.
+
+        Two slots rather than a fresh file per frame (the `prepare`/`commit_prepared` discipline):
+        `overlay-add` is synchronous, so once it returns mpv has taken the new file and released the
+        other one, and the alternation is safe by construction. Rewriting a file that already exists
+        at size reuses its blocks — 0.8 ms/frame against 3.2 ms for create-write-unlink, on the
+        upload path a scroll runs tens of times a second.
+        """
+        slots = self._frame_slots.get(oid)
+        if slots is None:
+            slots = tuple(self._new_slot(oid) for _ in range(2))
+            self._frame_slots[oid] = slots
+        live = self._live.get(oid)
+        held = live[2] if live else None
+        path = next((p for p in slots if str(p) != held), slots[0])
+        path.write_bytes(data)
+        self._files[oid] = path
         return path
+
+    def _new_slot(self, oid: int) -> Path:
+        with tempfile.NamedTemporaryFile(
+            prefix=f"saitenka-osd-{oid}-", suffix=".bgra", delete=False
+        ) as staged:
+            return Path(staged.name)
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         label = _oid_label(oid)
@@ -292,8 +312,7 @@ class Overlay:
             otel_metrics.upload_duration_ms, "upload", oid=label
         ) as span:
             data, w, h, stride = to_bgra(img)
-            path = self._tempfile(oid)
-            path.write_bytes(data)
+            path = self._write_frame(oid, data)
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
             res = self._add(oid, tail)
             _set_draw_geometry(span, x, y, w, h)
@@ -310,8 +329,7 @@ class Overlay:
         ) as span:
             buf = np.ascontiguousarray(bgra)
             h, w = buf.shape[:2]
-            path = self._tempfile(oid)
-            path.write_bytes(buf.tobytes())
+            path = self._write_frame(oid, buf.tobytes())
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
             res = self._add(oid, tail)
             _set_draw_geometry(span, x, y, w, h)
