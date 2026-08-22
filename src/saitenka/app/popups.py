@@ -385,6 +385,11 @@ class Panel:
         """Raster what ``viewport_warm`` asks about, so a worker can open that gate."""
         self.windowed.warm_viewport(scroll, view_h)
 
+    @property
+    def missed_last_assemble(self) -> bool:
+        """The last warm-only compose left a band as background — warm it and re-blit."""
+        return self.windowed.missed_last_assemble
+
     def warm_native_viewport(self, scroll: int, view_h: int, scale: float) -> None:
         """Raster what ``native_viewport_warm`` asks about — the crisp blit's half."""
         self.windowed.warm_native_viewport(scroll, view_h, scale)

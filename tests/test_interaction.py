@@ -103,7 +103,10 @@ def test_tooltip_show_span_attributes_the_cold_hover(monkeypatch):
     assert show.attrs["cold"] is True  # first hover of this word builds the panel
     assert show.attrs["chars"] >= 1
     assert show.attrs["full_h"] > 0
-    assert show.attrs["bands"] >= 1  # a cold first paint rasters at least one band
+    # 0, not >=1: the first paint composes the cached/offline head and paints background where a
+    # band is missing. Every tier is warm-only on the interactive thread now, so this attribute
+    # reads "did the main thread violate that", and the answer must always be no.
+    assert show.attrs["bands"] == 0
 
 
 def test_subtitle_render_span_is_emitted(monkeypatch):

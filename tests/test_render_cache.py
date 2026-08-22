@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import numpy as np
+import pytest
 
 from saitenka.app import (
     nested_popup,
@@ -409,9 +410,9 @@ def assert_no_interactive_raster(view, act) -> int:
     """The raster-accounting invariant that makes 'no tooltip raster on the interactive thread'
     enforceable, not aspirational: drive ``act`` — an interactive-thread action on popup ``view`` — and
     return how many glyph bands it rasterised SYNCHRONOUSLY on the calling thread (the ``_sync_rasters``
-    delta — the crisp warm_only compose reads cached bands and rasters none). The contract is 0 on a
-    warm view; a cold view is the negative control (returns > 0), proving the oracle can fire. Reused by
-    every phase that moves a raster off the interactive thread."""
+    delta). The contract is now 0 on EVERY view, warm or cold — every tier composes warm-only and a
+    miss paints background — so a cold view is no longer the negative control. Falsifiability comes
+    from `_render_band` itself under `guard_main_render`; see the test below."""
     st = view.state
     assert st is not None, "the view must have a panel to account for its rasters"
     before = st.windowed._sync_rasters
@@ -419,10 +420,11 @@ def assert_no_interactive_raster(view, act) -> int:
     return st.windowed._sync_rasters - before
 
 
-def test_cold_nested_scroll_rasters_on_the_interactive_thread():
-    # Negative control for the oracle: a nested popup scrolled into its COLD tail (never warmed, since we
-    # don't drain the render-ahead) rasters glyph bands on the calling thread — proving the oracle can
-    # actually fire (else a 0 in the positive test is meaningless).
+def test_a_cold_nested_scroll_still_rasters_nothing_on_the_interactive_thread():
+    # The contract that replaced the old negative control: scrolling a nested popup into its COLD tail
+    # (never warmed — we don't drain the render-ahead) used to raster glyph bands on the calling
+    # thread. Now it paints the cached bands over background and owes itself a re-blit, so a scroll
+    # costs the interactive thread nothing however cold the destination is.
     r = _nested_reader()
     tok = r.tokens[0]
     nested_popup.open_nested(
@@ -430,12 +432,32 @@ def test_cold_nested_scroll_rasters_on_the_interactive_thread():
     )
 
     def scroll_to_the_cold_tail() -> None:
-        for _ in range(
-            6
-        ):  # each notch grows the height estimate and moves past the warmed overscan
+        for _ in range(6):  # each notch moves further past anything the show warmed
             tooltip_panel.scroll_view(r.tip_ports, r.tip.nest, r.tip.nest.view_h)
 
-    assert assert_no_interactive_raster(r.tip.nest, scroll_to_the_cold_tail) > 0
+    assert assert_no_interactive_raster(r.tip.nest, scroll_to_the_cold_tail) == 0
+    assert r.tip.nest.scroll > 0, "the wheel must still move the view, warm or not"
+
+
+def test_the_raster_oracle_can_fire():
+    # Falsifiability for `assert_no_interactive_raster`: with the render-loop guard armed, a band
+    # raster on this thread raises rather than quietly counting up. Without this, a 0 above could mean
+    # "nothing rasters" or "nothing ran".
+    from saitenka.render import banded
+
+    r = _nested_reader()
+    tok = r.tokens[0]
+    nested_popup.open_nested(
+        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+    )
+    panel = r.tip.nest.state
+    assert panel is not None
+    banded.guard_main_render(on=True)
+    try:
+        with pytest.raises(RuntimeError, match="reached the render loop"):
+            panel.windowed.viewport_bgra(4000, 200, 0)  # the rastering path, on this thread
+    finally:
+        banded.guard_main_render(on=False)
 
 
 def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():

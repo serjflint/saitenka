@@ -465,13 +465,17 @@ def blit_panel(
         scale=f"{ports.scale.display:.4f}",
         kind=compose_kind(oid, navigated=ports.nav_store.current.can_go_back),
     ) as span:
-        view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
+        # warm_only: the offline head if it covers this, else the cached bands, NEVER a raster here.
+        # The 1x tier was the last main-thread rasteriser — permitted rather than intended, since
+        # `guard_main_render` forbids it for native bands and had no 1x counterpart.
+        view = panel.viewport(y0, vh, overscan=vh, warm_only=True)
         # A head served from the precomposed first view returns pixels having rastered NOTHING, so a
         # show can leave the band cache as empty as it found it — and the next scroll then has no
         # warm neighbour to land on. rasters=0 with blocks=0 is that case; it is invisible from the
         # pixels, which look identical either way.
         span.set("rasters", panel.windowed.last_frame_rasters)
         span.set("blocks", panel.windowed.cached_blocks)
+        span.set("partial", panel.windowed.missed_last_assemble)
     return decorate_and_upload(ports, view, y0, full_h, xy, oid)
 
 
@@ -583,7 +587,15 @@ def apply_pending_crisp(ports: TipPorts, view: PopupView) -> None:
         return
     vh = min(view.view_h, st.full_height)
     y0 = max(0, min(view.scroll, max(0, st.full_height - vh)))
-    if st.native_viewport_warm(y0, vh, ports.scale.raster):
+    # Ask about the tier this blit will actually read. Below the crisp threshold the soft path is the
+    # blit, and its bands are 1x — gating that on native warmth asks a cache nothing ever fills, so a
+    # partial soft frame would never be upgraded.
+    warm = (
+        st.native_viewport_warm(y0, vh, ports.scale.raster)
+        if ports.scale.raster > _CRISP_MIN_SCALE
+        else st.viewport_warm(y0, vh)
+    )
+    if warm:
         render_view(
             ports, view
         )  # warm now → _blit_native composites crisp and clears crisp_pending
@@ -601,8 +613,12 @@ def _blit_native(ports: TipPorts, view: PopupView, st: Panel):
     )  # bucketed → matches hit_target's inverse; reuses cached native bands
     if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
         view.crisp_miss = "not_hidpi"
-        view.crisp_pending = False
-        return blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
+        rect = blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
+        # A partial frame owes itself a re-blit: the main thread no longer rasters the 1x bands, so a
+        # cold band is background until a worker warms it. `apply_pending_crisp` asks `viewport_warm`
+        # at this scale, which is the tier that just came up short.
+        view.crisp_pending = st.missed_last_assemble
+        return rect
     full_h = st.full_height
     vh = min(view_h, full_h)
     y0 = max(0, min(scroll, max(0, full_h - vh)))
@@ -613,7 +629,10 @@ def _blit_native(ports: TipPorts, view: PopupView, st: Panel):
     if not st.native_viewport_warm(y0, vh, scale):
         view.crisp_miss = "warming"
         view.crisp_pending = True  # poll's apply_pending_crisp re-blits once the bands warm
-        return blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
+        rect = blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
+        if st.missed_last_assemble:  # the soft fallback came up short too — still owed a re-blit
+            view.crisp_miss = "warming"
+        return rect
     try:
         # crisp=native (soft_reason="" — this IS the crisp path, not a soft fallback). warm_only: the
         # main thread NEVER rasters — the bands are warm (gated above); a raced eviction shows bg, not a
@@ -667,14 +686,14 @@ def scroll_view(ports: TipPorts, view: PopupView, delta: int) -> bool:
         # tooltip's half is declared by `scroll_tip`, which is the only caller that reaches here
         # with it — a second write here was one fact with two writers.
         dispatch_hover(ports, events.HoverScrolled(nested=True))
-    deferred = ports.request_render_ahead(view, 1 if delta > 0 else -1)
-    if not deferred:
-        view.scroll = ns
-        render_view(ports, view)
-        return True
-    if st.viewport_warm(ns, min(view.view_h, st.full_height)):
-        view.scroll = ns
-        render_view(ports, view)
+    ports.request_render_ahead(view, 1 if delta > 0 else -1)
+    # Publish unconditionally. The blit is warm-only on every tier now, so this cannot cost a
+    # synchronous raster — it paints the bands that are cached and background where they are not,
+    # and the re-blit `crisp_pending` owes fills the gap once the worker lands. Waiting for warmth
+    # instead is what made a scroll appear not to work at all: the gate asked about a cache nothing
+    # had filled at the destination, so the wheel moved and the pixels never did.
+    view.scroll = ns
+    render_view(ports, view)
     return True
 
 

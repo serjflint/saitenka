@@ -125,6 +125,18 @@ class CachedBlock:
         return w * h * 4
 
 
+def _clip_band(band_top: int, band_h: int, view_h: int) -> tuple[int, int, int] | None:
+    """Where a band lands in a viewport: ``(src_y0, dst_y, rows)``, or ``None`` when it falls outside.
+
+    The geometry every assembler needs and each used to re-derive. Splitting it out is the same cut as
+    the rest of the engine: this is arithmetic over offsets, and an assembler should only copy rows.
+    ``band_top`` is the band's top in VIEWPORT space (negative when it starts above the fold).
+    """
+    src_y0, dst_y = max(0, -band_top), max(0, band_top)
+    rows = min(band_h - src_y0, view_h - dst_y)
+    return (src_y0, dst_y, rows) if rows > 0 else None
+
+
 @dataclass(frozen=True, slots=True)
 class BlockGeom:
     """A block's retained hit geometry: its x-offset and row-local scan/link boxes. Kept even after the
@@ -302,6 +314,8 @@ class WindowedPanel:
         self._scaled_bgra: dict[tuple[int, int, float], np.ndarray] = {}
         self._scaled_cap = 64
         self._bg_bgra: np.ndarray | None = None  # theme.bg as a (4,) premul-BGRA pixel; memoised
+        #: Did the last warm-only assemble leave a band as background? The caller warms and re-blits.
+        self._missed_last_assemble = False
         # Retained per-ROW hit geometry, accumulated across the row's bands (row-local boxes), NEVER
         # evicted — so a hover resolves even when a band's pixels are gone. _geom_seen dedups a line
         # drawn in two adjacent bands at their shared seam.
@@ -425,6 +439,11 @@ class WindowedPanel:
         """Rasterise row ``i``'s band ``[y0, y1)`` WITHOUT touching shared state — safe on a worker
         thread (fonts are thread-local; the row's memoised layout handle is walk-once). The caller
         stores the result under the lock. Body rows go through ``render_window`` (O(band) getmask2)."""
+        if _GUARD_MAIN_RENDER and _on_render_loop():
+            raise RuntimeError(
+                "1x band raster reached the render loop — every tier is warm-only on the main thread "
+                "(the blit composes cached bands and background; a worker warms the rest)"
+            )
         row = self._rows[i]
         assert row.render_window is not None  # only body rows are banded
         img, scan, links = row.render_window(y0, y1)
@@ -640,14 +659,89 @@ class WindowedPanel:
                 cb = self._blocks.get((i, b))
                 if cb is None:
                     continue
-                band_top = row_top + y0 - scroll  # in viewport space (may be off either edge)
-                src_y0 = max(0, -band_top)
-                dst_y = max(0, band_top)
-                h = min(cb.h - src_y0, view_h - dst_y)  # band rows inside the viewport
-                if h <= 0:
+                placed = _clip_band(row_top + y0 - scroll, cb.h, view_h)
+                if placed is None:
                     continue
+                src_y0, dst_y, h = placed
                 out[dst_y : dst_y + h] = self._band_bgra((i, b), cb)[src_y0 : src_y0 + h]
         return out
+
+    def _warm_head(self, scroll: int, view_h: int, overscan: int) -> np.ndarray | None:
+        """The offline/precomposed head when it answers this exact request — 0 rasters. Under lock."""
+        if scroll != 0 or self._first_view is None:
+            return None
+        vh, ov, arr = self._first_view
+        if vh != view_h or ov != overscan:
+            return None
+        if otel_metrics.precompose_hits is not None:
+            otel_metrics.precompose_hits.add(1)
+        self._last_frame_rasters = 0
+        self._missed_last_assemble = False
+        return arr.copy()  # the caller mutates it in place (scrollbar/flash) — isolate the cache
+
+    def _warm_plan(
+        self, scroll: int, view_h: int, overscan: int
+    ) -> tuple[list[tuple[tuple[int, int], CachedBlock, int]], bool]:
+        """The cached bands covering ``[scroll, scroll+view_h)`` and whether any were missing. Under
+        lock; the returned blocks are immutable, so the caller may use them once it is released."""
+        table = self._offsets.estimated_table()
+        start, end = table.visible_range(scroll, view_h, overscan)
+        plan: list[tuple[tuple[int, int], CachedBlock, int]] = []
+        missing = False
+        for i in range(start, end):
+            if not self._offsets.known(i):
+                missing = True
+                continue
+            row_top = table.starts[i]
+            for b, y0, _y1 in _row_bands(self._offsets.height(i)):
+                block = self._blocks.get((i, b))
+                if block is None:
+                    missing = True
+                else:
+                    plan.append(((i, b), block, row_top + y0 - scroll))
+        return plan, missing
+
+    def _assemble_warm_1x(self, scroll: int, view_h: int, overscan: int) -> np.ndarray:
+        """The main thread's 1× compose: the offline head if it covers this request, else whatever
+        bands are cached, with a brief lock and no raster.
+
+        The 1× tier was the last place the main thread rasterised — `_ensure_bands` inside
+        `_viewport_bgra_locked` — and it was permitted rather than intended: `guard_main_render`
+        forbids it for native bands and had no 1× counterpart. A miss leaves background and
+        `missed_last_assemble` says so, so the caller can warm it on a worker and re-blit.
+        """
+        with self._lock:
+            head = self._warm_head(scroll, view_h, overscan)
+            if head is not None:
+                return head
+            plan, missing = self._warm_plan(scroll, view_h, overscan)
+            arrays = {key: self._band_bgra(key, block) for key, block, _ in plan}
+            background = self._bg_bgra_value()
+            self._last_frame_rasters = 0
+            self._missed_last_assemble = missing
+        out = np.empty((max(view_h, 1), self.width, 4), np.uint8)
+        out[:] = background
+        for key, block, band_top in plan:
+            placed = _clip_band(band_top, block.h, view_h)
+            if placed is not None:
+                src_y0, dst_y, h = placed
+                out[dst_y : dst_y + h] = arrays[key][src_y0 : src_y0 + h]
+        return out
+
+    @property
+    def missed_last_assemble(self) -> bool:
+        """Did the last warm-only assemble leave a band as background? The caller warms and re-blits."""
+        return self._missed_last_assemble
+
+    def _bg_bgra_value(self) -> np.ndarray:
+        """The panel background as one premul-BGRA pixel, memoised. Call under ``self._lock``."""
+        from saitenka.bgra import to_bgra_array
+
+        bg = self._bg_bgra
+        if bg is None:
+            bg = to_bgra_array(Image.new("RGBA", (1, 1), self.theme.bg))[0, 0]
+            self._bg_bgra = bg
+        return bg
 
     def viewport_bgra(
         self,
@@ -672,6 +766,8 @@ class WindowedPanel:
                 return self._assemble_warm_bgra(v)
             with self._lock:
                 return self._scaled_assemble_bgra(v, warm_only=False)
+        if warm_only:  # the MAIN-THREAD 1x path — cache and offline head only, never a raster
+            return self._assemble_warm_1x(scroll, view_h, overscan)
         with self._lock:
             if scroll == 0 and self._first_view is not None:
                 vh, ov, arr = self._first_view
@@ -859,9 +955,9 @@ class WindowedPanel:
             array = arrays.get(key)
             if array is None:  # cold → leave background; a worker will warm this band
                 continue
-            src_y0, dst_y = max(0, -band_top), max(0, band_top)
-            h = min(array.shape[0] - src_y0, dev_vh - dst_y)
-            if h > 0:
+            placed = _clip_band(band_top, array.shape[0], dev_vh)
+            if placed is not None:
+                src_y0, dst_y, h = placed
                 out[dst_y : dst_y + h] = array[src_y0 : src_y0 + h]
         return out
 
@@ -1055,10 +1151,10 @@ class WindowedPanel:
         for i, span, cb, band_top in self._scaled_placements(v, warm_only=warm_only):
             if cb is None:  # warm_only miss → leave background; a worker will warm this band
                 continue
-            src_y0, dst_y = max(0, -band_top), max(0, band_top)
-            h = min(cb.h - src_y0, dev_vh - dst_y)
-            if h <= 0:
+            placed = _clip_band(band_top, cb.h, dev_vh)
+            if placed is None:
                 continue
+            src_y0, dst_y, h = placed
             key = (i, span[0], v.skey)
             out[dst_y : dst_y + h] = self._scaled_band_bgra(key, cb, v)[src_y0 : src_y0 + h]
         self._trim_scaled()
@@ -1072,10 +1168,10 @@ class WindowedPanel:
         for _i, _span, cb, band_top in self._scaled_placements(v, warm_only=warm_only):
             if cb is None:  # warm_only miss → background; a worker will warm this band
                 continue
-            src_y0, dst_y = max(0, -band_top), max(0, band_top)
-            h = min(cb.h - src_y0, dev_vh - dst_y)
-            if h <= 0:
+            placed = _clip_band(band_top, cb.h, dev_vh)
+            if placed is None:
                 continue
+            src_y0, dst_y, h = placed
             im = cb.image()
             crop = im if src_y0 == 0 and h == cb.h else im.crop((0, src_y0, im.width, src_y0 + h))
             out.alpha_composite(crop, (round(cb.x * v.scale), dst_y))
@@ -1178,8 +1274,11 @@ class WindowedPanel:
             if should_cancel is not None and should_cancel():
                 break
             with self._lock:
-                if (i, b) not in self._blocks:
-                    self._store(self._render_band(i, b, y0, y1))
+                cached = (i, b) in self._blocks
+            if not cached:  # raster unlocked, store locked — see `_warm_row`
+                block = self._render_band(i, b, y0, y1)
+                with self._lock:
+                    self._store(block)
             rendered += 1
         return rendered
 
@@ -1269,8 +1368,11 @@ class WindowedPanel:
             if should_cancel is not None and should_cancel():
                 break
             with self._lock:
-                if (i, b) not in self._blocks:
-                    self._store(self._render_band(i, b, y0, y1))
+                cached = (i, b) in self._blocks
+            if not cached:  # raster unlocked, store locked — see `_warm_row`
+                block = self._render_band(i, b, y0, y1)
+                with self._lock:
+                    self._store(block)
             rendered += 1
         return rendered
 

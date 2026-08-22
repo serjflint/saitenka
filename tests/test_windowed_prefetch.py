@@ -190,3 +190,59 @@ def test_concurrent_worker_and_main_stay_consistent():
         stop.set()
         t.join(timeout=5)
     assert not errors  # the worker never raised (no dict-changed-size / torn read under the lock)
+
+
+def test_the_panel_lock_is_not_held_across_a_raster():
+    """The lock guards cache MEMBERSHIP (a lookup measures ~1us); a band raster is ~10ms. Holding it
+    across the raster serialises the render-ahead worker against the main thread's compose — measured
+    8.04ms against 2.13ms uncontended, while the same worker load on a *different* panel cost
+    nothing, so it was the lock and not the cores.
+
+    Deterministic rather than timed: the raster itself reports whether the lock was held when it ran.
+    A wall-clock version of this passed against the regression it was meant to catch — the worker
+    finished before the compose began — so it asserted nothing.
+    """
+    panel = WindowedPanel(panel_rows(_entry(), WIDTH), WIDTH, render_block_fn=None)
+    observed: list[bool] = []
+    real = panel._lock
+
+    class Watched:
+        """Wraps the real lock and remembers whether this thread is inside it."""
+
+        def __init__(self) -> None:
+            self.depth = 0
+
+        def __enter__(self):
+            real.acquire()
+            self.depth += 1
+            return self
+
+        def __exit__(self, *_exc) -> None:
+            self.depth -= 1
+            real.release()
+
+        def acquire(self, *a, **kw):
+            return real.acquire(*a, **kw)
+
+        def release(self):
+            return real.release()
+
+    watched = Watched()
+    panel._lock = watched
+    for row in panel._rows:
+        if row.render_window is None:
+            continue
+        inner = row.render_window
+
+        def watching(*a, _inner=inner, **kw):
+            observed.append(watched.depth > 0)
+            return _inner(*a, **kw)
+
+        row.render_window = watching
+
+    panel.warm_viewport(600, 200)
+
+    assert observed, "no band was rastered — the test did not exercise the warm path"
+    assert not any(observed), (
+        f"{sum(observed)}/{len(observed)} band rasters ran with the panel lock held"
+    )
