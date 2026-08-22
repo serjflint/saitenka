@@ -2738,3 +2738,61 @@ def test_the_legacy_renderer_restores_the_visibility_it_found_at_close(tmp_path:
     result.close()
 
     assert ("set_property", "sub-visibility", True) in ipc.commands
+
+
+def _decision_spans(monkeypatch) -> list[dict[str, object]]:
+    """Record every `subtitle_geometry_decision` span's attributes."""
+    from saitenka import otel_metrics
+
+    spans: list[dict[str, object]] = []
+
+    class _Span:
+        def __init__(self, attributes: dict[str, object]) -> None:
+            self.attributes = attributes
+
+        def set(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    @contextmanager
+    def record(name: str, **attributes: str):
+        values: dict[str, object] = dict(attributes)
+        if name == "subtitle_geometry_decision":
+            spans.append(values)
+        yield _Span(values)
+
+    monkeypatch.setattr(otel_metrics, "traced", record)
+    return spans
+
+
+def test_geometry_records_the_frame_it_shares_with_the_osd_surface(tmp_path, monkeypatch) -> None:
+    """Boxes are laid out in the frame `osd-dimensions` reports; they are drawn onto the surface the
+    host latched in `self.osd`. Nothing downstream compares the two, and when they differ the output
+    is not degraded but silently wrong — every box carries the same offset."""
+    spans = _decision_spans(monkeypatch)
+    result, ipc, _backend = reader(tmp_path)
+    result.osd = (1280, 720)  # agrees with the fake's osd-dimensions
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    framed = [s for s in spans if "frame_width" in s]
+    assert framed, "no decision reached the frame branch"
+    assert all(s["host_osd"] == "(1280, 720)" for s in framed)
+    assert all("frame_disagreement" not in s for s in framed)
+    result.close()
+
+
+def test_a_frame_that_disagrees_with_the_osd_surface_is_recorded(tmp_path, monkeypatch) -> None:
+    """Negative control for the test above — the oracle has to catch the divergence it exists for,
+    or the match assertion is only proving that both sides read the same fake."""
+    spans = _decision_spans(monkeypatch)
+    result, ipc, _backend = reader(tmp_path)
+    result.osd = (3574, 2074)  # the host latched a surface `osd-dimensions` never reported
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    framed = [s for s in spans if "frame_width" in s]
+    assert framed, "no decision reached the frame branch"
+    assert any(s.get("frame_disagreement") == "(1280, 720)_vs_(3574, 2074)" for s in framed)
+    result.close()

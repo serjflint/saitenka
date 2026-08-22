@@ -373,6 +373,7 @@ class NativeSubtitleGeometry:
         self._last_transition: str | None = None
         self._last_recovery: str | None = None
         self._last_render_inputs: _RenderInputs | None = None
+        self._last_host_osd: tuple[int, ...] | None = None
         self._failure_diagnostic: tuple[str, str | None] | None = None
 
     def _skipped_tokens(self) -> int:
@@ -430,8 +431,37 @@ class NativeSubtitleGeometry:
                 span.set("storage_height", render.storage_size[1])
                 span.set("pixel_aspect", render.pixel_aspect)
                 span.set("margins", repr(render.margins))
+                self._record_frame_agreement(span, render.frame_size)
             if target_owner != self._owner:
                 span.set("owner_transition", f"{self._owner}_to_{target_owner}")
+
+    def _record_frame_agreement(
+        self, span: otel_metrics.SpanSetter, frame: tuple[int, int]
+    ) -> None:
+        """Do the boxes and the surface they land on agree about the frame?
+
+        A mismatch is not a degraded mode — it is silently wrong output: every box takes the same
+        scale-and-offset error, so hit regions and the highlight sit beside the words for the whole
+        episode. Recorded on every decision because the divergence is invisible otherwise; the two
+        sizes reach a report only as `frame_*` (live `osd-dimensions`) and an `osd_probe` that fires
+        just on a change, and neither says whether they were equal when it mattered.
+        """
+        host = self._last_host_osd
+        if host is None:
+            return
+        agree = tuple(host[:2]) == frame
+        span.set("host_osd", repr(tuple(host[:2])))
+        if not agree:
+            span.set("frame_disagreement", f"{frame}_vs_{tuple(host[:2])}")
+            log.warning(
+                "geometry frame %r disagrees with the OSD surface %r — every box is offset",
+                frame,
+                tuple(host[:2]),
+            )
+        if otel_metrics.geometry_frame_agreement is not None:
+            otel_metrics.geometry_frame_agreement.add(
+                1, {"outcome": "match" if agree else "mismatch"}
+            )
 
     def _transition_owner(
         self,
@@ -1025,6 +1055,11 @@ class NativeSubtitleGeometry:
             self._ports.degrade()
             return None
         self._last_render_inputs = render
+        # The frame boxes are computed in comes from the LIVE `osd-dimensions`; the surface they are
+        # drawn onto is the host's latched `self.osd`, which only `refresh_osd` moves and only when it
+        # already differs. `seen.osd` is merely this path's fallback, so the two can diverge silently
+        # and every box then carries the same scale-and-offset error.
+        self._last_host_osd = tuple(seen.osd) if seen.osd else None
         active_rows = seen.prop("sub-text/ass-full")
         if isinstance(active_rows, str):
             self.ass_full_capability = AssFullCapability.SUPPORTED
