@@ -297,10 +297,25 @@ class FakeSurfaces:
 
 
 class FakeIpc:
-    """A disconnected egress: every submission is refused, which is a path `clear` already handles."""
+    """Records the mpv commands a renderer submits, and accepts every one."""
 
-    def submit_runtime_mpv(self, **_kwargs) -> bool:
-        return False
+    def __init__(self) -> None:
+        self.commands: list[tuple] = []
+
+    def submit_runtime_mpv(self, *, command, **_kwargs) -> bool:
+        self.commands.append(tuple(command))
+        return True
+
+    def focus_traffic(self) -> list[str]:
+        """The focus slot's payload kinds — `ass-events` is a draw, `none` a take-down."""
+        from saitenka.app.subtitle_render import NATIVE_FOCUS_ID
+
+        return [str(c[2]) for c in self.commands if c[:2] == ("osd-overlay", NATIVE_FOCUS_ID)]
+
+    def cancel_runtime_timer(self, *_args, **_kwargs) -> None: ...
+
+    def submit_runtime_timer(self, *_args, **_kwargs) -> bool:
+        return True
 
     def send(self, *_args, **_kwargs) -> None: ...
 
@@ -354,6 +369,73 @@ def test_the_raster_comes_back_after_the_slot_was_taken_down_under_it() -> None:
     renderer._publish_overpaint(request, surfaces)
 
     assert surfaces.overpaint_traffic() == ["present", "remove", "present"]
+
+
+def _native_renderer_and_target():
+    """A native-visible renderer that owns the pixels, plus the target its lifecycle calls take."""
+    from dataclasses import replace as _replace
+
+    from saitenka.app.subtitle_ownership import PixelOwner
+    from saitenka.app.subtitle_render import SubtitleTarget
+
+    renderer = _overpaint_renderer()
+    renderer._state = _replace(renderer._state, owner=PixelOwner.NATIVE)
+    surfaces, ipc = FakeSurfaces(), FakeIpc()
+    # No coverage on the boxes, so the tokens are device 1's text redraw rather than device 2's
+    # raster — the focus slot is what carries the colors AND the JLPT rules, and it is the slot the
+    # surface layer cannot hide.
+    request = draw_request(
+        styles=[Style((255, 0, 0, 255), underline=(0, 128, 255, 255))] * 3,
+        boxes=measured_boxes(),
+    )
+    target = SubtitleTarget(
+        ipc=ipc,
+        get=lambda _name: None,
+        prop=lambda _name: None,
+        surfaces=surfaces,
+        refresh=lambda: None,
+        draw_request=lambda: request,
+    )
+    return renderer, target, surfaces, ipc, request
+
+
+def test_a_hidden_session_is_not_repainted_by_the_next_redraw() -> None:
+    """The focus slot carries the token colors and the JLPT rules, and it is written straight
+    through the IPC runtime — so `LifecycleSurfaces.set_visible(False)` does not cover it. Any
+    redraw after `Alt+o` put both back on a session the user had just hidden, and they stayed
+    until a cue change happened to produce an empty payload.
+    """
+    renderer, target, surfaces, ipc, request = _native_renderer_and_target()
+    renderer.draw(request, surfaces, ipc)
+    renderer.suspend_for_overlay(target)
+    ipc.commands.clear()
+
+    renderer.draw(request, surfaces, ipc)
+
+    assert ipc.focus_traffic() == []
+
+
+def test_the_session_draws_again_once_it_is_unhidden() -> None:
+    """The negative control. A gate with no way back would read as "Alt+o kills the overlay until
+    a restart", which is a worse bug than the one it fixes.
+
+    Ownership is re-established by hand because `resume_after_overlay` deliberately leaves it
+    `unknown` — `suspend_for_overlay` set `sub-visibility` behind the FSM's back, so only mpv can
+    settle who owns the pixels. That is a separate gate from this one, and it already has tests.
+    """
+    from dataclasses import replace as _replace
+
+    from saitenka.app.subtitle_ownership import PixelOwner
+
+    renderer, target, surfaces, ipc, request = _native_renderer_and_target()
+    renderer.suspend_for_overlay(target)
+    renderer.resume_after_overlay(target)
+    renderer._state = _replace(renderer._state, owner=PixelOwner.NATIVE)
+    ipc.commands.clear()
+
+    renderer.draw(request, surfaces, ipc)
+
+    assert ipc.focus_traffic() == ["ass-events"]
 
 
 def test_the_overpaint_placement_records_both_spaces_it_reconciles() -> None:

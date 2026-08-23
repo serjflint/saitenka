@@ -602,6 +602,9 @@ class NativeVisibleRenderer:
         #: Whether device 2's raster is on screen, so a cue that needs none takes the last one down
         #: rather than leaving it over the words that follow.
         self._overpaint_shown = False
+        #: Whether a saitenka overlay window (or `Alt+o`) has taken the session's pixels down. The
+        #: focus slot is not a `LifecycleSurfaces` one, so nothing else stops a redraw repainting it.
+        self._suspended = False
         #: Placement and pixels of the raster currently on the slot, so a redraw that changes
         #: neither can skip the upload. `None` whenever the slot is down — see `_drop_overpaint`.
         self._overpaint_published: tuple[int, int, bytes] | None = None
@@ -1097,6 +1100,12 @@ class NativeVisibleRenderer:
         self, request: DrawRequest, surfaces=None, ipc=None, /, *, on_settled=None
     ) -> DrawResult | None:
         """Focus box over mpv's own pixels, or the legacy render when mpv does not own them."""
+        # The focus slot is written straight through the IPC runtime, so the surface layer's
+        # `set_visible(False)` does not cover it: without this, any redraw after `Alt+o` repainted
+        # the token colors and the JLPT rules onto a session the user had just hidden, and they
+        # stayed until a cue change happened to produce an empty payload.
+        if self._suspended:
+            return None
         if self._state.owner == PixelOwner.LEGACY:
             return self._fallback.draw(request, surfaces, ipc, on_settled=on_settled)
         # `activate` drives the ownership FSM and needs the host, so the coordinator runs it just
@@ -1281,12 +1290,14 @@ class NativeVisibleRenderer:
         self._state, _ = reduce_ownership(self._state, OwnershipEvent(EventKind.CLOSE_FINISHED))
 
     def suspend_for_overlay(self, target: SubtitleTarget) -> None:
+        self._suspended = True
         self._hide_focus(target.ipc)
         self._hide_overpaint(target.surfaces)
         self._fallback.clear(target.surfaces, target.ipc)
         _send_visibility(target.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
     def resume_after_overlay(self, target: SubtitleTarget) -> None:
+        self._suspended = False
         if self._state.owner == PixelOwner.LEGACY:
             self._state, actions = reduce_ownership(
                 self._state, OwnershipEvent(EventKind.LEGACY_REHANDOFF)
