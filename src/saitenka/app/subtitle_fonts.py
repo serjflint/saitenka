@@ -317,6 +317,12 @@ def _dump_container_fonts(video: Path, target: Path, manifest: Path) -> bool:
                     *dumps,
                     "-i",
                     str(video),
+                    # Attachments are written when the input is opened, so the null output exists
+                    # only to give ffmpeg a destination. Without `-t 0` it transcodes the whole
+                    # episode to reach an end it never needed: 42s for a 24-minute 1080p HEVC file
+                    # against 0.06s here, for byte-identical fonts.
+                    "-t",
+                    "0",
                     "-f",
                     "null",
                     "-",

@@ -169,6 +169,40 @@ def test_an_unreadable_container_costs_the_faces_not_the_session(tmp_path: Path)
     assert resolved.setup.extract_fonts is True
 
 
+def test_dumping_the_attachments_does_not_transcode_the_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ffmpeg writes the attachments while opening the input, so the null output is only somewhere
+    to send the streams. Left unbounded it transcodes to the end of the file to reach an end it
+    never needed: 42s on a 24-minute 1080p HEVC episode against 0.06s bounded, for byte-identical
+    fonts — and it ran on the startup path, ahead of the keybinds.
+
+    Asserted on the argv because the cost lives in ffmpeg, not here: a synthetic fixture short
+    enough for a test decodes too fast to time the difference.
+    """
+    streams = (
+        b'{"streams":[{"tags":{"filename":"sign.ttf","mimetype":"font/ttf"},"extradata_size":9}]}'
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        commands.append([str(part) for part in command])
+        if "-show_streams" in command:
+            return subprocess.CompletedProcess(command, 0, stdout=streams, stderr=b"")
+        Path(command[command.index("-dump_attachment:t:0") + 1]).write_bytes(b"face-bytes")
+        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subtitle_fonts.subprocess, "run", fake_run)
+    video = tmp_path / "episode.mkv"
+    video.write_bytes(b"container")
+
+    assert subtitle_fonts.container_fonts(video, cache_dir=tmp_path / "cache") == (
+        ("sign.ttf", b"face-bytes"),
+    )
+    dump = next(command for command in commands if "-dump_attachment:t:0" in command)
+    assert dump[dump.index("-t") + 1] == "0"
+
+
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 def test_a_containers_font_attachment_is_dumped_and_cached(tmp_path: Path) -> None:

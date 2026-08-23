@@ -465,8 +465,12 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
     lookahead = values.get("lookahead", defaults.lookahead)
     if isinstance(lookahead, bool) or not isinstance(lookahead, int) or lookahead < 0:
         raise ValueError("subtitle_geometry.lookahead must be a non-negative integer")
+    native_formats = values.get("native_formats", defaults.native_formats)
+    if not isinstance(native_formats, str):
+        raise TypeError("subtitle_geometry.native_formats must be a string")
     return SubtitleGeometryOptions(
         native_visible=native_visible,
+        native_formats=native_formats,
         library_path=library_path,
         cache_max=cache_max,
         lookahead=lookahead,
