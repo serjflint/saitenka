@@ -158,6 +158,14 @@ The geometry runtime is selected independently of mpv's bundled or system libass
 introspect mpv's exact libass build and font environment, so a compatible runtime inside the supported
 envelope can still differ at pixel level; this experimental mode does not claim runtime pixel identity.
 
+What it does claim is checked against pixels rather than argued from mpv's source. `poe smoke-live`
+has mpv render a cue and encode the frame, then compares the ink against the boxes Saitenka measured
+for the same document — including one case placed by alignment and margins rather than by `\pos`, so
+the whole placement chain is in the comparison. On the development machine every edge agrees to
+within one pixel, which is the anti-aliasing threshold. The suite carries a negative control that
+measures at a frame size mpv did not use, so a differential that stopped detecting anything fails
+rather than passes.
+
 Supported frames are static and use the mpv profile above, without application-level style
 overrides. A cue typeset with animation (`\t`, `\move`, `\fad`), karaoke, a vector drawing, an ASS
 effect, bidirectional text, or a blur (`\blur`/`\be`, which spreads a word's ink past its own box and
