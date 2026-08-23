@@ -2906,10 +2906,9 @@ def test_a_default_mpv_render_configuration_supports_native_geometry():
         ("sub-ass-scale-with-window", True),
         ("sub-ass-use-video-data", "aspect-only"),
         ("sub-ass-style-overrides", ["Default.FontSize=60"]),
-        # The converted branch reads these, and both default on; an unmirrored one is a uniform
-        # scale error on every box that no other meter can see.
-        ("sub-scale-with-window", False),
-        ("sub-scale-by-window", False),
+        # Not arithmetic we skipped: mpv draws the glyphs into the video frame before interpolation
+        # and colour management, and our overlay is composited after that, at a different
+        # resolution and through a different filter chain.
         ("blend-subtitles", True),
     ],
 )
@@ -2919,6 +2918,25 @@ def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: s
     the setting because a user who set it needs to know which one to undo."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+@pytest.mark.parametrize(
+    ("scale_with_window", "scale_by_window"),
+    [(True, True), (False, True), (True, False), (False, False)],
+)
+def test_the_sub_scale_switches_are_reproduced_not_refused(
+    *, scale_with_window: bool, scale_by_window: bool
+) -> None:
+    """mpv reads these two only on the forced-override branch a CONVERTED track takes, and
+    `converted.font_scale` reproduces both — so they are inputs to the measurement. On the authored
+    branch mpv reads `sub-ass-scale-with-window` instead and never reads `sub-scale-by-window` at
+    all, which is why refusing a track for them would give up an episode over nothing."""
+    result = _inputs(
+        **{"sub-scale-with-window": scale_with_window, "sub-scale-by-window": scale_by_window}
+    )
+
+    assert result.scale_with_window is scale_with_window
+    assert result.scale_by_window is scale_by_window
 
 
 @pytest.mark.parametrize(

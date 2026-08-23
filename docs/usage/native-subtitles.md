@@ -88,7 +88,15 @@ sub-ass-force-margins=no
 sub-ass-video-aspect-override=0
 sub-ass-use-video-data=all
 sub-ass-style-overrides=
+blend-subtitles=no
 ```
+
+`--blend-subtitles` is the one render option here that is a refusal rather than something Saitenka
+reproduces. It moves mpv's glyphs off the OSD surface into the video frame, before interpolation and
+color management — the overlay Saitenka draws onto is composited after that, at a different
+resolution and through a different filter chain, so the colour could not register with the glyphs it
+is colouring. `--sub-scale-with-window` and `--sub-scale-by-window` are *not* refused: they are read
+and reproduced.
 
 The font settings are not in that list. Saitenka reads `embeddedfonts`, `sub-fonts-dir`,
 `sub-font-provider` and `sub-font` when a track loads and loads the same faces mpv did — the

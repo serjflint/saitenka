@@ -241,14 +241,18 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         "sub-ass-use-video-data": settings["sub-ass-use-video-data"] == "all",
         "sub-ass-vsfilter-aspect-compat": settings["sub-ass-vsfilter-aspect-compat"] is None,
         "sub-ass-style-overrides": settings["sub-ass-style-overrides"] in (None, "", (), [], [""]),
-        # `configure_ass` takes its forced-override branch for a CONVERTED track, where it reads
-        # these two rather than the `sub-ass-*` variants above — and both default `true`
-        # (`options/options.c:344-365`). An unmirrored non-default here is a uniform scale error on
-        # every box, which no meter can see because nothing else moves.
-        "sub-scale-with-window": settings["sub-scale-with-window"] is True,
-        "sub-scale-by-window": settings["sub-scale-by-window"] is True,
-        # mpv renders subtitles INTO the video frame with this on, at the video's resolution rather
-        # than the OSD surface's, so our overlay and its glyphs land at different scales.
+        # `--sub-scale-with-window` and `--sub-scale-by-window` are NOT here. mpv reads them only on
+        # `configure_ass`'s forced-override branch, which a CONVERTED track takes — and there
+        # `converted.font_scale` reproduces both, so they are inputs to the measurement rather than
+        # reasons to give up on a track. On the authored branch mpv reads `sub-ass-scale-with-window`
+        # (gated above) and never reads `sub-scale-by-window` at all, so refusing either there would
+        # cost an episode's interaction over an option with no effect on it.
+        #
+        # `--blend-subtitles` is different in kind, and stays. It is not arithmetic we skipped: it
+        # moves mpv's glyphs off the OSD surface entirely, into the video frame before interpolation
+        # and colour management. Our overlay is composited after that, at a different resolution and
+        # through a different filter chain, so an overprint drawn there could not register with the
+        # glyphs it is colouring however well the layout agreed.
         "blend-subtitles": settings["blend-subtitles"] in {False, "no"},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
@@ -312,6 +316,8 @@ def render_inputs_of(
         cast("bool", settings["sub-ass-force-margins"]),
         tuple(sorted((name, repr(value)) for name, value in settings.items())),
         subtitle_fonts.option_snapshot(settings),
+        settings["sub-scale-with-window"] is not False,
+        settings["sub-scale-by-window"] is not False,
     )
 
 
@@ -364,6 +370,10 @@ class _RenderInputs:
     profile: tuple[tuple[str, str], ...]
     #: Just the font options, so a change to one can be told from a change to the render space.
     font_options: tuple[tuple[str, str], ...] = ()
+    #: The two `--sub-scale-*` switches mpv reads on its forced-override branch. Reproduced rather
+    #: than refused, so they travel to `converted.font_scale` as values.
+    scale_with_window: bool = True
+    scale_by_window: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -1186,13 +1196,13 @@ class NativeSubtitleGeometry:
         return converted.RenderSpace(render.frame_size[0], render.frame_size[1], render.margins)
 
     def _converted_scale(self, render: _RenderInputs) -> float:
-        """`ass_set_font_scale` on mpv's converted branch — the letterbox multiplier, not 1.
-
-        The gate already refuses `--sub-scale-with-window` and `--sub-scale-by-window` off their
-        defaults, so both are `True` here; passing them anyway keeps the port readable against
-        `configure_ass` rather than folded into an assumption.
-        """
-        return converted.font_scale(self._render_space(render), use_margins=render.use_margins)
+        """`ass_set_font_scale` on mpv's converted branch — the letterbox multiplier, not 1."""
+        return converted.font_scale(
+            self._render_space(render),
+            use_margins=render.use_margins,
+            scale_with_window=render.scale_with_window,
+            scale_by_window=render.scale_by_window,
+        )
 
     def _document_for(self, rows: str, render: _RenderInputs) -> bytes:
         """The document the boxes are measured against.
