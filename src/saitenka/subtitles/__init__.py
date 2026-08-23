@@ -1,5 +1,6 @@
 """Pure subtitle parsing and cue navigation."""
 
+from saitenka.subtitles import converted
 from saitenka.subtitles.ass import (
     AssColorRewrite,
     AssStyle,
@@ -88,6 +89,7 @@ __all__ = [
     "allocate_token_colors",
     "authored_ass_rows_at",
     "canonical_active_ass_rows",
+    "converted",
     "decode_ass_event",
     "parse_ass",
     "parse_ass_event_line",

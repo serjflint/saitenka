@@ -177,6 +177,15 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         "sub-ass-use-video-data": settings["sub-ass-use-video-data"] == "all",
         "sub-ass-vsfilter-aspect-compat": settings["sub-ass-vsfilter-aspect-compat"] is None,
         "sub-ass-style-overrides": settings["sub-ass-style-overrides"] in (None, "", (), [], [""]),
+        # `configure_ass` takes its forced-override branch for a CONVERTED track, where it reads
+        # these two rather than the `sub-ass-*` variants above — and both default `true`
+        # (`options/options.c:344-365`). An unmirrored non-default here is a uniform scale error on
+        # every box, which no meter can see because nothing else moves.
+        "sub-scale-with-window": settings["sub-scale-with-window"] is True,
+        "sub-scale-by-window": settings["sub-scale-by-window"] is True,
+        # mpv renders subtitles INTO the video frame with this on, at the video's resolution rather
+        # than the OSD surface's, so our overlay and its glyphs land at different scales.
+        "blend-subtitles": settings["blend-subtitles"] in {False, "no"},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
 
@@ -931,6 +940,9 @@ class NativeSubtitleGeometry:
                     "sub-ass-use-video-data",
                     "sub-ass-vsfilter-aspect-compat",
                     "sub-ass-style-overrides",
+                    "sub-scale-with-window",
+                    "sub-scale-by-window",
+                    "blend-subtitles",
                     *subtitle_fonts.FONT_OPTIONS,
                 )
             },

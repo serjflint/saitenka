@@ -90,6 +90,9 @@ class FakeIPC(util.FakeIPC):
             "options/sub-ass-use-video-data": "all",
             "options/sub-ass-vsfilter-aspect-compat": None,
             "options/sub-ass-style-overrides": [],
+            "options/sub-scale-with-window": True,
+            "options/sub-scale-by-window": True,
+            "options/blend-subtitles": False,
             "options/sub-font-provider": "auto",
             "options/embeddedfonts": False,
             "options/sub-fonts-dir": "",
@@ -2739,6 +2742,9 @@ _SUPPORTED_SETTINGS = {
     "sub-ass-use-video-data": "all",
     "sub-ass-vsfilter-aspect-compat": None,
     "sub-ass-style-overrides": None,
+    "sub-scale-with-window": True,
+    "sub-scale-by-window": True,
+    "blend-subtitles": False,
     "sub-font-provider": "auto",
     "embeddedfonts": False,
     "sub-fonts-dir": None,
@@ -2776,6 +2782,11 @@ def test_a_default_mpv_render_configuration_supports_native_geometry():
         ("sub-ass-scale-with-window", True),
         ("sub-ass-use-video-data", "aspect-only"),
         ("sub-ass-style-overrides", ["Default.FontSize=60"]),
+        # The converted branch reads these, and both default on; an unmirrored one is a uniform
+        # scale error on every box that no other meter can see.
+        ("sub-scale-with-window", False),
+        ("sub-scale-by-window", False),
+        ("blend-subtitles", True),
     ],
 )
 def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: str, value: object):
