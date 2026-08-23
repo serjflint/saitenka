@@ -1118,3 +1118,28 @@ def test_deinflect_missing_warns(monkeypatch):
     monkeypatch.setitem(sys.modules, "saitenka_deinflect", None)  # → import raises ImportError
     c = doc.check_deinflect()
     assert c.status == "warn" and "deinflect" in c.detail
+
+
+def test_repeated_sub_font_lines_warn(tmp_path, monkeypatch):
+    """`--sub-font` names one family and mpv is last-wins, so a stack of lines reads like a
+    fallback chain and is not one. Observed ending in Symbola, whose U+3000 is a real outline
+    where every other font's is empty — a dashed `IDSP` box mid-sentence, from a font nobody
+    meant to select for text."""
+    mpvconf = tmp_path / "mpv.conf"
+    mpvconf.write_text('sub-font="Gandhi Sans"\nsub-font="Symbola"\nsub-font-provider=auto\n')
+    monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
+
+    c = doc.check_sub_font()
+
+    assert c.status == "warn"
+    assert "Symbola" in c.detail and "2 times" in c.detail
+
+
+def test_a_single_sub_font_line_is_ok(tmp_path, monkeypatch):
+    """The negative control: one line is the normal case and must stay quiet, or the warning is
+    noise every user learns to skip."""
+    mpvconf = tmp_path / "mpv.conf"
+    mpvconf.write_text('sub-font="Gandhi Sans"\nsub-font-provider=auto\n')
+    monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
+
+    assert doc.check_sub_font().status == "ok"

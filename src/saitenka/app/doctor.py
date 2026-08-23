@@ -431,6 +431,33 @@ def check_sub_auto() -> Check:
     return Check("sub-auto", "ok", f"mpv.conf sub-auto={val}", info=True)
 
 
+def check_sub_font() -> Check:
+    """`--sub-font` names ONE family, and mpv is last-wins. Several lines read like a fallback
+    chain and are not one: only the last takes effect, and libass then falls back per glyph from
+    *that* family — so a list ending in a symbol font draws the whole cue from it.
+
+    Observed as a dashed `IDSP` box mid-sentence: six `sub-font=` lines ending in Symbola, whose
+    U+3000 is a real outline where every other font's is empty, with Japanese falling back to a
+    Mincho serif nobody chose.
+    """
+    p = _mpv_conf_path()
+    if not p.exists():
+        return Check("sub-font", "ok", "no mpv.conf — mpv default sub-font=sans-serif", info=True)
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:  # pragma: no cover
+        return Check("sub-font", "warn", f"couldn't read {p}: {e}")
+    values = re.findall(r"^\s*sub-font\s*=\s*(\S.*?)\s*$", text, re.MULTILINE)
+    if len(values) <= 1:
+        return Check("sub-font", "ok", f"mpv.conf sub-font={values[0] if values else '(unset)'}")
+    return Check(
+        "sub-font",
+        "warn",
+        f"mpv.conf sets sub-font {len(values)} times — mpv takes only the last ({values[-1]}); "
+        "the earlier ones do nothing. Keep the one family you want and let libass fall back",
+    )
+
+
 def check_fonts() -> Check:
     try:
         from saitenka import fonts
@@ -1254,6 +1281,7 @@ def run_checks(deck: str | None = None, model: str | None = None) -> Report:
         *check_profiles(),
         check_legacy_files(),
         check_sub_auto(),
+        check_sub_font(),
         check_fonts(),
         check_tts(),
         check_deinflect(),
