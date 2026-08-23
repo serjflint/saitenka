@@ -266,6 +266,8 @@ class FakeIPC:
         self._event_arrived = threading.Event()
         self._events_lock = threading.Lock()
         self.props: dict = {}
+        #: What mpv's `~~` placeholders expand to; `None` is the `--no-config` answer.
+        self.config_dir: str | Path | None = None
         self.commands: list[tuple] = []
         self.requests: list[IPCRequest] = []
         self._event_sink = None
@@ -332,7 +334,29 @@ class FakeIPC:
         self.commands.append(args)
         if args and args[0] == "get_property":
             return {"data": self.props.get(args[1])}
+        if args and args[0] == "expand-path":
+            return {"data": self._expanded(str(args[1]))}
         return {"data": None}
+
+    def expand_path(self, path: str) -> str | None:
+        """mpv's `expand-path`, over a config directory a test can point somewhere real.
+
+        Through `command` like `MpvIPC.expand_path`, so a subclass simulating mpv sees the read; a
+        fake with a second path for one channel reads as a production bug. With no config directory
+        set the `~~` prefix simply falls away, which is what mpv answers under `--no-config`: every
+        platform path is NULL there, so the placeholder resolves to a bare relative name.
+        """
+        reply = self.command("expand-path", path)
+        data = reply.get("data") if isinstance(reply, dict) else None
+        return data if isinstance(data, str) and data else None
+
+    def _expanded(self, path: str) -> str:
+        if not path.startswith("~~"):
+            return path
+        stripped = path.removeprefix("~~").removeprefix("/")
+        if self.config_dir is None:
+            return stripped
+        return str(Path(self.config_dir) / stripped)
 
     def probe(self, name: str) -> dict:
         return self.command("get_property", name)

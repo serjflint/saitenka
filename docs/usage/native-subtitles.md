@@ -73,10 +73,14 @@ sub-ass-force-margins=no
 sub-ass-video-aspect-override=0
 sub-ass-use-video-data=all
 sub-ass-style-overrides=
-sub-font-provider=auto
-embeddedfonts=no
-sub-fonts-dir=
 ```
+
+The font settings are not in that list. Saitenka reads `embeddedfonts`, `sub-fonts-dir`,
+`sub-font-provider` and `sub-font` when a track loads and loads the same faces mpv did — the
+container's font attachments, an `[Fonts]` section inside the `.ass`, and the directory
+`--sub-fonts-dir` names (or the config directory's `fonts` when it is empty). Change one of them
+mid-episode and the frame is refused until the next track load rather than measured in the wrong
+faces; reselect the track to pick the change up.
 
 ## Current supported envelope
 
@@ -88,8 +92,8 @@ The geometry runtime is selected independently of mpv's bundled or system libass
 introspect mpv's exact libass build and font environment, so a compatible runtime inside the supported
 envelope can still differ at pixel level; this experimental mode does not claim runtime pixel identity.
 
-Supported frames are static and use the mpv profile above, without attached/custom fonts or
-application-level style overrides. A frame may contain several simultaneous ASS events: Saitenka
+Supported frames are static and use the mpv profile above, without application-level style
+overrides. A frame may contain several simultaneous ASS events: Saitenka
 matches mpv's public `sub-text/ass-full` rows back to the authored source and keeps event identity in
 each hit box. Whitespace and other non-painting tokenizer tokens remain available to the normal text
 pipeline but are not required to produce libass pixels.

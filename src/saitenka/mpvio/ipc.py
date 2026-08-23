@@ -398,6 +398,20 @@ class MpvIPC:
                 )
                 return {"error": "timeout"}
 
+    def expand_path(self, path: str) -> str | None:
+        """What mpv's ``~~`` placeholders resolve to, or `None` when it does not answer.
+
+        A read like `query`, and on the transport for the same reason: mpv searches five platform
+        config directories in priority order and honours `--config-dir` and `--no-config`, so any
+        local guess at "the mpv config directory" is a different answer on someone else's machine.
+        Asking the player is the only way to get its answer.
+        """
+        reply = self.command("expand-path", path)
+        if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
+            return None
+        data = reply.get("data")
+        return data if isinstance(data, str) and data else None
+
     def probe(self, name: str) -> dict:
         """The whole reply for one property — for the question the value cannot answer.
 

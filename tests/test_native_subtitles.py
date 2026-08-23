@@ -13,6 +13,7 @@ from util import record_spans
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
@@ -92,6 +93,7 @@ class FakeIPC(util.FakeIPC):
             "options/sub-font-provider": "auto",
             "options/embeddedfonts": False,
             "options/sub-fonts-dir": "",
+            "options/sub-font": "sans-serif",
         }
         self.set_property_error: str | None = None
         self.set_property_exception: Exception | None = None
@@ -348,6 +350,10 @@ def reader(
     # and has no provider to schedule against.
     assert (result.native_geometry is not None) == native_visible
     if result.native_geometry is not None:
+        # Through the production resolver, not a hand-built environment: a track load is where the
+        # font set is read, and a harness that skipped it would leave every test measuring against
+        # an environment the runtime never produces.
+        resolve_track_fonts(ipc, ipc.query, result.native_geometry)
         result.native_geometry.set_source(source)
     return result, ipc, backend
 
@@ -1864,7 +1870,7 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
 def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, caplog) -> None:
     result, ipc, backend = reader(tmp_path)
     ipc.props["options/sub-scale"] = 1.2
-    ipc.props["options/sub-font-provider"] = "fontconfig"
+    ipc.props["options/sub-pos"] = 50.0
     caplog.clear()
 
     with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
@@ -1878,7 +1884,7 @@ def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, c
         (
             "native subtitle interaction unavailable: "
             "subtitle-render-input-unsupported "
-            "detail=sub-scale=1.2, sub-font-provider='fontconfig'"
+            "detail=sub-scale=1.2, sub-pos=50.0"
         )
     ]
     result.close()
@@ -1901,16 +1907,46 @@ def test_pending_timing_does_not_escape_an_unsupported_render_profile(tmp_path: 
     result.close()
 
 
-def test_custom_mpv_font_provider_fails_closed(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("options/sub-font-provider", "fontconfig"),
+        ("options/embeddedfonts", True),
+        ("options/sub-fonts-dir", "/fonts"),
+        ("options/sub-font", "Symbola"),
+    ],
+)
+def test_a_font_setting_changed_under_a_resolved_track_fails_closed(
+    tmp_path: Path, option: str, value: object
+) -> None:
+    """mpv rebuilds its subtitle decoder for any of these, so a change between track loads means its
+    faces and ours have diverged. Measuring on anyway is the silent failure: every box comes out the
+    wrong width and nothing anywhere says so."""
     result, ipc, backend = reader(tmp_path)
-    ipc.props["options/sub-font-provider"] = "fontconfig"
+    ipc.props[option] = value
 
     result.set_subtitle("猫を見る")
 
     assert backend.requests == []
     assert result.boxes == []
     assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert result.native_geometry.status.fallback_reason == "subtitle-font-environment-stale"
+    result.close()
+
+
+def test_resolving_the_track_again_clears_a_stale_font_environment(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/embeddedfonts"] = True
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-font-environment-stale"
+
+    resolve_track_fonts(ipc, ipc.query, result.native_geometry)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert backend.requests
+    assert result.native_geometry.status.fallback_reason is None
     result.close()
 
 
@@ -2702,9 +2738,6 @@ def test_a_default_mpv_render_configuration_supports_native_geometry():
         ("sub-ass-override", "force"),
         ("sub-ass-scale-with-window", True),
         ("sub-ass-use-video-data", "aspect-only"),
-        ("sub-font-provider", "fontconfig"),  # different glyphs, so different boxes
-        ("embeddedfonts", True),
-        ("sub-fonts-dir", "/fonts"),
         ("sub-ass-style-overrides", ["Default.FontSize=60"]),
     ],
 )
@@ -2714,6 +2747,26 @@ def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: s
     the setting because a user who set it needs to know which one to undo."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("embeddedfonts", True),
+        ("sub-fonts-dir", "/fonts"),
+        ("sub-font-provider", "fontconfig"),
+        ("sub-font", "Symbola"),
+    ],
+)
+def test_a_font_setting_is_an_input_to_the_measuring_renderer_not_a_refusal(
+    name: str, value: object
+):
+    """These four decide which faces libass loads, and `subtitle_fonts.resolve` reproduces each of
+    them. Refusing a track for them — as the render-input gate used to — gave up the whole episode's
+    interaction over a setting we can simply mirror."""
+    result = _inputs(**{name: value})
+
+    assert (name, repr(value)) in result.font_options
 
 
 def test_the_osd_surface_wins_over_the_reported_video_size():

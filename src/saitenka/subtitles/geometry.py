@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import math
-from dataclasses import dataclass
-from enum import StrEnum
+from dataclasses import dataclass, field
+from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -25,6 +25,33 @@ class Rect:
 
     def contains(self, x: float, y: float) -> bool:
         return self.x <= x < self.x + self.width and self.y <= y < self.y + self.height
+
+
+class FontProvider(IntEnum):
+    """libass's `ASS_DefaultFontProvider`, named here so the contract stays provider-neutral."""
+
+    NONE = 0
+    AUTODETECT = 1
+    CORETEXT = 2
+    FONTCONFIG = 3
+    DIRECTWRITE = 4
+
+
+@dataclass(frozen=True, slots=True)
+class FontSetup:
+    """Font lookup a renderer must be given before it can lay a cue out.
+
+    Separate from ``attachments`` because these are settings and those are payload, and because a
+    backend applies them at different points: the directory and the extraction flag before the
+    document is parsed, the lookup defaults after the renderer exists.
+    """
+
+    fonts_dir: str | None = None
+    extract_fonts: bool = False
+    default_font: str | None = None
+    default_family: str | None = None
+    fontconfig_config: str | None = None
+    font_provider: FontProvider = FontProvider.AUTODETECT
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +142,7 @@ class GeometryRequest:
     palette: tuple[GeometryPaletteEntry, ...] = ()
     reserved_rgb: tuple[int, ...] = ()
     attachments: tuple[tuple[str, bytes], ...] = ()
+    font_setup: FontSetup = field(default_factory=FontSetup)
     render_profile: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
@@ -137,6 +165,7 @@ class GeometryRequest:
             repr(self.use_margins),
             repr(self.palette),
             repr(self.reserved_rgb),
+            repr(self.font_setup),
             repr(self.render_profile),
         ):
             digest.update(value.encode())

@@ -38,6 +38,8 @@ from saitenka.subtitles.document import (
     TokenAnnotation,
 )
 from saitenka.subtitles.geometry import (
+    FontProvider,
+    FontSetup,
     GeometryBackend,
     GeometryPaletteEntry,
     GeometryRequest,
@@ -61,6 +63,8 @@ __all__ = [
     "CueIndex",
     "DecodedSubtitleEvent",
     "DrawingSpan",
+    "FontProvider",
+    "FontSetup",
     "GeometryBackend",
     "GeometryPaletteEntry",
     "GeometryRequest",

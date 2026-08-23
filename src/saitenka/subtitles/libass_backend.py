@@ -53,12 +53,18 @@ class NativeRenderer(Protocol):
 
 
 class RendererFactory(Protocol):
-    def __call__(
+    def __call__(  # noqa: PLR0913  # one keyword per libass font-setup call; see FontSetup
         self,
         ass: bytes,
         *,
         fonts: list[tuple[str, bytes]],
         library_path: Path | None,
+        fonts_dir: str | None,
+        extract_fonts: bool,
+        default_font: str | None,
+        default_family: str | None,
+        font_provider: int,
+        fontconfig_config: str | None,
     ) -> NativeRenderer: ...
 
 
@@ -180,10 +186,17 @@ class LibassGeometryBackend:
         if factory is None:
             module = importlib.import_module("libasslite")
             factory = cast("RendererFactory", module.AssRenderer)
+        setup = request.font_setup
         return factory(
             request.ass,
             fonts=list(request.attachments),
             library_path=self._library_path,
+            fonts_dir=setup.fonts_dir,
+            extract_fonts=setup.extract_fonts,
+            default_font=setup.default_font,
+            default_family=setup.default_family,
+            font_provider=int(setup.font_provider),
+            fontconfig_config=setup.fontconfig_config,
         )
 
     def _renderer(self, request: GeometryRequest) -> NativeRenderer:

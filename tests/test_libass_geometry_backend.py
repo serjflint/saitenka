@@ -5,6 +5,8 @@ from dataclasses import dataclass, replace
 import pytest
 
 from saitenka.subtitles import (
+    FontProvider,
+    FontSetup,
     GeometryPaletteEntry,
     GeometryRequest,
     SubtitleEventId,
@@ -38,6 +40,8 @@ def request(
     margins: tuple[int, int, int, int] = (0, 0, 0, 0),
     use_margins: bool = False,
     render_profile: tuple[tuple[str, str], ...] = (),
+    font_setup: FontSetup | None = None,
+    palette_size: int = 2,
 ) -> GeometryRequest:
     track = SubtitleTrackId("track")
     event = SubtitleEventId(track, 1_000, 2_000, 0, 0)
@@ -54,9 +58,10 @@ def request(
         palette=(
             GeometryPaletteEntry(event, 0, 0x010203),
             GeometryPaletteEntry(event, 1, 0x040506),
-        ),
+        )[:palette_size],
         reserved_rgb=(0xFFFFFF,),
         attachments=(("font.ttf", b"font"),),
+        font_setup=font_setup or FontSetup(),
         render_profile=render_profile,
     )
 
@@ -249,6 +254,50 @@ def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
     backend.close()
     backend.close()
     assert created[1].closed
+
+
+def test_backend_forwards_every_font_source_to_the_renderer() -> None:
+    """The measuring renderer has to be handed the same four sources mpv's was, or it lays the cue
+    out in whatever the system happens to offer and every box comes out the wrong width."""
+    seen: list[dict] = []
+
+    def factory(_ass, **kwargs):
+        seen.append(kwargs)
+        return FakeRenderer(Result((Layer(1, 1, b"\xff", 0x01020300, 10, 20),)))
+
+    backend = LibassGeometryBackend(renderer_factory=factory)
+    setup = FontSetup(
+        fonts_dir="/config/fonts",
+        extract_fonts=True,
+        default_font="/config/subfont.ttf",
+        default_family="sans-serif",
+        fontconfig_config="/config/fonts.conf",
+        font_provider=FontProvider.FONTCONFIG,
+    )
+
+    backend.render(request(font_setup=setup, palette_size=1))
+
+    assert seen == [
+        {
+            "fonts": [("font.ttf", b"font")],
+            "library_path": None,
+            "fonts_dir": "/config/fonts",
+            "extract_fonts": True,
+            "default_font": "/config/subfont.ttf",
+            "default_family": "sans-serif",
+            "fontconfig_config": "/config/fonts.conf",
+            "font_provider": 3,
+        }
+    ]
+
+
+def test_a_font_source_change_is_a_different_cached_renderer() -> None:
+    """Two tracks whose only difference is the font set must not share a renderer: libass reads the
+    directory and the extraction flag before it parses, so a reused one is measuring the old set."""
+    plain = request(palette_size=1)
+    attached = request(palette_size=1, font_setup=FontSetup(fonts_dir="/config/fonts"))
+
+    assert plain.cache_key() != attached.cache_key()
 
 
 def test_backend_forwards_mpv_margin_contract() -> None:

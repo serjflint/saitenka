@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 from saitenka import otel_metrics
-from saitenka.app import cue_annotation
+from saitenka.app import cue_annotation, subtitle_fonts
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryCacheReason,
     GeometryOutcome,
@@ -60,6 +60,7 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-geometry-cache-miss",
         "subtitle-observation-pending",
         "subtitle-frame-unsupported",
+        "subtitle-font-environment-stale",
     }
 )
 _PENDING_REASONS = frozenset(
@@ -153,6 +154,14 @@ def _lookahead_tokenized(
 
 
 def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
+    """Which of mpv's render options put the cue somewhere our layout cannot follow.
+
+    The font options are absent on purpose: `subtitle_fonts.resolve` now reproduces each of them
+    instead of refusing it, so `--embeddedfonts`, `--sub-fonts-dir`, `--sub-font-provider` and
+    `--sub-font` are inputs to the measuring renderer rather than reasons to give up on a track.
+    They are still read, so a change to one still invalidates the cache and is still checked
+    against the resolved environment.
+    """
     supported = {
         "sub-ass-override": settings["sub-ass-override"] in {False, "no"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
@@ -168,9 +177,6 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         "sub-ass-use-video-data": settings["sub-ass-use-video-data"] == "all",
         "sub-ass-vsfilter-aspect-compat": settings["sub-ass-vsfilter-aspect-compat"] is None,
         "sub-ass-style-overrides": settings["sub-ass-style-overrides"] in (None, "", (), [], [""]),
-        "sub-font-provider": settings["sub-font-provider"] == "auto",
-        "embeddedfonts": settings["embeddedfonts"] is False,
-        "sub-fonts-dir": settings["sub-fonts-dir"] in {None, ""},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
 
@@ -228,6 +234,7 @@ def render_inputs_of(
         margins,
         cast("bool", settings["sub-ass-force-margins"]),
         tuple(sorted((name, repr(value)) for name, value in settings.items())),
+        subtitle_fonts.option_snapshot(settings),
     )
 
 
@@ -278,6 +285,8 @@ class _RenderInputs:
     margins: tuple[int, int, int, int]
     use_margins: bool
     profile: tuple[tuple[str, str], ...]
+    #: Just the font options, so a change to one can be told from a change to the render space.
+    font_options: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,6 +394,7 @@ class NativeSubtitleGeometry:
         self._last_render_inputs: _RenderInputs | None = None
         self._last_host_osd: tuple[int, ...] | None = None
         self._failure_diagnostic: tuple[str, str | None] | None = None
+        self._fonts = subtitle_fonts.FontEnvironment()
 
     def _skipped_tokens(self) -> int:
         return (
@@ -644,6 +654,37 @@ class NativeSubtitleGeometry:
         elif error in {"property not found", "unknown property"}:
             self.ass_full_capability = AssFullCapability.UNSUPPORTED
 
+    def set_fonts(self, environment: subtitle_fonts.FontEnvironment) -> None:
+        """Adopt the font set mpv holds for this track, resolved by whoever loaded it.
+
+        Not read from mpv here: it costs an ffmpeg dump and two `expand-path` round trips, and gate
+        6 keeps that off the interaction loop. Arriving late is safe — it invalidates, so the next
+        cue re-measures; arriving never leaves the environment empty and the check below refuses
+        the frame rather than laying it out in whatever the system happens to offer.
+        """
+        if environment == self._fonts:
+            return
+        self._fonts = environment
+        log.info(
+            "subtitle font sources: %s (%d attachment(s), fonts-dir %s)",
+            "+".join(environment.sources) or "none",
+            len(environment.attachments),
+            environment.setup.fonts_dir or "-",
+        )
+        if otel_metrics.subtitle_geometry_font_sources is not None:
+            otel_metrics.subtitle_geometry_font_sources.add(
+                1, {"sources": "+".join(environment.sources) or "none"}
+            )
+        self.invalidate(cause=GeometryCacheReason.RENDER_INPUT_CHANGED)
+
+    def _fonts_are_current(self, render: _RenderInputs) -> bool:
+        """Whether the resolved environment still describes what mpv is doing.
+
+        mpv treats every one of these options as `UPDATE_SUB_HARD` — it rebuilds its own subtitle
+        decoder — so a change between track loads means our faces and its faces have diverged.
+        """
+        return self._fonts.options == render.font_options
+
     def set_source(self, path: Path | None, *, live: bool = False) -> None:
         """Point at a new authored source.
 
@@ -846,6 +887,7 @@ class NativeSubtitleGeometry:
         generation: int,
         cue: _CueInputs,
         annotations: tuple[TokenAnnotation, ...],
+        fonts: subtitle_fonts.FontEnvironment,
     ) -> GeometryRequest:
         with otel_metrics.traced("subtitle_geometry_prepare") as span:
             span.set("observed_rows", len(cue.active_rows.splitlines()))
@@ -884,11 +926,13 @@ class NativeSubtitleGeometry:
             render_profile=cue.render_profile,
             palette=prepared.palette,
             reserved_rgb=prepared.reserved_rgb,
+            attachments=fonts.attachments,
+            font_setup=fonts.setup,
         )
 
     @staticmethod
     def _render_inputs(prop: Callable[[str], Any], osd) -> _RenderInputs:
-        """Read the sixteen mpv properties native geometry depends on, then decide.
+        """Read the mpv properties native geometry depends on, then decide.
 
         Takes the property reader and the OSD size rather than the host: those two are all it ever
         wanted, and a shim that takes the whole `Reader` cannot be driven by the session runtime.
@@ -909,9 +953,7 @@ class NativeSubtitleGeometry:
                     "sub-ass-use-video-data",
                     "sub-ass-vsfilter-aspect-compat",
                     "sub-ass-style-overrides",
-                    "sub-font-provider",
-                    "embeddedfonts",
-                    "sub-fonts-dir",
+                    *subtitle_fonts.FONT_OPTIONS,
                 )
             },
             fallback_size=osd,
@@ -959,7 +1001,10 @@ class NativeSubtitleGeometry:
                 continue
             queued_keys.add(key)
 
-            def build(inputs: _CueInputs = inputs) -> GeometryRequest:
+            def build(
+                inputs: _CueInputs = inputs,
+                fonts: subtitle_fonts.FontEnvironment = self._fonts,
+            ) -> GeometryRequest:
                 tokenized = self._ports.tokenize_lookahead(inputs.text)
                 selection = self._annotations(
                     inputs.text,
@@ -975,6 +1020,7 @@ class NativeSubtitleGeometry:
                     generation,
                     inputs,
                     selection.annotations,
+                    fonts,
                 )
 
             self.worker.prefetch(key, generation, build)
@@ -1075,6 +1121,14 @@ class NativeSubtitleGeometry:
             self._ports.degrade()
             return None
         self._last_render_inputs = render
+        if not self._fonts_are_current(render):
+            self.worker.mark_not_ready()
+            self._set_fallback(
+                "subtitle-font-environment-stale",
+                log_detail=f"{self._fonts.options} != {render.font_options}",
+            )
+            self._ports.degrade()
+            return None
         # The frame boxes are computed in comes from the LIVE `osd-dimensions`; the surface they are
         # drawn onto is the host's latched `self.osd`, which only `refresh_osd` moves and only when it
         # already differs. `seen.osd` is merely this path's fallback, so the two can diverge silently
@@ -1189,13 +1243,14 @@ class NativeSubtitleGeometry:
             self._degrade_geometry("mpv-sub-visibility-rejected")
             return False
 
-        def build() -> GeometryRequest:
+        def build(fonts: subtitle_fonts.FontEnvironment = self._fonts) -> GeometryRequest:
             return self._build(
                 inputs.source,
                 inputs.track_id,
                 inputs.generation,
                 inputs.cue,
                 selection.annotations,
+                fonts,
             )
 
         def settled() -> None:

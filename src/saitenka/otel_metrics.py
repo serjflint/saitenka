@@ -115,6 +115,10 @@ cue_settles: Counter | None = None
 #: are read from `osd-dimensions` by two different paths, so they can diverge with no error anywhere:
 #: the output is simply wrong for the whole episode. This is the invariant, checked per decision.
 geometry_frame_agreement: Counter | None = None
+#: labeled sources=system+fonts-dir+attachments+in-file. The measuring renderer used to hold only
+#: the system providers, so this says how often a track's typesetting came from somewhere it could
+#: not reach — the field evidence for whether the other three sources matter here.
+subtitle_geometry_font_sources: Counter | None = None
 
 
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
@@ -402,7 +406,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global geometry_frame_agreement
+    global geometry_frame_agreement, subtitle_geometry_font_sources
 
     with _lock:
         _reader = reader
@@ -622,6 +626,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.geometry.frame_agreement",
             description="geometry frame vs the OSD surface it draws onto (outcome=match|mismatch)",
         )
+        subtitle_geometry_font_sources = meter.create_counter(
+            "saitenka.subtitle_geometry.font_sources",
+            description="font sources resolved per track (sources=system+fonts-dir+attachments+in-file)",
+        )
         mpv_effect_apply_ms = meter.create_histogram(
             "saitenka.mpv_effect.apply_ms",
             unit="ms",
@@ -670,7 +678,7 @@ def unregister() -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global geometry_frame_agreement
+    global geometry_frame_agreement, subtitle_geometry_font_sources
 
     with _lock:
         _reader = None
@@ -739,6 +747,7 @@ def unregister() -> None:
         hover_pause_claim = None
         cue_settles = None
         geometry_frame_agreement = None
+        subtitle_geometry_font_sources = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
         prefetch_queue_depth = None
