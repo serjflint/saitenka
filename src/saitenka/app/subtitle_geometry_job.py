@@ -208,14 +208,16 @@ class SubtitleGeometryWorker:
         The queue policy stays here — a single current slot that supersedes, a bounded prefetch
         queue that drops oldest — because the broker owns admission and never feature state.
         """
+        queued: Callable[[], None] | None = None
         with self._condition:
             if self._closed or self._inflight:
                 return
             pending, self._pending = self._pending, None
             if pending is not None:
                 job = GeometryJob(self, pending, None)
-                if self._pending_settled is not None:
-                    self._settling.append(self._pending_settled)
+                queued = self._pending_settled
+                if queued is not None:
+                    self._settling.append(queued)
                 self._pending_settled = None
             elif self._prefetch_pending:
                 entry = self._prefetch_pending.popitem(last=False)
@@ -244,7 +246,15 @@ class SubtitleGeometryWorker:
             else:
                 self._prefetch_inflight_key = None
                 self._prefetch_dropped += 1
+            # The terminal that owed this settlement will never arrive. Left queued, the NEXT job's
+            # terminal pays it out — running this cue's callback against a later cue's snapshot.
+            if queued is not None and queued in self._settling:
+                self._settling.remove(queued)
             self._condition.notify_all()
+        if queued is not None:
+            queued()
+        # The refusal freed the slot; without this a queued prefetch waits for an unrelated event.
+        self._pump()
 
     def execute(self, job: GeometryJob) -> None:
         """Run one lane job. Called on a lane worker thread by :func:`run_geometry_job`."""

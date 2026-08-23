@@ -42,6 +42,7 @@ def request(
     render_profile: tuple[tuple[str, str], ...] = (),
     font_setup: FontSetup | None = None,
     palette_size: int = 2,
+    keep_coverage: bool = False,
 ) -> GeometryRequest:
     track = SubtitleTrackId("track")
     event = SubtitleEventId(track, 1_000, 2_000, 0, 0)
@@ -63,6 +64,7 @@ def request(
         attachments=(("font.ttf", b"font"),),
         font_setup=font_setup or FontSetup(),
         render_profile=render_profile,
+        keep_coverage=keep_coverage,
     )
 
 
@@ -156,6 +158,9 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
     assert baseline.cache_key() != request(margins=(10, 20, 30, 40)).cache_key()
     assert baseline.cache_key() != request(use_margins=True).cache_key()
     assert baseline.cache_key() != request(render_profile=(("sub-scale", "1.2"),)).cache_key()
+    # Not a render input but a content one: a hit served maskless to a caller that wanted coverage
+    # drops the cue to the plainest colour device with nothing saying why.
+    assert baseline.cache_key() != request(keep_coverage=True).cache_key()
 
 
 @pytest.mark.parametrize(

@@ -778,6 +778,27 @@ def test_the_oldest_cue_gives_up_its_masks_first(monkeypatch) -> None:
     worker.close()
 
 
+def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> None:
+    """A settlement is queued against the terminal of the job that owes it. Refused admission means
+    that terminal never arrives, so leaving it queued hands it to the NEXT job's terminal — which
+    runs this cue's callback against a later cue's snapshot, and the callback's owner is nowhere in
+    the traceback when the token indices then disagree.
+    """
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lambda **_kwargs: False)
+    settled: list[str] = []
+
+    for name in ("first", "second"):
+        assert worker.submit_job(
+            coordinator.generation,
+            lambda: request(coordinator.generation, 1_300),
+            on_settled=lambda name=name: settled.append(name),
+        )
+
+    assert settled == ["first", "second"]
+    worker.close()
+
+
 def test_the_render_space_is_part_of_the_cache_key() -> None:
     """Not a freshness nicety: a snapshot's coverage masks are rasterised at this frame's pixels and
     uploaded as a bitmap, which mpv does not rescale with its OSD surface the way it rescales a text
