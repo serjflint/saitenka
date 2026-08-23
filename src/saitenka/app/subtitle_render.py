@@ -302,6 +302,43 @@ def overpaint_image(
     return overpaint.compose(list(color_ladder(request, drifting=drifting).masks))
 
 
+def _trace_overpaint_placement(request: DrawRequest, image: overpaint.Overpaint) -> None:
+    """Where device 2's raster lands, beside the two spaces it has to reconcile.
+
+    The masks are measured against the geometry frame and the slot is addressed in mpv's OSD space.
+    Those differ by the letterbox whenever the video does not fill the window, and nothing downstream
+    can tell a correct placement from one that skipped the conversion — the raster simply appears
+    somewhere. So the placement, the boxes it came from, and both spaces are recorded together.
+    """
+    height, width = image.rgba.shape[0], image.rgba.shape[1]
+    with otel_metrics.traced("subtitle_overpaint_placement") as span:
+        span.set("x", image.x)
+        span.set("y", image.y)
+        span.set("width", width)
+        span.set("height", height)
+        span.set("osd_width", request.osd[0])
+        span.set("osd_height", request.osd[1])
+        span.set("token_count", len(request.boxes))
+        if request.boxes:
+            span.set("boxes_left", min(box.x for box in request.boxes))
+            span.set("boxes_top", min(box.y for box in request.boxes))
+            span.set("boxes_right", max(box.x + box.w for box in request.boxes))
+            span.set("boxes_bottom", max(box.y + box.h for box in request.boxes))
+            span.set("box_height_max", max(box.h for box in request.boxes))
+    log.debug(
+        "overpaint placed: %dx%d at (%d,%d) from %d box(es) spanning y %s..%s; osd %dx%d",
+        width,
+        height,
+        image.x,
+        image.y,
+        len(request.boxes),
+        min((box.y for box in request.boxes), default="-"),
+        max((box.y + box.h for box in request.boxes), default="-"),
+        request.osd[0],
+        request.osd[1],
+    )
+
+
 def focus_drawing(rect: tuple[int, int, int, int]) -> str:
     """``rect`` as an ASS vector drawing — the translucent highlight mpv paints natively."""
     left, top, width, height = rect
@@ -1161,14 +1198,31 @@ class NativeVisibleRenderer:
         drift = subtitle_calibration.drift_of(measured, completion.result, border=OVERPRINT_BORDER)
         if drift is None:
             return
+        # Both rectangles, not only their difference: a drift of +14 reads as a near-agreement, and
+        # a placement that is a whole letterbox out reads the same way once it has been subtracted.
         log.info(
-            "subtitle layout drift %s: l=%+.1f t=%+.1f r=%+.1f b=%+.1f",
+            "subtitle layout drift %s: l=%+.1f t=%+.1f r=%+.1f b=%+.1f (measured %s, osd %s)",
             signature,
             drift.left,
             drift.top,
             drift.right,
             drift.bottom,
+            measured,
+            completion.result,
         )
+        with otel_metrics.traced("subtitle_layout_drift") as span:
+            span.set("signature", signature)
+            for name, value in zip(
+                ("measured_left", "measured_top", "measured_right", "measured_bottom"),
+                measured,
+                strict=True,
+            ):
+                span.set(name, value)
+            for key, value in completion.result.items():
+                if isinstance(value, int | float):
+                    span.set(f"osd_{key}", value)
+            span.set("worst", drift.worst)
+            span.set("agrees", drift.agrees)
         if otel_metrics.subtitle_layout_drift_px is not None:
             otel_metrics.subtitle_layout_drift_px.record(drift.worst)
         if drift.agrees or families <= self._drifting:
@@ -1248,6 +1302,7 @@ class NativeVisibleRenderer:
                 surfaces.remove(OverlayId.OVERPAINT, owner=Owner.SUBTITLE)
             return
         self._overpaint_shown = True
+        _trace_overpaint_placement(request, image)
         # The array path, not `present`: these pixels were composited into numpy and never were a
         # PIL image. Wrapping one to unwrap it again is two copies of every cue.
         surfaces.present_rgba(

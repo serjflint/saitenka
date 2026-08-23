@@ -275,3 +275,49 @@ def test_the_payload_lands_where_the_measurement_said_the_token_was() -> None:
         assert any(x <= layer.dst_x < x + 48 and y <= layer.dst_y < y + 48 for layer in painted), (
             f"no glyph near the requested origin {(x, y)}"
         )
+
+
+def test_the_overpaint_placement_records_both_spaces_it_reconciles() -> None:
+    """The raster is composed against the geometry frame and addressed in mpv's OSD space, which
+    differ by the letterbox. A placement that skipped the conversion looks exactly like one that
+    did — the pixels just appear somewhere — so the trace has to carry the placement, the boxes it
+    came from, and both extents, or the next report is another round of guessing from a screenshot.
+    """
+    from saitenka.app.subtitle_render import _trace_overpaint_placement, overpaint_image
+    from saitenka.app.subtitles import WordBox
+
+    boxes = [
+        WordBox(index, 100 + index * 60, 600, 50, 40, "", 48.0, coverage=bytes(50 * 40))
+        for index in range(3)
+    ]
+    request = draw_request(styles=[Style((9, 9, 9, 255))] * 3, boxes=boxes)
+    image = overpaint_image(request)
+    assert image is not None
+
+    recorded = {}
+    _trace_overpaint_placement(request, image)  # must not raise without a configured exporter
+
+    class Span:
+        def set(self, key, value):
+            recorded[key] = value
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    import saitenka.otel_metrics as om
+
+    original = om.traced
+    om.traced = lambda _name: Span()
+    try:
+        _trace_overpaint_placement(request, image)
+    finally:
+        om.traced = original
+
+    assert recorded["osd_width"], recorded["osd_height"]
+    assert (recorded["x"], recorded["y"]) == (image.x, image.y)
+    assert recorded["token_count"] == len(boxes)
+    assert recorded["boxes_top"] == min(box.y for box in boxes)
+    assert recorded["boxes_bottom"] == max(box.y + box.h for box in boxes)
