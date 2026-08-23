@@ -2319,6 +2319,27 @@ def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path)
     result.close()
 
 
+def test_every_gate_option_is_observed_and_counted_a_render_space_input() -> None:
+    """Three lists that have to agree, and nothing made them.
+
+    An option missing from `OBSERVED_PROPS` is not merely slower: `observed_property` falls through
+    to a blocking `get_property`, and `_render_inputs` runs twice per cue, so each omission is two
+    more round trips per cue on the interaction loop. Missing from `RENDER_SPACE_PROPERTIES` is the
+    correctness half — a mid-episode change to it never invalidates the geometry it just moved, so
+    the boxes stay where the old value put them until the track reloads.
+
+    Four options landed on this branch reading the gate but neither list, which is why this exists.
+    """
+    from saitenka.app.controller import OBSERVED_PROPS
+    from saitenka.app.native_subtitles import GATE_OPTIONS
+    from saitenka.runtime.playback import RENDER_SPACE_PROPERTIES
+
+    qualified = {f"options/{name}" for name in GATE_OPTIONS}
+
+    assert qualified <= set(OBSERVED_PROPS)
+    assert qualified <= RENDER_SPACE_PROPERTIES
+
+
 def calibration_calls(ipc) -> list[tuple]:
     """Every hidden `compute_bounds` the layout check asked mpv for."""
     return [

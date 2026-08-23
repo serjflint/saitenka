@@ -107,6 +107,30 @@ _UNSUPPORTED_SOURCE_REASONS = frozenset(
 #: measurement, never against a reading of the decoder.
 CONVERTED_CODECS = frozenset({"subrip"})
 
+#: The mpv options a geometry request is derived from — reproduced in the measuring render, or
+#: refused. Every one must also be observed and counted a render-space input, or `_render_inputs`
+#: reads it with a blocking round trip twice per cue and a mid-episode change never invalidates the
+#: boxes it moved. `tests/test_native_subtitles.py` binds the three lists together.
+GATE_OPTIONS = (
+    "sub-ass-override",
+    "sub-ass-scale-with-window",
+    "sub-scale",
+    "sub-pos",
+    "sub-use-margins",
+    "sub-ass-force-margins",
+    "sub-ass-video-aspect-override",
+    "sub-ass-use-video-data",
+    "sub-ass-vsfilter-aspect-compat",
+    "sub-ass-style-overrides",
+    "sub-scale-with-window",
+    "sub-scale-by-window",
+    "blend-subtitles",
+    "sub-filter-sdh",
+    "video-crop",
+    "video-rotate",
+    *subtitle_fonts.FONT_OPTIONS,
+)
+
 
 class SourceKind(StrEnum):
     """Which document the boxes are measured against.
@@ -1232,28 +1256,7 @@ class NativeSubtitleGeometry:
         return render_inputs_of(
             prop("osd-dimensions") or {},
             prop("video-out-params") or {},
-            {
-                name: prop(f"options/{name}")
-                for name in (
-                    "sub-ass-override",
-                    "sub-ass-scale-with-window",
-                    "sub-scale",
-                    "sub-pos",
-                    "sub-use-margins",
-                    "sub-ass-force-margins",
-                    "sub-ass-video-aspect-override",
-                    "sub-ass-use-video-data",
-                    "sub-ass-vsfilter-aspect-compat",
-                    "sub-ass-style-overrides",
-                    "sub-scale-with-window",
-                    "sub-scale-by-window",
-                    "blend-subtitles",
-                    "sub-filter-sdh",
-                    "video-crop",
-                    "video-rotate",
-                    *subtitle_fonts.FONT_OPTIONS,
-                )
-            },
+            {name: prop(f"options/{name}") for name in GATE_OPTIONS},
             frame_size=osd,
         )
 
