@@ -242,6 +242,32 @@ def test_the_job_env_context_check_can_fail(tmp_path: Path, monkeypatch) -> None
     assert _job_env_context_uses() == [("broken.yml", "build", "TMP", "runner")]
 
 
+def test_every_evidence_file_a_libasslite_step_writes_is_uploaded() -> None:
+    """An artifact list is exact paths, not a glob, so a tool that starts writing a new evidence
+    file just stops being collected — silently, and only noticed when a failure needs it. The
+    shadow-prototype benchmark writes `<output>-libass.log`, which is where a native abort's
+    message lands: the `finally` that would echo it never runs when the process is killed.
+    """
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["libasslite"]["steps"]
+    uploaded = {
+        line.strip()
+        for step in steps
+        if "upload-artifact" in str(step.get("uses", ""))
+        for line in str(step["with"]["path"]).splitlines()
+        if line.strip()
+    }
+
+    assert "libasslite/native-subtitle-integration-libass.log" in uploaded, (
+        "the benchmark redirects fd 2 here; unlisted, a native abort's message is never collected"
+    )
+    assert "libasslite/native-subtitle-integration.json" in uploaded, (
+        "the console prints a verdict now — the samples behind it live only in this artifact"
+    )
+
+
 def test_windows_libass_jobs_cache_downloads_by_allowlisted_vcpkg_revision() -> None:
     observed = []
     for workflow_name, job in [("ci.yml", "libasslite"), ("libasslite-release.yml", "smoke")]:

@@ -156,25 +156,45 @@ def _percentile(samples: list[float], quantile: float) -> float:
     return ordered[min(len(ordered) - 1, max(0, round((len(ordered) - 1) * quantile)))]
 
 
-def _performance_passes(report: dict, manifest: dict) -> bool:
+def _performance_checks(report: dict, manifest: dict) -> dict[str, bool]:
     budgets = manifest["budgets"]
-    return bool(
-        report["interaction_cpu_p99_ms"] <= budgets["interaction_cpu_p99_ms"]
-        and report["interaction_p99_ms"] <= budgets["interaction_wall_p99_ms"]
-        and report["interaction_cpu_delta_p99_ms"] <= budgets["interaction_cpu_delta_p99_ms"]
-        and report["interaction_wall_delta_p99_ms"] <= budgets["interaction_wall_delta_p99_ms"]
-        and report["ready_before_presentation_ratio"] >= budgets["ready_before_presentation_ratio"]
-        and report["retained_rss_growth_mib"] <= budgets["retained_rss_growth_mib"]
-        and report["cadence_misses"] == 0
-    )
+    return {
+        "interaction_cpu_p99_ms": (
+            report["interaction_cpu_p99_ms"] <= budgets["interaction_cpu_p99_ms"]
+        ),
+        "interaction_wall_p99_ms": report["interaction_p99_ms"]
+        <= budgets["interaction_wall_p99_ms"],
+        "interaction_cpu_delta_p99_ms": (
+            report["interaction_cpu_delta_p99_ms"] <= budgets["interaction_cpu_delta_p99_ms"]
+        ),
+        "interaction_wall_delta_p99_ms": (
+            report["interaction_wall_delta_p99_ms"] <= budgets["interaction_wall_delta_p99_ms"]
+        ),
+        "ready_before_presentation_ratio": (
+            report["ready_before_presentation_ratio"] >= budgets["ready_before_presentation_ratio"]
+        ),
+        "retained_rss_growth_mib": (
+            report["retained_rss_growth_mib"] <= budgets["retained_rss_growth_mib"]
+        ),
+        "cadence_misses": report["cadence_misses"] == 0,
+    }
+
+
+def _performance_passes(report: dict, manifest: dict) -> bool:
+    return all(_performance_checks(report, manifest).values())
 
 
 def _functional_checks(report: dict, manifest: dict) -> dict[str, bool]:
-    """Every functional invariant, named. One conjunction tells you a run failed; this tells you
-    which clause, which is the difference between reading a log and re-deriving it by hand."""
+    """Every functional invariant, named, so a failure says which clause rather than only that one
+    failed."""
+    # The schema guard short-circuits, as it did when this was one `and` chain: every clause below
+    # subscripts keys a foreign schema need not carry, and a `KeyError` here would kill the run
+    # instead of recording the functional failure this check exists to record.
+    if report.get("schema") != 1:
+        return {"schema": False}
     workloads = report.get("simultaneous_frame_workloads", [])
     return {
-        "schema": report.get("schema") == 1,
+        "schema": True,
         "event_count": report["event_count"] == manifest["event_count"],
         "interaction_clock": report["interaction_clock"] == manifest["interaction_clock"],
         "result_cache_bounded": report["result_cache_entries"] <= manifest["cache_max"],
@@ -666,30 +686,30 @@ def _native_log_to(path: Path):
     fd 2, not `sys.stderr`: the writer is C, and rebinding the Python object would not move it.
     """
     sys.stderr.flush()
-    saved = os.dup(2)
-    sink = path.open("wb")
-    try:
-        os.dup2(sink.fileno(), 2)
-        yield
-    finally:
-        sys.stderr.flush()
-        os.dup2(saved, 2)
-        os.close(saved)
-        sink.close()
+    with path.open("wb") as sink:  # opened before the dup, so a failed open cannot leak it
+        saved = os.dup(2)
+        try:
+            os.dup2(sink.fileno(), 2)
+            yield
+        finally:
+            sys.stderr.flush()
+            os.dup2(saved, 2)
+            os.close(saved)
 
 
 def _summarize(report: dict, manifest: dict, output: Path) -> str:
     """A console view sized for a human, with the full record left in the artifact.
 
-    Dumping the report to stdout printed ~1800 lines of raw latency samples, which is where the one
-    line that says *why* a run failed used to go to die.
+    Every clause that can fail the run is named here, because the numbers alone do not say which
+    budget bit — and re-deriving that from the artifact by hand is the cost this exists to remove.
     """
-    verdict = "pass" if report["all_functional_invariants_passed"] else "FAIL"
+    verdict = "PASS" if report["integration_budgets_passed"] else "FAIL"
     lines = [
         (
-            f"trials {report['completed_trials']}/{report['trial_count']}"
+            f"{verdict}"
+            f"  trials {report['completed_trials']}/{report['trial_count']}"
             f"  performance {report['performance_passes']}/{report['required_performance_passes']}"
-            f"  functional {verdict}"
+            f"  functional {'ok' if report['all_functional_invariants_passed'] else 'FAILED'}"
         ),
     ]
     for trial in report["trials"]:
@@ -704,9 +724,13 @@ def _summarize(report: dict, manifest: dict, output: Path) -> str:
             f"  ready {done['ready_before_presentation_ratio']:.3f}"
             f"  rss +{done['retained_rss_growth_mib']:.1f}MiB"
         )
-        failed = [name for name, ok in _functional_checks(done, manifest).items() if not ok]
-        if failed:
-            lines.append(f"    functional failures: {', '.join(failed)}")
+        for kind, checks in (
+            ("performance", _performance_checks(done, manifest)),
+            ("functional", _functional_checks(done, manifest)),
+        ):
+            failed = [name for name, ok in checks.items() if not ok]
+            if failed:
+                lines.append(f"    {kind} failures: {', '.join(failed)}")
     lines.append(f"full report: {output}")
     return "\n".join(lines)
 

@@ -57,20 +57,15 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     first = threading.Event()
     second = threading.Event()
     wedged = threading.Event()
-    counter = threading.Lock()
     calls = 0
 
     def run() -> bool:
         nonlocal calls
-        with counter:  # two probe threads reach this; `calls += 1` is not atomic without the GIL
-            calls += 1
-            mine = calls
-        if mine == 1:
+        calls += 1
+        if calls == 1:
             wedged.set()
-            # Generous, because these bound a WEDGE, not a timeout: the first probe must still be
-            # stuck when the replacement publishes. At 1s under `-n auto` it can expire on its own
-            # before the test gets there, unwedge, and publish False — the failure looks like a
-            # rejected-late-result bug and is really the fixture giving up early.
+            # Bounds a WEDGE, not a timeout: expiring on its own would unwedge the probe and
+            # publish False, which reads as a rejected-late-result bug.
             first.wait(30)
             return False
         second.wait(30)
@@ -78,11 +73,9 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
 
     probe = CapabilityProbe(run, name="test", ttl=30, retry=1, timeout=5, clock=lambda: clock[0])
     assert probe.request()
-    # The wedged probe must be INSIDE `run`, not merely spawned. The clock is fake, so the
-    # replacement is requested microseconds later and the scheduler decides which thread reaches
-    # `run` first — whichever does takes the wedge branch. When that is the replacement, its
-    # generation-0 sibling publishes a result the probe correctly rejects, and the test reads
-    # "capability probe did not publish" while nothing is wrong with the probe.
+    # Ordering the two threads: the clock is fake, so without this the replacement is spawned
+    # microseconds later and can reach `run` first, taking the wedge branch meant for its
+    # predecessor. `calls` is then read from one thread at a time, too.
     assert wedged.wait(5), "the first probe never reached the callable it is supposed to wedge in"
     clock[0] = 6.0
     assert probe.request()

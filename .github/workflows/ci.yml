@@ -297,6 +297,7 @@ jobs:
             libasslite/prototype-benchmark.log
             libasslite/native-subtitle-integration.json
             libasslite/native-subtitle-integration.log
+            libasslite/native-subtitle-integration-libass.log
           if-no-files-found: warn
       - name: Verify locked dependency notices
         if: runner.os == 'Linux' && matrix.py == '3.13'
