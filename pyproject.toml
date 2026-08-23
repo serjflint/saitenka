@@ -618,7 +618,10 @@ install-smoke = { cmd = "uv run --no-project python tools/install_smoke.py" }
 # `subtitle-geometry-bundle` is deliberately absent: its wheel needs a staged native payload only CI
 # produces. A running mpv holds the modules it imported at launch, so an edit is not live until mpv
 # is fully quit and relaunched — "behaviour didn't change" is almost always a stale process.
-install-editable = { shell = "uv tool install --force --python 3.14t --editable '.[full,layout-engine,images,subtitle-geometry]'", help = "Put this checkout on PATH as `saitenka` for live mpv testing (relaunch mpv after)" }
+# `install-plugin` is not a convenience: the lua bakes an ABSOLUTE path to the binary, because a
+# Finder-launched mpv gets launchd's PATH. Reinstalling without re-baking leaves mpv spawning the
+# previous checkout — a live run silently exercising the wrong branch.
+install-editable = { shell = "uv tool install --force --python 3.14t --editable '.[full,layout-engine,images,subtitle-geometry]' && saitenka install-plugin", help = "Put this checkout on PATH as `saitenka` for live mpv testing (relaunch mpv after)" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }

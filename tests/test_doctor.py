@@ -617,6 +617,29 @@ def test_plugin_baked_path_gone_warns(tmp_path, monkeypatch):
     assert c.status == "warn" and "no longer exists" in c.detail
 
 
+def test_plugin_pointing_at_another_install_warns(tmp_path, monkeypatch):
+    """The failure the existing checks let through: a baked path that exists, and belongs to a
+    different install. mpv launches that one, so a live test of this checkout silently exercises
+    whatever was baked last — observed pointing at a cache environment for another tree."""
+    from saitenka.app import plugin
+
+    scripts = tmp_path / "scripts"
+    other = tmp_path / "other" / "saitenka"
+    mine = tmp_path / "mine" / "saitenka"
+    for path in (other, mine):
+        path.parent.mkdir()
+        path.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(plugin, "resolve_overlay_bin", lambda: str(other))
+    plugin.install_plugin(scripts_dir=scripts)
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
+    monkeypatch.setattr(plugin, "resolve_overlay_bin", lambda: str(mine))
+
+    c = doc.check_plugin()
+
+    assert c.status == "warn"
+    assert str(other) in c.detail and str(mine) in c.detail
+
+
 def test_sub_auto_all_warns(tmp_path, monkeypatch):
     mpvconf = tmp_path / "mpv.conf"
     mpvconf.write_text("sub-auto=all\n")

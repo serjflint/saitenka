@@ -736,6 +736,19 @@ def check_plugin() -> Check:
             "warn",
             f"installed {LUA_NAME} points at {binp} which no longer exists — re-run `install-plugin`",
         )
+    # A path that exists but is not the one this saitenka runs from. Silent, and worse than a
+    # missing one: mpv launches the *other* install, so a live test of a checkout exercises
+    # whatever was baked last. Observed pointing at a uv cache environment for a different tree.
+    from saitenka.app.plugin import resolve_overlay_bin
+
+    current = Path(resolve_overlay_bin())
+    if current.is_absolute() and Path(binp).resolve() != current.resolve():
+        return Check(
+            "plugin",
+            "warn",
+            f"installed {LUA_NAME} spawns {binp}, but this saitenka is {current} — mpv would run "
+            "the other one; re-run `saitenka install-plugin`",
+        )
     return Check("plugin", "ok", f"mpv plugin installed ({dest}) → {binp} attach")
 
 
