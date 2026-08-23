@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
+from util import requires_libass
 
 from saitenka.subtitles import (
     AnnotatedSubtitleEvent,
@@ -576,14 +577,19 @@ def test_the_blur_refusal_is_measured_not_assumed() -> None:
     the reserved color exactly, with any alpha in the low byte the hit map shifts out. What it
     breaks is the EXTENT. Here the images grow by half a glyph and two neighbouring words overlap,
     which is a hover landing on the wrong word.
+
+    `Spacing` is 10 because the precondition — that the sharp pair does NOT already overlap — was
+    otherwise decided by whatever the host calls `sans-serif`: the two glyphs abutted at exactly
+    0px against macOS's Hiragino and overlapped by 4px against Linux's Noto CJK. Spacing adds a
+    fixed advance whatever the face, so the gap survives the font instead of depending on it.
     """
-    libasslite = pytest.importorskip("libasslite")
+    libasslite = requires_libass()
     header = (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
         "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: D,sans-serif,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,"
+        "Style: D,sans-serif,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,10,0,"
         "1,0,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
     )
