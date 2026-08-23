@@ -2037,18 +2037,104 @@ def test_an_srt_stays_with_the_legacy_renderer_unless_the_config_asks(tmp_path: 
     result.close()
 
 
-def test_a_converted_track_prefetches_nothing_and_says_so(tmp_path: Path) -> None:
-    """There is no document to read ahead in — a converted track's events exist only as the rows mpv
-    reports for the cue on screen. The cost is a cache miss per cue, which is a latency, not a wrong
-    box, and it must not be paid for as a failure."""
+TWO_CUE_SRT = (
+    "1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n\n2\n00:00:04,000 --> 00:00:06,000\n犬を見る\n"
+)
+
+
+def converted_episode(tmp_path: Path, srt: str):
+    """A converted session whose `.srt` holds more than the cue on screen, so lookahead has a
+    target — `converted_reader`'s single cue has no next boundary to read ahead to."""
     result, ipc, backend = converted_reader(tmp_path)
+    source = tmp_path / "episode.srt"
+    source.write_text(srt, encoding="utf-8")
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source, live=True)
+    result.load_sub_index(str(source))
+    return result, ipc, backend
+
+
+def test_a_converted_track_reads_ahead_by_predicting_the_events_mpv_will_report(
+    tmp_path: Path,
+) -> None:
+    """A converted track's events exist only as the rows mpv reports for the cue on screen, so every
+    cue used to be a cache miss. They are now predicted from the `.srt` — libavcodec's conversion,
+    done here — which is what gives the track a lookahead window at all."""
+    result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
+
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.stats.prefetch_cache_entries == 0
+    assert result.native_geometry.worker.stats.prefetched >= 1, "nothing was read ahead"
+    prefetched = backend.requests[-1].ass.decode()
+    # The cue's own timings, not its text: by the time it reaches the backend every token carries a
+    # reserved colour key, so the words are no longer contiguous in the document.
+    assert "0:00:04.00,0:00:06.00" in prefetched, "the next cue was not the one prefetched"
     assert result.native_geometry.status.fallback_reason is None
-    assert backend.requests
+    result.close()
+
+
+def test_a_predicted_cue_is_served_from_the_cache_when_mpv_reports_it(tmp_path: Path) -> None:
+    """The payoff: mpv's row for the next cue lands on the key the prefetch was filed under, so the
+    cue is published without a render. The row here is the shape a live mpv produces —
+    `tests/test_subrip_conversion.py` owns that half against a recorded oracle; this owns the
+    wiring, that a matching row is actually served from the cache."""
+    result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    rendered = len(backend.requests)
+
+    ipc.props["sub-text/ass-full"] = "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,犬を見る"
+    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
+    result.set_subtitle("犬を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.stats.cache_hits >= 1
+    assert len(backend.requests) == rendered, "the predicted cue was rendered a second time"
+    assert result.boxes
+    result.close()
+
+
+def test_a_mispredicted_cue_costs_a_render_and_not_a_wrong_box(tmp_path: Path) -> None:
+    """The safety argument, exercised rather than asserted. The cache key carries the event rows, so
+    a prediction that disagrees with mpv simply never matches — the cue is rebuilt from mpv's own
+    row, which is exactly what a converted track did before any of this existed."""
+    result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    rendered = len(backend.requests)
+
+    # mpv reports something the prediction could not have produced — a styled row for the same cue.
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\b1}犬を見る"
+    )
+    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
+    result.set_subtitle("犬を見る")
+    settle_jobs(result, ipc)
+
+    assert len(backend.requests) > rendered, "a mismatched prediction was used anyway"
+    assert "{\\b1}" in backend.requests[-1].ass.decode(), "the rebuild did not use mpv's own row"
+    assert result.boxes
+    result.close()
+
+
+def test_a_cue_srtdec_would_mangle_is_simply_not_read_ahead(tmp_path: Path) -> None:
+    """`srtdec` parses ` b ` in `a < b > c` as a bold tag. The converter declines rather than guess,
+    and declining has to be quiet: it costs the lookahead for that cue, which is what a converted
+    track had for every cue."""
+    result, ipc, _backend = converted_episode(
+        tmp_path,
+        "1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n\n2\n00:00:04,000 --> 00:00:06,000\na < b > c\n",
+    )
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.stats.prefetched == 0
+    assert result.native_geometry.status.fallback_reason is None
     result.close()
 
 

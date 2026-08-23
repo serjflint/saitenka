@@ -797,6 +797,11 @@ port-probe-census = { shell = "uv run python tools/port_probe_census.py", help =
 # *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
 # pin. Yomitan-backed corpora skip (not fail) when no checkout at the pin is found. See tools/corpus_drift.py.
 corpus-drift = { shell = "uv run --extra full python tools/corpus_drift.py" }
+# NOT in `all` (needs mpv + ffmpeg on PATH) — re-asks a live mpv the question the committed
+# `tests/fixtures/subrip_rows.json` answers. `subtitles.subrip` predicts the ASS event libavcodec
+# hands mpv for a SubRip cue; that fixture is the only oracle for it, and it goes stale silently
+# when a new libavcodec changes the conversion. `record` re-blesses it, deliberately.
+subrip-oracle = { shell = "uv run tools/subrip_oracle.py check" }
 # Docs site (Material for MkDocs → Read the Docs). `--strict` fails on broken links/nav, so a docs
 # regression is caught locally, not on RTD. NOT in `all` (docs deps are an opt-in group).
 # `docs-cli`/`docs-markers` regenerate committed reference fragments from the code (run after changing

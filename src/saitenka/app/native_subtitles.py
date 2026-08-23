@@ -29,8 +29,11 @@ from saitenka.subtitles import (
     authored_ass_rows_at,
     canonical_active_ass_rows,
     converted,
+    decode_ass_event,
     font_names,
+    parse_ass_event_line,
     prepare_ass_hit_map_frame,
+    subrip,
 )
 
 if TYPE_CHECKING:
@@ -626,6 +629,8 @@ class NativeSubtitleGeometry:
         self._fonts = subtitle_fonts.FontEnvironment()
         self._in_document_families: frozenset[str] = frozenset()
         self._measured_unsafe: frozenset[str] = frozenset()
+        #: A converted track's cue markup, by millisecond span — see `_adopt_converted`.
+        self._converted_markup: dict[tuple[int, int], str] = {}
         self._track_codec = ""
 
     def record_drifting_families(self, families: frozenset[str]) -> None:
@@ -938,6 +943,7 @@ class NativeSubtitleGeometry:
         self.source_kind = SourceKind.NONE
         self._source_bytes = None
         self._in_document_families = frozenset()
+        self._converted_markup = {}
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
@@ -958,12 +964,7 @@ class NativeSubtitleGeometry:
         elif self._track_codec not in CONVERTED_CODECS:
             self._set_fallback("subtitle-source-conversion-unreproduced")
         else:
-            # No file is read: mpv is not rendering this one either. The document is rebuilt per
-            # cue from the rows mpv reports, which are its own conversion — so the events cannot
-            # differ from what it is drawing, and only the header around them is reproduced.
-            self.source_path = path
-            self.source_kind = SourceKind.CONVERTED
-            self.fallback_reason = None
+            self._adopt_converted(path)
 
     def _adopt_authored(self, path: Path) -> None:
         try:
@@ -982,6 +983,30 @@ class NativeSubtitleGeometry:
         self.source_path = path
         self.source_kind = SourceKind.AUTHORED
         self.fallback_reason = None
+
+    def _adopt_converted(self, path: Path) -> None:
+        """Take a track mpv is rendering from libavcodec's conversion rather than from this file.
+
+        The file is still read, but not as the document: mpv is not drawing it. It is read for the
+        cue markup, which the cue index has already thrown away — `parse_srt` keeps plain text — and
+        which is the only thing `subtitles.subrip` needs to predict the events mpv will report. That
+        prediction is what gives a converted track a lookahead window at all.
+        """
+        self.source_path = path
+        self.source_kind = SourceKind.CONVERTED
+        self.fallback_reason = None
+        self._converted_markup = {}
+        try:
+            with path.open("rb") as source_file:
+                raw = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
+        except OSError:
+            return  # only the lookahead is lost; the per-cue path never reads this file
+        if len(raw) > MAX_ASS_SOURCE_BYTES:
+            return
+        try:
+            self._converted_markup = subrip.markup_by_cue(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            log.debug("converted subtitle source is not UTF-8; no cue lookahead for this track")
 
     def invalidate(
         self,
@@ -1232,19 +1257,29 @@ class NativeSubtitleGeometry:
             frame_size=osd,
         )
 
-    @staticmethod
     def _lookahead_cue(
-        source: bytes,
+        self,
         track_id: SubtitleTrackId,
         timestamp_ms: int,
         render: _RenderInputs,
+        index: CueIndex,
     ) -> _CueInputs | None:
-        """The cue at `timestamp_ms` in the authored document, or `None` when there is nothing to
-        read ahead for — an unparsable region, or a gap between cues."""
-        try:
-            active_rows, text = authored_ass_rows_at(source, track_id, timestamp_ms)
-        except (TypeError, ValueError):
+        """The cue at `timestamp_ms`, or `None` when there is nothing to read ahead for.
+
+        Two ways to get one, because the two track kinds hold their events in different places. An
+        authored track is read out of the document mpv is drawing. A converted one has no such
+        document, so the event is *predicted* from the `.srt` — and a wrong prediction cannot
+        become a wrong box, because the cache key carries the rows and a mispredicted one simply
+        never matches the observation it was meant to serve.
+        """
+        rows = (
+            self._converted_rows(timestamp_ms, index)
+            if self.source_kind is SourceKind.CONVERTED
+            else self._authored_rows(track_id, timestamp_ms)
+        )
+        if rows is None:
             return None
+        active_rows, text = rows
         if not active_rows.strip() or not text.strip():
             return None
         return _CueInputs(
@@ -1261,6 +1296,40 @@ class NativeSubtitleGeometry:
             render.profile,
         )
 
+    def _authored_rows(
+        self, track_id: SubtitleTrackId, timestamp_ms: int
+    ) -> tuple[str, str] | None:
+        source = self._source_bytes
+        if source is None:
+            return None
+        try:
+            return authored_ass_rows_at(source, track_id, timestamp_ms)
+        except (TypeError, ValueError):
+            return None
+
+    def _converted_rows(self, timestamp_ms: int, index: CueIndex) -> tuple[str, str] | None:
+        """The event libavcodec will hand mpv for the cue at `timestamp_ms`, and its plain text.
+
+        `None` whenever anything is less than certain — no cue there, no markup recovered for it,
+        or a cue whose SubRip markup `subtitles.subrip` declines to predict. Declining costs the
+        lookahead for that one cue, which is exactly what a converted track had for all of them.
+        """
+        active = index.active_at(timestamp_ms / 1_000)
+        if not active.located:
+            return None
+        cue = index.cues[active.position]
+        markup = self._converted_markup.get((round(cue.start * 1_000), round(cue.end * 1_000)))
+        if markup is None:
+            return None
+        row = subrip.dialogue_row(cue, markup)
+        if row is None:
+            return None
+        try:
+            decoded = decode_ass_event(parse_ass_event_line(row, SubtitleTrackId("lookahead"), 0))
+        except (TypeError, ValueError):
+            return None
+        return row, decoded.text
+
     def _prefetch(
         self,
         seen: GeometryObservation,
@@ -1273,25 +1342,27 @@ class NativeSubtitleGeometry:
         index = seen.index
         if index is None or self.lookahead == 0:
             return
-        source = self._source_bytes
-        if source is None or self.source_kind is not SourceKind.AUTHORED:
-            # A converted track has no document to read ahead in — its events exist only as the rows
-            # mpv reports for the cue on screen. The cost is a cache miss per cue, which is a
-            # latency, not a wrong box.
+        if self.source_kind is SourceKind.NONE:
             return
         queued_keys: set[str] = set()
         for boundary in index.boundaries_after(after_ms / 1_000):
             timestamp_ms = round(boundary * 1_000) + 1
-            inputs = self._lookahead_cue(source, track_id, timestamp_ms, render_inputs)
+            inputs = self._lookahead_cue(track_id, timestamp_ms, render_inputs, index)
             if inputs is None:
                 continue
             key = self._key(path, inputs)
             if key in queued_keys:
                 continue
             queued_keys.add(key)
+            # Per cue, not once for the track: a converted document is rebuilt around this cue's own
+            # rows, so the two kinds cannot share one captured source.
+            document = self._document_for(inputs.active_rows, render_inputs)
+            state = self._renderer_state(render_inputs)
 
             def build(
                 inputs: _CueInputs = inputs,
+                document: bytes = document,
+                state: RendererState = state,
                 fonts: subtitle_fonts.FontEnvironment = self._fonts,
                 unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
             ) -> GeometryRequest:
@@ -1305,13 +1376,13 @@ class NativeSubtitleGeometry:
                 if not selection.annotations:
                     raise ValueError("prefetched frame has no interaction-eligible tokens")
                 return self._build(
-                    source,
+                    document,
                     track_id,
                     generation,
                     inputs,
                     selection.annotations,
                     fonts,
-                    RendererState(),
+                    state,
                     unreachable,
                 )
 

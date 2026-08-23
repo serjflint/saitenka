@@ -1,6 +1,6 @@
 """Pure subtitle parsing and cue navigation."""
 
-from saitenka.subtitles import converted, font_names
+from saitenka.subtitles import converted, font_names, subrip
 from saitenka.subtitles.ass import (
     AssColorRewrite,
     AssStyle,
@@ -105,4 +105,5 @@ __all__ = [
     "serialize_ass_event_line",
     "shift_ass_dialogue",
     "source_primary_bgr_colors",
+    "subrip",
 ]

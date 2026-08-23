@@ -89,8 +89,14 @@ A SubRip track is not rendered from its file: libavcodec converts it to ASS and 
 applying a whole branch of styling it applies to no authored track. Under `native_formats = "all"`
 Saitenka reconstructs that conversion — libavcodec's header, mpv's own subtitle style, the
 aspect-corrected script resolution, and the letterbox-dependent font scale — around the cue rows mpv
-reports, so the events are mpv's own and only the header is reproduced. The cost is cue lookahead:
-there is no document to read ahead in, so each cue is measured when it arrives.
+reports, so the events are mpv's own and only the header is reproduced.
+
+Cue lookahead works there too, by predicting the events libavcodec will produce for the cues ahead
+straight from the `.srt`. A wrong prediction cannot put a box in the wrong place: the geometry cache
+is keyed on the event rows, so a predicted row that disagrees with the one mpv reports simply misses
+and the cue is measured on arrival, exactly as an unpredicted one is. Cues whose SubRip markup the
+converter will not reproduce faithfully — a stray `<`, an unknown tag, a named font colour — are left
+out of the lookahead rather than guessed at.
 
 The complete option reference, including the bounded result cache and cue lookahead, lives in
 [`overlay.example.toml`](https://github.com/serjflint/saitenka/blob/main/overlay.example.toml). Run
