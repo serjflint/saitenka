@@ -1980,6 +1980,9 @@ def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> Non
         "h": 1080,
         "par": 1.0,
     }
+    # Through the path production uses: the host adopts a new OSD surface in `refresh_osd`, and the
+    # layout follows the host rather than re-reading the property.
+    assert result.refresh_osd()
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
@@ -2710,14 +2713,14 @@ _OSD = {"w": 1920, "h": 1080, "mt": 0, "mb": 0, "ml": 0, "mr": 0, "par": 1.0}
 _VIDEO = {"w": 1920, "h": 1080, "par": 1.0}
 
 
-def _inputs(*, osd=None, video=None, **settings):
+def _inputs(*, osd=None, video=None, frame_size=None, **settings):
     from saitenka.app.native_subtitles import render_inputs_of
 
     return render_inputs_of(
         {**_OSD, **(osd or {})},
         {**_VIDEO, **(video or {})},
         {**_SUPPORTED_SETTINGS, **settings},
-        fallback_size=(1280, 720),
+        frame_size=frame_size or (1920, 1080),
     )
 
 
@@ -2778,8 +2781,11 @@ def test_the_osd_surface_wins_over_the_reported_video_size():
     assert result.storage_size == (1280, 720)
 
 
-def test_a_missing_osd_size_falls_back_to_the_players_own():
-    result = _inputs(osd={"w": None, "h": None})
+def test_an_unreported_osd_size_never_moves_the_frame():
+    """`osd-dimensions` reads 0×0 until mpv has rendered a frame, and reads a stale size across a
+    resize. Neither can move the layout: the surface the host is drawing onto is the frame, and it
+    is passed in rather than re-read here."""
+    result = _inputs(osd={"w": None, "h": None}, frame_size=(1280, 720))
 
     assert result.frame_size == (1280, 720)
 
@@ -2857,35 +2863,25 @@ def _decision_spans(monkeypatch) -> list[dict[str, object]]:
     return spans
 
 
-def test_geometry_records_the_frame_it_shares_with_the_osd_surface(tmp_path, monkeypatch) -> None:
-    """Boxes are laid out in the frame `osd-dimensions` reports; they are drawn onto the surface the
-    host latched in `self.osd`. Nothing downstream compares the two, and when they differ the output
-    is not degraded but silently wrong — every box carries the same offset."""
+@pytest.mark.parametrize("surface", [(1280, 720), (3574, 2074)])
+def test_boxes_are_laid_out_in_the_surface_they_are_drawn_onto(
+    tmp_path, monkeypatch, surface: tuple[int, int]
+) -> None:
+    """One value, not two reads of one property.
+
+    The layout used to come from a live `osd-dimensions` read and the drawing from the host's
+    latched surface. Whenever those disagreed the output was not degraded but silently wrong: every
+    box carried the same scale-and-offset error for the whole episode, and nothing compared them.
+    The second surface here is one `osd-dimensions` never reports, so a layout that went back to
+    reading the property directly would not follow it."""
     spans = _decision_spans(monkeypatch)
     result, ipc, _backend = reader(tmp_path)
-    result.osd = (1280, 720)  # agrees with the fake's osd-dimensions
+    result.osd = surface
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     framed = [s for s in spans if "frame_width" in s]
     assert framed, "no decision reached the frame branch"
-    assert all(s["host_osd"] == "(1280, 720)" for s in framed)
-    assert all("frame_disagreement" not in s for s in framed)
-    result.close()
-
-
-def test_a_frame_that_disagrees_with_the_osd_surface_is_recorded(tmp_path, monkeypatch) -> None:
-    """Negative control for the test above — the oracle has to catch the divergence it exists for,
-    or the match assertion is only proving that both sides read the same fake."""
-    spans = _decision_spans(monkeypatch)
-    result, ipc, _backend = reader(tmp_path)
-    result.osd = (3574, 2074)  # the host latched a surface `osd-dimensions` never reported
-
-    result.set_subtitle("猫を見る")
-    settle_jobs(result, ipc)
-
-    framed = [s for s in spans if "frame_width" in s]
-    assert framed, "no decision reached the frame branch"
-    assert any(s.get("frame_disagreement") == "(1280, 720)_vs_(3574, 2074)" for s in framed)
+    assert {(s["frame_width"], s["frame_height"]) for s in framed} == {surface}
     result.close()

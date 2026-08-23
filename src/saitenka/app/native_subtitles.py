@@ -204,7 +204,7 @@ def render_inputs_of(
     video: Mapping[str, object],
     settings: Mapping[str, object],
     *,
-    fallback_size: tuple[int, int],
+    frame_size: tuple[int, int],
 ) -> _RenderInputs:
     """Whether mpv's current render configuration lets us key geometry off it, and the frame it
     implies. Raises `ValueError` naming what disqualified it.
@@ -213,14 +213,18 @@ def render_inputs_of(
     boxes would be computed against a frame mpv is not drawing into, so hit regions land beside the
     words. `sub-scale`, `sub-pos` and the margin flags all move the text; the font settings change
     which glyphs get laid out; a non-finite or non-positive pixel aspect makes the mapping
-    meaningless. `osd-dimensions` is preferred over the reported OSD size because it is the surface
-    subtitles are actually composited onto.
+    meaningless.
+
+    `frame_size` is the host's OSD surface, passed in rather than re-derived from the `osd` mapping
+    here. Both were reads of `osd-dimensions`, and two reads of one property are two values: the
+    boxes were laid out against one and drawn onto the other, with the same scale-and-offset error
+    on every box and nothing to say so. Margins and pixel aspect still come from the mapping — the
+    host does not carry those.
     """
 
     def _dim(source: Mapping[str, object], key: str, default: int) -> int:
         return int(cast("int | float | str", source.get(key) or default))
 
-    frame_size = (_dim(osd, "w", fallback_size[0]), _dim(osd, "h", fallback_size[1]))
     storage_size = (_dim(video, "w", frame_size[0]), _dim(video, "h", frame_size[1]))
     margins = _frame_margins(osd)
     unsupported = _unsupported_render_inputs(settings)
@@ -355,6 +359,9 @@ class GeometryObservation:
     """
 
     prop: Callable[[str], Any]
+    #: The OSD surface mpv composites onto, and therefore the frame the boxes are laid out in.
+    #: One value for both: it used to be the host's for drawing and a second read of
+    #: `osd-dimensions` for the layout, which is two values whenever they disagree.
     osd: tuple[int, int]
     text: str
     tokens: list[Token]
@@ -392,7 +399,6 @@ class NativeSubtitleGeometry:
         self._last_transition: str | None = None
         self._last_recovery: str | None = None
         self._last_render_inputs: _RenderInputs | None = None
-        self._last_host_osd: tuple[int, ...] | None = None
         self._failure_diagnostic: tuple[str, str | None] | None = None
         self._fonts = subtitle_fonts.FontEnvironment()
 
@@ -451,37 +457,8 @@ class NativeSubtitleGeometry:
                 span.set("storage_height", render.storage_size[1])
                 span.set("pixel_aspect", render.pixel_aspect)
                 span.set("margins", repr(render.margins))
-                self._record_frame_agreement(span, render.frame_size)
             if target_owner != self._owner:
                 span.set("owner_transition", f"{self._owner}_to_{target_owner}")
-
-    def _record_frame_agreement(
-        self, span: otel_metrics.SpanSetter, frame: tuple[int, int]
-    ) -> None:
-        """Do the boxes and the surface they land on agree about the frame?
-
-        A mismatch is not a degraded mode — it is silently wrong output: every box takes the same
-        scale-and-offset error, so hit regions and the highlight sit beside the words for the whole
-        episode. Recorded on every decision because the divergence is invisible otherwise; the two
-        sizes reach a report only as `frame_*` (live `osd-dimensions`) and an `osd_probe` that fires
-        just on a change, and neither says whether they were equal when it mattered.
-        """
-        host = self._last_host_osd
-        if host is None:
-            return
-        agree = tuple(host[:2]) == frame
-        span.set("host_osd", repr(tuple(host[:2])))
-        if not agree:
-            span.set("frame_disagreement", f"{frame}_vs_{tuple(host[:2])}")
-            log.warning(
-                "geometry frame %r disagrees with the OSD surface %r — every box is offset",
-                frame,
-                tuple(host[:2]),
-            )
-        if otel_metrics.geometry_frame_agreement is not None:
-            otel_metrics.geometry_frame_agreement.add(
-                1, {"outcome": "match" if agree else "mismatch"}
-            )
 
     def _transition_owner(
         self,
@@ -931,11 +908,12 @@ class NativeSubtitleGeometry:
         )
 
     @staticmethod
-    def _render_inputs(prop: Callable[[str], Any], osd) -> _RenderInputs:
+    def _render_inputs(prop: Callable[[str], Any], osd: tuple[int, int]) -> _RenderInputs:
         """Read the mpv properties native geometry depends on, then decide.
 
-        Takes the property reader and the OSD size rather than the host: those two are all it ever
-        wanted, and a shim that takes the whole `Reader` cannot be driven by the session runtime.
+        Takes the property reader and the OSD surface rather than the host: those two are all it
+        ever wanted, and a shim that takes the whole `Reader` cannot be driven by the session
+        runtime. The surface is the host's, and is the frame — see `render_inputs_of`.
         """
         return render_inputs_of(
             prop("osd-dimensions") or {},
@@ -956,7 +934,7 @@ class NativeSubtitleGeometry:
                     *subtitle_fonts.FONT_OPTIONS,
                 )
             },
-            fallback_size=osd,
+            frame_size=osd,
         )
 
     def _prefetch(
@@ -1129,11 +1107,6 @@ class NativeSubtitleGeometry:
             )
             self._ports.degrade()
             return None
-        # The frame boxes are computed in comes from the LIVE `osd-dimensions`; the surface they are
-        # drawn onto is the host's latched `self.osd`, which only `refresh_osd` moves and only when it
-        # already differs. `seen.osd` is merely this path's fallback, so the two can diverge silently
-        # and every box then carries the same scale-and-offset error.
-        self._last_host_osd = tuple(seen.osd) if seen.osd else None
         active_rows = seen.prop("sub-text/ass-full")
         if isinstance(active_rows, str):
             self.ass_full_capability = AssFullCapability.SUPPORTED

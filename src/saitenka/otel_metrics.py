@@ -111,10 +111,6 @@ hover_pause_claim: Counter | None = (
 #: Counted rather than spanned because a tick that finds no cue is a clock reading, not an event: as
 #: spans those were 39% of a whole trace file and 2873 of their 2902 instances said only this.
 cue_settles: Counter | None = None
-#: labeled outcome=match|mismatch. The frame boxes are computed in and the surface they are drawn onto
-#: are read from `osd-dimensions` by two different paths, so they can diverge with no error anywhere:
-#: the output is simply wrong for the whole episode. This is the invariant, checked per decision.
-geometry_frame_agreement: Counter | None = None
 #: labeled sources=system+fonts-dir+attachments+in-file. The measuring renderer used to hold only
 #: the system providers, so this says how often a track's typesetting came from somewhere it could
 #: not reach — the field evidence for whether the other three sources matter here.
@@ -406,7 +402,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global geometry_frame_agreement, subtitle_geometry_font_sources
+    global subtitle_geometry_font_sources
 
     with _lock:
         _reader = reader
@@ -622,10 +618,6 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.cue.settles",
             description="cue settles per event drain (outcome=no-observation|adopted|reinstalled)",
         )
-        geometry_frame_agreement = meter.create_counter(
-            "saitenka.geometry.frame_agreement",
-            description="geometry frame vs the OSD surface it draws onto (outcome=match|mismatch)",
-        )
         subtitle_geometry_font_sources = meter.create_counter(
             "saitenka.subtitle_geometry.font_sources",
             description="font sources resolved per track (sources=system+fonts-dir+attachments+in-file)",
@@ -678,7 +670,7 @@ def unregister() -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global geometry_frame_agreement, subtitle_geometry_font_sources
+    global subtitle_geometry_font_sources
 
     with _lock:
         _reader = None
@@ -746,7 +738,6 @@ def unregister() -> None:
         hover_pause_release = None
         hover_pause_claim = None
         cue_settles = None
-        geometry_frame_agreement = None
         subtitle_geometry_font_sources = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
