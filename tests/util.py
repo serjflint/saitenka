@@ -979,3 +979,21 @@ class ManualRenderAheadSubmitter:
                 error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
             )
         )
+
+
+def requires_libass():
+    """Skip unless a real libass runtime is loadable, and return the wrapper.
+
+    `pytest.importorskip("libasslite")` answers the wrong question. The wrapper is pure Python and
+    imports fine on a machine that has no libass at all — it `dlopen`s the library only when a
+    renderer is built. So a CI runner with the wheel and no `libass.so` sailed past the guard and
+    failed inside the first render instead of skipping, and the diagnosis pointed at the test.
+    """
+    import pytest
+
+    libasslite = pytest.importorskip("libasslite")
+    try:
+        libasslite.library_version()
+    except RuntimeError as error:  # no libass on this host
+        pytest.skip(f"libass runtime unavailable: {error}")
+    return libasslite

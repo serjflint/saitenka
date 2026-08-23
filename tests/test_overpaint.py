@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from util import requires_libass
 
 from saitenka.subtitles import overpaint
 
@@ -111,7 +112,7 @@ def test_the_color_lands_on_the_pixels_the_measurement_measured() -> None:
     This is what device 2 claims and device 1 cannot: no face is consulted anywhere in the chain, so
     a family only the subtitle renderer holds is colored exactly as well as any other.
     """
-    pytest.importorskip("libasslite")
+    requires_libass()
     from saitenka.subtitles import (
         GeometryPaletteEntry,
         GeometryRequest,

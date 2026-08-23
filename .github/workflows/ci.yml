@@ -30,8 +30,13 @@ jobs:
 
       # fugashi (the tokenizer) has no free-threaded 3.14t wheel, so uv builds it from sdist against
       # system MeCab. Without libmecab-dev the build fails "Have you installed MeCab?".
-      - name: Install MeCab (fugashi build dep)
-        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+      #
+      # libass is the RUNTIME `libasslite` dlopens, not a build dep: the wrapper is pure Python and
+      # imports fine without it, so the gate's converted-document oracle would skip rather than fail
+      # — a libass parity test that never renders in CI is not a gate. fonts-noto-cjk so the
+      # Japanese cues it lays out resolve to a real face.
+      - name: Install MeCab (fugashi build dep) and libass (libasslite runtime)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev libass9 fonts-noto-cjk
 
       # Non-Python binaries `poe all` shells out to: lychee (links task). shellcheck (shell task) and
       # node (unused by `all`) ship on the runner; typos (spell) rides `uvx`.

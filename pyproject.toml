@@ -140,14 +140,13 @@ test = [
 ]
 dev = [
     { include-group = "test" },
-    # The native extras the GATE renders against — `poe all` runs `tests/test_converted_document.py`
-    # and the geometry backend's integration tier through real libass. Neither `full` nor `test`
-    # declares them, so the suite was green only while an env happened to still hold them: a clean
-    # `uv sync` produced a red gate on a clean tree. Not in `test`, which the 3.15t CI legs install
-    # alone precisely to avoid building native wheels.
+    # `poe all` renders the converted-document oracle through real libass, but `libasslite` sits in
+    # the `subtitle-geometry` extra that neither `full` nor `test` declares — so the suite was green
+    # only while an env happened to still hold it, and a clean `uv sync` produced a red gate on a
+    # clean tree. Not in `test`, which the 3.15t CI legs install alone precisely to avoid building
+    # native wheels; `layout-engine` and `images` stay out entirely, deliberately absent from the
+    # gate so their own CI jobs are where those Rust paths are exercised.
     "saitenka[subtitle-geometry]",
-    "saitenka[layout-engine]",
-    "saitenka[images]",
     "mypy>=2.3.0",
     "playwright>=1.61.0",
     "poethepoet>=0.48.0",

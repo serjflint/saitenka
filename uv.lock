@@ -2309,7 +2309,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "pyyaml" },
     { name = "ruff" },
-    { name = "saitenka", extra = ["images", "layout-engine", "subtitle-geometry"] },
+    { name = "saitenka", extra = ["subtitle-geometry"] },
     { name = "ty" },
 ]
 docs = [
@@ -2398,8 +2398,6 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", specifier = ">=0.16" },
-    { name = "saitenka", extras = ["images"] },
-    { name = "saitenka", extras = ["layout-engine"] },
     { name = "saitenka", extras = ["subtitle-geometry"] },
     { name = "ty", specifier = ">=0.0.61" },
 ]

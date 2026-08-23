@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from util import requires_libass
 
 from saitenka.subtitles import converted
 from saitenka.subtitles.geometry import RendererState
@@ -289,6 +290,7 @@ def test_every_token_of_a_converted_cue_gets_a_box_from_real_libass() -> None:
     made every glyph fully transparent passed eighteen tests and failed every cue on a user's
     screen.
     """
+    requires_libass()
     from saitenka.subtitles.libass_backend import LibassGeometryBackend
 
     backend = LibassGeometryBackend()
@@ -322,6 +324,7 @@ def test_a_style_the_user_changed_moves_the_boxes_libass_paints() -> None:
     out somewhere else because of it". A `Style:` field the row drops, mis-scales, or writes into
     the wrong column reads green against arithmetic and silently pins every box to mpv's defaults.
     """
+    requires_libass()
     from saitenka.subtitles.libass_backend import LibassGeometryBackend
 
     backend = LibassGeometryBackend()
@@ -345,6 +348,7 @@ def test_a_reused_renderer_measures_each_cue_against_its_own_document() -> None:
     green. So each cue is measured twice, once through a shared renderer and once through a fresh
     one, and the two must agree exactly.
     """
+    requires_libass()
     from saitenka.subtitles.libass_backend import LibassGeometryBackend
 
     cues = ["（鳥のさえずり）", "うんうん…。", "キーボードを打つ音"]
@@ -429,6 +433,8 @@ def test_justify_reaches_libass_even_though_a_style_row_cannot_state_it() -> Non
         TokenAnnotation,
     )
     from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+
+    requires_libass()
     from saitenka.subtitles.libass_backend import LibassGeometryBackend
 
     frame = (HD.width, HD.height)
