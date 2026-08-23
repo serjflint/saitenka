@@ -91,7 +91,10 @@ def test_only_current_false_readback_can_request_catastrophic_legacy() -> None:
         ),
     )
     assert committed.owner == PixelOwner.LEGACY
-    assert commit_actions == ()
+    # The interaction pixels were measured against mpv's glyphs, which this handoff just hid.
+    assert commit_actions == (
+        OwnershipAction(ActionKind.CLEAR_INTERACTION, context=failed_state.context),
+    )
 
 
 def test_a_verify_cannot_supersede_an_assertion_still_in_flight() -> None:

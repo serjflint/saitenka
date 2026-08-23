@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import math
-from dataclasses import dataclass
-from enum import StrEnum
+from dataclasses import dataclass, field, replace
+from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -27,6 +27,56 @@ class Rect:
         return self.x <= x < self.x + self.width and self.y <= y < self.y + self.height
 
 
+class FontProvider(IntEnum):
+    """libass's `ASS_DefaultFontProvider`, named here so the contract stays provider-neutral."""
+
+    NONE = 0
+    AUTODETECT = 1
+    CORETEXT = 2
+    FONTCONFIG = 3
+    DIRECTWRITE = 4
+
+
+@dataclass(frozen=True, slots=True)
+class FontSetup:
+    """Font lookup a renderer must be given before it can lay a cue out.
+
+    Separate from ``attachments`` because these are settings and those are payload, and because a
+    backend applies them at different points: the directory and the extraction flag before the
+    document is parsed, the lookup defaults after the renderer exists.
+    """
+
+    fonts_dir: str | None = None
+    extract_fonts: bool = False
+    default_font: str | None = None
+    default_family: str | None = None
+    fontconfig_config: str | None = None
+    font_provider: FontProvider = FontProvider.AUTODETECT
+
+
+@dataclass(frozen=True, slots=True)
+class RendererState:
+    """Renderer state a host sets per frame, which a measuring renderer has to set identically.
+
+    `font_scale` is not decoration: on a track the host converted it is a letterbox-dependent
+    multiplier, not 1, so a renderer that leaves it alone lays every box out at the wrong size —
+    uniformly, which is the hardest kind of wrong to notice.
+
+    `features` are `ASS_Feature` flags applied to the track before its first render, as
+    `(feature, enabled)` pairs; they change how a run's advances accumulate.
+
+    `blur` and `justify` are here rather than in the document because a V4+ `Style:` row has no
+    field for either — mpv writes both onto the libass style struct directly, so the only way to
+    reproduce them is a selective style override on the renderer. `justify` decides where every
+    line of a multi-line cue starts, which is a box position, not a decoration.
+    """
+
+    font_scale: float = 1.0
+    features: tuple[tuple[int, bool], ...] = ()
+    blur: float = 0.0
+    justify: int = 0
+
+
 @dataclass(frozen=True, slots=True)
 class TokenGeometry:
     """Geometry for one semantic token; ``bounds`` is the stable UI anchor."""
@@ -35,6 +85,15 @@ class TokenGeometry:
     token_index: int
     bounds: Rect
     regions: tuple[Rect, ...] = ()
+    #: Copied from the palette entry that produced this token — see `GeometryPaletteEntry`.
+    font_name: str = ""
+    font_size: float = 0.0
+    #: The token's own anti-aliased coverage, row-major over `bounds`, one byte per pixel — the
+    #: measuring render's output kept instead of thrown away once the extent was read off it.
+    #: This is what lets the color be painted as a raster when the text device cannot draw the
+    #: face; tinting a mask IS the raster, so the second device costs no second render. Empty when
+    #: the backend was not asked to keep it.
+    coverage: bytes = b""
 
 
 class GeometryVariant(StrEnum):
@@ -48,6 +107,12 @@ class GeometryPaletteEntry:
     event_id: SubtitleEventId
     token_index: int
     rgb: int
+    #: The face and size this token is laid out in, in the FRAME's units rather than the document's
+    #: script units — so an overprint can draw the same glyph at the same size without redoing
+    #: libass's scaling. Empty when the document did not resolve one; the overprint then leaves that
+    #: token uncolored rather than drawing it at a guess.
+    font_name: str = ""
+    font_size: float = 0.0
 
     def __post_init__(self) -> None:
         if self.token_index < 0 or isinstance(self.rgb, bool) or not 0 < self.rgb <= 0xFFFFFF:
@@ -115,7 +180,12 @@ class GeometryRequest:
     palette: tuple[GeometryPaletteEntry, ...] = ()
     reserved_rgb: tuple[int, ...] = ()
     attachments: tuple[tuple[str, bytes], ...] = ()
+    font_setup: FontSetup = field(default_factory=FontSetup)
+    renderer_state: RendererState = field(default_factory=RendererState)
     render_profile: tuple[tuple[str, str], ...] = ()
+    #: Keep each token's coverage mask, for the raster device. Asked for per frame rather than
+    #: always, because a cue whose color the text device can draw has no use for the bytes.
+    keep_coverage: bool = False
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -123,7 +193,14 @@ class GeometryRequest:
         _validate_attachments(self)
 
     def cache_key(self) -> str:
-        """Stable identity for render inputs; generation is deliberately excluded."""
+        """Stable identity for render inputs; generation is deliberately excluded.
+
+        `frame_size` is load-bearing beyond cache freshness, and not obviously so. A snapshot's
+        coverage masks are rasterised at this frame's pixels and uploaded to mpv as a bitmap, which
+        — unlike an `osd-overlay` text payload — mpv does not rescale with its OSD surface. Drop the
+        frame from this key and a resize serves the old masks, painting the previous window's
+        colors over the new window's glyphs.
+        """
         digest = hashlib.sha256()
         for value in (
             str(self.track_id),
@@ -137,7 +214,14 @@ class GeometryRequest:
             repr(self.use_margins),
             repr(self.palette),
             repr(self.reserved_rgb),
+            repr(self.font_setup),
+            repr(self.renderer_state),
             repr(self.render_profile),
+            # It changes what the snapshot CONTAINS, not just how it was made: a maskless hit
+            # served to a caller that asked for coverage drops the whole cue to the plainest
+            # color device, silently. Free while the only producer derives it from the palette
+            # hashed above — and this is what keeps that from being the thing holding it true.
+            repr(self.keep_coverage),
         ):
             digest.update(value.encode())
             digest.update(b"\0")
@@ -146,6 +230,32 @@ class GeometryRequest:
             digest.update(name.encode())
             digest.update(b"\0")
             digest.update(data)
+        return digest.hexdigest()
+
+    def renderer_key(self) -> str:
+        """Identity of the libass *renderer* this request needs — a different question from
+        `cache_key`, which is the identity of the SNAPSHOT.
+
+        libass has three handles with three lifetimes: the library and its font set, the renderer
+        holding the glyph cache built for them, and the track, which is the only per-cue one. A
+        renderer is therefore identified by the font environment alone. Keying it on `cache_key`
+        instead meant hashing the timestamp, the palette and the document — all of which change
+        every cue — so the renderer cache could never hit: it rebuilt libass, rescanned the font
+        directory, and discarded the glyph cache once per cue, at every frame size.
+
+        Deliberately absent: the frame geometry and the render style, which `render` pushes onto
+        the renderer per call; `renderer_state.features`, which libass stores on the TRACK and
+        which travel with the document; and the document itself.
+        """
+        digest = hashlib.sha256()
+        digest.update(repr(self.font_setup).encode())
+        digest.update(b"\0")
+        # Names and sizes, not the bytes: a font's content is what makes a renderer expensive to
+        # build, and re-hashing megabytes of it per cue would pay that cost back a second time.
+        # Attachments only change when the track does, which also changes a name or a length.
+        for name, data in self.attachments:
+            digest.update(f"{name}:{len(data)}".encode())
+            digest.update(b"\0")
         return digest.hexdigest()
 
 
@@ -157,6 +267,21 @@ class GeometrySnapshot:
     timestamp_ms: int
     variant: GeometryVariant
     tokens: tuple[TokenGeometry, ...]
+
+    @property
+    def coverage_bytes(self) -> int:
+        """Retained alpha, in bytes — the only part of a snapshot whose size is not bounded by the
+        token count. A full-screen sign's masks are megabytes."""
+        return sum(len(token.coverage) for token in self.tokens)
+
+    def without_coverage(self) -> GeometrySnapshot:
+        """The same hit boxes with the masks dropped.
+
+        Still a complete, correct answer: coverage feeds only the raster color device, so a
+        stripped snapshot costs those tokens a plainer mark and nothing else. That is what makes it
+        the right thing to evict under memory pressure — evicting the entry would cost a re-render.
+        """
+        return replace(self, tokens=tuple(replace(token, coverage=b"") for token in self.tokens))
 
 
 class GeometryBackend(Protocol):

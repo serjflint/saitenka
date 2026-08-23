@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app import subtitle_raster
+from saitenka.app import subtitle_calibration, subtitle_raster
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_ownership import (
     ASK_MPV,
@@ -38,6 +38,7 @@ from saitenka.runtime.surfaces import (
     SurfaceRuntime,
     SurfaceTransactionOutcome,
 )
+from saitenka.subtitles import decoration, font_names, overpaint, overprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -61,6 +62,9 @@ class OwnershipRetryDue:
 
 
 NATIVE_FOCUS_ID = 1_001
+#: The hidden slot the layout calibration lays a payload out on. Nothing is ever drawn there —
+#: `compute_bounds` answers with the box and leaves the surface untouched.
+NATIVE_CALIBRATION_ID = 1_002
 
 _FOCUS_SLOT = "subtitle-native-focus"
 _VISIBILITY_ASSERT = "ownership:assert-native-visibility"
@@ -119,6 +123,9 @@ class DrawRequest:
     #: The CURRENT cue's hit boxes. The legacy path produces them and the native focus path reads
     #: them, so they travel in the request rather than being re-read off a host mid-draw.
     boxes: list[WordBox] = field(default_factory=list)
+    #: Whether mpv is paused. Only the layout calibration reads it, and only to stay off the
+    #: playing core — `compute_bounds` costs mpv a full render and a cache flush.
+    paused: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +171,172 @@ def focus_rect(boxes, hover: int, span: tuple[int, int] | None) -> tuple[int, in
     right = max(box.x + box.w for box in selected)
     bottom = max(box.y + box.h for box in selected)
     return left, top, right - left + 2 * FOCUS_PAD, bottom - top + 2 * FOCUS_PAD
+
+
+#: Our own hairline border, in frame pixels. Not the authored one — that stays where mpv drew it.
+#: This exists to swallow the antialiased fringe of the glyph underneath, which would otherwise
+#: show as a pale outline around every colored word.
+OVERPRINT_BORDER = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class ColorLadder:
+    """Each token assigned to at most one color device, so the two cannot double-color one.
+
+    Assignment is one decision, taken here, rather than independent filters over the same boxes —
+    which is how a token whose face resolved but whose text carried ASS syntax was once refused by
+    device 1 for its text and by device 2 for its face, and lost its color with nothing saying so.
+
+    `rules` are not a color device. They carry the JLPT level underline, which is additive: a token
+    can hold a rule and a paint, or a rule and nothing.
+    """
+
+    paints: tuple[overprint.TokenPaint, ...] = ()
+    masks: tuple[overpaint.TokenMask, ...] = ()
+    rules: tuple[decoration.TokenRule, ...] = ()
+
+
+def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> ColorLadder:
+    """Sort the cue's tokens onto the two color devices, best first, and collect their underlines.
+
+    Device 1 redraws the glyphs, which needs a face mpv's OSD renderer can load and text that is not
+    ASS syntax. Device 2 tints the coverage the measurement kept, which needs no face but needs that
+    mask. A token neither can serve keeps its box, its tooltip and its mining, and simply is not
+    colored — there is no third color device. Marking it anyway would say "this token is in some
+    reading state" in the one vocabulary that already means something else here.
+
+    `drifting` is where a *late* verdict lands. Which families mpv's OSD renderer can reach is
+    inferred when the geometry is built, and `subtitle_calibration` can contradict that inference
+    afterwards — by which time the cue is drawn and its request is long gone. Applying the answer
+    here, at the point of drawing, is what lets it take effect on the cue already on screen instead
+    of on some later one.
+    """
+    styles = request.styles
+    if not styles or not request.boxes:
+        return ColorLadder()
+    surfaces = [token.surface for line in request.lines for token in line]
+    paints: list[overprint.TokenPaint] = []
+    masks: list[overpaint.TokenMask] = []
+    rules: list[decoration.TokenRule] = []
+    for box in request.boxes:
+        if box.index >= len(surfaces) or not surfaces[box.index].strip():
+            continue
+        color = _token_color(request, box.index)
+        if color is not None:
+            _assign_rung(box, surfaces[box.index], color, drifting, paints, masks)
+        underline = _token_underline(request, box.index)
+        if underline is not None:
+            rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, underline))
+    return ColorLadder(tuple(paints), tuple(masks), tuple(rules))
+
+
+def _assign_rung(
+    box: WordBox,
+    text: str,
+    color: int,
+    drifting: frozenset[str],
+    paints: list[overprint.TokenPaint],
+    masks: list[overpaint.TokenMask],
+) -> None:
+    """Best color device this token can hold, appended to that device's list, or neither."""
+    font_name = "" if font_names.key(box.font_name) in drifting else box.font_name
+    paint = overprint.TokenPaint(
+        text, box.x, box.y, font_name, box.font_size, color, OVERPRINT_BORDER
+    )
+    mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, color)
+    if paint.drawable:
+        paints.append(paint)
+    elif mask.usable:
+        masks.append(mask)
+
+
+def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> str:
+    """Everything the cue draws through mpv's OSD renderer: devices 1 and 3 of the ladder.
+
+    Both travel in one `ass-events` payload because both are ASS events. Device 2 does not: it is a
+    bitmap, and goes up its own overlay slot.
+
+    Empty when there is nothing to color — no measured faces (the legacy renderer produces none),
+    or no styles. Empty is a real answer and the caller sends it: it clears the slot, which is what
+    "this cue has no overprint" has to look like, or the previous cue's colors stay on screen.
+    """
+    ladder = color_ladder(request, drifting=drifting)
+    parts = (overprint.payload(list(ladder.paints)), decoration.payload(list(ladder.rules)))
+    return "\n".join(part for part in parts if part)
+
+
+def _token_color(request: DrawRequest, index: int) -> int | None:
+    """The reading-state color for one token, as 24-bit RGB, or `None` when it has none."""
+    return _token_rgb(request, index, "color")
+
+
+def _token_underline(request: DrawRequest, index: int) -> int | None:
+    """The JLPT level underline for one token, or `None` when it has no level.
+
+    Separate from the reading state and additive to it (`app/scoring.py`): a word can be both due
+    for review and N3. The standard renderer has always drawn both; reading only the color here is
+    what made the level invisible whenever this mode was on.
+    """
+    return _token_rgb(request, index, "underline")
+
+
+def _token_rgb(request: DrawRequest, index: int, field: str) -> int | None:
+    styles = request.styles
+    if not styles or not 0 <= index < len(styles):
+        return None
+    rgba = getattr(styles[index], field, None)
+    if rgba is None:
+        return None
+    return (rgba[0] << 16) | (rgba[1] << 8) | rgba[2]
+
+
+def overpaint_image(
+    request: DrawRequest, *, drifting: frozenset[str] = frozenset()
+) -> overpaint.Overpaint | None:
+    """Device 2: the color as a raster, for the tokens device 1 refused.
+
+    Only those tokens. A cue whose dialogue is a system font and whose signs came from a container
+    attachment gets its dialogue colored as text and its signs colored as pixels, in one frame —
+    which is the whole reason the stand-down is per family rather than per track.
+    """
+    return overpaint.compose(list(color_ladder(request, drifting=drifting).masks))
+
+
+def _trace_overpaint_placement(request: DrawRequest, image: overpaint.Overpaint) -> None:
+    """Where device 2's raster lands, beside the two spaces it has to reconcile.
+
+    The masks are measured against the geometry frame and the slot is addressed in mpv's OSD space.
+    Those differ by the letterbox whenever the video does not fill the window, and nothing downstream
+    can tell a correct placement from one that skipped the conversion — the raster simply appears
+    somewhere. So the placement, the boxes it came from, and both spaces are recorded together.
+    """
+    height, width = image.rgba.shape[0], image.rgba.shape[1]
+    with otel_metrics.traced("subtitle_overpaint_placement") as span:
+        span.set("x", image.x)
+        span.set("y", image.y)
+        span.set("width", width)
+        span.set("height", height)
+        span.set("osd_width", request.osd[0])
+        span.set("osd_height", request.osd[1])
+        span.set("token_count", len(request.boxes))
+        if request.boxes:
+            span.set("boxes_left", min(box.x for box in request.boxes))
+            span.set("boxes_top", min(box.y for box in request.boxes))
+            span.set("boxes_right", max(box.x + box.w for box in request.boxes))
+            span.set("boxes_bottom", max(box.y + box.h for box in request.boxes))
+            span.set("box_height_max", max(box.h for box in request.boxes))
+    log.debug(
+        "overpaint placed: %dx%d at (%d,%d) from %d box(es) spanning y %s..%s; osd %dx%d",
+        width,
+        height,
+        image.x,
+        image.y,
+        len(request.boxes),
+        min((box.y for box in request.boxes), default="-"),
+        max((box.y + box.h for box in request.boxes), default="-"),
+        request.osd[0],
+        request.osd[1],
+    )
 
 
 def focus_drawing(rect: tuple[int, int, int, int]) -> str:
@@ -363,6 +536,10 @@ class SubtitleTarget:
     #: This source can never produce geometry (see `NativeSubtitleGeometry.source_unsupported`).
     #: A snapshot, not a callable: it is read inside the same call that builds the target.
     native_unsupported: bool = False
+    #: The user asked for the legacy renderer. Separate from `native_unsupported` because the two
+    #: are different facts with the same consequence, and a report has to tell them apart: one is a
+    #: choice and the other is a track the native path cannot serve.
+    legacy_forced: bool = False
 
 
 class NullRenderer(NoPixelOwnership):
@@ -422,6 +599,32 @@ class NativeVisibleRenderer:
         # The focus highlight is its own presentation slot: a hide issued while a show is still in
         # flight must not land after it, and the revision fence is what orders them.
         self._focus = SurfaceRuntime()
+        #: Whether device 2's raster is on screen, so a cue that needs none takes the last one down
+        #: rather than leaving it over the words that follow.
+        self._overpaint_shown = False
+        #: Whether a saitenka overlay window (or `Alt+o`) has taken the session's pixels down. The
+        #: focus slot is not a `LifecycleSurfaces` one, so nothing else stops a redraw repainting it.
+        self._suspended = False
+        #: Placement and pixels of the raster currently on the slot, so a redraw that changes
+        #: neither can skip the upload. `None` whenever the slot is down — see `_drop_overpaint`.
+        self._overpaint_published: tuple[int, int, bytes] | None = None
+        #: Payload shapes already measured against mpv's OSD renderer, so a stall is paid once per
+        #: face set per surface rather than once per cue.
+        self._calibrated: set[str] = set()
+        #: One check this track may spend without waiting to be paused. Armed at a track load, where
+        #: the session is already stalling, so a session that never pauses still measures once.
+        self._calibrate_unpaused = False
+        #: Families the measurement caught mpv's OSD renderer laying out differently from ours, so
+        #: device 1 stands down on them for the rest of the session. Kept per family rather than per
+        #: payload shape: whether a face is loadable is a property of the font environment, not of
+        #: the cue that happened to expose it, so one drifting cue answers for every later one.
+        self._drifting: frozenset[str] = frozenset()
+        #: Told when that set grows, so the geometry side rebuilds with coverage masks kept — which
+        #: is what promotes those tokens from device 3's rule to device 2's tinted glyphs.
+        self._on_drift: Callable[[frozenset[str]], None] | None = None
+
+    def set_drift_sink(self, sink: Callable[[frozenset[str]], None] | None) -> None:
+        self._on_drift = sink
 
     @property
     def ownership_state(self) -> OwnershipState:
@@ -729,6 +932,7 @@ class NativeVisibleRenderer:
             self._fallback.clear(target.surfaces, target.ipc)
         elif action.kind == ActionKind.CLEAR_INTERACTION:
             self._hide_focus(target.ipc)
+            self._hide_overpaint(target.surfaces)
         elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
             self._stage_legacy(target, action)
         elif action.kind == ActionKind.SHOW_MPV:
@@ -795,19 +999,25 @@ class NativeVisibleRenderer:
             (
                 target.prop("sid") if isinstance(sid, AskMpv) else sid,
                 target.source,
+                # In the selection because a forced switch has to READ as a selection change: this
+                # method returns early on an unchanged one, so a flag outside it would toggle
+                # nothing until the next track load.
+                target.legacy_forced,
             )
         )
         if selection == self._selection:
             return
         self._selection = selection
+        # A new track brings a new font set, so the previous track's answers say nothing about it.
+        self._calibrate_unpaused = True
         # A source geometry can never accept (an .srt, say) would otherwise leave the episode with
-        # mpv's pixels and no hit boxes for its whole run. Choosing the mode HERE is what keeps the
-        # module rule intact — "geometry availability never selects the renderer": this is a
-        # property of the source, evaluated once per selection, not a geometry outcome that could
-        # flip between cues.
+        # mpv's pixels and no hit boxes for its whole run, and a user who asks for the legacy
+        # renderer is asking for the same thing deliberately. Choosing the mode HERE is what keeps
+        # the module rule intact — "geometry availability never selects the renderer": both inputs
+        # are evaluated once per selection, not geometry outcomes that could flip between cues.
         mode = (
             OwnershipMode.LEGACY_OVERLAY
-            if target.native_unsupported
+            if target.native_unsupported or target.legacy_forced
             else OwnershipMode.NATIVE_VISIBLE
         )
         context = OwnershipContext(
@@ -890,6 +1100,12 @@ class NativeVisibleRenderer:
         self, request: DrawRequest, surfaces=None, ipc=None, /, *, on_settled=None
     ) -> DrawResult | None:
         """Focus box over mpv's own pixels, or the legacy render when mpv does not own them."""
+        # The focus slot is written straight through the IPC runtime, so the surface layer's
+        # `set_visible(False)` does not cover it: without this, any redraw after `Alt+o` repainted
+        # the token colors and the JLPT rules onto a session the user had just hidden, and they
+        # stayed until a cue change happened to produce an empty payload.
+        if self._suspended:
+            return None
         if self._state.owner == PixelOwner.LEGACY:
             return self._fallback.draw(request, surfaces, ipc, on_settled=on_settled)
         # `activate` drives the ownership FSM and needs the host, so the coordinator runs it just
@@ -901,7 +1117,13 @@ class NativeVisibleRenderer:
             if request.hover >= 0 and box_for_token(request.boxes, request.hover) is not None
             else None
         )
-        if rect is None:
+        self._publish_overpaint(request, surfaces)
+        drawing = overprint_payload(request, drifting=self._drifting)
+        if rect is not None:
+            # One slot, one payload: the highlight and the color are drawn together so a repaint
+            # can never leave one of them showing the previous cue.
+            drawing = f"{focus_drawing(rect)}\n{drawing}" if drawing else focus_drawing(rect)
+        if not drawing:
             self._hide_focus(ipc)
             return None
         self._submit_focus(
@@ -910,17 +1132,144 @@ class NativeVisibleRenderer:
             (
                 NATIVE_FOCUS_ID,
                 "ass-events",
-                focus_drawing(rect),
+                drawing,
                 request.osd[0],
                 request.osd[1],
                 1,
             ),
         )
+        self._calibrate(request, ipc)
         return None
+
+    def _calibrate(self, request: DrawRequest, ipc) -> None:
+        """Ask mpv where its OSD renderer actually put the overprint, and act on the difference.
+
+        It runs on the payload the cue is already drawing rather than a synthetic probe, so what is
+        checked is the thing that shipped, once per payload shape per surface — the call costs mpv a
+        full render on its core thread, which is why it is not simply run per cue.
+
+        Paused is the usual moment, and under the default config the first hover supplies it. But
+        `pause_on_tooltip` is a setting, and a session that never pauses would then never measure
+        anything at all. So a track load spends one unpaused check: the load is already stalling for
+        a subprocess and a font resolution, and a stutter there is one nobody sees.
+        """
+        payload = overprint_payload(request, drifting=self._drifting)
+        signature = subtitle_calibration.payload_signature(payload, request.osd)
+        if not (request.paused or self._calibrate_unpaused) or ipc is None or signature is None:
+            return
+        measured = subtitle_calibration.measured_bounds(request.boxes, drifting=self._drifting)
+        if measured is None or signature in self._calibrated:
+            return
+        families = subtitle_calibration.payload_families(payload)
+
+        def finished(completion: EffectFinished) -> None:
+            self._record_drift(completion, measured, signature, families)
+
+        # Marked only once the ask is actually in flight. Marking first burns the face set for the
+        # session on a refused admission, so a real substituted-face drift on it is never measured.
+        if ipc.submit_runtime_mpv(
+            owner=Owner.SUBTITLE,
+            identity=f"subtitle:calibrate:{signature}",
+            # `hidden` and `compute_bounds`: mpv lays the payload out and answers with the box
+            # without ever putting it on screen, on an id nothing else writes.
+            command=(
+                "osd-overlay",
+                NATIVE_CALIBRATION_ID,
+                "ass-events",
+                payload,
+                request.osd[0],
+                request.osd[1],
+                0,
+                True,
+                True,
+            ),
+            timeout_s=10.0,
+            on_finished=finished,
+        ):
+            self._calibrated.add(signature)
+            self._calibrate_unpaused = False  # the track's one free check, spent
+
+    def _record_drift(
+        self,
+        completion: EffectFinished,
+        measured: tuple[int, int, int, int],
+        signature: str,
+        families: frozenset[str],
+    ) -> None:
+        """A missing answer leaves the inference standing; a disagreeing one overrides it.
+
+        Only ever in the demoting direction. The measurement can say "these two renderers did not
+        lay the same cue out", which is proof device 1 is wrong; it cannot say the inference's own
+        reasons — an attachment, an in-file `[Fonts]` section — have stopped applying.
+        """
+        if completion.outcome is not EffectOutcome.SUCCEEDED or not isinstance(
+            completion.result, dict
+        ):
+            log.info("subtitle layout calibration did not answer: %s", completion.outcome)
+            return
+        drift = subtitle_calibration.drift_of(measured, completion.result, border=OVERPRINT_BORDER)
+        if drift is None:
+            return
+        # Both rectangles, not only their difference: a drift of +14 reads as a near-agreement, and
+        # a placement that is a whole letterbox out reads the same way once it has been subtracted.
+        log.info(
+            "subtitle layout drift %s: l=%+.1f t=%+.1f r=%+.1f b=%+.1f (measured %s, osd %s)",
+            signature,
+            drift.left,
+            drift.top,
+            drift.right,
+            drift.bottom,
+            measured,
+            completion.result,
+        )
+        with otel_metrics.traced("subtitle_layout_drift") as span:
+            span.set("signature", signature)
+            for name, value in zip(
+                ("measured_left", "measured_top", "measured_right", "measured_bottom"),
+                measured,
+                strict=True,
+            ):
+                span.set(name, value)
+            for key, value in completion.result.items():
+                if isinstance(value, int | float):
+                    span.set(f"osd_{key}", value)
+            span.set("worst", drift.worst)
+            span.set("agrees", drift.agrees)
+        if otel_metrics.subtitle_layout_drift_px is not None:
+            otel_metrics.subtitle_layout_drift_px.record(drift.worst)
+        if drift.agrees or families <= self._drifting:
+            return
+        self._drifting |= families
+        log.info(
+            "subtitle overprint stands down on %s: measured drift", ", ".join(sorted(families))
+        )
+        if otel_metrics.subtitle_overprint_demotions is not None:
+            otel_metrics.subtitle_overprint_demotions.add(
+                len(families), {"reason": "measured-layout-drift"}
+            )
+        if self._on_drift is not None:
+            self._on_drift(self._drifting)
 
     def clear(self, surfaces=None, ipc=None, /) -> None:
         self._hide_focus(ipc)
+        self._hide_overpaint(surfaces)
         self._fallback.clear(surfaces, ipc)
+
+    def _hide_overpaint(self, surfaces) -> None:
+        if surfaces is None or not self._overpaint_shown:
+            return
+        self._drop_overpaint()
+        surfaces.remove(OverlayId.OVERPAINT, owner=Owner.SUBTITLE)
+
+    def _drop_overpaint(self) -> None:
+        """Forget what is on the slot, because nothing is.
+
+        Every path that takes the raster down goes through here — `clear`, `suspend_for_overlay`,
+        and a cue with no raster of its own. Leaving the memo standing would tell the next publish
+        of the same cue that its pixels are already up, and the raster would never come back after
+        a tooltip closed.
+        """
+        self._overpaint_shown = False
 
     def close(self) -> None:
         self._fallback.close()
@@ -941,11 +1290,14 @@ class NativeVisibleRenderer:
         self._state, _ = reduce_ownership(self._state, OwnershipEvent(EventKind.CLOSE_FINISHED))
 
     def suspend_for_overlay(self, target: SubtitleTarget) -> None:
+        self._suspended = True
         self._hide_focus(target.ipc)
+        self._hide_overpaint(target.surfaces)
         self._fallback.clear(target.surfaces, target.ipc)
         _send_visibility(target.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
     def resume_after_overlay(self, target: SubtitleTarget) -> None:
+        self._suspended = False
         if self._state.owner == PixelOwner.LEGACY:
             self._state, actions = reduce_ownership(
                 self._state, OwnershipEvent(EventKind.LEGACY_REHANDOFF)
@@ -958,6 +1310,38 @@ class NativeVisibleRenderer:
         # Verify, not activate: `suspend_for_overlay` set sub-visibility behind the FSM's back, so
         # the established flag is stale by construction and only mpv can settle it.
         self._verify_native(target)
+
+    def _publish_overpaint(self, request: DrawRequest, surfaces) -> None:
+        """Put device 2's raster on its own slot, or take it down when this cue has none.
+
+        Both halves matter: a cue that needs no raster must actively remove the previous one, or the
+        last attachment-only cue's colors stay painted over the words of every cue after it.
+        """
+        if surfaces is None:
+            return
+        image = overpaint_image(request, drifting=self._drifting)
+        if image is None:
+            if self._overpaint_shown:
+                self._drop_overpaint()
+                surfaces.remove(OverlayId.OVERPAINT, owner=Owner.SUBTITLE)
+            return
+        # A hover redraws the whole cue, and the raster is the one part of it a hover cannot
+        # change — the highlight is device 1's slot, not this one. One live cue published fifteen
+        # byte-identical frames against seven tooltips; each is an upload of the cue's pixels to
+        # mpv for a screen that already shows them.
+        published = (image.x, image.y, image.rgba.tobytes())
+        if self._overpaint_shown and published == self._overpaint_published:
+            return
+        self._overpaint_shown = True
+        self._overpaint_published = published
+        _trace_overpaint_placement(request, image)
+        # The array path, not `present`: these pixels were composited into numpy and never were a
+        # PIL image. Wrapping one to unwrap it again is two copies of every cue.
+        surfaces.present_rgba(
+            image.rgba, image.x, image.y, oid=OverlayId.OVERPAINT, owner=Owner.SUBTITLE
+        )
+        if otel_metrics.subtitle_overpaint_frames is not None:
+            otel_metrics.subtitle_overpaint_frames.add(1)
 
     def _hide_focus(self, ipc) -> None:
         self._submit_focus(ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))

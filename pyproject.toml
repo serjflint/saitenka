@@ -55,10 +55,10 @@ layout-engine = ["taffylite>=0.1.0"]
 images = ["resvglite>=0.2.0"]
 # Native-visible ASS interaction. The wrapper stays separate from the Apache-2.0 core package and
 # runtime-loads either an explicit or system libass.
-subtitle-geometry = ["libasslite==0.1.2"]
+subtitle-geometry = ["libasslite==0.2.0"]
 subtitle-geometry-bundle = [
     "saitenka[subtitle-geometry]",
-    "libasslite-bundle==0.1.2",
+    "libasslite-bundle==0.1.3",
 ]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
@@ -140,6 +140,13 @@ test = [
 ]
 dev = [
     { include-group = "test" },
+    # `poe all` renders the converted-document oracle through real libass, but `libasslite` sits in
+    # the `subtitle-geometry` extra that neither `full` nor `test` declares — so the suite was green
+    # only while an env happened to still hold it, and a clean `uv sync` produced a red gate on a
+    # clean tree. Not in `test`, which the 3.15t CI legs install alone precisely to avoid building
+    # native wheels; `layout-engine` and `images` stay out entirely, deliberately absent from the
+    # gate so their own CI jobs are where those Rust paths are exercised.
+    "saitenka[subtitle-geometry]",
     "mypy>=2.3.0",
     "playwright>=1.61.0",
     "poethepoet>=0.48.0",
@@ -601,7 +608,7 @@ timeline-bench-banded = { shell = "PYTHON_GIL=0 uv run --extra full python examp
 # L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
 # No PYTHON_GIL=0 — the smoke tests input→OSD mapping, not free-threading, and forcing the GIL off is a
 # fatal `config_read_gil` error on a non-free-threaded interpreter (the E2E leg pins 3.13 for fugashi wheels).
-smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py tests/test_live_ass_document.py" }
+smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py tests/test_live_mpv_premises.py tests/test_live_ass_document.py tests/test_live_subtitle_pixel_differential.py" }
 # Live-mpv jank harness (#32): drive the overlay against a real PLAYING mpv and poll mpv's own
 # frame-drop counters — the true real-time signal the headless benches can't see. Needs a display; the
 # E2E GUI tier runs it under Xvfb. --max-drops is the catastrophic-jank gate.
@@ -618,7 +625,10 @@ install-smoke = { cmd = "uv run --no-project python tools/install_smoke.py" }
 # `subtitle-geometry-bundle` is deliberately absent: its wheel needs a staged native payload only CI
 # produces. A running mpv holds the modules it imported at launch, so an edit is not live until mpv
 # is fully quit and relaunched — "behaviour didn't change" is almost always a stale process.
-install-editable = { shell = "uv tool install --force --python 3.14t --editable '.[full,layout-engine,images,subtitle-geometry]'", help = "Put this checkout on PATH as `saitenka` for live mpv testing (relaunch mpv after)" }
+# `install-plugin` is not a convenience: the lua bakes an ABSOLUTE path to the binary, because a
+# Finder-launched mpv gets launchd's PATH. Reinstalling without re-baking leaves mpv spawning the
+# previous checkout — a live run silently exercising the wrong branch.
+install-editable = { shell = "uv tool install --force --python 3.14t --editable '.[full,layout-engine,images,subtitle-geometry]' && saitenka install-plugin", help = "Put this checkout on PATH as `saitenka` for live mpv testing (relaunch mpv after)" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
@@ -797,6 +807,11 @@ port-probe-census = { shell = "uv run python tools/port_probe_census.py", help =
 # *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
 # pin. Yomitan-backed corpora skip (not fail) when no checkout at the pin is found. See tools/corpus_drift.py.
 corpus-drift = { shell = "uv run --extra full python tools/corpus_drift.py" }
+# NOT in `all` (needs mpv + ffmpeg on PATH) — re-asks a live mpv the question the committed
+# `tests/fixtures/subrip_rows.json` answers. `subtitles.subrip` predicts the ASS event libavcodec
+# hands mpv for a SubRip cue; that fixture is the only oracle for it, and it goes stale silently
+# when a new libavcodec changes the conversion. `record` re-blesses it, deliberately.
+subrip-oracle = { shell = "uv run tools/subrip_oracle.py check" }
 # Docs site (Material for MkDocs → Read the Docs). `--strict` fails on broken links/nav, so a docs
 # regression is caught locally, not on RTD. NOT in `all` (docs deps are an opt-in group).
 # `docs-cli`/`docs-markers` regenerate committed reference fragments from the code (run after changing
@@ -861,7 +876,7 @@ shell = { shell = "shellcheck install/*.sh" }
 # ADVISORY — PowerShell installer static analysis (PSScriptAnalyzer). Prereqs: `brew install --cask
 # powershell` + `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`. Kept OUT of `hygiene`
 # because pwsh is a heavy, mac-uncommon prereq and the .ps1 files only matter for Windows packaging.
-# Excludes PSAvoidUsingWriteHost (installers legitimately colour output) + PSUseBOMForUnicodeEncodedFile
+# Excludes PSAvoidUsingWriteHost (installers legitimately color output) + PSUseBOMForUnicodeEncodedFile
 # (bad advice cross-platform); leaves the real ones (empty catch, Invoke-Expression). -EnableExit → rc=findings.
 ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost -EnableExit\"" }
 

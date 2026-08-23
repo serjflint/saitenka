@@ -1,14 +1,17 @@
 """Persistent overlay config: TOML load, path expansion, precedence, env override."""
 
+from dataclasses import fields
 from pathlib import Path
 
 from saitenka.app.config import (
+    SubtitleGeometryOptions,
     TelemetryOptions,
     config_path,
     expand_paths,
     load_config,
     resolve_resync_split_penalty,
     resolve_telemetry,
+    subtitle_geometry_options,
     warn_retired,
 )
 
@@ -87,3 +90,22 @@ def test_a_config_that_sets_nothing_retired_warns_about_nothing(caplog):
         assert warn_retired({"perf": {"prefetch_workers": 2}, "slang": "ja"}) == []
 
     assert caplog.text == ""
+
+
+def test_every_subtitle_geometry_setting_survives_the_loader():
+    """Field by field, because the loader names each one and a field it forgets is invisible: the
+    option keeps its default, the config file says otherwise, and nothing warns. `native_formats`
+    shipped that way — `overlay.toml` asked for the SubRip tracks and got authored-ass.
+    """
+    written = {
+        "native_visible": True,
+        "native_formats": "all",
+        "library_path": "/opt/lib/libass.dylib",
+        "cache_max": 7,
+        "lookahead": 4,
+    }
+    assert {f.name for f in fields(SubtitleGeometryOptions)} == set(written)
+
+    loaded = subtitle_geometry_options({"subtitle_geometry": written})
+
+    assert {f.name: getattr(loaded, f.name) for f in fields(loaded)} == written

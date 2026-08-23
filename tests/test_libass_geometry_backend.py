@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 import pytest
 
 from saitenka.subtitles import (
+    FontProvider,
+    FontSetup,
     GeometryPaletteEntry,
     GeometryRequest,
     SubtitleEventId,
@@ -38,6 +41,9 @@ def request(
     margins: tuple[int, int, int, int] = (0, 0, 0, 0),
     use_margins: bool = False,
     render_profile: tuple[tuple[str, str], ...] = (),
+    font_setup: FontSetup | None = None,
+    palette_size: int = 2,
+    keep_coverage: bool = False,
 ) -> GeometryRequest:
     track = SubtitleTrackId("track")
     event = SubtitleEventId(track, 1_000, 2_000, 0, 0)
@@ -54,10 +60,12 @@ def request(
         palette=(
             GeometryPaletteEntry(event, 0, 0x010203),
             GeometryPaletteEntry(event, 1, 0x040506),
-        ),
+        )[:palette_size],
         reserved_rgb=(0xFFFFFF,),
         attachments=(("font.ttf", b"font"),),
+        font_setup=font_setup or FontSetup(),
         render_profile=render_profile,
+        keep_coverage=keep_coverage,
     )
 
 
@@ -151,6 +159,9 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
     assert baseline.cache_key() != request(margins=(10, 20, 30, 40)).cache_key()
     assert baseline.cache_key() != request(use_margins=True).cache_key()
     assert baseline.cache_key() != request(render_profile=(("sub-scale", "1.2"),)).cache_key()
+    # Not a render input but a content one: a hit served maskless to a caller that wanted coverage
+    # drops the cue to the plainest color device with nothing saying why.
+    assert baseline.cache_key() != request(keep_coverage=True).cache_key()
 
 
 @pytest.mark.parametrize(
@@ -208,14 +219,18 @@ def test_request_rejects_palette_budget_before_rendering() -> None:
 
 
 class FakeRenderer:
-    def __init__(self, result: Result) -> None:
+    def __init__(self, result: Result, ass: bytes = b"") -> None:
         self.result = result
         self.closed = False
         self.calls: list[tuple[tuple, dict]] = []
+        self.documents: list[bytes] = [ass]
 
     def render(self, *args, **kwargs) -> Result:
         self.calls.append((args, kwargs))
         return self.result
+
+    def set_document(self, ass: bytes, _features=()) -> None:
+        self.documents.append(ass)
 
     def close(self) -> None:
         assert not self.closed
@@ -225,30 +240,162 @@ class FakeRenderer:
         return 0x1705000
 
 
-def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
-    created: list[FakeRenderer] = []
+def _recording_factory(created: list[FakeRenderer]):
+    layers = Result(
+        (Layer(1, 1, b"\xff", 0x01020300, 10, 20), Layer(1, 1, b"\xff", 0x04050600, 30, 40))
+    )
 
-    def factory(_ass, **_kwargs):
-        renderer = FakeRenderer(
-            Result(
-                (
-                    Layer(1, 1, b"\xff", 0x01020300, 10, 20),
-                    Layer(1, 1, b"\xff", 0x04050600, 30, 40),
-                )
-            )
-        )
+    def factory(ass, **_kwargs):
+        renderer = FakeRenderer(layers, ass)
         created.append(renderer)
         return renderer
 
-    backend = LibassGeometryBackend(renderer_cache_max=1, renderer_factory=factory)
+    return factory
+
+
+def test_a_new_cue_swaps_the_document_instead_of_rebuilding_libass() -> None:
+    """A renderer is identified by its font environment, not by the cue it happens to hold.
+
+    Keying it on the snapshot identity — which hashes the timestamp, the palette and the document
+    — meant it could never be reused: one live session built a renderer for 16 of 18 renders, each
+    a libass init and a font-directory rescan, and threw away the glyph cache it had just filled
+    for the same fonts.
+    """
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(request())
+    backend.render(request(ass=b"the next cue"))
+    backend.close()
+
+    assert len(created) == 1, "a second cue rebuilt the whole library"
+    assert created[0].documents == [b"ass", b"the next cue"]
+
+
+def test_the_swapped_in_document_is_the_one_the_render_is_measured_against() -> None:
+    """The hazard the reuse opens, and the reason the swap is not left to the caller: a cached
+    renderer still holding the previous cue's track answers with that cue's boxes, silently — hit
+    regions beside the words, which is the failure this whole path exists to prevent."""
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(request())
+    backend.render(request(ass=b"the next cue"))
+    rendered_under = created[0].documents[-1]
+    backend.close()
+
+    assert rendered_under == b"the next cue"
+
+
+def test_a_different_font_environment_gets_its_own_renderer() -> None:
+    """The other half of the identity: fonts are what a renderer is built around, so a track that
+    brings its own must not be measured against the previous track's font set."""
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(request())
+    backend.render(request(font_setup=FontSetup(default_family="Hiragino Sans")))
+    backend.close()
+
+    assert len(created) == 2
+
+
+def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(
+        renderer_cache_max=1, renderer_factory=_recording_factory(created)
+    )
 
     assert len(backend.render(request()).tokens) == 2
-    assert len(backend.render(request(ass=b"other")).tokens) == 2
+    assert len(backend.render(request(font_setup=FontSetup(default_family="other"))).tokens) == 2
     assert len(created) == 2 and created[0].closed and not created[1].closed
 
     backend.close()
     backend.close()
     assert created[1].closed
+
+
+def test_building_a_renderer_is_timed_and_reusing_one_is_not(monkeypatch) -> None:
+    """The interval nothing measured. `render_ms` times `renderer.render()` and `extract_ms` a
+    pure-Python walk, so a library init and a font scan fell between the two spans and read as
+    free — which is how a per-cue cost got argued about from console noise instead of a number.
+    Zero on a reuse, so the histogram measures construction rather than diluting it.
+    """
+    from saitenka import otel_metrics
+
+    spans: list[dict[str, object]] = []
+
+    class _Span:
+        def __init__(self, values: dict[str, object]) -> None:
+            self.values = values
+
+        def set(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+    @contextmanager
+    def record(_name: str, **attributes: str):
+        values: dict[str, object] = dict(attributes)
+        spans.append(values)
+        yield _Span(values)
+
+    monkeypatch.setattr(otel_metrics, "traced", record)
+    layers = Result((Layer(1, 1, b"\xff", 0x01020300, 10, 20),))
+    backend = LibassGeometryBackend(renderer_factory=lambda *_a, **_k: FakeRenderer(layers))
+    try:
+        backend.render(request(palette_size=1))
+        backend.render(request(palette_size=1))
+    finally:
+        backend.close()
+
+    built = [span["renderer_built_ms"] for span in spans if "renderer_built_ms" in span]
+    assert len(built) == 2
+    assert built[0] >= 0.0
+    assert built[1] == 0.0, "a cached renderer was billed for a construction that did not happen"
+
+
+def test_backend_forwards_every_font_source_to_the_renderer() -> None:
+    """The measuring renderer has to be handed the same four sources mpv's was, or it lays the cue
+    out in whatever the system happens to offer and every box comes out the wrong width."""
+    seen: list[dict] = []
+
+    def factory(_ass, **kwargs):
+        seen.append(kwargs)
+        return FakeRenderer(Result((Layer(1, 1, b"\xff", 0x01020300, 10, 20),)))
+
+    backend = LibassGeometryBackend(renderer_factory=factory)
+    setup = FontSetup(
+        fonts_dir="/config/fonts",
+        extract_fonts=True,
+        default_font="/config/subfont.ttf",
+        default_family="sans-serif",
+        fontconfig_config="/config/fonts.conf",
+        font_provider=FontProvider.FONTCONFIG,
+    )
+
+    backend.render(request(font_setup=setup, palette_size=1))
+
+    assert seen == [
+        {
+            "fonts": [("font.ttf", b"font")],
+            "library_path": None,
+            "fonts_dir": "/config/fonts",
+            "extract_fonts": True,
+            "default_font": "/config/subfont.ttf",
+            "default_family": "sans-serif",
+            "fontconfig_config": "/config/fonts.conf",
+            "font_provider": 3,
+            "features": [],
+        }
+    ]
+
+
+def test_a_font_source_change_is_a_different_cached_renderer() -> None:
+    """Two tracks whose only difference is the font set must not share a renderer: libass reads the
+    directory and the extraction flag before it parses, so a reused one is measuring the old set."""
+    plain = request(palette_size=1)
+    attached = request(palette_size=1, font_setup=FontSetup(fonts_dir="/config/fonts"))
+
+    assert plain.cache_key() != attached.cache_key()
 
 
 def test_backend_forwards_mpv_margin_contract() -> None:
@@ -272,6 +419,7 @@ def test_backend_forwards_mpv_margin_contract() -> None:
                 "margins": (98, 99, 0, 0),
                 "use_margins": True,
                 "max_bitmap_bytes": 1_843_200,
+                "style": None,
             },
         )
     ]

@@ -130,6 +130,10 @@ class KeyOptions:
     sub_picker_key: str = field(
         default="Ctrl+j", metadata={"help": "Open the jimaku subtitle-source download picker."}
     )
+    legacy_renderer_key: str = field(
+        default="Ctrl+Shift+L",
+        metadata={"help": "Draw subtitles with the legacy renderer instead of mpv's."},
+    )
     preview_key: str = field(default="p", metadata={"help": "Toggle the card-preview panel."})
     hover_pause_key: str = field(default="Alt+p", metadata={"help": "Toggle pause-on-hover."})
     sub_prev_key: str = field(
@@ -347,14 +351,21 @@ class SubtitleGeometryOptions:
         default=False,
         metadata={"help": "Keep mpv subtitles visible and derive hover geometry with libass."},
     )
+    native_formats: str = field(
+        default="authored-ass",
+        metadata={
+            "help": (
+                "Which tracks the native path takes: authored-ass (only .ass) or all (also the "
+                "SubRip tracks mpv converts). Ignored when native_visible is off."
+            )
+        },
+    )
     library_path: str | None = field(
         default=None,
         metadata={"help": "Optional explicit path to the system libass library."},
     )
     cache_max: int = field(default=3, metadata={"help": "Current/lookahead geometry cache bound."})
-    lookahead: int = field(
-        default=2, metadata={"help": "Static authored ASS cues to render ahead."}
-    )
+    lookahead: int = field(default=2, metadata={"help": "Static cues to render ahead."})
 
 
 # Flat legacy kwarg name -> the ReaderOptions group it belongs to (used by with_overrides).
@@ -454,8 +465,12 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
     lookahead = values.get("lookahead", defaults.lookahead)
     if isinstance(lookahead, bool) or not isinstance(lookahead, int) or lookahead < 0:
         raise ValueError("subtitle_geometry.lookahead must be a non-negative integer")
+    native_formats = values.get("native_formats", defaults.native_formats)
+    if not isinstance(native_formats, str):
+        raise TypeError("subtitle_geometry.native_formats must be a string")
     return SubtitleGeometryOptions(
         native_visible=native_visible,
+        native_formats=native_formats,
         library_path=library_path,
         cache_max=cache_max,
         lookahead=lookahead,

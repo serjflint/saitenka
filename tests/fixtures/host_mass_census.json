@@ -2,14 +2,14 @@
   "counts": {
     "alias": 1,
     "delegated": 1,
-    "delegator": 93,
+    "delegator": 94,
     "derived": 45,
-    "init_lines": 456,
+    "init_lines": 459,
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2348,
-    "total": 343
+    "substantive_lines": 2353,
+    "total": 344
   },
-  "reason": "the subtitle target carries whether the source can ever produce geometry, so an .srt selects the renderer that can draw its hit boxes instead of leaving the episode unscannable"
+  "reason": "one port line: the geometry owner can ask for a rebuild, not only a redraw, which is what lets a late font verdict produce the coverage masks the raster device needs"
 }

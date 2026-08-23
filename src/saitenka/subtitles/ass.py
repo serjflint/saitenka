@@ -30,6 +30,10 @@ _COLOR_STATE = re.compile(
     r"|r(?P<style>[^\\}]*))"
 )
 _PRIMARY_COLOR_COMMAND = re.compile(r"\\1?c")
+#: Effects that spread a token's ink past its own outline. Not a color problem — libass reports the
+#: reserved color exactly either way — but a size one: `\blur4` grows a 32px glyph's image to 60px,
+#: which makes two neighbouring words' boxes overlap by half a glyph and hover pick the wrong one.
+_SPREAD = re.compile(r"\\(?:blur|be)(?P<amount>-?\d*\.?\d*)(?![\d.])")
 _ASS_TIME = re.compile(
     r"(?P<hours>\d+):(?P<minutes>[0-5]\d):(?P<seconds>[0-5]\d)\.(?P<centiseconds>\d{2})"
 )
@@ -56,6 +60,11 @@ class UnsupportedAssEvent(ValueError):
 class AssStyle:
     name: str
     primary_color: str
+    #: The face and size libass lays this style's text out with, in the document's script units.
+    #: Carried so an overprint can draw a token in the SAME face at the SAME size — a decoration
+    #: drawn from the box alone cannot, and a guessed face is a different advance.
+    font_name: str = ""
+    font_size: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.name or not re.fullmatch(r"[0-9A-Fa-f]{1,8}", self.primary_color):
@@ -201,10 +210,31 @@ def _parse_style(fields: Sequence[str], value: str) -> AssStyle:
     if len(values) != len(fields):
         raise UnsupportedAssEvent("ASS style row does not match its Format row")
     row = dict(zip(fields, values, strict=True))
+    # `primarycolour`, not `primarycolor`: this is the ASS `Format` row's own field name, casefolded
+    # from `PrimaryColour`. Spelling it the way the rest of this file spells the word makes every
+    # style fail to parse.
     color_match = re.fullmatch(r"&H([0-9A-Fa-f]{1,8})&?", row.get("primarycolour", ""))
     if not color_match or not row.get("name"):
         raise UnsupportedAssEvent("ASS style has no parseable primary color")
-    return AssStyle(row["name"], color_match.group(1))
+    return AssStyle(
+        row["name"],
+        color_match.group(1),
+        row.get("fontname", "").strip(),
+        _style_size(row.get("fontsize", "")),
+    )
+
+
+def _style_size(value: str) -> float:
+    """The style's `Fontsize`, or 0 when it is missing or unparseable.
+
+    Zero rather than an exception: the size only matters to the overprint, and a style whose color
+    parses is still a style the hit map can use. The overprint refuses a token with no size instead
+    of drawing one at a guess.
+    """
+    try:
+        return float(value.strip())
+    except ValueError:
+        return 0.0
 
 
 def parse_ass_styles(extradata: bytes) -> AssStyleCatalog:
@@ -450,9 +480,29 @@ def _validate_rewrite_envelope(
             raise UnsupportedAssEvent("a token boundary may split a Latin ligature")
 
 
+def _spreads_ink(content: str) -> bool:
+    """Whether a `\\blur`/`\\be` in this block actually spreads anything.
+
+    `\\blur0` and `\\be0` are no-ops and common in real typesetting; refusing them would refuse
+    tracks for a tag that changes nothing. Anything whose amount does not read as a number — a bare
+    `\\blur`, which resets to the style's, or a malformed `\\blur-` — cannot be shown to spread
+    nothing, and refusing is the direction that costs a cache miss rather than a wrong box.
+    """
+    return any(_amount_spreads(match.group("amount")) for match in _SPREAD.finditer(content))
+
+
+def _amount_spreads(amount: str) -> bool:
+    try:
+        return float(amount) != 0
+    except ValueError:
+        return True
+
+
 def _validate_static_overrides(source: RawSubtitleEvent, blocks: Sequence[_OverrideBlock]) -> None:
     if any(_UNSAFE.search(block.content) for block in blocks):
         raise UnsupportedAssEvent("animated or karaoke overrides are not color-rewritten")
+    if any(_spreads_ink(block.content) for block in blocks):
+        raise UnsupportedAssEvent("a blurred token's extent is not the word's extent")
     if source.effect.strip():
         raise UnsupportedAssEvent("ASS effects are outside the static interactive envelope")
     for block in blocks:

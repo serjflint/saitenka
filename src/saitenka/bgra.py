@@ -22,13 +22,12 @@ _PREMUL_LUT = (
 _PREMUL_FLAT = np.ascontiguousarray(_PREMUL_LUT.ravel())
 
 
-def to_bgra_array(img: Image.Image, *, premultiply: bool = True) -> np.ndarray:
-    """RGBA image → a contiguous premultiplied **BGRA** array (H, W, 4) for mpv's ``overlay-add``.
+def rgba_to_bgra_array(arr: np.ndarray, *, premultiply: bool = True) -> np.ndarray:
+    """An RGBA (H, W, 4) uint8 array → a contiguous premultiplied **BGRA** one.
 
-    Exposed so callers can convert a tall panel ONCE and then upload scrolled viewport *slices* of it
-    without re-converting (fast scrolling). Premultiply is a 256×256 LUT gather (byte-identical to
-    the reference ``value * alpha // 255``)."""
-    arr = np.asarray(img.convert("RGBA"))
+    Takes the array rather than an image so a producer that never had a PIL image — the subtitle
+    raster device composites straight into numpy — does not round-trip through one to get here.
+    """
     if premultiply:
         idx = arr[:, :, 3:4].astype(np.uint16) * 256 + arr[:, :, :3]
         rgb = _PREMUL_FLAT.take(idx)
@@ -36,10 +35,26 @@ def to_bgra_array(img: Image.Image, *, premultiply: bool = True) -> np.ndarray:
     return np.ascontiguousarray(arr[:, :, [2, 1, 0, 3]])
 
 
+def to_bgra_array(img: Image.Image, *, premultiply: bool = True) -> np.ndarray:
+    """RGBA image → a contiguous premultiplied **BGRA** array (H, W, 4) for mpv's ``overlay-add``.
+
+    Exposed so callers can convert a tall panel ONCE and then upload scrolled viewport *slices* of it
+    without re-converting (fast scrolling). Premultiply is a 256×256 LUT gather (byte-identical to
+    the reference ``value * alpha // 255``)."""
+    return rgba_to_bgra_array(np.asarray(img.convert("RGBA")), premultiply=premultiply)
+
+
 def to_bgra(img: Image.Image, *, premultiply: bool = True) -> tuple[bytes, int, int, int]:
     """Convert an RGBA image to the (data, w, h, stride) mpv's ``overlay-add bgra`` expects."""
     bgra = to_bgra_array(img, premultiply=premultiply)
     return bgra.tobytes(), img.width, img.height, img.width * 4
+
+
+def rgba_to_bgra(arr: np.ndarray, *, premultiply: bool = True) -> tuple[bytes, int, int, int]:
+    """`to_bgra` for a producer that already holds the RGBA array."""
+    bgra = rgba_to_bgra_array(arr, premultiply=premultiply)
+    height, width = arr.shape[0], arr.shape[1]
+    return bgra.tobytes(), width, height, width * 4
 
 
 def scale_bgra(bgra: np.ndarray, scale: float) -> np.ndarray:

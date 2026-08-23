@@ -56,6 +56,12 @@ class PreparedAssFrame:
     semantic_text: str
     palette: tuple[GeometryPaletteEntry, ...]
     reserved_rgb: tuple[int, ...]
+    #: The document's script height, which is what libass scales its font sizes from. Carried so a
+    #: caller that knows the frame can turn a style's script-unit size into frame pixels; `0` when
+    #: the document declares none, which is the case where nothing may be drawn over the cue.
+    #: Required, not defaulted: a default is what let this field ship reading zero for every cue,
+    #: which silently switched the overprint off everywhere rather than failing anywhere.
+    play_res_y: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +72,25 @@ class _ParsedAssSource:
     signature_index: Mapping[tuple[object, ...], tuple[RawSubtitleEvent, ...]]
     reserved_bgr: tuple[int, ...]
     has_bom: bool
+    play_res_y: int
+
+
+def _token_faces(
+    events: Sequence[AnnotatedSubtitleEvent], catalog: AssStyleCatalog
+) -> dict[SubtitleEventId, tuple[str, float]]:
+    """The face and script-unit size each active event's style lays its text out in.
+
+    Per event rather than per token because the style is an event's, and an override tag that
+    changed the face mid-event would make the event unpaintable rather than differently painted —
+    such a cue is refused upstream, so a per-event answer is the whole answer here.
+    """
+    by_name = {style.name: style for style in catalog.styles}
+    faces: dict[SubtitleEventId, tuple[str, float]] = {}
+    for event in events:
+        source = event.decoded.source
+        style = by_name.get(source.style)
+        faces[source.identity] = ("", 0.0) if style is None else (style.font_name, style.font_size)
+    return faces
 
 
 def _bgr_to_rgb(color: int) -> int:
@@ -149,7 +174,24 @@ def _parsed_source(source: bytes, track_id: SubtitleTrackId) -> _ParsedAssSource
         ),
         source_primary_bgr_colors(catalog, raw_events),
         source.startswith(b"\xef\xbb\xbf"),
+        _play_res_y(decoded_source),
     )
+
+
+def _play_res_y(document: str) -> int:
+    """The `[Script Info]` `PlayResY`, or 0 when the document declares none.
+
+    Zero rather than libass's own default: this value only feeds the overprint, and guessing it
+    would put a colored glyph at the wrong size over the right word.
+    """
+    for line in document.splitlines():
+        name, separator, value = line.partition(":")
+        if separator and name.strip().casefold() == "playresy":
+            try:
+                return int(float(value.strip()))
+            except ValueError:
+                return 0
+    return 0
 
 
 def _event_signature(event: RawSubtitleEvent) -> tuple[object, ...]:
@@ -308,16 +350,23 @@ def prepare_ass_hit_map_frame(
     frame_id = SubtitleFrameId(
         track_id, tuple(event.decoded.source.identity for event in annotated)
     )
+    faces = _token_faces(annotated, parsed.catalog)
     return PreparedAssFrame(
         encoded,
         frame_id,
         annotated,
         semantic_text,
         tuple(
-            GeometryPaletteEntry(item.event_id, item.token_index, _bgr_to_rgb(item.bgr))
+            GeometryPaletteEntry(
+                item.event_id,
+                item.token_index,
+                _bgr_to_rgb(item.bgr),
+                *faces.get(item.event_id, ("", 0.0)),
+            )
             for item in colors
         ),
         tuple(_bgr_to_rgb(color) for color in reserved_bgr),
+        parsed.play_res_y,
     )
 
 

@@ -87,6 +87,7 @@ key name. Defaults match the tables above. See [Configuration](configuration.md)
 | `subtitle_mark_jp_key` | `Alt+j` | Mark the current track as Japanese |
 | `subtitle_retry_key` | `Ctrl+Shift+T` | Re-time / fetch subtitles |
 | `sub_picker_key` | `Ctrl+j` | Open the jimaku download picker |
+| `legacy_renderer_key` | `Ctrl+Shift+L` | Draw subtitles with Saitenka's own renderer instead of mpv's |
 | `profile_cycle_key` | `Alt+Shift+p` | Cycle the active reading profile |
 | `overlay_toggle_key` | `Alt+o` | Hide / show Saitenka |
 | `hover_pause_key` | `Alt+p` | Toggle hover auto-pause |

@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
+from util import requires_libass
 
 from saitenka.subtitles import (
     AnnotatedSubtitleEvent,
@@ -152,7 +153,34 @@ def test_parse_ass_styles_uses_authored_format_order() -> None:
     extradata = (
         b"[V4+ Styles]\nFormat: Fontname, PrimaryColour, Name\nStyle: Arial,&H00ABCDEF,Default\n"
     )
-    assert parse_ass_styles(extradata) == AssStyleCatalog((AssStyle("Default", "00ABCDEF"),))
+    assert parse_ass_styles(extradata) == AssStyleCatalog(
+        (AssStyle("Default", "00ABCDEF", "Arial"),)
+    )
+
+
+def test_a_style_without_a_usable_size_still_parses() -> None:
+    """The size only matters to the overprint. A style whose color parses is still one the hit map
+    can use, so an unparseable `Fontsize` costs the overprint, not the interaction."""
+    extradata = (
+        b"[V4+ Styles]\nFormat: Name, PrimaryColour, Fontname, Fontsize\n"
+        b"Style: Default,&H00ABCDEF,Arial,not-a-number\n"
+    )
+
+    catalog = parse_ass_styles(extradata)
+
+    assert catalog.styles[0].font_size == 0.0
+    assert catalog.styles[0].font_name == "Arial"
+
+
+def test_a_styles_face_and_size_are_read_for_the_overprint() -> None:
+    extradata = (
+        b"[V4+ Styles]\nFormat: Name, PrimaryColour, Fontname, Fontsize\n"
+        b"Style: Default,&H00ABCDEF,Noto Sans JP,48.5\n"
+    )
+
+    style = parse_ass_styles(extradata).styles[0]
+
+    assert (style.font_name, style.font_size) == ("Noto Sans JP", 48.5)
 
 
 def test_style_rows_and_identities_follow_libass_case_sensitivity() -> None:
@@ -509,6 +537,12 @@ def test_animated_effect_field_fails_closed() -> None:
         ("{\\fad(100,100)}猫", (0, 1), "animated or karaoke"),
         ("{\\fade(0,255,0,0,100,200,300)}猫", (0, 1), "animated or karaoke"),
         ("{\\t(\\fscx120)}動く", (0, 2), "animated or karaoke"),
+        ("{\\blur4}猫", (0, 1), "extent is not the word"),
+        ("{\\be2}猫", (0, 1), "extent is not the word"),
+        ("{\\blur}猫", (0, 1), "extent is not the word"),
+        # A sign with no digits: the amount group matches, and reading it as a number does not.
+        ("{\\blur-}猫", (0, 1), "extent is not the word"),
+        ("{\\be-.}猫", (0, 1), "extent is not the word"),
         ("{\\p1}m 0 0{\\p0}字", (0, 1), "drawing events"),
         ("色{\\r}変更", (0, 3), "crosses a token"),
         ("色{\\c&H112233&}変更", (0, 3), "crosses a token"),
@@ -524,6 +558,66 @@ def test_rewrite_fails_closed_for_unsupported_ass(
     source = annotated(raw, span)
     with pytest.raises(UnsupportedAssEvent, match=reason):
         rewrite_ass_event(source, {0: 0x010203}, CATALOG)
+
+
+@pytest.mark.parametrize("raw", ["{\\blur0}猫", "{\\be0}猫", "{\\blur0.0}猫"])
+def test_a_blur_that_spreads_nothing_is_not_a_refusal(raw: str) -> None:
+    """`\\blur0` and `\\be0` are ordinary in real typesetting — a group's template sets them and a
+    line overrides them back. Refusing the tag rather than the effect would refuse those tracks for
+    a command that changes no pixel."""
+    assert rewrite_ass_event(annotated(raw, (0, 1)), {0: 0x010203}, CATALOG) is not None
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_the_blur_refusal_is_measured_not_assumed() -> None:
+    """Why blur is refused, from libass rather than from reasoning about it.
+
+    The first guess was that a spread fill breaks the COLOUR keying — it does not: libass reports
+    the reserved color exactly, with any alpha in the low byte the hit map shifts out. What it
+    breaks is the EXTENT. Here the images grow by half a glyph and two neighbouring words overlap,
+    which is a hover landing on the wrong word.
+
+    `Spacing` is 10 because the precondition — that the sharp pair does NOT already overlap — was
+    otherwise decided by whatever the host calls `sans-serif`: the two glyphs abutted at exactly
+    0px against macOS's Hiragino and overlapped by 4px against Linux's Noto CJK. Spacing adds a
+    fixed advance whatever the face, so the gap survives the font instead of depending on it.
+    """
+    libasslite = requires_libass()
+    header = (
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
+        "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        "Style: D,sans-serif,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,10,0,"
+        "1,0,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+    )
+
+    def render(tag: str) -> list[tuple[int, int, int]]:
+        event = (
+            rf"Dialogue: 0,0:00:01.00,0:00:03.00,D,,0,0,0,,{{\pos(40,40){tag}\1c&H0000FF&}}猫"
+            r"{\1c&H00FF00&}犬" + "\n"
+        )
+        renderer = libasslite.AssRenderer((header + event).encode())
+        try:
+            result = renderer.render(2_000, (640, 360), (640, 360), pixel_aspect=1.0)
+            return [
+                (layer.color >> 8, layer.dst_x, layer.dst_x + layer.width)
+                for layer in result.layers
+                if layer.image_type == 0
+            ]
+        finally:
+            renderer.close()
+
+    sharp = render("")
+    blurred = render(r"\blur4")
+
+    assert [color for color, _left, _right in blurred] == [
+        color for color, _left, _right in sharp
+    ], "blur changed the reported color, which is not the reason it is refused"
+    assert sharp[0][2] <= sharp[1][1], "the sharp boxes should not overlap"
+    assert blurred[0][2] > blurred[1][1], "blur is refused because the boxes overlap"
 
 
 def test_hit_map_requires_exact_unique_non_reserved_colors() -> None:

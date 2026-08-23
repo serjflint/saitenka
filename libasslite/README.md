@@ -19,6 +19,11 @@ renderer = libasslite.AssRenderer(
     ass_bytes,
     fonts=[("subtitle-font.ttf", font_bytes)],
     library_path=Path("/opt/homebrew/lib/libass.dylib"),
+    fonts_dir="/home/me/.config/mpv/fonts",
+    extract_fonts=True,
+    default_family="sans-serif",
+    font_provider=libasslite.FontProvider.AUTODETECT,
+    features=[(libasslite.Feature.WRAP_UNICODE, True)],
 )
 result = renderer.render(
     timestamp_ms=1_500,
@@ -27,9 +32,21 @@ result = renderer.render(
     margins=(98, 99, 0, 0),  # top, bottom, left, right
     use_margins=False,
     max_bitmap_bytes=16 * 1024 * 1024,
+    style=libasslite.RenderStyle(font_scale=1.0, line_position=0.0),
 )
 renderer.close()
 ```
+
+Four font sources are available, matching what a player can offer libass: the system providers, a
+`fonts_dir` scanned for extra faces, `fonts=` bytes (`ass_add_font`, how a container's attachments
+arrive), and an `[Fonts]` section inside the document when `extract_fonts=True`. Set
+`font_provider=libasslite.FontProvider.NONE` to confine lookup to the first three.
+
+`RenderStyle` carries the renderer state libass keeps between frames — font scale, line spacing and
+position, hinting, shaper, and selective style override. It is passed per render because every member
+of it is a function of the display geometry; omitting it restores libass's defaults, so one render's
+result never depends on the render before it. `unsupported_features()` reports the track features
+this libass build could not apply.
 
 `AssRenderResult.layers` preserves libass list order. Each layer contains a tightly packed `bytes`
 bitmap (`width * height`), placement, `0xRRGGBBAA` color, and public image type. Rendering releases
@@ -48,9 +65,10 @@ copying it elsewhere; adjacent runtime dependencies must remain discoverable by 
 
 ## Scope
 
-The package deliberately exposes only in-memory ASS loading, memory fonts, frame/storage geometry,
-frame margins and margin policy, rendering, change detection, and copied image layers. It does not
-parse token spans, control mpv, schedule work, cache geometry, or bundle fonts/libass.
+The package deliberately exposes only in-memory ASS loading, the four font sources, font lookup
+defaults, track features, frame/storage geometry, frame margins and margin policy, the between-frame
+renderer state, rendering, change detection, and copied image layers. It does not parse token spans,
+control mpv, schedule work, cache geometry, or bundle fonts/libass.
 
 ## Licensing
 

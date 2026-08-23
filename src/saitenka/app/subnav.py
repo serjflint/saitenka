@@ -101,6 +101,14 @@ def sub_nav(ports: NavPorts, delta: int) -> bool:
     idx = episode.sub_index
     if idx is None:
         return False
+    # The index is the subtitle FILE's cues; mpv's filters run between the file and the screen. With
+    # one active, stepping by index can land on a cue mpv drops — the instant render shows a line
+    # that never appears and the seek settles somewhere else. mpv's own `sub-seek` cannot make that
+    # mistake, so the instant half is given up rather than aimed at silence.
+    if subnav_policy.filters_can_drop_a_cue(
+        {name: ports.get(f"options/{name}") for name in subnav_policy.FILTER_OPTIONS}
+    ):
+        return False
     # Span covers the decision AND the render it triggers below — set_subtitle's own "cue_redraw"
     # span nests inside this one, so the span's total duration IS the keypress → drawn latency for
     # the instant-nav path.

@@ -684,3 +684,225 @@ def test_new_epoch_reports_its_invalidation_cause_once() -> None:
     assert worker.prefetch_miss_reason("second-new-key") == "first-seen"
 
     worker.close()
+
+
+class HeavyCoverageBackend(FakeGeometryBackend):
+    """A cue whose coverage masks are a megabyte — a full-screen sign, not a pathological input."""
+
+    MASK = b"\xff" * (1024 * 1024)
+
+    def render(self, request: GeometryRequest) -> GeometrySnapshot:
+        result = super().render(request)
+        return GeometrySnapshot(
+            result.generation,
+            result.track_id,
+            result.frame_id,
+            result.timestamp_ms,
+            result.variant,
+            tuple(
+                TokenGeometry(
+                    token.event_id, token.token_index, token.bounds, (), "", 0.0, self.MASK
+                )
+                for token in result.tokens
+            ),
+        )
+
+
+def fill_cache(worker: SubtitleGeometryWorker, coordinator, count: int) -> None:
+    for index in range(count):
+        assert worker.prefetch(
+            f"cue-{index}",
+            coordinator.generation,
+            lambda index=index: request(coordinator.generation, 1_300 + index),
+        )
+        assert worker.wait_idle()
+
+
+def test_retained_coverage_is_bounded_by_bytes_not_by_entry_count(monkeypatch) -> None:
+    """The entry bound does not bound this. Coverage is the one part of a snapshot whose size a
+    count says nothing about, and lookahead holds a window of cues, so a run of full-screen signs
+    grows the retained alpha without any meter moving."""
+    from saitenka.app import subtitle_geometry_job
+
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 2 * 1024 * 1024)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=8)
+
+    fill_cache(worker, coordinator, 5)
+
+    assert worker.retained_coverage_bytes <= 2 * 1024 * 1024
+    assert worker.stats.coverage_trimmed > 0
+    worker.close()
+
+
+def test_the_budget_drops_the_masks_and_keeps_the_boxes(monkeypatch) -> None:
+    """What the budget evicts is the color device's input, not the cue. A stripped snapshot is
+    still a complete set of hit boxes — its tokens fall to the rule device, which needs nothing —
+    where evicting the entry would cost a re-render of a cue about to be shown."""
+    from saitenka.app import subtitle_geometry_job
+
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 1)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4)
+
+    fill_cache(worker, coordinator, 2)
+    assert worker.publish_prefetched("cue-1", coordinator.generation) is not None
+
+    published = coordinator.current
+    assert published is not None
+    assert published.tokens[0].bounds.contains(25, 30), "the hit boxes did not survive the trim"
+    assert published.tokens[0].coverage == b""
+    worker.close()
+
+
+def test_the_oldest_cue_gives_up_its_masks_first(monkeypatch) -> None:
+    """The cue about to be drawn is the one that still needs its raster; a speculative one measured
+    three cues ahead is the cheapest color to lose."""
+    from saitenka.app import subtitle_geometry_job
+
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 1024 * 1024)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4)
+
+    fill_cache(worker, coordinator, 2)
+
+    assert worker.publish_prefetched("cue-0", coordinator.generation) is not None
+    first = coordinator.current
+    coordinator.invalidate()
+    assert worker.publish_prefetched("cue-1", coordinator.generation) is not None
+    second = coordinator.current
+
+    assert first is not None and second is not None
+    assert first.tokens[0].coverage == b""
+    assert second.tokens[0].coverage == HeavyCoverageBackend.MASK
+    worker.close()
+
+
+def test_the_trim_treats_a_cue_the_result_cache_evicted_as_the_oldest(monkeypatch) -> None:
+    """ "Oldest first" spans two maps, and they do not agree on age by construction.
+
+    Every prefetch is written to both, but current requests fill only the result cache — so a key
+    the result cache no longer holds is one it evicted, which makes it the oldest thing the worker
+    has. Listing the cache first put it last, and the trim then took the masks off the cue nearest
+    to being drawn while keeping them for one already gone.
+    """
+    from saitenka.app import subtitle_geometry_job
+
+    mask = len(HeavyCoverageBackend.MASK)
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 2 * mask)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+
+    fill_cache(worker, coordinator, 2)
+    # A current request of its own: this is what pushes cue-0 out of the result cache while the
+    # prefetch map keeps it, which is the only way the two orderings come apart.
+    assert worker.submit_job(coordinator.generation, lambda: request(coordinator.generation, 9_999))
+    assert worker.wait_idle()
+
+    # The newer cue first: publishing re-enters the cache and can trim again, so reading the one
+    # under test last would be reading the state of a later trim.
+    assert worker.publish_prefetched("cue-1", coordinator.generation) is not None
+    newer = coordinator.current
+    coordinator.invalidate()
+    assert worker.publish_prefetched("cue-0", coordinator.generation) is not None
+    evicted = coordinator.current
+
+    assert evicted is not None and newer is not None
+    assert evicted.tokens[0].coverage == b"", "the oldest cue kept its masks"
+    assert newer.tokens[0].coverage == HeavyCoverageBackend.MASK
+
+
+def test_close_pays_the_settlements_no_terminal_will_ever_deliver() -> None:
+    """Closing retires the lane, so a queued settlement has nothing left to arrive and pay it. Its
+    caller is told the work finished — which is true, it finished by ending — rather than waiting on
+    a completion the worker has already stopped being able to produce."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    settled: list[str] = []
+    holding = threading.Event()
+    worker = SubtitleGeometryWorker(
+        coordinator, cache_max=4, submit=lambda **_kwargs: holding.is_set()
+    )
+    holding.set()  # admitted, so the job stays in flight and its settlement stays queued
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation),
+        on_settled=lambda: settled.append("owed"),
+    )
+    assert settled == [], "the terminal never fired, so nothing should have settled yet"
+
+    worker.close()
+
+    assert settled == ["owed"]
+
+
+def test_a_caller_that_attached_to_a_refused_speculation_is_settled_too() -> None:
+    """The other way a caller is owed a settlement, and the one a refusal used to strand.
+
+    `_pump` publishes the in-flight prefetch key inside the lock and submits outside it. A caller
+    whose request matches that key in the window between registers a waiter and no job of its own,
+    appending its callback directly. Paying only the queued one left this in `_settling` for the
+    next terminal — one cue's callback against another cue's snapshot.
+
+    The submitter drives the interleaving instead of a thread, so the window is a fact of the code
+    rather than of the scheduler.
+    """
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    settled: list[str] = []
+    worker: SubtitleGeometryWorker | None = None
+
+    def refuse_after_a_caller_attaches(**_kwargs) -> bool:
+        assert worker is not None
+        worker.submit_job(
+            coordinator.generation,
+            lambda: request(coordinator.generation),
+            work_key="cue-0",
+            on_settled=lambda: settled.append("attached"),
+        )
+        return False
+
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=refuse_after_a_caller_attaches)
+    assert worker.prefetch("cue-0", coordinator.generation, lambda: request(coordinator.generation))
+
+    assert settled == ["attached"]
+    assert not worker._prefetch_waiters, "the refused speculation left a waiter behind"
+    worker.close()
+
+
+def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> None:
+    """A settlement is queued against the terminal of the job that owes it. Refused admission means
+    that terminal never arrives, so leaving it queued hands it to the NEXT job's terminal — which
+    runs this cue's callback against a later cue's snapshot, and the callback's owner is nowhere in
+    the traceback when the token indices then disagree.
+    """
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lambda **_kwargs: False)
+    settled: list[str] = []
+
+    for name in ("first", "second"):
+        assert worker.submit_job(
+            coordinator.generation,
+            lambda: request(coordinator.generation, 1_300),
+            on_settled=lambda name=name: settled.append(name),
+        )
+
+    assert settled == ["first", "second"]
+    worker.close()
+
+
+def test_the_render_space_is_part_of_the_cache_key() -> None:
+    """Not a freshness nicety: a snapshot's coverage masks are rasterised at this frame's pixels and
+    uploaded as a bitmap, which mpv does not rescale with its OSD surface the way it rescales a text
+    payload. Drop the frame from the key and a resize paints the old window's colors over the new
+    window's glyphs."""
+    base = request(1)
+    resized = GeometryRequest(
+        generation=base.generation,
+        track_id=base.track_id,
+        frame_id=base.frame_id,
+        timestamp_ms=base.timestamp_ms,
+        frame_size=(1280, 720),
+        storage_size=base.storage_size,
+        ass=base.ass,
+    )
+
+    assert base.cache_key() != resized.cache_key()

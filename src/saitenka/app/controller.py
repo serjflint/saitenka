@@ -58,6 +58,7 @@ from saitenka.app import (
     subtitle_intents,
     subtitle_modes,
     subtitle_raster,
+    subtitles,
     surfaces,
     telemetry,
     tooltip,
@@ -83,6 +84,7 @@ from saitenka.app.bindings import (
     HELP_TOGGLE_MSG,
     HOVER_PAUSE_MSG,
     KANJI_MSG,
+    LEGACY_RENDERER_MSG,
     MINE_ALL_MSG,
     MINE_MSG,
     MINE_VIDEO_MSG,
@@ -278,11 +280,38 @@ OBSERVED_PROPS = (
     "options/sub-ass-force-margins",
     "options/sub-ass-video-aspect-override",
     "options/sub-ass-use-video-data",
-    "options/sub-ass-vsfilter-aspect-compat",
     "options/sub-ass-style-overrides",
+    "options/sub-scale-with-window",
+    "options/sub-scale-by-window",
+    "options/blend-subtitles",
+    "options/sub-filter-sdh",
     "options/sub-font-provider",
     "options/embeddedfonts",
     "options/sub-fonts-dir",
+    "options/sub-font",
+    "options/osd-fonts-dir",
+    "options/osd-font-provider",
+    # `converted.STYLE_OPTIONS` — the style mpv applies to a track it converted. Observed so
+    # `_render_inputs` does not block on them per cue, and counted a render-space input so a
+    # mid-episode change re-measures the boxes it just moved.
+    "options/sub-font-size",
+    "options/sub-color",
+    "options/sub-outline-color",
+    "options/sub-back-color",
+    "options/sub-border-style",
+    "options/sub-outline-size",
+    "options/sub-shadow-offset",
+    "options/sub-spacing",
+    "options/sub-margin-x",
+    "options/sub-margin-y",
+    "options/sub-align-x",
+    "options/sub-align-y",
+    "options/sub-blur",
+    "options/sub-bold",
+    "options/sub-italic",
+    "options/sub-justify",
+    "options/video-crop",
+    "options/video-rotate",
     "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
 )
 # Which observations are geometry inputs, which retire the cue identity, and which render space
@@ -409,6 +438,7 @@ class Reader:
                     use_native=self._use_native_subtitle_renderer,
                     ownership_undecided=self._native_ownership_undecided,
                     redraw=self.draw_subtitle,
+                    reschedule=self._arm_geometry_refresh,
                     publish=self._publish_geometry,
                     tokenize_lookahead=lambda text: native_subtitles._lookahead_tokenized(
                         text,
@@ -420,7 +450,9 @@ class Reader:
                     ),
                 ),
                 lookahead=o.subtitle_geometry.lookahead,
+                formats=native_subtitles.native_formats(o.subtitle_geometry.native_formats),
             )
+            native_subtitles.connect_drift_sink(current_renderer, self.native_geometry)
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac
         # Alpha (0–255) of the translucent box behind the rendered subtitle; 0 = no box (fully see-through).
@@ -1058,7 +1090,19 @@ class Reader:
             draw_request=self._draw_request,
             source=None if geometry is None else geometry.source_path,
             native_unsupported=geometry is not None and geometry.source_unsupported,
+            legacy_forced=self.subtitle_pipeline.legacy_forced,
         )
+
+    def toggle_legacy_renderer(self) -> bool:
+        """Carry the intent to the coordinator, then redraw the cue under the renderer it chose."""
+        geometry = self.native_geometry
+        if geometry is not None:
+            geometry.invalidate(live=True)
+        forced = self.subtitle_pipeline.force_legacy(
+            self.subtitle_target(), forced=not self.subtitle_pipeline.legacy_forced
+        )
+        self.set_subtitle(self.sub_text)
+        return forced
 
     def _draw_request(self) -> DrawRequest:
         """Snapshot the host once per draw, so the values cannot drift apart mid-render.
@@ -1084,6 +1128,7 @@ class Reader:
             hover_span=self.interaction.hovered_word_meta.span,
             styles=self.styles,
             boxes=self.boxes,
+            paused=bool(self.observed_property("pause")),
         )
 
     def _reduce_playback(self, event: events.PlaybackEvent) -> None:
@@ -1856,14 +1901,12 @@ class Reader:
 
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:
-        ox, oy = self.sub_origin
-        for b in self.boxes:
-            tok = self.tokens[b.index]
-            if self.tokenizer.is_skippable(tok):
-                continue
-            if b.contains(mx - ox, my - oy):
-                return b.index
-        return -1
+        return subtitles.token_at(
+            self.boxes,
+            (mx, my),
+            self.sub_origin,
+            is_skippable=lambda index: self.tokenizer.is_skippable(self.tokens[index]),
+        )
 
     @staticmethod
     def _in_rect(rect, x: float, y: float) -> bool:
@@ -3269,7 +3312,7 @@ class Reader:
                 "define-section",
                 GLOBAL_SECTION,
                 contents,
-                "default",
+                "force",
                 owner=Owner.INTERACTION,
             )
             send_correlated(
@@ -3330,6 +3373,7 @@ class Reader:
             SUBTITLE_LANGUAGE_MSG: action(Reader.toggle_subtitle_language),
             SUBTITLE_MARK_JP_MSG: action(Reader.mark_current_subtitle_japanese),
             SUBTITLE_RETRY_MSG: action(Reader.retry_japanese_subtitles),
+            LEGACY_RENDERER_MSG: action(Reader.toggle_legacy_renderer),
             ANNOTATION_MSG: action(Reader.toggle_annotation_mode),
             TRANS_MSG: action(Reader.toggle_translation),
             COPY_LINE_MSG: action(Reader.copy_line),

@@ -11,16 +11,21 @@ from dirty_equals import IsPartialDict
 from driver import Driver
 from util import record_spans
 
+from saitenka.app import native_subtitles, subtitle_fonts, subtitle_render
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
+from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.scoring import Scorer
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
+from saitenka.app.wordlists import KnownWords
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, events
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
@@ -87,17 +92,23 @@ class FakeIPC(util.FakeIPC):
             "options/sub-ass-force-margins": False,
             "options/sub-ass-video-aspect-override": 0.0,
             "options/sub-ass-use-video-data": "all",
-            "options/sub-ass-vsfilter-aspect-compat": None,
             "options/sub-ass-style-overrides": [],
+            "options/sub-scale-with-window": True,
+            "options/sub-scale-by-window": True,
+            "options/blend-subtitles": False,
             "options/sub-font-provider": "auto",
             "options/embeddedfonts": False,
             "options/sub-fonts-dir": "",
+            "options/sub-font": "sans-serif",
         }
         self.set_property_error: str | None = None
         self.set_property_exception: Exception | None = None
         self.overlay_add_error: str | None = None
+        self.osd_bounds: dict | None = None
         self.get_property_error: str | None = None
         self.correlate_commands = False
+        #: Identity substrings the gateway will not admit — its real answer when it is at capacity.
+        self.refused_identities: tuple[str, ...] = ()
         self.submitted: list[tuple] = []
         self.job_lanes: dict[str, object] = {}
         self.pending_jobs: list[tuple] = []
@@ -155,6 +166,8 @@ class FakeIPC(util.FakeIPC):
         it did when the command was synchronous. `correlate_commands = True` queues instead, which
         is the only way to observe the mid-flight window or place a late result.
         """
+        if any(refused in str(identity) for refused in self.refused_identities):
+            return False
         self.submitted.append((identity, command, on_finished))
         if not self.correlate_commands:
             self.deliver_runtime_mpv()
@@ -241,6 +254,11 @@ class FakeIPC(util.FakeIPC):
             self.props["sub-visibility"] = args[2]
         if args and args[0] == "overlay-add" and self.overlay_add_error is not None:
             return {"error": self.overlay_add_error}
+        if args[:1] == ("osd-overlay",) and args[-1] is True:
+            # `compute_bounds`: mpv lays the payload out through its OSD libass and answers with the
+            # box. No fake can lay text out, so the box is the test's to state — `None` until one
+            # does, which is the same "not a box" every caller must already survive.
+            return {"error": "success", "data": self.osd_bounds}
         return {"error": "success", "data": None}
 
     def close(self) -> None:
@@ -253,6 +271,12 @@ class FakeBackend:
         self.closed = False
         self.error: Exception | None = None
         self.token_index_offset = 0
+        #: `None` echoes the request's palette, which is what the real backend does
+        #: (`libass_backend._token_geometry` copies the key straight through). A fake that answered
+        #: a constant instead is how the palette shipped reading zero for every cue with the whole
+        #: suite green: nothing downstream of the request was ever driven by the request.
+        self.font_name: str | None = None
+        self.font_size: float | None = None
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         self.requests.append(request)
@@ -263,6 +287,13 @@ class FakeBackend:
                 entry.event_id,
                 entry.token_index + self.token_index_offset,
                 Rect(100 + entry.token_index * 60, 600, 50, 40),
+                (),
+                entry.font_name if self.font_name is None else self.font_name,
+                entry.font_size if self.font_size is None else self.font_size,
+                # Solid coverage over the whole rect when the request asked for it — the real
+                # backend keeps the render's own anti-aliased mask, and the shape of the bytes is
+                # what the raster device consumes.
+                bytes([255]) * (50 * 40) if request.keep_coverage else b"",
             )
             for entry in request.palette
         )
@@ -326,7 +357,11 @@ class _AllSkippableTokenizer(_SingleTokenizer):
 
 
 def reader(
-    tmp_path: Path, *, correlated_surfaces: bool = False, native_visible: bool = True
+    tmp_path: Path,
+    *,
+    correlated_surfaces: bool = False,
+    native_visible: bool = True,
+    scorer=None,
 ) -> tuple[Reader, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
@@ -343,11 +378,16 @@ def reader(
         options=options,
         geometry_backend=backend,
         runtime_submit=ipc.submit_runtime_mpv if correlated_surfaces else None,
+        scorer=scorer,
     )
     # Native geometry exists exactly when the mode does — the legacy renderer lays its own boxes out
     # and has no provider to schedule against.
     assert (result.native_geometry is not None) == native_visible
     if result.native_geometry is not None:
+        # Through the production resolver, not a hand-built environment: a track load is where the
+        # font set is read, and a harness that skipped it would leave every test measuring against
+        # an environment the runtime never produces.
+        resolve_track_fonts(ipc, ipc.query, result.native_geometry)
         result.native_geometry.set_source(source)
     return result, ipc, backend
 
@@ -1864,7 +1904,7 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
 def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, caplog) -> None:
     result, ipc, backend = reader(tmp_path)
     ipc.props["options/sub-scale"] = 1.2
-    ipc.props["options/sub-font-provider"] = "fontconfig"
+    ipc.props["options/sub-pos"] = 50.0
     caplog.clear()
 
     with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
@@ -1878,7 +1918,7 @@ def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, c
         (
             "native subtitle interaction unavailable: "
             "subtitle-render-input-unsupported "
-            "detail=sub-scale=1.2, sub-font-provider='fontconfig'"
+            "detail=sub-scale=1.2, sub-pos=50.0"
         )
     ]
     result.close()
@@ -1901,16 +1941,882 @@ def test_pending_timing_does_not_escape_an_unsupported_render_profile(tmp_path: 
     result.close()
 
 
-def test_custom_mpv_font_provider_fails_closed(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("options/sub-font-provider", "fontconfig"),
+        ("options/embeddedfonts", True),
+        ("options/sub-fonts-dir", "/fonts"),
+        ("options/sub-font", "Symbola"),
+    ],
+)
+def test_a_font_setting_changed_under_a_resolved_track_fails_closed(
+    tmp_path: Path, option: str, value: object
+) -> None:
+    """mpv rebuilds its subtitle decoder for any of these, so a change between track loads means its
+    faces and ours have diverged. Measuring on anyway is the silent failure: every box comes out the
+    wrong width and nothing anywhere says so."""
     result, ipc, backend = reader(tmp_path)
-    ipc.props["options/sub-font-provider"] = "fontconfig"
+    ipc.props[option] = value
 
     result.set_subtitle("猫を見る")
 
     assert backend.requests == []
     assert result.boxes == []
     assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-font-environment-stale"
+    result.close()
+
+
+SRT_ROWS = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る"
+
+
+def converted_reader(tmp_path: Path, *, codec: str = "subrip"):
+    """A session whose selected track is one mpv converted from SubRip.
+
+    The codec is stated because it is what decides the branch: the `.srt` on disk is our own
+    extraction, and for `mov_text`/`webvtt` it is a *different* conversion from the one mpv is
+    drawing — see `set_track_codec`.
+    """
+    result, ipc, backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result.native_geometry.formats = native_subtitles.NativeFormats.ALL
+    result.native_geometry.set_track_codec(codec)
+    ipc.props["sub-text/ass-full"] = SRT_ROWS
+    source = tmp_path / "episode.srt"
+    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
+    result.native_geometry.set_source(source, live=True)
+    return result, ipc, backend
+
+
+def test_the_user_s_subtitle_style_reaches_the_document_the_boxes_are_measured_against(
+    tmp_path: Path,
+) -> None:
+    """The end of the plumbing, not the reader in isolation: a `--sub-margin-y` mpv reports has to
+    come out the other side as the `MarginV` libass is handed. It did not — `document()` was called
+    with no style at all, so every converted cue on every machine was laid out against mpv's
+    defaults, and a user who had moved the subtitles saw a second copy of the line offset from
+    theirs."""
+    result, ipc, backend = converted_reader(tmp_path)
+    ipc.props["options/sub-margin-y"] = 120
+    ipc.props["options/sub-bold"] = True
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    style = next(
+        line
+        for line in backend.requests[-1].ass.decode().splitlines()
+        if line.startswith("Style: Default")
+    ).split(",")
+    assert style[21] == str(round(round(120 * 288 / 720) * 1.0))  # MarginV, at this font scale
+    assert style[7] == "1"  # Bold
+
+
+def test_a_converted_track_says_so_in_the_span_that_diagnoses_it(tmp_path: Path, monkeypatch):
+    """`source_class` read `source_path`, so every converted track called itself `external-ass` —
+    the one label that rules out the branch it was actually on. A span whose job is to say which
+    document the boxes came from must not name a different one."""
+    spans = _decision_spans(monkeypatch)
+    result, ipc, _backend = converted_reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert {span["source_class"] for span in spans if "source_class" in span} == {"converted"}
+
+
+def test_a_converted_track_is_measured_against_the_document_mpv_rebuilt(tmp_path: Path) -> None:
+    """mpv never renders a SubRip file — libavcodec converts it and mpv renders that. The boxes have
+    to be measured against the conversion, so the document is rebuilt around the rows mpv reports
+    rather than read off disk."""
+    result, ipc, backend = converted_reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.source_kind is native_subtitles.SourceKind.CONVERTED
+    assert backend.requests
+    document = backend.requests[-1].ass.decode()
+    assert "PlayResY: 288" in document  # libavcodec's, not the .srt's (it has none)
+    assert "YCbCr Matrix: None" in document
+    # mpv's own row, carrying the per-token color keys the hit map is read back from — the events
+    # are its conversion, so only the header around them was reproduced.
+    assert (
+        document.rstrip().splitlines()[-1].startswith("Dialogue: 0,0:00:01.00,0:00:03.00,Default")
+    )
+    assert "猫" in document and "見る" in document
+
+
+def test_a_converted_track_carries_the_features_and_scale_mpv_sets(tmp_path: Path) -> None:
+    """`configure_ass` turns on three track features and a non-unit font scale for a converted
+    track. Leaving either off measures a layout mpv is not drawing."""
+    result, ipc, backend = converted_reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    state = backend.requests[-1].renderer_state
+    assert dict(state.features) == {1: True, 2: True, 3: True}
+    assert state.font_scale > 0
+
+
+def test_an_srt_stays_with_the_legacy_renderer_unless_the_config_asks(tmp_path: Path) -> None:
+    """The default envelope is the tested one. A track the native path has not been asked to take
+    still selects the renderer that can draw its hit boxes."""
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    source = tmp_path / "episode.srt"
+    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
+
+    result.native_geometry.set_source(source, live=True)
+
+    assert result.native_geometry.source_unsupported is True
+    assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
+    result.close()
+
+
+TWO_CUE_SRT = (
+    "1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n\n2\n00:00:04,000 --> 00:00:06,000\n犬を見る\n"
+)
+
+
+def converted_episode(tmp_path: Path, srt: str):
+    """A converted session whose `.srt` holds more than the cue on screen, so lookahead has a
+    target — `converted_reader`'s single cue has no next boundary to read ahead to."""
+    result, ipc, backend = converted_reader(tmp_path)
+    source = tmp_path / "episode.srt"
+    source.write_text(srt, encoding="utf-8")
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source, live=True)
+    result.load_sub_index(str(source))
+    return result, ipc, backend
+
+
+def test_a_converted_track_reads_ahead_by_predicting_the_events_mpv_will_report(
+    tmp_path: Path,
+) -> None:
+    """A converted track's events exist only as the rows mpv reports for the cue on screen, so every
+    cue used to be a cache miss. They are now predicted from the `.srt` — libavcodec's conversion,
+    done here — which is what gives the track a lookahead window at all."""
+    result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.stats.prefetched >= 1, "nothing was read ahead"
+    prefetched = backend.requests[-1].ass.decode()
+    # The cue's own timings, not its text: by the time it reaches the backend every token carries a
+    # reserved color key, so the words are no longer contiguous in the document.
+    assert "0:00:04.00,0:00:06.00" in prefetched, "the next cue was not the one prefetched"
+    assert result.native_geometry.status.fallback_reason is None
+    result.close()
+
+
+def test_a_predicted_cue_is_served_from_the_cache_when_mpv_reports_it(tmp_path: Path) -> None:
+    """The payoff: mpv's row for the next cue lands on the key the prefetch was filed under, so the
+    cue is published without a render. The row here is the shape a live mpv produces —
+    `tests/test_subrip_conversion.py` owns that half against a recorded oracle; this owns the
+    wiring, that a matching row is actually served from the cache."""
+    result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    rendered = len(backend.requests)
+
+    ipc.props["sub-text/ass-full"] = "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,犬を見る"
+    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
+    result.set_subtitle("犬を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.stats.cache_hits >= 1
+    assert len(backend.requests) == rendered, "the predicted cue was rendered a second time"
+    assert result.boxes
+    result.close()
+
+
+def test_a_miss_names_which_part_of_the_key_the_prediction_got_wrong(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A live session reported two lookups, both misses, and there was no way to tell a lookahead
+    that predicted a *nearly* right cue from one that never ran — both say `first-seen`. The
+    divergence names the component, which is the difference between a one-field bug and an
+    unwired one."""
+    from saitenka import otel_metrics
+
+    spans: list[dict[str, object]] = []
+
+    class _Span:
+        def __init__(self, values: dict[str, object]) -> None:
+            self.values = values
+
+        def set(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+    @contextmanager
+    def record(name: str, **attributes: str):
+        values: dict[str, object] = dict(attributes)
+        if name == "subtitle_geometry_cache":
+            spans.append(values)
+        yield _Span(values)
+
+    result, ipc, _backend = converted_episode(tmp_path, TWO_CUE_SRT)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    monkeypatch.setattr(otel_metrics, "traced", record)
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\b1}犬を見る"
+    )
+    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
+    result.set_subtitle("犬を見る")
+    settle_jobs(result, ipc)
+
+    missed = [span for span in spans if span.get("outcome") == "miss"]
+    assert missed, "the mispredicted cue did not report a miss"
+    # The rows differ and nothing else does: same file, same frame, same profile.
+    assert missed[0]["key_divergence"] == "rows"
+    result.close()
+
+
+def test_a_mispredicted_cue_costs_a_render_and_not_a_wrong_box(tmp_path: Path) -> None:
+    """The safety argument, exercised rather than asserted. The cache key carries the event rows, so
+    a prediction that disagrees with mpv simply never matches — the cue is rebuilt from mpv's own
+    row, which is exactly what a converted track did before any of this existed."""
+    result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    rendered = len(backend.requests)
+
+    # mpv reports something the prediction could not have produced — a styled row for the same cue.
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\b1}犬を見る"
+    )
+    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
+    result.set_subtitle("犬を見る")
+    settle_jobs(result, ipc)
+
+    assert len(backend.requests) > rendered, "a mismatched prediction was used anyway"
+    assert "{\\b1}" in backend.requests[-1].ass.decode(), "the rebuild did not use mpv's own row"
+    assert result.boxes
+    result.close()
+
+
+def test_a_cue_srtdec_would_mangle_is_simply_not_read_ahead(tmp_path: Path) -> None:
+    """`srtdec` parses ` b ` in `a < b > c` as a bold tag. The converter declines rather than guess,
+    and declining has to be quiet: it costs the lookahead for that cue, which is what a converted
+    track had for every cue."""
+    result, ipc, _backend = converted_episode(
+        tmp_path,
+        "1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n\n2\n00:00:04,000 --> 00:00:06,000\na < b > c\n",
+    )
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.stats.prefetched == 0
+    assert result.native_geometry.status.fallback_reason is None
+    result.close()
+
+
+@pytest.mark.parametrize("codec", ["mov_text", "webvtt", "microdvd", ""])
+def test_a_conversion_we_have_not_reproduced_is_refused_by_name(tmp_path: Path, codec: str) -> None:
+    """`native_formats = "all"` is not "any text track". Every codec here is converted to ASS by a
+    DIFFERENT libavcodec decoder than SubRip's, writing its own header and styles — and our own
+    extraction transcodes all of them to `.srt`, so the artifact on disk claims to be something it
+    is not. Measuring one against SubRip's header is a wrong box, not a degraded one.
+
+    The empty codec is the unknown case, and it is refused for the same reason: the stop rule is to
+    narrow the mode rather than guess which decoder mpv is running.
+    """
+    result, _ipc, _backend = converted_reader(tmp_path, codec=codec)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.source_kind is native_subtitles.SourceKind.NONE
+    assert (
+        result.native_geometry.status.fallback_reason == "subtitle-source-conversion-unreproduced"
+    )
+    # A named refusal, and one that selects the renderer that CAN draw the boxes — not a track left
+    # with mpv's pixels and nothing to click.
+    assert result.native_geometry.source_unsupported is True
+    result.close()
+
+
+def test_the_sdh_filter_is_refused_because_it_rewrites_the_event(tmp_path: Path) -> None:
+    """`--sub-filter-sdh` rewrites an event's text before libass ever sees it, so mpv is drawing
+    something the file does not contain and our match back to the source is against a document that
+    no longer describes the screen."""
+    result, ipc, _backend = reader(tmp_path)
+    ipc.props["options/sub-filter-sdh"] = True
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
     assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert not result.boxes
+    result.close()
+
+
+def test_a_regex_filter_only_drops_a_cue_so_it_is_not_refused(tmp_path: Path) -> None:
+    """The negative control for the refusal above, and the reason it names one option rather than
+    the whole filter chain: `--sub-filter-regex` can only drop a whole packet, never rewrite one, so
+    the events that do arrive are still the file's own."""
+    result, ipc, _backend = reader(tmp_path)
+    ipc.props["options/sub-filter-regex"] = ["advert"]
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.boxes
+    result.close()
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("all", native_subtitles.NativeFormats.ALL),
+        ("authored-ass", native_subtitles.NativeFormats.AUTHORED_ASS),
+        ("nonsense", native_subtitles.NativeFormats.AUTHORED_ASS),
+    ],
+)
+def test_an_unknown_format_setting_narrows_rather_than_widens(
+    configured: str, expected: native_subtitles.NativeFormats
+) -> None:
+    assert native_subtitles.native_formats(configured) is expected
+
+
+def overlay_payloads(ipc) -> list[str]:
+    return [
+        str(command[3])
+        for command in ipc.commands
+        if command[0] == "osd-overlay" and len(command) > 3 and command[2] == "ass-events"
+    ]
+
+
+def attachment_supplying(ipc, *families: str) -> subtitle_fonts.FontEnvironment:
+    """A font environment whose container attachment advertises exactly `families`.
+
+    The names are stated rather than parsed out of real font bytes: what is under test here is which
+    palette entries stand down given a set, and `tests/test_font_names.py` owns the other half —
+    that a real attachment's set is read correctly from its name table.
+    """
+    return subtitle_fonts.FontEnvironment(
+        subtitle_fonts.FontSetup(extract_fonts=True),
+        (("Embedded.otf", b"font"),),
+        subtitle_fonts.option_snapshot(
+            {name: ipc.query(f"options/{name}") for name in subtitle_fonts.FONT_OPTIONS}
+        ),
+        frozenset(families),
+    )
+
+
+def test_a_face_only_the_subtitle_renderer_has_stands_the_overprint_down(tmp_path: Path) -> None:
+    """The case the drift probe measured at -29px. mpv's OSD library can never receive a container
+    attachment, so an overprint sent through `osd-overlay` would be laid out in a substitute face —
+    right words, wrong glyph shapes. The boxes are still right, so the cue stays interactive; only
+    the color stands down, and the demotion is counted rather than silent."""
+    result, ipc, backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert backend.requests
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
+    assert result.boxes  # the hit boxes still land
+    result.close()
+
+
+def presented_overpaints(ipc) -> list[tuple[int, int, int, int]]:
+    """Every `overlay-add` on the raster device's slot, as (x, y, width, height).
+
+    mpv's argument order is `<id> <x> <y> <file> <offset> <fmt> <w> <h> <stride>`.
+    """
+    return [
+        (int(command[2]), int(command[3]), int(command[7]), int(command[8]))
+        for command in ipc.commands
+        if command[0] == "overlay-add" and command[1] == OverlayId.OVERPAINT
+    ]
+
+
+def test_a_face_the_osd_library_cannot_load_is_colored_as_a_raster_instead(tmp_path: Path) -> None:
+    """The point of the second device: a signs-and-songs release keeps its color.
+
+    The text device has to stand down there — mpv's OSD library can never load a container
+    attachment — and until this device existed that meant no color at all on exactly the tracks
+    whose typesetting this mode is for. The raster needs no face: it tints the pixels the
+    measurement already drew, from the font set mpv's SUBTITLE renderer holds.
+    """
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    assert result.native_geometry is not None
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert not [payload for payload in overlay_payloads(ipc) if "\\fn" in payload], (
+        "the text device drew a face the OSD library cannot load"
+    )
+    painted = presented_overpaints(ipc)
+    assert painted, "no raster reached mpv"
+    # Cropped to the union of the three 50x40 boxes the fake laid out at x=100, 160, 220 — not to
+    # the frame, which would be most of a megabyte of transparent pixels per cue.
+    assert painted[-1] == (100, 600, 170, 40)
+    assert result.boxes
+    result.close()
+
+
+def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path) -> None:
+    """The raster is a tint over mpv's own glyphs. Once the handoff hides those, it is floating over
+    a render that never laid it out — and nothing repaints it, because `draw` routes to the legacy
+    renderer from then on. So it stays on the last cue's words for the rest of a gapless episode.
+
+    The focus rect had the same hole: arriving at LEGACY emitted no interaction clear at all.
+    """
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    assert result.native_geometry is not None
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert presented_overpaints(ipc), "the raster never reached mpv, so the teardown proves nothing"
+    ipc.commands.clear()
+
+    # Coming back from an overlay re-verifies ownership. The write does not land and the readback
+    # says FALSE, which is the proof that hands the pixels to the legacy renderer.
+    ipc.set_property_exception = OSError("pipe closed")
+    ipc.props["sub-visibility"] = False
+    renderer.resume_after_overlay(result.subtitle_target())
+
+    assert renderer.ownership_state.owner is PixelOwner.LEGACY
+    assert ("overlay-remove", OverlayId.OVERPAINT) in ipc.commands
+    result.close()
+
+
+def palette_for(*, play_res_y: str, frame_height: int, font_scale: float):
+    """The overprint palette for a one-token cue in a document declaring `play_res_y`."""
+    from saitenka.app.native_subtitles import _palette_in_frame_units
+    from saitenka.subtitles import SubtitleTrackId, TokenAnnotation
+    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+
+    row = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫"
+    source = (
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\n"
+        f"{play_res_y}\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, "
+        "SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
+        "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, "
+        "MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,"
+        "0,0,0,0,100,100,0,0,1,2,1,2,10,10,30,1\n\n[Events]\nFormat: Layer, Start, End, Style, "
+        f"Name, MarginL, MarginR, MarginV, Effect, Text\n{row}\n"
+    )
+    track = SubtitleTrackId("palette-units")
+    prepared = prepare_ass_hit_map_frame(
+        source.encode(), track, active_rows=row, text="猫", tokens=[TokenAnnotation(0, 0, 1)]
+    )
+    return _palette_in_frame_units(
+        prepared, frame_height, font_scale, unreachable=subtitle_fonts.OsdReach(frozenset())
+    )
+
+
+@pytest.mark.parametrize(
+    ("frame_height", "font_scale", "expected"),
+    [
+        (720, 1.0, 48.0),  # identity: the case the wire-level test already pins
+        (1080, 1.0, 72.0),  # a 720p script in a 1080p frame
+        (720, 1.25, 60.0),  # `ass_set_font_scale`, which a converted track drives off 1.0
+        (1080, 1.25, 90.0),  # both at once, because they multiply rather than compose
+    ],
+)
+def test_the_overprint_font_size_is_restated_in_the_frames_pixels(
+    frame_height: int, font_scale: float, expected: float
+) -> None:
+    """libass scales a style's `Fontsize` by `frame_height / PlayResY` and then by the font scale.
+    Skip that and the overprint draws the token at its script-unit size over glyphs laid out at the
+    frame's — a uniform error that is invisible at 720p, which is the only shape ever measured."""
+    palette = palette_for(play_res_y="PlayResY: 720", frame_height=frame_height, font_scale=1.0)
+    scaled = palette_for(
+        play_res_y="PlayResY: 720", frame_height=frame_height, font_scale=font_scale
+    )
+
+    assert palette[0].font_size == pytest.approx(expected / font_scale)
+    assert scaled[0].font_size == pytest.approx(expected)
+
+
+def test_a_document_with_no_playresy_keeps_its_boxes_and_loses_its_overprint() -> None:
+    """There is no script-unit-to-pixel ratio without it, so a size would be a guess. Zero is the
+    overprint's "do not draw this token" — the hit boxes are unaffected, only the color stands
+    down to a device that needs no size."""
+    palette = palette_for(play_res_y="", frame_height=720, font_scale=1.0)
+
+    assert [(entry.font_name, entry.font_size) for entry in palette] == [("", 0.0)]
+
+
+def test_every_gate_option_is_observed_and_counted_a_render_space_input() -> None:
+    """Three lists that have to agree, and nothing made them.
+
+    An option missing from `OBSERVED_PROPS` is not merely slower: `observed_property` falls through
+    to a blocking `get_property`, and `_render_inputs` runs twice per cue, so each omission is two
+    more round trips per cue on the interaction loop. Missing from `RENDER_SPACE_PROPERTIES` is the
+    correctness half — a mid-episode change to it never invalidates the geometry it just moved, so
+    the boxes stay where the old value put them until the track reloads.
+
+    Four options landed on this branch reading the gate but neither list, which is why this exists.
+    """
+    from saitenka.app.controller import OBSERVED_PROPS
+    from saitenka.app.native_subtitles import GATE_OPTIONS
+    from saitenka.runtime.playback import RENDER_SPACE_PROPERTIES
+
+    qualified = {f"options/{name}" for name in GATE_OPTIONS}
+
+    assert qualified <= set(OBSERVED_PROPS)
+    assert qualified <= RENDER_SPACE_PROPERTIES
+
+
+def calibration_calls(ipc) -> list[tuple]:
+    """Every hidden `compute_bounds` the layout check asked mpv for."""
+    return [
+        command
+        for command in ipc.commands
+        if command[0] == "osd-overlay" and command[1] == subtitle_render.NATIVE_CALIBRATION_ID
+    ]
+
+
+def test_a_playing_session_still_measures_once_for_the_track(tmp_path: Path) -> None:
+    """Paused is the usual moment, and the default config supplies it at the first hover. But
+    `pause_on_tooltip` is a setting, and without this a session that never pauses would never
+    measure at all — the inference about which faces mpv's OSD renderer can load would go
+    unchecked for the whole episode. The track load is where that one check is affordable."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = False
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert len(calibration_calls(ipc)) == 1
+    result.close()
+
+
+def test_a_playing_session_does_not_measure_again_after_that(tmp_path: Path) -> None:
+    """The other half, and the reason the check is gated at all: `compute_bounds` makes mpv do a
+    full render on its core thread. One per track load is a stall nobody sees; one per cue is a
+    stutter through the whole episode."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = False
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert len(calibration_calls(ipc)) == 1
+
+    for _ in range(3):
+        result.set_subtitle("猫を見る")
+        settle_jobs(result, ipc)
+        result.draw_subtitle()
+
+    assert len(calibration_calls(ipc)) == 1
+    result.close()
+
+
+def test_the_layout_check_measures_once_per_face_set_while_paused(tmp_path: Path) -> None:
+    """Paused, it asks mpv where its OSD renderer actually put the overprint — the one direct check
+    of the only claim the text device makes. Once per face set, not once per cue: the answer cannot
+    change while the faces and the surface do not."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    first = len(calibration_calls(ipc))
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert first == 1
+    assert len(calibration_calls(ipc)) == 1
+    payload = calibration_calls(ipc)[0]
+    # `hidden` and `compute_bounds` both set: mpv answers with the box and draws nothing.
+    assert payload[-2:] == (True, True)
+    assert r"\fnArial" in str(payload[3])
+    result.close()
+
+
+def test_a_refused_layout_check_is_asked_again_rather_than_written_off(tmp_path: Path) -> None:
+    """ "Measured once per face set" has to mean measured, not asked. The gateway refuses admission
+    when it is at capacity, and marking the face set before the ask lands retires it for the whole
+    session — so a real substituted-face drift on that set is never measured, and the text device
+    keeps drawing words in the wrong place with every meter reading green."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.refused_identities = ("subtitle:calibrate:",)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert not calibration_calls(ipc)
+
+    ipc.refused_identities = ()
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert len(calibration_calls(ipc)) == 1
+    result.close()
+
+
+def osd_box(*, right: float) -> dict[str, float]:
+    """What mpv reports for the fake's three 50x40 boxes at x=100/160/220, `right` px wider.
+
+    Inflated by the hairline border on every edge, because `mp_ass_get_bb` unions the outline images
+    — so a reply that did NOT carry it would understate the drift by two pixels.
+    """
+    return {"x0": 99.0, "y0": 599.0, "x1": 271.0 + right, "y1": 641.0}
+
+
+def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing(
+    tmp_path: Path,
+) -> None:
+    """The late verdict. Which families the OSD renderer can reach is inferred when the geometry is
+    built, and the measurement can contradict that inference long after — by which time the request
+    is gone. Applying it where the drawing happens is what lets the answer reach the cue on screen
+    instead of some later one."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.osd_bounds = osd_box(right=29.0)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert r"\fnArial" in overlay_payloads(ipc)[0], (
+        "nothing was drawn as text, so nothing to demote"
+    )
+    assert result.native_geometry is not None
+    assert result.native_geometry._measured_unsafe == frozenset({"arial"}), (
+        "no verdict was recorded"
+    )
+
+    # The verdict has to reschedule, not just redraw: it changes what the measurement must CONTAIN.
+    # Redrawing the old snapshot cannot produce coverage masks, and nothing re-observes a cue that
+    # has not changed — so without this the family stays uncolored for as long as it is shown.
+    settle_geometry(result, ipc)
+    settle_jobs(result, ipc)
+    result.draw_subtitle()
+
+    assert presented_overpaints(ipc), "the color did not step down to the raster after the verdict"
+    result.close()
+
+
+def test_an_agreeing_measurement_leaves_the_text_device_alone(tmp_path: Path) -> None:
+    """The negative control. Demoting on agreement would strip the color from every correctly
+    typeset track — and the whole point of measuring is that the inference can be wrong either way."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.osd_bounds = osd_box(right=0.0)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert r"\fnArial" in overlay_payloads(ipc)[-1]
+    result.close()
+
+
+def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_path: Path) -> None:
+    """The consequence for the other side. A late verdict lands on device 3's rule because the cue
+    was built without masks; telling the geometry side is what makes the NEXT build keep them, so
+    those tokens rise to the raster instead of staying on the bottom rung."""
+    result, ipc, backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.osd_bounds = osd_box(right=29.0)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert backend.requests[-1].keep_coverage is False, "the first cue had no verdict yet"
+    # The same cue again, and it is re-rendered rather than served from cache — the verdict
+    # invalidates, which is the half that makes the demotion reach the pixels.
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert backend.requests[-1].keep_coverage is True
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
+    result.close()
+
+
+def test_a_cue_the_text_device_can_draw_publishes_no_raster(tmp_path: Path) -> None:
+    """The negative control, and the ladder's rule: a device is used only when the one above it
+    cannot draw. Two colors over one cue would double every glyph's alpha."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
+    assert not presented_overpaints(ipc)
+    result.close()
+
+
+def test_only_the_tokens_in_the_embedded_family_lose_their_color(tmp_path: Path) -> None:
+    """The reason the stand-down is keyed on families and not on the presence of an attachment: a
+    release whose dialogue is a system font and whose signs are attachment-only should lose the
+    color on its signs, not on the whole episode."""
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(
+        ASS.replace(
+            b"Style: Default,Arial,",
+            b"Style: Sign,Embedded Signs,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,"
+            b"100,100,0,0,1,2,1,2,10,10,30,1\nStyle: Default,Arial,",
+        ).replace(
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る\n".encode(),
+            (
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫\n"
+                "Dialogue: 1,0:00:01.00,0:00:03.00,Sign,,0,0,0,,犬\n"
+            ).encode(),
+        )
+    )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "embedded signs"))
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫\n"
+        "Dialogue: 1,0:00:01.00,0:00:03.00,Sign,,0000,0000,0000,,犬"
+    )
+
+    result.set_subtitle("猫\n犬")
+    settle_jobs(result, ipc)
+
+    by_event = {
+        entry.event_id.source_order: entry.font_name for entry in backend.requests[-1].palette
+    }
+    assert by_event == {0: "Arial", 1: ""}
+    result.close()
+
+
+def test_a_document_that_embeds_its_own_fonts_stands_those_families_down(tmp_path: Path) -> None:
+    """The fourth font source: an `[Fonts]` section inside the `.ass` reaches mpv's subtitle renderer
+    through `ass_set_extract_fonts` and never its OSD one, exactly like a container attachment. It
+    arrives with the source rather than with the font environment, so the two halves have to be
+    combined on read or one of them is silently dropped.
+
+    Driven through `set_source` with a real encoded font, because the families are only known by
+    decoding the section — setting the derived set directly would test the combination and skip the
+    decode that has to happen for it to hold any names at all."""
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "embedded.ass"
+    source.write_bytes(
+        ASS.decode().replace("[V4+ Styles]", util.ass_fonts_section("Arial") + "[V4+ Styles]").encode()
+    )  # fmt: skip
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result.native_geometry.set_fonts(attachment_supplying(ipc))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
+    result.close()
+
+
+def test_a_document_that_embeds_a_family_nobody_uses_costs_no_color(tmp_path: Path) -> None:
+    """The negative control for the test above: the section is decoded either way, so a green run
+    there proves the demotion only if a section naming an unused family leaves the color alone."""
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "embedded.ass"
+    source.write_bytes(
+        ASS.decode()
+        .replace("[V4+ Styles]", util.ass_fonts_section("Embedded Signs") + "[V4+ Styles]")
+        .encode()
+    )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result.native_geometry.set_fonts(attachment_supplying(ipc))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {"Arial"}
+    result.close()
+
+
+def test_the_overprint_reaches_mpv_in_the_measured_face_and_size(tmp_path: Path) -> None:
+    """The feature end to end, on the wire: a cue mpv is drawing gets a per-token `osd-overlay`
+    payload naming the face and the frame-pixel size the measurement resolved.
+
+    The one test the whole path had no positive for — which is why a palette carrying zero for every
+    cue, and so an overprint that never drew anywhere, passed the suite.
+    """
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    drawn = [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
+    assert drawn, "no overprint reached mpv"
+    # The style's 48 script units at this document's PlayResY 720, into a 720-tall frame: unchanged.
+    assert r"{\an7\pos(100,600)\fnArial\fs48" in drawn[-1]
+    result.close()
+
+
+def test_an_unmeasured_face_leaves_the_cue_uncolored_rather_than_guessed(tmp_path: Path) -> None:
+    """A token whose face the measurement did not resolve is not drawn at a guess: the wrong glyph
+    shape over the right word is worse than no color, because nothing shows it is wrong."""
+    result, ipc, backend = reader(tmp_path)
+    backend.font_name, backend.font_size = "", 0.0
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.boxes  # the hit boxes still land, so the cue stays interactive
+    assert not [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
+    result.close()
+
+
+def test_the_legacy_renderer_can_be_selected_and_given_back(tmp_path: Path) -> None:
+    """The comparison target has to be selectable. Until now the only route to the legacy renderer
+    was catastrophic recovery, and a target you cannot choose is not one."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.NATIVE
+
+    assert result.toggle_legacy_renderer() is True
+    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.LEGACY
+
+    assert result.toggle_legacy_renderer() is False
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.NATIVE
+    result.close()
+
+
+def test_a_forced_legacy_switch_is_told_apart_from_a_failure(tmp_path: Path) -> None:
+    """Both end with the legacy renderer drawing, and a report has to say which happened: one is a
+    user comparing the engines, the other is the native path giving up."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    result.toggle_legacy_renderer()
+
+    assert result.subtitle_pipeline.legacy_forced is True
+    assert result.native_geometry is not None
+    # Not a geometry failure: nothing refused a frame, so no fallback reason is latched.
+    assert result.native_geometry.status.fallback_reason != "mpv-sub-visibility-rejected"
+    result.close()
+
+
+def test_resolving_the_track_again_clears_a_stale_font_environment(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/embeddedfonts"] = True
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-font-environment-stale"
+
+    resolve_track_fonts(ipc, ipc.query, result.native_geometry)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert backend.requests
+    assert result.native_geometry.status.fallback_reason is None
     result.close()
 
 
@@ -1944,6 +2850,9 @@ def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> Non
         "h": 1080,
         "par": 1.0,
     }
+    # Through the path production uses: the host adopts a new OSD surface in `refresh_osd`, and the
+    # layout follows the host rather than re-reading the property.
+    assert result.refresh_osd()
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
@@ -2664,8 +3573,13 @@ _SUPPORTED_SETTINGS = {
     "sub-ass-force-margins": False,
     "sub-ass-video-aspect-override": None,
     "sub-ass-use-video-data": "all",
-    "sub-ass-vsfilter-aspect-compat": None,
     "sub-ass-style-overrides": None,
+    "sub-scale-with-window": True,
+    "sub-scale-by-window": True,
+    "blend-subtitles": False,
+    "sub-filter-sdh": False,
+    "video-crop": "",
+    "video-rotate": 0,
     "sub-font-provider": "auto",
     "embeddedfonts": False,
     "sub-fonts-dir": None,
@@ -2674,15 +3588,39 @@ _OSD = {"w": 1920, "h": 1080, "mt": 0, "mb": 0, "ml": 0, "mr": 0, "par": 1.0}
 _VIDEO = {"w": 1920, "h": 1080, "par": 1.0}
 
 
-def _inputs(*, osd=None, video=None, **settings):
+def _inputs(*, osd=None, video=None, frame_size=None, **settings):
     from saitenka.app.native_subtitles import render_inputs_of
 
     return render_inputs_of(
         {**_OSD, **(osd or {})},
         {**_VIDEO, **(video or {})},
         {**_SUPPORTED_SETTINGS, **settings},
-        fallback_size=(1280, 720),
+        frame_size=frame_size or (1920, 1080),
     )
+
+
+def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
+    """`prop("options/<name>")` returns mpv's typed value; only a *removed* option reads `None`.
+
+    So a row that accepts `None` and nothing else refuses every track on every mpv that still has
+    the option, and passes vacuously on the builds that dropped it — which is invisible when
+    everyone testing runs a recent one. `sub-ass-vsfilter-aspect-compat` sat here for exactly that
+    reason: mpv defaults it to `yes`, so `True is None` refused native geometry outright on
+    mpv < 0.41, and 0.41 removed the option and made the row read green.
+    """
+    from saitenka.app.native_subtitles import _unsupported_render_inputs
+
+    plausible = (0, 0.0, 1.0, 100.0, "", (), False, True, "no", "yes", "all", "auto")
+
+    for name, value in _SUPPORTED_SETTINGS.items():
+        if value is not None:
+            continue
+        accepted = [
+            candidate
+            for candidate in plausible
+            if name not in _unsupported_render_inputs({**_SUPPORTED_SETTINGS, name: candidate})
+        ]
+        assert accepted, f"{name} is accepted only when mpv does not report it"
 
 
 def test_a_default_mpv_render_configuration_supports_native_geometry():
@@ -2702,10 +3640,10 @@ def test_a_default_mpv_render_configuration_supports_native_geometry():
         ("sub-ass-override", "force"),
         ("sub-ass-scale-with-window", True),
         ("sub-ass-use-video-data", "aspect-only"),
-        ("sub-font-provider", "fontconfig"),  # different glyphs, so different boxes
-        ("embeddedfonts", True),
-        ("sub-fonts-dir", "/fonts"),
         ("sub-ass-style-overrides", ["Default.FontSize=60"]),
+        # `=video` alone, and not for the arithmetic: it lays the cue out on `texture_w/h` AFTER the
+        # user's shader hooks, which a `--glsl-shader` can resize and no property reports.
+        ("blend-subtitles", "video"),
     ],
 )
 def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: str, value: object):
@@ -2714,6 +3652,95 @@ def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: s
     the setting because a user who set it needs to know which one to undo."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+LETTERBOX = {"w": 1920, "h": 1080, "mt": 140, "mb": 140, "ml": 0, "mr": 0, "par": 1.0}
+
+
+def test_blending_lays_the_cue_out_on_the_video_rectangle_not_the_window() -> None:
+    """`--blend-subtitles=yes` draws the subtitle into the video texture before scaling, on an
+    `mp_osd_res` mpv rebuilds from the src/dst rects (`video.c:3249-3263`): the video's on-screen
+    rectangle, every margin zero, `display_par` 1. Laying out on the window instead would put the
+    cue in the letterbox — the whole 280px of it — and every box beside its word."""
+    result = _inputs(osd=LETTERBOX, frame_size=(1920, 1080), **{"blend-subtitles": "yes"})
+
+    assert result.frame_size == (1920, 800)
+    assert result.margins == (0, 0, 0, 0)
+    assert result.box_origin == (0, 140)
+
+
+def test_without_blending_the_letterbox_stays_part_of_the_frame() -> None:
+    """The negative control. `--sub-use-margins=yes` is in the profile precisely so mpv may put the
+    cue in the letterbox, so the unblended frame is the whole window and the origin is nothing."""
+    result = _inputs(osd=LETTERBOX, frame_size=(1920, 1080))
+
+    assert result.frame_size == (1920, 1080)
+    assert result.margins == (140, 140, 0, 0)
+    assert result.box_origin == (0, 0)
+
+
+def test_the_blend_surface_drops_the_screens_own_aspect() -> None:
+    """`display_par` is 1.0 on the blend rect, so only the video's own pixel aspect survives —
+    keeping the screen's would stretch every box by it."""
+    result = _inputs(
+        osd={**LETTERBOX, "par": 2.0},
+        video={"w": 1920, "h": 1080, "par": 1.5},
+        frame_size=(1920, 1080),
+        **{"blend-subtitles": "yes"},
+    )
+
+    assert result.pixel_aspect == 1.5
+
+
+@pytest.mark.parametrize(("name", "value"), [("video-crop", "1280x720"), ("video-rotate", 90)])
+def test_a_crop_or_rotation_is_refused_only_while_blending(name: str, value: object) -> None:
+    """`_blend_space` derives the video rectangle from the premise that the src rect is the whole
+    image. A crop breaks that outright and a rotation re-orients it (`aspect.c:156-163`). Neither
+    changes anything the unblended path reads, so refusing them there would cost tracks for nothing.
+    """
+    with pytest.raises(ValueError, match=name):
+        _inputs(**{name: value, "blend-subtitles": "yes"})
+
+    assert _inputs(**{name: value}).frame_size == (1920, 1080)
+
+
+@pytest.mark.parametrize(
+    ("scale_with_window", "scale_by_window"),
+    [(True, True), (False, True), (True, False), (False, False)],
+)
+def test_the_sub_scale_switches_are_reproduced_not_refused(
+    *, scale_with_window: bool, scale_by_window: bool
+) -> None:
+    """mpv reads these two only on the forced-override branch a CONVERTED track takes, and
+    `converted.font_scale` reproduces both — so they are inputs to the measurement. On the authored
+    branch mpv reads `sub-ass-scale-with-window` instead and never reads `sub-scale-by-window` at
+    all, which is why refusing a track for them would give up an episode over nothing."""
+    result = _inputs(
+        **{"sub-scale-with-window": scale_with_window, "sub-scale-by-window": scale_by_window}
+    )
+
+    assert result.scale_with_window is scale_with_window
+    assert result.scale_by_window is scale_by_window
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("embeddedfonts", True),
+        ("sub-fonts-dir", "/fonts"),
+        ("sub-font-provider", "fontconfig"),
+        ("sub-font", "Symbola"),
+    ],
+)
+def test_a_font_setting_is_an_input_to_the_measuring_renderer_not_a_refusal(
+    name: str, value: object
+):
+    """These four decide which faces libass loads, and `subtitle_fonts.resolve` reproduces each of
+    them. Refusing a track for them — as the render-input gate used to — gave up the whole episode's
+    interaction over a setting we can simply mirror."""
+    result = _inputs(**{name: value})
+
+    assert (name, repr(value)) in result.font_options
 
 
 def test_the_osd_surface_wins_over_the_reported_video_size():
@@ -2725,8 +3752,11 @@ def test_the_osd_surface_wins_over_the_reported_video_size():
     assert result.storage_size == (1280, 720)
 
 
-def test_a_missing_osd_size_falls_back_to_the_players_own():
-    result = _inputs(osd={"w": None, "h": None})
+def test_an_unreported_osd_size_never_moves_the_frame():
+    """`osd-dimensions` reads 0×0 until mpv has rendered a frame, and reads a stale size across a
+    resize. Neither can move the layout: the surface the host is drawing onto is the frame, and it
+    is passed in rather than re-read here."""
+    result = _inputs(osd={"w": None, "h": None}, frame_size=(1280, 720))
 
     assert result.frame_size == (1280, 720)
 
@@ -2804,35 +3834,25 @@ def _decision_spans(monkeypatch) -> list[dict[str, object]]:
     return spans
 
 
-def test_geometry_records_the_frame_it_shares_with_the_osd_surface(tmp_path, monkeypatch) -> None:
-    """Boxes are laid out in the frame `osd-dimensions` reports; they are drawn onto the surface the
-    host latched in `self.osd`. Nothing downstream compares the two, and when they differ the output
-    is not degraded but silently wrong — every box carries the same offset."""
+@pytest.mark.parametrize("surface", [(1280, 720), (3574, 2074)])
+def test_boxes_are_laid_out_in_the_surface_they_are_drawn_onto(
+    tmp_path, monkeypatch, surface: tuple[int, int]
+) -> None:
+    """One value, not two reads of one property.
+
+    The layout used to come from a live `osd-dimensions` read and the drawing from the host's
+    latched surface. Whenever those disagreed the output was not degraded but silently wrong: every
+    box carried the same scale-and-offset error for the whole episode, and nothing compared them.
+    The second surface here is one `osd-dimensions` never reports, so a layout that went back to
+    reading the property directly would not follow it."""
     spans = _decision_spans(monkeypatch)
     result, ipc, _backend = reader(tmp_path)
-    result.osd = (1280, 720)  # agrees with the fake's osd-dimensions
+    result.osd = surface
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     framed = [s for s in spans if "frame_width" in s]
     assert framed, "no decision reached the frame branch"
-    assert all(s["host_osd"] == "(1280, 720)" for s in framed)
-    assert all("frame_disagreement" not in s for s in framed)
-    result.close()
-
-
-def test_a_frame_that_disagrees_with_the_osd_surface_is_recorded(tmp_path, monkeypatch) -> None:
-    """Negative control for the test above — the oracle has to catch the divergence it exists for,
-    or the match assertion is only proving that both sides read the same fake."""
-    spans = _decision_spans(monkeypatch)
-    result, ipc, _backend = reader(tmp_path)
-    result.osd = (3574, 2074)  # the host latched a surface `osd-dimensions` never reported
-
-    result.set_subtitle("猫を見る")
-    settle_jobs(result, ipc)
-
-    framed = [s for s in spans if "frame_width" in s]
-    assert framed, "no decision reached the frame branch"
-    assert any(s.get("frame_disagreement") == "(1280, 720)_vs_(3574, 2074)" for s in framed)
+    assert {(s["frame_width"], s["frame_height"]) for s in framed} == {surface}
     result.close()

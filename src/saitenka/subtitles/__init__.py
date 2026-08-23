@@ -1,5 +1,6 @@
 """Pure subtitle parsing and cue navigation."""
 
+from saitenka.subtitles import converted, font_names, subrip
 from saitenka.subtitles.ass import (
     AssColorRewrite,
     AssStyle,
@@ -38,12 +39,15 @@ from saitenka.subtitles.document import (
     TokenAnnotation,
 )
 from saitenka.subtitles.geometry import (
+    FontProvider,
+    FontSetup,
     GeometryBackend,
     GeometryPaletteEntry,
     GeometryRequest,
     GeometrySnapshot,
     GeometryVariant,
     Rect,
+    RendererState,
     TokenGeometry,
 )
 from saitenka.subtitles.index import CueIndex
@@ -61,6 +65,8 @@ __all__ = [
     "CueIndex",
     "DecodedSubtitleEvent",
     "DrawingSpan",
+    "FontProvider",
+    "FontSetup",
     "GeometryBackend",
     "GeometryPaletteEntry",
     "GeometryRequest",
@@ -73,6 +79,7 @@ __all__ = [
     "RawSubtitleTrack",
     "RawTextSpan",
     "Rect",
+    "RendererState",
     "SubtitleAttachment",
     "SubtitleEventId",
     "SubtitleFrameId",
@@ -84,7 +91,9 @@ __all__ = [
     "allocate_token_colors",
     "authored_ass_rows_at",
     "canonical_active_ass_rows",
+    "converted",
     "decode_ass_event",
+    "font_names",
     "parse_ass",
     "parse_ass_event_line",
     "parse_ass_styles",
@@ -96,4 +105,5 @@ __all__ = [
     "serialize_ass_event_line",
     "shift_ass_dialogue",
     "source_primary_bgr_colors",
+    "subrip",
 ]

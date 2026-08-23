@@ -13,6 +13,7 @@ import numpy as np
 
 from saitenka import otel_metrics
 from saitenka.bgra import (  # re-exported: `from saitenka.mpvio.osd import to_bgra…`
+    rgba_to_bgra,
     to_bgra,
     to_bgra_array,
 )
@@ -210,8 +211,25 @@ class Overlay:
     def prepare(
         self, img: Image.Image, x: int = 0, y: int = 0, *, oid: int = 0, revision: int
     ) -> PreparedOverlay:
+        return self._prepare(to_bgra(img), x, y, oid=oid, revision=revision)
+
+    def prepare_rgba(
+        self, rgba: np.ndarray, x: int = 0, y: int = 0, *, oid: int = 0, revision: int
+    ) -> PreparedOverlay:
+        """`prepare` for a caller whose pixels are already an RGBA array — no PIL round trip."""
+        return self._prepare(rgba_to_bgra(rgba), x, y, oid=oid, revision=revision)
+
+    def _prepare(
+        self,
+        converted: tuple[bytes, int, int, int],
+        x: int,
+        y: int,
+        *,
+        oid: int,
+        revision: int,
+    ) -> PreparedOverlay:
         physical_oid = self._oid(oid)
-        data, w, h, stride = to_bgra(img)
+        data, w, h, stride = converted
         with tempfile.NamedTemporaryFile(
             prefix=f"saitenka-osd-{physical_oid}-r{revision}-",
             suffix=".bgra",

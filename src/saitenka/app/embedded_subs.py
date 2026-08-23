@@ -81,6 +81,37 @@ def extract_embedded_track(
     return True
 
 
+def container_fonts_cache_dir() -> Path:
+    from saitenka.app.paths import cache_dir
+
+    return cache_dir() / "container-fonts"
+
+
+def resolve_track_fonts(ipc, get: PropertyGet, geometry: NativeSubtitleGeometry) -> None:
+    """Hand the geometry owner the same font set mpv's subtitle renderer holds for this track.
+
+    Runs here because this is where a track load already pays for a subprocess and knows the media
+    path; the attachments live in the video container even when the subtitle itself is external.
+    Fail-soft: an unreachable mpv leaves the environment empty, which the geometry owner refuses
+    rather than measures.
+    """
+    from saitenka.app import subtitle_fonts
+
+    path = get("path")
+    try:
+        settings = {name: ipc.query(f"options/{name}") for name in subtitle_fonts.FONT_OPTIONS}
+        environment = subtitle_fonts.resolve(
+            expand=ipc.expand_path,
+            settings=settings,
+            video=Path(str(path)) if path else None,
+            cache_dir=container_fonts_cache_dir(),
+        )
+    except (OSError, ValueError, TypeError) as error:
+        log.warning("could not resolve the track's font sources: %s", error)
+        return
+    geometry.set_fonts(environment)
+
+
 def build_sub_index_for_current_track(
     ipc, get: PropertyGet, load: Callable[[Path], None], geometry: NativeSubtitleGeometry | None
 ) -> None:
@@ -92,9 +123,14 @@ def build_sub_index_for_current_track(
     (app/prefetch.py's ``upcoming_cue_texts``) gets real upcoming lines regardless of subtitle
     source. Fail-soft throughout: no selected track / no video path / extraction failure just
     leaves the index unset."""
+    track = _selected_sub_track(ipc)
     if geometry is not None:
         geometry.set_source(None, live=True)
-    artifact = subtitle_artifact.resolve(_selected_sub_track(ipc), media_path=get("path"))
+        # Before the source, which reads it: an external artifact reaches `set_source` through
+        # `load` and carries no codec of its own.
+        geometry.set_track_codec(str((track or {}).get("codec") or ""))
+        resolve_track_fonts(ipc, get, geometry)
+    artifact = subtitle_artifact.resolve(track, media_path=get("path"))
     if isinstance(artifact, subtitle_artifact.ArtifactUnavailable):
         log.debug("no subtitle artifact for the current track: %s", artifact.value)
         return

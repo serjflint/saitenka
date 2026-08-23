@@ -16,6 +16,7 @@ from saitenka.runtime.surfaces import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import numpy as np
     from PIL import Image
 
     from saitenka.mpvio.osd import Overlay, PreparedOverlay
@@ -44,11 +45,44 @@ class LifecycleSurfaces:
         owner: Owner = Owner.PRESENTATION,
         on_settled: Callable[[bool], None] | None = None,
     ) -> SurfaceTransaction:
+        return self._present(
+            lambda revision: self._overlay.prepare(img, x, y, oid=oid, revision=revision),
+            oid=oid,
+            owner=owner,
+            on_settled=on_settled,
+        )
+
+    def present_rgba(
+        self,
+        rgba: np.ndarray,
+        x: int,
+        y: int,
+        *,
+        oid: int,
+        owner: Owner = Owner.PRESENTATION,
+        on_settled: Callable[[bool], None] | None = None,
+    ) -> SurfaceTransaction:
+        """`present` for pixels that were composited as an array. Same fence, no PIL."""
+        return self._present(
+            lambda revision: self._overlay.prepare_rgba(rgba, x, y, oid=oid, revision=revision),
+            oid=oid,
+            owner=owner,
+            on_settled=on_settled,
+        )
+
+    def _present(
+        self,
+        stage: Callable[[int], PreparedOverlay],
+        *,
+        oid: int,
+        owner: Owner,
+        on_settled: Callable[[bool], None] | None,
+    ) -> SurfaceTransaction:
         with self._request_lock:
             transaction = self._runtime.request(str(oid), SurfaceAction.PRESENT)
             prepared = None
             try:
-                prepared = self._overlay.prepare(img, x, y, oid=oid, revision=transaction.revision)
+                prepared = stage(transaction.revision)
                 self._submit(transaction, prepared.command, prepared, owner, on_settled)
             except _SURFACE_ERRORS:
                 self._fail(transaction, prepared, on_settled)

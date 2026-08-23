@@ -87,13 +87,13 @@ def test_native_visible_launch_locks_the_proved_mpv_profile_before_user_override
         "--sub-ass-video-aspect-override=0",
         "--sub-ass-use-video-data=all",
         "--sub-ass-style-overrides=",
-        "--sub-font-provider=auto",
-        "--embeddedfonts=no",
-        "--sub-fonts-dir=",
         "--sub-visibility=yes",
     }
     assert required <= set(argv)
     assert argv.index("--sub-scale=1") < argv.index("--sub-scale=1.2")
+    # The font options are read, not forced: pinning them threw away the very typesetting a release
+    # ships attached fonts for, and the measuring renderer now loads the same faces mpv does.
+    assert not any(argument.startswith(("--embeddedfonts", "--sub-fonts-dir")) for argument in argv)
 
 
 def test_native_geometry_mpv_version_floor() -> None:

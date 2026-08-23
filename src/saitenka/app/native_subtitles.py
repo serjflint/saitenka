@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import ast
 import logging
 import math
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 from saitenka import otel_metrics
-from saitenka.app import cue_annotation
+from saitenka.app import cue_annotation, subtitle_fonts
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryCacheReason,
     GeometryOutcome,
@@ -21,16 +22,23 @@ from saitenka.app.subtitle_geometry_diagnostics import (
 from saitenka.app.subtitles import WordBox
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
+    GeometryPaletteEntry,
     GeometryRequest,
+    RendererState,
     SubtitleTrackId,
     TokenAnnotation,
     authored_ass_rows_at,
     canonical_active_ass_rows,
+    converted,
+    decode_ass_event,
+    font_names,
+    parse_ass_event_line,
     prepare_ass_hit_map_frame,
+    subrip,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import SupportsFloat
 
@@ -39,6 +47,7 @@ if TYPE_CHECKING:
     from saitenka.app.token_cache import TokenizedCue
     from saitenka.app.tokenize import Token
     from saitenka.subtitles import Cue, CueIndex
+    from saitenka.subtitles.ass_geometry import PreparedAssFrame
     from saitenka.subtitles.geometry import GeometrySnapshot
 
 log = logging.getLogger(__name__)
@@ -51,6 +60,7 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-render-input-unsupported",
         "subtitle-source-encoding-unsupported",
         "subtitle-source-not-authored-ass",
+        "subtitle-source-conversion-unreproduced",
         "subtitle-source-too-large",
         "subtitle-source-unavailable",
         "subtitle-timing-unavailable",
@@ -60,6 +70,7 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-geometry-cache-miss",
         "subtitle-observation-pending",
         "subtitle-frame-unsupported",
+        "subtitle-font-environment-stale",
     }
 )
 _PENDING_REASONS = frozenset(
@@ -73,13 +84,105 @@ _PENDING_REASONS = frozenset(
 # Sources geometry can never accept, however long it waits — wrong format, too large, not UTF-8.
 # `subtitle-source-unavailable` is deliberately absent: `set_source(None)` is also the reset every
 # track load runs, so switching on it would flap the renderer twice per episode.
+#: `ASS_Feature` ordinals, in the header's declaration order. Named here rather than imported from
+#: the wrapper because the wrapper is an optional extra and this module loads without it.
+_ASS_FEATURE_BIDI_BRACKETS = 1
+_ASS_FEATURE_WHOLE_TEXT_LAYOUT = 2
+_ASS_FEATURE_WRAP_UNICODE = 3
+
 _UNSUPPORTED_SOURCE_REASONS = frozenset(
     {
         "subtitle-source-encoding-unsupported",
         "subtitle-source-not-authored-ass",
+        "subtitle-source-conversion-unreproduced",
         "subtitle-source-too-large",
     }
 )
+
+#: The demuxer codecs whose libavcodec-to-ASS conversion `subtitles.converted` reproduces. Only
+#: SubRip: every other text codec sd_ass converts (`mov_text`, `webvtt`, `microdvd`, ...) is decoded
+#: by a DIFFERENT libavcodec decoder, which writes its own header and its own styles, and mpv's
+#: converted branch leaves margins, ScaleX/Y and any non-default style standing. Our own extraction
+#: hides the difference by transcoding all of them to `.srt` (`subtitle_artifact.extract_spec`) —
+#: the file is not what mpv is decoding, so the suffix cannot be the test. Widen this only against a
+#: measurement, never against a reading of the decoder.
+CONVERTED_CODECS = frozenset({"subrip"})
+
+#: The components of `_key`, in order, so a miss can name which one diverged rather than only
+#: that the whole key did.
+_KEY_FIELDS = (
+    "path",
+    "text",
+    "rows",
+    "frame_size",
+    "storage_size",
+    "pixel_aspect",
+    "margins",
+    "use_margins",
+    "render_profile",
+)
+
+#: The mpv options a geometry request is derived from — reproduced in the measuring render, or
+#: refused. Every one must also be observed and counted a render-space input, or `_render_inputs`
+#: reads it with a blocking round trip twice per cue and a mid-episode change never invalidates the
+#: boxes it moved. `tests/test_native_subtitles.py` binds the three lists together.
+GATE_OPTIONS = (
+    "sub-ass-override",
+    "sub-ass-scale-with-window",
+    "sub-scale",
+    "sub-pos",
+    "sub-use-margins",
+    "sub-ass-force-margins",
+    "sub-ass-video-aspect-override",
+    "sub-ass-use-video-data",
+    "sub-ass-style-overrides",
+    "sub-scale-with-window",
+    "sub-scale-by-window",
+    "blend-subtitles",
+    "sub-filter-sdh",
+    "video-crop",
+    "video-rotate",
+    *subtitle_fonts.FONT_OPTIONS,
+    # Read, never refused: mpv applies these to a CONVERTED track only, and `converted.style_of`
+    # reproduces each of them. Refusing one would cost a user with a custom `--sub-font-size` every
+    # authored track too, where mpv does not read it at all.
+    *converted.STYLE_OPTIONS,
+)
+
+
+class SourceKind(StrEnum):
+    """Which document the boxes are measured against.
+
+    `CONVERTED` is not "an SRT": mpv never renders one. libavcodec turns it into ASS and mpv renders
+    *that*, through a branch of `configure_ass` it applies to no authored track. The document is
+    therefore reconstructed per cue rather than read from disk — see `subtitles.converted`.
+    """
+
+    NONE = "none"
+    AUTHORED = "authored-ass"
+    CONVERTED = "converted"
+
+
+class NativeFormats(StrEnum):
+    """Which track formats the native path will take."""
+
+    AUTHORED_ASS = "authored-ass"
+    ALL = "all"
+
+
+def native_formats(configured: object) -> NativeFormats:
+    """Read the config value, defaulting to the tested envelope rather than raising.
+
+    A typo must not take the session down, and it must not silently widen the envelope either:
+    anything unrecognised means the authored-ASS path, and says so.
+    """
+    try:
+        return NativeFormats(str(configured))
+    except ValueError:
+        log.warning(
+            "unknown native_formats %r; using %s", configured, NativeFormats.AUTHORED_ASS.value
+        )
+        return NativeFormats.AUTHORED_ASS
 
 
 class AssFullCapability(StrEnum):
@@ -152,8 +255,76 @@ def _lookahead_tokenized(
     )
 
 
+def _requested_family(font_name: str) -> str:
+    """The family an ASS `Fontname` asks for, as the unreachable set spells it."""
+    return font_names.key(font_name)
+
+
+def connect_drift_sink(renderer: object, geometry: NativeSubtitleGeometry) -> None:
+    """Let a measured drift verdict reach the geometry side.
+
+    The renderer measures it and applies it where it draws, which is the only place a late answer
+    can still reach the cue on screen. This side needs to hear it so the next build keeps coverage
+    masks for those families. A renderer without the seam simply never reports one.
+    """
+    sink = getattr(renderer, "set_drift_sink", None)
+    if sink is not None:
+        sink(geometry.record_drifting_families)
+
+
+def _palette_in_frame_units(
+    prepared: PreparedAssFrame,
+    frame_height: int,
+    font_scale: float,
+    *,
+    unreachable: subtitle_fonts.OsdReach,
+) -> tuple[GeometryPaletteEntry, ...]:
+    """Restate each token's font size in the frame's pixels rather than the document's script units.
+
+    libass scales a style's `Fontsize` by `frame_height / PlayResY`, then by whatever
+    `ass_set_font_scale` holds. Doing that here — once, where both numbers are known — is what lets
+    an overprint draw the token at the size it was actually laid out at, instead of redoing libass's
+    arithmetic at the point of drawing where `PlayResY` is no longer in scope.
+
+    A document that declares no `PlayResY` yields a size of zero, which the overprint reads as "do
+    not draw this token" rather than as a size. So does a token whose family the OSD library cannot
+    reach: its box is still right, and only its color stands down.
+    """
+    if prepared.play_res_y <= 0:
+        return tuple(replace(entry, font_name="", font_size=0.0) for entry in prepared.palette)
+    scale = frame_height / prepared.play_res_y * font_scale
+    demoted = [
+        entry
+        for entry in prepared.palette
+        if unreachable.blocks(_requested_family(entry.font_name))
+    ]
+    if demoted and otel_metrics.subtitle_overprint_demotions is not None:
+        otel_metrics.subtitle_overprint_demotions.add(
+            len(demoted), {"reason": "font-not-on-osd-library"}
+        )
+    blanked = {(entry.event_id, entry.token_index) for entry in demoted}
+    return tuple(
+        replace(entry, font_name="", font_size=0.0)
+        if (entry.event_id, entry.token_index) in blanked
+        else replace(entry, font_size=entry.font_size * scale)
+        for entry in prepared.palette
+    )
+
+
 def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
+    """Which of mpv's render options put the cue somewhere our layout cannot follow.
+
+    The font options are absent on purpose: `subtitle_fonts.resolve` now reproduces each of them
+    instead of refusing it, so `--embeddedfonts`, `--sub-fonts-dir`, `--sub-font-provider` and
+    `--sub-font` are inputs to the measuring renderer rather than reasons to give up on a track.
+    They are still read, so a change to one still invalidates the cache and is still checked
+    against the resolved environment.
+    """
     supported = {
+        # Refusing every value but "no" is what keeps `ass_set_selective_style_override` out of the
+        # measuring render: that API applies `yes`/`force`/`scale` to an AUTHORED track. A converted
+        # track is unaffected either way — mpv rewrites its `[V4+ Styles]` block directly, which
+        # `subtitles.converted` ports.
         "sub-ass-override": settings["sub-ass-override"] in {False, "no"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
         "sub-scale": settings["sub-scale"] == 1.0,
@@ -166,13 +337,93 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
             0,
         },
         "sub-ass-use-video-data": settings["sub-ass-use-video-data"] == "all",
-        "sub-ass-vsfilter-aspect-compat": settings["sub-ass-vsfilter-aspect-compat"] is None,
         "sub-ass-style-overrides": settings["sub-ass-style-overrides"] in (None, "", (), [], [""]),
-        "sub-font-provider": settings["sub-font-provider"] == "auto",
-        "embeddedfonts": settings["embeddedfonts"] is False,
-        "sub-fonts-dir": settings["sub-fonts-dir"] in {None, ""},
+        # `--sub-ass-vsfilter-aspect-compat` is NOT here, and must not return as an is-None check:
+        # mpv's default is `yes`, so a present bool option never reads `None` and that row refused
+        # every track on every mpv that still had the option. 0.41 removed it in favour of
+        # `sub-ass-use-video-data`, gated above and forced by `mpvio.launch`.
+        #
+        # `--sub-scale-with-window` and `--sub-scale-by-window` are NOT here. mpv reads them only on
+        # `configure_ass`'s forced-override branch, which a CONVERTED track takes — and there
+        # `converted.font_scale` reproduces both, so they are inputs to the measurement rather than
+        # reasons to give up on a track. On the authored branch mpv reads `sub-ass-scale-with-window`
+        # (gated above) and never reads `sub-scale-by-window` at all, so refusing either there would
+        # cost an episode's interaction over an option with no effect on it.
+        #
+        # `--blend-subtitles` does not move our overlay: it is still drawn last and at screen
+        # resolution, in the `OSD_DRAW_OSD_ONLY` pass onto the screen (`video/out/gpu/video.c:3650`).
+        # What moves is where MPV's glyphs are — it builds a different `mp_osd_res` for the blend
+        # pass (`video.c:3227-3273`), and the boxes have to be laid out against that surface and
+        # then offset onto the screen.
+        #
+        # `=yes` IS reproduced — see `_blend_space`, which recreates that `mp_osd_res` from
+        # `osd-dimensions`. `=video` is not: it lays the subtitle out on `texture_w/h` AFTER the
+        # user's shader hooks, which a `--glsl-shader` can resize and nothing reports.
+        "blend-subtitles": settings["blend-subtitles"] in {False, "no", True, "yes"},
+        # Only meaningful for the blend pass, and only there are they refused. `_blend_space`
+        # derives the blend rect from the premise that the src rect is the whole image, which a
+        # crop breaks outright and a rotation re-orients (`mp_get_src_dst_rects`,
+        # `aspect.c:156-163`). Outside blending they change nothing this gate reads.
+        "video-crop": not _blends_into_video(settings) or not str(settings["video-crop"] or ""),
+        "video-rotate": not _blends_into_video(settings)
+        or settings["video-rotate"] in {0, None, "0", "no"},
+        # The SDH filter REWRITES an event's text before `ass_process_chunk` sees it
+        # (`filter_and_add`, `sd_ass.c:370-385`), so what mpv is drawing is not what the file says
+        # and our match back to the authored source is against a document that no longer describes
+        # the screen. It runs on every track sd_ass handles — `.codec` is hardcoded `"ass"`
+        # (`sd_ass.c:221`), so a converted track is filtered too.
+        #
+        # `--sub-filter-regex` / `--sub-filter-jsre` are NOT here: they only DROP a whole packet,
+        # never rewrite one. A dropped cue reaches us as an empty `sub-text`, which already means
+        # "nothing to lay out" — the events that do arrive are still the file's own.
+        "sub-filter-sdh": settings["sub-filter-sdh"] in {False, "no", None},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
+
+
+@dataclass(frozen=True, slots=True)
+class _BlendSpace:
+    """The surface mpv lays a blended subtitle out on, and where it sits on the screen."""
+
+    frame_size: tuple[int, int]
+    pixel_aspect: float
+    origin: tuple[int, int]
+
+
+def _blends_into_video(settings: Mapping[str, object]) -> bool:
+    return settings["blend-subtitles"] in {True, "yes"}
+
+
+def _blend_space(
+    frame_size: tuple[int, int],
+    margins: tuple[int, int, int, int],
+    video: Mapping[str, object],
+) -> _BlendSpace | None:
+    """`--blend-subtitles=yes`: the OSD resolution mpv builds for the blend pass, or `None`.
+
+    mpv draws the subtitle into the video texture before scaling, on a `mp_osd_res` it recreates
+    from the src/dst rects (`video/out/gpu/video.c:3249-3263`): the video's on-screen rectangle,
+    with margins `-src.x0`, `src.x1 - image_w` (scaled), and `display_par = 1.0`.
+
+    Derivable from `osd-dimensions` alone in the cases this accepts. `mp_get_src_dst_rects`
+    (`video/out/aspect.c:76-114`) sets `osd.ml = dst.x0` and `osd.mr = dst_size - dst.x1` BEFORE it
+    clips, so the video rectangle is exactly the surface inset by those margins. And when the source
+    is uncropped and unrotated the src rect is the whole image, which makes every blend-pass margin
+    zero. Both premises are guarded: a crop or a rotation is refused above, and any case where mpv
+    had to clip (pan, zoom or panscan pushing the video past the window) leaves a NEGATIVE osd
+    margin, which `_validate_frame` already rejects.
+
+    The consequence for the boxes is an offset, not a scale: the blend surface has the same pixel
+    pitch as the screen, so a token measured at `(x, y)` there is drawn at `(x + ml, y + mt)`.
+    """
+    top, bottom, left, right = margins
+    width = frame_size[0] - left - right
+    height = frame_size[1] - top - bottom
+    if width <= 0 or height <= 0:
+        return None
+    # `display_par` is 1.0 on the blend rect, so the screen's OSD aspect drops out and only the
+    # video's own remains.
+    return _BlendSpace((width, height), _pixel_aspect({"par": 1.0}, video), (left, top))
 
 
 def _validate_frame(frame_size: tuple[int, int], margins: tuple[int, int, int, int]) -> None:
@@ -198,7 +449,7 @@ def render_inputs_of(
     video: Mapping[str, object],
     settings: Mapping[str, object],
     *,
-    fallback_size: tuple[int, int],
+    frame_size: tuple[int, int],
 ) -> _RenderInputs:
     """Whether mpv's current render configuration lets us key geometry off it, and the frame it
     implies. Raises `ValueError` naming what disqualified it.
@@ -207,20 +458,39 @@ def render_inputs_of(
     boxes would be computed against a frame mpv is not drawing into, so hit regions land beside the
     words. `sub-scale`, `sub-pos` and the margin flags all move the text; the font settings change
     which glyphs get laid out; a non-finite or non-positive pixel aspect makes the mapping
-    meaningless. `osd-dimensions` is preferred over the reported OSD size because it is the surface
-    subtitles are actually composited onto.
+    meaningless.
+
+    `frame_size` is the host's OSD surface, passed in rather than re-derived from the `osd` mapping
+    here. Both were reads of `osd-dimensions`, and two reads of one property are two values: the
+    boxes were laid out against one and drawn onto the other, with the same scale-and-offset error
+    on every box and nothing to say so. Margins and pixel aspect still come from the mapping — the
+    host does not carry those.
     """
 
     def _dim(source: Mapping[str, object], key: str, default: int) -> int:
         return int(cast("int | float | str", source.get(key) or default))
 
-    frame_size = (_dim(osd, "w", fallback_size[0]), _dim(osd, "h", fallback_size[1]))
     storage_size = (_dim(video, "w", frame_size[0]), _dim(video, "h", frame_size[1]))
     margins = _frame_margins(osd)
     unsupported = _unsupported_render_inputs(settings)
     if unsupported:
         raise ValueError(", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported))
     _validate_frame(frame_size, margins)
+    blended = _blend_space(frame_size, margins, video) if _blends_into_video(settings) else None
+    if blended is not None:
+        return _RenderInputs(
+            blended.frame_size,
+            storage_size,
+            blended.pixel_aspect,
+            (0, 0, 0, 0),
+            cast("bool", settings["sub-ass-force-margins"]),
+            tuple(sorted((name, repr(value)) for name, value in settings.items())),
+            subtitle_fonts.option_snapshot(settings),
+            settings["sub-scale-with-window"] is not False,
+            settings["sub-scale-by-window"] is not False,
+            blended.origin,
+            converted.style_of(settings),
+        )
     return _RenderInputs(
         frame_size,
         storage_size,
@@ -228,6 +498,10 @@ def render_inputs_of(
         margins,
         cast("bool", settings["sub-ass-force-margins"]),
         tuple(sorted((name, repr(value)) for name, value in settings.items())),
+        subtitle_fonts.option_snapshot(settings),
+        settings["sub-scale-with-window"] is not False,
+        settings["sub-scale-by-window"] is not False,
+        style=converted.style_of(settings),
     )
 
 
@@ -278,6 +552,19 @@ class _RenderInputs:
     margins: tuple[int, int, int, int]
     use_margins: bool
     profile: tuple[tuple[str, str], ...]
+    #: Just the font options, so a change to one can be told from a change to the render space.
+    font_options: tuple[tuple[str, str], ...] = ()
+    #: The two `--sub-scale-*` switches mpv reads on its forced-override branch. Reproduced rather
+    #: than refused, so they travel to `converted.font_scale` as values.
+    scale_with_window: bool = True
+    scale_by_window: bool = True
+    #: Where the frame the boxes were laid out in sits on the screen. Non-zero only under
+    #: `--blend-subtitles=yes`, where mpv lays the cue out on the video rectangle rather than on the
+    #: OSD surface, and the boxes are drawn onto the screen — see `_blend_space`.
+    box_origin: tuple[int, int] = (0, 0)
+    #: The `--sub-*` style mpv applies to a converted track. Unread on an authored one, where
+    #: `--sub-ass-override=no` leaves the file's own styles standing.
+    style: converted.SubStyle = field(default_factory=converted.SubStyle)
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,6 +610,10 @@ class GeometryPorts:
     use_native: Callable[[], bool]
     ownership_undecided: Callable[[], bool]
     redraw: Callable[[], None]
+    #: Ask for a fresh geometry build. Distinct from `redraw`, which re-draws what is already
+    #: measured: a verdict that changes what the measurement must CONTAIN — coverage masks, say —
+    #: needs the request rebuilt, and redrawing the old snapshot cannot produce it.
+    reschedule: Callable[[], None]
     #: Hand the hit boxes (and, when the cue is installed, its origin) to whoever presents them.
     #: The geometry owner IS the publisher of these — unlike a renderer, which returns them so a
     #: superseded cue cannot write over a live one. Here the generation fence is what orders them.
@@ -346,6 +637,9 @@ class GeometryObservation:
     """
 
     prop: Callable[[str], Any]
+    #: The OSD surface mpv composites onto, and therefore the frame the boxes are laid out in.
+    #: One value for both drawing and layout — reading `osd-dimensions` separately for the layout
+    #: is two surfaces whenever the two reads disagree.
     osd: tuple[int, int]
     text: str
     tokens: list[Token]
@@ -360,13 +654,20 @@ class GeometryObservation:
 
 class NativeSubtitleGeometry:
     def __init__(
-        self, worker: SubtitleGeometryWorker, ports: GeometryPorts, *, lookahead: int = 2
+        self,
+        worker: SubtitleGeometryWorker,
+        ports: GeometryPorts,
+        *,
+        lookahead: int = 2,
+        formats: NativeFormats = NativeFormats.AUTHORED_ASS,
     ) -> None:
         if lookahead < 0:
             raise ValueError("subtitle geometry lookahead must be non-negative")
         self.worker = worker
         self._ports = ports
         self.lookahead = lookahead
+        self.formats = formats
+        self.source_kind = SourceKind.NONE
         self.source_path: Path | None = None
         self._source_bytes: bytes | None = None
         self.fallback_reason: str | None = "subtitle-source-unavailable"
@@ -383,8 +684,54 @@ class NativeSubtitleGeometry:
         self._last_transition: str | None = None
         self._last_recovery: str | None = None
         self._last_render_inputs: _RenderInputs | None = None
-        self._last_host_osd: tuple[int, ...] | None = None
         self._failure_diagnostic: tuple[str, str | None] | None = None
+        self._fonts = subtitle_fonts.FontEnvironment()
+        self._in_document_families: frozenset[str] = frozenset()
+        self._measured_unsafe: frozenset[str] = frozenset()
+        #: A converted track's cue markup, by millisecond span — see `_adopt_converted`.
+        self._converted_markup: dict[tuple[int, int], str] = {}
+        self._track_codec = ""
+
+    def record_drifting_families(self, families: frozenset[str]) -> None:
+        """A measured verdict that mpv's OSD renderer does not lay these families out as we do.
+
+        The renderer has already stopped drawing them as text — it applies the verdict where it
+        draws, which is the only place a *late* answer can still reach the cue on screen. What is
+        left for this side is the consequence for the next build: those tokens now need coverage
+        masks, so the raster device can color them instead of the rule device marking them.
+        """
+        if families <= self._measured_unsafe:
+            return
+        self._measured_unsafe |= families
+        self.invalidate(cause=GeometryCacheReason.RENDER_INPUT_CHANGED)
+        # Both, and they do different work. `redraw` takes the drifting face off the cue on screen
+        # now; `reschedule` builds the request that will carry coverage masks for it, which is the
+        # only way the raster device can pick the color back up. Invalidating alone does neither —
+        # nothing re-observes a cue that has not changed, so the rebuild never happens and the
+        # family stays uncolored for as long as it is shown.
+        self._ports.reschedule()
+        self._ports.redraw()
+
+    def set_track_codec(self, codec: str) -> None:
+        """Which decoder mpv is running for the selected track, from `track-list`.
+
+        The codec, not the file suffix: our own extraction transcodes `mov_text` and `webvtt` to
+        `.srt` (`subtitle_artifact.extract_spec`), so the artifact on disk says SubRip while mpv is
+        decoding something else entirely — two conversions of one source, and only one of them is
+        the one on screen. Must be set before the source, which is where it is read.
+        """
+        self._track_codec = codec.strip().casefold()
+
+    @property
+    def unreachable_families(self) -> subtitle_fonts.OsdReach:
+        """The families the overprint must stand down on — see `FontEnvironment.osd_unreachable`.
+
+        Three halves, arriving independently: the container's attachments come with the font
+        environment, the document's own ``[Fonts]`` section with the source, and a measured drift
+        verdict from the renderer at any time after either. Combining them on read means no arrival
+        order leaves one out.
+        """
+        return self._fonts.osd_unreachable(self._in_document_families, self._measured_unsafe)
 
     def _skipped_tokens(self) -> int:
         return (
@@ -424,7 +771,7 @@ class NativeSubtitleGeometry:
             span.set("reason", reason)
             span.set("generation", self.worker.generation)
             span.set("source_epoch", self._source_epoch)
-            span.set("source_class", "external-ass" if self.source_path is not None else "none")
+            span.set("source_class", self.source_kind)
             span.set("ass_full_capability", self.ass_full_capability)
             span.set("active_events", active_events)
             span.set("eligible_tokens", self._eligible_tokens)
@@ -441,37 +788,8 @@ class NativeSubtitleGeometry:
                 span.set("storage_height", render.storage_size[1])
                 span.set("pixel_aspect", render.pixel_aspect)
                 span.set("margins", repr(render.margins))
-                self._record_frame_agreement(span, render.frame_size)
             if target_owner != self._owner:
                 span.set("owner_transition", f"{self._owner}_to_{target_owner}")
-
-    def _record_frame_agreement(
-        self, span: otel_metrics.SpanSetter, frame: tuple[int, int]
-    ) -> None:
-        """Do the boxes and the surface they land on agree about the frame?
-
-        A mismatch is not a degraded mode — it is silently wrong output: every box takes the same
-        scale-and-offset error, so hit regions and the highlight sit beside the words for the whole
-        episode. Recorded on every decision because the divergence is invisible otherwise; the two
-        sizes reach a report only as `frame_*` (live `osd-dimensions`) and an `osd_probe` that fires
-        just on a change, and neither says whether they were equal when it mattered.
-        """
-        host = self._last_host_osd
-        if host is None:
-            return
-        agree = tuple(host[:2]) == frame
-        span.set("host_osd", repr(tuple(host[:2])))
-        if not agree:
-            span.set("frame_disagreement", f"{frame}_vs_{tuple(host[:2])}")
-            log.warning(
-                "geometry frame %r disagrees with the OSD surface %r — every box is offset",
-                frame,
-                tuple(host[:2]),
-            )
-        if otel_metrics.geometry_frame_agreement is not None:
-            otel_metrics.geometry_frame_agreement.add(
-                1, {"outcome": "match" if agree else "mismatch"}
-            )
 
     def _transition_owner(
         self,
@@ -644,8 +962,39 @@ class NativeSubtitleGeometry:
         elif error in {"property not found", "unknown property"}:
             self.ass_full_capability = AssFullCapability.UNSUPPORTED
 
+    def set_fonts(self, environment: subtitle_fonts.FontEnvironment) -> None:
+        """Adopt the font set mpv holds for this track, resolved by whoever loaded it.
+
+        Not read from mpv here: it costs an ffmpeg dump and two `expand-path` round trips, and gate
+        6 keeps that off the interaction loop. Arriving late is safe — it invalidates, so the next
+        cue re-measures; arriving never leaves the environment empty and the check below refuses
+        the frame rather than laying it out in whatever the system happens to offer.
+        """
+        if environment == self._fonts:
+            return
+        self._fonts = environment
+        log.info(
+            "subtitle font sources: %s (%d attachment(s), fonts-dir %s)",
+            "+".join(environment.sources) or "none",
+            len(environment.attachments),
+            environment.setup.fonts_dir or "-",
+        )
+        if otel_metrics.subtitle_geometry_font_sources is not None:
+            otel_metrics.subtitle_geometry_font_sources.add(
+                1, {"sources": "+".join(environment.sources) or "none"}
+            )
+        self.invalidate(cause=GeometryCacheReason.RENDER_INPUT_CHANGED)
+
+    def _fonts_are_current(self, render: _RenderInputs) -> bool:
+        """Whether the resolved environment still describes what mpv is doing.
+
+        mpv treats every one of these options as `UPDATE_SUB_HARD` — it rebuilds its own subtitle
+        decoder — so a change between track loads means our faces and its faces have diverged.
+        """
+        return self._fonts.options == render.font_options
+
     def set_source(self, path: Path | None, *, live: bool = False) -> None:
-        """Point at a new authored source.
+        """Point at a new source.
 
         `live` says a running session is switching, so whatever the old source left on screen has
         to be retired. It used to be spelled by passing the host and testing it for `None` — a
@@ -656,7 +1005,10 @@ class NativeSubtitleGeometry:
         self._source_epoch += 1
         self.worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
         self.source_path = None
+        self.source_kind = SourceKind.NONE
         self._source_bytes = None
+        self._in_document_families = frozenset()
+        self._converted_markup = {}
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
@@ -670,21 +1022,56 @@ class NativeSubtitleGeometry:
             self._ports.degrade()
         if path is None:
             self._set_fallback("subtitle-source-unavailable")
-        elif path.suffix.casefold() != ".ass":
+        elif path.suffix.casefold() == ".ass":
+            self._adopt_authored(path)
+        elif self.formats is not NativeFormats.ALL:
             self._set_fallback("subtitle-source-not-authored-ass")
+        elif self._track_codec not in CONVERTED_CODECS:
+            self._set_fallback("subtitle-source-conversion-unreproduced")
         else:
-            try:
-                with path.open("rb") as source_file:
-                    source = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
-            except OSError:
-                self._set_fallback("subtitle-source-unavailable")
-            else:
-                if len(source) > MAX_ASS_SOURCE_BYTES:
-                    self._set_fallback("subtitle-source-too-large")
-                else:
-                    self._source_bytes = source
-                    self.source_path = path
-                    self.fallback_reason = None
+            self._adopt_converted(path)
+
+    def _adopt_authored(self, path: Path) -> None:
+        try:
+            with path.open("rb") as source_file:
+                source = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
+        except OSError:
+            self._set_fallback("subtitle-source-unavailable")
+            return
+        if len(source) > MAX_ASS_SOURCE_BYTES:
+            self._set_fallback("subtitle-source-too-large")
+            return
+        self._source_bytes = source
+        # Once per track, not per cue: an `[Fonts]` section decodes megabytes, and this is already
+        # the call that reads the whole file off disk.
+        self._in_document_families = font_names.in_document(source)
+        self.source_path = path
+        self.source_kind = SourceKind.AUTHORED
+        self.fallback_reason = None
+
+    def _adopt_converted(self, path: Path) -> None:
+        """Take a track mpv is rendering from libavcodec's conversion rather than from this file.
+
+        The file is still read, but not as the document: mpv is not drawing it. It is read for the
+        cue markup, which the cue index has already thrown away — `parse_srt` keeps plain text — and
+        which is the only thing `subtitles.subrip` needs to predict the events mpv will report. That
+        prediction is what gives a converted track a lookahead window at all.
+        """
+        self.source_path = path
+        self.source_kind = SourceKind.CONVERTED
+        self.fallback_reason = None
+        self._converted_markup = {}
+        try:
+            with path.open("rb") as source_file:
+                raw = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
+        except OSError:
+            return  # only the lookahead is lost; the per-cue path never reads this file
+        if len(raw) > MAX_ASS_SOURCE_BYTES:
+            return
+        try:
+            self._converted_markup = subrip.markup_by_cue(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            log.debug("converted subtitle source is not UTF-8; no cue lookahead for this track")
 
     def invalidate(
         self,
@@ -814,6 +1201,37 @@ class NativeSubtitleGeometry:
             )
         )
 
+    @staticmethod
+    def _key_divergence(live: str, filed: Iterable[str]) -> str:
+        """Which components of the nearest filed key the live one disagrees with.
+
+        A converted track predicts its own events from the `.srt` rather than reading them off a
+        document, so a lookahead that files a key mpv never reproduces misses *every* cue and
+        reports the same `first-seen` as a track with no lookahead at all. Naming the field says
+        which of the two it is, and the components are the key's own — the tuple is written from
+        literals, so it reads back.
+        """
+        try:
+            here = ast.literal_eval(live)
+        except (SyntaxError, ValueError):
+            return "unreadable"
+        best: tuple[str, ...] | None = None
+        for candidate in filed:
+            try:
+                there = ast.literal_eval(candidate)
+            except (SyntaxError, ValueError):
+                continue
+            differing = tuple(
+                name
+                for name, mine, theirs in zip(_KEY_FIELDS, here, there, strict=False)
+                if mine != theirs
+            )
+            if best is None or len(differing) < len(best):
+                best = differing
+        if best is None:
+            return "nothing-filed"
+        return ",".join(best) or "none"
+
     def _observation_key(self, seen: GeometryObservation) -> str | None:
         path = self.source_path
         active_rows = seen.prop("sub-text/ass-full")
@@ -846,6 +1264,9 @@ class NativeSubtitleGeometry:
         generation: int,
         cue: _CueInputs,
         annotations: tuple[TokenAnnotation, ...],
+        fonts: subtitle_fonts.FontEnvironment,
+        renderer_state: RendererState,
+        unreachable: subtitle_fonts.OsdReach,
     ) -> GeometryRequest:
         with otel_metrics.traced("subtitle_geometry_prepare") as span:
             span.set("observed_rows", len(cue.active_rows.splitlines()))
@@ -870,6 +1291,9 @@ class NativeSubtitleGeometry:
             span.set("prepare_ms", prepare_ms)
             if otel_metrics.subtitle_geometry_prepare_ms is not None:
                 otel_metrics.subtitle_geometry_prepare_ms.record(prepare_ms)
+        palette = _palette_in_frame_units(
+            prepared, cue.frame_size[1], renderer_state.font_scale, unreachable=unreachable
+        )
         return GeometryRequest(
             generation,
             track_id,
@@ -882,40 +1306,104 @@ class NativeSubtitleGeometry:
             margins=cue.margins,
             use_margins=cue.use_margins,
             render_profile=cue.render_profile,
-            palette=prepared.palette,
+            palette=palette,
             reserved_rgb=prepared.reserved_rgb,
+            attachments=fonts.attachments,
+            font_setup=fonts.setup,
+            renderer_state=renderer_state,
+            # Exactly the frames the text device cannot color: no resolved face, a family only the
+            # subtitle renderer holds, or a document with no `PlayResY` to scale from. The raster
+            # device needs none of those — it tints what the measurement already drew.
+            keep_coverage=any(entry.font_size <= 0 for entry in palette),
         )
 
     @staticmethod
-    def _render_inputs(prop: Callable[[str], Any], osd) -> _RenderInputs:
-        """Read the sixteen mpv properties native geometry depends on, then decide.
+    def _render_inputs(prop: Callable[[str], Any], osd: tuple[int, int]) -> _RenderInputs:
+        """Read the mpv properties native geometry depends on, then decide.
 
-        Takes the property reader and the OSD size rather than the host: those two are all it ever
-        wanted, and a shim that takes the whole `Reader` cannot be driven by the session runtime.
+        Takes the property reader and the OSD surface rather than the host: those two are all it
+        ever wanted, and a shim that takes the whole `Reader` cannot be driven by the session
+        runtime. The surface is the host's, and is the frame — see `render_inputs_of`.
         """
         return render_inputs_of(
             prop("osd-dimensions") or {},
             prop("video-out-params") or {},
-            {
-                name: prop(f"options/{name}")
-                for name in (
-                    "sub-ass-override",
-                    "sub-ass-scale-with-window",
-                    "sub-scale",
-                    "sub-pos",
-                    "sub-use-margins",
-                    "sub-ass-force-margins",
-                    "sub-ass-video-aspect-override",
-                    "sub-ass-use-video-data",
-                    "sub-ass-vsfilter-aspect-compat",
-                    "sub-ass-style-overrides",
-                    "sub-font-provider",
-                    "embeddedfonts",
-                    "sub-fonts-dir",
-                )
-            },
-            fallback_size=osd,
+            {name: prop(f"options/{name}") for name in GATE_OPTIONS},
+            frame_size=osd,
         )
+
+    def _lookahead_cue(
+        self,
+        track_id: SubtitleTrackId,
+        timestamp_ms: int,
+        render: _RenderInputs,
+        index: CueIndex,
+    ) -> _CueInputs | None:
+        """The cue at `timestamp_ms`, or `None` when there is nothing to read ahead for.
+
+        Two ways to get one, because the two track kinds hold their events in different places. An
+        authored track is read out of the document mpv is drawing. A converted one has no such
+        document, so the event is *predicted* from the `.srt` — and a wrong prediction cannot
+        become a wrong box, because the cache key carries the rows and a mispredicted one simply
+        never matches the observation it was meant to serve.
+        """
+        rows = (
+            self._converted_rows(timestamp_ms, index)
+            if self.source_kind is SourceKind.CONVERTED
+            else self._authored_rows(track_id, timestamp_ms)
+        )
+        if rows is None:
+            return None
+        active_rows, text = rows
+        if not active_rows.strip() or not text.strip():
+            return None
+        return _CueInputs(
+            timestamp_ms,
+            timestamp_ms + 1,
+            timestamp_ms,
+            text,
+            active_rows,
+            render.frame_size,
+            render.storage_size,
+            render.pixel_aspect,
+            render.margins,
+            render.use_margins,
+            render.profile,
+        )
+
+    def _authored_rows(
+        self, track_id: SubtitleTrackId, timestamp_ms: int
+    ) -> tuple[str, str] | None:
+        source = self._source_bytes
+        if source is None:
+            return None
+        try:
+            return authored_ass_rows_at(source, track_id, timestamp_ms)
+        except (TypeError, ValueError):
+            return None
+
+    def _converted_rows(self, timestamp_ms: int, index: CueIndex) -> tuple[str, str] | None:
+        """The event libavcodec will hand mpv for the cue at `timestamp_ms`, and its plain text.
+
+        `None` whenever anything is less than certain — no cue there, no markup recovered for it,
+        or a cue whose SubRip markup `subtitles.subrip` declines to predict. Declining costs the
+        lookahead for that one cue, which is exactly what a converted track had for all of them.
+        """
+        active = index.active_at(timestamp_ms / 1_000)
+        if not active.located:
+            return None
+        cue = index.cues[active.position]
+        markup = self._converted_markup.get((round(cue.start * 1_000), round(cue.end * 1_000)))
+        if markup is None:
+            return None
+        row = subrip.dialogue_row(cue, markup)
+        if row is None:
+            return None
+        try:
+            decoded = decode_ass_event(parse_ass_event_line(row, SubtitleTrackId("lookahead"), 0))
+        except (TypeError, ValueError):
+            return None
+        return row, decoded.text
 
     def _prefetch(
         self,
@@ -929,37 +1417,30 @@ class NativeSubtitleGeometry:
         index = seen.index
         if index is None or self.lookahead == 0:
             return
-        source = self._source_bytes
-        if source is None:
+        if self.source_kind is SourceKind.NONE:
             return
         queued_keys: set[str] = set()
         for boundary in index.boundaries_after(after_ms / 1_000):
             timestamp_ms = round(boundary * 1_000) + 1
-            try:
-                active_rows, text = authored_ass_rows_at(source, track_id, timestamp_ms)
-            except (TypeError, ValueError):
+            inputs = self._lookahead_cue(track_id, timestamp_ms, render_inputs, index)
+            if inputs is None:
                 continue
-            if not active_rows.strip() or not text.strip():
-                continue
-            inputs = _CueInputs(
-                timestamp_ms,
-                timestamp_ms + 1,
-                timestamp_ms,
-                text,
-                active_rows,
-                render_inputs.frame_size,
-                render_inputs.storage_size,
-                render_inputs.pixel_aspect,
-                render_inputs.margins,
-                render_inputs.use_margins,
-                render_inputs.profile,
-            )
             key = self._key(path, inputs)
             if key in queued_keys:
                 continue
             queued_keys.add(key)
+            # Per cue, not once for the track: a converted document is rebuilt around this cue's own
+            # rows, so the two kinds cannot share one captured source.
+            document = self._document_for(inputs.active_rows, render_inputs)
+            state = self._renderer_state(render_inputs)
 
-            def build(inputs: _CueInputs = inputs) -> GeometryRequest:
+            def build(
+                inputs: _CueInputs = inputs,
+                document: bytes = document,
+                state: RendererState = state,
+                fonts: subtitle_fonts.FontEnvironment = self._fonts,
+                unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
+            ) -> GeometryRequest:
                 tokenized = self._ports.tokenize_lookahead(inputs.text)
                 selection = self._annotations(
                     inputs.text,
@@ -970,11 +1451,14 @@ class NativeSubtitleGeometry:
                 if not selection.annotations:
                     raise ValueError("prefetched frame has no interaction-eligible tokens")
                 return self._build(
-                    source,
+                    document,
                     track_id,
                     generation,
                     inputs,
                     selection.annotations,
+                    fonts,
+                    state,
+                    unreachable,
                 )
 
             self.worker.prefetch(key, generation, build)
@@ -996,14 +1480,25 @@ class NativeSubtitleGeometry:
     def _active_observation(
         self,
         seen: GeometryObservation,
-        source: bytes,
+        source: bytes | None,
         track_id: SubtitleTrackId,
         start: float,
         end: float,
         active_rows: object,
     ) -> tuple[float, float, int, str] | None:
+        """Where in the track this cue is, and the rows that make it up.
+
+        `source` is `None` for a converted track — mpv is not rendering a file there, so there is no
+        document to index into and the rows have to come from mpv itself.
+        """
         hint = seen.cue_hint
-        if hint is not None:
+        if hint is not None and self.source_kind is SourceKind.CONVERTED:
+            # The hint means "we navigated and mpv has not caught up". On an authored track the
+            # document answers for the target cue; on a converted one there is nothing to ask until
+            # mpv reports the rows, so wait for it rather than measure the cue we are leaving.
+            self._degrade_geometry("subtitle-observation-pending")
+            return None
+        if hint is not None and source is not None:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
             if semantic_text != seen.normalise(seen.text):
@@ -1033,6 +1528,55 @@ class NativeSubtitleGeometry:
                     start, end = indexed.start, indexed.end
         return start, end, timestamp_ms, active_rows
 
+    def _render_space(self, render: _RenderInputs) -> converted.RenderSpace:
+        return converted.RenderSpace(render.frame_size[0], render.frame_size[1], render.margins)
+
+    def _converted_scale(self, render: _RenderInputs) -> float:
+        """`ass_set_font_scale` on mpv's converted branch — the letterbox multiplier, not 1."""
+        return converted.font_scale(
+            self._render_space(render),
+            use_margins=render.use_margins,
+            scale_with_window=render.scale_with_window,
+            scale_by_window=render.scale_by_window,
+        )
+
+    def _document_for(self, rows: str, render: _RenderInputs) -> bytes:
+        """The document the boxes are measured against.
+
+        Authored: the file, as mpv reads it. Converted: rebuilt around the rows mpv just reported,
+        because mpv is rendering libavcodec's conversion rather than anything on disk, and
+        `sub-ass-extradata` is *property unavailable* there so its header cannot be read back.
+        """
+        if self.source_kind is SourceKind.CONVERTED:
+            return converted.document(
+                rows,
+                self._render_space(render),
+                style=render.style,
+                scale=self._converted_scale(render),
+            )
+        return self._source_bytes or b""
+
+    def _renderer_state(self, render: _RenderInputs) -> RendererState:
+        """What the measuring renderer must be set to for this track kind.
+
+        Nothing for an authored one — mpv leaves its renderer at libass's defaults there. For a
+        converted one, the font scale and the three track features `configure_ass` turns on
+        (`sd_ass.c:604-615`); each of them changes how a run's advances accumulate, so leaving them
+        off measures a layout mpv is not drawing.
+        """
+        if self.source_kind is not SourceKind.CONVERTED:
+            return RendererState()
+        return RendererState(
+            font_scale=self._converted_scale(render),
+            blur=render.style.blur,
+            justify=render.style.justify,
+            features=(
+                (_ASS_FEATURE_WRAP_UNICODE, True),
+                (_ASS_FEATURE_BIDI_BRACKETS, True),
+                (_ASS_FEATURE_WHOLE_TEXT_LAYOUT, True),
+            ),
+        )
+
     def _trace_unscheduled(self, reason: str, cue_revision: int) -> None:
         """Name a geometry schedule that never started. Not a degrade: the inputs are not assembled
         yet, so pixels and ownership are untouched — only the silence is the bug. The revision is
@@ -1045,9 +1589,9 @@ class NativeSubtitleGeometry:
     def _unassembled_input(self, *, cue_text: str, has_tokens: bool) -> str | None:
         """Which of the four schedule preconditions is not met yet, if any. These are "inputs not
         assembled", not a failure — name which and do not degrade."""
-        if self.source_path is None:
+        if self.source_path is None or self.source_kind is SourceKind.NONE:
             return "no-source-path"
-        if self._source_bytes is None:
+        if self.source_kind is SourceKind.AUTHORED and self._source_bytes is None:
             return "no-source-bytes"
         if not cue_text.strip():
             return "no-cue-text"
@@ -1057,9 +1601,11 @@ class NativeSubtitleGeometry:
 
     def _resolve_schedule_inputs(self, seen: GeometryObservation) -> _ScheduleInputs | None:
         path = self.source_path
+        # `None` for a converted track by design: mpv is not rendering a file there either, so the
+        # document is rebuilt per cue from the rows it reports (`_document_for`).
         source = self._source_bytes
         unassembled = self._unassembled_input(cue_text=seen.text, has_tokens=bool(seen.tokens))
-        if unassembled is not None or path is None or source is None:
+        if unassembled is not None or path is None:
             # Every other exit below records a reason; this one used to return a bare None, so a
             # geometry schedule that never ran was invisible in the logs and in telemetry.
             self._trace_unscheduled(unassembled or "no-source-path", seen.cue_revision)
@@ -1075,11 +1621,14 @@ class NativeSubtitleGeometry:
             self._ports.degrade()
             return None
         self._last_render_inputs = render
-        # The frame boxes are computed in comes from the LIVE `osd-dimensions`; the surface they are
-        # drawn onto is the host's latched `self.osd`, which only `refresh_osd` moves and only when it
-        # already differs. `seen.osd` is merely this path's fallback, so the two can diverge silently
-        # and every box then carries the same scale-and-offset error.
-        self._last_host_osd = tuple(seen.osd) if seen.osd else None
+        if not self._fonts_are_current(render):
+            self.worker.mark_not_ready()
+            self._set_fallback(
+                "subtitle-font-environment-stale",
+                log_detail=f"{self._fonts.options} != {render.font_options}",
+            )
+            self._ports.degrade()
+            return None
         active_rows = seen.prop("sub-text/ass-full")
         if isinstance(active_rows, str):
             self.ass_full_capability = AssFullCapability.SUPPORTED
@@ -1111,7 +1660,7 @@ class NativeSubtitleGeometry:
         )
         return _ScheduleInputs(
             path,
-            source,
+            self._document_for(rows, render),
             track_id,
             generation,
             render,
@@ -1156,9 +1705,14 @@ class NativeSubtitleGeometry:
             span.set("outcome", "hit" if cache_hit else "miss")
             if not cache_hit:
                 span.set("reason", self.worker.prefetch_miss_reason(inputs.key))
+                span.set(
+                    "key_divergence",
+                    self._key_divergence(inputs.key, self.worker.filed_keys()),
+                )
             span.set("cache_hits", stats.cache_hits)
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
+            span.set("coverage_trimmed", stats.coverage_trimmed)
         if cache_hit:
             # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
             # a cached cue would sit unapplied until some later miss happened to land.
@@ -1189,13 +1743,24 @@ class NativeSubtitleGeometry:
             self._degrade_geometry("mpv-sub-visibility-rejected")
             return False
 
-        def build() -> GeometryRequest:
+        # Bound now, not read in the closure: the job runs on the worker, and by then the track may
+        # have changed under it — the same reason `fonts` is bound here.
+        renderer_state = self._renderer_state(inputs.render)
+
+        def build(
+            fonts: subtitle_fonts.FontEnvironment = self._fonts,
+            state: RendererState = renderer_state,
+            unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
+        ) -> GeometryRequest:
             return self._build(
                 inputs.source,
                 inputs.track_id,
                 inputs.generation,
                 inputs.cue,
                 selection.annotations,
+                fonts,
+                state,
+                unreachable,
             )
 
         def settled() -> None:
@@ -1279,13 +1844,21 @@ class NativeSubtitleGeometry:
         if self._pending_key is not None and self._pending_key[0] == snapshot.generation:
             self._published_key = self._pending_key[1]
         self._pending_key = None
+        # Into screen coordinates here rather than through `publish`'s origin: the origin only
+        # translates hit testing, and the focus rect, the overprint's `\pos` and the raster's upload
+        # point all read the box directly. One translated set is one answer; a translated origin
+        # beside untranslated boxes is two.
+        origin = (0, 0) if self._last_render_inputs is None else self._last_render_inputs.box_origin
         return [
             WordBox(
                 item.token_index,
-                item.bounds.x,
-                item.bounds.y,
+                item.bounds.x + origin[0],
+                item.bounds.y + origin[1],
                 item.bounds.width,
                 item.bounds.height,
+                item.font_name,
+                item.font_size,
+                item.coverage,
             )
             for item in snapshot.tokens
         ]

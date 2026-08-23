@@ -30,8 +30,13 @@ jobs:
 
       # fugashi (the tokenizer) has no free-threaded 3.14t wheel, so uv builds it from sdist against
       # system MeCab. Without libmecab-dev the build fails "Have you installed MeCab?".
-      - name: Install MeCab (fugashi build dep)
-        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+      #
+      # libass is the RUNTIME `libasslite` dlopens, not a build dep: the wrapper is pure Python and
+      # imports fine without it, so the gate's converted-document oracle would skip rather than fail
+      # — a libass parity test that never renders in CI is not a gate. fonts-noto-cjk so the
+      # Japanese cues it lays out resolve to a real face.
+      - name: Install MeCab (fugashi build dep) and libass (libasslite runtime)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev libass9 fonts-noto-cjk
 
       # Non-Python binaries `poe all` shells out to: lychee (links task). shellcheck (shell task) and
       # node (unused by `all`) ship on the runner; typos (spell) rides `uvx`.
@@ -77,6 +82,11 @@ jobs:
       # (cargo ships on the runner; maturin is pulled per taffylite's build-system) and drives the full
       # parity gate — the `layout-engine` extra is DELIBERATELY absent from `poe all` (the gate job),
       # so this job is where the Rust path is exercised.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: taffylite
+
       - name: Sync (3.14t, full + layout-engine → builds taffylite)
         run: |
           uv python install
@@ -136,6 +146,13 @@ jobs:
           $downloads = "$env:RUNNER_TEMP/vcpkg-downloads"
           "VCPKG_DOWNLOADS=$downloads" | Out-File $env:GITHUB_ENV -Append
           New-Item -ItemType Directory -Force $downloads | Out-Null
+          # The BUILT packages, not their sources. Caching downloads only saves the fetch; `vcpkg
+          # install libass` still compiles libass plus freetype, harfbuzz, fribidi, brotli, png and
+          # zlib from source, which is why this job ran 10-13 minutes against 1 for the same work on
+          # Linux. With a binary cache a warm run unpacks them instead.
+          $archives = "$env:RUNNER_TEMP/vcpkg-archives"
+          New-Item -ItemType Directory -Force $archives | Out-Null
+          "VCPKG_BINARY_SOURCES=clear;files,$archives,readwrite" | Out-File $env:GITHUB_ENV -Append
           $revision = (git -C "$env:VCPKG_INSTALLATION_ROOT" rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $revision -cnotmatch '^[0-9a-f]{40}$') {
             throw "vcpkg revision is not a lowercase Git SHA"
@@ -147,6 +164,20 @@ jobs:
         with:
           path: ${{ runner.temp }}/vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-revision.outputs.revision }}
+      - name: Cache vcpkg built packages
+        if: runner.os == 'Windows'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ runner.temp }}/vcpkg-archives
+          key: vcpkg-archives-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-revision.outputs.revision }}-libass
+      # Caches ~/.cargo (registry, git, AND ~/.cargo/bin) plus target/. Without it every leg
+      # recompiled the crate twice — `cargo test` then `cargo clippy` — and rebuilt `cargo-about`
+      # from source, six times over the matrix.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: libasslite
+          key: ${{ matrix.py }}
       - name: Install libass (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libass9 fonts-noto-cjk

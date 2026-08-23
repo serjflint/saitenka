@@ -72,6 +72,16 @@ def _deinflect_keys() -> list[str]:
     ]
 
 
+def _subrip_keys() -> list[str]:
+    """Every recorded libavcodec SubRip conversion — name, the markup fed in, and the row mpv
+    reported. The row is in the key because a re-record on a machine where mpv answered differently
+    is exactly the drift this catches; the name alone would call that the same case."""
+    return [
+        "\x1f".join((c["name"], c["markup"], c["row"]))
+        for c in _json_cases("tests/fixtures/subrip_rows.json")
+    ]
+
+
 # --- registry --------------------------------------------------------------------------------------
 
 
@@ -108,6 +118,15 @@ CORPORA: list[CorpusSpec] = [
         count=1280,
         sha256="aa52c291a0cd2d53a9b7d6e10a618f3a4f595a52729ba59d0d7f056bf3c00fa1",
         unique=False,
+    ),
+    # libavcodec SubRip→ASS conversions recorded from a live mpv by `tools/subrip_oracle.py`. The
+    # oracle re-records against mpv; nothing there checks the census, so without this a re-record
+    # that lost cases would shrink the agreement corpus with the suite still green.
+    CorpusSpec(
+        "subrip",
+        _subrip_keys,
+        count=26,
+        sha256="98af5c408b21d77fea4112280455b7f9d1d73e4e8b8c6119b7c96f17385c16aa",
     ),
 ]
 

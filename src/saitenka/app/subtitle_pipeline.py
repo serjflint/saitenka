@@ -111,6 +111,9 @@ class SubtitleModeCoordinator:
     ):
         self._renderer = renderer
         self._backend = backend
+        #: The user asked for the legacy renderer. Here rather than on the host because this is the
+        #: object that owns which renderer draws; the host only carries the intent to it.
+        self.legacy_forced = False
         self._state_lock = threading.Lock()
         self._backend_lock = threading.Lock()
         self._generation = 0
@@ -126,6 +129,24 @@ class SubtitleModeCoordinator:
     @renderer.setter
     def renderer(self, renderer: CurrentSubtitleRenderer) -> None:
         self._renderer = renderer
+
+    def force_legacy(self, target: SubtitleTarget, *, forced: bool) -> bool:
+        """Hand the pixels to the legacy renderer, or give them back. Returns the state in force.
+
+        The legacy renderer is this work's comparison target, and until now the only route to it was
+        catastrophic recovery — a target you cannot select is not one. It is also the answer for a
+        cue the native path refuses: scannable, colored text instead of untouchable pixels.
+
+        The flag travels into `activate` through the target, which is where the mode is chosen from
+        the selection; a flag read anywhere else would toggle nothing until the next track load.
+        """
+        self.legacy_forced = forced
+        if otel_metrics.subtitle_renderer_forced is not None:
+            otel_metrics.subtitle_renderer_forced.add(
+                1, {"renderer": "legacy" if forced else "native"}
+            )
+        self._renderer.activate(target)
+        return forced
 
     def draw_current(self, target: SubtitleTarget) -> DrawResult | None:
         """Draw the current cue and hand the geometry back. The one place a draw is staged.

@@ -46,6 +46,7 @@ sub_text_reconcile_duration_ms: Histogram | None = None
 subtitle_geometry_ready_ms: Histogram | None = None
 subtitle_geometry_prepare_ms: Histogram | None = None
 subtitle_geometry_render_ms: Histogram | None = None
+subtitle_geometry_renderer_build_ms: Histogram | None = None
 subtitle_geometry_extract_ms: Histogram | None = None
 subtitle_geometry_active_events: Histogram | None = None
 subtitle_geometry_eligible_tokens: Histogram | None = None
@@ -111,10 +112,19 @@ hover_pause_claim: Counter | None = (
 #: Counted rather than spanned because a tick that finds no cue is a clock reading, not an event: as
 #: spans those were 39% of a whole trace file and 2873 of their 2902 instances said only this.
 cue_settles: Counter | None = None
-#: labeled outcome=match|mismatch. The frame boxes are computed in and the surface they are drawn onto
-#: are read from `osd-dimensions` by two different paths, so they can diverge with no error anywhere:
-#: the output is simply wrong for the whole episode. This is the invariant, checked per decision.
-geometry_frame_agreement: Counter | None = None
+#: labeled sources=system+fonts-dir+attachments+in-file. Field evidence for whether the three
+#: sources beyond the system providers matter: how often a track's typesetting comes from one.
+subtitle_geometry_font_sources: Counter | None = None
+#: labeled renderer=legacy|native. A deliberate switch, not a failure: the catastrophic-fallback
+#: counter next door says the native path gave up, and conflating the two would make a user
+#: comparing the engines look like a regression.
+subtitle_renderer_forced: Counter | None = None
+#: labeled reason=. The overprint stands down rather than coloring words in a substitute face. Each
+#: demotion is a device the ladder could not use, so this is where "the color went missing" stops
+#: being invisible and becomes a number a report can show.
+subtitle_overprint_demotions: Counter | None = None
+subtitle_overpaint_frames: Counter | None = None
+subtitle_layout_drift_px: Histogram | None = None
 
 
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
@@ -382,6 +392,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
     global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_renderer_build_ms
     global subtitle_geometry_active_events
     global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
     global scroll_frame_duration_ms, show_tooltip_duration_ms
@@ -402,7 +413,9 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global geometry_frame_agreement
+    global subtitle_geometry_font_sources, subtitle_renderer_forced
+    global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_layout_drift_px
 
     with _lock:
         _reader = reader
@@ -454,6 +467,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_geometry.render_ms",
             unit="ms",
             description="offscreen libass render time",
+        )
+        subtitle_geometry_renderer_build_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.renderer_build_ms",
+            unit="ms",
+            description="libass library init and font scan for a renderer the cache did not hold",
         )
         subtitle_geometry_extract_ms = meter.create_histogram(
             "saitenka.subtitle_geometry.extract_ms",
@@ -618,9 +636,26 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.cue.settles",
             description="cue settles per event drain (outcome=no-observation|adopted|reinstalled)",
         )
-        geometry_frame_agreement = meter.create_counter(
-            "saitenka.geometry.frame_agreement",
-            description="geometry frame vs the OSD surface it draws onto (outcome=match|mismatch)",
+        subtitle_geometry_font_sources = meter.create_counter(
+            "saitenka.subtitle_geometry.font_sources",
+            description="font sources resolved per track (sources=system+fonts-dir+attachments+in-file)",
+        )
+        subtitle_renderer_forced = meter.create_counter(
+            "saitenka.subtitle.renderer_forced",
+            description="deliberate runtime renderer switches (renderer=legacy|native)",
+        )
+        subtitle_overprint_demotions = meter.create_counter(
+            "saitenka.subtitle.overprint_demotions",
+            description="cues left uncolored because no device could draw them faithfully (reason=)",
+        )
+        subtitle_overpaint_frames = meter.create_counter(
+            "saitenka.subtitle.overpaint_frames",
+            description="frames the raster device colored after the text device stood down",
+        )
+        subtitle_layout_drift_px = meter.create_histogram(
+            "saitenka.subtitle.layout_drift_px",
+            unit="px",
+            description="worst edge disagreement between mpv's OSD layout and our measurement",
         )
         mpv_effect_apply_ms = meter.create_histogram(
             "saitenka.mpv_effect.apply_ms",
@@ -650,6 +685,7 @@ def unregister() -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
     global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_renderer_build_ms
     global subtitle_geometry_active_events
     global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
     global scroll_frame_duration_ms, show_tooltip_duration_ms
@@ -670,7 +706,9 @@ def unregister() -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global geometry_frame_agreement
+    global subtitle_geometry_font_sources, subtitle_renderer_forced
+    global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_layout_drift_px
 
     with _lock:
         _reader = None
@@ -686,6 +724,7 @@ def unregister() -> None:
         subtitle_geometry_ready_ms = None
         subtitle_geometry_prepare_ms = None
         subtitle_geometry_render_ms = None
+        subtitle_geometry_renderer_build_ms = None
         subtitle_geometry_extract_ms = None
         subtitle_geometry_active_events = None
         subtitle_geometry_eligible_tokens = None
@@ -738,7 +777,11 @@ def unregister() -> None:
         hover_pause_release = None
         hover_pause_claim = None
         cue_settles = None
-        geometry_frame_agreement = None
+        subtitle_geometry_font_sources = None
+        subtitle_renderer_forced = None
+        subtitle_overprint_demotions = None
+        subtitle_overpaint_frames = None
+        subtitle_layout_drift_px = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
         prefetch_queue_depth = None
