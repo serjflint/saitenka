@@ -81,6 +81,8 @@ class _TokenKey:
     event_id: SubtitleEventId
     token_index: int
     rgb: int
+    font_name: str = ""
+    font_size: float = 0.0
 
 
 def _collect_layer(
@@ -145,6 +147,8 @@ def _token_geometry(key: _TokenKey, extent: list[int], regions: list[Rect]) -> T
         key.token_index,
         Rect(left, top, right - left, bottom - top),
         tuple(regions),
+        key.font_name,
+        key.font_size,
     )
 
 
@@ -154,7 +158,12 @@ def extract_token_geometry(
 ) -> tuple[TokenGeometry, ...]:
     """Recover every requested token from public character-image layers."""
     palette = {
-        entry.rgb: (index, _TokenKey(entry.event_id, entry.token_index, entry.rgb))
+        entry.rgb: (
+            index,
+            _TokenKey(
+                entry.event_id, entry.token_index, entry.rgb, entry.font_name, entry.font_size
+            ),
+        )
         for index, entry in enumerate(request.palette, start=1)
     }
     reserved = set(request.reserved_rgb)

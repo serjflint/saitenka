@@ -259,6 +259,10 @@ class FakeBackend:
         self.closed = False
         self.error: Exception | None = None
         self.token_index_offset = 0
+        #: The face a real measuring render resolves per token; empty is the "did not resolve" case
+        #: the overprint has to leave uncoloured.
+        self.font_name = ""
+        self.font_size = 0.0
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         self.requests.append(request)
@@ -269,6 +273,9 @@ class FakeBackend:
                 entry.event_id,
                 entry.token_index + self.token_index_offset,
                 Rect(100 + entry.token_index * 60, 600, 50, 40),
+                (),
+                self.font_name,
+                self.font_size,
             )
             for entry in request.palette
         )
@@ -2031,6 +2038,27 @@ def test_an_unknown_format_setting_narrows_rather_than_widens(
     configured: str, expected: native_subtitles.NativeFormats
 ) -> None:
     assert native_subtitles.native_formats(configured) is expected
+
+
+def overlay_payloads(ipc) -> list[str]:
+    return [
+        str(command[3])
+        for command in ipc.commands
+        if command[0] == "osd-overlay" and len(command) > 3 and command[2] == "ass-events"
+    ]
+
+
+def test_an_unmeasured_face_leaves_the_cue_uncoloured_rather_than_guessed(tmp_path: Path) -> None:
+    """A token whose face the measurement did not resolve is not drawn at a guess: the wrong glyph
+    shape over the right word is worse than no colour, because nothing shows it is wrong."""
+    result, ipc, _backend = reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.boxes  # the hit boxes still land, so the cue stays interactive
+    assert not [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
+    result.close()
 
 
 def test_the_legacy_renderer_can_be_selected_and_given_back(tmp_path: Path) -> None:

@@ -2,15 +2,21 @@
 
 The experimental native-visible mode lets mpv keep rendering the original ASS track while Saitenka
 adds word scanning, dictionary tooltips, and mining. Use it when preserving the subtitle's typesetting
-matters more than Saitenka's per-word subtitle colors.
+matters: the per-word colors come too, painted over mpv's own glyphs.
 
 ```text
-the same authored ASS cue
+the same cue
 ├─ mpv renders the original track (not Saitenka's rewritten copy)
-└─ Saitenka derives invisible token hit boxes
+└─ Saitenka derives token geometry from it
+   ├─ each token redrawn over mpv's own glyphs in its reading-state colour
    ├─ hover ──> focus outline
    └─ click/scan ──> the usual tooltip and mining features
 ```
+
+The colour is an overprint: mpv's glyphs stay, and each token is drawn again on top in the same
+face, at the same size and place, so the authored outline and shadow keep framing it. A token whose
+face the measurement did not resolve is left uncoloured rather than drawn at a guess — the cue stays
+interactive either way.
 
 Saitenka does not draw a second subtitle over mpv's after native pixel ownership is established.
 Geometry readiness is independent: a cache miss or unsupported/failed geometry keeps the same mpv

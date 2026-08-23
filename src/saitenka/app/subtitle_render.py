@@ -38,6 +38,7 @@ from saitenka.runtime.surfaces import (
     SurfaceRuntime,
     SurfaceTransactionOutcome,
 )
+from saitenka.subtitles import overprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -164,6 +165,45 @@ def focus_rect(boxes, hover: int, span: tuple[int, int] | None) -> tuple[int, in
     right = max(box.x + box.w for box in selected)
     bottom = max(box.y + box.h for box in selected)
     return left, top, right - left + 2 * FOCUS_PAD, bottom - top + 2 * FOCUS_PAD
+
+
+#: Our own hairline border, in frame pixels. Not the authored one — that stays where mpv drew it.
+#: This exists to swallow the antialiased fringe of the glyph underneath, which would otherwise
+#: show as a pale outline around every coloured word.
+OVERPRINT_BORDER = 1.0
+
+
+def overprint_payload(request: DrawRequest) -> str:
+    """The cue redrawn per token in its reading-state colour, over mpv's own pixels.
+
+    Empty when there is nothing to colour — no measured faces (the legacy renderer produces none),
+    or no styles. Empty is a real answer and the caller sends it: it clears the slot, which is what
+    "this cue has no overprint" has to look like, or the previous cue's colours stay on screen.
+    """
+    styles = request.styles
+    if not styles or not request.boxes:
+        return ""
+    surfaces = [token.surface for line in request.lines for token in line]
+    paints = []
+    for box in request.boxes:
+        if box.index >= len(surfaces) or box.index >= len(styles):
+            continue
+        style = styles[box.index]
+        colour = getattr(style, "color", None)
+        if colour is None:
+            continue
+        paints.append(
+            overprint.TokenPaint(
+                surfaces[box.index],
+                box.x,
+                box.y,
+                box.font_name,
+                box.font_size,
+                (colour[0] << 16) | (colour[1] << 8) | colour[2],
+                OVERPRINT_BORDER,
+            )
+        )
+    return overprint.payload(paints)
 
 
 def focus_drawing(rect: tuple[int, int, int, int]) -> str:
@@ -909,7 +949,12 @@ class NativeVisibleRenderer:
             if request.hover >= 0 and box_for_token(request.boxes, request.hover) is not None
             else None
         )
-        if rect is None:
+        drawing = overprint_payload(request)
+        if rect is not None:
+            # One slot, one payload: the highlight and the colour are drawn together so a repaint
+            # can never leave one of them showing the previous cue.
+            drawing = f"{focus_drawing(rect)}\n{drawing}" if drawing else focus_drawing(rect)
+        if not drawing:
             self._hide_focus(ipc)
             return None
         self._submit_focus(
@@ -918,7 +963,7 @@ class NativeVisibleRenderer:
             (
                 NATIVE_FOCUS_ID,
                 "ass-events",
-                focus_drawing(rect),
+                drawing,
                 request.osd[0],
                 request.osd[1],
                 1,

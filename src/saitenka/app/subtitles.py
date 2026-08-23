@@ -46,6 +46,10 @@ class WordBox:
     y: int
     w: int
     h: int
+    #: How the native path drew this token — its face and its size in frame pixels. Empty from the
+    #: legacy renderer, which paints the colour itself and has nothing to overprint.
+    font_name: str = ""
+    font_size: float = 0.0
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h

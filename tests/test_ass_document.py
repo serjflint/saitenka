@@ -152,7 +152,34 @@ def test_parse_ass_styles_uses_authored_format_order() -> None:
     extradata = (
         b"[V4+ Styles]\nFormat: Fontname, PrimaryColour, Name\nStyle: Arial,&H00ABCDEF,Default\n"
     )
-    assert parse_ass_styles(extradata) == AssStyleCatalog((AssStyle("Default", "00ABCDEF"),))
+    assert parse_ass_styles(extradata) == AssStyleCatalog(
+        (AssStyle("Default", "00ABCDEF", "Arial"),)
+    )
+
+
+def test_a_style_without_a_usable_size_still_parses() -> None:
+    """The size only matters to the overprint. A style whose colour parses is still one the hit map
+    can use, so an unparseable `Fontsize` costs the overprint, not the interaction."""
+    extradata = (
+        b"[V4+ Styles]\nFormat: Name, PrimaryColour, Fontname, Fontsize\n"
+        b"Style: Default,&H00ABCDEF,Arial,not-a-number\n"
+    )
+
+    catalog = parse_ass_styles(extradata)
+
+    assert catalog.styles[0].font_size == 0.0
+    assert catalog.styles[0].font_name == "Arial"
+
+
+def test_a_styles_face_and_size_are_read_for_the_overprint() -> None:
+    extradata = (
+        b"[V4+ Styles]\nFormat: Name, PrimaryColour, Fontname, Fontsize\n"
+        b"Style: Default,&H00ABCDEF,Noto Sans JP,48.5\n"
+    )
+
+    style = parse_ass_styles(extradata).styles[0]
+
+    assert (style.font_name, style.font_size) == ("Noto Sans JP", 48.5)
 
 
 def test_style_rows_and_identities_follow_libass_case_sensitivity() -> None:

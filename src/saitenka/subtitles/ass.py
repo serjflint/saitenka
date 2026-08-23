@@ -56,6 +56,11 @@ class UnsupportedAssEvent(ValueError):
 class AssStyle:
     name: str
     primary_color: str
+    #: The face and size libass lays this style's text out with, in the document's script units.
+    #: Carried so an overprint can draw a token in the SAME face at the SAME size — a decoration
+    #: drawn from the box alone cannot, and a guessed face is a different advance.
+    font_name: str = ""
+    font_size: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.name or not re.fullmatch(r"[0-9A-Fa-f]{1,8}", self.primary_color):
@@ -204,7 +209,25 @@ def _parse_style(fields: Sequence[str], value: str) -> AssStyle:
     color_match = re.fullmatch(r"&H([0-9A-Fa-f]{1,8})&?", row.get("primarycolour", ""))
     if not color_match or not row.get("name"):
         raise UnsupportedAssEvent("ASS style has no parseable primary color")
-    return AssStyle(row["name"], color_match.group(1))
+    return AssStyle(
+        row["name"],
+        color_match.group(1),
+        row.get("fontname", "").strip(),
+        _style_size(row.get("fontsize", "")),
+    )
+
+
+def _style_size(value: str) -> float:
+    """The style's `Fontsize`, or 0 when it is missing or unparseable.
+
+    Zero rather than an exception: the size only matters to the overprint, and a style whose colour
+    parses is still a style the hit map can use. The overprint refuses a token with no size instead
+    of drawing one at a guess.
+    """
+    try:
+        return float(value.strip())
+    except ValueError:
+        return 0.0
 
 
 def parse_ass_styles(extradata: bytes) -> AssStyleCatalog:

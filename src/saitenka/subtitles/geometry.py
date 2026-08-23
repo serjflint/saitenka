@@ -78,6 +78,9 @@ class TokenGeometry:
     token_index: int
     bounds: Rect
     regions: tuple[Rect, ...] = ()
+    #: Copied from the palette entry that produced this token — see `GeometryPaletteEntry`.
+    font_name: str = ""
+    font_size: float = 0.0
 
 
 class GeometryVariant(StrEnum):
@@ -91,6 +94,12 @@ class GeometryPaletteEntry:
     event_id: SubtitleEventId
     token_index: int
     rgb: int
+    #: The face and size this token is laid out in, in the FRAME's units rather than the document's
+    #: script units — so an overprint can draw the same glyph at the same size without redoing
+    #: libass's scaling. Empty when the document did not resolve one; the overprint then leaves that
+    #: token uncoloured rather than drawing it at a guess.
+    font_name: str = ""
+    font_size: float = 0.0
 
     def __post_init__(self) -> None:
         if self.token_index < 0 or isinstance(self.rgb, bool) or not 0 < self.rgb <= 0xFFFFFF:

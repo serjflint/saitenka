@@ -6,7 +6,7 @@ import logging
 import math
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
@@ -21,6 +21,7 @@ from saitenka.app.subtitle_geometry_diagnostics import (
 from saitenka.app.subtitles import WordBox
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
+    GeometryPaletteEntry,
     GeometryRequest,
     RendererState,
     SubtitleTrackId,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from saitenka.app.token_cache import TokenizedCue
     from saitenka.app.tokenize import Token
     from saitenka.subtitles import Cue, CueIndex
+    from saitenka.subtitles.ass_geometry import PreparedAssFrame
     from saitenka.subtitles.geometry import GeometrySnapshot
 
 log = logging.getLogger(__name__)
@@ -194,6 +196,25 @@ def _lookahead_tokenized(
         annotation_inputs(norm),
         priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
     )
+
+
+def _palette_in_frame_units(
+    prepared: PreparedAssFrame, frame_height: int, font_scale: float
+) -> tuple[GeometryPaletteEntry, ...]:
+    """Restate each token's font size in the frame's pixels rather than the document's script units.
+
+    libass scales a style's `Fontsize` by `frame_height / PlayResY`, then by whatever
+    `ass_set_font_scale` holds. Doing that here — once, where both numbers are known — is what lets
+    an overprint draw the token at the size it was actually laid out at, instead of redoing libass's
+    arithmetic at the point of drawing where `PlayResY` is no longer in scope.
+
+    A document that declares no `PlayResY` yields a size of zero, which the overprint reads as "do
+    not draw this token" rather than as a size.
+    """
+    if prepared.play_res_y <= 0:
+        return prepared.palette
+    scale = frame_height / prepared.play_res_y * font_scale
+    return tuple(replace(entry, font_size=entry.font_size * scale) for entry in prepared.palette)
 
 
 def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
@@ -973,7 +994,7 @@ class NativeSubtitleGeometry:
             margins=cue.margins,
             use_margins=cue.use_margins,
             render_profile=cue.render_profile,
-            palette=prepared.palette,
+            palette=_palette_in_frame_units(prepared, cue.frame_size[1], renderer_state.font_scale),
             reserved_rgb=prepared.reserved_rgb,
             attachments=fonts.attachments,
             font_setup=fonts.setup,
@@ -1472,6 +1493,8 @@ class NativeSubtitleGeometry:
                 item.bounds.y,
                 item.bounds.width,
                 item.bounds.height,
+                item.font_name,
+                item.font_size,
             )
             for item in snapshot.tokens
         ]
