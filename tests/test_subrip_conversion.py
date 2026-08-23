@@ -34,6 +34,34 @@ DECLINED = frozenset(
     {"stray-angle", "unknown-tag", "font-named-colour", "font-size", "trailing-an"}
 )
 
+#: Cases the converter must reproduce exactly. Named for the same reason `DECLINED` is: a re-record
+#: that lost one would otherwise just run a smaller parametrisation, all green.
+AGREEING = frozenset(
+    {
+        "adjacent-tags",
+        "ampersand",
+        "bold-underline",
+        "braces-and-backslash",
+        "empty-tag-pair",
+        "font-hex",
+        "font-hex-black",
+        "font-hex-mixed",
+        "font-hex-unquoted",
+        "italic",
+        "leading-an",
+        "line-whitespace",
+        "mid-an",
+        "non-ascii",
+        "plain",
+        "stray-close",
+        "tag-across-lines",
+        "three-lines",
+        "two-lines",
+        "unclosed-open",
+        "uppercase-tags",
+    }
+)
+
 
 def row_of(case: dict) -> tuple[str, Cue]:
     """The recorded row, and a cue carrying its own timings — so what is compared is the text."""
@@ -46,7 +74,7 @@ def _seconds(stamp: str) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + float(rest)
 
 
-@pytest.mark.parametrize("name", sorted(set(CASES) - DECLINED))
+@pytest.mark.parametrize("name", sorted(AGREEING))
 def test_the_predicted_row_is_the_row_mpv_reports(name: str) -> None:
     """Exactly, after canonicalisation — which is the comparison the geometry cache key makes, and
     therefore the only one that decides whether a prefetched cue is used."""
@@ -72,9 +100,15 @@ def test_a_cue_srtdec_would_mangle_is_declined_rather_than_guessed(name: str) ->
     assert subrip.dialogue_row(cue, case["markup"]) is None
 
 
-def test_the_declined_set_is_not_the_whole_corpus() -> None:
-    """A converter that declined everything would satisfy both tests above one at a time."""
-    assert len(DECLINED) < len(CASES) / 2
+def test_the_corpus_still_holds_every_case_it_was_locked_with() -> None:
+    """The denominator, which the two tests above take as given.
+
+    Both parametrise over `CASES`, so a re-record that dropped cases shrinks what they check and
+    stays green. The declined half was already pinned by name; this pins the agreeing half the same
+    way, so a lost case fails as a missing name rather than as a smaller test run nobody counts.
+    `poe corpus-lock` locks the recorded rows themselves — the content this cannot see.
+    """
+    assert set(CASES) == AGREEING | DECLINED
 
 
 def test_centiseconds_are_truncated_the_way_mpv_truncates_them() -> None:
