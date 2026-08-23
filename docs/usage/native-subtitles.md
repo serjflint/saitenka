@@ -33,12 +33,19 @@ N3, exactly as under the standard renderer. It is a vector rule under the hit bo
 color it needs no font and never stands down. This is also why nothing else uses an underline here:
 one mark, one meaning.
 
-Which faces mpv's OSD renderer can reach is worked out from how mpv builds it, and that reasoning can
-be wrong on a machine nobody tested. So while playback is paused Saitenka asks mpv to lay the color
-out and report where it landed, once per set of faces per window size, and compares that with its own
-measurement. A disagreement demotes those families for the rest of the session — the color steps
-down a rung rather than sitting on substitute glyph shapes, which is the one failure you could not
-see.
+Which faces mpv's OSD renderer can reach is worked out from how mpv builds it. That reasoning is
+about a mechanism, but the answer is about your machine — which fonts are installed, and what your
+font provider substitutes — so it can be right in general and wrong here. Saitenka therefore asks
+mpv to lay the color out and report where it landed, once per set of faces per window size, and
+compares that with its own measurement. A disagreement demotes those families for the rest of the
+session, and the color falls back to the tinted raster rather than sitting on substitute glyph
+shapes.
+
+The check costs mpv a full render on its core thread, so it is spent where a stall does not show:
+once at each track load, and afterwards only while playback is paused — which the first hover
+supplies, since opening a tooltip pauses by default. Note what this protects and what it does not:
+the hit boxes come from mpv's *subtitle* renderer and are unaffected, so an undetected disagreement
+misplaces the color, never the clicks.
 
 Saitenka does not draw a second subtitle over mpv's after native pixel ownership is established.
 Geometry readiness is independent: a cache miss or unsupported/failed geometry keeps the same mpv

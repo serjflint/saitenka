@@ -568,6 +568,9 @@ class NativeVisibleRenderer:
         #: Payload shapes already measured against mpv's OSD renderer, so a stall is paid once per
         #: face set per surface rather than once per cue.
         self._calibrated: set[str] = set()
+        #: One check this track may spend without waiting to be paused. Armed at a track load, where
+        #: the session is already stalling, so a session that never pauses still measures once.
+        self._calibrate_unpaused = False
         #: Families the measurement caught mpv's OSD renderer laying out differently from ours, so
         #: device 1 stands down on them for the rest of the session. Kept per family rather than per
         #: payload shape: whether a face is loadable is a property of the font environment, not of
@@ -962,6 +965,8 @@ class NativeVisibleRenderer:
         if selection == self._selection:
             return
         self._selection = selection
+        # A new track brings a new font set, so the previous track's answers say nothing about it.
+        self._calibrate_unpaused = True
         # A source geometry can never accept (an .srt, say) would otherwise leave the episode with
         # mpv's pixels and no hit boxes for its whole run, and a user who asks for the legacy
         # renderer is asking for the same thing deliberately. Choosing the mode HERE is what keeps
@@ -1091,12 +1096,17 @@ class NativeVisibleRenderer:
         """Ask mpv where its OSD renderer actually put the overprint, and act on the difference.
 
         It runs on the payload the cue is already drawing rather than a synthetic probe, so what is
-        checked is the thing that shipped; and it runs while paused, once per payload shape per
-        surface, because the call costs mpv a full render on its core thread.
+        checked is the thing that shipped, once per payload shape per surface — the call costs mpv a
+        full render on its core thread, which is why it is not simply run per cue.
+
+        Paused is the usual moment, and under the default config the first hover supplies it. But
+        `pause_on_tooltip` is a setting, and a session that never pauses would then never measure
+        anything at all. So a track load spends one unpaused check: the load is already stalling for
+        a subprocess and a font resolution, and a stutter there is one nobody sees.
         """
         payload = overprint_payload(request, drifting=self._drifting)
         signature = subtitle_calibration.payload_signature(payload, request.osd)
-        if not request.paused or ipc is None or signature is None:
+        if not (request.paused or self._calibrate_unpaused) or ipc is None or signature is None:
             return
         measured = subtitle_calibration.measured_bounds(request.boxes, drifting=self._drifting)
         if measured is None or signature in self._calibrated:
@@ -1128,6 +1138,7 @@ class NativeVisibleRenderer:
             on_finished=finished,
         ):
             self._calibrated.add(signature)
+            self._calibrate_unpaused = False  # the track's one free check, spent
 
     def _record_drift(
         self,

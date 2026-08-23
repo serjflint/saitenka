@@ -2407,16 +2407,37 @@ def calibration_calls(ipc) -> list[tuple]:
     ]
 
 
-def test_the_layout_check_never_runs_while_mpv_is_playing(tmp_path: Path) -> None:
-    """`compute_bounds` makes mpv do a full render and flush its cache, on its core thread. Gate 6
-    keeps that off a playing session — a check that stutters playback costs more than it proves."""
+def test_a_playing_session_still_measures_once_for_the_track(tmp_path: Path) -> None:
+    """Paused is the usual moment, and the default config supplies it at the first hover. But
+    `pause_on_tooltip` is a setting, and without this a session that never pauses would never
+    measure at all — the inference about which faces mpv's OSD renderer can load would go
+    unchecked for the whole episode. The track load is where that one check is affordable."""
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
     ipc.props["pause"] = False
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert not calibration_calls(ipc)
+    assert len(calibration_calls(ipc)) == 1
+    result.close()
+
+
+def test_a_playing_session_does_not_measure_again_after_that(tmp_path: Path) -> None:
+    """The other half, and the reason the check is gated at all: `compute_bounds` makes mpv do a
+    full render on its core thread. One per track load is a stall nobody sees; one per cue is a
+    stutter through the whole episode."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = False
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert len(calibration_calls(ipc)) == 1
+
+    for _ in range(3):
+        result.set_subtitle("猫を見る")
+        settle_jobs(result, ipc)
+        result.draw_subtitle()
+
+    assert len(calibration_calls(ipc)) == 1
     result.close()
 
 
