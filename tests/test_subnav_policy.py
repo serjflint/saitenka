@@ -138,6 +138,7 @@ def test_a_target_always_indexes_the_cue_it_returns(delta: int) -> None:
         {"sub-filter-sdh": "yes"},
         {"sub-filter-sdh": "YES"},
         {"sub-filter-regex-enable": "yes", "sub-filter-regex": ["^SIGN:"]},
+        {"sub-filter-sdh": 1},
     ],
 )
 def test_a_filter_that_can_drop_a_cue_is_detected(settings: dict) -> None:
@@ -157,6 +158,10 @@ def test_a_filter_that_can_drop_a_cue_is_detected(settings: dict) -> None:
         {"sub-filter-regex-enable": False, "sub-filter-regex": ["^SIGN:"]},
         {"sub-filter-regex-enable": "no", "sub-filter-regex": ["^SIGN:"]},
         {"sub-filter-sdh": "no"},
+        {"sub-filter-sdh": 0},
+        # Neither spelling: an option that answers something unexpected is not evidence of a filter.
+        {"sub-filter-sdh": "maybe"},
+        {"sub-filter-sdh": 7},
     ],
 )
 def test_an_unfiltered_session_keeps_its_instant_navigation(settings: dict) -> None:

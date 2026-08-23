@@ -66,17 +66,26 @@ _FALSE = frozenset({"no", "false", "0"})
 
 def _flag_on(value: object) -> bool:
     """Whether a flag reads as set. An unreadable property is not a filter."""
-    if isinstance(value, str):
-        return value.strip().casefold() in _TRUE
-    return value is True
+    return _spelling(value) is True
 
 
 def _flag_off(value: object) -> bool:
     """Whether a flag reads as explicitly clear — the question for a flag that defaults to on, where
     silence has to mean "assume it applies"."""
+    return _spelling(value) is False
+
+
+def _spelling(value: object) -> bool | None:
+    """The flag a value spells, or `None` when it spells neither. `1`/`0` are in because an option
+    that arrives as a string can arrive as an int by the same routes."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value) if value in {0, 1} else None
     if isinstance(value, str):
-        return value.strip().casefold() in _FALSE
-    return value is False
+        text = value.strip().casefold()
+        return True if text in _TRUE else (False if text in _FALSE else None)
+    return None
 
 
 def _nonempty(value: object) -> bool:

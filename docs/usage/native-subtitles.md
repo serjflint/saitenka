@@ -128,12 +128,14 @@ sub-ass-force-margins=no
 sub-ass-video-aspect-override=0
 sub-ass-use-video-data=all
 sub-ass-style-overrides=
-# Must be unset. mpv's default leaves it unset; only set it if you know you did.
-#sub-ass-vsfilter-aspect-compat=
 # Either `no` or `yes` is supported; `video` is not.
 blend-subtitles=no
 sub-filter-sdh=no
 ```
+
+One more has to be *absent* rather than set: `sub-ass-vsfilter-aspect-compat`. mpv leaves it unset by
+default, so this only bites a player that sets it deliberately — and the frame is then refused with
+`subtitle-render-input-unsupported` naming it.
 
 `--blend-subtitles=yes` is reproduced. mpv draws the subtitle into the video texture instead of the
 OSD surface, so the cue is laid out on the video's on-screen rectangle with no letterbox margins;

@@ -221,10 +221,32 @@ class SubtitleGeometryWorker:
 
         The queue policy stays here — a single current slot that supersedes, a bounded prefetch
         queue that drops oldest — because the broker owns admission and never feature state.
+
+        Loops rather than recursing on a refusal: each round consumes one queued item, so the depth
+        would be the prefetch queue's length, and that is `cache_max` — a config value with no upper
+        bound. A gateway at capacity and a generous `cache_max` is a `RecursionError` on the terminal
+        thread; iterating removes the class rather than bounding it.
         """
+        while True:
+            claimed = self._claim_next()
+            if claimed is None:
+                return
+            job, identity = claimed
+            if self._submit(
+                owner=Owner.SUBTITLE,
+                identity=identity,
+                lane=GEOMETRY_LANE,
+                request=job,
+                on_finished=self._delivered,
+            ):
+                return
+            self._unwind_refusal(job)
+
+    def _claim_next(self) -> tuple[GeometryJob, tuple[str, int]] | None:
+        """Take the next item and mark the lane busy, or `None` when there is nothing to hand over."""
         with self._condition:
             if self._closed or self._inflight:
-                return
+                return None
             pending, self._pending = self._pending, None
             if pending is not None:
                 job = GeometryJob(self, pending, None)
@@ -236,41 +258,34 @@ class SubtitleGeometryWorker:
                 self._prefetch_inflight_key = entry[0]
                 job = GeometryJob(self, None, entry)
             else:
-                return
+                return None
             self._inflight = True
             self._issued += 1
-            identity = (GEOMETRY_LANE, self._issued)
+            return job, (GEOMETRY_LANE, self._issued)
 
-        if self._submit(
-            owner=Owner.SUBTITLE,
-            identity=identity,
-            lane=GEOMETRY_LANE,
-            request=job,
-            on_finished=self._delivered,
-        ):
-            return
-        # Refused admission is dropped work, not queued work: unwind so the queue does not believe
-        # something is still in flight and stall every later request behind it.
+    def _unwind_refusal(self, job: GeometryJob) -> None:
+        """Give back what a refused submit claimed, and pay what its terminal now never will.
+
+        Refused admission is dropped work, not queued work: left marked in flight it stalls every
+        later request behind it. Everything `_settling` holds is owed by this job — `_delivered`
+        drains before pumping, and a caller can only attach while a job is in flight — so left
+        queued, the NEXT terminal pays them out, running one cue's callback against another cue's
+        snapshot with its owner nowhere in the traceback.
+        """
         with self._condition:
             self._inflight = False
             if job.current is not None:
                 self._superseded += 1
             else:
-                # A caller can attach to an in-flight speculation between this key being published
-                # and the submit returning, and it registers a waiter rather than a job of its own.
+                # A caller can attach to an in-flight speculation between its key being published
+                # and the submit returning, registering a waiter and no job of its own.
                 self._prefetch_waiters.pop(self._prefetch_inflight_key or "", None)
                 self._prefetch_inflight_key = None
                 self._prefetch_dropped += 1
-            # Everything `_settling` holds is owed by the job just refused, whose terminal will never
-            # arrive — `_delivered` drains before pumping, and a caller can only attach while a job
-            # is in flight. Left queued, the NEXT terminal pays them out, running one cue's callback
-            # against another cue's snapshot with the callback's owner nowhere in the traceback.
             owed, self._settling = self._settling, []
             self._condition.notify_all()
         for settle in owed:
             settle()
-        # The refusal freed the slot; without this a queued prefetch waits for an unrelated event.
-        self._pump()
 
     def execute(self, job: GeometryJob) -> None:
         """Run one lane job. Called on a lane worker thread by :func:`run_geometry_job`."""

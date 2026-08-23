@@ -126,6 +126,11 @@ def onto(source: list[WordBox], target: list[WordBox]) -> list[WordBox]:
     A uniform shift or scale between the engines is not a fault — the whole line moves and every
     word keeps its share of it. Removing it is what leaves the comparison measuring the one thing a
     user can see: a word taking more or less of the line in one engine than in the other.
+
+    Vertical placement is out of scope, not normalised: the row's `y`/`h` are taken from the target
+    outright, so a native box at the wrong height would not be caught here. That is deliberate —
+    the two engines' baselines and line heights genuinely differ — but it means this oracle speaks
+    only about horizontal partitioning.
     """
     left, right = min(box.x for box in source), max(box.x + box.w for box in source)
     into_left, into_right = min(box.x for box in target), max(box.x + box.w for box in target)
