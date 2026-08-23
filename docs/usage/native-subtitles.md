@@ -94,10 +94,11 @@ native_formats = "authored-ass"
 Two different things happen when this mode does not take something, and they are worth telling apart
 before you turn it on:
 
-- **A track it does not take** — a `.srt` under the default — is drawn by Saitenka's own renderer
-  instead, and stays scannable, hoverable and minable exactly as before. You lose mpv's typesetting
-  on that track, not the words. `Ctrl+Shift+L` (`keys.legacy_renderer_key`) asks for that renderer
-  deliberately, for a whole episode.
+- **A track it does not take** — whatever `native_formats` leaves out, so a SubRip track under the
+  default but not under `"all"` — is drawn by Saitenka's own renderer instead, and stays scannable,
+  hoverable and minable exactly as before. You lose mpv's typesetting on that track, not the words.
+  `Ctrl+Shift+L` (`keys.legacy_renderer_key`) asks for that renderer deliberately, for a whole
+  episode.
 - **A cue it cannot measure** — karaoke, animation, a vector drawing — keeps mpv's own rendering and
   loses only its interaction: no hover, no tooltip, no mining, on that cue. The renderer does not
   switch, so nothing flickers; the words are simply not scannable until the next cue.
