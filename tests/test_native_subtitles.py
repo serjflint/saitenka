@@ -92,7 +92,6 @@ class FakeIPC(util.FakeIPC):
             "options/sub-ass-force-margins": False,
             "options/sub-ass-video-aspect-override": 0.0,
             "options/sub-ass-use-video-data": "all",
-            "options/sub-ass-vsfilter-aspect-compat": None,
             "options/sub-ass-style-overrides": [],
             "options/sub-scale-with-window": True,
             "options/sub-scale-by-window": True,
@@ -3493,7 +3492,6 @@ _SUPPORTED_SETTINGS = {
     "sub-ass-force-margins": False,
     "sub-ass-video-aspect-override": None,
     "sub-ass-use-video-data": "all",
-    "sub-ass-vsfilter-aspect-compat": None,
     "sub-ass-style-overrides": None,
     "sub-scale-with-window": True,
     "sub-scale-by-window": True,
@@ -3518,6 +3516,30 @@ def _inputs(*, osd=None, video=None, frame_size=None, **settings):
         {**_SUPPORTED_SETTINGS, **settings},
         frame_size=frame_size or (1920, 1080),
     )
+
+
+def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
+    """`prop("options/<name>")` returns mpv's typed value; only a *removed* option reads `None`.
+
+    So a row that accepts `None` and nothing else refuses every track on every mpv that still has
+    the option, and passes vacuously on the builds that dropped it — which is invisible when
+    everyone testing runs a recent one. `sub-ass-vsfilter-aspect-compat` sat here for exactly that
+    reason: mpv defaults it to `yes`, so `True is None` refused native geometry outright on
+    mpv < 0.41, and 0.41 removed the option and made the row read green.
+    """
+    from saitenka.app.native_subtitles import _unsupported_render_inputs
+
+    plausible = (0, 0.0, 1.0, 100.0, "", (), False, True, "no", "yes", "all", "auto")
+
+    for name, value in _SUPPORTED_SETTINGS.items():
+        if value is not None:
+            continue
+        accepted = [
+            candidate
+            for candidate in plausible
+            if name not in _unsupported_render_inputs({**_SUPPORTED_SETTINGS, name: candidate})
+        ]
+        assert accepted, f"{name} is accepted only when mpv does not report it"
 
 
 def test_a_default_mpv_render_configuration_supports_native_geometry():

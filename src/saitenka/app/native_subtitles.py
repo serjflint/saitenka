@@ -120,7 +120,6 @@ GATE_OPTIONS = (
     "sub-ass-force-margins",
     "sub-ass-video-aspect-override",
     "sub-ass-use-video-data",
-    "sub-ass-vsfilter-aspect-compat",
     "sub-ass-style-overrides",
     "sub-scale-with-window",
     "sub-scale-by-window",
@@ -319,8 +318,12 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
             0,
         },
         "sub-ass-use-video-data": settings["sub-ass-use-video-data"] == "all",
-        "sub-ass-vsfilter-aspect-compat": settings["sub-ass-vsfilter-aspect-compat"] is None,
         "sub-ass-style-overrides": settings["sub-ass-style-overrides"] in (None, "", (), [], [""]),
+        # `--sub-ass-vsfilter-aspect-compat` is NOT here, and must not return as an is-None check:
+        # mpv's default is `yes`, so a present bool option never reads `None` and that row refused
+        # every track on every mpv that still had the option. 0.41 removed it in favour of
+        # `sub-ass-use-video-data`, gated above and forced by `mpvio.launch`.
+        #
         # `--sub-scale-with-window` and `--sub-scale-by-window` are NOT here. mpv reads them only on
         # `configure_ass`'s forced-override branch, which a CONVERTED track takes — and there
         # `converted.font_scale` reproduces both, so they are inputs to the measurement rather than

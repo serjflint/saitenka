@@ -300,7 +300,6 @@ class _IPC(NoSessionRuntime):
             "options/sub-ass-force-margins": False,
             "options/sub-ass-video-aspect-override": 0.0,
             "options/sub-ass-use-video-data": "all",
-            "options/sub-ass-vsfilter-aspect-compat": None,
             "options/sub-ass-style-overrides": [],
             "options/sub-scale-with-window": True,
             "options/sub-scale-by-window": True,

@@ -146,10 +146,6 @@ blend-subtitles=no
 sub-filter-sdh=no
 ```
 
-One more has to be *absent* rather than set: `sub-ass-vsfilter-aspect-compat`. mpv leaves it unset by
-default, so this only bites a player that sets it deliberately — and the frame is then refused with
-`subtitle-render-input-unsupported` naming it.
-
 `--blend-subtitles=yes` is reproduced. mpv draws the subtitle into the video texture instead of the
 OSD surface, so the cue is laid out on the video's on-screen rectangle with no letterbox margins;
 Saitenka rebuilds that rectangle from `osd-dimensions` and offsets the resulting boxes back onto the

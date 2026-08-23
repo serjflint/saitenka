@@ -280,7 +280,6 @@ OBSERVED_PROPS = (
     "options/sub-ass-force-margins",
     "options/sub-ass-video-aspect-override",
     "options/sub-ass-use-video-data",
-    "options/sub-ass-vsfilter-aspect-compat",
     "options/sub-ass-style-overrides",
     "options/sub-scale-with-window",
     "options/sub-scale-by-window",
