@@ -303,6 +303,11 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
     against the resolved environment.
     """
     supported = {
+        # Refusing every value but "no" is what keeps `ass_set_selective_style_override` out of the
+        # measuring render: that API is how mpv applies `yes`/`force`/`scale` to an AUTHORED track,
+        # and the one configuration needing it is the one refused here. A converted track is
+        # unaffected — mpv rewrites its `[V4+ Styles]` block directly (`subtitles.converted` ports
+        # that), which is a different mechanism, not a substitute for this one.
         "sub-ass-override": settings["sub-ass-override"] in {False, "no"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
         "sub-scale": settings["sub-scale"] == 1.0,
