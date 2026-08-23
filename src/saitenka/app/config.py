@@ -356,8 +356,7 @@ class SubtitleGeometryOptions:
         metadata={
             "help": (
                 "Which tracks the native path takes: authored-ass (only .ass) or all (also the "
-                "SubRip tracks mpv converts, which lose cue lookahead). Ignored when "
-                "native_visible is off."
+                "SubRip tracks mpv converts). Ignored when native_visible is off."
             )
         },
     )
@@ -366,9 +365,7 @@ class SubtitleGeometryOptions:
         metadata={"help": "Optional explicit path to the system libass library."},
     )
     cache_max: int = field(default=3, metadata={"help": "Current/lookahead geometry cache bound."})
-    lookahead: int = field(
-        default=2, metadata={"help": "Static authored ASS cues to render ahead."}
-    )
+    lookahead: int = field(default=2, metadata={"help": "Static cues to render ahead."})
 
 
 # Flat legacy kwarg name -> the ReaderOptions group it belongs to (used by with_overrides).

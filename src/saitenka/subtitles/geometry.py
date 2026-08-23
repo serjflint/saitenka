@@ -210,10 +210,10 @@ class GeometryRequest:
             repr(self.font_setup),
             repr(self.renderer_state),
             repr(self.render_profile),
-            # In the key because it changes what the snapshot CONTAINS, not just how it was made: a
-            # maskless hit served to a caller that asked for coverage drops the whole cue to the
-            # plainest device, silently. Today one producer derives it from the palette, which is
-            # already hashed — so this costs nothing and stops the invariant living in a call site.
+            # It changes what the snapshot CONTAINS, not just how it was made: a maskless hit
+            # served to a caller that asked for coverage drops the whole cue to the plainest
+            # colour device, silently. Free while the only producer derives it from the palette
+            # hashed above — and this is what keeps that from being the thing holding it true.
             repr(self.keep_coverage),
         ):
             digest.update(value.encode())

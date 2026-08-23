@@ -304,10 +304,9 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
     """
     supported = {
         # Refusing every value but "no" is what keeps `ass_set_selective_style_override` out of the
-        # measuring render: that API is how mpv applies `yes`/`force`/`scale` to an AUTHORED track,
-        # and the one configuration needing it is the one refused here. A converted track is
-        # unaffected — mpv rewrites its `[V4+ Styles]` block directly (`subtitles.converted` ports
-        # that), which is a different mechanism, not a substitute for this one.
+        # measuring render: that API applies `yes`/`force`/`scale` to an AUTHORED track. A converted
+        # track is unaffected either way — mpv rewrites its `[V4+ Styles]` block directly, which
+        # `subtitles.converted` ports.
         "sub-ass-override": settings["sub-ass-override"] in {False, "no"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
         "sub-scale": settings["sub-scale"] == 1.0,
@@ -608,8 +607,8 @@ class GeometryObservation:
 
     prop: Callable[[str], Any]
     #: The OSD surface mpv composites onto, and therefore the frame the boxes are laid out in.
-    #: One value for both: it used to be the host's for drawing and a second read of
-    #: `osd-dimensions` for the layout, which is two values whenever they disagree.
+    #: One value for both drawing and layout — reading `osd-dimensions` separately for the layout
+    #: is two surfaces whenever the two reads disagree.
     osd: tuple[int, int]
     text: str
     tokens: list[Token]

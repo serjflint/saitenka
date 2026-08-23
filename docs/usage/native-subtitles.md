@@ -79,6 +79,17 @@ native_visible = true
 native_formats = "authored-ass"
 ```
 
+Two different things happen when this mode does not take something, and they are worth telling apart
+before you turn it on:
+
+- **A track it does not take** — a `.srt` under the default — is drawn by Saitenka's own renderer
+  instead, and stays scannable, hoverable and minable exactly as before. You lose mpv's typesetting
+  on that track, not the words. `Ctrl+Shift+L` (`keys.legacy_renderer_key`) asks for that renderer
+  deliberately, for a whole episode.
+- **A cue it cannot measure** — karaoke, animation, a vector drawing — keeps mpv's own rendering and
+  loses only its interaction: no hover, no tooltip, no mining, on that cue. The renderer does not
+  switch, so nothing flickers; the words are simply not scannable until the next cue.
+
 `"all"` means the tracks mpv converts *from SubRip*, not any text track. A `mov_text` or `webvtt`
 stream is converted to ASS by a different libavcodec decoder, writing its own header and styles, and
 Saitenka's own extraction transcodes it to `.srt` — so the file on disk is not the document mpv is
@@ -117,6 +128,8 @@ sub-ass-force-margins=no
 sub-ass-video-aspect-override=0
 sub-ass-use-video-data=all
 sub-ass-style-overrides=
+# Must be unset. mpv's default leaves it unset; only set it if you know you did.
+#sub-ass-vsfilter-aspect-compat=
 # Either `no` or `yes` is supported; `video` is not.
 blend-subtitles=no
 sub-filter-sdh=no
@@ -203,9 +216,13 @@ blocking the player event loop.
 
 ## Troubleshooting
 
-- Run `saitenka doctor` first. A missing wrapper/runtime is an installation problem; an unsupported
-  render input means mpv is intentionally outside the tested envelope.
-- If `run` works but `attach` does not, compare the attached player's options with the profile above.
+- Run `saitenka doctor` first — it answers the installation question only: whether the wrapper and
+  the libass runtime are present and load.
+- Whether *mpv* is outside the envelope is a different question, and only `saitenka subtitle-report`
+  answers it. Look for `subtitle-render-input-unsupported`, which names the option that did not
+  match, and `subtitle-source-conversion-unreproduced` for a track kind the mode does not take.
+- If `run` works but `attach` does not, that reason code is the fast way in; comparing the attached
+  player's options against the profile above by eye is the slow one.
 - A native-geometry failure can temporarily remove scanning boxes, but the mpv subtitle style should
   remain stable. A switch to the standard renderer is a catastrophic native-visibility failure; include
   a report bundle if that occurs unexpectedly. Before reproducing, run `saitenka telemetry enable`;

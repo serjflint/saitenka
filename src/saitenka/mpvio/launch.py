@@ -88,9 +88,9 @@ def build_mpv_argv(
                 "--sub-ass-video-aspect-override=0",
                 "--sub-ass-use-video-data=all",
                 "--sub-ass-style-overrides=",
-                # No font options here. They used to be forced to the one combination the measuring
-                # renderer could reproduce, which threw away the typesetting a release attached its
-                # fonts for; `subtitle_fonts.resolve` now reads whatever mpv is using instead.
+                # No font options here: `subtitle_fonts.resolve` reads whatever mpv is using.
+                # Forcing them to the one combination the measuring renderer could reproduce would
+                # throw away the typesetting a release attached its fonts for.
                 "--sub-visibility=yes",
             )
         )

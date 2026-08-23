@@ -2,10 +2,10 @@
 
 Four sources reach mpv's subtitle renderer: the system providers, one extra directory
 (``--sub-fonts-dir``, or the config dir's ``fonts`` when that is empty), the container's font
-attachments, and a ``[Fonts]`` section inside the document. The measuring renderer used to hold only
-the first, so a track whose typesetting came from an attachment was laid out in a substitute face —
-silently, because nothing compares the two layouts, and the boxes are simply the wrong width for the
-whole episode.
+attachments, and a ``[Fonts]`` section inside the document. The measuring renderer must hold all
+four: a track whose typesetting comes from an attachment is otherwise laid out in a substitute face,
+silently — nothing compares the two layouts, so the boxes are just the wrong width for the whole
+episode.
 
 Resolving these costs a subprocess and two IPC round trips, so it happens once per track beside the
 artifact resolution (`embedded_subs`), never on the interaction loop.

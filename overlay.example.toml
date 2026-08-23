@@ -111,7 +111,7 @@
 # native_formats = "authored-ass"                  # or "all": also the SubRip tracks mpv converts
 # library_path = "/opt/homebrew/lib/libass.dylib"  # optional system-libass escape hatch
 # cache_max = 3                                    # retained current/lookahead geometry entries
-# lookahead = 2                                    # authored ASS cues rendered ahead (not converted)
+# lookahead = 2                                    # cues rendered ahead (converted tracks too)
 
 # ── Mining feel ──────────────────────────────────────────────────────────────────────────────────
 # max_bulk = 12              # cap on words mined in one "mine all" (Shift+m) action

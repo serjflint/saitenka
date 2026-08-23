@@ -371,10 +371,9 @@ class SubtitleGeometryWorker:
 
         Both maps, because the same snapshot sits in the result cache and the prefetch map and
         counting one of them halves the answer. They are keyed differently — the cache by
-        `cache_key()`, the prefetch map by the caller's cue key — so the render identity is the only
-        thing that can say whether two entries are one snapshot. Comparing the raw keys instead made
-        every entry look unique, which double-counted the total and left `_strip` unable to find the
-        cache's copy at all.
+        `cache_key()`, the prefetch map by the caller's cue key — so render identity is the only
+        thing that can say whether two entries are one snapshot; comparing the raw keys makes every
+        entry look unique, which double-counts the total and hides the cache's copy from `_strip`.
 
         The prefetch-only ones come first: every prefetch is written to both maps, so a render the
         cache no longer holds is one the cache evicted, which makes it the oldest thing here.
@@ -412,8 +411,8 @@ class SubtitleGeometryWorker:
     def _strip(self, key: str, stripped: GeometrySnapshot) -> None:
         """Replace one snapshot in every map that holds it, addressed by render identity.
 
-        Both maps, or the copy the other keeps makes the trim free nothing — which is what happened
-        while this looked the cue key up in a map keyed by `cache_key()`.
+        Both maps, or the copy the other keeps makes the trim free nothing. The prefetch map is
+        keyed by the caller's cue key, so its entry is found through its request, not through `key`.
         """
         if key in self._cache:
             self._cache[key] = stripped  # assignment to an existing key keeps its LRU position

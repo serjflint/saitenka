@@ -111,9 +111,8 @@ hover_pause_claim: Counter | None = (
 #: Counted rather than spanned because a tick that finds no cue is a clock reading, not an event: as
 #: spans those were 39% of a whole trace file and 2873 of their 2902 instances said only this.
 cue_settles: Counter | None = None
-#: labeled sources=system+fonts-dir+attachments+in-file. The measuring renderer used to hold only
-#: the system providers, so this says how often a track's typesetting came from somewhere it could
-#: not reach — the field evidence for whether the other three sources matter here.
+#: labeled sources=system+fonts-dir+attachments+in-file. Field evidence for whether the three
+#: sources beyond the system providers matter: how often a track's typesetting comes from one.
 subtitle_geometry_font_sources: Counter | None = None
 #: labeled renderer=legacy|native. A deliberate switch, not a failure: the catastrophic-fallback
 #: counter next door says the native path gave up, and conflating the two would make a user

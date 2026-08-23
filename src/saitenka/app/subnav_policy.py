@@ -59,7 +59,7 @@ def filters_can_drop_a_cue(settings: Mapping[str, object]) -> bool:
 
 #: mpv's own spellings for a flag property. It answers JSON bools over the IPC socket, but the same
 #: option read as a string — a config file, `--sub-filter-sdh=yes` echoed back — reaches here too,
-#: and `is True` silently read every one of those as "no filter".
+#: and an identity test against `True` reads every one of those as "no filter".
 _TRUE = frozenset({"yes", "true", "1"})
 _FALSE = frozenset({"no", "false", "0"})
 
