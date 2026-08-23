@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING, Protocol
 
@@ -186,7 +186,14 @@ class GeometryRequest:
         _validate_attachments(self)
 
     def cache_key(self) -> str:
-        """Stable identity for render inputs; generation is deliberately excluded."""
+        """Stable identity for render inputs; generation is deliberately excluded.
+
+        `frame_size` is load-bearing beyond cache freshness, and not obviously so. A snapshot's
+        coverage masks are rasterised at this frame's pixels and uploaded to mpv as a bitmap, which
+        — unlike an `osd-overlay` text payload — mpv does not rescale with its OSD surface. Drop the
+        frame from this key and a resize serves the old masks, painting the previous window's
+        colours over the new window's glyphs.
+        """
         digest = hashlib.sha256()
         for value in (
             str(self.track_id),
@@ -222,6 +229,21 @@ class GeometrySnapshot:
     timestamp_ms: int
     variant: GeometryVariant
     tokens: tuple[TokenGeometry, ...]
+
+    @property
+    def coverage_bytes(self) -> int:
+        """Retained alpha, in bytes — the only part of a snapshot whose size is not bounded by the
+        token count. A full-screen sign's masks are megabytes."""
+        return sum(len(token.coverage) for token in self.tokens)
+
+    def without_coverage(self) -> GeometrySnapshot:
+        """The same hit boxes with the masks dropped.
+
+        Still a complete, correct answer: coverage feeds only the raster colour device, so a
+        stripped snapshot costs those tokens a plainer mark and nothing else. That is what makes it
+        the right thing to evict under memory pressure — evicting the entry would cost a re-render.
+        """
+        return replace(self, tokens=tuple(replace(token, coverage=b"") for token in self.tokens))
 
 
 class GeometryBackend(Protocol):

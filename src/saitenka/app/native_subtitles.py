@@ -1557,6 +1557,7 @@ class NativeSubtitleGeometry:
             span.set("cache_hits", stats.cache_hits)
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
+            span.set("coverage_trimmed", stats.coverage_trimmed)
         if cache_hit:
             # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
             # a cached cue would sit unapplied until some later miss happened to land.

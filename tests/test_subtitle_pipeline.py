@@ -684,3 +684,114 @@ def test_new_epoch_reports_its_invalidation_cause_once() -> None:
     assert worker.prefetch_miss_reason("second-new-key") == "first-seen"
 
     worker.close()
+
+
+class HeavyCoverageBackend(FakeGeometryBackend):
+    """A cue whose coverage masks are a megabyte — a full-screen sign, not a pathological input."""
+
+    MASK = b"\xff" * (1024 * 1024)
+
+    def render(self, request: GeometryRequest) -> GeometrySnapshot:
+        result = super().render(request)
+        return GeometrySnapshot(
+            result.generation,
+            result.track_id,
+            result.frame_id,
+            result.timestamp_ms,
+            result.variant,
+            tuple(
+                TokenGeometry(
+                    token.event_id, token.token_index, token.bounds, (), "", 0.0, self.MASK
+                )
+                for token in result.tokens
+            ),
+        )
+
+
+def fill_cache(worker: SubtitleGeometryWorker, coordinator, count: int) -> None:
+    for index in range(count):
+        assert worker.prefetch(
+            f"cue-{index}",
+            coordinator.generation,
+            lambda index=index: request(coordinator.generation, 1_300 + index),
+        )
+        assert worker.wait_idle()
+
+
+def test_retained_coverage_is_bounded_by_bytes_not_by_entry_count(monkeypatch) -> None:
+    """The entry bound does not bound this. Coverage is the one part of a snapshot whose size a
+    count says nothing about, and lookahead holds a window of cues, so a run of full-screen signs
+    grows the retained alpha without any meter moving."""
+    from saitenka.app import subtitle_geometry_job
+
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 2 * 1024 * 1024)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=8)
+
+    fill_cache(worker, coordinator, 5)
+
+    assert worker.retained_coverage_bytes <= 2 * 1024 * 1024
+    assert worker.stats.coverage_trimmed > 0
+    worker.close()
+
+
+def test_the_budget_drops_the_masks_and_keeps_the_boxes(monkeypatch) -> None:
+    """What the budget evicts is the colour device's input, not the cue. A stripped snapshot is
+    still a complete set of hit boxes — its tokens fall to the rule device, which needs nothing —
+    where evicting the entry would cost a re-render of a cue about to be shown."""
+    from saitenka.app import subtitle_geometry_job
+
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 1)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4)
+
+    fill_cache(worker, coordinator, 2)
+    assert worker.publish_prefetched("cue-1", coordinator.generation) is not None
+
+    published = coordinator.current
+    assert published is not None
+    assert published.tokens[0].bounds.contains(25, 30), "the hit boxes did not survive the trim"
+    assert published.tokens[0].coverage == b""
+    worker.close()
+
+
+def test_the_oldest_cue_gives_up_its_masks_first(monkeypatch) -> None:
+    """The cue about to be drawn is the one that still needs its raster; a speculative one measured
+    three cues ahead is the cheapest colour to lose."""
+    from saitenka.app import subtitle_geometry_job
+
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 1024 * 1024)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4)
+
+    fill_cache(worker, coordinator, 2)
+
+    assert worker.publish_prefetched("cue-0", coordinator.generation) is not None
+    first = coordinator.current
+    coordinator.invalidate()
+    assert worker.publish_prefetched("cue-1", coordinator.generation) is not None
+    second = coordinator.current
+
+    assert first is not None and second is not None
+    assert first.tokens[0].coverage == b""
+    assert second.tokens[0].coverage == HeavyCoverageBackend.MASK
+    worker.close()
+
+
+def test_the_render_space_is_part_of_the_cache_key() -> None:
+    """Not a freshness nicety: a snapshot's coverage masks are rasterised at this frame's pixels and
+    uploaded as a bitmap, which mpv does not rescale with its OSD surface the way it rescales a text
+    payload. Drop the frame from the key and a resize paints the old window's colours over the new
+    window's glyphs."""
+    base = request(1)
+    resized = GeometryRequest(
+        generation=base.generation,
+        track_id=base.track_id,
+        frame_id=base.frame_id,
+        timestamp_ms=base.timestamp_ms,
+        frame_size=(1280, 720),
+        storage_size=base.storage_size,
+        ass=base.ass,
+    )
+
+    assert base.cache_key() != resized.cache_key()

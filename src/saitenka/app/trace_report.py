@@ -83,6 +83,7 @@ _FIELDS = frozenset(
         "cache_hits",
         "prefetch_dropped",
         "prefetch_cache_entries",
+        "coverage_trimmed",
     }
 )
 _MAX_RECORDS = 256

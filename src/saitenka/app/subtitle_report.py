@@ -64,6 +64,7 @@ _FIELDS = frozenset(
         "cache_hits",
         "prefetch_dropped",
         "prefetch_cache_entries",
+        "coverage_trimmed",
         "event",
         "mode",
         "owner_before",

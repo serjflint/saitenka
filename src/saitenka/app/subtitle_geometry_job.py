@@ -45,9 +45,15 @@ class GeometryWorkerStats:
     prefetch_dropped: int
     result_cache_entries: int
     prefetch_cache_entries: int
+    coverage_trimmed: int = 0
 
 
 GEOMETRY_LANE = "subtitle-geometry"
+
+#: Bytes of token coverage kept across every cached and prefetched cue. The caches are bounded by
+#: entries, and coverage is the one thing an entry count does not bound — a full-screen sign's alpha
+#: is megabytes, and lookahead holds a window of them.
+COVERAGE_BUDGET_BYTES = 16 * 1024 * 1024
 
 #: Deeper than the one job in flight: `_pump` re-submits from the tail of the handler, while the
 #: finished effect is still counted against the lane, and a refused admission is dropped work.
@@ -122,6 +128,7 @@ class SubtitleGeometryWorker:
         self._max_submit_us = 0
         self._prefetched_count = 0
         self._prefetch_dropped = 0
+        self._coverage_trimmed = 0
         self._local = (
             None
             if submit is not None
@@ -342,6 +349,52 @@ class SubtitleGeometryWorker:
             self._cache[key] = result
             while len(self._cache) > self._cache_max:
                 self._cache.popitem(last=False)
+            self._trim_coverage()
+
+    @property
+    def retained_coverage_bytes(self) -> int:
+        with self._condition:
+            return sum(snapshot.coverage_bytes for _key, snapshot in self._retained())
+
+    def _retained(self) -> list[tuple[str, GeometrySnapshot]]:
+        """Every snapshot this worker holds, oldest first, once each. Both maps: the same snapshot
+        is in the result cache and the prefetch map, so counting one of them halves the answer."""
+        return list(self._cache.items()) + [
+            (key, snapshot)
+            for key, (_request, snapshot) in self._prefetched.items()
+            if key not in self._cache
+        ]
+
+    def _trim_coverage(self) -> None:
+        """Hold the retained coverage under its byte budget, oldest cue first.
+
+        The entry bound is a count, and coverage is the one part of a snapshot whose size a count
+        does not bound: a lookahead window of full-screen signs is a window of megabyte alpha masks.
+
+        What is dropped is the masks, not the entries. A snapshot without coverage is still a
+        complete set of hit boxes; its tokens fall from the raster colour device to the rule device,
+        which needs nothing. So the budget costs a plainer mark, where evicting the entry would cost
+        a re-render of a cue that is about to be shown.
+        """
+        retained = self._retained()
+        total = sum(snapshot.coverage_bytes for _key, snapshot in retained)
+        for key, snapshot in retained:
+            if total <= COVERAGE_BUDGET_BYTES:
+                return
+            if not snapshot.coverage_bytes:
+                continue
+            total -= snapshot.coverage_bytes
+            self._strip(key, snapshot.without_coverage())
+            self._coverage_trimmed += 1
+
+    def _strip(self, key: str, stripped: GeometrySnapshot) -> None:
+        """Replace one snapshot in every map that holds it. Both, or the copy the other map keeps
+        makes the trim free nothing."""
+        if key in self._cache:
+            self._cache[key] = stripped  # assignment to an existing key keeps its LRU position
+        prefetched = self._prefetched.get(key)
+        if prefetched is not None:
+            self._prefetched[key] = (prefetched[0], stripped)
 
     def _idle(self) -> None:
         self._inflight = False
@@ -519,6 +572,7 @@ class SubtitleGeometryWorker:
                 self._prefetch_dropped,
                 len(self._cache),
                 len(self._prefetched),
+                self._coverage_trimmed,
             )
 
     def wait_idle(self, timeout: float = 5.0) -> bool:
