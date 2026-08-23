@@ -27,6 +27,34 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\c&H112233&}猫{\\c&H445566&
 """.encode()
 
 
+#: A font the repo already ships, used as a family no installed provider offers under that name.
+REPO_FONT = Path(__file__).resolve().parents[2] / "src/saitenka/assets/fonts/NotoSans.ttf"
+REPO_FONT_FAMILY = "Noto Sans"
+
+
+def noto_ass() -> bytes:
+    return ASS.replace(b"Default,Arial,48", f"Default,{REPO_FONT_FAMILY},48".encode())
+
+
+def uuencoded(data: bytes) -> str:
+    """The ASS `[Fonts]` encoding: three bytes to four printable characters, 80 to a line."""
+    digits = []
+    for offset in range(0, len(data), 3):
+        chunk = data[offset : offset + 3]
+        value = int.from_bytes(chunk.ljust(3, b"\0"), "big")
+        quad = [(value >> 18) & 63, (value >> 12) & 63, (value >> 6) & 63, value & 63]
+        digits.extend(chr(digit + 33) for digit in quad[: len(chunk) + 1])
+    return "\n".join("".join(digits[at : at + 80]) for at in range(0, len(digits), 80))
+
+
+def painted_characters(result: libasslite.AssRenderResult) -> int:
+    return len([layer for layer in result.layers if layer.image_type == 0 and layer.width])
+
+
+def frame(ass_renderer: libasslite.AssRenderer, **kwargs: object) -> libasslite.AssRenderResult:
+    return ass_renderer.render(1_500, (1280, 720), (1280, 720), **kwargs)  # type: ignore[arg-type]
+
+
 def configured_library() -> Path | None:
     configured = os.environ.get("LIBASSLITE_LIBRARY")
     if configured:
@@ -36,8 +64,8 @@ def configured_library() -> Path | None:
     return None
 
 
-def renderer(ass: bytes = ASS) -> libasslite.AssRenderer:
-    return libasslite.AssRenderer(ass, library_path=configured_library())
+def renderer(ass: bytes = ASS, **kwargs: object) -> libasslite.AssRenderer:
+    return libasslite.AssRenderer(ass, library_path=configured_library(), **kwargs)  # type: ignore[arg-type]
 
 
 def character_bounds(result: libasslite.AssRenderResult, rgb: int) -> tuple[int, int, int, int]:
@@ -305,6 +333,145 @@ def test_use_margins_moves_bottom_aligned_authored_ass_into_video_rectangle() ->
     assert ignored[1] >= 250
     assert applied[1] < ignored[1]
     assert applied[3] == ignored[3]
+
+
+def test_no_font_provider_confines_lookup_to_what_the_caller_loaded() -> None:
+    ass_renderer = renderer(noto_ass(), font_provider=libasslite.FontProvider.NONE)
+
+    assert painted_characters(frame(ass_renderer)) == 0
+
+
+def test_fonts_directory_supplies_a_family_no_provider_offers(tmp_path: Path) -> None:
+    if not REPO_FONT.exists():
+        pytest.skip("test requires the repository's bundled font asset")
+    (tmp_path / REPO_FONT.name).write_bytes(REPO_FONT.read_bytes())
+    ass_renderer = renderer(
+        noto_ass(),
+        fonts_dir=str(tmp_path),
+        font_provider=libasslite.FontProvider.NONE,
+    )
+
+    assert painted_characters(frame(ass_renderer)) > 0
+
+
+def test_attached_font_bytes_supply_a_family_no_provider_offers() -> None:
+    if not REPO_FONT.exists():
+        pytest.skip("test requires the repository's bundled font asset")
+    ass_renderer = renderer(
+        noto_ass(),
+        fonts=[(REPO_FONT.name, REPO_FONT.read_bytes())],
+        font_provider=libasslite.FontProvider.NONE,
+    )
+
+    assert painted_characters(frame(ass_renderer)) > 0
+
+
+@pytest.mark.parametrize("extract_fonts", [True, False])
+def test_in_file_font_section_is_read_only_when_extraction_is_asked_for(
+    *, extract_fonts: bool
+) -> None:
+    if not REPO_FONT.exists():
+        pytest.skip("test requires the repository's bundled font asset")
+    section = f"\n[Fonts]\nfontname: {REPO_FONT.name}\n{uuencoded(REPO_FONT.read_bytes())}\n"
+    ass_renderer = renderer(
+        noto_ass() + section.encode(),
+        extract_fonts=extract_fonts,
+        font_provider=libasslite.FontProvider.NONE,
+    )
+
+    assert (painted_characters(frame(ass_renderer)) > 0) is extract_fonts
+
+
+def test_render_style_never_carries_into_the_next_frame() -> None:
+    ass_renderer = renderer()
+
+    plain = geometry_signature(frame(ass_renderer))
+    scaled = geometry_signature(frame(ass_renderer, style=libasslite.RenderStyle(font_scale=2.0)))
+    again = geometry_signature(frame(ass_renderer))
+
+    assert scaled != plain
+    assert again == plain
+
+
+def test_line_position_lifts_a_bottom_aligned_event_to_the_top() -> None:
+    ass_renderer = renderer()
+
+    bottom = character_bounds(frame(ass_renderer), 0x332211)
+    top = character_bounds(
+        frame(ass_renderer, style=libasslite.RenderStyle(line_position=100.0)), 0x332211
+    )
+
+    assert top[1] < bottom[1]
+
+
+def test_selective_style_override_replaces_the_authored_font_size() -> None:
+    ass_renderer = renderer()
+    override = libasslite.RenderStyle(
+        override_bits=libasslite.OverrideBits.FONT_SIZE_FIELDS,
+        override_style=libasslite.AssStyle(font_name="Arial", font_size=96.0),
+    )
+
+    authored = character_bounds(frame(ass_renderer), 0x332211)
+    overridden = character_bounds(frame(ass_renderer, style=override), 0x332211)
+
+    assert overridden[3] - overridden[1] > authored[3] - authored[1]
+
+
+def test_override_bits_without_a_style_are_rejected_rather_than_zeroing_the_style() -> None:
+    with pytest.raises(ValueError, match="override_bits requires an override_style"):
+        libasslite.RenderStyle(override_bits=libasslite.OverrideBits.COLORS)
+
+
+def test_track_features_report_what_this_build_cannot_apply() -> None:
+    ass_renderer = renderer(
+        features=[
+            (libasslite.Feature.WRAP_UNICODE, True),
+            (libasslite.Feature.BIDI_BRACKETS, True),
+            (libasslite.Feature.WHOLE_TEXT_LAYOUT, True),
+        ]
+    )
+
+    assert set(ass_renderer.unsupported_features()) <= {
+        libasslite.Feature.WRAP_UNICODE,
+        libasslite.Feature.BIDI_BRACKETS,
+    }
+
+
+def test_an_unknown_track_feature_is_reported_not_silently_applied() -> None:
+    ass_renderer = renderer(features=[(999, True)])
+
+    assert ass_renderer.unsupported_features() == [999]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"font_provider": 5}, "font_provider must be between 0 and 4"),
+        ({"fonts_dir": "with\0nul"}, "fonts_dir contains a NUL byte"),
+        ({"default_family": "with\0nul"}, "default_family contains a NUL byte"),
+    ],
+)
+def test_invalid_font_setup_is_rejected_before_libass_is_initialized(
+    kwargs: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        renderer(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"hinting": 4}, "hinting must be between 0 and 3"),
+        ({"shaper": 2}, "shaper must be between 0 and 1"),
+        ({"font_scale": 0.0}, "font_scale must be finite and positive"),
+        ({"line_position": 101.0}, "line_position must be between 0 and 100"),
+    ],
+)
+def test_invalid_render_style_is_rejected_at_construction(
+    kwargs: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        libasslite.RenderStyle(**kwargs)  # type: ignore[arg-type]
 
 
 def test_close_is_idempotent_and_blocks_render() -> None:
