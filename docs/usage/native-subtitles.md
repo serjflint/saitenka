@@ -99,9 +99,9 @@ faces; reselect the track to pick the change up.
 
 ## Current supported envelope
 
-The first mode supports UTF-8 external authored `.ass` files whose visible geometry can be reproduced
-through libass's public API. It intentionally rejects unproved inputs instead of returning approximate
-hit boxes.
+The mode supports UTF-8 authored `.ass` files whose visible geometry can be reproduced through
+libass's public API, and — under `native_formats = "all"` — the SubRip tracks mpv converts. It
+intentionally rejects unproved inputs instead of returning approximate hit boxes.
 
 The geometry runtime is selected independently of mpv's bundled or system libass. Saitenka cannot
 introspect mpv's exact libass build and font environment, so a compatible runtime inside the supported
@@ -121,11 +121,11 @@ drained in one mpv poll are evaluated together, so intermediate `sub-start`/`sub
 not cause a transient pixel-owner decision.
 
 A geometry *outcome* never selects the renderer, but a subtitle *source* does. When the selected track
-can never produce geometry — not an authored `.ass`, oversized, or not UTF-8 — Saitenka draws that
-track with the standard renderer instead, so an `.srt` stays scannable rather than leaving the episode
-with mpv's pixels and no hit boxes. The decision is made once per track selection, from a property of
-the source that cannot change under it, so the standard renderer still never flashes between cues.
-Selecting an authored `.ass` returns to the native path.
+can never produce geometry — a format this configuration does not take, oversized, or not UTF-8 —
+Saitenka draws that track with the standard renderer instead, so it stays scannable rather than
+leaving the episode with mpv's pixels and no hit boxes. The decision is made once per track
+selection, from a property of the source that cannot change under it, so the standard renderer still
+never flashes between cues. Selecting a track the native path does take returns to it.
 
 Beyond that, the standard renderer is catastrophic recovery, not geometry fallback. Saitenka uses it
 only after a current visibility transaction tries to show mpv subtitles and reads back
