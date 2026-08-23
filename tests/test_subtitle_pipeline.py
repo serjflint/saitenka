@@ -812,6 +812,29 @@ def test_the_trim_treats_a_cue_the_result_cache_evicted_as_the_oldest(monkeypatc
     assert newer.tokens[0].coverage == HeavyCoverageBackend.MASK
 
 
+def test_close_pays_the_settlements_no_terminal_will_ever_deliver() -> None:
+    """Closing retires the lane, so a queued settlement has nothing left to arrive and pay it. Its
+    caller is told the work finished — which is true, it finished by ending — rather than waiting on
+    a completion the worker has already stopped being able to produce."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    settled: list[str] = []
+    holding = threading.Event()
+    worker = SubtitleGeometryWorker(
+        coordinator, cache_max=4, submit=lambda **_kwargs: holding.is_set()
+    )
+    holding.set()  # admitted, so the job stays in flight and its settlement stays queued
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation),
+        on_settled=lambda: settled.append("owed"),
+    )
+    assert settled == [], "the terminal never fired, so nothing should have settled yet"
+
+    worker.close()
+
+    assert settled == ["owed"]
+
+
 def test_a_caller_that_attached_to_a_refused_speculation_is_settled_too() -> None:
     """The other way a caller is owed a settlement, and the one a refusal used to strand.
 

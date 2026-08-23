@@ -267,10 +267,14 @@ class SubtitleGeometryWorker:
         """Give back what a refused submit claimed, and pay what its terminal now never will.
 
         Refused admission is dropped work, not queued work: left marked in flight it stalls every
-        later request behind it. Everything `_settling` holds is owed by this job — `_delivered`
-        drains before pumping, and a caller can only attach while a job is in flight — so left
-        queued, the NEXT terminal pays them out, running one cue's callback against another cue's
-        snapshot with its owner nowhere in the traceback.
+        later request behind it. Left queued, its settlements are paid by the NEXT terminal, running
+        one cue's callback against another cue's snapshot with its owner nowhere in the traceback.
+
+        The drain takes all of `_settling`, not this job's share, and that is safe for a narrower
+        reason than "they are all ours": `_idle` clears `_inflight` before its terminal fires, so a
+        pump can claim and be refused while a previous job's callbacks are still queued. Every
+        `_idle` site sits downstream of the publish those callbacks report, so paying them here is
+        early rather than wrong. Move `_idle` above a publish and that stops being true.
         """
         with self._condition:
             self._inflight = False
@@ -279,7 +283,10 @@ class SubtitleGeometryWorker:
             else:
                 # A caller can attach to an in-flight speculation between its key being published
                 # and the submit returning, registering a waiter and no job of its own.
-                self._prefetch_waiters.pop(self._prefetch_inflight_key or "", None)
+                key = self._prefetch_inflight_key or ""
+                if self._prefetch_waiters.pop(key, None) is not None:
+                    self._superseded += 1
+                self._remember_provenance(key, GeometryCacheReason.PREFETCH_SUPERSEDED)
                 self._prefetch_inflight_key = None
                 self._prefetch_dropped += 1
             owed, self._settling = self._settling, []
@@ -383,8 +390,12 @@ class SubtitleGeometryWorker:
             result.tokens,
         )
 
-    def _store(self, request: GeometryRequest, result: GeometrySnapshot) -> None:
-        key = request.cache_key()
+    def _store(
+        self, request: GeometryRequest, result: GeometrySnapshot, cache_key: str | None = None
+    ) -> None:
+        # The key is accepted rather than always derived: hashing the document and its fonts twice
+        # for one store is the caller's saving to give, and the prefetch path already holds it.
+        key = cache_key if cache_key is not None else request.cache_key()
         with self._condition:
             self._cache.pop(key, None)
             self._cache[key] = result
@@ -509,9 +520,10 @@ class SubtitleGeometryWorker:
             if result is None or generation != self._coordinator.generation:
                 self._prefetch_dropped += 1
                 return waiter
+            cache_key = request.cache_key()
             self._prefetched.pop(key, None)
-            self._prefetched[key] = _Prefetched(request.cache_key(), request, result)
-            self._store(request, result)
+            self._prefetched[key] = _Prefetched(cache_key, request, result)
+            self._store(request, result, cache_key)
             self._prefetched_count += 1
             while len(self._prefetched) > self._cache_max:
                 evicted, _cached = self._prefetched.popitem(last=False)
@@ -657,7 +669,13 @@ class SubtitleGeometryWorker:
             self._prefetch_inflight_key = None
             self._prefetched.clear()
             self._cache.clear()
+            # Same door as a refusal: no terminal is coming, so an unpaid settlement is one its
+            # caller waits on forever. Paying it after close is what makes the wait bounded.
+            owed, self._settling = self._settling, []
+            self._pending_settled = None
             self._condition.notify_all()
+        for settle in owed:
+            settle()
         if self._local is not None:
             self._local.close()
         self._coordinator.close()
