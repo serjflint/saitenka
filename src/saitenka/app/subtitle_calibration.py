@@ -9,11 +9,16 @@ colour lands on substitute glyph shapes and reads as a font choice.
 OSD libass, hidden, and returns the bounding box. Comparing that with the union of the boxes we
 measured is a direct check of the only claim device 1 makes.
 
-**This measures; it does not decide.** Acting on the number needs a threshold, and the threshold is
-not measured yet — the drift probe found exact agreement on one machine with one libass build, which
-is a sample of one. Shipping a demotion on a guessed epsilon is the thing the repo's own rule about
-measured claims exists to stop. So the drift is recorded and reported, and the static inference stays
-the decision until a real session's numbers say what the epsilon is.
+It measures **and now decides**, on an epsilon chosen as a separator rather than as a tolerance. Two
+classes have been measured: renderers that agree read exactly 0, and the substituted-face case reads
+−29 px. Any boundary strictly inside that gap classifies both the same way, so the verdict does not
+turn on the exact number — which is what makes acting on a two-point sample defensible where a
+tolerance pulled from the air would not be.
+
+The asymmetry is the other half of the argument. Demoting wrongly costs appearance: the token falls
+to a device that colours it correctly and more plainly. Clearing wrongly costs correctness: the
+colour lands on substitute glyph shapes and reads as a font choice, which no user can report. So the
+epsilon sits nearer the agreeing class than the disagreeing one.
 
 Cost: `compute_bounds` makes mpv do a full render and flush its cache, on its core thread. So it runs
 only while paused, and only once per distinct payload shape per surface — never during playback and
@@ -26,6 +31,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka.subtitles import font_names
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -35,6 +42,12 @@ if TYPE_CHECKING:
 #: Positions are deliberately excluded: they are ours in both renders, so a cue that moved but kept
 #: its faces is the same question and must not pay for a second stall.
 _FACE = re.compile(r"\\fn(?P<family>[^\\}]*)\\fs(?P<size>[0-9.]+)")
+
+#: Frame pixels on any one edge. A separator between the two measured classes (0 and 29), not a
+#: tolerance derived from one of them — see the module docstring for why the exact value does not
+#: carry the verdict. Well above what whole-pixel rounding on each edge can contribute, and far
+#: below a substituted face's error, which is a layout difference and grows with the run.
+DRIFT_EPSILON_PX = 4.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +63,24 @@ class Drift:
     def worst(self) -> float:
         return max(abs(self.left), abs(self.top), abs(self.right), abs(self.bottom))
 
+    @property
+    def agrees(self) -> bool:
+        return self.worst <= DRIFT_EPSILON_PX
+
+
+def payload_families(payload: str) -> frozenset[str]:
+    """Every family the payload asked for, as the reachability sets spell a family name.
+
+    All of them, because the measurement cannot say which one drifted: `compute_bounds` answers with
+    one box for the whole payload. Demoting the set is the conservative reading, and conservative is
+    the safe direction here — every device below draws the token correctly, just more plainly.
+    """
+    return frozenset(
+        family
+        for match in _FACE.finditer(payload)
+        if (family := font_names.key(match.group("family")))
+    )
+
 
 def payload_signature(payload: str, osd: tuple[int, int]) -> str | None:
     """What makes one calibration answer reusable, or `None` when the payload draws no text.
@@ -61,13 +92,20 @@ def payload_signature(payload: str, osd: tuple[int, int]) -> str | None:
     return f"{osd[0]}x{osd[1]}:{'|'.join(faces)}" if faces else None
 
 
-def measured_bounds(boxes: Sequence[WordBox]) -> tuple[int, int, int, int] | None:
+def measured_bounds(
+    boxes: Sequence[WordBox], *, drifting: frozenset[str] = frozenset()
+) -> tuple[int, int, int, int] | None:
     """The union of the tokens device 1 drew, in frame pixels — our side of the comparison.
 
     Only the tokens it drew: a token the text device stood down on is not in the payload, so
-    including its rect would report a drift that is really a difference in what was asked for.
+    including its rect would report a drift that is really a difference in what was asked for. That
+    holds for a family an earlier measurement already demoted, which is why `drifting` is here.
     """
-    drawn = [box for box in boxes if box.font_name and box.font_size > 0]
+    drawn = [
+        box
+        for box in boxes
+        if box.font_name and box.font_size > 0 and font_names.key(box.font_name) not in drifting
+    ]
     if not drawn:
         return None
     return (

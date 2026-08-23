@@ -211,9 +211,20 @@ def _lookahead_tokenized(
 
 
 def _requested_family(font_name: str) -> str:
-    """The family an ASS `Fontname` asks for, as the unreachable set spells it. libass drops a
-    leading `@` — the vertical-writing marker — before it looks the family up."""
-    return font_name.strip().removeprefix("@").casefold()
+    """The family an ASS `Fontname` asks for, as the unreachable set spells it."""
+    return font_names.key(font_name)
+
+
+def connect_drift_sink(renderer: object, geometry: NativeSubtitleGeometry) -> None:
+    """Let a measured drift verdict reach the geometry side.
+
+    The renderer measures it and applies it where it draws, which is the only place a late answer
+    can still reach the cue on screen. This side needs to hear it so the next build keeps coverage
+    masks for those families. A renderer without the seam simply never reports one.
+    """
+    sink = getattr(renderer, "set_drift_sink", None)
+    if sink is not None:
+        sink(geometry.record_drifting_families)
 
 
 def _palette_in_frame_units(
@@ -614,7 +625,22 @@ class NativeSubtitleGeometry:
         self._failure_diagnostic: tuple[str, str | None] | None = None
         self._fonts = subtitle_fonts.FontEnvironment()
         self._in_document_families: frozenset[str] = frozenset()
+        self._measured_unsafe: frozenset[str] = frozenset()
         self._track_codec = ""
+
+    def record_drifting_families(self, families: frozenset[str]) -> None:
+        """A measured verdict that mpv's OSD renderer does not lay these families out as we do.
+
+        The renderer has already stopped drawing them as text — it applies the verdict where it
+        draws, which is the only place a *late* answer can still reach the cue on screen. What is
+        left for this side is the consequence for the next build: those tokens now need coverage
+        masks, so the raster device can colour them instead of the rule device marking them.
+        """
+        if families <= self._measured_unsafe:
+            return
+        self._measured_unsafe |= families
+        self.invalidate(cause=GeometryCacheReason.RENDER_INPUT_CHANGED)
+        self._ports.redraw()
 
     def set_track_codec(self, codec: str) -> None:
         """Which decoder mpv is running for the selected track, from `track-list`.
@@ -630,11 +656,12 @@ class NativeSubtitleGeometry:
     def unreachable_families(self) -> subtitle_fonts.OsdReach:
         """The families the overprint must stand down on — see `FontEnvironment.osd_unreachable`.
 
-        Two halves that arrive independently: the container's attachments come with the font
-        environment, the document's own ``[Fonts]`` section with the source. Combining them on read
-        means neither arrival order leaves one half out.
+        Three halves, arriving independently: the container's attachments come with the font
+        environment, the document's own ``[Fonts]`` section with the source, and a measured drift
+        verdict from the renderer at any time after either. Combining them on read means no arrival
+        order leaves one out.
         """
-        return self._fonts.osd_unreachable(self._in_document_families)
+        return self._fonts.osd_unreachable(self._in_document_families, self._measured_unsafe)
 
     def _skipped_tokens(self) -> int:
         return (

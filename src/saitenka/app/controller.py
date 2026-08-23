@@ -428,6 +428,7 @@ class Reader:
                 lookahead=o.subtitle_geometry.lookahead,
                 formats=native_subtitles.native_formats(o.subtitle_geometry.native_formats),
             )
+            native_subtitles.connect_drift_sink(current_renderer, self.native_geometry)
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac
         # Alpha (0–255) of the translucent box behind the rendered subtitle; 0 = no box (fully see-through).

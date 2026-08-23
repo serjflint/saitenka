@@ -4,12 +4,12 @@
     "delegated": 1,
     "delegator": 94,
     "derived": 45,
-    "init_lines": 457,
+    "init_lines": 458,
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2351,
+    "substantive_lines": 2352,
     "total": 344
   },
-  "reason": "the geometry owner is told which track formats it may take, so the host passes one config value through at composition \u2014 the format decision belongs to the owner, not to the host that constructs it"
+  "reason": "one composition line wiring the renderer's measured-drift verdict to the geometry side, which owns the consequence"
 }

@@ -1,8 +1,9 @@
 """The runtime check on device 1's one claim: mpv's OSD renderer puts the colour where we said.
 
 Which families the two renderers agree on is inferred from mpv's source. This is the channel that
-can tell whether the inference is right on a real machine — and the reason it only *reports* is that
-acting on it needs a threshold nobody has measured yet.
+can tell whether the inference is right on a real machine, and the epsilon it decides on is a
+separator between the two measured classes — 0 px when they agree, 29 px when a face was substituted
+— rather than a tolerance derived from either.
 """
 
 from __future__ import annotations
@@ -100,3 +101,46 @@ def test_a_reply_that_is_not_a_box_is_not_a_drift_of_zero(reported: dict) -> Non
     """Zero would read as "measured and agreed", which is the one thing an unanswered probe must
     never claim."""
     assert subtitle_calibration.drift_of((0, 0, 1, 1), reported, border=0.0) is None
+
+
+def test_the_verdict_does_not_turn_on_the_exact_epsilon() -> None:
+    """The argument for acting on a two-point sample: both measured classes are classified the same
+    way by any boundary strictly inside the gap between them. A regression that moved the epsilon
+    onto either class would change a verdict, and this is what would catch it."""
+    agreeing = subtitle_calibration.Drift(0.0, 0.0, 0.0, 0.0)
+    substituted = subtitle_calibration.Drift(0.0, 0.0, 29.0, 0.0)
+
+    assert 0.0 < subtitle_calibration.DRIFT_EPSILON_PX < 29.0
+    assert agreeing.agrees is True
+    assert substituted.agrees is False
+
+
+def test_every_family_in_the_payload_is_named_by_the_verdict() -> None:
+    """`compute_bounds` answers with one box for the whole payload, so it cannot say which family
+    drifted. Naming all of them is the conservative reading, and conservative demotes to devices
+    that draw the token correctly."""
+    mixed = PAYLOAD.replace("\\fnArial\\fs48\\bord1.0\\shad0\\1c&H0000FF&", "\\fn@MS Gothic\\fs48")
+
+    assert subtitle_calibration.payload_families(mixed) == {"arial", "ms gothic"}
+
+
+def test_a_payload_with_no_faces_names_no_families() -> None:
+    """Device 3's rules carry no `\\fn`, so a cue drawn entirely by them has nothing to demote — and
+    demoting nothing must not read as demoting everything."""
+    assert subtitle_calibration.payload_families(r"{\an7\pos(1,2)\1c&HFF&\p1}m 0 0 l 4 0") == set()
+
+
+def test_a_family_already_demoted_is_not_in_our_side_of_the_next_comparison() -> None:
+    """After a verdict the renderer stops drawing that family, so its rect leaves the payload. Left
+    in our union it would report the demotion itself as a fresh drift, forever."""
+    boxes = [
+        WordBox(0, 100, 600, 50, 40, "Arial", 48.0),
+        WordBox(1, 900, 600, 50, 40, "MS Gothic", 48.0),
+    ]
+
+    assert subtitle_calibration.measured_bounds(boxes, drifting=frozenset({"ms gothic"})) == (
+        100,
+        600,
+        150,
+        640,
+    )

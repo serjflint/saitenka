@@ -27,6 +27,17 @@ _FAMILY_NAME_IDS = (1, 4, 16)
 _MAX_FONT_BYTES = 64 * 1024 * 1024
 
 
+def key(family: str) -> str:
+    """How a family name is spelled when two sets of them are compared.
+
+    One spelling, in one place, because the comparison is only sound if both sides normalise the
+    same way — and the sides are far apart: a name read out of a font table, a `Fontname` from an
+    ASS style, and an `\\fn` parsed back out of a payload we sent mpv. libass drops a leading `@`,
+    the vertical-writing marker, before it looks a family up.
+    """
+    return family.strip().removeprefix("@").casefold()
+
+
 def _names(font: TTFont) -> set[str]:
     try:
         records = font["name"].names

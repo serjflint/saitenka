@@ -105,6 +105,7 @@ class FakeIPC(util.FakeIPC):
         self.set_property_error: str | None = None
         self.set_property_exception: Exception | None = None
         self.overlay_add_error: str | None = None
+        self.osd_bounds: dict | None = None
         self.get_property_error: str | None = None
         self.correlate_commands = False
         self.submitted: list[tuple] = []
@@ -250,6 +251,11 @@ class FakeIPC(util.FakeIPC):
             self.props["sub-visibility"] = args[2]
         if args and args[0] == "overlay-add" and self.overlay_add_error is not None:
             return {"error": self.overlay_add_error}
+        if args[:1] == ("osd-overlay",) and args[-1] is True:
+            # `compute_bounds`: mpv lays the payload out through its OSD libass and answers with the
+            # box. No fake can lay text out, so the box is the test's to state — `None` until one
+            # does, which is the same "not a box" every caller must already survive.
+            return {"error": "success", "data": self.osd_bounds}
         return {"error": "success", "data": None}
 
     def close(self) -> None:
@@ -2236,6 +2242,71 @@ def test_the_layout_check_measures_once_per_face_set_while_paused(tmp_path: Path
     # `hidden` and `compute_bounds` both set: mpv answers with the box and draws nothing.
     assert payload[-2:] == (True, True)
     assert r"\fnArial" in str(payload[3])
+    result.close()
+
+
+def osd_box(*, right: float) -> dict[str, float]:
+    """What mpv reports for the fake's three 50x40 boxes at x=100/160/220, `right` px wider.
+
+    Inflated by the hairline border on every edge, because `mp_ass_get_bb` unions the outline images
+    — so a reply that did NOT carry it would understate the drift by two pixels.
+    """
+    return {"x0": 99.0, "y0": 599.0, "x1": 271.0 + right, "y1": 641.0}
+
+
+def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing(
+    tmp_path: Path,
+) -> None:
+    """The late verdict. Which families the OSD renderer can reach is inferred when the geometry is
+    built, and the measurement can contradict that inference long after — by which time the request
+    is gone. Applying it where the drawing happens is what lets the answer reach the cue on screen
+    instead of some later one."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.osd_bounds = osd_box(right=29.0)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    drawn = [payload for payload in overlay_payloads(ipc) if payload]
+    assert r"\fnArial" in drawn[0], "nothing was drawn as text, so nothing was demoted"
+    assert r"\fn" not in drawn[-1], "the text device kept drawing a face measured to drift"
+    assert r"\p1}" in drawn[-1], "the colour was dropped instead of stepping down a rung"
+    result.close()
+
+
+def test_an_agreeing_measurement_leaves_the_text_device_alone(tmp_path: Path) -> None:
+    """The negative control. Demoting on agreement would strip the colour from every correctly
+    typeset track — and the whole point of measuring is that the inference can be wrong either way."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.osd_bounds = osd_box(right=0.0)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert r"\fnArial" in overlay_payloads(ipc)[-1]
+    result.close()
+
+
+def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_path: Path) -> None:
+    """The consequence for the other side. A late verdict lands on device 3's rule because the cue
+    was built without masks; telling the geometry side is what makes the NEXT build keep them, so
+    those tokens rise to the raster instead of staying on the bottom rung."""
+    result, ipc, backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.osd_bounds = osd_box(right=29.0)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert backend.requests[-1].keep_coverage is False, "the first cue had no verdict yet"
+    # The same cue again, and it is re-rendered rather than served from cache — the verdict
+    # invalidates, which is the half that makes the demotion reach the pixels.
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert backend.requests[-1].keep_coverage is True
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
     result.close()
 
 

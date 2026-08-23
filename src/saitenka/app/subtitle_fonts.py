@@ -124,10 +124,17 @@ class FontEnvironment:
     #: is looked up two ways and no family can be argued equal.
     osd_shares_provider: bool = True
 
-    def osd_unreachable(self, in_document: frozenset[str] = frozenset()) -> OsdReach:
+    def osd_unreachable(
+        self,
+        in_document: frozenset[str] = frozenset(),
+        measured: frozenset[str] = frozenset(),
+    ) -> OsdReach:
         """The families that reach mpv's subtitle renderer and never its **OSD** one.
 
-        Three sources, all from `sub/osd_libass.c` and `sub/ass_mp.c`:
+        Three inferred sources, all from `sub/osd_libass.c` and `sub/ass_mp.c`, plus `measured` — a
+        family `subtitle_calibration` caught the two renderers disagreeing about. That one is not
+        inferred from anything and so is not conditioned on anything: it is an observation of the
+        failure the other three predict.
 
         * The OSD library is built from `osd_style` plus `mpv-osd-symbols` (`osd_libass.c:51-52`) and
           has no attachment path at all, so a container attachment or an in-file `[Fonts]` family is
@@ -147,7 +154,8 @@ class FontEnvironment:
         return OsdReach(
             self.attachment_families
             | (in_document if self.setup.extract_fonts else frozenset())
-            | (frozenset() if self.osd_shares_fonts_dir else self.fonts_dir_families),
+            | (frozenset() if self.osd_shares_fonts_dir else self.fonts_dir_families)
+            | measured,
             all_unsafe=not self.osd_shares_provider,
         )
 

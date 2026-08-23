@@ -28,6 +28,13 @@ cannot fail the way the two above can — the reading state still reaches you wh
 cannot carry it. Nothing is ever drawn at a guess: a substitute face would put the wrong glyph shapes
 over the right word, and the cue stays interactive either way.
 
+Which faces mpv's OSD renderer can reach is worked out from how mpv builds it, and that reasoning can
+be wrong on a machine nobody tested. So while playback is paused Saitenka asks mpv to lay the colour
+out and report where it landed, once per set of faces per window size, and compares that with its own
+measurement. A disagreement demotes those families for the rest of the session — the colour steps
+down a rung rather than sitting on substitute glyph shapes, which is the one failure you could not
+see.
+
 Saitenka does not draw a second subtitle over mpv's after native pixel ownership is established.
 Geometry readiness is independent: a cache miss or unsupported/failed geometry keeps the same mpv
 subtitle visible, clears unproved hit boxes, and restores interaction asynchronously when a valid result
