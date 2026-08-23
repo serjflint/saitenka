@@ -11,7 +11,7 @@ from dirty_equals import IsPartialDict
 from driver import Driver
 from util import record_spans
 
-from saitenka.app import native_subtitles, subtitle_fonts
+from saitenka.app import native_subtitles, subtitle_fonts, subtitle_render
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.embedded_subs import resolve_track_fonts
@@ -2192,6 +2192,50 @@ def test_a_face_the_osd_library_cannot_load_is_coloured_as_a_raster_instead(tmp_
     # the frame, which would be most of a megabyte of transparent pixels per cue.
     assert painted[-1] == (100, 600, 170, 40)
     assert result.boxes
+    result.close()
+
+
+def calibration_calls(ipc) -> list[tuple]:
+    """Every hidden `compute_bounds` the layout check asked mpv for."""
+    return [
+        command
+        for command in ipc.commands
+        if command[0] == "osd-overlay" and command[1] == subtitle_render.NATIVE_CALIBRATION_ID
+    ]
+
+
+def test_the_layout_check_never_runs_while_mpv_is_playing(tmp_path: Path) -> None:
+    """`compute_bounds` makes mpv do a full render and flush its cache, on its core thread. Gate 6
+    keeps that off a playing session — a check that stutters playback costs more than it proves."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = False
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert not calibration_calls(ipc)
+    result.close()
+
+
+def test_the_layout_check_measures_once_per_face_set_while_paused(tmp_path: Path) -> None:
+    """Paused, it asks mpv where its OSD renderer actually put the overprint — the one direct check
+    of the only claim the text device makes. Once per face set, not once per cue: the answer cannot
+    change while the faces and the surface do not."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    first = len(calibration_calls(ipc))
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert first == 1
+    assert len(calibration_calls(ipc)) == 1
+    payload = calibration_calls(ipc)[0]
+    # `hidden` and `compute_bounds` both set: mpv answers with the box and draws nothing.
+    assert payload[-2:] == (True, True)
+    assert r"\fnArial" in str(payload[3])
     result.close()
 
 

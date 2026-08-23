@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app import subtitle_raster
+from saitenka.app import subtitle_calibration, subtitle_raster
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_ownership import (
     ASK_MPV,
@@ -62,6 +62,9 @@ class OwnershipRetryDue:
 
 
 NATIVE_FOCUS_ID = 1_001
+#: The hidden slot the layout calibration lays a payload out on. Nothing is ever drawn there —
+#: `compute_bounds` answers with the box and leaves the surface untouched.
+NATIVE_CALIBRATION_ID = 1_002
 
 _FOCUS_SLOT = "subtitle-native-focus"
 _VISIBILITY_ASSERT = "ownership:assert-native-visibility"
@@ -120,6 +123,9 @@ class DrawRequest:
     #: The CURRENT cue's hit boxes. The legacy path produces them and the native focus path reads
     #: them, so they travel in the request rather than being re-read off a host mid-draw.
     boxes: list[WordBox] = field(default_factory=list)
+    #: Whether mpv is paused. Only the layout calibration reads it, and only to stay off the
+    #: playing core — `compute_bounds` costs mpv a full render and a cache flush.
+    paused: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,6 +503,9 @@ class NativeVisibleRenderer:
         #: Whether device 2's raster is on screen, so a cue that needs none takes the last one down
         #: rather than leaving it over the words that follow.
         self._overpaint_shown = False
+        #: Payload shapes already measured against mpv's OSD renderer, so a stall is paid once per
+        #: face set per surface rather than once per cue.
+        self._calibrated: set[str] = set()
 
     @property
     def ownership_state(self) -> OwnershipState:
@@ -1001,7 +1010,71 @@ class NativeVisibleRenderer:
                 1,
             ),
         )
+        self._calibrate(request, ipc)
         return None
+
+    def _calibrate(self, request: DrawRequest, ipc) -> None:
+        """Ask mpv where its OSD renderer actually put the overprint, and record the difference.
+
+        Measurement only — see `subtitle_calibration`. It runs on the payload the cue is already
+        drawing rather than a synthetic probe, so what is checked is the thing that shipped; and it
+        runs while paused, once per payload shape per surface, because the call costs mpv a full
+        render on its core thread.
+        """
+        payload = overprint_payload(request)
+        signature = subtitle_calibration.payload_signature(payload, request.osd)
+        if not request.paused or ipc is None or signature is None:
+            return
+        measured = subtitle_calibration.measured_bounds(request.boxes)
+        if measured is None or signature in self._calibrated:
+            return
+        self._calibrated.add(signature)
+
+        def finished(completion: EffectFinished) -> None:
+            self._record_drift(completion, measured, signature)
+
+        ipc.submit_runtime_mpv(
+            owner=Owner.SUBTITLE,
+            identity=f"subtitle:calibrate:{signature}",
+            # `hidden` and `compute_bounds`: mpv lays the payload out and answers with the box
+            # without ever putting it on screen, on an id nothing else writes.
+            command=(
+                "osd-overlay",
+                NATIVE_CALIBRATION_ID,
+                "ass-events",
+                payload,
+                request.osd[0],
+                request.osd[1],
+                0,
+                True,
+                True,
+            ),
+            timeout_s=10.0,
+            on_finished=finished,
+        )
+
+    @staticmethod
+    def _record_drift(
+        completion: EffectFinished, measured: tuple[int, int, int, int], signature: str
+    ) -> None:
+        if completion.outcome is not EffectOutcome.SUCCEEDED or not isinstance(
+            completion.result, dict
+        ):
+            log.info("subtitle layout calibration did not answer: %s", completion.outcome)
+            return
+        drift = subtitle_calibration.drift_of(measured, completion.result, border=OVERPRINT_BORDER)
+        if drift is None:
+            return
+        log.info(
+            "subtitle layout drift %s: l=%+.1f t=%+.1f r=%+.1f b=%+.1f",
+            signature,
+            drift.left,
+            drift.top,
+            drift.right,
+            drift.bottom,
+        )
+        if otel_metrics.subtitle_layout_drift_px is not None:
+            otel_metrics.subtitle_layout_drift_px.record(drift.worst)
 
     def clear(self, surfaces=None, ipc=None, /) -> None:
         self._hide_focus(ipc)

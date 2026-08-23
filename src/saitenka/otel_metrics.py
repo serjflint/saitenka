@@ -124,6 +124,7 @@ subtitle_renderer_forced: Counter | None = None
 #: being invisible and becomes a number a report can show.
 subtitle_overprint_demotions: Counter | None = None
 subtitle_overpaint_frames: Counter | None = None
+subtitle_layout_drift_px: Histogram | None = None
 
 
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
@@ -413,6 +414,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced
     global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_layout_drift_px
 
     with _lock:
         _reader = reader
@@ -644,6 +646,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.overpaint_frames",
             description="frames the raster device coloured after the text device stood down",
         )
+        subtitle_layout_drift_px = meter.create_histogram(
+            "saitenka.subtitle.layout_drift_px",
+            unit="px",
+            description="worst edge disagreement between mpv's OSD layout and our measurement",
+        )
         mpv_effect_apply_ms = meter.create_histogram(
             "saitenka.mpv_effect.apply_ms",
             unit="ms",
@@ -694,6 +701,7 @@ def unregister() -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced
     global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_layout_drift_px
 
     with _lock:
         _reader = None
@@ -765,6 +773,7 @@ def unregister() -> None:
         subtitle_renderer_forced = None
         subtitle_overprint_demotions = None
         subtitle_overpaint_frames = None
+        subtitle_layout_drift_px = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
         prefetch_queue_depth = None

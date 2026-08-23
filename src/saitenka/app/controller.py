@@ -1101,6 +1101,7 @@ class Reader:
             hover_span=self.interaction.hovered_word_meta.span,
             styles=self.styles,
             boxes=self.boxes,
+            paused=bool(self.observed_property("pause")),
         )
 
     def _reduce_playback(self, event: events.PlaybackEvent) -> None:
