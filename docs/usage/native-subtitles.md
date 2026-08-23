@@ -129,8 +129,11 @@ reproduced.
 
 `--sub-filter-sdh` is the other refusal. It rewrites a cue's text before libass sees it, so mpv is
 drawing something the subtitle file does not contain and there is nothing to match the hit boxes
-back to. `--sub-filter-regex` and `--sub-filter-jsre` are unaffected — they can only drop a whole
-cue, never rewrite one, and a dropped cue simply has nothing to lay out.
+back to. `--sub-filter-regex` and `--sub-filter-jsre` keep their geometry — they can only drop a
+whole cue, never rewrite one, and a dropped cue simply has nothing to lay out. They do cost the
+instant half of `Alt+←/→`: the cue index is built from the subtitle file, the filters run between the
+file and the screen, so with one active Saitenka hands navigation to mpv's own `sub-seek` rather than
+render a line mpv may never show.
 
 The font settings are not in that list. Saitenka reads `embeddedfonts`, `sub-fonts-dir`,
 `sub-font-provider` and `sub-font` when a track loads and loads the same faces mpv did — the

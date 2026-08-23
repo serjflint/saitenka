@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from saitenka.subtitles import Cue, CueIndex
 
 
@@ -23,6 +25,42 @@ class NavigationTarget:
     #: step taken in an overlap is distinguishable in a trace from an unambiguous one — the two
     #: land the user in different places and only one of them is obviously right.
     overlapping: int = 0
+
+
+#: mpv's subtitle filters (`mp_sub_filter_opts`, `sd_ass.c`) that decide a cue never appears.
+#: `regex`/`jsre` drop the whole packet; SDH rewrites the text and mpv drops what it empties.
+FILTER_OPTIONS = (
+    "sub-filter-sdh",
+    "sub-filter-regex-enable",
+    "sub-filter-regex",
+    "sub-filter-jsre",
+)
+
+
+def filters_can_drop_a_cue(settings: Mapping[str, object]) -> bool:
+    """Whether mpv may be hiding cues the parsed index still contains.
+
+    The index comes from the subtitle *file*; these filters run between the file and the screen, so
+    a filtered episode's index holds cues mpv will never show and Alt+←/→ can step onto silence.
+
+    Reproducing the filters is not the answer. `jsre` is JavaScript evaluated by mpv's own engine,
+    and matching a regex engine's dialect by eye is how a navigation lands one cue off with nothing
+    reporting it. So this only *detects* them, and the caller falls back to mpv's `sub-seek` — which
+    cannot land on a dropped cue, because mpv is the one dropping them.
+    """
+    if settings.get("sub-filter-sdh") is True:
+        return True
+    if settings.get("sub-filter-regex-enable") is not False and _nonempty(
+        settings.get("sub-filter-regex")
+    ):
+        return True
+    return _nonempty(settings.get("sub-filter-jsre"))
+
+
+def _nonempty(value: object) -> bool:
+    """An mpv string-list property reads back as a list, but a `None` from an unreadable property
+    and an empty list must both mean "no filter"."""
+    return bool(value) if isinstance(value, (list, tuple)) else bool(str(value or "").strip())
 
 
 def cue_is_on_screen(

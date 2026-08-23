@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app.subnav_policy import cue_is_on_screen, resolve_target
+from saitenka.app.subnav_policy import (
+    cue_is_on_screen,
+    filters_can_drop_a_cue,
+    resolve_target,
+)
 from saitenka.subtitles import Cue, CueIndex
 
 CUES = (
@@ -120,3 +124,35 @@ def test_a_target_always_indexes_the_cue_it_returns(delta: int) -> None:
 
     assert chosen is not None
     assert INDEX.cues[chosen.index] is chosen.cue
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"sub-filter-sdh": True},
+        {"sub-filter-regex": ["^SIGN:"]},
+        {"sub-filter-jsre": ["/^\\[.*\\]$/"]},
+        {"sub-filter-regex-enable": True, "sub-filter-regex": ["x"]},
+    ],
+)
+def test_a_filter_that_can_drop_a_cue_is_detected(settings: dict) -> None:
+    """The cue index is the subtitle FILE's; these run between the file and the screen. With one
+    active, stepping by index can land on a cue mpv never shows."""
+    assert filters_can_drop_a_cue(settings) is True
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {},
+        {"sub-filter-sdh": False, "sub-filter-regex": [], "sub-filter-jsre": []},
+        {"sub-filter-regex": None, "sub-filter-jsre": None},
+        {"sub-filter-regex": ""},
+        # Configured but switched off: mpv compiles nothing, so nothing is dropped.
+        {"sub-filter-regex-enable": False, "sub-filter-regex": ["^SIGN:"]},
+    ],
+)
+def test_an_unfiltered_session_keeps_its_instant_navigation(settings: dict) -> None:
+    """The negative control, and the expensive half: this guard gives up the instant render, so a
+    reading that fired on an ordinary session would cost every user the feature."""
+    assert filters_can_drop_a_cue(settings) is False

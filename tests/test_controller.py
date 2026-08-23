@@ -927,6 +927,38 @@ def test_identical_text_navigation_counts_the_landed_cue():
     assert reader.episode.session_recorder.snapshot.cue_count == 2
 
 
+def test_navigation_hands_a_filtered_episode_back_to_mpv():
+    """`--sub-filter-regex`/`-jsre` drop whole cues between the file and the screen, and the cue
+    index is the file's. Stepping by index there renders a line mpv never shows and then settles
+    somewhere else; mpv's own `sub-seek` cannot land on a cue mpv dropped, so the instant half is
+    given up rather than aimed at silence."""
+    from saitenka.subtitles import Cue, CueIndex
+
+    ipc = FakeIPC()
+    ipc.props.update({"sub-start": 1.0, "sub-end": 2.0, "options/sub-filter-regex": ["^SIGN:"]})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.episode.sub_index = CueIndex([Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")])
+    reader.set_subtitle("いち")
+
+    assert reader._sub_nav(1) is False
+    assert reader.sub_text == "いち", "the overlay was moved onto a cue mpv may not show"
+
+
+def test_navigation_stays_instant_without_a_filter():
+    """The negative control for the guard above: it costs the feature when it fires, so it must not
+    fire on an ordinary session."""
+    from saitenka.subtitles import Cue, CueIndex
+
+    ipc = FakeIPC()
+    ipc.props.update({"sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.episode.sub_index = CueIndex([Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")])
+    reader.set_subtitle("いち")
+
+    assert reader._sub_nav(1) is True
+    assert reader.sub_text == "に"
+
+
 def test_reader_has_subtitle_state_before_any_cue():
     r = Reader(FakeIPC())
     assert r.sub_text == "" and r.tokens == [] and r.hover == -1
