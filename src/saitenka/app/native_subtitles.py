@@ -56,6 +56,7 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-render-input-unsupported",
         "subtitle-source-encoding-unsupported",
         "subtitle-source-not-authored-ass",
+        "subtitle-source-conversion-unreproduced",
         "subtitle-source-too-large",
         "subtitle-source-unavailable",
         "subtitle-timing-unavailable",
@@ -89,9 +90,19 @@ _UNSUPPORTED_SOURCE_REASONS = frozenset(
     {
         "subtitle-source-encoding-unsupported",
         "subtitle-source-not-authored-ass",
+        "subtitle-source-conversion-unreproduced",
         "subtitle-source-too-large",
     }
 )
+
+#: The demuxer codecs whose libavcodec-to-ASS conversion `subtitles.converted` reproduces. Only
+#: SubRip: every other text codec sd_ass converts (`mov_text`, `webvtt`, `microdvd`, ...) is decoded
+#: by a DIFFERENT libavcodec decoder, which writes its own header and its own styles, and mpv's
+#: converted branch leaves margins, ScaleX/Y and any non-default style standing. Our own extraction
+#: hides the difference by transcoding all of them to `.srt` (`subtitle_artifact.extract_spec`) —
+#: the file is not what mpv is decoding, so the suffix cannot be the test. Widen this only against a
+#: measurement, never against a reading of the decoder.
+CONVERTED_CODECS = frozenset({"subrip"})
 
 
 class SourceKind(StrEnum):
@@ -288,6 +299,16 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         # is blind to this path, and shipping geometry nothing can check is what this gate exists to
         # stop.
         "blend-subtitles": settings["blend-subtitles"] in {False, "no"},
+        # The SDH filter REWRITES an event's text before `ass_process_chunk` sees it
+        # (`filter_and_add`, `sd_ass.c:370-385`), so what mpv is drawing is not what the file says
+        # and our match back to the authored source is against a document that no longer describes
+        # the screen. It runs on every track sd_ass handles — `.codec` is hardcoded `"ass"`
+        # (`sd_ass.c:221`), so a converted track is filtered too.
+        #
+        # `--sub-filter-regex` / `--sub-filter-jsre` are NOT here: they only DROP a whole packet,
+        # never rewrite one. A dropped cue reaches us as an empty `sub-text`, which already means
+        # "nothing to lay out" — the events that do arrive are still the file's own.
+        "sub-filter-sdh": settings["sub-filter-sdh"] in {False, "no", None},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
 
@@ -526,6 +547,17 @@ class NativeSubtitleGeometry:
         self._failure_diagnostic: tuple[str, str | None] | None = None
         self._fonts = subtitle_fonts.FontEnvironment()
         self._in_document_families: frozenset[str] = frozenset()
+        self._track_codec = ""
+
+    def set_track_codec(self, codec: str) -> None:
+        """Which decoder mpv is running for the selected track, from `track-list`.
+
+        The codec, not the file suffix: our own extraction transcodes `mov_text` and `webvtt` to
+        `.srt` (`subtitle_artifact.extract_spec`), so the artifact on disk says SubRip while mpv is
+        decoding something else entirely — two conversions of one source, and only one of them is
+        the one on screen. Must be set before the source, which is where it is read.
+        """
+        self._track_codec = codec.strip().casefold()
 
     @property
     def unreachable_families(self) -> frozenset[str]:
@@ -827,15 +859,17 @@ class NativeSubtitleGeometry:
             self._set_fallback("subtitle-source-unavailable")
         elif path.suffix.casefold() == ".ass":
             self._adopt_authored(path)
-        elif self.formats is NativeFormats.ALL:
+        elif self.formats is not NativeFormats.ALL:
+            self._set_fallback("subtitle-source-not-authored-ass")
+        elif self._track_codec not in CONVERTED_CODECS:
+            self._set_fallback("subtitle-source-conversion-unreproduced")
+        else:
             # No file is read: mpv is not rendering this one either. The document is rebuilt per
             # cue from the rows mpv reports, which are its own conversion — so the events cannot
             # differ from what it is drawing, and only the header around them is reproduced.
             self.source_path = path
             self.source_kind = SourceKind.CONVERTED
             self.fallback_reason = None
-        else:
-            self._set_fallback("subtitle-source-not-authored-ass")
 
     def _adopt_authored(self, path: Path) -> None:
         try:
@@ -1093,6 +1127,7 @@ class NativeSubtitleGeometry:
                     "sub-scale-with-window",
                     "sub-scale-by-window",
                     "blend-subtitles",
+                    "sub-filter-sdh",
                     *subtitle_fonts.FONT_OPTIONS,
                 )
             },

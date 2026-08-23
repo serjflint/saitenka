@@ -1957,11 +1957,17 @@ def test_a_font_setting_changed_under_a_resolved_track_fails_closed(
 SRT_ROWS = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る"
 
 
-def converted_reader(tmp_path: Path):
-    """A session whose selected track is one mpv converted from SubRip."""
+def converted_reader(tmp_path: Path, *, codec: str = "subrip"):
+    """A session whose selected track is one mpv converted from SubRip.
+
+    The codec is stated because it is what decides the branch: the `.srt` on disk is our own
+    extraction, and for `mov_text`/`webvtt` it is a *different* conversion from the one mpv is
+    drawing — see `set_track_codec`.
+    """
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
     result.native_geometry.formats = native_subtitles.NativeFormats.ALL
+    result.native_geometry.set_track_codec(codec)
     ipc.props["sub-text/ass-full"] = SRT_ROWS
     source = tmp_path / "episode.srt"
     source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
@@ -2032,6 +2038,59 @@ def test_a_converted_track_prefetches_nothing_and_says_so(tmp_path: Path) -> Non
     assert result.native_geometry.worker.stats.prefetch_cache_entries == 0
     assert result.native_geometry.status.fallback_reason is None
     assert backend.requests
+    result.close()
+
+
+@pytest.mark.parametrize("codec", ["mov_text", "webvtt", "microdvd", ""])
+def test_a_conversion_we_have_not_reproduced_is_refused_by_name(tmp_path: Path, codec: str) -> None:
+    """`native_formats = "all"` is not "any text track". Every codec here is converted to ASS by a
+    DIFFERENT libavcodec decoder than SubRip's, writing its own header and styles — and our own
+    extraction transcodes all of them to `.srt`, so the artifact on disk claims to be something it
+    is not. Measuring one against SubRip's header is a wrong box, not a degraded one.
+
+    The empty codec is the unknown case, and it is refused for the same reason: the stop rule is to
+    narrow the mode rather than guess which decoder mpv is running.
+    """
+    result, _ipc, _backend = converted_reader(tmp_path, codec=codec)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.source_kind is native_subtitles.SourceKind.NONE
+    assert (
+        result.native_geometry.status.fallback_reason == "subtitle-source-conversion-unreproduced"
+    )
+    # A named refusal, and one that selects the renderer that CAN draw the boxes — not a track left
+    # with mpv's pixels and nothing to click.
+    assert result.native_geometry.source_unsupported is True
+    result.close()
+
+
+def test_the_sdh_filter_is_refused_because_it_rewrites_the_event(tmp_path: Path) -> None:
+    """`--sub-filter-sdh` rewrites an event's text before libass ever sees it, so mpv is drawing
+    something the file does not contain and our match back to the source is against a document that
+    no longer describes the screen."""
+    result, ipc, _backend = reader(tmp_path)
+    ipc.props["options/sub-filter-sdh"] = True
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert not result.boxes
+    result.close()
+
+
+def test_a_regex_filter_only_drops_a_cue_so_it_is_not_refused(tmp_path: Path) -> None:
+    """The negative control for the refusal above, and the reason it names one option rather than
+    the whole filter chain: `--sub-filter-regex` can only drop a whole packet, never rewrite one, so
+    the events that do arrive are still the file's own."""
+    result, ipc, _backend = reader(tmp_path)
+    ipc.props["options/sub-filter-regex"] = ["advert"]
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.boxes
     result.close()
 
 
@@ -3016,6 +3075,7 @@ _SUPPORTED_SETTINGS = {
     "sub-scale-with-window": True,
     "sub-scale-by-window": True,
     "blend-subtitles": False,
+    "sub-filter-sdh": False,
     "sub-font-provider": "auto",
     "embeddedfonts": False,
     "sub-fonts-dir": None,

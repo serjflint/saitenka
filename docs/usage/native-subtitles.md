@@ -62,6 +62,12 @@ native_visible = true
 native_formats = "authored-ass"
 ```
 
+`"all"` means the tracks mpv converts *from SubRip*, not any text track. A `mov_text` or `webvtt`
+stream is converted to ASS by a different libavcodec decoder, writing its own header and styles, and
+Saitenka's own extraction transcodes it to `.srt` — so the file on disk is not the document mpv is
+drawing. Those tracks are refused by name (`subtitle-source-conversion-unreproduced`) and drawn with
+the standard renderer, which keeps them scannable.
+
 A SubRip track is not rendered from its file: libavcodec converts it to ASS and mpv renders that,
 applying a whole branch of styling it applies to no authored track. Under `native_formats = "all"`
 Saitenka reconstructs that conversion — libavcodec's header, mpv's own subtitle style, the
@@ -89,6 +95,7 @@ sub-ass-video-aspect-override=0
 sub-ass-use-video-data=all
 sub-ass-style-overrides=
 blend-subtitles=no
+sub-filter-sdh=no
 ```
 
 `--blend-subtitles` is the one render option here Saitenka refuses rather than reproduces. mpv draws
@@ -98,6 +105,11 @@ but the drift check Saitenka uses to prove its layout runs through mpv's OSD ren
 option does not touch, so there would be no way to tell whether the boxes were right.
 `--sub-scale-with-window` and `--sub-scale-by-window` are *not* refused: they are read and
 reproduced.
+
+`--sub-filter-sdh` is the other refusal. It rewrites a cue's text before libass sees it, so mpv is
+drawing something the subtitle file does not contain and there is nothing to match the hit boxes
+back to. `--sub-filter-regex` and `--sub-filter-jsre` are unaffected — they can only drop a whole
+cue, never rewrite one, and a dropped cue simply has nothing to lay out.
 
 The font settings are not in that list. Saitenka reads `embeddedfonts`, `sub-fonts-dir`,
 `sub-font-provider` and `sub-font` when a track loads and loads the same faces mpv did — the

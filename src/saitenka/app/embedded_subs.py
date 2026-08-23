@@ -123,10 +123,14 @@ def build_sub_index_for_current_track(
     (app/prefetch.py's ``upcoming_cue_texts``) gets real upcoming lines regardless of subtitle
     source. Fail-soft throughout: no selected track / no video path / extraction failure just
     leaves the index unset."""
+    track = _selected_sub_track(ipc)
     if geometry is not None:
         geometry.set_source(None, live=True)
+        # Before the source, which reads it: an external artifact reaches `set_source` through
+        # `load` and carries no codec of its own.
+        geometry.set_track_codec(str((track or {}).get("codec") or ""))
         resolve_track_fonts(ipc, get, geometry)
-    artifact = subtitle_artifact.resolve(_selected_sub_track(ipc), media_path=get("path"))
+    artifact = subtitle_artifact.resolve(track, media_path=get("path"))
     if isinstance(artifact, subtitle_artifact.ArtifactUnavailable):
         log.debug("no subtitle artifact for the current track: %s", artifact.value)
         return
