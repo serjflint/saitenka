@@ -367,13 +367,25 @@ class SubtitleGeometryWorker:
             return sum(snapshot.coverage_bytes for _key, snapshot in self._retained())
 
     def _retained(self) -> list[tuple[str, GeometrySnapshot]]:
-        """Every snapshot this worker holds, oldest first, once each. Both maps: the same snapshot
-        is in the result cache and the prefetch map, so counting one of them halves the answer."""
-        return list(self._cache.items()) + [
+        """Every snapshot this worker holds, oldest first, once each, by render identity.
+
+        Both maps, because the same snapshot sits in the result cache and the prefetch map and
+        counting one of them halves the answer. They are keyed differently — the cache by
+        `cache_key()`, the prefetch map by the caller's cue key — so the render identity is the only
+        thing that can say whether two entries are one snapshot. Comparing the raw keys instead made
+        every entry look unique, which double-counted the total and left `_strip` unable to find the
+        cache's copy at all.
+
+        The prefetch-only ones come first: every prefetch is written to both maps, so a render the
+        cache no longer holds is one the cache evicted, which makes it the oldest thing here.
+        """
+        cached = dict(self._cache)
+        prefetch_only = [
             (key, snapshot)
-            for key, (_request, snapshot) in self._prefetched.items()
-            if key not in self._cache
+            for request, snapshot in self._prefetched.values()
+            if (key := request.cache_key()) not in cached
         ]
+        return prefetch_only + list(self._cache.items())
 
     def _trim_coverage(self) -> None:
         """Hold the retained coverage under its byte budget, oldest cue first.
@@ -398,13 +410,16 @@ class SubtitleGeometryWorker:
             self._coverage_trimmed += 1
 
     def _strip(self, key: str, stripped: GeometrySnapshot) -> None:
-        """Replace one snapshot in every map that holds it. Both, or the copy the other map keeps
-        makes the trim free nothing."""
+        """Replace one snapshot in every map that holds it, addressed by render identity.
+
+        Both maps, or the copy the other keeps makes the trim free nothing — which is what happened
+        while this looked the cue key up in a map keyed by `cache_key()`.
+        """
         if key in self._cache:
             self._cache[key] = stripped  # assignment to an existing key keeps its LRU position
-        prefetched = self._prefetched.get(key)
-        if prefetched is not None:
-            self._prefetched[key] = (prefetched[0], stripped)
+        for cue, (request, _snapshot) in list(self._prefetched.items()):
+            if request.cache_key() == key:
+                self._prefetched[cue] = (request, stripped)
 
     def _idle(self) -> None:
         self._inflight = False

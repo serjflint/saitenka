@@ -778,6 +778,40 @@ def test_the_oldest_cue_gives_up_its_masks_first(monkeypatch) -> None:
     worker.close()
 
 
+def test_the_trim_treats_a_cue_the_result_cache_evicted_as_the_oldest(monkeypatch) -> None:
+    """ "Oldest first" spans two maps, and they do not agree on age by construction.
+
+    Every prefetch is written to both, but current requests fill only the result cache — so a key
+    the result cache no longer holds is one it evicted, which makes it the oldest thing the worker
+    has. Listing the cache first put it last, and the trim then took the masks off the cue nearest
+    to being drawn while keeping them for one already gone.
+    """
+    from saitenka.app import subtitle_geometry_job
+
+    mask = len(HeavyCoverageBackend.MASK)
+    monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 2 * mask)
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), HeavyCoverageBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+
+    fill_cache(worker, coordinator, 2)
+    # A current request of its own: this is what pushes cue-0 out of the result cache while the
+    # prefetch map keeps it, which is the only way the two orderings come apart.
+    assert worker.submit_job(coordinator.generation, lambda: request(coordinator.generation, 9_999))
+    assert worker.wait_idle()
+
+    # The newer cue first: publishing re-enters the cache and can trim again, so reading the one
+    # under test last would be reading the state of a later trim.
+    assert worker.publish_prefetched("cue-1", coordinator.generation) is not None
+    newer = coordinator.current
+    coordinator.invalidate()
+    assert worker.publish_prefetched("cue-0", coordinator.generation) is not None
+    evicted = coordinator.current
+
+    assert evicted is not None and newer is not None
+    assert evicted.tokens[0].coverage == b"", "the oldest cue kept its masks"
+    assert newer.tokens[0].coverage == HeavyCoverageBackend.MASK
+
+
 def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> None:
     """A settlement is queued against the terminal of the job that owes it. Refused admission means
     that terminal never arrives, so leaving it queued hands it to the NEXT job's terminal — which

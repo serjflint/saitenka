@@ -119,13 +119,22 @@ def markup_by_cue(content: str) -> dict[tuple[int, int], str]:
 
     Keyed by timing rather than by order because the caller matches against the cue index, and the
     index drops empty cues — so the two orderings are not the same sequence.
+
+    Two cues can share a span — two speakers, or a sign over dialogue — and then the timing does not
+    identify one body. Such a span is dropped rather than resolved to whichever block came last: a
+    wrong markup predicts a row that matches nothing, which costs the same cache miss as no
+    prediction while looking like a working one.
     """
     found: dict[tuple[int, int], str] = {}
+    collided: set[tuple[int, int]] = set()
     for block in re.split(r"\n[ \t]*\n", content.replace("\r\n", "\n").replace("\r", "\n")):
         span = _span(block.split("\n"))
-        if span is not None:
-            found[span[0]] = span[1]
-    return found
+        if span is None:
+            continue
+        if span[0] in found:
+            collided.add(span[0])
+        found[span[0]] = span[1]
+    return {span: markup for span, markup in found.items() if span not in collided}
 
 
 _SPAN = re.compile(

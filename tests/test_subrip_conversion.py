@@ -122,6 +122,21 @@ def test_markup_survives_the_walk_from_file_to_cue() -> None:
     }
 
 
+def test_two_cues_sharing_a_span_predict_nothing_rather_than_one_of_them() -> None:
+    """Two speakers on one timing is ordinary in a `.srt`, and the span then names two bodies. Last
+    one wins would predict the other cue's row — a row that matches nothing, costing the same miss
+    as declining while reading like a prediction that worked."""
+    content = (
+        "1\n00:00:01,000 --> 00:00:03,000\n<i>Left</i>\n\n"
+        "2\n00:00:01,000 --> 00:00:03,000\nRight\n\n"
+        "3\n00:00:04,000 --> 00:00:05,000\nAlone\n"
+    )
+
+    found = subrip.markup_by_cue(content)
+
+    assert found == {(4_000, 5_000): "Alone"}
+
+
 @pytest.mark.parametrize(
     "content",
     [

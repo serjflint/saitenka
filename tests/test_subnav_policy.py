@@ -133,6 +133,11 @@ def test_a_target_always_indexes_the_cue_it_returns(delta: int) -> None:
         {"sub-filter-regex": ["^SIGN:"]},
         {"sub-filter-jsre": ["/^\\[.*\\]$/"]},
         {"sub-filter-regex-enable": True, "sub-filter-regex": ["x"]},
+        # mpv's string spellings for the same flags. `is True` read every one of these as "off",
+        # which gives back the instant navigation on exactly the session that cannot have it.
+        {"sub-filter-sdh": "yes"},
+        {"sub-filter-sdh": "YES"},
+        {"sub-filter-regex-enable": "yes", "sub-filter-regex": ["^SIGN:"]},
     ],
 )
 def test_a_filter_that_can_drop_a_cue_is_detected(settings: dict) -> None:
@@ -150,6 +155,8 @@ def test_a_filter_that_can_drop_a_cue_is_detected(settings: dict) -> None:
         {"sub-filter-regex": ""},
         # Configured but switched off: mpv compiles nothing, so nothing is dropped.
         {"sub-filter-regex-enable": False, "sub-filter-regex": ["^SIGN:"]},
+        {"sub-filter-regex-enable": "no", "sub-filter-regex": ["^SIGN:"]},
+        {"sub-filter-sdh": "no"},
     ],
 )
 def test_an_unfiltered_session_keeps_its_instant_navigation(settings: dict) -> None:

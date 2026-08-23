@@ -48,13 +48,35 @@ def filters_can_drop_a_cue(settings: Mapping[str, object]) -> bool:
     reporting it. So this only *detects* them, and the caller falls back to mpv's `sub-seek` — which
     cannot land on a dropped cue, because mpv is the one dropping them.
     """
-    if settings.get("sub-filter-sdh") is True:
+    if _flag_on(settings.get("sub-filter-sdh")):
         return True
-    if settings.get("sub-filter-regex-enable") is not False and _nonempty(
+    if not _flag_off(settings.get("sub-filter-regex-enable")) and _nonempty(
         settings.get("sub-filter-regex")
     ):
         return True
     return _nonempty(settings.get("sub-filter-jsre"))
+
+
+#: mpv's own spellings for a flag property. It answers JSON bools over the IPC socket, but the same
+#: option read as a string — a config file, `--sub-filter-sdh=yes` echoed back — reaches here too,
+#: and `is True` silently read every one of those as "no filter".
+_TRUE = frozenset({"yes", "true", "1"})
+_FALSE = frozenset({"no", "false", "0"})
+
+
+def _flag_on(value: object) -> bool:
+    """Whether a flag reads as set. An unreadable property is not a filter."""
+    if isinstance(value, str):
+        return value.strip().casefold() in _TRUE
+    return value is True
+
+
+def _flag_off(value: object) -> bool:
+    """Whether a flag reads as explicitly clear — the question for a flag that defaults to on, where
+    silence has to mean "assume it applies"."""
+    if isinstance(value, str):
+        return value.strip().casefold() in _FALSE
+    return value is False
 
 
 def _nonempty(value: object) -> bool:

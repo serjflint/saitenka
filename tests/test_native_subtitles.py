@@ -2319,6 +2319,64 @@ def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path)
     result.close()
 
 
+def palette_for(*, play_res_y: str, frame_height: int, font_scale: float):
+    """The overprint palette for a one-token cue in a document declaring `play_res_y`."""
+    from saitenka.app.native_subtitles import _palette_in_frame_units
+    from saitenka.subtitles import SubtitleTrackId, TokenAnnotation
+    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+
+    row = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫"
+    source = (
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\n"
+        f"{play_res_y}\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, "
+        "SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
+        "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, "
+        "MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,"
+        "0,0,0,0,100,100,0,0,1,2,1,2,10,10,30,1\n\n[Events]\nFormat: Layer, Start, End, Style, "
+        f"Name, MarginL, MarginR, MarginV, Effect, Text\n{row}\n"
+    )
+    track = SubtitleTrackId("palette-units")
+    prepared = prepare_ass_hit_map_frame(
+        source.encode(), track, active_rows=row, text="猫", tokens=[TokenAnnotation(0, 0, 1)]
+    )
+    return _palette_in_frame_units(
+        prepared, frame_height, font_scale, unreachable=subtitle_fonts.OsdReach(frozenset())
+    )
+
+
+@pytest.mark.parametrize(
+    ("frame_height", "font_scale", "expected"),
+    [
+        (720, 1.0, 48.0),  # identity: the case the wire-level test already pins
+        (1080, 1.0, 72.0),  # a 720p script in a 1080p frame
+        (720, 1.25, 60.0),  # `ass_set_font_scale`, which a converted track drives off 1.0
+        (1080, 1.25, 90.0),  # both at once, because they multiply rather than compose
+    ],
+)
+def test_the_overprint_font_size_is_restated_in_the_frames_pixels(
+    frame_height: int, font_scale: float, expected: float
+) -> None:
+    """libass scales a style's `Fontsize` by `frame_height / PlayResY` and then by the font scale.
+    Skip that and the overprint draws the token at its script-unit size over glyphs laid out at the
+    frame's — a uniform error that is invisible at 720p, which is the only shape ever measured."""
+    palette = palette_for(play_res_y="PlayResY: 720", frame_height=frame_height, font_scale=1.0)
+    scaled = palette_for(
+        play_res_y="PlayResY: 720", frame_height=frame_height, font_scale=font_scale
+    )
+
+    assert palette[0].font_size == pytest.approx(expected / font_scale)
+    assert scaled[0].font_size == pytest.approx(expected)
+
+
+def test_a_document_with_no_playresy_keeps_its_boxes_and_loses_its_overprint() -> None:
+    """There is no script-unit-to-pixel ratio without it, so a size would be a guess. Zero is the
+    overprint's "do not draw this token" — the hit boxes are unaffected, only the colour stands
+    down to a device that needs no size."""
+    palette = palette_for(play_res_y="", frame_height=720, font_scale=1.0)
+
+    assert [(entry.font_name, entry.font_size) for entry in palette] == [("", 0.0)]
+
+
 def test_every_gate_option_is_observed_and_counted_a_render_space_input() -> None:
     """Three lists that have to agree, and nothing made them.
 
