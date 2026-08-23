@@ -50,6 +50,9 @@ class WordBox:
     #: legacy renderer, which paints the colour itself and has nothing to overprint.
     font_name: str = ""
     font_size: float = 0.0
+    #: The token's anti-aliased coverage over its own rect, one byte per pixel, kept only when the
+    #: face is one the text device cannot draw — see `TokenGeometry.coverage`.
+    coverage: bytes = b""
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h

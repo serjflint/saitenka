@@ -140,7 +140,9 @@ def _validate_token_pixels(
     return sorted(bounds, key=order)
 
 
-def _token_geometry(key: _TokenKey, extent: list[int], regions: list[Rect]) -> TokenGeometry:
+def _token_geometry(
+    key: _TokenKey, extent: list[int], regions: list[Rect], coverage: bytes = b""
+) -> TokenGeometry:
     left, top, right, bottom = extent
     return TokenGeometry(
         key.event_id,
@@ -149,14 +151,60 @@ def _token_geometry(key: _TokenKey, extent: list[int], regions: list[Rect]) -> T
         tuple(regions),
         key.font_name,
         key.font_size,
+        coverage,
     )
+
+
+def _token_coverage(
+    layers: Sequence[ImageLayer],
+    palette: dict[int, tuple[int, _TokenKey]],
+    bounds: dict[_TokenKey, list[int]],
+) -> dict[_TokenKey, bytes]:
+    """Each token's coverage, cropped to the extent the first pass measured.
+
+    A second pass over the same layers rather than a wider first one: the crop is only knowable
+    once the extent is, and buffering every painted pixel to avoid re-walking would cost more than
+    the walk. Both passes are on the geometry worker, never the interaction loop.
+
+    `max` on overlap, not `+`: two layers of one token (a glyph split across images) meet at their
+    shared edge, and adding there would push the alpha past opaque and print a seam.
+    """
+    masks = {
+        key: bytearray((extent[2] - extent[0]) * (extent[3] - extent[1]))
+        for key, extent in bounds.items()
+    }
+    for layer in layers:
+        if layer.image_type != 0 or layer.width <= 0 or layer.height <= 0:
+            continue
+        entry = palette.get(layer.color >> 8)
+        if entry is not None and (extent := bounds.get(entry[1])) is not None:
+            _blit_coverage(layer, masks[entry[1]], extent)
+    return {key: bytes(mask) for key, mask in masks.items()}
+
+
+def _blit_coverage(layer: ImageLayer, mask: bytearray, extent: list[int]) -> None:
+    stride = extent[2] - extent[0]
+    for offset, value in enumerate(layer.bitmap):
+        if not value:
+            continue
+        x = layer.dst_x + offset % layer.width - extent[0]
+        y = layer.dst_y + offset // layer.width - extent[1]
+        position = y * stride + x
+        mask[position] = max(mask[position], value)
 
 
 def extract_token_geometry(
     result: RenderResult,
     request: GeometryRequest,
+    *,
+    keep_coverage: bool = False,
 ) -> tuple[TokenGeometry, ...]:
-    """Recover every requested token from public character-image layers."""
+    """Recover every requested token from public character-image layers.
+
+    `keep_coverage` also keeps the anti-aliased mask each token was measured from, which is what the
+    raster device paints when the text device cannot reach the face. Off by default: a snapshot that
+    carries masks nobody will tint is bytes crossing a thread for nothing.
+    """
     palette = {
         entry.rgb: (
             index,
@@ -173,7 +221,10 @@ def extract_token_geometry(
     for layer in result.layers:
         _collect_layer(layer, palette, reserved, owners, request.frame_size, bounds, segments)
     ordered = _validate_token_pixels(palette, bounds)
-    return tuple(_token_geometry(key, bounds[key], segments[key]) for key in ordered)
+    masks = _token_coverage(result.layers, palette, bounds) if keep_coverage else {}
+    return tuple(
+        _token_geometry(key, bounds[key], segments[key], masks.get(key, b"")) for key in ordered
+    )
 
 
 def _render_style(state: RendererState) -> object | None:
@@ -269,7 +320,7 @@ class LibassGeometryBackend:
             if otel_metrics.subtitle_geometry_render_ms is not None:
                 otel_metrics.subtitle_geometry_render_ms.record(render_ms)
             started = time.perf_counter_ns()
-            tokens = extract_token_geometry(result, request)
+            tokens = extract_token_geometry(result, request, keep_coverage=request.keep_coverage)
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("extract_ms", extract_ms)
             span.set("found_tokens", len(tokens))

@@ -1076,6 +1076,9 @@ class NativeSubtitleGeometry:
             span.set("prepare_ms", prepare_ms)
             if otel_metrics.subtitle_geometry_prepare_ms is not None:
                 otel_metrics.subtitle_geometry_prepare_ms.record(prepare_ms)
+        palette = _palette_in_frame_units(
+            prepared, cue.frame_size[1], renderer_state.font_scale, unreachable=unreachable
+        )
         return GeometryRequest(
             generation,
             track_id,
@@ -1088,16 +1091,15 @@ class NativeSubtitleGeometry:
             margins=cue.margins,
             use_margins=cue.use_margins,
             render_profile=cue.render_profile,
-            palette=_palette_in_frame_units(
-                prepared,
-                cue.frame_size[1],
-                renderer_state.font_scale,
-                unreachable=unreachable,
-            ),
+            palette=palette,
             reserved_rgb=prepared.reserved_rgb,
             attachments=fonts.attachments,
             font_setup=fonts.setup,
             renderer_state=renderer_state,
+            # Exactly the frames the text device cannot colour: no resolved face, a family only the
+            # subtitle renderer holds, or a document with no `PlayResY` to scale from. The raster
+            # device needs none of those — it tints what the measurement already drew.
+            keep_coverage=any(entry.font_size <= 0 for entry in palette),
         )
 
     @staticmethod
@@ -1599,6 +1601,7 @@ class NativeSubtitleGeometry:
                 item.bounds.height,
                 item.font_name,
                 item.font_size,
+                item.coverage,
             )
             for item in snapshot.tokens
         ]

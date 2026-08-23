@@ -27,3 +27,7 @@ class OverlayId(IntEnum):
     LOADING = 9  # top-left "loading dictionaries" spinner during progressive startup
     HELP = 10
     PICKER = 11  # Window 1: the jimaku subtitle-source download picker
+    #: The reading-state colour as a raster over mpv's own subtitle glyphs, for a face mpv's OSD
+    #: library cannot load. Its own slot because it is retired on its own schedule: the text device
+    #: shares the focus slot, and this one has to come down when a cue's masks stop being current.
+    OVERPAINT = 12

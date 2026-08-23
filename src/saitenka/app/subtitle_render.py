@@ -38,7 +38,7 @@ from saitenka.runtime.surfaces import (
     SurfaceRuntime,
     SurfaceTransactionOutcome,
 )
-from saitenka.subtitles import overprint
+from saitenka.subtitles import overpaint, overprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -204,6 +204,34 @@ def overprint_payload(request: DrawRequest) -> str:
             )
         )
     return overprint.payload(paints)
+
+
+def _token_colour(request: DrawRequest, index: int) -> int | None:
+    """The reading-state colour for one token, as 24-bit RGB, or `None` when it has none."""
+    styles = request.styles
+    if not styles or not 0 <= index < len(styles):
+        return None
+    colour = getattr(styles[index], "color", None)
+    if colour is None:
+        return None
+    return (colour[0] << 16) | (colour[1] << 8) | colour[2]
+
+
+def overpaint_image(request: DrawRequest) -> overpaint.Overpaint | None:
+    """Device 2: the colour as a raster, for the tokens device 1 refused.
+
+    Only those tokens. A cue whose dialogue is a system font and whose signs came from a container
+    attachment gets its dialogue coloured as text and its signs coloured as pixels, in one frame —
+    which is the whole reason the stand-down is per family rather than per track.
+    """
+    return overpaint.compose(
+        [
+            overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, colour)
+            for box in request.boxes
+            if box.coverage and not box.font_name
+            if (colour := _token_colour(request, box.index)) is not None
+        ]
+    )
 
 
 def focus_drawing(rect: tuple[int, int, int, int]) -> str:
@@ -466,6 +494,9 @@ class NativeVisibleRenderer:
         # The focus highlight is its own presentation slot: a hide issued while a show is still in
         # flight must not land after it, and the revision fence is what orders them.
         self._focus = SurfaceRuntime()
+        #: Whether device 2's raster is on screen, so a cue that needs none takes the last one down
+        #: rather than leaving it over the words that follow.
+        self._overpaint_shown = False
 
     @property
     def ownership_state(self) -> OwnershipState:
@@ -949,6 +980,7 @@ class NativeVisibleRenderer:
             if request.hover >= 0 and box_for_token(request.boxes, request.hover) is not None
             else None
         )
+        self._publish_overpaint(request, surfaces)
         drawing = overprint_payload(request)
         if rect is not None:
             # One slot, one payload: the highlight and the colour are drawn together so a repaint
@@ -973,7 +1005,14 @@ class NativeVisibleRenderer:
 
     def clear(self, surfaces=None, ipc=None, /) -> None:
         self._hide_focus(ipc)
+        self._hide_overpaint(surfaces)
         self._fallback.clear(surfaces, ipc)
+
+    def _hide_overpaint(self, surfaces) -> None:
+        if surfaces is None or not self._overpaint_shown:
+            return
+        self._overpaint_shown = False
+        surfaces.remove(OverlayId.OVERPAINT, owner=Owner.SUBTITLE)
 
     def close(self) -> None:
         self._fallback.close()
@@ -995,6 +1034,7 @@ class NativeVisibleRenderer:
 
     def suspend_for_overlay(self, target: SubtitleTarget) -> None:
         self._hide_focus(target.ipc)
+        self._hide_overpaint(target.surfaces)
         self._fallback.clear(target.surfaces, target.ipc)
         _send_visibility(target.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
@@ -1011,6 +1051,29 @@ class NativeVisibleRenderer:
         # Verify, not activate: `suspend_for_overlay` set sub-visibility behind the FSM's back, so
         # the established flag is stale by construction and only mpv can settle it.
         self._verify_native(target)
+
+    def _publish_overpaint(self, request: DrawRequest, surfaces) -> None:
+        """Put device 2's raster on its own slot, or take it down when this cue has none.
+
+        Both halves matter: a cue that needs no raster must actively remove the previous one, or the
+        last attachment-only cue's colours stay painted over the words of every cue after it.
+        """
+        if surfaces is None:
+            return
+        image = overpaint_image(request)
+        if image is None:
+            if self._overpaint_shown:
+                self._overpaint_shown = False
+                surfaces.remove(OverlayId.OVERPAINT, owner=Owner.SUBTITLE)
+            return
+        self._overpaint_shown = True
+        # The array path, not `present`: these pixels were composited into numpy and never were a
+        # PIL image. Wrapping one to unwrap it again is two copies of every cue.
+        surfaces.present_rgba(
+            image.rgba, image.x, image.y, oid=OverlayId.OVERPAINT, owner=Owner.SUBTITLE
+        )
+        if otel_metrics.subtitle_overpaint_frames is not None:
+            otel_metrics.subtitle_overpaint_frames.add(1)
 
     def _hide_focus(self, ipc) -> None:
         self._submit_focus(ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))

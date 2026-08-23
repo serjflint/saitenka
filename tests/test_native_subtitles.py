@@ -18,6 +18,7 @@ from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
+from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
@@ -280,6 +281,10 @@ class FakeBackend:
                 (),
                 entry.font_name if self.font_name is None else self.font_name,
                 entry.font_size if self.font_size is None else self.font_size,
+                # Solid coverage over the whole rect when the request asked for it — the real
+                # backend keeps the render's own anti-aliased mask, and the shape of the bytes is
+                # what the raster device consumes.
+                bytes([255]) * (50 * 40) if request.keep_coverage else b"",
             )
             for entry in request.palette
         )
@@ -2148,6 +2153,58 @@ def test_a_face_only_the_subtitle_renderer_has_stands_the_overprint_down(tmp_pat
     assert backend.requests
     assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
     assert result.boxes  # the hit boxes still land
+    result.close()
+
+
+def presented_overpaints(ipc) -> list[tuple[int, int, int, int]]:
+    """Every `overlay-add` on the raster device's slot, as (x, y, width, height).
+
+    mpv's argument order is `<id> <x> <y> <file> <offset> <fmt> <w> <h> <stride>`.
+    """
+    return [
+        (int(command[2]), int(command[3]), int(command[7]), int(command[8]))
+        for command in ipc.commands
+        if command[0] == "overlay-add" and command[1] == OverlayId.OVERPAINT
+    ]
+
+
+def test_a_face_the_osd_library_cannot_load_is_coloured_as_a_raster_instead(tmp_path: Path) -> None:
+    """The point of the second device: a signs-and-songs release keeps its colour.
+
+    The text device has to stand down there — mpv's OSD library can never load a container
+    attachment — and until this device existed that meant no colour at all on exactly the tracks
+    whose typesetting this mode is for. The raster needs no face: it tints the pixels the
+    measurement already drew, from the font set mpv's SUBTITLE renderer holds.
+    """
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    assert result.native_geometry is not None
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert not [payload for payload in overlay_payloads(ipc) if "\\fn" in payload], (
+        "the text device drew a face the OSD library cannot load"
+    )
+    painted = presented_overpaints(ipc)
+    assert painted, "no raster reached mpv"
+    # Cropped to the union of the three 50x40 boxes the fake laid out at x=100, 160, 220 — not to
+    # the frame, which would be most of a megabyte of transparent pixels per cue.
+    assert painted[-1] == (100, 600, 170, 40)
+    assert result.boxes
+    result.close()
+
+
+def test_a_cue_the_text_device_can_draw_publishes_no_raster(tmp_path: Path) -> None:
+    """The negative control, and the ladder's rule: a device is used only when the one above it
+    cannot draw. Two colours over one cue would double every glyph's alpha."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
+    assert not presented_overpaints(ipc)
     result.close()
 
 

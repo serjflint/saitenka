@@ -81,6 +81,12 @@ class TokenGeometry:
     #: Copied from the palette entry that produced this token — see `GeometryPaletteEntry`.
     font_name: str = ""
     font_size: float = 0.0
+    #: The token's own anti-aliased coverage, row-major over `bounds`, one byte per pixel — the
+    #: measuring render's output kept instead of thrown away once the extent was read off it.
+    #: This is what lets the colour be painted as a raster when the text device cannot draw the
+    #: face; tinting a mask IS the raster, so the second device costs no second render. Empty when
+    #: the backend was not asked to keep it.
+    coverage: bytes = b""
 
 
 class GeometryVariant(StrEnum):
@@ -170,6 +176,9 @@ class GeometryRequest:
     font_setup: FontSetup = field(default_factory=FontSetup)
     renderer_state: RendererState = field(default_factory=RendererState)
     render_profile: tuple[tuple[str, str], ...] = ()
+    #: Keep each token's coverage mask, for the raster device. Asked for per frame rather than
+    #: always, because a cue whose colour the text device can draw has no use for the bytes.
+    keep_coverage: bool = False
 
     def __post_init__(self) -> None:
         _validate_render_space(self)

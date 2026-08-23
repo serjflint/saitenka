@@ -14,9 +14,16 @@ the same cue
 ```
 
 The colour is an overprint: mpv's glyphs stay, and each token is drawn again on top in the same
-face, at the same size and place, so the authored outline and shadow keep framing it. A token whose
-face the measurement did not resolve is left uncoloured rather than drawn at a guess — the cue stays
-interactive either way.
+face, at the same size and place, so the authored outline and shadow keep framing it.
+
+Some faces mpv's OSD renderer can never load — a font that came from the container's attachments or
+from a `[Fonts]` section inside the `.ass`, which reach only its subtitle renderer. Those tokens are
+coloured a second way instead: the geometry measurement already drew them with the *right* font set,
+so its own anti-aliased pixels are tinted and uploaded as an image. No second font lookup happens
+anywhere, which is what keeps the colour on the same glyph shapes mpv drew. The choice is per token,
+so a release whose dialogue is a system font and whose signs are attachment-only gets both in the
+same frame. A token the measurement could not resolve at all is left uncoloured rather than drawn at
+a guess — the cue stays interactive either way.
 
 Saitenka does not draw a second subtitle over mpv's after native pixel ownership is established.
 Geometry readiness is independent: a cache miss or unsupported/failed geometry keeps the same mpv
