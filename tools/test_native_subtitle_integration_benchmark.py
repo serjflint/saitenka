@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import native_subtitle_integration_benchmark as benchmark
 import pytest
@@ -74,6 +76,75 @@ def manifest() -> dict:
 
 def test_budget_oracle_accepts_locked_boundary() -> None:
     assert evaluate(report(), manifest())
+
+
+def test_the_locked_fixture_satisfies_every_named_clause() -> None:
+    assert all(benchmark._functional_checks(report(), manifest()).values())
+    assert all(benchmark._performance_checks(report(), manifest()).values())
+
+
+def test_a_broken_clause_is_named_and_still_fails_the_oracle() -> None:
+    broken = report()
+    broken["tooltip_open_count"] = broken["presented"] - 1
+
+    checks = benchmark._functional_checks(broken, manifest())
+
+    assert [name for name, ok in checks.items() if not ok] == ["tooltip_opened_every_presentation"]
+    assert not benchmark._functional_passes(broken, manifest()), "naming must not weaken the oracle"
+
+
+def test_a_foreign_schema_reports_a_failure_rather_than_raising() -> None:
+    """The guard short-circuits, as the original `and` chain did. Evaluating the clauses behind it
+    subscripts keys another schema need not carry, turning a recordable failure into a dead run."""
+    foreign = {"schema": 7}
+
+    assert benchmark._functional_checks(foreign, manifest()) == {"schema": False}
+    assert not benchmark._functional_passes(foreign, manifest())
+
+
+def test_summary_names_the_failing_budget_not_only_the_count() -> None:
+    slow = report()
+    slow["interaction_cpu_delta_p99_ms"] = manifest()["budgets"]["interaction_cpu_delta_p99_ms"] + 1
+
+    summary = benchmark._summarize(
+        benchmark.summarize_trials([slow, slow, slow], manifest()), manifest(), Path("report.json")
+    )
+
+    # One of the three budgets the printed numbers do not show, so a count alone cannot explain it.
+    assert "interaction_cpu_delta_p99_ms" in summary
+    assert summary.startswith("FAIL")
+
+
+def test_summary_leaves_the_sample_arrays_to_the_artifact() -> None:
+    """Negative control: the fixture carries the arrays, so a summary that dumped the report fails
+    this. Asserting their absence from a fixture that never had them would prove nothing."""
+    bulky = report() | {"interaction_samples_ms": [0.0] * 303, "interaction_cpu_samples_ms": [0.0]}
+
+    summary = benchmark._summarize(
+        benchmark.summarize_trials([bulky, bulky, bulky], manifest()), manifest(), Path("r.json")
+    )
+
+    assert "interaction_samples_ms" not in summary
+    assert len(summary.splitlines()) == 5
+
+
+def test_native_log_restores_stderr_even_when_the_body_raises(tmp_path) -> None:
+    log = tmp_path / "native.log"
+    probe = os.dup(2)
+    os.close(probe)
+
+    def write_then_fail() -> None:
+        with benchmark._native_log_to(log):
+            os.write(2, b"from the C side\n")
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        write_then_fail()
+
+    restored = os.dup(2)
+    os.close(restored)
+    assert restored == probe, "the descriptor table must come back to where it started"
+    assert log.read_bytes() == b"from the C side\n"
 
 
 def test_budget_oracle_accepts_wall_frame_boundary() -> None:
