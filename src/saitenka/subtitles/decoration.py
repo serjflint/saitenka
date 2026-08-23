@@ -1,18 +1,16 @@
-r"""Device 3 of the color ladder: the reading state as a mark, when it cannot be the glyph.
+r"""The JLPT level underline, drawn under a token's hit box.
 
-Devices 1 and 2 both color the word itself — one by redrawing it, one by tinting the coverage the
-measurement already produced. Each has a precondition: a face mpv's OSD renderer can load, or a
-mask kept from that render. When a token has neither, the color has nowhere to go, and the choice
-is between a mark that is *beside* the word and no color at all.
+The level is not the reading state and does not replace it: `app/scoring.py` produces a color and an
+underline per token, and a word can be both due for review and N3. The standard renderer has always
+drawn both, so this is what stops the level from disappearing whenever native-visible mode is on.
 
-This is the mark. It is drawn from the hit box alone — a `\p1` vector rectangle, which libass
-rasterises without consulting a face — so it has no precondition left to fail. That is the point of
-having a bottom rung: every rung above it can stand down for a reason of its own, and the reading
-state still reaches the reader.
+Drawn from the hit box alone — a `\p1` vector rectangle, which libass rasterises without consulting
+a face — so unlike the color devices it has no font precondition to fail.
 
-It deliberately does not try to look like the word. An underline says "this token is in this state"
-and leaves mpv's typesetting untouched; a filled box behind the glyph would fight the authored
-outline it was meant to preserve.
+It is deliberately *not* used to stand in for a color a token could not get. That mark would sit
+where this one sits and mean something else entirely, and the reader has no way to tell two
+underlines apart. An uncolorable token is left uncolored; it keeps its box, its tooltip and its
+mining, and says nothing it cannot say truthfully.
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ _GAP = 1
 
 @dataclass(frozen=True, slots=True)
 class TokenRule:
-    """One token's hit box and the color its reading state calls for."""
+    """One token's hit box and the color of the level underline it carries."""
 
     x: int
     y: int

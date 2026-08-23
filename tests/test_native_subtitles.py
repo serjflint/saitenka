@@ -2486,10 +2486,22 @@ def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    drawn = [payload for payload in overlay_payloads(ipc) if payload]
-    assert r"\fnArial" in drawn[0], "nothing was drawn as text, so nothing was demoted"
-    assert r"\fn" not in drawn[-1], "the text device kept drawing a face measured to drift"
-    assert r"\p1}" in drawn[-1], "the color was dropped instead of stepping down a rung"
+    assert r"\fnArial" in overlay_payloads(ipc)[0], (
+        "nothing was drawn as text, so nothing to demote"
+    )
+    assert result.native_geometry is not None
+    assert result.native_geometry._measured_unsafe == frozenset({"arial"}), (
+        "no verdict was recorded"
+    )
+
+    # The verdict has to reschedule, not just redraw: it changes what the measurement must CONTAIN.
+    # Redrawing the old snapshot cannot produce coverage masks, and nothing re-observes a cue that
+    # has not changed — so without this the family stays uncolored for as long as it is shown.
+    settle_geometry(result, ipc)
+    settle_jobs(result, ipc)
+    result.draw_subtitle()
+
+    assert presented_overpaints(ipc), "the color did not step down to the raster after the verdict"
     result.close()
 
 

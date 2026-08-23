@@ -420,6 +420,7 @@ class Reader:
                     use_native=self._use_native_subtitle_renderer,
                     ownership_undecided=self._native_ownership_undecided,
                     redraw=self.draw_subtitle,
+                    reschedule=self._arm_geometry_refresh,
                     publish=self._publish_geometry,
                     tokenize_lookahead=lambda text: native_subtitles._lookahead_tokenized(
                         text,

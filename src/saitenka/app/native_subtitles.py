@@ -583,6 +583,10 @@ class GeometryPorts:
     use_native: Callable[[], bool]
     ownership_undecided: Callable[[], bool]
     redraw: Callable[[], None]
+    #: Ask for a fresh geometry build. Distinct from `redraw`, which re-draws what is already
+    #: measured: a verdict that changes what the measurement must CONTAIN — coverage masks, say —
+    #: needs the request rebuilt, and redrawing the old snapshot cannot produce it.
+    reschedule: Callable[[], None]
     #: Hand the hit boxes (and, when the cue is installed, its origin) to whoever presents them.
     #: The geometry owner IS the publisher of these — unlike a renderer, which returns them so a
     #: superseded cue cannot write over a live one. Here the generation fence is what orders them.
@@ -673,6 +677,12 @@ class NativeSubtitleGeometry:
             return
         self._measured_unsafe |= families
         self.invalidate(cause=GeometryCacheReason.RENDER_INPUT_CHANGED)
+        # Both, and they do different work. `redraw` takes the drifting face off the cue on screen
+        # now; `reschedule` builds the request that will carry coverage masks for it, which is the
+        # only way the raster device can pick the color back up. Invalidating alone does neither —
+        # nothing re-observes a cue that has not changed, so the rebuild never happens and the
+        # family stays uncolored for as long as it is shown.
+        self._ports.reschedule()
         self._ports.redraw()
 
     def set_track_codec(self, codec: str) -> None:

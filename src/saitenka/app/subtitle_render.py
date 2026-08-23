@@ -181,12 +181,14 @@ OVERPRINT_BORDER = 1.0
 
 @dataclass(frozen=True, slots=True)
 class ColorLadder:
-    """Each token assigned to exactly one device, so the three cannot double-color or drop one.
+    """Each token assigned to at most one color device, so the two cannot double-color one.
 
-    Assignment is one decision, taken here, rather than three independent filters — three filters
-    over the same boxes are three chances for a token to match none of them. That happened: a token
-    whose face resolved but whose text carried ASS syntax was refused by device 1 for its text and
-    by device 2 for its face, and fell out of the ladder entirely.
+    Assignment is one decision, taken here, rather than independent filters over the same boxes —
+    which is how a token whose face resolved but whose text carried ASS syntax was once refused by
+    device 1 for its text and by device 2 for its face, and lost its color with nothing saying so.
+
+    `rules` are not a color device. They carry the JLPT level underline, which is additive: a token
+    can hold a rule and a paint, or a rule and nothing.
     """
 
     paints: tuple[overprint.TokenPaint, ...] = ()
@@ -195,12 +197,13 @@ class ColorLadder:
 
 
 def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> ColorLadder:
-    """Sort the cue's tokens onto the three devices, best first.
+    """Sort the cue's tokens onto the two color devices, best first, and collect their underlines.
 
     Device 1 redraws the glyphs, which needs a face mpv's OSD renderer can load and text that is not
     ASS syntax. Device 2 tints the coverage the measurement kept, which needs no face but needs that
-    mask. Device 3 draws a rule from the hit box, which needs neither — it is the rung that cannot
-    fail, so a token reaches it only after the two above have refused.
+    mask. A token neither can serve keeps its box, its tooltip and its mining, and simply is not
+    colored — there is no third color device. Marking it anyway would say "this token is in some
+    reading state" in the one vocabulary that already means something else here.
 
     `drifting` is where a *late* verdict lands. Which families mpv's OSD renderer can reach is
     inferred when the geometry is built, and `subtitle_calibration` can contradict that inference
@@ -216,13 +219,14 @@ def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()
     masks: list[overpaint.TokenMask] = []
     rules: list[decoration.TokenRule] = []
     for box in request.boxes:
-        # A blank token leaves the ladder here rather than at a rung: device 1 declines it for its
-        # text, but device 3 draws from the box alone and would rule a line under the gap.
         if box.index >= len(surfaces) or not surfaces[box.index].strip():
             continue
         color = _token_color(request, box.index)
         if color is not None:
-            _assign_rung(box, surfaces[box.index], color, drifting, paints, masks, rules)
+            _assign_rung(box, surfaces[box.index], color, drifting, paints, masks)
+        underline = _token_underline(request, box.index)
+        if underline is not None:
+            rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, underline))
     return ColorLadder(tuple(paints), tuple(masks), tuple(rules))
 
 
@@ -233,9 +237,8 @@ def _assign_rung(
     drifting: frozenset[str],
     paints: list[overprint.TokenPaint],
     masks: list[overpaint.TokenMask],
-    rules: list[decoration.TokenRule],
 ) -> None:
-    """Best rung this token can hold, appended to that rung's list."""
+    """Best color device this token can hold, appended to that device's list, or neither."""
     font_name = "" if font_names.key(box.font_name) in drifting else box.font_name
     paint = overprint.TokenPaint(
         text, box.x, box.y, font_name, box.font_size, color, OVERPRINT_BORDER
@@ -245,8 +248,6 @@ def _assign_rung(
         paints.append(paint)
     elif mask.usable:
         masks.append(mask)
-    else:
-        rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, color))
 
 
 def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> str:
@@ -266,13 +267,27 @@ def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozen
 
 def _token_color(request: DrawRequest, index: int) -> int | None:
     """The reading-state color for one token, as 24-bit RGB, or `None` when it has none."""
+    return _token_rgb(request, index, "color")
+
+
+def _token_underline(request: DrawRequest, index: int) -> int | None:
+    """The JLPT level underline for one token, or `None` when it has no level.
+
+    Separate from the reading state and additive to it (`app/scoring.py`): a word can be both due
+    for review and N3. The standard renderer has always drawn both; reading only the color here is
+    what made the level invisible whenever this mode was on.
+    """
+    return _token_rgb(request, index, "underline")
+
+
+def _token_rgb(request: DrawRequest, index: int, field: str) -> int | None:
     styles = request.styles
     if not styles or not 0 <= index < len(styles):
         return None
-    color = getattr(styles[index], "color", None)
-    if color is None:
+    rgba = getattr(styles[index], field, None)
+    if rgba is None:
         return None
-    return (color[0] << 16) | (color[1] << 8) | color[2]
+    return (rgba[0] << 16) | (rgba[1] << 8) | rgba[2]
 
 
 def overpaint_image(

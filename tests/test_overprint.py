@@ -106,8 +106,12 @@ def draw_request(*, styles, boxes):
 
 
 class Style:
-    def __init__(self, color) -> None:
+    """Stands in for `scoring.TokenStyle`, which carries a reading-state color AND a level
+    underline. Both, because the two are additive and the native path has to draw both."""
+
+    def __init__(self, color, underline=None) -> None:
         self.color = color
+        self.underline = underline
 
 
 def measured_boxes(*, font: str = "Arial", size: float = 48.0):
@@ -132,19 +136,19 @@ def test_the_cue_is_drawn_once_per_token_in_its_own_color() -> None:
     assert lines[0].endswith("}猫")
 
 
-def test_a_cue_the_measurement_gave_no_face_for_steps_down_to_the_mark() -> None:
-    """Not uncolored: no face means device 1 cannot draw the glyph, and with no coverage mask
-    either, device 3 marks the box instead. Guessing a face is the thing that is refused — carrying
-    the reading state at all is not."""
+def test_a_cue_the_measurement_gave_no_face_for_is_left_uncolored() -> None:
+    """No face and no mask means the color has nowhere truthful to go, so it goes nowhere.
+
+    Marking the box instead was the earlier answer, and it drew the same rule the JLPT level draws —
+    one underline meaning two things, in the mode where the level's own underline was missing. The
+    token keeps its box, its tooltip and its mining; only the color is absent."""
     from saitenka.app.subtitle_render import overprint_payload
 
     styles = [Style((255, 0, 0, 255))] * 3
 
     payload = overprint_payload(draw_request(styles=styles, boxes=measured_boxes(font="")))
 
-    lines = payload.splitlines()
-    assert len(lines) == 3
-    assert all(r"\p1}" in line and r"\fn" not in line for line in lines)
+    assert payload == ""
 
 
 def test_a_cue_with_no_reading_state_is_left_uncolored() -> None:
@@ -155,22 +159,54 @@ def test_a_cue_with_no_reading_state_is_left_uncolored() -> None:
     assert overprint_payload(draw_request(styles=None, boxes=measured_boxes())) == ""
 
 
-def test_each_token_lands_on_exactly_one_rung_of_the_ladder() -> None:
-    """Three devices used to be three independent filters over the same boxes, which is three
-    chances for a token to match none of them — a resolved face plus ASS syntax in the text was
-    refused by device 1 for its text and by device 2 for its face, and lost its color silently."""
+def test_a_level_underline_is_drawn_beside_the_color_not_instead_of_it() -> None:
+    """JLPT level and reading state are additive in `scoring.py`, and the standard renderer has
+    always drawn both. Reading only `style.color` is what made the level invisible whenever this
+    mode was on — a whole feature silently absent, with nothing reporting it."""
+    from saitenka.app.subtitle_render import color_ladder, overprint_payload
+
+    styles = [Style((255, 0, 0, 255), underline=(0, 128, 255, 255))] * 3
+    request = draw_request(styles=styles, boxes=measured_boxes())
+
+    ladder = color_ladder(request)
+    payload = overprint_payload(request)
+
+    assert len(ladder.paints) == 3, "the color device stood down"
+    assert len(ladder.rules) == 3, "the level underline never reached the payload"
+    # Both marks, in their own colors: the word redrawn in red, the rule under it in blue.
+    assert payload.count(r"\p1}") == 3
+    assert r"\1c&HFF8000&" in payload, "the rule did not carry the level's own color"
+
+
+def test_a_token_with_no_level_gets_no_rule() -> None:
+    """The negative control for the one above: a rule that appeared for every token would look
+    like a level mark on words that have none, which is the same lie in the other direction."""
+    from saitenka.app.subtitle_render import color_ladder
+
+    ladder = color_ladder(
+        draw_request(styles=[Style((255, 0, 0, 255))] * 3, boxes=measured_boxes())
+    )
+
+    assert (len(ladder.paints), len(ladder.rules)) == (3, 0)
+
+
+def test_each_token_lands_on_at_most_one_color_device() -> None:
+    """The devices are one decision, not independent filters over the same boxes — which is how a
+    resolved face plus ASS syntax in the text was refused by device 1 for its text and by device 2
+    for its face, and lost its color silently. A token neither can serve gets nothing, and `rules`
+    stays empty because no token here carries a level."""
     from saitenka.app.subtitle_render import color_ladder
     from saitenka.app.subtitles import WordBox
 
     boxes = [
         WordBox(0, 0, 0, 50, 40, "Arial", 48.0),  # a face: device 1
         WordBox(1, 60, 0, 50, 40, "", 48.0, coverage=bytes(50 * 40)),  # a mask: device 2
-        WordBox(2, 120, 0, 50, 40, "", 0.0),  # neither: device 3
+        WordBox(2, 120, 0, 50, 40, "", 0.0),  # neither: uncolored
     ]
 
     ladder = color_ladder(draw_request(styles=[Style((1, 2, 3, 255))] * 3, boxes=boxes))
 
-    assert (len(ladder.paints), len(ladder.masks), len(ladder.rules)) == (1, 1, 1)
+    assert (len(ladder.paints), len(ladder.masks), len(ladder.rules)) == (1, 1, 0)
 
 
 def test_a_face_the_overprint_cannot_use_still_reaches_the_raster() -> None:

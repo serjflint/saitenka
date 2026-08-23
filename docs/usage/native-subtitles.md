@@ -8,7 +8,8 @@ matters: the per-word colors come too, painted over mpv's own glyphs.
 the same cue
 ├─ mpv renders the original track (not Saitenka's rewritten copy)
 └─ Saitenka derives token geometry from it
-   ├─ each token marked in its reading-state color: redrawn, tinted, or underlined
+   ├─ each token colored in its reading state: redrawn, or tinted
+   ├─ its JLPT level, if it has one: an underline in the level's color
    ├─ hover ──> focus outline
    └─ click/scan ──> the usual tooltip and mining features
 ```
@@ -22,11 +23,15 @@ colored a second way instead: the geometry measurement already drew them with th
 so its own anti-aliased pixels are tinted and uploaded as an image. No second font lookup happens
 anywhere, which is what keeps the color on the same glyph shapes mpv drew. The choice is per token,
 so a release whose dialogue is a system font and whose signs are attachment-only gets both in the
-same frame. A token the measurement resolved neither a face nor pixels for gets a third treatment: a
-thin rule under the word in the same color, drawn from the hit box alone. It consults no font, so it
-cannot fail the way the two above can — the reading state still reaches you when the typesetting
-cannot carry it. Nothing is ever drawn at a guess: a substitute face would put the wrong glyph shapes
-over the right word, and the cue stays interactive either way.
+same frame. A token the measurement resolved neither a face nor pixels for is left **uncolored** —
+it keeps its hit box, its tooltip and its mining, and simply carries no reading state. Nothing is
+ever drawn at a guess: a substitute face would put the wrong glyph shapes over the right word, which
+is the one failure you could not see.
+
+The JLPT level underline is drawn separately and is additive — a word can be both due for review and
+N3, exactly as under the standard renderer. It is a vector rule under the hit box, so unlike the
+color it needs no font and never stands down. This is also why nothing else uses an underline here:
+one mark, one meaning.
 
 Which faces mpv's OSD renderer can reach is worked out from how mpv builds it, and that reasoning can
 be wrong on a machine nobody tested. So while playback is paused Saitenka asks mpv to lay the color

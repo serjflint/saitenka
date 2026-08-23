@@ -4,12 +4,12 @@
     "delegated": 1,
     "delegator": 94,
     "derived": 45,
-    "init_lines": 458,
+    "init_lines": 459,
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2352,
+    "substantive_lines": 2353,
     "total": 344
   },
-  "reason": "one composition line wiring the renderer's measured-drift verdict to the geometry side, which owns the consequence"
+  "reason": "one port line: the geometry owner can ask for a rebuild, not only a redraw, which is what lets a late font verdict produce the coverage masks the raster device needs"
 }
