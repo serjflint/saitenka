@@ -145,6 +145,16 @@ class AssRenderer:
             style=style,
         )
 
+    def set_document(self, ass: bytes, features: Sequence[tuple[int, bool]] = ()) -> None:
+        """Render a different document from here on, keeping the library and the glyph cache.
+
+        The document is libass's only per-cue handle. Rebuilding a renderer to change it also
+        rebuilds the library and rescans the font directory, and discards the glyph cache built
+        for the very same fonts. `features` are re-applied because libass stores them on the
+        track, so they do not survive the swap.
+        """
+        self._native.set_document(ass, list(features))
+
     def close(self) -> None:
         self._native.close()
 

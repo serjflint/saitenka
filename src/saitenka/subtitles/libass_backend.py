@@ -54,6 +54,10 @@ class NativeRenderer(Protocol):
         style: object | None = None,
     ) -> RenderResult: ...
 
+    def set_document(self, ass: bytes, features: list[tuple[int, bool]] = ..., /) -> None:
+        """Point this renderer at a different track, keeping its library and glyph cache."""
+        ...
+
     def close(self) -> None: ...
 
     def library_version(self) -> int: ...
@@ -227,34 +231,30 @@ def extract_token_geometry(
     )
 
 
-#: `ASS_OverrideBits` (`ass.h`), read off the header rather than counted: the neighbouring values
-#: are not in the order the names suggest, and `1 << 9` — one bit below JUSTIFY — is
-#: `ASS_OVERRIDE_FULL_STYLE`, which replaces every field of every style with the one handed over.
-#: Only these two, and only when the option is set: a wider override restyles the cue away from the
-#: document instead of carrying the two fields the document cannot state.
-_ASS_OVERRIDE_BIT_JUSTIFY = 1 << 10
-_ASS_OVERRIDE_BIT_BLUR = 1 << 11
-
-
 def _render_style(state: RendererState) -> object | None:
     """`libasslite.RenderStyle` for this frame, or `None` when libass's defaults already say it.
 
     Imported here rather than at module scope: the wrapper is an optional extra, and this module is
     imported by hosts that never installed it.
+
+    Only BLUR and JUSTIFY, and only when set. `ASS_OverrideBits` is not in the order its names
+    suggest — the value one bit below JUSTIFY is `FULL_STYLE`, which replaces every field of every
+    style with the one handed over and collapses the layout. Taking the mask from `libasslite`
+    rather than restating it here is what keeps that from being re-derived by counting.
     """
     if state == RendererState():
         return None
     module = importlib.import_module("libasslite")
-    bits = 0
+    bits = module.OverrideBits.DEFAULT
     if state.blur:
-        bits |= _ASS_OVERRIDE_BIT_BLUR
+        bits |= module.OverrideBits.BLUR
     if state.justify:
-        bits |= _ASS_OVERRIDE_BIT_JUSTIFY
+        bits |= module.OverrideBits.JUSTIFY
     if not bits:
         return module.RenderStyle(font_scale=state.font_scale)
     return module.RenderStyle(
         font_scale=state.font_scale,
-        override_bits=bits,
+        override_bits=int(bits),
         override_style=module.AssStyle(blur=state.blur, justify=state.justify),
     )
 
@@ -275,6 +275,11 @@ class LibassGeometryBackend:
         self._cache_max = renderer_cache_max
         self._factory = renderer_factory
         self._renderers: OrderedDict[str, NativeRenderer] = OrderedDict()
+        #: The document each cached renderer is currently pointed at, by identity rather than by
+        #: value: the bytes are the cue's whole hit-map document, and comparing them per cue would
+        #: cost more than the swap it is trying to avoid. The producer hands the same object back
+        #: for a repeated render, so identity is the right test and a false miss only re-swaps.
+        self._documents: dict[str, bytes] = {}
         self._closed = False
 
     @property
@@ -301,24 +306,34 @@ class LibassGeometryBackend:
         )
 
     def _renderer(self, request: GeometryRequest) -> tuple[NativeRenderer, float]:
-        """This request's renderer, and the milliseconds spent building one when it was not cached.
+        """This request's renderer, pointed at this request's document, and what building cost.
 
-        Measured because it is not covered by anything else: `render_ms` times `renderer.render()`
-        and `extract_ms` a pure-Python walk, so a library init and a font-directory rescan fell
-        between the two spans and read as free. The cache is keyed on `cache_key()`, which hashes
-        the timestamp and the palette — everything that changes per cue — so in practice this is
-        paid every cue, and how much it costs was never established.
+        Keyed on `renderer_key()` — the font environment — not `cache_key()`, which is the
+        SNAPSHOT's identity and hashes the timestamp, the palette and the document. Those change
+        every cue, so the renderer cache could never hit: it rebuilt libass, rescanned the font
+        directory and discarded the glyph cache once per cue. One live session built a renderer for
+        16 of 18 renders at 1.4–3.0ms each, against renders of 0.7–4.5ms, with the cache sitting
+        pinned at its bound evicting entries nothing could reuse.
+
+        The document is swapped on the way out rather than left to the caller: a cached renderer
+        still holding the previous cue's track would hand back that cue's boxes, silently, which is
+        the failure class this whole path exists to prevent.
         """
-        key = request.cache_key()
+        key = request.renderer_key()
         renderer = self._renderers.pop(key, None)
         built_ms = 0.0
         if renderer is None:
             started = time.perf_counter_ns()
             renderer = self._new_renderer(request)
             built_ms = (time.perf_counter_ns() - started) / 1_000_000
+            self._documents[key] = request.ass
+        elif self._documents.get(key) is not request.ass:
+            renderer.set_document(request.ass, list(request.renderer_state.features))
+            self._documents[key] = request.ass
         self._renderers[key] = renderer
         while len(self._renderers) > self._cache_max:
-            _key, evicted = self._renderers.popitem(last=False)
+            evicted_key, evicted = self._renderers.popitem(last=False)
+            self._documents.pop(evicted_key, None)
             evicted.close()
         return renderer, built_ms
 
@@ -374,6 +389,7 @@ class LibassGeometryBackend:
         if self._closed:
             return
         self._closed = True
+        self._documents.clear()
         while self._renderers:
             _key, renderer = self._renderers.popitem(last=False)
             renderer.close()

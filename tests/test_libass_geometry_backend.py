@@ -219,14 +219,18 @@ def test_request_rejects_palette_budget_before_rendering() -> None:
 
 
 class FakeRenderer:
-    def __init__(self, result: Result) -> None:
+    def __init__(self, result: Result, ass: bytes = b"") -> None:
         self.result = result
         self.closed = False
         self.calls: list[tuple[tuple, dict]] = []
+        self.documents: list[bytes] = [ass]
 
     def render(self, *args, **kwargs) -> Result:
         self.calls.append((args, kwargs))
         return self.result
+
+    def set_document(self, ass: bytes, _features=()) -> None:
+        self.documents.append(ass)
 
     def close(self) -> None:
         assert not self.closed
@@ -236,25 +240,74 @@ class FakeRenderer:
         return 0x1705000
 
 
-def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
-    created: list[FakeRenderer] = []
+def _recording_factory(created: list[FakeRenderer]):
+    layers = Result(
+        (Layer(1, 1, b"\xff", 0x01020300, 10, 20), Layer(1, 1, b"\xff", 0x04050600, 30, 40))
+    )
 
-    def factory(_ass, **_kwargs):
-        renderer = FakeRenderer(
-            Result(
-                (
-                    Layer(1, 1, b"\xff", 0x01020300, 10, 20),
-                    Layer(1, 1, b"\xff", 0x04050600, 30, 40),
-                )
-            )
-        )
+    def factory(ass, **_kwargs):
+        renderer = FakeRenderer(layers, ass)
         created.append(renderer)
         return renderer
 
-    backend = LibassGeometryBackend(renderer_cache_max=1, renderer_factory=factory)
+    return factory
+
+
+def test_a_new_cue_swaps_the_document_instead_of_rebuilding_libass() -> None:
+    """A renderer is identified by its font environment, not by the cue it happens to hold.
+
+    Keying it on the snapshot identity — which hashes the timestamp, the palette and the document
+    — meant it could never be reused: one live session built a renderer for 16 of 18 renders, each
+    a libass init and a font-directory rescan, and threw away the glyph cache it had just filled
+    for the same fonts.
+    """
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(request())
+    backend.render(request(ass=b"the next cue"))
+    backend.close()
+
+    assert len(created) == 1, "a second cue rebuilt the whole library"
+    assert created[0].documents == [b"ass", b"the next cue"]
+
+
+def test_the_swapped_in_document_is_the_one_the_render_is_measured_against() -> None:
+    """The hazard the reuse opens, and the reason the swap is not left to the caller: a cached
+    renderer still holding the previous cue's track answers with that cue's boxes, silently — hit
+    regions beside the words, which is the failure this whole path exists to prevent."""
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(request())
+    backend.render(request(ass=b"the next cue"))
+    rendered_under = created[0].documents[-1]
+    backend.close()
+
+    assert rendered_under == b"the next cue"
+
+
+def test_a_different_font_environment_gets_its_own_renderer() -> None:
+    """The other half of the identity: fonts are what a renderer is built around, so a track that
+    brings its own must not be measured against the previous track's font set."""
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(request())
+    backend.render(request(font_setup=FontSetup(default_family="Hiragino Sans")))
+    backend.close()
+
+    assert len(created) == 2
+
+
+def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(
+        renderer_cache_max=1, renderer_factory=_recording_factory(created)
+    )
 
     assert len(backend.render(request()).tokens) == 2
-    assert len(backend.render(request(ass=b"other")).tokens) == 2
+    assert len(backend.render(request(font_setup=FontSetup(default_family="other"))).tokens) == 2
     assert len(created) == 2 and created[0].closed and not created[1].closed
 
     backend.close()

@@ -334,6 +334,78 @@ def test_a_style_the_user_changed_moves_the_boxes_libass_paints() -> None:
     assert [name for name, union in moved.items() if union == baseline] == []
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_a_reused_renderer_measures_each_cue_against_its_own_document() -> None:
+    """The differential that makes renderer reuse safe to have.
+
+    A renderer now survives across cues and has its track swapped, which is the whole saving — and
+    also the one way it could go silently wrong: a renderer still holding the previous cue's
+    document answers with that cue's boxes, and hit regions land beside the words with every meter
+    green. So each cue is measured twice, once through a shared renderer and once through a fresh
+    one, and the two must agree exactly.
+    """
+    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+    cues = ["（鳥のさえずり）", "うんうん…。", "キーボードを打つ音"]
+
+    from saitenka.subtitles import (
+        GeometryPaletteEntry,
+        GeometryRequest,
+        SubtitleTrackId,
+        TokenAnnotation,
+    )
+    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+
+    frame = (HD.width, HD.height)
+
+    def boxes(backend, cue: str) -> list[tuple[int, int, int, int]]:
+        row = f"Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,{cue}"
+        track = SubtitleTrackId("swap")
+        prepared = prepare_ass_hit_map_frame(
+            converted.document(row, HD, scale=1.0),
+            track,
+            active_rows=row,
+            text=cue,
+            tokens=[TokenAnnotation(0, 0, 2), TokenAnnotation(1, 2, 4)],
+        )
+        snapshot = backend.render(
+            GeometryRequest(
+                1,
+                track,
+                prepared.frame_id,
+                11_256,
+                frame,
+                frame,
+                prepared.ass,
+                palette=tuple(
+                    GeometryPaletteEntry(
+                        entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
+                    )
+                    for entry in prepared.palette
+                ),
+                reserved_rgb=prepared.reserved_rgb,
+                renderer_state=RendererState(font_scale=1.0),
+            )
+        )
+        return [(t.bounds.x, t.bounds.y, t.bounds.width, t.bounds.height) for t in snapshot.tokens]
+
+    shared = LibassGeometryBackend()
+    try:
+        # Interleaved and repeated: a swap that only ever moves forward would hide a renderer that
+        # kept state from two cues ago.
+        reused = {cue: boxes(shared, cue) for cue in cues + cues[::-1]}
+    finally:
+        shared.close()
+
+    for cue in cues:
+        fresh = LibassGeometryBackend()
+        try:
+            assert reused[cue] == boxes(fresh, cue), f"{cue} was measured against another document"
+        finally:
+            fresh.close()
+
+
 #: A two-line cue with a short second line. `--sub-justify` decides where that second line starts,
 #: so it is the only shape in which the option is visible at all.
 WRAPPED = "ながいいちぎょうめです\nみじかいに"

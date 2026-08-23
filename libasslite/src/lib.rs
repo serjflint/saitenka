@@ -103,7 +103,9 @@ struct Api {
     library_version: LibraryVersion,
     library_done: LibraryDone,
     renderer_done: RendererDone,
+    read_memory: ReadMemory,
     free_track: FreeTrack,
+    track_set_feature: TrackSetFeature,
     set_frame_size: SetSize,
     set_storage_size: SetSize,
     set_margins: SetMargins,
@@ -131,6 +133,43 @@ struct NativeRenderer {
 
 // Every access to the three libass handles is serialized by AssRenderer.native.
 unsafe impl Send for NativeRenderer {}
+
+impl NativeRenderer {
+    /// Point this renderer at a different document, keeping the library and the font cache.
+    ///
+    /// The three libass handles have three lifetimes: the library is per font environment, the
+    /// renderer holds the glyph cache built for it, and only the TRACK is per cue. Building all
+    /// three together made every cue pay a library init and a font-directory rescan, and threw
+    /// away the glyph cache that had just been filled for the same fonts.
+    ///
+    /// The new track is read BEFORE the old one is freed, so a document libass rejects leaves the
+    /// renderer holding the document it already had rather than none at all.
+    fn set_document(&mut self, mut ass: Vec<u8>, features: &[(i32, bool)]) -> PyResult<()> {
+        let track = unsafe {
+            (self.api.read_memory)(
+                self.library_handle,
+                ass.as_mut_ptr().cast(),
+                ass.len(),
+                ptr::null(),
+            )
+        };
+        if track.is_null() {
+            return Err(PyValueError::new_err("libass rejected the ASS document"));
+        }
+        // Per track, not per renderer: libass stores these on the track, so a swapped-in document
+        // starts at the defaults unless they are set again.
+        let mut unsupported = Vec::new();
+        for &(feature, enable) in features {
+            if unsafe { (self.api.track_set_feature)(track, feature, c_int::from(enable)) } != 0 {
+                unsupported.push(feature);
+            }
+        }
+        unsafe { (self.api.free_track)(self.track) };
+        self.track = track;
+        self.unsupported_features = unsupported;
+        Ok(())
+    }
+}
 
 impl Drop for NativeRenderer {
     fn drop(&mut self) {
@@ -525,7 +564,9 @@ fn open_native(
             library_version,
             library_done,
             renderer_done,
+            read_memory,
             free_track,
+            track_set_feature,
             set_frame_size,
             set_storage_size,
             set_margins,
@@ -797,6 +838,30 @@ impl AssRenderer {
         };
         Ok(Self {
             native: Mutex::new(Some(open_native(library_path, ass, fonts, setup, features)?)),
+        })
+    }
+
+    /// Render a different document from here on, keeping the library and the glyph cache.
+    ///
+    /// The document is the only per-cue handle libass has; rebuilding a whole renderer to change
+    /// it discards the font cache built for the very same fonts. `features` are re-applied because
+    /// libass stores them on the track, so they do not survive the swap.
+    #[pyo3(signature = (ass, features=Vec::new()))]
+    fn set_document(
+        &self,
+        py: Python<'_>,
+        ass: Vec<u8>,
+        features: Vec<(i32, bool)>,
+    ) -> PyResult<()> {
+        py.detach(|| {
+            let mut guard = self
+                .native
+                .lock()
+                .map_err(|_| PyRuntimeError::new_err("renderer lock poisoned"))?;
+            guard
+                .as_mut()
+                .ok_or_else(|| PyRuntimeError::new_err("renderer is closed"))?
+                .set_document(ass, &features)
         })
     }
 
