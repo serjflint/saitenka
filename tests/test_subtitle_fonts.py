@@ -222,3 +222,24 @@ def test_a_non_font_attachment_is_left_where_mpv_leaves_it(tmp_path: Path) -> No
     )  # fmt: skip
 
     assert subtitle_fonts.container_fonts(video, cache_dir=tmp_path / "cache") == ()
+
+
+@pytest.mark.parametrize(
+    ("embedded", "reachable"),
+    [(False, True), (True, False)],
+)
+def test_an_in_container_face_is_one_the_osd_library_can_never_load(
+    tmp_path: Path, *, embedded: bool, reachable: bool
+) -> None:
+    """mpv's OSD library is built from `osd_style` plus `mpv-osd-symbols` and has no attachment path
+    at all. A family that came from the container or an in-file `[Fonts]` section therefore reaches
+    the subtitle renderer and never the OSD one — which is what decides whether the overprint may
+    draw through `osd-overlay` or has to stand down."""
+    resolved = subtitle_fonts.resolve(
+        expand=expander(tmp_path),
+        settings={"embeddedfonts": embedded, "sub-font-provider": "auto"},
+        video=None,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert resolved.osd_reachable is reachable

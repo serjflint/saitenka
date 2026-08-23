@@ -86,6 +86,18 @@ class FontEnvironment:
     options: tuple[tuple[str, str], ...] = ()
 
     @property
+    def osd_reachable(self) -> bool:
+        """Whether every face in play is one mpv's **OSD** library can also load.
+
+        Its library is built from `osd_style` plus `mpv-osd-symbols` (`osd_libass.c:51-52`) and has
+        no attachment path at all — so a family supplied by the container or by an in-file `[Fonts]`
+        section reaches the subtitle renderer and never the OSD one. An overprint drawn through
+        `osd-overlay` would then be laid out in a substitute face: right words, wrong glyph shapes,
+        measured at −29px against the correct layout in the drift probe.
+        """
+        return not ({"attachments", "in-file"} & set(self.sources))
+
+    @property
     def sources(self) -> tuple[str, ...]:
         """Which of the four sources are in play, for the counter and the report."""
         present = ["system"] if self.setup.font_provider != FontProvider.NONE else []

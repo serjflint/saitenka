@@ -119,6 +119,10 @@ subtitle_geometry_font_sources: Counter | None = None
 #: counter next door says the native path gave up, and conflating the two would make a user
 #: comparing the engines look like a regression.
 subtitle_renderer_forced: Counter | None = None
+#: labeled reason=. The overprint stands down rather than colouring words in a substitute face. Each
+#: demotion is a device the ladder could not use, so this is where "the colour went missing" stops
+#: being invisible and becomes a number a report can show.
+subtitle_overprint_demotions: Counter | None = None
 
 
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
@@ -407,6 +411,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced
+    global subtitle_overprint_demotions
 
     with _lock:
         _reader = reader
@@ -630,6 +635,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.renderer_forced",
             description="deliberate runtime renderer switches (renderer=legacy|native)",
         )
+        subtitle_overprint_demotions = meter.create_counter(
+            "saitenka.subtitle.overprint_demotions",
+            description="cues left uncoloured because no device could draw them faithfully (reason=)",
+        )
         mpv_effect_apply_ms = meter.create_histogram(
             "saitenka.mpv_effect.apply_ms",
             unit="ms",
@@ -679,6 +688,7 @@ def unregister() -> None:
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced
+    global subtitle_overprint_demotions
 
     with _lock:
         _reader = None
@@ -748,6 +758,7 @@ def unregister() -> None:
         cue_settles = None
         subtitle_geometry_font_sources = None
         subtitle_renderer_forced = None
+        subtitle_overprint_demotions = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
         prefetch_queue_depth = None

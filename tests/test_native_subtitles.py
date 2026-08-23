@@ -11,7 +11,7 @@ from dirty_equals import IsPartialDict
 from driver import Driver
 from util import record_spans
 
-from saitenka.app import native_subtitles
+from saitenka.app import native_subtitles, subtitle_fonts
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.embedded_subs import resolve_track_fonts
@@ -2046,6 +2046,33 @@ def overlay_payloads(ipc) -> list[str]:
         for command in ipc.commands
         if command[0] == "osd-overlay" and len(command) > 3 and command[2] == "ass-events"
     ]
+
+
+def test_a_face_only_the_subtitle_renderer_has_stands_the_overprint_down(tmp_path: Path) -> None:
+    """The case the drift probe measured at -29px. mpv's OSD library can never receive a container
+    attachment, so an overprint sent through `osd-overlay` would be laid out in a substitute face —
+    right words, wrong glyph shapes. The boxes are still right, so the cue stays interactive; only
+    the colour stands down, and the demotion is counted rather than silent."""
+    result, ipc, backend = reader(tmp_path)
+    backend.font_name, backend.font_size = "Gandhi Sans", 48.0
+    assert result.native_geometry is not None
+    result.native_geometry.set_fonts(
+        subtitle_fonts.FontEnvironment(
+            subtitle_fonts.FontSetup(extract_fonts=True),
+            (("GandhiSans.otf", b"font"),),
+            subtitle_fonts.option_snapshot(
+                {name: ipc.query(f"options/{name}") for name in subtitle_fonts.FONT_OPTIONS}
+            ),
+        )
+    )
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert backend.requests
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
+    assert result.boxes  # the hit boxes still land
+    result.close()
 
 
 def test_an_unmeasured_face_leaves_the_cue_uncoloured_rather_than_guessed(tmp_path: Path) -> None:

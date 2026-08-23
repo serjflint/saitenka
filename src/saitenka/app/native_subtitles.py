@@ -199,7 +199,11 @@ def _lookahead_tokenized(
 
 
 def _palette_in_frame_units(
-    prepared: PreparedAssFrame, frame_height: int, font_scale: float
+    prepared: PreparedAssFrame,
+    frame_height: int,
+    font_scale: float,
+    *,
+    osd_reachable: bool,
 ) -> tuple[GeometryPaletteEntry, ...]:
     """Restate each token's font size in the frame's pixels rather than the document's script units.
 
@@ -209,10 +213,14 @@ def _palette_in_frame_units(
     arithmetic at the point of drawing where `PlayResY` is no longer in scope.
 
     A document that declares no `PlayResY` yields a size of zero, which the overprint reads as "do
-    not draw this token" rather than as a size.
+    not draw this token" rather than as a size. So does a track whose faces the OSD library cannot
+    reach: the boxes are still right, and the overprint stands down rather than colouring the words
+    in a substitute face.
     """
-    if prepared.play_res_y <= 0:
-        return prepared.palette
+    if prepared.play_res_y <= 0 or not osd_reachable:
+        if not osd_reachable and otel_metrics.subtitle_overprint_demotions is not None:
+            otel_metrics.subtitle_overprint_demotions.add(1, {"reason": "font-not-on-osd-library"})
+        return tuple(replace(entry, font_name="", font_size=0.0) for entry in prepared.palette)
     scale = frame_height / prepared.play_res_y * font_scale
     return tuple(replace(entry, font_size=entry.font_size * scale) for entry in prepared.palette)
 
@@ -1015,7 +1023,12 @@ class NativeSubtitleGeometry:
             margins=cue.margins,
             use_margins=cue.use_margins,
             render_profile=cue.render_profile,
-            palette=_palette_in_frame_units(prepared, cue.frame_size[1], renderer_state.font_scale),
+            palette=_palette_in_frame_units(
+                prepared,
+                cue.frame_size[1],
+                renderer_state.font_scale,
+                osd_reachable=fonts.osd_reachable,
+            ),
             reserved_rgb=prepared.reserved_rgb,
             attachments=fonts.attachments,
             font_setup=fonts.setup,
