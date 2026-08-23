@@ -17,6 +17,8 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from saitenka.subtitles import subrip
 from saitenka.subtitles.model import Cue
@@ -82,6 +84,25 @@ def test_centiseconds_are_truncated_the_way_mpv_truncates_them() -> None:
 
     assert row is not None
     assert "0:00:01.34,0:00:03.45" in row
+
+
+@given(milliseconds=st.integers(min_value=0, max_value=6 * 3_600_000))
+@example(milliseconds=2_010)  # 2.010 is 2.00999… in binary; truncating reads it back as 2009ms
+@example(milliseconds=8_110)
+def test_a_whole_millisecond_survives_the_trip_through_float_seconds(milliseconds: int) -> None:
+    """The stamp mpv prints comes from an integer millisecond count; ours arrives as float seconds.
+
+    Truncating that product loses a centisecond wherever the binary float lands just under the
+    integer — 148 of 20 000 timings at 10ms steps — and each one is a row that matches nothing, so
+    the cue it was prefetched for is silently rebuilt from cold.
+    """
+    row = subrip.dialogue_row(Cue(milliseconds / 1_000, 9.0, ""), "x")
+
+    assert row is not None
+    stamp = row.split(",")[1]
+    hours, minutes, rest = stamp.split(":")
+    printed = (int(hours) * 3_600_000) + (int(minutes) * 60_000) + round(float(rest) * 1_000)
+    assert printed == milliseconds - milliseconds % 10
 
 
 def test_markup_survives_the_walk_from_file_to_cue() -> None:

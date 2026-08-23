@@ -93,7 +93,10 @@ def event_text(text: str) -> str | None:
 def _timestamp(seconds: float) -> str:
     """`H:MM:SS.cc`, truncated. mpv truncates the centiseconds where ffmpeg's muxer rounds them, and
     the row this has to match is mpv's."""
-    total = max(0, int(seconds * 1_000))
+    # Round to the millisecond first: that is the integer mpv holds, and `seconds` only carries it
+    # as a binary float, so truncating here reads 2.010 back as 2009ms and loses a centisecond.
+    # The truncation that must be preserved is milliseconds to centiseconds, below.
+    total = max(0, round(seconds * 1_000))
     hours, rest = divmod(total, 3_600_000)
     minutes, rest = divmod(rest, 60_000)
     return f"{hours}:{minutes:02d}:{rest // 1000:02d}.{rest % 1000 // 10:02d}"

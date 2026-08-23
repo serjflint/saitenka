@@ -1086,13 +1086,14 @@ class NativeVisibleRenderer:
         measured = subtitle_calibration.measured_bounds(request.boxes, drifting=self._drifting)
         if measured is None or signature in self._calibrated:
             return
-        self._calibrated.add(signature)
         families = subtitle_calibration.payload_families(payload)
 
         def finished(completion: EffectFinished) -> None:
             self._record_drift(completion, measured, signature, families)
 
-        ipc.submit_runtime_mpv(
+        # Marked only once the ask is actually in flight. Marking first burns the face set for the
+        # session on a refused admission, so a real substituted-face drift on it is never measured.
+        if ipc.submit_runtime_mpv(
             owner=Owner.SUBTITLE,
             identity=f"subtitle:calibrate:{signature}",
             # `hidden` and `compute_bounds`: mpv lays the payload out and answers with the box
@@ -1110,7 +1111,8 @@ class NativeVisibleRenderer:
             ),
             timeout_s=10.0,
             on_finished=finished,
-        )
+        ):
+            self._calibrated.add(signature)
 
     def _record_drift(
         self,

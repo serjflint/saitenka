@@ -108,6 +108,8 @@ class FakeIPC(util.FakeIPC):
         self.osd_bounds: dict | None = None
         self.get_property_error: str | None = None
         self.correlate_commands = False
+        #: Identity substrings the gateway will not admit — its real answer when it is at capacity.
+        self.refused_identities: tuple[str, ...] = ()
         self.submitted: list[tuple] = []
         self.job_lanes: dict[str, object] = {}
         self.pending_jobs: list[tuple] = []
@@ -165,6 +167,8 @@ class FakeIPC(util.FakeIPC):
         it did when the command was synchronous. `correlate_commands = True` queues instead, which
         is the only way to observe the mid-flight window or place a late result.
         """
+        if any(refused in str(identity) for refused in self.refused_identities):
+            return False
         self.submitted.append((identity, command, on_finished))
         if not self.correlate_commands:
             self.deliver_runtime_mpv()
@@ -2356,6 +2360,27 @@ def test_the_layout_check_measures_once_per_face_set_while_paused(tmp_path: Path
     # `hidden` and `compute_bounds` both set: mpv answers with the box and draws nothing.
     assert payload[-2:] == (True, True)
     assert r"\fnArial" in str(payload[3])
+    result.close()
+
+
+def test_a_refused_layout_check_is_asked_again_rather_than_written_off(tmp_path: Path) -> None:
+    """ "Measured once per face set" has to mean measured, not asked. The gateway refuses admission
+    when it is at capacity, and marking the face set before the ask lands retires it for the whole
+    session — so a real substituted-face drift on that set is never measured, and the text device
+    keeps drawing words in the wrong place with every meter reading green."""
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    ipc.props["pause"] = True
+    ipc.refused_identities = ("subtitle:calibrate:",)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert not calibration_calls(ipc)
+
+    ipc.refused_identities = ()
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert len(calibration_calls(ipc)) == 1
     result.close()
 
 

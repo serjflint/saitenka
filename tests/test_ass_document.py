@@ -539,6 +539,9 @@ def test_animated_effect_field_fails_closed() -> None:
         ("{\\blur4}猫", (0, 1), "extent is not the word"),
         ("{\\be2}猫", (0, 1), "extent is not the word"),
         ("{\\blur}猫", (0, 1), "extent is not the word"),
+        # A sign with no digits: the amount group matches, and reading it as a number does not.
+        ("{\\blur-}猫", (0, 1), "extent is not the word"),
+        ("{\\be-.}猫", (0, 1), "extent is not the word"),
         ("{\\p1}m 0 0{\\p0}字", (0, 1), "drawing events"),
         ("色{\\r}変更", (0, 3), "crosses a token"),
         ("色{\\c&H112233&}変更", (0, 3), "crosses a token"),

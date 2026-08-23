@@ -481,13 +481,18 @@ def _spreads_ink(content: str) -> bool:
     """Whether a `\\blur`/`\\be` in this block actually spreads anything.
 
     `\\blur0` and `\\be0` are no-ops and common in real typesetting; refusing them would refuse
-    tracks for a tag that changes nothing. A bare `\\blur` with no amount resets to the style's,
-    which cannot be read from here, so it counts as spreading.
+    tracks for a tag that changes nothing. Anything whose amount does not read as a number — a bare
+    `\\blur`, which resets to the style's, or a malformed `\\blur-` — cannot be shown to spread
+    nothing, and refusing is the direction that costs a cache miss rather than a wrong box.
     """
-    return any(
-        match.group("amount") in {"", "."} or float(match.group("amount")) != 0
-        for match in _SPREAD.finditer(content)
-    )
+    return any(_amount_spreads(match.group("amount")) for match in _SPREAD.finditer(content))
+
+
+def _amount_spreads(amount: str) -> bool:
+    try:
+        return float(amount) != 0
+    except ValueError:
+        return True
 
 
 def _validate_static_overrides(source: RawSubtitleEvent, blocks: Sequence[_OverrideBlock]) -> None:

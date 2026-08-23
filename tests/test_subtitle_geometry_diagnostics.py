@@ -57,6 +57,37 @@ def test_the_envelope_refusals_are_named_rather_than_reported_as_provider_errors
 
 
 @pytest.mark.parametrize(
+    ("raw", "span"),
+    [
+        ("{\\k20}歌う", (0, 2)),
+        ("{\\blur4}猫", (0, 1)),
+        ("{\\blur-}猫", (0, 1)),
+        ("{\\p1}m 0 0{\\p0}字", (0, 1)),
+        ("色{\\cZZ}変更", (0, 3)),
+    ],
+)
+def test_the_classifier_reads_the_message_the_rewrite_actually_raises(
+    raw: str, span: tuple[int, int]
+) -> None:
+    """The parametrisation above is hand-copied text. Copies drift: rename one refusal and every
+    track carrying that typesetting silently reverts to reporting `provider-error` — "something
+    broke, retry" — with both files still green. This closes the loop by classifying the exception
+    the raise site produces rather than a transcription of it.
+    """
+    from test_ass_document import CATALOG, annotated  # the suite puts tests/ on the path
+
+    from saitenka.subtitles.ass import UnsupportedAssEvent, rewrite_ass_event
+
+    with pytest.raises(UnsupportedAssEvent) as refusal:
+        rewrite_ass_event(annotated(raw, span), {0: 0x010203}, CATALOG)
+
+    assert geometry_failure_reason(refusal.value) == (
+        "subtitle-frame-unsupported",
+        GeometryErrorCode.TYPESETTING,
+    )
+
+
+@pytest.mark.parametrize(
     ("detail", "code"),
     [
         ("missing libass token colors", GeometryErrorCode.MISSING_PALETTE_PIXELS),
