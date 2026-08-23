@@ -38,7 +38,7 @@ from saitenka.runtime.surfaces import (
     SurfaceRuntime,
     SurfaceTransactionOutcome,
 )
-from saitenka.subtitles import overpaint, overprint
+from saitenka.subtitles import decoration, overpaint, overprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -179,37 +179,76 @@ def focus_rect(boxes, hover: int, span: tuple[int, int] | None) -> tuple[int, in
 OVERPRINT_BORDER = 1.0
 
 
+@dataclass(frozen=True, slots=True)
+class ColourLadder:
+    """Each token assigned to exactly one device, so the three cannot double-colour or drop one.
+
+    Assignment is one decision, taken here, rather than three independent filters — three filters
+    over the same boxes are three chances for a token to match none of them. That happened: a token
+    whose face resolved but whose text carried ASS syntax was refused by device 1 for its text and
+    by device 2 for its face, and fell out of the ladder entirely.
+    """
+
+    paints: tuple[overprint.TokenPaint, ...] = ()
+    masks: tuple[overpaint.TokenMask, ...] = ()
+    rules: tuple[decoration.TokenRule, ...] = ()
+
+
+def colour_ladder(request: DrawRequest) -> ColourLadder:
+    """Sort the cue's tokens onto the three devices, best first.
+
+    Device 1 redraws the glyphs, which needs a face mpv's OSD renderer can load and text that is not
+    ASS syntax. Device 2 tints the coverage the measurement kept, which needs no face but needs that
+    mask. Device 3 draws a rule from the hit box, which needs neither — it is the rung that cannot
+    fail, so a token reaches it only after the two above have refused.
+    """
+    styles = request.styles
+    if not styles or not request.boxes:
+        return ColourLadder()
+    surfaces = [token.surface for line in request.lines for token in line]
+    paints: list[overprint.TokenPaint] = []
+    masks: list[overpaint.TokenMask] = []
+    rules: list[decoration.TokenRule] = []
+    for box in request.boxes:
+        # A blank token leaves the ladder here rather than at a rung: device 1 declines it for its
+        # text, but device 3 draws from the box alone and would rule a line under the gap.
+        if box.index >= len(surfaces) or not surfaces[box.index].strip():
+            continue
+        colour = _token_colour(request, box.index)
+        if colour is None:
+            continue
+        paint = overprint.TokenPaint(
+            surfaces[box.index],
+            box.x,
+            box.y,
+            box.font_name,
+            box.font_size,
+            colour,
+            OVERPRINT_BORDER,
+        )
+        mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, colour)
+        if paint.drawable:
+            paints.append(paint)
+        elif mask.usable:
+            masks.append(mask)
+        else:
+            rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, colour))
+    return ColourLadder(tuple(paints), tuple(masks), tuple(rules))
+
+
 def overprint_payload(request: DrawRequest) -> str:
-    """The cue redrawn per token in its reading-state colour, over mpv's own pixels.
+    """Everything the cue draws through mpv's OSD renderer: devices 1 and 3 of the ladder.
+
+    Both travel in one `ass-events` payload because both are ASS events. Device 2 does not: it is a
+    bitmap, and goes up its own overlay slot.
 
     Empty when there is nothing to colour — no measured faces (the legacy renderer produces none),
     or no styles. Empty is a real answer and the caller sends it: it clears the slot, which is what
     "this cue has no overprint" has to look like, or the previous cue's colours stay on screen.
     """
-    styles = request.styles
-    if not styles or not request.boxes:
-        return ""
-    surfaces = [token.surface for line in request.lines for token in line]
-    paints = []
-    for box in request.boxes:
-        if box.index >= len(surfaces) or box.index >= len(styles):
-            continue
-        style = styles[box.index]
-        colour = getattr(style, "color", None)
-        if colour is None:
-            continue
-        paints.append(
-            overprint.TokenPaint(
-                surfaces[box.index],
-                box.x,
-                box.y,
-                box.font_name,
-                box.font_size,
-                (colour[0] << 16) | (colour[1] << 8) | colour[2],
-                OVERPRINT_BORDER,
-            )
-        )
-    return overprint.payload(paints)
+    ladder = colour_ladder(request)
+    parts = (overprint.payload(list(ladder.paints)), decoration.payload(list(ladder.rules)))
+    return "\n".join(part for part in parts if part)
 
 
 def _token_colour(request: DrawRequest, index: int) -> int | None:
@@ -230,14 +269,7 @@ def overpaint_image(request: DrawRequest) -> overpaint.Overpaint | None:
     attachment gets its dialogue coloured as text and its signs coloured as pixels, in one frame —
     which is the whole reason the stand-down is per family rather than per track.
     """
-    return overpaint.compose(
-        [
-            overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, colour)
-            for box in request.boxes
-            if box.coverage and not box.font_name
-            if (colour := _token_colour(request, box.index)) is not None
-        ]
-    )
+    return overpaint.compose(list(colour_ladder(request).masks))
 
 
 def focus_drawing(rect: tuple[int, int, int, int]) -> str:

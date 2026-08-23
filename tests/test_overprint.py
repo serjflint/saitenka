@@ -7,6 +7,8 @@ measurement said the token was", which the last test asks of a real libass.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from saitenka.subtitles import overprint
@@ -130,12 +132,19 @@ def test_the_cue_is_drawn_once_per_token_in_its_own_colour() -> None:
     assert lines[0].endswith("}猫")
 
 
-def test_a_cue_the_measurement_gave_no_face_for_is_left_uncoloured() -> None:
+def test_a_cue_the_measurement_gave_no_face_for_steps_down_to_the_mark() -> None:
+    """Not uncoloured: no face means device 1 cannot draw the glyph, and with no coverage mask
+    either, device 3 marks the box instead. Guessing a face is the thing that is refused — carrying
+    the reading state at all is not."""
     from saitenka.app.subtitle_render import overprint_payload
 
     styles = [Style((255, 0, 0, 255))] * 3
 
-    assert overprint_payload(draw_request(styles=styles, boxes=measured_boxes(font=""))) == ""
+    payload = overprint_payload(draw_request(styles=styles, boxes=measured_boxes(font="")))
+
+    lines = payload.splitlines()
+    assert len(lines) == 3
+    assert all(r"\p1}" in line and r"\fn" not in line for line in lines)
 
 
 def test_a_cue_with_no_reading_state_is_left_uncoloured() -> None:
@@ -144,6 +153,39 @@ def test_a_cue_with_no_reading_state_is_left_uncoloured() -> None:
     from saitenka.app.subtitle_render import overprint_payload
 
     assert overprint_payload(draw_request(styles=None, boxes=measured_boxes())) == ""
+
+
+def test_each_token_lands_on_exactly_one_rung_of_the_ladder() -> None:
+    """Three devices used to be three independent filters over the same boxes, which is three
+    chances for a token to match none of them — a resolved face plus ASS syntax in the text was
+    refused by device 1 for its text and by device 2 for its face, and lost its colour silently."""
+    from saitenka.app.subtitle_render import colour_ladder
+    from saitenka.app.subtitles import WordBox
+
+    boxes = [
+        WordBox(0, 0, 0, 50, 40, "Arial", 48.0),  # a face: device 1
+        WordBox(1, 60, 0, 50, 40, "", 48.0, coverage=bytes(50 * 40)),  # a mask: device 2
+        WordBox(2, 120, 0, 50, 40, "", 0.0),  # neither: device 3
+    ]
+
+    ladder = colour_ladder(draw_request(styles=[Style((1, 2, 3, 255))] * 3, boxes=boxes))
+
+    assert (len(ladder.paints), len(ladder.masks), len(ladder.rules)) == (1, 1, 1)
+
+
+def test_a_face_the_overprint_cannot_use_still_reaches_the_raster() -> None:
+    """The token that used to fall out: device 1 refuses the *text*, so having a face must not keep
+    it off device 2, which does not care what the text says."""
+    from saitenka.app.subtitle_render import colour_ladder
+    from saitenka.app.subtitles import WordBox
+
+    boxes = [WordBox(0, 0, 0, 4, 4, "Arial", 48.0, coverage=bytes(16))]
+    request = draw_request(styles=[Style((1, 2, 3, 255))], boxes=boxes)
+    request.lines[0][0] = dataclasses.replace(request.lines[0][0], surface=r"{\b1}")
+
+    ladder = colour_ladder(request)
+
+    assert (len(ladder.paints), len(ladder.masks), len(ladder.rules)) == (0, 1, 0)
 
 
 def test_a_box_without_a_token_behind_it_is_skipped_not_mispainted() -> None:

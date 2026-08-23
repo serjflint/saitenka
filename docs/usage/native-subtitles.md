@@ -8,7 +8,7 @@ matters: the per-word colors come too, painted over mpv's own glyphs.
 the same cue
 ├─ mpv renders the original track (not Saitenka's rewritten copy)
 └─ Saitenka derives token geometry from it
-   ├─ each token redrawn over mpv's own glyphs in its reading-state colour
+   ├─ each token marked in its reading-state colour: redrawn, tinted, or underlined
    ├─ hover ──> focus outline
    └─ click/scan ──> the usual tooltip and mining features
 ```
@@ -22,8 +22,11 @@ coloured a second way instead: the geometry measurement already drew them with t
 so its own anti-aliased pixels are tinted and uploaded as an image. No second font lookup happens
 anywhere, which is what keeps the colour on the same glyph shapes mpv drew. The choice is per token,
 so a release whose dialogue is a system font and whose signs are attachment-only gets both in the
-same frame. A token the measurement could not resolve at all is left uncoloured rather than drawn at
-a guess — the cue stays interactive either way.
+same frame. A token the measurement resolved neither a face nor pixels for gets a third treatment: a
+thin rule under the word in the same colour, drawn from the hit box alone. It consults no font, so it
+cannot fail the way the two above can — the reading state still reaches you when the typesetting
+cannot carry it. Nothing is ever drawn at a guess: a substitute face would put the wrong glyph shapes
+over the right word, and the cue stays interactive either way.
 
 Saitenka does not draw a second subtitle over mpv's after native pixel ownership is established.
 Geometry readiness is independent: a cache miss or unsupported/failed geometry keeps the same mpv
