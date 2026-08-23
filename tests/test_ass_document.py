@@ -158,7 +158,7 @@ def test_parse_ass_styles_uses_authored_format_order() -> None:
 
 
 def test_a_style_without_a_usable_size_still_parses() -> None:
-    """The size only matters to the overprint. A style whose colour parses is still one the hit map
+    """The size only matters to the overprint. A style whose color parses is still one the hit map
     can use, so an unparseable `Fontsize` costs the overprint, not the interaction."""
     extradata = (
         b"[V4+ Styles]\nFormat: Name, PrimaryColour, Fontname, Fontsize\n"
@@ -573,7 +573,7 @@ def test_the_blur_refusal_is_measured_not_assumed() -> None:
     """Why blur is refused, from libass rather than from reasoning about it.
 
     The first guess was that a spread fill breaks the COLOUR keying — it does not: libass reports
-    the reserved colour exactly, with any alpha in the low byte the hit map shifts out. What it
+    the reserved color exactly, with any alpha in the low byte the hit map shifts out. What it
     breaks is the EXTENT. Here the images grow by half a glyph and two neighbouring words overlap,
     which is a hover landing on the wrong word.
     """
@@ -607,9 +607,9 @@ def test_the_blur_refusal_is_measured_not_assumed() -> None:
     sharp = render("")
     blurred = render(r"\blur4")
 
-    assert [colour for colour, _left, _right in blurred] == [
-        colour for colour, _left, _right in sharp
-    ], "blur changed the reported colour, which is not the reason it is refused"
+    assert [color for color, _left, _right in blurred] == [
+        color for color, _left, _right in sharp
+    ], "blur changed the reported color, which is not the reason it is refused"
     assert sharp[0][2] <= sharp[1][1], "the sharp boxes should not overlap"
     assert blurred[0][2] > blurred[1][1], "blur is refused because the boxes overlap"
 

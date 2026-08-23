@@ -159,7 +159,7 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
     assert baseline.cache_key() != request(use_margins=True).cache_key()
     assert baseline.cache_key() != request(render_profile=(("sub-scale", "1.2"),)).cache_key()
     # Not a render input but a content one: a hit served maskless to a caller that wanted coverage
-    # drops the cue to the plainest colour device with nothing saying why.
+    # drops the cue to the plainest color device with nothing saying why.
     assert baseline.cache_key() != request(keep_coverage=True).cache_key()
 
 

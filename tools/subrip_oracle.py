@@ -53,7 +53,7 @@ CASES: tuple[tuple[str, str], ...] = (
     # would otherwise get wrong rather than merely that it agrees where it answers.
     ("stray-angle", "a < b > c"),
     ("unknown-tag", "<unknown>tag</unknown>"),
-    ("font-named-colour", '<font color="red">r</font>'),
+    ("font-named-color", '<font color="red">r</font>'),
     ("font-size", '<font size="20">s</font>'),
     ("trailing-an", "{\\an1}bottom{\\an2}"),
     ("mid-an", "text {\\an8} more"),

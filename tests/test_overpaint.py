@@ -1,6 +1,6 @@
-"""Device 2: the reading-state colour as a raster, for a face mpv's OSD library cannot load.
+"""Device 2: the reading-state color as a raster, for a face mpv's OSD library cannot load.
 
-The oracle is not "does an image come out" but "is the colour on the same pixels the measurement
+The oracle is not "does an image come out" but "is the color on the same pixels the measurement
 said the token covered". The last test asks that of a real libass: render a cue, tint what came
 back, and check the ink lands where the glyphs did.
 """
@@ -17,7 +17,7 @@ def solid(width: int, height: int, value: int = 255) -> bytes:
     return bytes([value]) * (width * height)
 
 
-def test_a_tinted_mask_carries_its_colour_at_its_own_alpha() -> None:
+def test_a_tinted_mask_carries_its_color_at_its_own_alpha() -> None:
     """Coverage is anti-aliased, so it has to survive as alpha rather than being thresholded — a
     binary mask prints a jagged edge over glyphs mpv drew smooth."""
     mask = overpaint.TokenMask(0, 0, 2, 1, bytes([255, 64]), 0x3366FF)
@@ -44,7 +44,7 @@ def test_the_image_is_cropped_to_the_tokens_not_to_the_frame() -> None:
     assert result.rgba.shape == (20, 40, 4)
 
 
-def test_each_token_keeps_its_own_colour() -> None:
+def test_each_token_keeps_its_own_color() -> None:
     result = overpaint.compose(
         [
             overpaint.TokenMask(0, 0, 4, 1, solid(4, 1), 0xFF0000),
@@ -76,12 +76,12 @@ def test_a_shared_edge_pixel_does_not_print_a_seam() -> None:
     [
         overpaint.TokenMask(0, 0, 0, 10, b"", 0xFFFFFF),  # no extent
         overpaint.TokenMask(0, 0, 4, 4, solid(2, 2), 0xFFFFFF),  # coverage does not fit the extent
-        overpaint.TokenMask(0, 0, 4, 4, solid(4, 4), -1),  # not a colour
+        overpaint.TokenMask(0, 0, 4, 4, solid(4, 4), -1),  # not a color
     ],
 )
 def test_a_mask_that_does_not_describe_itself_is_dropped(mask: overpaint.TokenMask) -> None:
     """These numbers arrive from a render. A mismatched one must be refused, not reshaped: reshaping
-    would paint a token's colour across the wrong pixels, which reads as a rendering bug."""
+    would paint a token's color across the wrong pixels, which reads as a rendering bug."""
     assert mask.usable is False
     assert overpaint.compose([mask]) is None
 
@@ -104,12 +104,12 @@ def test_an_implausible_extent_is_refused_rather_than_allocated() -> None:
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_the_colour_lands_on_the_pixels_the_measurement_measured() -> None:
+def test_the_color_lands_on_the_pixels_the_measurement_measured() -> None:
     """The oracle that matters, end to end through a real libass: render a cue as the hit map does,
-    keep the coverage, tint it, and check the colour covers the glyphs and only the glyphs.
+    keep the coverage, tint it, and check the color covers the glyphs and only the glyphs.
 
     This is what device 2 claims and device 1 cannot: no face is consulted anywhere in the chain, so
-    a family only the subtitle renderer holds is coloured exactly as well as any other.
+    a family only the subtitle renderer holds is colored exactly as well as any other.
     """
     pytest.importorskip("libasslite")
     from saitenka.subtitles import (
@@ -131,7 +131,7 @@ def test_the_colour_lands_on_the_pixels_the_measurement_measured() -> None:
         "Style: D,sans-serif,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,"
         "1,0,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
-        # Two tokens, each in its own reserved colour — the same trick the hit map uses to read a
+        # Two tokens, each in its own reserved color — the same trick the hit map uses to read a
         # token back out of a render that knows nothing about tokens.
         r"Dialogue: 0,0:00:01.00,0:00:03.00,D,,0,0,0,,{\pos(40,40)\1c&H0000FF&}猫"
         r"{\1c&H00FF00&}犬" + "\n"
@@ -167,15 +167,15 @@ def test_the_colour_lands_on_the_pixels_the_measurement_measured() -> None:
                 token.bounds.width,
                 token.bounds.height,
                 token.coverage,
-                colour,
+                color,
             )
-            for token, colour in zip(snapshot.tokens, (0xFF00FF, 0x00FFFF), strict=True)
+            for token, color in zip(snapshot.tokens, (0xFF00FF, 0x00FFFF), strict=True)
         ]
     )
 
     assert painted is not None
     first = snapshot.tokens[0]
-    # Every pixel the first token covered carries its colour, and nothing outside its rect does.
+    # Every pixel the first token covered carries its color, and nothing outside its rect does.
     inside = painted.rgba[
         first.bounds.y - painted.y : first.bounds.y - painted.y + first.bounds.height,
         first.bounds.x - painted.x : first.bounds.x - painted.x + first.bounds.width,

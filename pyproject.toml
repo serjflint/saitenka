@@ -866,7 +866,7 @@ shell = { shell = "shellcheck install/*.sh" }
 # ADVISORY — PowerShell installer static analysis (PSScriptAnalyzer). Prereqs: `brew install --cask
 # powershell` + `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`. Kept OUT of `hygiene`
 # because pwsh is a heavy, mac-uncommon prereq and the .ps1 files only matter for Windows packaging.
-# Excludes PSAvoidUsingWriteHost (installers legitimately colour output) + PSUseBOMForUnicodeEncodedFile
+# Excludes PSAvoidUsingWriteHost (installers legitimately color output) + PSUseBOMForUnicodeEncodedFile
 # (bad advice cross-platform); leaves the real ones (empty catch, Invoke-Expression). -EnableExit → rc=findings.
 ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost -EnableExit\"" }
 

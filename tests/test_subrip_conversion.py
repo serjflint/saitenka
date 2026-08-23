@@ -6,7 +6,7 @@ serialises the row itself, so it is the only thing that can say what the row is.
 
 Two claims, and the second is the one that keeps this honest. Where the converter answers, it must
 agree exactly. Where `srtdec` does something no one would design — a stray `<` parsed as a tag, a
-second `{\\an}` dropped, an unknown tag deleted, a named colour resolved from a table — it must
+second `{\\an}` dropped, an unknown tag deleted, a named color resolved from a table — it must
 DECLINE rather than guess, because a declined cue costs a cache miss and a guessed one costs a
 render.
 """
@@ -30,9 +30,7 @@ CASES = {case["name"]: case for case in FIXTURE["cases"]}
 
 #: Cases the converter must decline. Named here rather than derived from a mismatch, so that a
 #: converter which quietly stopped predicting everything would fail this file rather than pass it.
-DECLINED = frozenset(
-    {"stray-angle", "unknown-tag", "font-named-colour", "font-size", "trailing-an"}
-)
+DECLINED = frozenset({"stray-angle", "unknown-tag", "font-named-color", "font-size", "trailing-an"})
 
 #: Cases the converter must reproduce exactly. Named for the same reason `DECLINED` is: a re-record
 #: that lost one would otherwise just run a smaller parametrisation, all green.

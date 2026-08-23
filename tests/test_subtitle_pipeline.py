@@ -736,7 +736,7 @@ def test_retained_coverage_is_bounded_by_bytes_not_by_entry_count(monkeypatch) -
 
 
 def test_the_budget_drops_the_masks_and_keeps_the_boxes(monkeypatch) -> None:
-    """What the budget evicts is the colour device's input, not the cue. A stripped snapshot is
+    """What the budget evicts is the color device's input, not the cue. A stripped snapshot is
     still a complete set of hit boxes — its tokens fall to the rule device, which needs nothing —
     where evicting the entry would cost a re-render of a cue about to be shown."""
     from saitenka.app import subtitle_geometry_job
@@ -757,7 +757,7 @@ def test_the_budget_drops_the_masks_and_keeps_the_boxes(monkeypatch) -> None:
 
 def test_the_oldest_cue_gives_up_its_masks_first(monkeypatch) -> None:
     """The cue about to be drawn is the one that still needs its raster; a speculative one measured
-    three cues ahead is the cheapest colour to lose."""
+    three cues ahead is the cheapest color to lose."""
     from saitenka.app import subtitle_geometry_job
 
     monkeypatch.setattr(subtitle_geometry_job, "COVERAGE_BUDGET_BYTES", 1024 * 1024)
@@ -892,7 +892,7 @@ def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> N
 def test_the_render_space_is_part_of_the_cache_key() -> None:
     """Not a freshness nicety: a snapshot's coverage masks are rasterised at this frame's pixels and
     uploaded as a bitmap, which mpv does not rescale with its OSD surface the way it rescales a text
-    payload. Drop the frame from the key and a resize paints the old window's colours over the new
+    payload. Drop the frame from the key and a resize paints the old window's colors over the new
     window's glyphs."""
     base = request(1)
     resized = GeometryRequest(

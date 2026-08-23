@@ -6,7 +6,7 @@ the container or in an in-file ``[Fonts]`` section reaches the subtitle renderer
 overprint for such a token through `osd-overlay` substitutes a face: right words, wrong glyph shapes.
 
 Over-inclusion is the safe direction. A family named here that the system also provides costs the
-colour on those tokens; a family missed here paints them in the wrong shapes, and nothing on screen
+color on those tokens; a family missed here paints them in the wrong shapes, and nothing on screen
 says so. So every name a matcher might key on is collected, not just the typographic family.
 """
 

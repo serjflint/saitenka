@@ -2005,7 +2005,7 @@ def test_a_converted_track_is_measured_against_the_document_mpv_rebuilt(tmp_path
     document = backend.requests[-1].ass.decode()
     assert "PlayResY: 288" in document  # libavcodec's, not the .srt's (it has none)
     assert "YCbCr Matrix: None" in document
-    # mpv's own row, carrying the per-token colour keys the hit map is read back from — the events
+    # mpv's own row, carrying the per-token color keys the hit map is read back from — the events
     # are its conversion, so only the header around them was reproduced.
     assert (
         document.rstrip().splitlines()[-1].startswith("Dialogue: 0,0:00:01.00,0:00:03.00,Default")
@@ -2073,7 +2073,7 @@ def test_a_converted_track_reads_ahead_by_predicting_the_events_mpv_will_report(
     assert result.native_geometry.worker.stats.prefetched >= 1, "nothing was read ahead"
     prefetched = backend.requests[-1].ass.decode()
     # The cue's own timings, not its text: by the time it reaches the backend every token carries a
-    # reserved colour key, so the words are no longer contiguous in the document.
+    # reserved color key, so the words are no longer contiguous in the document.
     assert "0:00:04.00,0:00:06.00" in prefetched, "the next cue was not the one prefetched"
     assert result.native_geometry.status.fallback_reason is None
     result.close()
@@ -2238,7 +2238,7 @@ def test_a_face_only_the_subtitle_renderer_has_stands_the_overprint_down(tmp_pat
     """The case the drift probe measured at -29px. mpv's OSD library can never receive a container
     attachment, so an overprint sent through `osd-overlay` would be laid out in a substitute face —
     right words, wrong glyph shapes. The boxes are still right, so the cue stays interactive; only
-    the colour stands down, and the demotion is counted rather than silent."""
+    the color stands down, and the demotion is counted rather than silent."""
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
     result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
@@ -2264,11 +2264,11 @@ def presented_overpaints(ipc) -> list[tuple[int, int, int, int]]:
     ]
 
 
-def test_a_face_the_osd_library_cannot_load_is_coloured_as_a_raster_instead(tmp_path: Path) -> None:
-    """The point of the second device: a signs-and-songs release keeps its colour.
+def test_a_face_the_osd_library_cannot_load_is_colored_as_a_raster_instead(tmp_path: Path) -> None:
+    """The point of the second device: a signs-and-songs release keeps its color.
 
     The text device has to stand down there — mpv's OSD library can never load a container
-    attachment — and until this device existed that meant no colour at all on exactly the tracks
+    attachment — and until this device existed that meant no color at all on exactly the tracks
     whose typesetting this mode is for. The raster needs no face: it tints the pixels the
     measurement already drew, from the font set mpv's SUBTITLE renderer holds.
     """
@@ -2370,7 +2370,7 @@ def test_the_overprint_font_size_is_restated_in_the_frames_pixels(
 
 def test_a_document_with_no_playresy_keeps_its_boxes_and_loses_its_overprint() -> None:
     """There is no script-unit-to-pixel ratio without it, so a size would be a guess. Zero is the
-    overprint's "do not draw this token" — the hit boxes are unaffected, only the colour stands
+    overprint's "do not draw this token" — the hit boxes are unaffected, only the color stands
     down to a device that needs no size."""
     palette = palette_for(play_res_y="", frame_height=720, font_scale=1.0)
 
@@ -2489,12 +2489,12 @@ def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing
     drawn = [payload for payload in overlay_payloads(ipc) if payload]
     assert r"\fnArial" in drawn[0], "nothing was drawn as text, so nothing was demoted"
     assert r"\fn" not in drawn[-1], "the text device kept drawing a face measured to drift"
-    assert r"\p1}" in drawn[-1], "the colour was dropped instead of stepping down a rung"
+    assert r"\p1}" in drawn[-1], "the color was dropped instead of stepping down a rung"
     result.close()
 
 
 def test_an_agreeing_measurement_leaves_the_text_device_alone(tmp_path: Path) -> None:
-    """The negative control. Demoting on agreement would strip the colour from every correctly
+    """The negative control. Demoting on agreement would strip the color from every correctly
     typeset track — and the whole point of measuring is that the inference can be wrong either way."""
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
     ipc.props["pause"] = True
@@ -2530,7 +2530,7 @@ def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_pat
 
 def test_a_cue_the_text_device_can_draw_publishes_no_raster(tmp_path: Path) -> None:
     """The negative control, and the ladder's rule: a device is used only when the one above it
-    cannot draw. Two colours over one cue would double every glyph's alpha."""
+    cannot draw. Two colors over one cue would double every glyph's alpha."""
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
 
     result.set_subtitle("猫を見る")
@@ -2541,10 +2541,10 @@ def test_a_cue_the_text_device_can_draw_publishes_no_raster(tmp_path: Path) -> N
     result.close()
 
 
-def test_only_the_tokens_in_the_embedded_family_lose_their_colour(tmp_path: Path) -> None:
+def test_only_the_tokens_in_the_embedded_family_lose_their_color(tmp_path: Path) -> None:
     """The reason the stand-down is keyed on families and not on the presence of an attachment: a
     release whose dialogue is a system font and whose signs are attachment-only should lose the
-    colour on its signs, not on the whole episode."""
+    color on its signs, not on the whole episode."""
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(
@@ -2603,9 +2603,9 @@ def test_a_document_that_embeds_its_own_fonts_stands_those_families_down(tmp_pat
     result.close()
 
 
-def test_a_document_that_embeds_a_family_nobody_uses_costs_no_colour(tmp_path: Path) -> None:
+def test_a_document_that_embeds_a_family_nobody_uses_costs_no_color(tmp_path: Path) -> None:
     """The negative control for the test above: the section is decoded either way, so a green run
-    there proves the demotion only if a section naming an unused family leaves the colour alone."""
+    there proves the demotion only if a section naming an unused family leaves the color alone."""
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "embedded.ass"
     source.write_bytes(
@@ -2643,9 +2643,9 @@ def test_the_overprint_reaches_mpv_in_the_measured_face_and_size(tmp_path: Path)
     result.close()
 
 
-def test_an_unmeasured_face_leaves_the_cue_uncoloured_rather_than_guessed(tmp_path: Path) -> None:
+def test_an_unmeasured_face_leaves_the_cue_uncolored_rather_than_guessed(tmp_path: Path) -> None:
     """A token whose face the measurement did not resolve is not drawn at a guess: the wrong glyph
-    shape over the right word is worse than no colour, because nothing shows it is wrong."""
+    shape over the right word is worse than no color, because nothing shows it is wrong."""
     result, ipc, backend = reader(tmp_path)
     backend.font_name, backend.font_size = "", 0.0
 

@@ -1,9 +1,9 @@
-r"""Device 3 of the colour ladder: the reading state as a mark, when it cannot be the glyph.
+r"""Device 3 of the color ladder: the reading state as a mark, when it cannot be the glyph.
 
-Devices 1 and 2 both colour the word itself — one by redrawing it, one by tinting the coverage the
+Devices 1 and 2 both color the word itself — one by redrawing it, one by tinting the coverage the
 measurement already produced. Each has a precondition: a face mpv's OSD renderer can load, or a
-mask kept from that render. When a token has neither, the colour has nowhere to go, and the choice
-is between a mark that is *beside* the word and no colour at all.
+mask kept from that render. When a token has neither, the color has nowhere to go, and the choice
+is between a mark that is *beside* the word and no color at all.
 
 This is the mark. It is drawn from the hit box alone — a `\p1` vector rectangle, which libass
 rasterises without consulting a face — so it has no precondition left to fail. That is the point of
@@ -31,7 +31,7 @@ _GAP = 1
 
 @dataclass(frozen=True, slots=True)
 class TokenRule:
-    """One token's hit box and the colour its reading state calls for."""
+    """One token's hit box and the color its reading state calls for."""
 
     x: int
     y: int
@@ -49,7 +49,7 @@ class TokenRule:
         return max(_MIN_RULE, min(_MAX_RULE, self.height // _RULE_DIVISOR))
 
 
-def _ass_colour(rgb: int) -> str:
+def _ass_color(rgb: int) -> str:
     return f"&H{(rgb & 0xFF) << 16 | (rgb & 0x00FF00) | (rgb >> 16) & 0xFF:06X}&"
 
 
@@ -57,7 +57,7 @@ def event_line(rule: TokenRule) -> str:
     thickness = rule.thickness
     return (
         rf"{{\an7\pos({rule.x},{rule.y + rule.height + _GAP})"
-        rf"\1c{_ass_colour(rule.rgb)}\bord0\shad0\p1}}"
+        rf"\1c{_ass_color(rule.rgb)}\bord0\shad0\p1}}"
         f"m 0 0 l {rule.width} 0 l {rule.width} {thickness} l 0 {thickness}"
     )
 

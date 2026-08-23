@@ -1,9 +1,9 @@
-"""Device 2 of the colour ladder: the reading-state colour as a raster, not as text.
+"""Device 2 of the color ladder: the reading-state color as a raster, not as text.
 
 The text device (`overprint`) redraws each token through mpv's OSD libass, which cannot load a
 family that only reached the *subtitle* renderer — a container attachment or an in-file ``[Fonts]``
 section. Those are exactly the releases whose typesetting this mode exists to preserve, so standing
-down there means no colour on the tracks that most want it.
+down there means no color on the tracks that most want it.
 
 This device needs no face at all, and it rasterises nothing new. **The glyphs here are libass's** —
 the measuring render already drew every token from the same font set mpv's subtitle renderer holds,
@@ -11,7 +11,7 @@ and its anti-aliased coverage is kept (`TokenGeometry.coverage`). Tinting that m
 
 That is what makes the device safe, and it is worth stating because the obvious reading is wrong:
 drawing the text again with a *different* rasteriser — Pillow, say — would give it Pillow's shaping,
-hinting and fallback, so the colour would sit on differently shaped letters than mpv's. That is the
+hinting and fallback, so the color would sit on differently shaped letters than mpv's. That is the
 same failure as device 1 on a substitute face, just with a different substitute. Nothing below
 touches a font; the only image library in the chain is the one that carries the array to mpv.
 
@@ -37,7 +37,7 @@ MAX_COMPOSITE_PIXELS = 8 * 1024 * 1024
 
 @dataclass(frozen=True, slots=True)
 class TokenMask:
-    """One token's coverage at its place in the frame, and the colour to tint it."""
+    """One token's coverage at its place in the frame, and the color to tint it."""
 
     x: int
     y: int

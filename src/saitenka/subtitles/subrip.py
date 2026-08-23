@@ -33,8 +33,8 @@ if TYPE_CHECKING:
 #: angle brackets as a tag, including a stray comparison, so "looks like a tag" is not a safe test —
 #: "is one of the four we reproduce" is.
 _TAG = re.compile(r"<(?P<close>/?)(?P<name>[A-Za-z][A-Za-z0-9]*)(?P<rest>[^>]*)>")
-#: Only a six-digit hex colour. `srtdec` also accepts the CSS colour names, from a table this would
-#: have to copy and keep true; a named colour declines instead.
+#: Only a six-digit hex color. `srtdec` also accepts the CSS color names, from a table this would
+#: have to copy and keep true; a named color declines instead.
 _FONT_COLOUR = re.compile(r'^\s+color\s*=\s*"?#(?P<hex>[0-9A-Fa-f]{6})"?\s*$')
 _STYLE_TAGS = {"i": "i", "b": "b", "u": "u"}
 _POSITION = re.compile(r"\{\\an[1-9]\}")
@@ -56,10 +56,10 @@ def _tag_ass(match: re.Match[str]) -> str | None:
         return None
     if closing:
         return r"{\c}" if not match.group("rest") else None
-    colour = _FONT_COLOUR.match(match.group("rest"))
-    if colour is None:
+    color = _FONT_COLOUR.match(match.group("rest"))
+    if color is None:
         return None
-    value = int(colour.group("hex"), 16)
+    value = int(color.group("hex"), 16)
     bgr = (value & 0xFF) << 16 | (value & 0x00FF00) | (value >> 16) & 0xFF
     return f"{{\\c&H{bgr:X}&}}"
 

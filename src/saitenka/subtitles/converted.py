@@ -39,8 +39,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 @dataclass(frozen=True, slots=True)
-class Colour:
-    """An mpv `--sub-color`-style colour. Alpha is opacity, the way mpv states it."""
+class Color:
+    """An mpv `--sub-color`-style color. Alpha is opacity, the way mpv states it."""
 
     r: int = 255
     g: int = 255
@@ -63,9 +63,9 @@ class SubStyle:
 
     font: str = "sans-serif"
     font_size: float = 38.0
-    color: Colour = Colour()
-    outline_color: Colour = Colour(0, 0, 0, 255)
-    back_color: Colour = Colour(0, 0, 0, 175)
+    color: Color = Color()
+    outline_color: Color = Color(0, 0, 0, 255)
+    back_color: Color = Color(0, 0, 0, 175)
     border_style: int = 1
     outline_size: float = 1.65
     shadow_offset: float = 0.0
@@ -168,10 +168,10 @@ def style_row(style: SubStyle, res_y: float, space: RenderSpace, *, scale: float
         "Default",
         style.font,
         _fmt(style.font_size * reference),
-        _colour(style.color),
-        _colour(style.color),  # SecondaryColour is a copy of the primary
-        _colour(style.outline_color),
-        _colour(style.back_color),
+        _color(style.color),
+        _color(style.color),  # SecondaryColour is a copy of the primary
+        _color(style.outline_color),
+        _color(style.back_color),
         str(int(style.bold)),
         str(int(style.italic)),
         "0",  # Underline
@@ -198,8 +198,8 @@ def _fmt(value: float) -> str:
     return f"{value:g}"
 
 
-def _colour(colour: Colour) -> str:
-    return f"&H{colour.as_ass():08X}"
+def _color(color: Color) -> str:
+    return f"&H{color.as_ass():08X}"
 
 
 def document(

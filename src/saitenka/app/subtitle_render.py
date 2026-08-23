@@ -175,13 +175,13 @@ def focus_rect(boxes, hover: int, span: tuple[int, int] | None) -> tuple[int, in
 
 #: Our own hairline border, in frame pixels. Not the authored one — that stays where mpv drew it.
 #: This exists to swallow the antialiased fringe of the glyph underneath, which would otherwise
-#: show as a pale outline around every coloured word.
+#: show as a pale outline around every colored word.
 OVERPRINT_BORDER = 1.0
 
 
 @dataclass(frozen=True, slots=True)
-class ColourLadder:
-    """Each token assigned to exactly one device, so the three cannot double-colour or drop one.
+class ColorLadder:
+    """Each token assigned to exactly one device, so the three cannot double-color or drop one.
 
     Assignment is one decision, taken here, rather than three independent filters — three filters
     over the same boxes are three chances for a token to match none of them. That happened: a token
@@ -194,7 +194,7 @@ class ColourLadder:
     rules: tuple[decoration.TokenRule, ...] = ()
 
 
-def colour_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> ColourLadder:
+def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> ColorLadder:
     """Sort the cue's tokens onto the three devices, best first.
 
     Device 1 redraws the glyphs, which needs a face mpv's OSD renderer can load and text that is not
@@ -210,7 +210,7 @@ def colour_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset(
     """
     styles = request.styles
     if not styles or not request.boxes:
-        return ColourLadder()
+        return ColorLadder()
     surfaces = [token.surface for line in request.lines for token in line]
     paints: list[overprint.TokenPaint] = []
     masks: list[overpaint.TokenMask] = []
@@ -220,16 +220,16 @@ def colour_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset(
         # text, but device 3 draws from the box alone and would rule a line under the gap.
         if box.index >= len(surfaces) or not surfaces[box.index].strip():
             continue
-        colour = _token_colour(request, box.index)
-        if colour is not None:
-            _assign_rung(box, surfaces[box.index], colour, drifting, paints, masks, rules)
-    return ColourLadder(tuple(paints), tuple(masks), tuple(rules))
+        color = _token_color(request, box.index)
+        if color is not None:
+            _assign_rung(box, surfaces[box.index], color, drifting, paints, masks, rules)
+    return ColorLadder(tuple(paints), tuple(masks), tuple(rules))
 
 
 def _assign_rung(
     box: WordBox,
     text: str,
-    colour: int,
+    color: int,
     drifting: frozenset[str],
     paints: list[overprint.TokenPaint],
     masks: list[overpaint.TokenMask],
@@ -238,15 +238,15 @@ def _assign_rung(
     """Best rung this token can hold, appended to that rung's list."""
     font_name = "" if font_names.key(box.font_name) in drifting else box.font_name
     paint = overprint.TokenPaint(
-        text, box.x, box.y, font_name, box.font_size, colour, OVERPRINT_BORDER
+        text, box.x, box.y, font_name, box.font_size, color, OVERPRINT_BORDER
     )
-    mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, colour)
+    mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, color)
     if paint.drawable:
         paints.append(paint)
     elif mask.usable:
         masks.append(mask)
     else:
-        rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, colour))
+        rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, color))
 
 
 def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> str:
@@ -255,36 +255,36 @@ def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozen
     Both travel in one `ass-events` payload because both are ASS events. Device 2 does not: it is a
     bitmap, and goes up its own overlay slot.
 
-    Empty when there is nothing to colour — no measured faces (the legacy renderer produces none),
+    Empty when there is nothing to color — no measured faces (the legacy renderer produces none),
     or no styles. Empty is a real answer and the caller sends it: it clears the slot, which is what
-    "this cue has no overprint" has to look like, or the previous cue's colours stay on screen.
+    "this cue has no overprint" has to look like, or the previous cue's colors stay on screen.
     """
-    ladder = colour_ladder(request, drifting=drifting)
+    ladder = color_ladder(request, drifting=drifting)
     parts = (overprint.payload(list(ladder.paints)), decoration.payload(list(ladder.rules)))
     return "\n".join(part for part in parts if part)
 
 
-def _token_colour(request: DrawRequest, index: int) -> int | None:
-    """The reading-state colour for one token, as 24-bit RGB, or `None` when it has none."""
+def _token_color(request: DrawRequest, index: int) -> int | None:
+    """The reading-state color for one token, as 24-bit RGB, or `None` when it has none."""
     styles = request.styles
     if not styles or not 0 <= index < len(styles):
         return None
-    colour = getattr(styles[index], "color", None)
-    if colour is None:
+    color = getattr(styles[index], "color", None)
+    if color is None:
         return None
-    return (colour[0] << 16) | (colour[1] << 8) | colour[2]
+    return (color[0] << 16) | (color[1] << 8) | color[2]
 
 
 def overpaint_image(
     request: DrawRequest, *, drifting: frozenset[str] = frozenset()
 ) -> overpaint.Overpaint | None:
-    """Device 2: the colour as a raster, for the tokens device 1 refused.
+    """Device 2: the color as a raster, for the tokens device 1 refused.
 
     Only those tokens. A cue whose dialogue is a system font and whose signs came from a container
-    attachment gets its dialogue coloured as text and its signs coloured as pixels, in one frame —
+    attachment gets its dialogue colored as text and its signs colored as pixels, in one frame —
     which is the whole reason the stand-down is per family rather than per track.
     """
-    return overpaint.compose(list(colour_ladder(request, drifting=drifting).masks))
+    return overpaint.compose(list(color_ladder(request, drifting=drifting).masks))
 
 
 def focus_drawing(rect: tuple[int, int, int, int]) -> str:
@@ -1051,7 +1051,7 @@ class NativeVisibleRenderer:
         self._publish_overpaint(request, surfaces)
         drawing = overprint_payload(request, drifting=self._drifting)
         if rect is not None:
-            # One slot, one payload: the highlight and the colour are drawn together so a repaint
+            # One slot, one payload: the highlight and the color are drawn together so a repaint
             # can never leave one of them showing the previous cue.
             drawing = f"{focus_drawing(rect)}\n{drawing}" if drawing else focus_drawing(rect)
         if not drawing:
@@ -1211,7 +1211,7 @@ class NativeVisibleRenderer:
         """Put device 2's raster on its own slot, or take it down when this cue has none.
 
         Both halves matter: a cue that needs no raster must actively remove the previous one, or the
-        last attachment-only cue's colours stay painted over the words of every cue after it.
+        last attachment-only cue's colors stay painted over the words of every cue after it.
         """
         if surfaces is None:
             return

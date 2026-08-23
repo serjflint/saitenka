@@ -3,7 +3,7 @@
 Device 1 draws each token through mpv's **OSD** libass, while the hit boxes come from our own
 measuring renderer. Which families the two agree on is inferred statically — from mpv's source, in
 `subtitle_fonts.OsdReach` — and an inference can be wrong in a way nothing on screen shows: the
-colour lands on substitute glyph shapes and reads as a font choice.
+color lands on substitute glyph shapes and reads as a font choice.
 
 `osd-overlay … compute_bounds` is the one channel that can tell. mpv renders the payload through its
 OSD libass, hidden, and returns the bounding box. Comparing that with the union of the boxes we
@@ -16,8 +16,8 @@ turn on the exact number — which is what makes acting on a two-point sample de
 tolerance pulled from the air would not be.
 
 The asymmetry is the other half of the argument. Demoting wrongly costs appearance: the token falls
-to a device that colours it correctly and more plainly. Clearing wrongly costs correctness: the
-colour lands on substitute glyph shapes and reads as a font choice, which no user can report. So the
+to a device that colors it correctly and more plainly. Clearing wrongly costs correctness: the
+color lands on substitute glyph shapes and reads as a font choice, which no user can report. So the
 epsilon sits nearer the agreeing class than the disagreeing one.
 
 Cost: `compute_bounds` makes mpv do a full render and flush its cache, on its core thread. So it runs

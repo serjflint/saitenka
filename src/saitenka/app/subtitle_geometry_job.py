@@ -434,7 +434,7 @@ class SubtitleGeometryWorker:
         does not bound: a lookahead window of full-screen signs is a window of megabyte alpha masks.
 
         What is dropped is the masks, not the entries. A snapshot without coverage is still a
-        complete set of hit boxes; its tokens fall from the raster colour device to the rule device,
+        complete set of hit boxes; its tokens fall from the raster color device to the rule device,
         which needs nothing. So the budget costs a plainer mark, where evicting the entry would cost
         a re-render of a cue that is about to be shown.
         """

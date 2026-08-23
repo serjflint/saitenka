@@ -229,7 +229,7 @@ def test_an_in_document_face_is_one_the_osd_library_can_never_load(tmp_path: Pat
     """mpv's OSD library is built from `osd_style` plus `mpv-osd-symbols` and has no attachment path
     at all. A family that came from the container or an in-file `[Fonts]` section therefore reaches
     the subtitle renderer and never the OSD one — which is what decides whether the overprint may
-    draw that token through `osd-overlay` or has to leave it uncoloured."""
+    draw that token through `osd-overlay` or has to leave it uncolored."""
     resolved = subtitle_fonts.resolve(
         expand=expander(tmp_path),
         settings={"embeddedfonts": True, "sub-font-provider": "auto"},
@@ -321,7 +321,7 @@ def test_an_attachments_own_family_name_is_what_the_overprint_stands_down_on(
     tmp_path: Path,
 ) -> None:
     """The whole point of naming families rather than counting sources: a release whose dialogue is
-    a system font and whose signs are attachment-only must lose the colour on its signs only."""
+    a system font and whose signs are attachment-only must lose the color on its signs only."""
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         pytest.skip("test requires ffmpeg and ffprobe")
     video = tmp_path / "episode.mkv"

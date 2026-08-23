@@ -135,7 +135,7 @@ class SubtitleModeCoordinator:
 
         The legacy renderer is this work's comparison target, and until now the only route to it was
         catastrophic recovery — a target you cannot select is not one. It is also the answer for a
-        cue the native path refuses: scannable, coloured text instead of untouchable pixels.
+        cue the native path refuses: scannable, colored text instead of untouchable pixels.
 
         The flag travels into `activate` through the target, which is where the mode is chosen from
         the selection; a flag read anywhere else would toggle nothing until the next track load.

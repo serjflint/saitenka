@@ -1,4 +1,4 @@
-"""The runtime check on device 1's one claim: mpv's OSD renderer puts the colour where we said.
+"""The runtime check on device 1's one claim: mpv's OSD renderer puts the color where we said.
 
 Which families the two renderers agree on is inferred from mpv's source. This is the channel that
 can tell whether the inference is right on a real machine, and the epsilon it decides on is a

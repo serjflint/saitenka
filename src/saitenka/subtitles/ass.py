@@ -30,8 +30,8 @@ _COLOR_STATE = re.compile(
     r"|r(?P<style>[^\\}]*))"
 )
 _PRIMARY_COLOR_COMMAND = re.compile(r"\\1?c")
-#: Effects that spread a token's ink past its own outline. Not a colour problem — libass reports the
-#: reserved colour exactly either way — but a size one: `\blur4` grows a 32px glyph's image to 60px,
+#: Effects that spread a token's ink past its own outline. Not a color problem — libass reports the
+#: reserved color exactly either way — but a size one: `\blur4` grows a 32px glyph's image to 60px,
 #: which makes two neighbouring words' boxes overlap by half a glyph and hover pick the wrong one.
 _SPREAD = re.compile(r"\\(?:blur|be)(?P<amount>-?\d*\.?\d*)(?![\d.])")
 _ASS_TIME = re.compile(
@@ -210,6 +210,9 @@ def _parse_style(fields: Sequence[str], value: str) -> AssStyle:
     if len(values) != len(fields):
         raise UnsupportedAssEvent("ASS style row does not match its Format row")
     row = dict(zip(fields, values, strict=True))
+    # `primarycolour`, not `primarycolor`: this is the ASS `Format` row's own field name, casefolded
+    # from `PrimaryColour`. Spelling it the way the rest of this file spells the word makes every
+    # style fail to parse.
     color_match = re.fullmatch(r"&H([0-9A-Fa-f]{1,8})&?", row.get("primarycolour", ""))
     if not color_match or not row.get("name"):
         raise UnsupportedAssEvent("ASS style has no parseable primary color")
@@ -224,7 +227,7 @@ def _parse_style(fields: Sequence[str], value: str) -> AssStyle:
 def _style_size(value: str) -> float:
     """The style's `Fontsize`, or 0 when it is missing or unparseable.
 
-    Zero rather than an exception: the size only matters to the overprint, and a style whose colour
+    Zero rather than an exception: the size only matters to the overprint, and a style whose color
     parses is still a style the hit map can use. The overprint refuses a token with no size instead
     of drawing one at a guess.
     """

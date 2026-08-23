@@ -1,4 +1,4 @@
-r"""Device 3: the rung of the colour ladder that has no precondition left to fail.
+r"""Device 3: the rung of the color ladder that has no precondition left to fail.
 
 Devices 1 and 2 each need something — a loadable face, a kept coverage mask. This one needs only
 the hit box, so the tests here are mostly about *reach*: that a token the two rungs above refuse
@@ -33,7 +33,7 @@ def test_the_rule_sits_under_the_box_not_over_the_glyphs() -> None:
     assert r"\pos(100,249)" in line
 
 
-def test_the_colour_is_written_as_ass_bgr() -> None:
+def test_the_color_is_written_as_ass_bgr() -> None:
     assert r"\1c&H80FF00&" in decoration.event_line(RULE)
 
 
@@ -75,7 +75,7 @@ def test_a_whitespace_token_is_not_underlined() -> None:
     word — the ladder has to drop the token before it reaches this rung."""
     from test_overprint import Style, draw_request
 
-    from saitenka.app.subtitle_render import colour_ladder
+    from saitenka.app.subtitle_render import color_ladder
     from saitenka.app.subtitles import WordBox
 
     request = draw_request(
@@ -84,7 +84,7 @@ def test_a_whitespace_token_is_not_underlined() -> None:
     )
     request.lines[0][1] = dataclasses.replace(request.lines[0][1], surface=" ")
 
-    assert colour_ladder(request).rules == ()
+    assert color_ladder(request).rules == ()
 
 
 @pytest.mark.integration

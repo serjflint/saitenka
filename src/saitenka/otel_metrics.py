@@ -118,8 +118,8 @@ subtitle_geometry_font_sources: Counter | None = None
 #: counter next door says the native path gave up, and conflating the two would make a user
 #: comparing the engines look like a regression.
 subtitle_renderer_forced: Counter | None = None
-#: labeled reason=. The overprint stands down rather than colouring words in a substitute face. Each
-#: demotion is a device the ladder could not use, so this is where "the colour went missing" stops
+#: labeled reason=. The overprint stands down rather than coloring words in a substitute face. Each
+#: demotion is a device the ladder could not use, so this is where "the color went missing" stops
 #: being invisible and becomes a number a report can show.
 subtitle_overprint_demotions: Counter | None = None
 subtitle_overpaint_frames: Counter | None = None
@@ -639,11 +639,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         )
         subtitle_overprint_demotions = meter.create_counter(
             "saitenka.subtitle.overprint_demotions",
-            description="cues left uncoloured because no device could draw them faithfully (reason=)",
+            description="cues left uncolored because no device could draw them faithfully (reason=)",
         )
         subtitle_overpaint_frames = meter.create_counter(
             "saitenka.subtitle.overpaint_frames",
-            description="frames the raster device coloured after the text device stood down",
+            description="frames the raster device colored after the text device stood down",
         )
         subtitle_layout_drift_px = meter.create_histogram(
             "saitenka.subtitle.layout_drift_px",

@@ -8,30 +8,30 @@ matters: the per-word colors come too, painted over mpv's own glyphs.
 the same cue
 ├─ mpv renders the original track (not Saitenka's rewritten copy)
 └─ Saitenka derives token geometry from it
-   ├─ each token marked in its reading-state colour: redrawn, tinted, or underlined
+   ├─ each token marked in its reading-state color: redrawn, tinted, or underlined
    ├─ hover ──> focus outline
    └─ click/scan ──> the usual tooltip and mining features
 ```
 
-The colour is an overprint: mpv's glyphs stay, and each token is drawn again on top in the same
+The color is an overprint: mpv's glyphs stay, and each token is drawn again on top in the same
 face, at the same size and place, so the authored outline and shadow keep framing it.
 
 Some faces mpv's OSD renderer can never load — a font that came from the container's attachments or
 from a `[Fonts]` section inside the `.ass`, which reach only its subtitle renderer. Those tokens are
-coloured a second way instead: the geometry measurement already drew them with the *right* font set,
+colored a second way instead: the geometry measurement already drew them with the *right* font set,
 so its own anti-aliased pixels are tinted and uploaded as an image. No second font lookup happens
-anywhere, which is what keeps the colour on the same glyph shapes mpv drew. The choice is per token,
+anywhere, which is what keeps the color on the same glyph shapes mpv drew. The choice is per token,
 so a release whose dialogue is a system font and whose signs are attachment-only gets both in the
 same frame. A token the measurement resolved neither a face nor pixels for gets a third treatment: a
-thin rule under the word in the same colour, drawn from the hit box alone. It consults no font, so it
+thin rule under the word in the same color, drawn from the hit box alone. It consults no font, so it
 cannot fail the way the two above can — the reading state still reaches you when the typesetting
 cannot carry it. Nothing is ever drawn at a guess: a substitute face would put the wrong glyph shapes
 over the right word, and the cue stays interactive either way.
 
 Which faces mpv's OSD renderer can reach is worked out from how mpv builds it, and that reasoning can
-be wrong on a machine nobody tested. So while playback is paused Saitenka asks mpv to lay the colour
+be wrong on a machine nobody tested. So while playback is paused Saitenka asks mpv to lay the color
 out and report where it landed, once per set of faces per window size, and compares that with its own
-measurement. A disagreement demotes those families for the rest of the session — the colour steps
+measurement. A disagreement demotes those families for the rest of the session — the color steps
 down a rung rather than sitting on substitute glyph shapes, which is the one failure you could not
 see.
 
@@ -106,7 +106,7 @@ Cue lookahead works there too, by predicting the events libavcodec will produce 
 straight from the `.srt`. A wrong prediction cannot put a box in the wrong place: the geometry cache
 is keyed on the event rows, so a predicted row that disagrees with the one mpv reports simply misses
 and the cue is measured on arrival, exactly as an unpredicted one is. Cues whose SubRip markup the
-converter will not reproduce faithfully — a stray `<`, an unknown tag, a named font colour — are left
+converter will not reproduce faithfully — a stray `<`, an unknown tag, a named font color — are left
 out of the lookahead rather than guessed at.
 
 The complete option reference, including the bounded result cache and cue lookahead, lives in
@@ -237,7 +237,7 @@ blocking the player event loop.
   paint, supersession, cancellation, and failure without recording the hovered text.
 - `Ctrl+Shift+L` hands the current episode to Saitenka's own renderer without restarting, and hands
   it back. That is the way to compare the two engines on the same cue, and the answer when a track's
-  typesetting is one the native path refuses: coloured, scannable text instead of untouchable pixels.
+  typesetting is one the native path refuses: colored, scannable text instead of untouchable pixels.
   A report tells a deliberate switch from a native-visibility failure.
 - Set `native_visible = false` to restore Saitenka's default redrawn, FSRS-colored subtitle.
 

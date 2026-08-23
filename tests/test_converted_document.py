@@ -97,9 +97,9 @@ def test_the_style_carries_mpvs_defaults_translated_to_the_track_resolution() ->
 
 def test_alpha_is_inverted_because_ass_stores_transparency() -> None:
     """`MP_ASS_RGBA` writes `0xFF - a`: mpv states opacity and ASS stores its complement. Getting
-    this backwards makes a fully opaque colour fully transparent."""
-    assert converted.Colour(255, 255, 255, 255).as_ass() == 0xFFFFFF00
-    assert converted.Colour(0, 0, 0, 175).as_ass() == 0x00000050
+    this backwards makes a fully opaque color fully transparent."""
+    assert converted.Color(255, 255, 255, 255).as_ass() == 0xFFFFFF00
+    assert converted.Color(0, 0, 0, 175).as_ass() == 0x00000050
 
 
 def test_every_style_is_swept_to_the_neutral_base_direction() -> None:

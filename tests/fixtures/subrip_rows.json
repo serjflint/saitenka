@@ -112,7 +112,7 @@
       "row": "Dialogue: 0,0:01:25.00,0:01:27.00,Default,,0000,0000,0000,,tag"
     },
     {
-      "name": "font-named-colour",
+      "name": "font-named-color",
       "markup": "<font color=\"red\">r</font>",
       "row": "Dialogue: 0,0:01:29.00,0:01:31.00,Default,,0000,0000,0000,,{\\c&HFF&}r{\\c}"
     },

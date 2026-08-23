@@ -1,8 +1,8 @@
 """Which families a font supplies, and which ones a document carries inside itself.
 
-The answer decides whether the overprint may draw a token or must leave it uncoloured, and both
+The answer decides whether the overprint may draw a token or must leave it uncolored, and both
 directions of a wrong answer are silent on screen: a family missed here paints the word in a
-substitute face, a family invented here costs a colour that was available. So the oracle is a real
+substitute face, a family invented here costs a color that was available. So the oracle is a real
 font's real name table, and a `[Fonts]` section encoded the way libass encodes one.
 """
 

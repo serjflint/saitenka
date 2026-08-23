@@ -126,7 +126,7 @@ CORPORA: list[CorpusSpec] = [
         "subrip",
         _subrip_keys,
         count=26,
-        sha256="6de6b331f9c5654c9f53ea513de0717dad09d9ea3940636f62b28f0541672b7e",
+        sha256="98af5c408b21d77fea4112280455b7f9d1d73e4e8b8c6119b7c96f17385c16aa",
     ),
 ]
 

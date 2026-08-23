@@ -83,7 +83,7 @@ class TokenGeometry:
     font_size: float = 0.0
     #: The token's own anti-aliased coverage, row-major over `bounds`, one byte per pixel — the
     #: measuring render's output kept instead of thrown away once the extent was read off it.
-    #: This is what lets the colour be painted as a raster when the text device cannot draw the
+    #: This is what lets the color be painted as a raster when the text device cannot draw the
     #: face; tinting a mask IS the raster, so the second device costs no second render. Empty when
     #: the backend was not asked to keep it.
     coverage: bytes = b""
@@ -103,7 +103,7 @@ class GeometryPaletteEntry:
     #: The face and size this token is laid out in, in the FRAME's units rather than the document's
     #: script units — so an overprint can draw the same glyph at the same size without redoing
     #: libass's scaling. Empty when the document did not resolve one; the overprint then leaves that
-    #: token uncoloured rather than drawing it at a guess.
+    #: token uncolored rather than drawing it at a guess.
     font_name: str = ""
     font_size: float = 0.0
 
@@ -177,7 +177,7 @@ class GeometryRequest:
     renderer_state: RendererState = field(default_factory=RendererState)
     render_profile: tuple[tuple[str, str], ...] = ()
     #: Keep each token's coverage mask, for the raster device. Asked for per frame rather than
-    #: always, because a cue whose colour the text device can draw has no use for the bytes.
+    #: always, because a cue whose color the text device can draw has no use for the bytes.
     keep_coverage: bool = False
 
     def __post_init__(self) -> None:
@@ -192,7 +192,7 @@ class GeometryRequest:
         coverage masks are rasterised at this frame's pixels and uploaded to mpv as a bitmap, which
         — unlike an `osd-overlay` text payload — mpv does not rescale with its OSD surface. Drop the
         frame from this key and a resize serves the old masks, painting the previous window's
-        colours over the new window's glyphs.
+        colors over the new window's glyphs.
         """
         digest = hashlib.sha256()
         for value in (
@@ -212,7 +212,7 @@ class GeometryRequest:
             repr(self.render_profile),
             # It changes what the snapshot CONTAINS, not just how it was made: a maskless hit
             # served to a caller that asked for coverage drops the whole cue to the plainest
-            # colour device, silently. Free while the only producer derives it from the palette
+            # color device, silently. Free while the only producer derives it from the palette
             # hashed above — and this is what keeps that from being the thing holding it true.
             repr(self.keep_coverage),
         ):
@@ -244,7 +244,7 @@ class GeometrySnapshot:
     def without_coverage(self) -> GeometrySnapshot:
         """The same hit boxes with the masks dropped.
 
-        Still a complete, correct answer: coverage feeds only the raster colour device, so a
+        Still a complete, correct answer: coverage feeds only the raster color device, so a
         stripped snapshot costs those tokens a plainer mark and nothing else. That is what makes it
         the right thing to evict under memory pressure — evicting the entry would cost a re-render.
         """

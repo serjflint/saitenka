@@ -1,7 +1,7 @@
 r"""The one check on the leg the hit boxes actually depend on: mpv's own subtitle renderer.
 
 Everything else in this repo measures the *OSD* renderer — `compute_bounds` answers through it, and
-that is the leg the colour is drawn on. The boxes are supposed to match the other leg: mpv's
+that is the leg the color is drawn on. The boxes are supposed to match the other leg: mpv's
 `sd_ass`, its own `ASS_Library`, its own attachments. Nothing measured it. A box quietly twenty
 pixels wide of its word looks exactly like a correct one until someone clicks.
 

@@ -47,7 +47,7 @@ class WordBox:
     w: int
     h: int
     #: How the native path drew this token — its face and its size in frame pixels. Empty from the
-    #: legacy renderer, which paints the colour itself and has nothing to overprint.
+    #: legacy renderer, which paints the color itself and has nothing to overprint.
     font_name: str = ""
     font_size: float = 0.0
     #: The token's anti-aliased coverage over its own rect, one byte per pixel, kept only when the

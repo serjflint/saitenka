@@ -182,7 +182,7 @@ def _play_res_y(document: str) -> int:
     """The `[Script Info]` `PlayResY`, or 0 when the document declares none.
 
     Zero rather than libass's own default: this value only feeds the overprint, and guessing it
-    would put a coloured glyph at the wrong size over the right word.
+    would put a colored glyph at the wrong size over the right word.
     """
     for line in document.splitlines():
         name, separator, value = line.partition(":")

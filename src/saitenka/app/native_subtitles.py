@@ -270,7 +270,7 @@ def _palette_in_frame_units(
 
     A document that declares no `PlayResY` yields a size of zero, which the overprint reads as "do
     not draw this token" rather than as a size. So does a token whose family the OSD library cannot
-    reach: its box is still right, and only its colour stands down.
+    reach: its box is still right, and only its color stands down.
     """
     if prepared.play_res_y <= 0:
         return tuple(replace(entry, font_name="", font_size=0.0) for entry in prepared.palette)
@@ -667,7 +667,7 @@ class NativeSubtitleGeometry:
         The renderer has already stopped drawing them as text — it applies the verdict where it
         draws, which is the only place a *late* answer can still reach the cue on screen. What is
         left for this side is the consequence for the next build: those tokens now need coverage
-        masks, so the raster device can colour them instead of the rule device marking them.
+        masks, so the raster device can color them instead of the rule device marking them.
         """
         if families <= self._measured_unsafe:
             return
@@ -1243,7 +1243,7 @@ class NativeSubtitleGeometry:
             attachments=fonts.attachments,
             font_setup=fonts.setup,
             renderer_state=renderer_state,
-            # Exactly the frames the text device cannot colour: no resolved face, a family only the
+            # Exactly the frames the text device cannot color: no resolved face, a family only the
             # subtitle renderer holds, or a document with no `PlayResY` to scale from. The raster
             # device needs none of those — it tints what the measurement already drew.
             keep_coverage=any(entry.font_size <= 0 for entry in palette),

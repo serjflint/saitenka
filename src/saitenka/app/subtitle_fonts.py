@@ -149,7 +149,7 @@ class FontEnvironment:
           can argue any of them equal.
 
         Per family rather than per track, because a release whose dialogue is a system font and whose
-        signs are attachment-only should lose the colour on its signs, not on the whole episode.
+        signs are attachment-only should lose the color on its signs, not on the whole episode.
         """
         return OsdReach(
             self.attachment_families
@@ -213,7 +213,7 @@ def _directory_families(fonts_dir: str | None) -> frozenset[str]:
 
     Read from the files rather than from libass, which offers no way to enumerate what it loaded.
     Unreadable is empty, and empty means "no family is blamed on this directory" — the direction
-    that keeps a colour rather than the one that invents a demotion.
+    that keeps a color rather than the one that invents a demotion.
     """
     if not fonts_dir:
         return frozenset()
