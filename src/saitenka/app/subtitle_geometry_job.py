@@ -321,6 +321,16 @@ class SubtitleGeometryWorker:
             self._provenance.popitem(last=False)
             self._history_lossy = True
 
+    def filed_keys(self) -> tuple[str, ...]:
+        """Every key a prefetch is filed or queued under, for diagnosing a miss.
+
+        A miss says only that the live key was absent; whether the lookahead predicted a *nearly*
+        identical cue or nothing like it is the difference between a one-field bug and a
+        never-ran-at-all one, and nothing distinguished them.
+        """
+        with self._condition:
+            return (*self._prefetched, *self._prefetch_pending)
+
     def prefetch_miss_reason(self, key: str) -> GeometryCacheReason:
         with self._condition:
             if key in self._prefetch_pending or key == self._prefetch_inflight_key:

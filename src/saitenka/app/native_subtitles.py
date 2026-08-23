@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import logging
 import math
 import time
@@ -37,7 +38,7 @@ from saitenka.subtitles import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import SupportsFloat
 
@@ -106,6 +107,20 @@ _UNSUPPORTED_SOURCE_REASONS = frozenset(
 #: the file is not what mpv is decoding, so the suffix cannot be the test. Widen this only against a
 #: measurement, never against a reading of the decoder.
 CONVERTED_CODECS = frozenset({"subrip"})
+
+#: The components of `_key`, in order, so a miss can name which one diverged rather than only
+#: that the whole key did.
+_KEY_FIELDS = (
+    "path",
+    "text",
+    "rows",
+    "frame_size",
+    "storage_size",
+    "pixel_aspect",
+    "margins",
+    "use_margins",
+    "render_profile",
+)
 
 #: The mpv options a geometry request is derived from — reproduced in the measuring render, or
 #: refused. Every one must also be observed and counted a render-space input, or `_render_inputs`
@@ -1186,6 +1201,37 @@ class NativeSubtitleGeometry:
             )
         )
 
+    @staticmethod
+    def _key_divergence(live: str, filed: Iterable[str]) -> str:
+        """Which components of the nearest filed key the live one disagrees with.
+
+        A converted track predicts its own events from the `.srt` rather than reading them off a
+        document, so a lookahead that files a key mpv never reproduces misses *every* cue and
+        reports the same `first-seen` as a track with no lookahead at all. Naming the field says
+        which of the two it is, and the components are the key's own — the tuple is written from
+        literals, so it reads back.
+        """
+        try:
+            here = ast.literal_eval(live)
+        except (SyntaxError, ValueError):
+            return "unreadable"
+        best: tuple[str, ...] | None = None
+        for candidate in filed:
+            try:
+                there = ast.literal_eval(candidate)
+            except (SyntaxError, ValueError):
+                continue
+            differing = tuple(
+                name
+                for name, mine, theirs in zip(_KEY_FIELDS, here, there, strict=False)
+                if mine != theirs
+            )
+            if best is None or len(differing) < len(best):
+                best = differing
+        if best is None:
+            return "nothing-filed"
+        return ",".join(best) or "none"
+
     def _observation_key(self, seen: GeometryObservation) -> str | None:
         path = self.source_path
         active_rows = seen.prop("sub-text/ass-full")
@@ -1659,6 +1705,10 @@ class NativeSubtitleGeometry:
             span.set("outcome", "hit" if cache_hit else "miss")
             if not cache_hit:
                 span.set("reason", self.worker.prefetch_miss_reason(inputs.key))
+                span.set(
+                    "key_divergence",
+                    self._key_divergence(inputs.key, self.worker.filed_keys()),
+                )
             span.set("cache_hits", stats.cache_hits)
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)

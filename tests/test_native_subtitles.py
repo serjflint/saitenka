@@ -2137,6 +2137,50 @@ def test_a_predicted_cue_is_served_from_the_cache_when_mpv_reports_it(tmp_path: 
     result.close()
 
 
+def test_a_miss_names_which_part_of_the_key_the_prediction_got_wrong(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A live session reported two lookups, both misses, and there was no way to tell a lookahead
+    that predicted a *nearly* right cue from one that never ran — both say `first-seen`. The
+    divergence names the component, which is the difference between a one-field bug and an
+    unwired one."""
+    from saitenka import otel_metrics
+
+    spans: list[dict[str, object]] = []
+
+    class _Span:
+        def __init__(self, values: dict[str, object]) -> None:
+            self.values = values
+
+        def set(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+    @contextmanager
+    def record(name: str, **attributes: str):
+        values: dict[str, object] = dict(attributes)
+        if name == "subtitle_geometry_cache":
+            spans.append(values)
+        yield _Span(values)
+
+    result, ipc, _backend = converted_episode(tmp_path, TWO_CUE_SRT)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    monkeypatch.setattr(otel_metrics, "traced", record)
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\b1}犬を見る"
+    )
+    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
+    result.set_subtitle("犬を見る")
+    settle_jobs(result, ipc)
+
+    missed = [span for span in spans if span.get("outcome") == "miss"]
+    assert missed, "the mispredicted cue did not report a miss"
+    # The rows differ and nothing else does: same file, same frame, same profile.
+    assert missed[0]["key_divergence"] == "rows"
+    result.close()
+
+
 def test_a_mispredicted_cue_costs_a_render_and_not_a_wrong_box(tmp_path: Path) -> None:
     """The safety argument, exercised rather than asserted. The cache key carries the event rows, so
     a prediction that disagrees with mpv simply never matches — the cue is rebuilt from mpv's own
