@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787469793331,
+  "lastUpdate": 1787528554666,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -8627,6 +8627,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.515734,
             "range": "3 replicas; min 1.27201; max 1.5936; MAD 0.077868; worst 1.5936",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c31c1d9f316343cf9195fe3d3b758dde2e7afe35",
+          "message": "Merge pull request #416 from serjflint/feat/one-subtitle-engine\n\nfeat(subtitles): colour mpv's own subtitle glyphs, and take the tracks it converts",
+          "timestamp": "2026-08-24T04:40:03+05:00",
+          "tree_id": "9f029ac47cac292352e127e8fb0ccb424bb804c5",
+          "url": "https://github.com/serjflint/saitenka/commit/c31c1d9f316343cf9195fe3d3b758dde2e7afe35"
+        },
+        "date": 1787528553880,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.434116,
+            "range": "3 replicas; min 4.99195; max 6.43593; MAD 0.001815",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.82269,
+            "range": "3 replicas; min 7.35027; max 9.26506; MAD 0.442368; worst 9.26506",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.347409,
+            "range": "3 replicas; min 15.1165; max 20.7178; MAD 0.370402",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.661254,
+            "range": "3 replicas; min 15.252; max 21.0517; MAD 0.390411; worst 21.0517",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 23.977669,
+            "range": "3 replicas; min 17.9388; max 27.2596; MAD 3.28192",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.17162,
+            "range": "3 replicas; min 0.097128; max 0.172101; MAD 0.000481; worst 0.172101",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.44646,
+            "range": "3 replicas; min 43.9184; max 46.0142; MAD 0.52809; worst 46.0142",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.417699,
+            "range": "3 replicas; min 3.40679; max 3.52556; MAD 0.010912; worst 3.52556",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.793562,
+            "range": "3 replicas; min 1.55252; max 2.02243; MAD 0.228869; worst 2.02243",
             "unit": "ms"
           }
         ]
