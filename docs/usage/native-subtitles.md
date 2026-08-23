@@ -52,7 +52,16 @@ Add the toggle to `overlay.toml`:
 ```toml
 [subtitle_geometry]
 native_visible = true
+# "authored-ass" (default) takes only .ass tracks; "all" also takes the SubRip ones mpv converts.
+native_formats = "authored-ass"
 ```
+
+A SubRip track is not rendered from its file: libavcodec converts it to ASS and mpv renders that,
+applying a whole branch of styling it applies to no authored track. Under `native_formats = "all"`
+Saitenka reconstructs that conversion — libavcodec's header, mpv's own subtitle style, the
+aspect-corrected script resolution, and the letterbox-dependent font scale — around the cue rows mpv
+reports, so the events are mpv's own and only the header is reproduced. The cost is cue lookahead:
+there is no document to read ahead in, so each cue is measured when it arrives.
 
 The complete option reference, including the bounded result cache and cue lookahead, lives in
 [`overlay.example.toml`](https://github.com/serjflint/saitenka/blob/main/overlay.example.toml). Run

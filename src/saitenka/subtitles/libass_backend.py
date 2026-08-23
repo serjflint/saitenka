@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka import otel_metrics
-from saitenka.subtitles.geometry import MAX_BITMAP_BYTES, GeometrySnapshot, Rect, TokenGeometry
+from saitenka.subtitles.geometry import (
+    MAX_BITMAP_BYTES,
+    GeometrySnapshot,
+    Rect,
+    RendererState,
+    TokenGeometry,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -45,6 +51,7 @@ class NativeRenderer(Protocol):
         margins: tuple[int, int, int, int],
         use_margins: bool,
         max_bitmap_bytes: int,
+        style: object | None = None,
     ) -> RenderResult: ...
 
     def close(self) -> None: ...
@@ -65,6 +72,7 @@ class RendererFactory(Protocol):
         default_family: str | None,
         font_provider: int,
         fontconfig_config: str | None,
+        features: list[tuple[int, bool]],
     ) -> NativeRenderer: ...
 
 
@@ -159,6 +167,18 @@ def extract_token_geometry(
     return tuple(_token_geometry(key, bounds[key], segments[key]) for key in ordered)
 
 
+def _render_style(state: RendererState) -> object | None:
+    """`libasslite.RenderStyle` for this frame, or `None` when libass's defaults already say it.
+
+    Imported here rather than at module scope: the wrapper is an optional extra, and this module is
+    imported by hosts that never installed it.
+    """
+    if state == RendererState():
+        return None
+    module = importlib.import_module("libasslite")
+    return module.RenderStyle(font_scale=state.font_scale)
+
+
 class LibassGeometryBackend:
     """Bounded renderer cache over the optional ``libasslite`` package."""
 
@@ -197,6 +217,7 @@ class LibassGeometryBackend:
             default_family=setup.default_family,
             font_provider=int(setup.font_provider),
             fontconfig_config=setup.fontconfig_config,
+            features=list(request.renderer_state.features),
         )
 
     def _renderer(self, request: GeometryRequest) -> NativeRenderer:
@@ -231,6 +252,7 @@ class LibassGeometryBackend:
                 max_bitmap_bytes=min(
                     2 * request.frame_size[0] * request.frame_size[1], MAX_BITMAP_BYTES
                 ),
+                style=_render_style(request.renderer_state),
             )
             render_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("render_ms", render_ms)

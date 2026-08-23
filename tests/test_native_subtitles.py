@@ -11,6 +11,7 @@ from dirty_equals import IsPartialDict
 from driver import Driver
 from util import record_spans
 
+from saitenka.app import native_subtitles
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.embedded_subs import resolve_track_fonts
@@ -1935,6 +1936,101 @@ def test_a_font_setting_changed_under_a_resolved_track_fails_closed(
     assert result.native_geometry is not None
     assert result.native_geometry.status.fallback_reason == "subtitle-font-environment-stale"
     result.close()
+
+
+SRT_ROWS = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る"
+
+
+def converted_reader(tmp_path: Path):
+    """A session whose selected track is one mpv converted from SubRip."""
+    result, ipc, backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result.native_geometry.formats = native_subtitles.NativeFormats.ALL
+    ipc.props["sub-text/ass-full"] = SRT_ROWS
+    source = tmp_path / "episode.srt"
+    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
+    result.native_geometry.set_source(source, live=True)
+    return result, ipc, backend
+
+
+def test_a_converted_track_is_measured_against_the_document_mpv_rebuilt(tmp_path: Path) -> None:
+    """mpv never renders a SubRip file — libavcodec converts it and mpv renders that. The boxes have
+    to be measured against the conversion, so the document is rebuilt around the rows mpv reports
+    rather than read off disk."""
+    result, ipc, backend = converted_reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.source_kind is native_subtitles.SourceKind.CONVERTED
+    assert backend.requests
+    document = backend.requests[-1].ass.decode()
+    assert "PlayResY: 288" in document  # libavcodec's, not the .srt's (it has none)
+    assert "YCbCr Matrix: None" in document
+    # mpv's own row, carrying the per-token colour keys the hit map is read back from — the events
+    # are its conversion, so only the header around them was reproduced.
+    assert (
+        document.rstrip().splitlines()[-1].startswith("Dialogue: 0,0:00:01.00,0:00:03.00,Default")
+    )
+    assert "猫" in document and "見る" in document
+
+
+def test_a_converted_track_carries_the_features_and_scale_mpv_sets(tmp_path: Path) -> None:
+    """`configure_ass` turns on three track features and a non-unit font scale for a converted
+    track. Leaving either off measures a layout mpv is not drawing."""
+    result, ipc, backend = converted_reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    state = backend.requests[-1].renderer_state
+    assert dict(state.features) == {1: True, 2: True, 3: True}
+    assert state.font_scale > 0
+
+
+def test_an_srt_stays_with_the_legacy_renderer_unless_the_config_asks(tmp_path: Path) -> None:
+    """The default envelope is the tested one. A track the native path has not been asked to take
+    still selects the renderer that can draw its hit boxes."""
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    source = tmp_path / "episode.srt"
+    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
+
+    result.native_geometry.set_source(source, live=True)
+
+    assert result.native_geometry.source_unsupported is True
+    assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
+    result.close()
+
+
+def test_a_converted_track_prefetches_nothing_and_says_so(tmp_path: Path) -> None:
+    """There is no document to read ahead in — a converted track's events exist only as the rows mpv
+    reports for the cue on screen. The cost is a cache miss per cue, which is a latency, not a wrong
+    box, and it must not be paid for as a failure."""
+    result, ipc, backend = converted_reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.stats.prefetch_cache_entries == 0
+    assert result.native_geometry.status.fallback_reason is None
+    assert backend.requests
+    result.close()
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("all", native_subtitles.NativeFormats.ALL),
+        ("authored-ass", native_subtitles.NativeFormats.AUTHORED_ASS),
+        ("nonsense", native_subtitles.NativeFormats.AUTHORED_ASS),
+    ],
+)
+def test_an_unknown_format_setting_narrows_rather_than_widens(
+    configured: str, expected: native_subtitles.NativeFormats
+) -> None:
+    assert native_subtitles.native_formats(configured) is expected
 
 
 def test_the_legacy_renderer_can_be_selected_and_given_back(tmp_path: Path) -> None:

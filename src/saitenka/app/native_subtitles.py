@@ -22,10 +22,12 @@ from saitenka.app.subtitles import WordBox
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
     GeometryRequest,
+    RendererState,
     SubtitleTrackId,
     TokenAnnotation,
     authored_ass_rows_at,
     canonical_active_ass_rows,
+    converted,
     prepare_ass_hit_map_frame,
 )
 
@@ -74,6 +76,12 @@ _PENDING_REASONS = frozenset(
 # Sources geometry can never accept, however long it waits — wrong format, too large, not UTF-8.
 # `subtitle-source-unavailable` is deliberately absent: `set_source(None)` is also the reset every
 # track load runs, so switching on it would flap the renderer twice per episode.
+#: `ASS_Feature` ordinals, in the header's declaration order. Named here rather than imported from
+#: the wrapper because the wrapper is an optional extra and this module loads without it.
+_ASS_FEATURE_BIDI_BRACKETS = 1
+_ASS_FEATURE_WHOLE_TEXT_LAYOUT = 2
+_ASS_FEATURE_WRAP_UNICODE = 3
+
 _UNSUPPORTED_SOURCE_REASONS = frozenset(
     {
         "subtitle-source-encoding-unsupported",
@@ -81,6 +89,41 @@ _UNSUPPORTED_SOURCE_REASONS = frozenset(
         "subtitle-source-too-large",
     }
 )
+
+
+class SourceKind(StrEnum):
+    """Which document the boxes are measured against.
+
+    `CONVERTED` is not "an SRT": mpv never renders one. libavcodec turns it into ASS and mpv renders
+    *that*, through a branch of `configure_ass` it applies to no authored track. The document is
+    therefore reconstructed per cue rather than read from disk — see `subtitles.converted`.
+    """
+
+    NONE = "none"
+    AUTHORED = "authored-ass"
+    CONVERTED = "converted"
+
+
+class NativeFormats(StrEnum):
+    """Which track formats the native path will take."""
+
+    AUTHORED_ASS = "authored-ass"
+    ALL = "all"
+
+
+def native_formats(configured: object) -> NativeFormats:
+    """Read the config value, defaulting to the tested envelope rather than raising.
+
+    A typo must not take the session down, and it must not silently widen the envelope either:
+    anything unrecognised means the authored-ASS path, and says so.
+    """
+    try:
+        return NativeFormats(str(configured))
+    except ValueError:
+        log.warning(
+            "unknown native_formats %r; using %s", configured, NativeFormats.AUTHORED_ASS.value
+        )
+        return NativeFormats.AUTHORED_ASS
 
 
 class AssFullCapability(StrEnum):
@@ -385,13 +428,20 @@ class GeometryObservation:
 
 class NativeSubtitleGeometry:
     def __init__(
-        self, worker: SubtitleGeometryWorker, ports: GeometryPorts, *, lookahead: int = 2
+        self,
+        worker: SubtitleGeometryWorker,
+        ports: GeometryPorts,
+        *,
+        lookahead: int = 2,
+        formats: NativeFormats = NativeFormats.AUTHORED_ASS,
     ) -> None:
         if lookahead < 0:
             raise ValueError("subtitle geometry lookahead must be non-negative")
         self.worker = worker
         self._ports = ports
         self.lookahead = lookahead
+        self.formats = formats
+        self.source_kind = SourceKind.NONE
         self.source_path: Path | None = None
         self._source_bytes: bytes | None = None
         self.fallback_reason: str | None = "subtitle-source-unavailable"
@@ -672,7 +722,7 @@ class NativeSubtitleGeometry:
         return self._fonts.options == render.font_options
 
     def set_source(self, path: Path | None, *, live: bool = False) -> None:
-        """Point at a new authored source.
+        """Point at a new source.
 
         `live` says a running session is switching, so whatever the old source left on screen has
         to be retired. It used to be spelled by passing the host and testing it for `None` — a
@@ -683,6 +733,7 @@ class NativeSubtitleGeometry:
         self._source_epoch += 1
         self.worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
         self.source_path = None
+        self.source_kind = SourceKind.NONE
         self._source_bytes = None
         self._last_snapshot = None
         self._submitted_at = None
@@ -697,21 +748,32 @@ class NativeSubtitleGeometry:
             self._ports.degrade()
         if path is None:
             self._set_fallback("subtitle-source-unavailable")
-        elif path.suffix.casefold() != ".ass":
-            self._set_fallback("subtitle-source-not-authored-ass")
+        elif path.suffix.casefold() == ".ass":
+            self._adopt_authored(path)
+        elif self.formats is NativeFormats.ALL:
+            # No file is read: mpv is not rendering this one either. The document is rebuilt per
+            # cue from the rows mpv reports, which are its own conversion — so the events cannot
+            # differ from what it is drawing, and only the header around them is reproduced.
+            self.source_path = path
+            self.source_kind = SourceKind.CONVERTED
+            self.fallback_reason = None
         else:
-            try:
-                with path.open("rb") as source_file:
-                    source = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
-            except OSError:
-                self._set_fallback("subtitle-source-unavailable")
-            else:
-                if len(source) > MAX_ASS_SOURCE_BYTES:
-                    self._set_fallback("subtitle-source-too-large")
-                else:
-                    self._source_bytes = source
-                    self.source_path = path
-                    self.fallback_reason = None
+            self._set_fallback("subtitle-source-not-authored-ass")
+
+    def _adopt_authored(self, path: Path) -> None:
+        try:
+            with path.open("rb") as source_file:
+                source = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
+        except OSError:
+            self._set_fallback("subtitle-source-unavailable")
+            return
+        if len(source) > MAX_ASS_SOURCE_BYTES:
+            self._set_fallback("subtitle-source-too-large")
+            return
+        self._source_bytes = source
+        self.source_path = path
+        self.source_kind = SourceKind.AUTHORED
+        self.fallback_reason = None
 
     def invalidate(
         self,
@@ -874,6 +936,7 @@ class NativeSubtitleGeometry:
         cue: _CueInputs,
         annotations: tuple[TokenAnnotation, ...],
         fonts: subtitle_fonts.FontEnvironment,
+        renderer_state: RendererState,
     ) -> GeometryRequest:
         with otel_metrics.traced("subtitle_geometry_prepare") as span:
             span.set("observed_rows", len(cue.active_rows.splitlines()))
@@ -914,6 +977,7 @@ class NativeSubtitleGeometry:
             reserved_rgb=prepared.reserved_rgb,
             attachments=fonts.attachments,
             font_setup=fonts.setup,
+            renderer_state=renderer_state,
         )
 
     @staticmethod
@@ -949,6 +1013,35 @@ class NativeSubtitleGeometry:
             frame_size=osd,
         )
 
+    @staticmethod
+    def _lookahead_cue(
+        source: bytes,
+        track_id: SubtitleTrackId,
+        timestamp_ms: int,
+        render: _RenderInputs,
+    ) -> _CueInputs | None:
+        """The cue at `timestamp_ms` in the authored document, or `None` when there is nothing to
+        read ahead for — an unparsable region, or a gap between cues."""
+        try:
+            active_rows, text = authored_ass_rows_at(source, track_id, timestamp_ms)
+        except (TypeError, ValueError):
+            return None
+        if not active_rows.strip() or not text.strip():
+            return None
+        return _CueInputs(
+            timestamp_ms,
+            timestamp_ms + 1,
+            timestamp_ms,
+            text,
+            active_rows,
+            render.frame_size,
+            render.storage_size,
+            render.pixel_aspect,
+            render.margins,
+            render.use_margins,
+            render.profile,
+        )
+
     def _prefetch(
         self,
         seen: GeometryObservation,
@@ -962,30 +1055,17 @@ class NativeSubtitleGeometry:
         if index is None or self.lookahead == 0:
             return
         source = self._source_bytes
-        if source is None:
+        if source is None or self.source_kind is not SourceKind.AUTHORED:
+            # A converted track has no document to read ahead in — its events exist only as the rows
+            # mpv reports for the cue on screen. The cost is a cache miss per cue, which is a
+            # latency, not a wrong box.
             return
         queued_keys: set[str] = set()
         for boundary in index.boundaries_after(after_ms / 1_000):
             timestamp_ms = round(boundary * 1_000) + 1
-            try:
-                active_rows, text = authored_ass_rows_at(source, track_id, timestamp_ms)
-            except (TypeError, ValueError):
+            inputs = self._lookahead_cue(source, track_id, timestamp_ms, render_inputs)
+            if inputs is None:
                 continue
-            if not active_rows.strip() or not text.strip():
-                continue
-            inputs = _CueInputs(
-                timestamp_ms,
-                timestamp_ms + 1,
-                timestamp_ms,
-                text,
-                active_rows,
-                render_inputs.frame_size,
-                render_inputs.storage_size,
-                render_inputs.pixel_aspect,
-                render_inputs.margins,
-                render_inputs.use_margins,
-                render_inputs.profile,
-            )
             key = self._key(path, inputs)
             if key in queued_keys:
                 continue
@@ -1011,6 +1091,7 @@ class NativeSubtitleGeometry:
                     inputs,
                     selection.annotations,
                     fonts,
+                    RendererState(),
                 )
 
             self.worker.prefetch(key, generation, build)
@@ -1032,14 +1113,25 @@ class NativeSubtitleGeometry:
     def _active_observation(
         self,
         seen: GeometryObservation,
-        source: bytes,
+        source: bytes | None,
         track_id: SubtitleTrackId,
         start: float,
         end: float,
         active_rows: object,
     ) -> tuple[float, float, int, str] | None:
+        """Where in the track this cue is, and the rows that make it up.
+
+        `source` is `None` for a converted track — mpv is not rendering a file there, so there is no
+        document to index into and the rows have to come from mpv itself.
+        """
         hint = seen.cue_hint
-        if hint is not None:
+        if hint is not None and self.source_kind is SourceKind.CONVERTED:
+            # The hint means "we navigated and mpv has not caught up". On an authored track the
+            # document answers for the target cue; on a converted one there is nothing to ask until
+            # mpv reports the rows, so wait for it rather than measure the cue we are leaving.
+            self._degrade_geometry("subtitle-observation-pending")
+            return None
+        if hint is not None and source is not None:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
             if semantic_text != seen.normalise(seen.text):
@@ -1069,6 +1161,50 @@ class NativeSubtitleGeometry:
                     start, end = indexed.start, indexed.end
         return start, end, timestamp_ms, active_rows
 
+    def _render_space(self, render: _RenderInputs) -> converted.RenderSpace:
+        return converted.RenderSpace(render.frame_size[0], render.frame_size[1], render.margins)
+
+    def _converted_scale(self, render: _RenderInputs) -> float:
+        """`ass_set_font_scale` on mpv's converted branch — the letterbox multiplier, not 1.
+
+        The gate already refuses `--sub-scale-with-window` and `--sub-scale-by-window` off their
+        defaults, so both are `True` here; passing them anyway keeps the port readable against
+        `configure_ass` rather than folded into an assumption.
+        """
+        return converted.font_scale(self._render_space(render), use_margins=render.use_margins)
+
+    def _document_for(self, rows: str, render: _RenderInputs) -> bytes:
+        """The document the boxes are measured against.
+
+        Authored: the file, as mpv reads it. Converted: rebuilt around the rows mpv just reported,
+        because mpv is rendering libavcodec's conversion rather than anything on disk, and
+        `sub-ass-extradata` is *property unavailable* there so its header cannot be read back.
+        """
+        if self.source_kind is SourceKind.CONVERTED:
+            return converted.document(
+                rows, self._render_space(render), scale=self._converted_scale(render)
+            )
+        return self._source_bytes or b""
+
+    def _renderer_state(self, render: _RenderInputs) -> RendererState:
+        """What the measuring renderer must be set to for this track kind.
+
+        Nothing for an authored one — mpv leaves its renderer at libass's defaults there. For a
+        converted one, the font scale and the three track features `configure_ass` turns on
+        (`sd_ass.c:604-615`); each of them changes how a run's advances accumulate, so leaving them
+        off measures a layout mpv is not drawing.
+        """
+        if self.source_kind is not SourceKind.CONVERTED:
+            return RendererState()
+        return RendererState(
+            font_scale=self._converted_scale(render),
+            features=(
+                (_ASS_FEATURE_WRAP_UNICODE, True),
+                (_ASS_FEATURE_BIDI_BRACKETS, True),
+                (_ASS_FEATURE_WHOLE_TEXT_LAYOUT, True),
+            ),
+        )
+
     def _trace_unscheduled(self, reason: str, cue_revision: int) -> None:
         """Name a geometry schedule that never started. Not a degrade: the inputs are not assembled
         yet, so pixels and ownership are untouched — only the silence is the bug. The revision is
@@ -1081,9 +1217,9 @@ class NativeSubtitleGeometry:
     def _unassembled_input(self, *, cue_text: str, has_tokens: bool) -> str | None:
         """Which of the four schedule preconditions is not met yet, if any. These are "inputs not
         assembled", not a failure — name which and do not degrade."""
-        if self.source_path is None:
+        if self.source_path is None or self.source_kind is SourceKind.NONE:
             return "no-source-path"
-        if self._source_bytes is None:
+        if self.source_kind is SourceKind.AUTHORED and self._source_bytes is None:
             return "no-source-bytes"
         if not cue_text.strip():
             return "no-cue-text"
@@ -1093,9 +1229,11 @@ class NativeSubtitleGeometry:
 
     def _resolve_schedule_inputs(self, seen: GeometryObservation) -> _ScheduleInputs | None:
         path = self.source_path
+        # `None` for a converted track by design: mpv is not rendering a file there either, so the
+        # document is rebuilt per cue from the rows it reports (`_document_for`).
         source = self._source_bytes
         unassembled = self._unassembled_input(cue_text=seen.text, has_tokens=bool(seen.tokens))
-        if unassembled is not None or path is None or source is None:
+        if unassembled is not None or path is None:
             # Every other exit below records a reason; this one used to return a bare None, so a
             # geometry schedule that never ran was invisible in the logs and in telemetry.
             self._trace_unscheduled(unassembled or "no-source-path", seen.cue_revision)
@@ -1150,7 +1288,7 @@ class NativeSubtitleGeometry:
         )
         return _ScheduleInputs(
             path,
-            source,
+            self._document_for(rows, render),
             track_id,
             generation,
             render,
@@ -1228,7 +1366,14 @@ class NativeSubtitleGeometry:
             self._degrade_geometry("mpv-sub-visibility-rejected")
             return False
 
-        def build(fonts: subtitle_fonts.FontEnvironment = self._fonts) -> GeometryRequest:
+        # Bound now, not read in the closure: the job runs on the worker, and by then the track may
+        # have changed under it — the same reason `fonts` is bound here.
+        renderer_state = self._renderer_state(inputs.render)
+
+        def build(
+            fonts: subtitle_fonts.FontEnvironment = self._fonts,
+            state: RendererState = renderer_state,
+        ) -> GeometryRequest:
             return self._build(
                 inputs.source,
                 inputs.track_id,
@@ -1236,6 +1381,7 @@ class NativeSubtitleGeometry:
                 inputs.cue,
                 selection.annotations,
                 fonts,
+                state,
             )
 
         def settled() -> None:

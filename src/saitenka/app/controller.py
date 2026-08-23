@@ -422,6 +422,7 @@ class Reader:
                     ),
                 ),
                 lookahead=o.subtitle_geometry.lookahead,
+                formats=native_subtitles.native_formats(o.subtitle_geometry.native_formats),
             )
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac

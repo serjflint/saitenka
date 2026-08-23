@@ -287,6 +287,7 @@ def test_backend_forwards_every_font_source_to_the_renderer() -> None:
             "default_family": "sans-serif",
             "fontconfig_config": "/config/fonts.conf",
             "font_provider": 3,
+            "features": [],
         }
     ]
 
@@ -321,6 +322,7 @@ def test_backend_forwards_mpv_margin_contract() -> None:
                 "margins": (98, 99, 0, 0),
                 "use_margins": True,
                 "max_bitmap_bytes": 1_843_200,
+                "style": None,
             },
         )
     ]

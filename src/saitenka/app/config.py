@@ -351,6 +351,16 @@ class SubtitleGeometryOptions:
         default=False,
         metadata={"help": "Keep mpv subtitles visible and derive hover geometry with libass."},
     )
+    native_formats: str = field(
+        default="authored-ass",
+        metadata={
+            "help": (
+                "Which tracks the native path takes: authored-ass (only .ass) or all (also the "
+                "SubRip tracks mpv converts, which lose cue lookahead). Ignored when "
+                "native_visible is off."
+            )
+        },
+    )
     library_path: str | None = field(
         default=None,
         metadata={"help": "Optional explicit path to the system libass library."},

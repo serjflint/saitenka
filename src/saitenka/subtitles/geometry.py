@@ -55,6 +55,22 @@ class FontSetup:
 
 
 @dataclass(frozen=True, slots=True)
+class RendererState:
+    """Renderer state a host sets per frame, which a measuring renderer has to set identically.
+
+    `font_scale` is not decoration: on a track the host converted it is a letterbox-dependent
+    multiplier, not 1, so a renderer that leaves it alone lays every box out at the wrong size —
+    uniformly, which is the hardest kind of wrong to notice.
+
+    `features` are `ASS_Feature` flags applied to the track before its first render, as
+    `(feature, enabled)` pairs; they change how a run's advances accumulate.
+    """
+
+    font_scale: float = 1.0
+    features: tuple[tuple[int, bool], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class TokenGeometry:
     """Geometry for one semantic token; ``bounds`` is the stable UI anchor."""
 
@@ -143,6 +159,7 @@ class GeometryRequest:
     reserved_rgb: tuple[int, ...] = ()
     attachments: tuple[tuple[str, bytes], ...] = ()
     font_setup: FontSetup = field(default_factory=FontSetup)
+    renderer_state: RendererState = field(default_factory=RendererState)
     render_profile: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
@@ -166,6 +183,7 @@ class GeometryRequest:
             repr(self.palette),
             repr(self.reserved_rgb),
             repr(self.font_setup),
+            repr(self.renderer_state),
             repr(self.render_profile),
         ):
             digest.update(value.encode())

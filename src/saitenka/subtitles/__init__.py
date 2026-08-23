@@ -47,6 +47,7 @@ from saitenka.subtitles.geometry import (
     GeometrySnapshot,
     GeometryVariant,
     Rect,
+    RendererState,
     TokenGeometry,
 )
 from saitenka.subtitles.index import CueIndex
@@ -78,6 +79,7 @@ __all__ = [
     "RawSubtitleTrack",
     "RawTextSpan",
     "Rect",
+    "RendererState",
     "SubtitleAttachment",
     "SubtitleEventId",
     "SubtitleFrameId",

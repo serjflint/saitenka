@@ -4,12 +4,12 @@
     "delegated": 1,
     "delegator": 94,
     "derived": 45,
-    "init_lines": 456,
+    "init_lines": 457,
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2350,
+    "substantive_lines": 2351,
     "total": 344
   },
-  "reason": "the legacy renderer became selectable at runtime, so the host carries one more command verb to its coordinator \u2014 the comparison target this work is measured against was previously reachable only through catastrophic recovery"
+  "reason": "the geometry owner is told which track formats it may take, so the host passes one config value through at composition \u2014 the format decision belongs to the owner, not to the host that constructs it"
 }
