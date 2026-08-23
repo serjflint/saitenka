@@ -7,6 +7,7 @@ import copy
 import hashlib
 import importlib
 import json
+import os
 import platform
 import statistics
 import sys
@@ -168,40 +169,51 @@ def _performance_passes(report: dict, manifest: dict) -> bool:
     )
 
 
-def _functional_passes(report: dict, manifest: dict) -> bool:
+def _functional_checks(report: dict, manifest: dict) -> dict[str, bool]:
+    """Every functional invariant, named. One conjunction tells you a run failed; this tells you
+    which clause, which is the difference between reading a log and re-deriving it by hand."""
     workloads = report.get("simultaneous_frame_workloads", [])
-    expected_counts = manifest["simultaneous_event_counts"]
-    return bool(
-        report.get("schema") == 1
-        and report["event_count"] == manifest["event_count"]
-        and report["interaction_clock"] == manifest["interaction_clock"]
-        and report["result_cache_entries"] <= manifest["cache_max"]
-        and report["prefetch_cache_entries"] <= manifest["cache_max"]
-        and report["presented"] == manifest["event_count"]
-        and report["completed"] == manifest["event_count"]
-        and report["geometry_apply_count"] == report["ready_before_presented"]
-        and report["hit_test_count"] == report["presented"]
+    return {
+        "schema": report.get("schema") == 1,
+        "event_count": report["event_count"] == manifest["event_count"],
+        "interaction_clock": report["interaction_clock"] == manifest["interaction_clock"],
+        "result_cache_bounded": report["result_cache_entries"] <= manifest["cache_max"],
+        "prefetch_cache_bounded": report["prefetch_cache_entries"] <= manifest["cache_max"],
+        "presented_every_cue": report["presented"] == manifest["event_count"],
+        "completed_every_cue": report["completed"] == manifest["event_count"],
+        "applied_what_was_ready": (
+            report["geometry_apply_count"] == report["ready_before_presented"]
+        ),
+        "hit_tested_every_presentation": report["hit_test_count"] == report["presented"],
         # Against presentations, not applications: the two are sampled on opposite sides of the
         # geometry lane's terminal, so the one cold cue that presents before its geometry lands
         # separates them by exactly one with nothing wrong. Every presented cue drawing focus is
         # both the stricter claim and the one that survives an asynchronous pipeline.
-        and report["focus_draw_count"] == report["presented"]
-        and report["tooltip_open_count"] == report["presented"]
-        and report["tooltip_scroll_count"] == report["presented"]
-        and report["failures"] == 0
-        and report["last_error"] is None
-        and report["superseded"] == 0
-        and report["prefetch_dropped"] == 0
-        and report["source_clear_current"] is False
-        and report["source_clear_hit_count"] == 0
-        and report["profile_switch_cache_entries"] == 0
-        and report["close_completed"] is True
-        and [item["active_events"] for item in workloads] == expected_counts
-        and all(
+        "focus_drew_every_presentation": report["focus_draw_count"] == report["presented"],
+        "tooltip_opened_every_presentation": report["tooltip_open_count"] == report["presented"],
+        "tooltip_scrolled_every_presentation": (
+            report["tooltip_scroll_count"] == report["presented"]
+        ),
+        "no_failures": report["failures"] == 0,
+        "no_last_error": report["last_error"] is None,
+        "nothing_superseded": report["superseded"] == 0,
+        "no_prefetch_dropped": report["prefetch_dropped"] == 0,
+        "source_cleared": report["source_clear_current"] is False,
+        "no_source_clear_hits": report["source_clear_hit_count"] == 0,
+        "profile_switch_evicted_caches": report["profile_switch_cache_entries"] == 0,
+        "closed_cleanly": report["close_completed"] is True,
+        "workload_denominator": (
+            [item["active_events"] for item in workloads] == manifest["simultaneous_event_counts"]
+        ),
+        "workload_tokens_all_found": all(
             item["eligible_tokens"] == item["found_tokens"] == item["active_events"]
             for item in workloads
-        )
-    )
+        ),
+    }
+
+
+def _functional_passes(report: dict, manifest: dict) -> bool:
+    return all(_functional_checks(report, manifest).values())
 
 
 def evaluate(report: dict, manifest: dict) -> bool:
@@ -644,6 +656,61 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
     return report
 
 
+@contextmanager
+def _native_log_to(path: Path):
+    """Point fd 2 at `path` for the duration, so libass's chatter lands in a file.
+
+    libass logs its version, shaper, font provider and every `fontselect` at default verbosity —
+    once per renderer, and this builds one per cue. libasslite installs no message callback, so
+    there is no level to turn down from Python and the descriptor is the only knob. It has to be
+    fd 2, not `sys.stderr`: the writer is C, and rebinding the Python object would not move it.
+    """
+    sys.stderr.flush()
+    saved = os.dup(2)
+    sink = path.open("wb")
+    try:
+        os.dup2(sink.fileno(), 2)
+        yield
+    finally:
+        sys.stderr.flush()
+        os.dup2(saved, 2)
+        os.close(saved)
+        sink.close()
+
+
+def _summarize(report: dict, manifest: dict, output: Path) -> str:
+    """A console view sized for a human, with the full record left in the artifact.
+
+    Dumping the report to stdout printed ~1800 lines of raw latency samples, which is where the one
+    line that says *why* a run failed used to go to die.
+    """
+    verdict = "pass" if report["all_functional_invariants_passed"] else "FAIL"
+    lines = [
+        (
+            f"trials {report['completed_trials']}/{report['trial_count']}"
+            f"  performance {report['performance_passes']}/{report['required_performance_passes']}"
+            f"  functional {verdict}"
+        ),
+    ]
+    for trial in report["trials"]:
+        index = trial["index"]
+        if trial.get("status") != "completed":
+            lines.append(f"  trial {index}: {trial['status']} — {trial.get('error', '')}")
+            continue
+        done = trial["report"]
+        lines.append(
+            f"  trial {index}: cpu p99 {done['interaction_cpu_p99_ms']:.2f}ms"
+            f"  wall p99 {done['interaction_p99_ms']:.2f}ms"
+            f"  ready {done['ready_before_presentation_ratio']:.3f}"
+            f"  rss +{done['retained_rss_growth_mib']:.1f}MiB"
+        )
+        failed = [name for name, ok in _functional_checks(done, manifest).items() if not ok]
+        if failed:
+            lines.append(f"    functional failures: {', '.join(failed)}")
+    lines.append(f"full report: {output}")
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
@@ -651,9 +718,18 @@ def main() -> int:
     parser.add_argument("--library-path", type=Path)
     args = parser.parse_args()
     manifest = load_manifest(args.manifest)
-    report = execute_trials(manifest, args.library_path, args.output)
-    print(json.dumps(report, indent=2))
-    return 0 if report["integration_budgets_passed"] else 1
+    native_log = args.output.with_name(f"{args.output.stem}-libass.log")
+    with _native_log_to(native_log):
+        report = execute_trials(manifest, args.library_path, args.output)
+    passed = report["integration_budgets_passed"]
+    print(_summarize(report, manifest, args.output))
+    captured = native_log.read_text(encoding="utf-8", errors="replace").splitlines()
+    print(f"native log: {len(captured)} lines → {native_log}")
+    if not passed:
+        # A failure has to stay diagnosable from the console alone, so the tail comes back out.
+        for line in captured[-40:]:
+            print(f"  | {line}")
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

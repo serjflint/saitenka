@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import native_subtitle_integration_benchmark as benchmark
 import pytest
@@ -74,6 +75,39 @@ def manifest() -> dict:
 
 def test_budget_oracle_accepts_locked_boundary() -> None:
     assert evaluate(report(), manifest())
+
+
+def test_every_functional_clause_is_named_and_reported() -> None:
+    """The console summary has to say WHICH invariant failed.
+
+    A single conjunction only says a run failed, and recovering the clause then costs a throwaway
+    script against the artifact — which is what the six-day-outage repair actually cost.
+    """
+    healthy = benchmark._functional_checks(report(), manifest())
+
+    assert all(healthy.values()), "the locked fixture must satisfy every named clause"
+
+    broken = report()
+    broken["tooltip_open_count"] = broken["presented"] - 1
+    checks = benchmark._functional_checks(broken, manifest())
+
+    assert [name for name, ok in checks.items() if not ok] == ["tooltip_opened_every_presentation"]
+    assert not benchmark._functional_passes(broken, manifest()), "naming must not weaken the oracle"
+
+
+def test_summary_names_the_failing_clause_without_dumping_samples() -> None:
+    broken = report()
+    broken["tooltip_open_count"] = broken["presented"] - 1
+    summary = benchmark._summarize(
+        benchmark.summarize_trials([broken, broken, broken], manifest()),
+        manifest(),
+        Path("/tmp/report.json"),
+    )
+
+    assert "tooltip_opened_every_presentation" in summary
+    # The samples are the artifact's job: dumping them here is what buried the verdict.
+    assert "interaction_samples_ms" not in summary
+    assert len(summary.splitlines()) < 20
 
 
 def test_budget_oracle_accepts_wall_frame_boundary() -> None:
