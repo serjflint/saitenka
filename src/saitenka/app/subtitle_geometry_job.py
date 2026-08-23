@@ -11,7 +11,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
 from saitenka.runtime import EffectFinished, Owner
@@ -69,6 +69,20 @@ class GeometryJob:
     prefetch: tuple[str, tuple[int, GeometryRequestBuilder]] | None
 
 
+class _Prefetched(NamedTuple):
+    """One speculative result, with the render identity it was filed under.
+
+    The key is carried rather than recomputed: this map is keyed by the caller's cue key while the
+    result cache is keyed by `cache_key()`, and reconciling them is per-cue work on the coverage
+    budget's path. `cache_key()` hashes the whole document and every embedded font, so deriving it
+    there costs milliseconds under the worker lock on an attachment-heavy release.
+    """
+
+    cache_key: str
+    request: GeometryRequest
+    snapshot: GeometrySnapshot
+
+
 def run_geometry_job(request: object, cancelled: threading.Event) -> object:
     _ = cancelled  # the coordinator's generation fence already retires superseded work
     if not isinstance(request, GeometryJob):
@@ -105,7 +119,7 @@ class SubtitleGeometryWorker:
         self._condition = threading.Condition()
         self._pending: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None = None
         self._prefetch_pending: OrderedDict[str, tuple[int, GeometryRequestBuilder]] = OrderedDict()
-        self._prefetched: OrderedDict[str, tuple[GeometryRequest, GeometrySnapshot]] = OrderedDict()
+        self._prefetched: OrderedDict[str, _Prefetched] = OrderedDict()
         self._prefetch_inflight_key: str | None = None
         self._prefetch_waiters: dict[str, GeometryReservation] = {}
         self._provenance: OrderedDict[str, GeometryCacheReason] = OrderedDict()
@@ -208,16 +222,14 @@ class SubtitleGeometryWorker:
         The queue policy stays here — a single current slot that supersedes, a bounded prefetch
         queue that drops oldest — because the broker owns admission and never feature state.
         """
-        queued: Callable[[], None] | None = None
         with self._condition:
             if self._closed or self._inflight:
                 return
             pending, self._pending = self._pending, None
             if pending is not None:
                 job = GeometryJob(self, pending, None)
-                queued = self._pending_settled
-                if queued is not None:
-                    self._settling.append(queued)
+                if self._pending_settled is not None:
+                    self._settling.append(self._pending_settled)
                 self._pending_settled = None
             elif self._prefetch_pending:
                 entry = self._prefetch_pending.popitem(last=False)
@@ -244,15 +256,19 @@ class SubtitleGeometryWorker:
             if job.current is not None:
                 self._superseded += 1
             else:
+                # A caller can attach to an in-flight speculation between this key being published
+                # and the submit returning, and it registers a waiter rather than a job of its own.
+                self._prefetch_waiters.pop(self._prefetch_inflight_key or "", None)
                 self._prefetch_inflight_key = None
                 self._prefetch_dropped += 1
-            # The terminal that owed this settlement will never arrive. Left queued, the NEXT job's
-            # terminal pays it out — running this cue's callback against a later cue's snapshot.
-            if queued is not None and queued in self._settling:
-                self._settling.remove(queued)
+            # Everything `_settling` holds is owed by the job just refused, whose terminal will never
+            # arrive — `_delivered` drains before pumping, and a caller can only attach while a job
+            # is in flight. Left queued, the NEXT terminal pays them out, running one cue's callback
+            # against another cue's snapshot with the callback's owner nowhere in the traceback.
+            owed, self._settling = self._settling, []
             self._condition.notify_all()
-        if queued is not None:
-            queued()
+        for settle in owed:
+            settle()
         # The refusal freed the slot; without this a queued prefetch waits for an unrelated event.
         self._pump()
 
@@ -308,7 +324,7 @@ class SubtitleGeometryWorker:
             if cached is None:
                 return None
             self._prefetched[key] = cached
-        request, result = cached
+        request, result = cached.request, cached.snapshot
         rebound_request = dataclass_replace(request, generation=generation)
         rebound_result = dataclass_replace(result, generation=generation)
         ticket = self._coordinator.bind(reservation, rebound_request)
@@ -378,11 +394,10 @@ class SubtitleGeometryWorker:
         The prefetch-only ones come first: every prefetch is written to both maps, so a render the
         cache no longer holds is one the cache evicted, which makes it the oldest thing here.
         """
-        cached = dict(self._cache)
         prefetch_only = [
-            (key, snapshot)
-            for request, snapshot in self._prefetched.values()
-            if (key := request.cache_key()) not in cached
+            (entry.cache_key, entry.snapshot)
+            for entry in self._prefetched.values()
+            if entry.cache_key not in self._cache
         ]
         return prefetch_only + list(self._cache.items())
 
@@ -416,9 +431,9 @@ class SubtitleGeometryWorker:
         """
         if key in self._cache:
             self._cache[key] = stripped  # assignment to an existing key keeps its LRU position
-        for cue, (request, _snapshot) in list(self._prefetched.items()):
-            if request.cache_key() == key:
-                self._prefetched[cue] = (request, stripped)
+        for cue, entry in list(self._prefetched.items()):
+            if entry.cache_key == key:
+                self._prefetched[cue] = entry._replace(snapshot=stripped)
 
     def _idle(self) -> None:
         self._inflight = False
@@ -480,7 +495,7 @@ class SubtitleGeometryWorker:
                 self._prefetch_dropped += 1
                 return waiter
             self._prefetched.pop(key, None)
-            self._prefetched[key] = (request, result)
+            self._prefetched[key] = _Prefetched(request.cache_key(), request, result)
             self._store(request, result)
             self._prefetched_count += 1
             while len(self._prefetched) > self._cache_max:

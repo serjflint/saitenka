@@ -812,6 +812,39 @@ def test_the_trim_treats_a_cue_the_result_cache_evicted_as_the_oldest(monkeypatc
     assert newer.tokens[0].coverage == HeavyCoverageBackend.MASK
 
 
+def test_a_caller_that_attached_to_a_refused_speculation_is_settled_too() -> None:
+    """The other way a caller is owed a settlement, and the one a refusal used to strand.
+
+    `_pump` publishes the in-flight prefetch key inside the lock and submits outside it. A caller
+    whose request matches that key in the window between registers a waiter and no job of its own,
+    appending its callback directly. Paying only the queued one left this in `_settling` for the
+    next terminal — one cue's callback against another cue's snapshot.
+
+    The submitter drives the interleaving instead of a thread, so the window is a fact of the code
+    rather than of the scheduler.
+    """
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    settled: list[str] = []
+    worker: SubtitleGeometryWorker | None = None
+
+    def refuse_after_a_caller_attaches(**_kwargs) -> bool:
+        assert worker is not None
+        worker.submit_job(
+            coordinator.generation,
+            lambda: request(coordinator.generation),
+            work_key="cue-0",
+            on_settled=lambda: settled.append("attached"),
+        )
+        return False
+
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=refuse_after_a_caller_attaches)
+    assert worker.prefetch("cue-0", coordinator.generation, lambda: request(coordinator.generation))
+
+    assert settled == ["attached"]
+    assert not worker._prefetch_waiters, "the refused speculation left a waiter behind"
+    worker.close()
+
+
 def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> None:
     """A settlement is queued against the terminal of the job that owes it. Refused admission means
     that terminal never arrives, so leaving it queued hands it to the NEXT job's terminal — which
