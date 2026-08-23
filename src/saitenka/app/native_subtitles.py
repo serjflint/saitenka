@@ -756,7 +756,7 @@ class NativeSubtitleGeometry:
             span.set("reason", reason)
             span.set("generation", self.worker.generation)
             span.set("source_epoch", self._source_epoch)
-            span.set("source_class", "external-ass" if self.source_path is not None else "none")
+            span.set("source_class", self.source_kind)
             span.set("ass_full_capability", self.ass_full_capability)
             span.set("active_events", active_events)
             span.set("eligible_tokens", self._eligible_tokens)

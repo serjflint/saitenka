@@ -1989,6 +1989,43 @@ def converted_reader(tmp_path: Path, *, codec: str = "subrip"):
     return result, ipc, backend
 
 
+def test_the_user_s_subtitle_style_reaches_the_document_the_boxes_are_measured_against(
+    tmp_path: Path,
+) -> None:
+    """The end of the plumbing, not the reader in isolation: a `--sub-margin-y` mpv reports has to
+    come out the other side as the `MarginV` libass is handed. It did not — `document()` was called
+    with no style at all, so every converted cue on every machine was laid out against mpv's
+    defaults, and a user who had moved the subtitles saw a second copy of the line offset from
+    theirs."""
+    result, ipc, backend = converted_reader(tmp_path)
+    ipc.props["options/sub-margin-y"] = 120
+    ipc.props["options/sub-bold"] = True
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    style = next(
+        line
+        for line in backend.requests[-1].ass.decode().splitlines()
+        if line.startswith("Style: Default")
+    ).split(",")
+    assert style[21] == str(round(round(120 * 288 / 720) * 1.0))  # MarginV, at this font scale
+    assert style[7] == "1"  # Bold
+
+
+def test_a_converted_track_says_so_in_the_span_that_diagnoses_it(tmp_path: Path, monkeypatch):
+    """`source_class` read `source_path`, so every converted track called itself `external-ass` —
+    the one label that rules out the branch it was actually on. A span whose job is to say which
+    document the boxes came from must not name a different one."""
+    spans = _decision_spans(monkeypatch)
+    result, ipc, _backend = converted_reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert {span["source_class"] for span in spans if "source_class" in span} == {"converted"}
+
+
 def test_a_converted_track_is_measured_against_the_document_mpv_rebuilt(tmp_path: Path) -> None:
     """mpv never renders a SubRip file — libavcodec converts it and mpv renders that. The boxes have
     to be measured against the conversion, so the document is rebuilt around the rows mpv reports
