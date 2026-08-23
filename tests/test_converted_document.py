@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from saitenka.subtitles import converted
+from saitenka.subtitles.geometry import RendererState
 
 EVENTS = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Hello world"
 HD = converted.RenderSpace(1920, 1080)
@@ -132,3 +133,78 @@ def test_the_vertical_margin_scales_with_the_font_and_the_horizontal_with_playre
 
     assert int(fields[19]) == round(round(19 * reference) * converted.play_res_x(HD) / 384)
     assert int(fields[21]) == round(round(34 * reference) * 2.0)
+
+
+def test_the_style_row_states_alpha_the_way_a_style_row_states_it() -> None:
+    """The struct and the text are not the same four bytes. `MP_ASS_RGBA` packs `RRGGBBAA` for the
+    field mpv assigns; a `Style:` row is `&HAABBGGRR`, which libass reorders on parse. Printing
+    mpv's integer verbatim reads the alpha off the wrong end, and opaque white becomes `&HFFFFFF00`
+    — alpha `0xFF`, fully transparent, so libass paints nothing and every token loses its box.
+    """
+    fields = (
+        converted.style_row(converted.SubStyle(), converted.PLAYRES_Y, HD, scale=1.0)
+        .removeprefix("Style: ")
+        .split(",")
+    )
+
+    assert fields[3] == "&H00FFFFFF"  # PrimaryColour: opaque white
+    assert fields[6] == "&H50000000"  # BackColour: black at mpv's default opacity
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_every_token_of_a_converted_cue_gets_a_box_from_real_libass() -> None:
+    """The reconstruction's arithmetic being right is not the claim that matters. The claim is that
+    libass, handed this document, paints each token in the color it was asked for — and only a real
+    render can say so. Everything above compares numbers to numbers, which is how a style row that
+    made every glyph fully transparent passed eighteen tests and failed every cue on a user's
+    screen.
+    """
+    from saitenka.subtitles import (
+        GeometryPaletteEntry,
+        GeometryRequest,
+        SubtitleTrackId,
+        TokenAnnotation,
+    )
+    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+    cue, spans = "（鳥のさえずり）", ((1, 2), (2, 3), (3, 7))
+    frame = (HD.width, HD.height)
+    row = f"Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,{cue}"
+    scale = converted.font_scale(HD)
+    track = SubtitleTrackId("converted-render")
+    prepared = prepare_ass_hit_map_frame(
+        converted.document(row, HD, scale=scale),
+        track,
+        active_rows=row,
+        text=cue,
+        tokens=[TokenAnnotation(index, *span) for index, span in enumerate(spans)],
+    )
+
+    backend = LibassGeometryBackend()
+    try:
+        snapshot = backend.render(
+            GeometryRequest(
+                1,
+                track,
+                prepared.frame_id,
+                11_256,
+                frame,
+                frame,
+                prepared.ass,
+                palette=tuple(
+                    GeometryPaletteEntry(
+                        entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
+                    )
+                    for entry in prepared.palette
+                ),
+                reserved_rgb=prepared.reserved_rgb,
+                renderer_state=RendererState(font_scale=scale),
+            )
+        )
+    finally:
+        backend.close()
+
+    assert [token.token_index for token in snapshot.tokens] == [0, 1, 2]
+    assert all(token.bounds.width > 0 and token.bounds.height > 0 for token in snapshot.tokens)

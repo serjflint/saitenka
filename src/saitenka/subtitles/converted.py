@@ -199,7 +199,16 @@ def _fmt(value: float) -> str:
 
 
 def _color(color: Color) -> str:
-    return f"&H{color.as_ass():08X}"
+    """The same color a `Style:` row's way round.
+
+    mpv never writes this text: it assigns `MP_ASS_RGBA`'s `RRGGBBAA` straight into the style
+    struct. A `Style:` row is `&HAABBGGRR`, which libass reorders back into that struct when it
+    parses. Printing mpv's integer verbatim therefore reads the alpha off the wrong end — opaque
+    white (`0xFFFFFF00`) becomes `&HFFFFFF00`, alpha `0xFF`, and libass paints nothing at all.
+    """
+    packed = color.as_ass()
+    red, green, blue = (packed >> 24) & 0xFF, (packed >> 16) & 0xFF, (packed >> 8) & 0xFF
+    return f"&H{packed & 0xFF:02X}{blue:02X}{green:02X}{red:02X}"
 
 
 def document(
