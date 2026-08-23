@@ -89,6 +89,8 @@ RENDER_SPACE_PROPERTIES = frozenset(
         "options/sub-fonts-dir",
         "options/osd-fonts-dir",
         "options/osd-font-provider",
+        "options/video-crop",
+        "options/video-rotate",
     }
 )
 # A changed authored-text input invalidates the cached ``sub-text/ass-full`` probe.

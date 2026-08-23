@@ -287,6 +287,8 @@ OBSERVED_PROPS = (
     "options/sub-fonts-dir",
     "options/osd-fonts-dir",
     "options/osd-font-provider",
+    "options/video-crop",
+    "options/video-rotate",
     "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
 )
 # Which observations are geometry inputs, which retire the cue identity, and which render space

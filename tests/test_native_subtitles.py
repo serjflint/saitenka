@@ -3177,6 +3177,8 @@ _SUPPORTED_SETTINGS = {
     "sub-scale-by-window": True,
     "blend-subtitles": False,
     "sub-filter-sdh": False,
+    "video-crop": "",
+    "video-rotate": 0,
     "sub-font-provider": "auto",
     "embeddedfonts": False,
     "sub-fonts-dir": None,
@@ -3214,10 +3216,9 @@ def test_a_default_mpv_render_configuration_supports_native_geometry():
         ("sub-ass-scale-with-window", True),
         ("sub-ass-use-video-data", "aspect-only"),
         ("sub-ass-style-overrides", ["Default.FontSize=60"]),
-        # Not arithmetic we skipped: mpv draws the glyphs into the video frame before interpolation
-        # and colour management, and our overlay is composited after that, at a different
-        # resolution and through a different filter chain.
-        ("blend-subtitles", True),
+        # `=video` alone, and not for the arithmetic: it lays the cue out on `texture_w/h` AFTER the
+        # user's shader hooks, which a `--glsl-shader` can resize and no property reports.
+        ("blend-subtitles", "video"),
     ],
 )
 def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: str, value: object):
@@ -3226,6 +3227,56 @@ def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: s
     the setting because a user who set it needs to know which one to undo."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+LETTERBOX = {"w": 1920, "h": 1080, "mt": 140, "mb": 140, "ml": 0, "mr": 0, "par": 1.0}
+
+
+def test_blending_lays_the_cue_out_on_the_video_rectangle_not_the_window() -> None:
+    """`--blend-subtitles=yes` draws the subtitle into the video texture before scaling, on an
+    `mp_osd_res` mpv rebuilds from the src/dst rects (`video.c:3249-3263`): the video's on-screen
+    rectangle, every margin zero, `display_par` 1. Laying out on the window instead would put the
+    cue in the letterbox — the whole 280px of it — and every box beside its word."""
+    result = _inputs(osd=LETTERBOX, frame_size=(1920, 1080), **{"blend-subtitles": "yes"})
+
+    assert result.frame_size == (1920, 800)
+    assert result.margins == (0, 0, 0, 0)
+    assert result.box_origin == (0, 140)
+
+
+def test_without_blending_the_letterbox_stays_part_of_the_frame() -> None:
+    """The negative control. `--sub-use-margins=yes` is in the profile precisely so mpv may put the
+    cue in the letterbox, so the unblended frame is the whole window and the origin is nothing."""
+    result = _inputs(osd=LETTERBOX, frame_size=(1920, 1080))
+
+    assert result.frame_size == (1920, 1080)
+    assert result.margins == (140, 140, 0, 0)
+    assert result.box_origin == (0, 0)
+
+
+def test_the_blend_surface_drops_the_screens_own_aspect() -> None:
+    """`display_par` is 1.0 on the blend rect, so only the video's own pixel aspect survives —
+    keeping the screen's would stretch every box by it."""
+    result = _inputs(
+        osd={**LETTERBOX, "par": 2.0},
+        video={"w": 1920, "h": 1080, "par": 1.5},
+        frame_size=(1920, 1080),
+        **{"blend-subtitles": "yes"},
+    )
+
+    assert result.pixel_aspect == 1.5
+
+
+@pytest.mark.parametrize(("name", "value"), [("video-crop", "1280x720"), ("video-rotate", 90)])
+def test_a_crop_or_rotation_is_refused_only_while_blending(name: str, value: object) -> None:
+    """`_blend_space` derives the video rectangle from the premise that the src rect is the whole
+    image. A crop breaks that outright and a rotation re-orients it (`aspect.c:156-163`). Neither
+    changes anything the unblended path reads, so refusing them there would cost tracks for nothing.
+    """
+    with pytest.raises(ValueError, match=name):
+        _inputs(**{name: value, "blend-subtitles": "yes"})
+
+    assert _inputs(**{name: value}).frame_size == (1920, 1080)
 
 
 @pytest.mark.parametrize(

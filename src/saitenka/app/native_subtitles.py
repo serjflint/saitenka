@@ -286,23 +286,23 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         # (gated above) and never reads `sub-scale-by-window` at all, so refusing either there would
         # cost an episode's interaction over an option with no effect on it.
         #
-        # `--blend-subtitles` stays refused, but NOT because the overprint could not reach it. Our
-        # overlay is still drawn last and at screen resolution — with blend on, the final pass is
-        # `OSD_DRAW_OSD_ONLY` onto the screen (`video/out/gpu/video.c:3650`), so our layer wins
-        # exactly as it does otherwise. What moves is where MPV's glyphs are: it builds a different
-        # `mp_osd_res` for the blend pass (`video.c:3227-3273`), and our boxes would be laid out
-        # against the OSD surface it is no longer drawing into.
+        # `--blend-subtitles` does not move our overlay: it is still drawn last and at screen
+        # resolution, in the `OSD_DRAW_OSD_ONLY` pass onto the screen (`video/out/gpu/video.c:3650`).
+        # What moves is where MPV's glyphs are — it builds a different `mp_osd_res` for the blend
+        # pass (`video.c:3227-3273`), and the boxes have to be laid out against that surface and
+        # then offset onto the screen.
         #
-        # That is a coordinate mapping, and for `=yes` it is derivable — a port of the src/dst rect
-        # geometry (`video/out/aspect.c`) plus the margin scaling right there in the pass. `=video`
-        # has one input nothing exposes: `texture_w/h` AFTER the user's shader hooks, which a
-        # `--glsl-shader` can resize.
-        #
-        # The reason it is not done is verification, not feasibility. `compute_bounds` renders
-        # through mpv's OSD libass, which blend-subtitles does not touch — so the one oracle we have
-        # is blind to this path, and shipping geometry nothing can check is what this gate exists to
-        # stop.
-        "blend-subtitles": settings["blend-subtitles"] in {False, "no"},
+        # `=yes` IS reproduced — see `_blend_space`, which recreates that `mp_osd_res` from
+        # `osd-dimensions`. `=video` is not: it lays the subtitle out on `texture_w/h` AFTER the
+        # user's shader hooks, which a `--glsl-shader` can resize and nothing reports.
+        "blend-subtitles": settings["blend-subtitles"] in {False, "no", True, "yes"},
+        # Only meaningful for the blend pass, and only there are they refused. `_blend_space`
+        # derives the blend rect from the premise that the src rect is the whole image, which a
+        # crop breaks outright and a rotation re-orients (`mp_get_src_dst_rects`,
+        # `aspect.c:156-163`). Outside blending they change nothing this gate reads.
+        "video-crop": not _blends_into_video(settings) or not str(settings["video-crop"] or ""),
+        "video-rotate": not _blends_into_video(settings)
+        or settings["video-rotate"] in {0, None, "0", "no"},
         # The SDH filter REWRITES an event's text before `ass_process_chunk` sees it
         # (`filter_and_add`, `sd_ass.c:370-385`), so what mpv is drawing is not what the file says
         # and our match back to the authored source is against a document that no longer describes
@@ -315,6 +315,51 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         "sub-filter-sdh": settings["sub-filter-sdh"] in {False, "no", None},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
+
+
+@dataclass(frozen=True, slots=True)
+class _BlendSpace:
+    """The surface mpv lays a blended subtitle out on, and where it sits on the screen."""
+
+    frame_size: tuple[int, int]
+    pixel_aspect: float
+    origin: tuple[int, int]
+
+
+def _blends_into_video(settings: Mapping[str, object]) -> bool:
+    return settings["blend-subtitles"] in {True, "yes"}
+
+
+def _blend_space(
+    frame_size: tuple[int, int],
+    margins: tuple[int, int, int, int],
+    video: Mapping[str, object],
+) -> _BlendSpace | None:
+    """`--blend-subtitles=yes`: the OSD resolution mpv builds for the blend pass, or `None`.
+
+    mpv draws the subtitle into the video texture before scaling, on a `mp_osd_res` it recreates
+    from the src/dst rects (`video/out/gpu/video.c:3249-3263`): the video's on-screen rectangle,
+    with margins `-src.x0`, `src.x1 - image_w` (scaled), and `display_par = 1.0`.
+
+    Derivable from `osd-dimensions` alone in the cases this accepts. `mp_get_src_dst_rects`
+    (`video/out/aspect.c:76-114`) sets `osd.ml = dst.x0` and `osd.mr = dst_size - dst.x1` BEFORE it
+    clips, so the video rectangle is exactly the surface inset by those margins. And when the source
+    is uncropped and unrotated the src rect is the whole image, which makes every blend-pass margin
+    zero. Both premises are guarded: a crop or a rotation is refused above, and any case where mpv
+    had to clip (pan, zoom or panscan pushing the video past the window) leaves a NEGATIVE osd
+    margin, which `_validate_frame` already rejects.
+
+    The consequence for the boxes is an offset, not a scale: the blend surface has the same pixel
+    pitch as the screen, so a token measured at `(x, y)` there is drawn at `(x + ml, y + mt)`.
+    """
+    top, bottom, left, right = margins
+    width = frame_size[0] - left - right
+    height = frame_size[1] - top - bottom
+    if width <= 0 or height <= 0:
+        return None
+    # `display_par` is 1.0 on the blend rect, so the screen's OSD aspect drops out and only the
+    # video's own remains.
+    return _BlendSpace((width, height), _pixel_aspect({"par": 1.0}, video), (left, top))
 
 
 def _validate_frame(frame_size: tuple[int, int], margins: tuple[int, int, int, int]) -> None:
@@ -367,6 +412,20 @@ def render_inputs_of(
     if unsupported:
         raise ValueError(", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported))
     _validate_frame(frame_size, margins)
+    blended = _blend_space(frame_size, margins, video) if _blends_into_video(settings) else None
+    if blended is not None:
+        return _RenderInputs(
+            blended.frame_size,
+            storage_size,
+            blended.pixel_aspect,
+            (0, 0, 0, 0),
+            cast("bool", settings["sub-ass-force-margins"]),
+            tuple(sorted((name, repr(value)) for name, value in settings.items())),
+            subtitle_fonts.option_snapshot(settings),
+            settings["sub-scale-with-window"] is not False,
+            settings["sub-scale-by-window"] is not False,
+            blended.origin,
+        )
     return _RenderInputs(
         frame_size,
         storage_size,
@@ -433,6 +492,10 @@ class _RenderInputs:
     #: than refused, so they travel to `converted.font_scale` as values.
     scale_with_window: bool = True
     scale_by_window: bool = True
+    #: Where the frame the boxes were laid out in sits on the screen. Non-zero only under
+    #: `--blend-subtitles=yes`, where mpv lays the cue out on the video rectangle rather than on the
+    #: OSD surface, and the boxes are drawn onto the screen — see `_blend_space`.
+    box_origin: tuple[int, int] = (0, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1134,6 +1197,8 @@ class NativeSubtitleGeometry:
                     "sub-scale-by-window",
                     "blend-subtitles",
                     "sub-filter-sdh",
+                    "video-crop",
+                    "video-rotate",
                     *subtitle_fonts.FONT_OPTIONS,
                 )
             },
@@ -1596,11 +1661,16 @@ class NativeSubtitleGeometry:
         if self._pending_key is not None and self._pending_key[0] == snapshot.generation:
             self._published_key = self._pending_key[1]
         self._pending_key = None
+        # Into screen coordinates here rather than through `publish`'s origin: the origin only
+        # translates hit testing, and the focus rect, the overprint's `\pos` and the raster's upload
+        # point all read the box directly. One translated set is one answer; a translated origin
+        # beside untranslated boxes is two.
+        origin = (0, 0) if self._last_render_inputs is None else self._last_render_inputs.box_origin
         return [
             WordBox(
                 item.token_index,
-                item.bounds.x,
-                item.bounds.y,
+                item.bounds.x + origin[0],
+                item.bounds.y + origin[1],
                 item.bounds.width,
                 item.bounds.height,
                 item.font_name,

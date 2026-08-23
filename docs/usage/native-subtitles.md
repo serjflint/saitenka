@@ -101,15 +101,19 @@ sub-ass-force-margins=no
 sub-ass-video-aspect-override=0
 sub-ass-use-video-data=all
 sub-ass-style-overrides=
+# Either `no` or `yes` is supported; `video` is not.
 blend-subtitles=no
 sub-filter-sdh=no
 ```
 
-`--blend-subtitles` is the one render option here Saitenka refuses rather than reproduces. mpv draws
-the subtitle into the video frame instead of the OSD surface, so the hit boxes would be laid out
-against a surface it is no longer drawing into. Mapping back is arithmetic rather than a barrier —
-but the drift check Saitenka uses to prove its layout runs through mpv's OSD renderer, which this
-option does not touch, so there would be no way to tell whether the boxes were right.
+`--blend-subtitles=yes` is reproduced. mpv draws the subtitle into the video texture instead of the
+OSD surface, so the cue is laid out on the video's on-screen rectangle with no letterbox margins;
+Saitenka rebuilds that rectangle from `osd-dimensions` and offsets the resulting boxes back onto the
+screen. A `--video-crop` or `--video-rotate` is refused *while blending*, because both break the
+assumption the rectangle is derived from; outside blending neither is read.
+
+`--blend-subtitles=video` stays refused: it lays the cue out on the video texture *after* the user's
+shader hooks, whose size a `--glsl-shader` can change and no property reports.
 `--sub-scale-with-window` and `--sub-scale-by-window` are *not* refused: they are read and
 reproduced.
 
