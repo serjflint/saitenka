@@ -6,7 +6,7 @@ import logging
 import math
 import time
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
@@ -128,6 +128,10 @@ GATE_OPTIONS = (
     "video-crop",
     "video-rotate",
     *subtitle_fonts.FONT_OPTIONS,
+    # Read, never refused: mpv applies these to a CONVERTED track only, and `converted.style_of`
+    # reproduces each of them. Refusing one would cost a user with a custom `--sub-font-size` every
+    # authored track too, where mpv does not read it at all.
+    *converted.STYLE_OPTIONS,
 )
 
 
@@ -470,6 +474,7 @@ def render_inputs_of(
             settings["sub-scale-with-window"] is not False,
             settings["sub-scale-by-window"] is not False,
             blended.origin,
+            converted.style_of(settings),
         )
     return _RenderInputs(
         frame_size,
@@ -481,6 +486,7 @@ def render_inputs_of(
         subtitle_fonts.option_snapshot(settings),
         settings["sub-scale-with-window"] is not False,
         settings["sub-scale-by-window"] is not False,
+        style=converted.style_of(settings),
     )
 
 
@@ -541,6 +547,9 @@ class _RenderInputs:
     #: `--blend-subtitles=yes`, where mpv lays the cue out on the video rectangle rather than on the
     #: OSD surface, and the boxes are drawn onto the screen — see `_blend_space`.
     box_origin: tuple[int, int] = (0, 0)
+    #: The `--sub-*` style mpv applies to a converted track. Unread on an authored one, where
+    #: `--sub-ass-override=no` leaves the file's own styles standing.
+    style: converted.SubStyle = field(default_factory=converted.SubStyle)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1494,7 +1503,10 @@ class NativeSubtitleGeometry:
         """
         if self.source_kind is SourceKind.CONVERTED:
             return converted.document(
-                rows, self._render_space(render), scale=self._converted_scale(render)
+                rows,
+                self._render_space(render),
+                style=render.style,
+                scale=self._converted_scale(render),
             )
         return self._source_bytes or b""
 
@@ -1510,6 +1522,8 @@ class NativeSubtitleGeometry:
             return RendererState()
         return RendererState(
             font_scale=self._converted_scale(render),
+            blur=render.style.blur,
+            justify=render.style.justify,
             features=(
                 (_ASS_FEATURE_WRAP_UNICODE, True),
                 (_ASS_FEATURE_BIDI_BRACKETS, True),

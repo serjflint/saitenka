@@ -115,6 +115,12 @@ Saitenka reconstructs that conversion — libavcodec's header, mpv's own subtitl
 aspect-corrected script resolution, and the letterbox-dependent font scale — around the cue rows mpv
 reports, so the events are mpv's own and only the header is reproduced.
 
+That style is read off mpv rather than assumed, so your `--sub-font`, `--sub-font-size`,
+`--sub-margin-x`/`-y`, `--sub-align-x`/`-y`, `--sub-justify`, `--sub-blur`, the colors and the
+border settings all move the boxes the way they move the words. None of them is refused: mpv reads
+them on the converted branch only, so refusing one would cost you every authored track as well over
+an option that does nothing there.
+
 Cue lookahead works there too, by predicting the events libavcodec will produce for the cues ahead
 straight from the `.srt`. A wrong prediction cannot put a box in the wrong place: the geometry cache
 is keyed on the event rows, so a predicted row that disagrees with the one mpv reports simply misses

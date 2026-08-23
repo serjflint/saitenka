@@ -64,10 +64,17 @@ class RendererState:
 
     `features` are `ASS_Feature` flags applied to the track before its first render, as
     `(feature, enabled)` pairs; they change how a run's advances accumulate.
+
+    `blur` and `justify` are here rather than in the document because a V4+ `Style:` row has no
+    field for either — mpv writes both onto the libass style struct directly, so the only way to
+    reproduce them is a selective style override on the renderer. `justify` decides where every
+    line of a multi-line cue starts, which is a box position, not a decoration.
     """
 
     font_scale: float = 1.0
     features: tuple[tuple[int, bool], ...] = ()
+    blur: float = 0.0
+    justify: int = 0
 
 
 @dataclass(frozen=True, slots=True)

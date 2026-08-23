@@ -12,7 +12,14 @@ is not a degraded box but a wrong one.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+log = logging.getLogger(__name__)
 
 #: `MP_ASS_FONT_PLAYRESX`/`Y` (`ass_mp.h:31`). libavcodec assumes them when converting to ASS, and
 #: VSFilter uses them by default, which is why mpv's fixups are all expressed relative to them.
@@ -79,6 +86,117 @@ class SubStyle:
     bold: bool = False
     italic: bool = False
     justify: int = 0
+
+
+#: mpv's choice tables for the three `osd_style_opts` fields it states by name, and the ASS values
+#: they carry. `mp_ass_set_style` writes each straight into the style struct, so these ARE libass's
+#: `Alignment` components and `Justify` — not an encoding of our own.
+_CHOICES: dict[str, dict[str, int]] = {
+    "sub-align-x": {"left": -1, "center": 0, "right": 1},
+    "sub-align-y": {"top": -1, "center": 0, "bottom": 1},
+    "sub-justify": {"auto": 0, "left": 1, "center": 2, "right": 3},
+    "sub-border-style": {"outline-and-shadow": 1, "opaque-box": 3, "background-box": 4},
+}
+
+#: Every mpv option `mp_ass_set_style` reads, paired with the `SubStyle` field it lands in. mpv
+#: applies all of them to a CONVERTED track and none of them to an authored one under
+#: `--sub-ass-override=no`, which is why the gate reads them rather than refusing them.
+#:
+#: `--sub-font` is absent because `subtitle_fonts` already owns it; `--sub-border-color` and
+#: `--sub-shadow-color` are absent because mpv reports them as aliases of the two names below.
+STYLE_OPTIONS: tuple[str, ...] = (
+    "sub-font-size",
+    "sub-color",
+    "sub-outline-color",
+    "sub-back-color",
+    "sub-border-style",
+    "sub-outline-size",
+    "sub-shadow-offset",
+    "sub-spacing",
+    "sub-margin-x",
+    "sub-margin-y",
+    "sub-align-x",
+    "sub-align-y",
+    "sub-blur",
+    "sub-bold",
+    "sub-italic",
+    "sub-justify",
+)
+
+_FIELDS: dict[str, str] = {
+    "sub-font": "font",
+    "sub-font-size": "font_size",
+    "sub-color": "color",
+    "sub-outline-color": "outline_color",
+    "sub-back-color": "back_color",
+    "sub-border-style": "border_style",
+    "sub-outline-size": "outline_size",
+    "sub-shadow-offset": "shadow_offset",
+    "sub-spacing": "spacing",
+    "sub-margin-x": "margin_x",
+    "sub-margin-y": "margin_y",
+    "sub-align-x": "align_x",
+    "sub-align-y": "align_y",
+    "sub-blur": "blur",
+    "sub-bold": "bold",
+    "sub-italic": "italic",
+    "sub-justify": "justify",
+}
+
+
+def parse_color(text: str) -> Color:
+    """mpv's `#AARRGGBB` — the form `options/sub-color` reports, whatever the user typed.
+
+    The alpha channel is opacity, matching `Color`; `Color.as_ass` inverts it on the way out. A
+    bare `#RRGGBB` is accepted because it is what a config file usually holds, even though mpv
+    normalises it before reporting.
+    """
+    digits = text.strip().removeprefix("#")
+    if len(digits) == 6:
+        digits = "FF" + digits
+    if len(digits) != 8:
+        raise ValueError(f"not an mpv color: {text!r}")
+    alpha, red, green, blue = (int(digits[at : at + 2], 16) for at in (0, 2, 4, 6))
+    return Color(red, green, blue, alpha)
+
+
+def _coerce(option: str, field: str, value: object) -> object:
+    if option in _CHOICES:
+        return _CHOICES[option][str(value)]
+    default = getattr(SubStyle(), field)
+    if isinstance(default, Color):
+        return parse_color(str(value))
+    if isinstance(default, bool):
+        return value in {True, "yes"}
+    if isinstance(default, int):
+        return int(str(value))
+    if isinstance(default, float):
+        return float(str(value))
+    return str(value)
+
+
+def style_of(settings: Mapping[str, object]) -> SubStyle:
+    """The style mpv is applying to a converted track, read off the options it reports.
+
+    Without this every converted cue is measured against mpv's *defaults*, so a user who moved
+    `--sub-margin-y` or grew `--sub-font-size` gets boxes where the default style would have put
+    the words rather than where theirs are.
+
+    An option mpv does not report, or reports in a shape this does not know, keeps its default and
+    says so. The alternative is refusing the track, which costs an episode's interaction over one
+    field — and mpv renames these (`--sub-border-size` became `--sub-outline-size`), so an unknown
+    name is a version difference rather than a broken player.
+    """
+    changed: dict[str, object] = {}
+    for option, field in _FIELDS.items():
+        value = settings.get(option)
+        if value is None:
+            continue
+        try:
+            changed[field] = _coerce(option, field, value)
+        except (KeyError, TypeError, ValueError):
+            log.warning("cannot read %s=%r; measuring against mpv's default", option, value)
+    return replace(SubStyle(), **changed)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True)

@@ -151,6 +151,79 @@ def test_the_style_row_states_alpha_the_way_a_style_row_states_it() -> None:
     assert fields[6] == "&H50000000"  # BackColour: black at mpv's default opacity
 
 
+#: One real `mpv.conf`, as mpv reports it back through `options/…` — colors normalised to
+#: `#AARRGGBB`, choices by name, sizes typed. Every value here differs from mpv's default, which is
+#: the point: a reader that dropped any of them would still pass a test built from the defaults.
+REPORTED = {
+    "sub-font": "Symbola",
+    "sub-font-size": 44.0,
+    "sub-color": "#FFECEFF4",
+    "sub-outline-color": "#FF2E3440",
+    "sub-back-color": "#FF2E3440",
+    "sub-border-style": "background-box",
+    "sub-outline-size": 1.15,
+    "sub-shadow-offset": 2.0,
+    "sub-spacing": 1.5,
+    "sub-margin-x": 40,
+    "sub-margin-y": 60,
+    "sub-align-x": "left",
+    "sub-align-y": "top",
+    "sub-blur": 0.5,
+    "sub-bold": True,
+    "sub-italic": True,
+    "sub-justify": "right",
+}
+
+
+def test_every_style_option_mpv_reports_reaches_the_style() -> None:
+    """A converted cue mpv draws under the user's `--sub-*` options and we measure under mpv's
+    defaults is a cue whose boxes sit where somebody else's subtitles would be. This is the
+    whole set, in the shapes `options/…` actually reports — choices by name, colors `#AARRGGBB`.
+    """
+    style = converted.style_of(REPORTED)
+
+    assert style == converted.SubStyle(
+        font="Symbola",
+        font_size=44.0,
+        color=converted.Color(0xEC, 0xEF, 0xF4, 0xFF),
+        outline_color=converted.Color(0x2E, 0x34, 0x40, 0xFF),
+        back_color=converted.Color(0x2E, 0x34, 0x40, 0xFF),
+        border_style=4,
+        outline_size=1.15,
+        shadow_offset=2.0,
+        spacing=1.5,
+        margin_x=40,
+        margin_y=60,
+        align_x=-1,
+        align_y=-1,
+        blur=0.5,
+        bold=True,
+        italic=True,
+        justify=3,
+    )
+
+
+def test_no_style_option_is_left_at_a_default_the_reader_cannot_reach() -> None:
+    """The completeness half: reading sixteen of seventeen fields is the failure mode this exists
+    to catch, because the seventeenth is silently mpv's default and nothing says so."""
+    default = converted.SubStyle()
+    read = converted.style_of(REPORTED)
+
+    unread = [name for name in default.__slots__ if getattr(read, name) == getattr(default, name)]
+
+    assert unread == ["margin_y_offset"]  # not an option: mpv passes 0 for subtitles
+
+
+def test_a_reported_value_in_a_shape_the_reader_does_not_know_keeps_the_default() -> None:
+    """mpv renames these — `--sub-border-size` became `--sub-outline-size` — so an unfamiliar value
+    is a version difference, not a broken player. Refusing the track would cost an episode's
+    interaction over one field; measuring the rest against a default that is wrong for one field is
+    the smaller error, and it is logged."""
+    style = converted.style_of({"sub-margin-y": "not-a-number", "sub-align-x": "sideways"})
+
+    assert style == converted.SubStyle()
+
+
 CUE, SPANS = "（鳥のさえずり）", ((1, 2), (2, 3), (3, 7))
 ROW = f"Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,{CUE}"
 
@@ -259,3 +332,69 @@ def test_a_style_the_user_changed_moves_the_boxes_libass_paints() -> None:
         backend.close()
 
     assert [name for name, union in moved.items() if union == baseline] == []
+
+
+#: A two-line cue with a short second line. `--sub-justify` decides where that second line starts,
+#: so it is the only shape in which the option is visible at all.
+WRAPPED = "ながいいちぎょうめです\nみじかいに"
+WRAPPED_ROW = (
+    "Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,ながいいちぎょうめです\\Nみじかいに"
+)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_justify_reaches_libass_even_though_a_style_row_cannot_state_it() -> None:
+    """`--sub-justify` is sent on every run and a V4+ `Format:` line has no `Justify` field — mpv
+    writes it onto the style struct directly. The only seam that carries it is a selective style
+    override on the renderer, and its bit is not where counting the names would put it: one below
+    JUSTIFY is `ASS_OVERRIDE_FULL_STYLE`, which replaces every field of every style instead.
+    """
+    from saitenka.subtitles import (
+        GeometryPaletteEntry,
+        GeometryRequest,
+        SubtitleTrackId,
+        TokenAnnotation,
+    )
+    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+    frame = (HD.width, HD.height)
+    track = SubtitleTrackId("converted-justify")
+    prepared = prepare_ass_hit_map_frame(
+        converted.document(WRAPPED_ROW, HD, scale=1.0),
+        track,
+        active_rows=WRAPPED_ROW,
+        text=WRAPPED,
+        tokens=[TokenAnnotation(index, *span) for index, span in enumerate(((0, 5), (12, 17)))],
+    )
+
+    def second_line_x(justify: int) -> int:
+        snapshot = backend.render(
+            GeometryRequest(
+                1,
+                track,
+                prepared.frame_id,
+                11_256,
+                frame,
+                frame,
+                prepared.ass,
+                palette=tuple(
+                    GeometryPaletteEntry(
+                        entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
+                    )
+                    for entry in prepared.palette
+                ),
+                reserved_rgb=prepared.reserved_rgb,
+                renderer_state=RendererState(font_scale=1.0, justify=justify),
+            )
+        )
+        return next(token.bounds.x for token in snapshot.tokens if token.token_index == 1)
+
+    backend = LibassGeometryBackend()
+    try:
+        left, centre, right = (second_line_x(justify) for justify in (1, 2, 3))
+    finally:
+        backend.close()
+
+    assert left < centre < right

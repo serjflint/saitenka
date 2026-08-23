@@ -227,6 +227,15 @@ def extract_token_geometry(
     )
 
 
+#: `ASS_OverrideBits` (`ass.h`), read off the header rather than counted: the neighbouring values
+#: are not in the order the names suggest, and `1 << 9` — one bit below JUSTIFY — is
+#: `ASS_OVERRIDE_FULL_STYLE`, which replaces every field of every style with the one handed over.
+#: Only these two, and only when the option is set: a wider override restyles the cue away from the
+#: document instead of carrying the two fields the document cannot state.
+_ASS_OVERRIDE_BIT_JUSTIFY = 1 << 10
+_ASS_OVERRIDE_BIT_BLUR = 1 << 11
+
+
 def _render_style(state: RendererState) -> object | None:
     """`libasslite.RenderStyle` for this frame, or `None` when libass's defaults already say it.
 
@@ -236,7 +245,18 @@ def _render_style(state: RendererState) -> object | None:
     if state == RendererState():
         return None
     module = importlib.import_module("libasslite")
-    return module.RenderStyle(font_scale=state.font_scale)
+    bits = 0
+    if state.blur:
+        bits |= _ASS_OVERRIDE_BIT_BLUR
+    if state.justify:
+        bits |= _ASS_OVERRIDE_BIT_JUSTIFY
+    if not bits:
+        return module.RenderStyle(font_scale=state.font_scale)
+    return module.RenderStyle(
+        font_scale=state.font_scale,
+        override_bits=bits,
+        override_style=module.AssStyle(blur=state.blur, justify=state.justify),
+    )
 
 
 class LibassGeometryBackend:

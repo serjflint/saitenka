@@ -291,6 +291,25 @@ OBSERVED_PROPS = (
     "options/sub-font",
     "options/osd-fonts-dir",
     "options/osd-font-provider",
+    # `converted.STYLE_OPTIONS` — the style mpv applies to a track it converted. Observed so
+    # `_render_inputs` does not block on them per cue, and counted a render-space input so a
+    # mid-episode change re-measures the boxes it just moved.
+    "options/sub-font-size",
+    "options/sub-color",
+    "options/sub-outline-color",
+    "options/sub-back-color",
+    "options/sub-border-style",
+    "options/sub-outline-size",
+    "options/sub-shadow-offset",
+    "options/sub-spacing",
+    "options/sub-margin-x",
+    "options/sub-margin-y",
+    "options/sub-align-x",
+    "options/sub-align-y",
+    "options/sub-blur",
+    "options/sub-bold",
+    "options/sub-italic",
+    "options/sub-justify",
     "options/video-crop",
     "options/video-rotate",
     "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
