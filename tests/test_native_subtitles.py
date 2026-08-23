@@ -2287,6 +2287,34 @@ def test_a_face_the_osd_library_cannot_load_is_coloured_as_a_raster_instead(tmp_
     result.close()
 
 
+def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path) -> None:
+    """The raster is a tint over mpv's own glyphs. Once the handoff hides those, it is floating over
+    a render that never laid it out — and nothing repaints it, because `draw` routes to the legacy
+    renderer from then on. So it stays on the last cue's words for the rest of a gapless episode.
+
+    The focus rect had the same hole: arriving at LEGACY emitted no interaction clear at all.
+    """
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    assert result.native_geometry is not None
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert presented_overpaints(ipc), "the raster never reached mpv, so the teardown proves nothing"
+    ipc.commands.clear()
+
+    # Coming back from an overlay re-verifies ownership. The write does not land and the readback
+    # says FALSE, which is the proof that hands the pixels to the legacy renderer.
+    ipc.set_property_exception = OSError("pipe closed")
+    ipc.props["sub-visibility"] = False
+    renderer.resume_after_overlay(result.subtitle_target())
+
+    assert renderer.ownership_state.owner is PixelOwner.LEGACY
+    assert ("overlay-remove", OverlayId.OVERPAINT) in ipc.commands
+    result.close()
+
+
 def calibration_calls(ipc) -> list[tuple]:
     """Every hidden `compute_bounds` the layout check asked mpv for."""
     return [

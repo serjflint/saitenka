@@ -871,6 +871,7 @@ class NativeVisibleRenderer:
             self._fallback.clear(target.surfaces, target.ipc)
         elif action.kind == ActionKind.CLEAR_INTERACTION:
             self._hide_focus(target.ipc)
+            self._hide_overpaint(target.surfaces)
         elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
             self._stage_legacy(target, action)
         elif action.kind == ActionKind.SHOW_MPV:

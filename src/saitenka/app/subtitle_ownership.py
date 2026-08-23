@@ -309,7 +309,12 @@ def _legacy_stage_result(
         return state, ()
     current = replace(state, active_assertion_id=None, active_effect_kind=None)
     if event.accepted:
-        return replace(current, owner=PixelOwner.LEGACY, visibility=Visibility.FALSE), ()
+        # Arriving at LEGACY retires the interaction pixels: they were measured against mpv's own
+        # glyphs, which are now hidden, so anything left on those slots floats over a render that
+        # did not lay it out.
+        return replace(current, owner=PixelOwner.LEGACY, visibility=Visibility.FALSE), (
+            OwnershipAction(ActionKind.CLEAR_INTERACTION, context=state.context),
+        )
     return _schedule_retry(replace(current, owner=PixelOwner.UNKNOWN))
 
 
