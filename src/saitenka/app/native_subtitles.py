@@ -221,7 +221,7 @@ def _palette_in_frame_units(
     frame_height: int,
     font_scale: float,
     *,
-    unreachable: frozenset[str],
+    unreachable: subtitle_fonts.OsdReach,
 ) -> tuple[GeometryPaletteEntry, ...]:
     """Restate each token's font size in the frame's pixels rather than the document's script units.
 
@@ -237,7 +237,11 @@ def _palette_in_frame_units(
     if prepared.play_res_y <= 0:
         return tuple(replace(entry, font_name="", font_size=0.0) for entry in prepared.palette)
     scale = frame_height / prepared.play_res_y * font_scale
-    demoted = [entry for entry in prepared.palette if _requested_family(entry.font_name) in unreachable]  # fmt: skip
+    demoted = [
+        entry
+        for entry in prepared.palette
+        if unreachable.blocks(_requested_family(entry.font_name))
+    ]
     if demoted and otel_metrics.subtitle_overprint_demotions is not None:
         otel_metrics.subtitle_overprint_demotions.add(
             len(demoted), {"reason": "font-not-on-osd-library"}
@@ -560,7 +564,7 @@ class NativeSubtitleGeometry:
         self._track_codec = codec.strip().casefold()
 
     @property
-    def unreachable_families(self) -> frozenset[str]:
+    def unreachable_families(self) -> subtitle_fonts.OsdReach:
         """The families the overprint must stand down on — see `FontEnvironment.osd_unreachable`.
 
         Two halves that arrive independently: the container's attachments come with the font
@@ -1051,7 +1055,7 @@ class NativeSubtitleGeometry:
         annotations: tuple[TokenAnnotation, ...],
         fonts: subtitle_fonts.FontEnvironment,
         renderer_state: RendererState,
-        unreachable: frozenset[str],
+        unreachable: subtitle_fonts.OsdReach,
     ) -> GeometryRequest:
         with otel_metrics.traced("subtitle_geometry_prepare") as span:
             span.set("observed_rows", len(cue.active_rows.splitlines()))
@@ -1197,7 +1201,7 @@ class NativeSubtitleGeometry:
             def build(
                 inputs: _CueInputs = inputs,
                 fonts: subtitle_fonts.FontEnvironment = self._fonts,
-                unreachable: frozenset[str] = self.unreachable_families,
+                unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
             ) -> GeometryRequest:
                 tokenized = self._ports.tokenize_lookahead(inputs.text)
                 selection = self._annotations(
@@ -1498,7 +1502,7 @@ class NativeSubtitleGeometry:
         def build(
             fonts: subtitle_fonts.FontEnvironment = self._fonts,
             state: RendererState = renderer_state,
-            unreachable: frozenset[str] = self.unreachable_families,
+            unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
         ) -> GeometryRequest:
             return self._build(
                 inputs.source,

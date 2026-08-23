@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import util
 
 from saitenka.app import subtitle_fonts
 from saitenka.subtitles import FontProvider
@@ -236,7 +237,7 @@ def test_an_in_document_face_is_one_the_osd_library_can_never_load(tmp_path: Pat
         cache_dir=tmp_path / "cache",
     )
 
-    assert resolved.osd_unreachable(frozenset({"signs"})) == frozenset({"signs"})
+    assert resolved.osd_unreachable(frozenset({"signs"})).blocks("signs")
 
 
 def test_a_document_face_is_reachable_again_once_mpv_stops_extracting_them(tmp_path: Path) -> None:
@@ -249,7 +250,69 @@ def test_a_document_face_is_reachable_again_once_mpv_stops_extracting_them(tmp_p
         cache_dir=tmp_path / "cache",
     )
 
-    assert resolved.osd_unreachable(frozenset({"signs"})) == frozenset()
+    assert not resolved.osd_unreachable(frozenset({"signs"})).blocks("signs")
+
+
+def test_a_fonts_dir_only_the_subtitle_library_reads_costs_its_families(tmp_path: Path) -> None:
+    """`mp_ass_init` takes `fonts_dir` off the style GROUP it is handed (`ass_mp.c:128-138`), and
+    the OSD library is handed `osd_style`. So `--sub-fonts-dir` without a matching `--osd-fonts-dir`
+    puts a family in the subtitle renderer alone — the same position as a container attachment, and
+    invisible until someone reads which struct each call site passes."""
+    typeset = tmp_path / "typeset"
+    typeset.mkdir()
+    (typeset / "Signs.ttf").write_bytes(util.tiny_font("Embedded Signs"))
+
+    resolved = subtitle_fonts.resolve(
+        expand=expander(tmp_path),
+        settings={
+            "sub-fonts-dir": str(typeset),
+            "osd-fonts-dir": "",
+            "embeddedfonts": False,
+            "sub-font-provider": "auto",
+        },
+        video=None,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert resolved.osd_unreachable().blocks("embedded signs")
+    assert not resolved.osd_unreachable().blocks("helvetica")
+
+
+def test_the_same_directory_on_both_sides_costs_nothing(tmp_path: Path) -> None:
+    """The negative control, and the common case: with neither option set both libraries fall back
+    to the config directory's `fonts`, so a family there is reachable from both."""
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "Signs.ttf").write_bytes(util.tiny_font("Embedded Signs"))
+
+    resolved = subtitle_fonts.resolve(
+        expand=expander(tmp_path),
+        settings={"sub-fonts-dir": "", "embeddedfonts": False, "sub-font-provider": "auto"},
+        video=None,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert resolved.setup.fonts_dir == str(fonts)
+    assert not resolved.osd_unreachable().blocks("embedded signs")
+
+
+def test_two_different_font_providers_make_every_family_unsafe(tmp_path: Path) -> None:
+    """`mp_ass_configure_fonts` takes the same style group, so the two libraries can be built on
+    different providers. Then even a system family is looked up two ways and no family's resolution
+    can be argued equal — which is a cue for the raster device, not a guess."""
+    resolved = subtitle_fonts.resolve(
+        expand=expander(tmp_path),
+        settings={
+            "sub-font-provider": "fontconfig",
+            "osd-font-provider": "none",
+            "embeddedfonts": False,
+        },
+        video=None,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert resolved.osd_unreachable().all_unsafe
+    assert resolved.osd_unreachable().blocks("any family at all")
 
 
 @pytest.mark.integration
@@ -282,5 +345,5 @@ def test_an_attachments_own_family_name_is_what_the_overprint_stands_down_on(
         cache_dir=tmp_path / "cache",
     )
 
-    assert "noto sans" in resolved.osd_unreachable()
-    assert "helvetica" not in resolved.osd_unreachable()
+    assert resolved.osd_unreachable().blocks("noto sans")
+    assert not resolved.osd_unreachable().blocks("helvetica")

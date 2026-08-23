@@ -51,7 +51,19 @@ FONT_EXTENSIONS = frozenset({".ttf", ".ttc", ".otf", ".otc"})
 #: The mpv options whose values decide the font environment. Read together with the render inputs so
 #: a mid-session change is visible to the gate, and snapshotted into the resolved environment so a
 #: change after resolution refuses the frame instead of measuring in the wrong faces.
-FONT_OPTIONS = ("embeddedfonts", "sub-fonts-dir", "sub-font-provider", "sub-font")
+FONT_OPTIONS = (
+    "embeddedfonts",
+    "sub-fonts-dir",
+    "sub-font-provider",
+    "sub-font",
+    # Read but never given to the measuring renderer: `mp_ass_init` and `mp_ass_configure_fonts`
+    # take a style GROUP (`sub/osd.c:47-78` — `fonts-dir` and `font-provider` are per-group), so the
+    # subtitle library gets these under `sub-` and the OSD library gets its own under `osd-`. When
+    # the two disagree, a family the subtitle renderer resolves is one the OSD renderer may not, and
+    # the text device has to stand down for it.
+    "osd-fonts-dir",
+    "osd-font-provider",
+)
 
 _PROVIDERS = {
     "auto": FontProvider.AUTODETECT,
@@ -74,6 +86,22 @@ def attachment_is_font(name: str | None, mimetype: str | None, size: int) -> boo
 
 
 @dataclass(frozen=True, slots=True)
+class OsdReach:
+    """Which families an `osd-overlay` payload would be laid out in differently from the cue.
+
+    Two shapes because there are two ways to lose: a *named* family the OSD library cannot load, and
+    a configuration where its whole system lookup differs from the subtitle library's — at which
+    point no family can be argued safe and the raster device takes the cue.
+    """
+
+    families: frozenset[str] = frozenset()
+    all_unsafe: bool = False
+
+    def blocks(self, family: str) -> bool:
+        return self.all_unsafe or family in self.families
+
+
+@dataclass(frozen=True, slots=True)
 class FontEnvironment:
     """What mpv gave libass for this track, plus the options it was derived from.
 
@@ -86,19 +114,42 @@ class FontEnvironment:
     attachments: tuple[tuple[str, bytes], ...] = ()
     options: tuple[tuple[str, str], ...] = ()
     attachment_families: frozenset[str] = frozenset()
+    #: Families supplied by `--sub-fonts-dir` and reachable from there ALONE, so they matter only
+    #: when the OSD library reads a different directory.
+    fonts_dir_families: frozenset[str] = frozenset()
+    #: Whether the OSD library reads the same extra directory the subtitle library does. When it
+    #: does not, only the families that live there are lost.
+    osd_shares_fonts_dir: bool = True
+    #: Whether the two libraries use the same font provider. When they do not, even a system family
+    #: is looked up two ways and no family can be argued equal.
+    osd_shares_provider: bool = True
 
-    def osd_unreachable(self, in_document: frozenset[str] = frozenset()) -> frozenset[str]:
+    def osd_unreachable(self, in_document: frozenset[str] = frozenset()) -> OsdReach:
         """The families that reach mpv's subtitle renderer and never its **OSD** one.
 
-        Its library is built from `osd_style` plus `mpv-osd-symbols` (`osd_libass.c:51-52`) and has
-        no attachment path at all — so a family supplied by the container or by an in-file `[Fonts]`
-        section is one an `osd-overlay` overprint would draw in a substitute face: right words, wrong
-        glyph shapes, measured at −29px against the correct layout in the drift probe.
+        Three sources, all from `sub/osd_libass.c` and `sub/ass_mp.c`:
+
+        * The OSD library is built from `osd_style` plus `mpv-osd-symbols` (`osd_libass.c:51-52`) and
+          has no attachment path at all, so a container attachment or an in-file `[Fonts]` family is
+          one it can never hold — right words, wrong glyph shapes, −29px in the drift probe.
+        * `mp_ass_init` reads `fonts_dir` off the style group it is handed (`ass_mp.c:128-138`), and
+          the OSD one is handed `osd_style`. So `--sub-fonts-dir` feeds the subtitle library and
+          `--osd-fonts-dir` the OSD one; set only the first and its families are subtitle-only. With
+          both unset they fall back to the same config directory, which is the common case and stays
+          reachable.
+        * `mp_ass_configure_fonts` takes the same group, so `--osd-font-provider` can differ from
+          `--sub-font-provider`. Then even a system family is looked up two ways, and nothing here
+          can argue any of them equal.
 
         Per family rather than per track, because a release whose dialogue is a system font and whose
         signs are attachment-only should lose the colour on its signs, not on the whole episode.
         """
-        return self.attachment_families | (in_document if self.setup.extract_fonts else frozenset())
+        return OsdReach(
+            self.attachment_families
+            | (in_document if self.setup.extract_fonts else frozenset())
+            | (frozenset() if self.osd_shares_fonts_dir else self.fonts_dir_families),
+            all_unsafe=not self.osd_shares_provider,
+        )
 
     @property
     def sources(self) -> tuple[str, ...]:
@@ -142,6 +193,34 @@ def _fonts_dir(expand: Callable[[str], str | None], configured: object) -> str |
 
 def _font_provider(configured: object) -> FontProvider:
     return _PROVIDERS.get(str(configured), FontProvider.AUTODETECT)
+
+
+#: Enough for a typesetting release's whole font folder; a directory past it is not one a user
+#: assembled, and reading all of it at track load would be the wrong place to find that out.
+MAX_FONTS_DIR_FILES = 512
+
+
+def _directory_families(fonts_dir: str | None) -> frozenset[str]:
+    """Every family a `--sub-fonts-dir` supplies, for deciding which ones the OSD library lacks.
+
+    Read from the files rather than from libass, which offers no way to enumerate what it loaded.
+    Unreadable is empty, and empty means "no family is blamed on this directory" — the direction
+    that keeps a colour rather than the one that invents a demotion.
+    """
+    if not fonts_dir:
+        return frozenset()
+    try:
+        entries = sorted(Path(fonts_dir).iterdir())[:MAX_FONTS_DIR_FILES]
+    except OSError as error:
+        log.warning("could not list the subtitle fonts directory %s: %s", fonts_dir, error)
+        return frozenset()
+    found: set[str] = set()
+    for entry in entries:
+        try:
+            found |= font_names.families(entry.read_bytes()) if entry.is_file() else frozenset()
+        except OSError:
+            continue
+    return frozenset(found)
 
 
 def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes], ...]:
@@ -264,6 +343,8 @@ def resolve(
         font_provider=_font_provider(settings.get("sub-font-provider")),
     )
     attachments = container_fonts(video, cache_dir=cache_dir) if embedded and video else ()
+    osd_fonts_dir = _fonts_dir(expand, settings.get("osd-fonts-dir"))
+    shares_dir = osd_fonts_dir == setup.fonts_dir
     return FontEnvironment(
         setup,
         attachments,
@@ -271,4 +352,10 @@ def resolve(
         frozenset().union(*(font_names.families(data) for _name, data in attachments))
         if attachments
         else frozenset(),
+        # Only enumerated when it can matter: reading every face in a directory to name families
+        # nothing will ask about is work for an answer already known.
+        frozenset() if shares_dir else _directory_families(setup.fonts_dir),
+        osd_shares_fonts_dir=shares_dir,
+        osd_shares_provider=_font_provider(settings.get("osd-font-provider"))
+        == setup.font_provider,
     )
