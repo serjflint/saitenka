@@ -93,18 +93,23 @@ def _section(ipc, name):
     return None, None
 
 
-def test_the_global_bindings_register_as_one_section_at_default_priority():
+def test_the_global_bindings_register_as_one_forced_section():
     """One command, not one per key: ~24 correlated commands in flight before the reactor drains
     would compete for terminal reservations, and over the bound a bind is dropped with only a log
-    line — a dead shortcut. Default priority is what mpv's own `keybind` gives, so a user's
-    input.conf shadows these exactly as it did before; `force` would silently start overriding it.
+    line — a dead shortcut.
+
+    Forced, because the per-key `keybind` form this replaced writes into mpv's OWN `default`
+    section and REPLACES the input.conf entry for that key. Asked for the binding table, mpv is
+    unambiguous: `keybind` lands at priority 16 and not weak; a `"default"` section is weak at 15,
+    below input.conf. Registering as `"default"` therefore did not preserve the old behaviour, it
+    inverted it — a user with `F1` bound in input.conf silently lost the help window.
     """
     ipc = FakeIPC()
 
     Reader(ipc)._register_keybinds()
 
     contents, flags = _section(ipc, C.GLOBAL_SECTION)
-    assert flags == "default"
+    assert flags == "force"
     assert ("enable-section", C.GLOBAL_SECTION) in [c[:2] for c in ipc.commands]
     assert len([c for c in ipc.commands if c and c[0] == "keybind"]) == 0
     assert len(contents.splitlines()) == len({ln.split(" ", 1)[0] for ln in contents.splitlines()})

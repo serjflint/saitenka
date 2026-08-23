@@ -3294,7 +3294,7 @@ class Reader:
                 "define-section",
                 GLOBAL_SECTION,
                 contents,
-                "default",
+                "force",
                 owner=Owner.INTERACTION,
             )
             send_correlated(

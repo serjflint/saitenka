@@ -53,10 +53,14 @@ Requirement = Literal["always", "anki", "tts"]
 # is up (controller._sync_mouse_capture) so clicks/wheel outrank other scripts' forced MBTN_LEFT.
 MOUSE_SECTION = "saitenka-mouse"
 
-# "global"-scoped bindings live in this DEFAULT-priority section. One `define-section` rather than a
+# "global"-scoped bindings live in this FORCED mpv input section. One `define-section` rather than a
 # `keybind` per key: the batch runs before the reactor drains, and one correlated command carries one
-# terminal instead of ~24 competing for the mailbox's reservations. Default (not forced) priority is
-# what `keybind` itself gives, so a user's input.conf shadows these exactly as it did before.
+# terminal instead of ~24 competing for the mailbox's reservations.
+#
+# Forced because `keybind` writes into mpv's OWN `default` section — it REPLACES the input.conf entry
+# for that key (priority 16, not weak), so every shortcut used to win outright. A `"default"` section
+# is weak at priority 15 instead, which silently handed F1 back to a user's `input.conf`. `"force"`
+# lands at 31 and leaves their binding in the table, overridden rather than overwritten.
 GLOBAL_SECTION = "saitenka-global"
 
 
