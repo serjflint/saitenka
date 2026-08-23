@@ -6,6 +6,8 @@ import json
 import zipfile
 from typing import TYPE_CHECKING
 
+from saitenka.app import font_resolution
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -209,10 +211,30 @@ def geometry_diagnosis(span: dict) -> str:
     return _DIAGNOSIS.get(span["name"], _render_diagnosis)(span.get("args", {}))
 
 
+def font_resolution_line(source: Path) -> str:
+    """What mpv's subtitle renderer resolved each family to, from the log every bundle carries.
+
+    Reported without our own side: the measuring renderer's choices are not in the bundle, so this
+    lists mpv's and leaves the comparison to a session that has both. A substituted face is a
+    different advance and therefore a wrong box, so naming what mpv chose is worth the line on its
+    own.
+    """
+    try:
+        log = _read_member(source, "mpv.log")
+    except (OSError, zipfile.BadZipFile):
+        # This is one line of a report, not the report: an unreadable bundle is `load_trace`'s to
+        # raise on, and failing here would take the whole rendering down over a diagnostic.
+        return "  font resolution: report archive unreadable"
+    if log is None:
+        return "  font resolution: no mpv.log in this report"
+    return font_resolution.summary(log, {})
+
+
 def render_geometry(source: Path, events: list[dict], *, nested: bool = False) -> str:
     spans = geometry_spans(events)
     heading = "##" if nested else "#"
     lines = [f"{heading} native subtitle geometry" + ("" if nested else f" — {source.name}")]
+    lines.append(font_resolution_line(source))
     if not spans:
         lines.append("  (no native-geometry spans — enable telemetry before reproducing)")
         return "\n".join(lines) + "\n"
