@@ -15,6 +15,35 @@ from saitenka.subtitles import FontProvider
 REPO_FONT = Path(__file__).resolve().parents[1] / "src/saitenka/assets/fonts/NotoSans.ttf"
 
 
+def one_attachment_container(tmp_path: Path) -> Path:
+    """A container in name only — every test using it fakes the tools that would read it."""
+    video = tmp_path / "episode.mkv"
+    video.write_bytes(b"container")
+    return video
+
+
+def fake_attachment_tools(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], dict]]:
+    """Stand in for ffprobe/ffmpeg, recording how each was invoked.
+
+    The out-of-process boundary is the one place this suite fakes rather than constructs: the
+    behaviour under test is which arguments those two tools are handed.
+    """
+    streams = (
+        b'{"streams":[{"tags":{"filename":"sign.ttf","mimetype":"font/ttf"},"extradata_size":9}]}'
+    )
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(([str(part) for part in command], kwargs))
+        if "-show_streams" in command:
+            return subprocess.CompletedProcess(command, 0, stdout=streams, stderr=b"")
+        Path(command[command.index("-dump_attachment:t:0") + 1]).write_bytes(b"face-bytes")
+        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subtitle_fonts.subprocess, "run", fake_run)
+    return calls
+
+
 def expander(config_dir: Path | None) -> object:
     """mpv's `expand-path`: only a `~`-prefixed path is touched, the rest come back verbatim."""
 
@@ -180,27 +209,46 @@ def test_dumping_the_attachments_does_not_transcode_the_episode(
     Asserted on the argv because the cost lives in ffmpeg, not here: a synthetic fixture short
     enough for a test decodes too fast to time the difference.
     """
-    streams = (
-        b'{"streams":[{"tags":{"filename":"sign.ttf","mimetype":"font/ttf"},"extradata_size":9}]}'
-    )
-    commands: list[list[str]] = []
+    calls = fake_attachment_tools(monkeypatch)
 
-    def fake_run(command, **_kwargs):
-        commands.append([str(part) for part in command])
-        if "-show_streams" in command:
-            return subprocess.CompletedProcess(command, 0, stdout=streams, stderr=b"")
-        Path(command[command.index("-dump_attachment:t:0") + 1]).write_bytes(b"face-bytes")
-        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
-
-    monkeypatch.setattr(subtitle_fonts.subprocess, "run", fake_run)
-    video = tmp_path / "episode.mkv"
-    video.write_bytes(b"container")
-
-    assert subtitle_fonts.container_fonts(video, cache_dir=tmp_path / "cache") == (
-        ("sign.ttf", b"face-bytes"),
-    )
-    dump = next(command for command in commands if "-dump_attachment:t:0" in command)
+    assert subtitle_fonts.container_fonts(
+        one_attachment_container(tmp_path), cache_dir=tmp_path / "cache"
+    ) == (("sign.ttf", b"face-bytes"),)
+    dump = next(command for command, _kwargs in calls if "-dump_attachment:t:0" in command)
     assert dump[dump.index("-t") + 1] == "0"
+
+
+def test_every_attachment_subprocess_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both run on the reader thread at every track load, so an unreachable share or a wedged
+    ffmpeg would hold the session there with no way out. Asserted over every call rather than by
+    name: an unbounded third one would be the same defect."""
+    calls = fake_attachment_tools(monkeypatch)
+
+    subtitle_fonts.container_fonts(one_attachment_container(tmp_path), cache_dir=tmp_path / "cache")
+
+    assert calls
+    assert all(kwargs.get("timeout") for _command, kwargs in calls)
+
+
+def test_a_wedged_attachment_dump_costs_the_faces_not_the_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The timeout has to land on the same fail-soft path an unreadable container takes: no faces,
+    which the environment check refuses, rather than an exception out of a track load."""
+
+    def wedged(command, **_kwargs):
+        raise subprocess.TimeoutExpired(command, 30)
+
+    monkeypatch.setattr(subtitle_fonts.subprocess, "run", wedged)
+
+    assert (
+        subtitle_fonts.container_fonts(
+            one_attachment_container(tmp_path), cache_dir=tmp_path / "cache"
+        )
+        == ()
+    )
 
 
 @pytest.mark.integration

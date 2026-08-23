@@ -65,6 +65,13 @@ FONT_OPTIONS = (
     "osd-font-provider",
 )
 
+#: Wall-clock bound on the two attachment subprocesses. They run on the reader thread at every track
+#: load, so an unreachable network share or a wedged ffmpeg would hold the session there indefinitely.
+#: Generous against the 0.12s a 19-attachment 1080p container costs: this is a deadlock stop, not a
+#: budget. Expiring costs the attachment faces, which the environment check then refuses rather than
+#: measuring in substitutes.
+DUMP_TIMEOUT_S = 30
+
 _PROVIDERS = {
     "auto": FontProvider.AUTODETECT,
     "none": FontProvider.NONE,
@@ -271,6 +278,7 @@ def _attachment_streams(exe: str, video: Path) -> list[dict]:
         ],
         check=True,
         capture_output=True,
+        timeout=DUMP_TIMEOUT_S,
     )
     streams = json.loads(probe.stdout or b"{}").get("streams")
     return streams if isinstance(streams, list) else []
@@ -329,6 +337,7 @@ def _dump_container_fonts(video: Path, target: Path, manifest: Path) -> bool:
                 ],
                 check=True,
                 capture_output=True,
+                timeout=DUMP_TIMEOUT_S,
             )
     except (OSError, subprocess.SubprocessError) as error:
         log.warning("could not dump %s's font attachments: %s", video.name, error)
