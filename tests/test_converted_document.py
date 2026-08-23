@@ -30,19 +30,38 @@ def test_a_letterboxed_frame_shrinks_the_text_by_the_bars() -> None:
 
 def test_margins_change_which_height_the_text_scales_with() -> None:
     """`get_libass_scale_height`: without margins the text scales with the video's visible height,
-    with them, with the height it would have resized to fit the frame."""
-    letterboxed = converted.RenderSpace(1920, 1080, (135, 135, 0, 0))
+    with them, with the height it would have resized to fit the frame.
 
-    assert converted.libass_scale_height(letterboxed, use_margins=False) == 810
-    assert converted.libass_scale_height(letterboxed, use_margins=True) == 810
+    Bars on both axes is the only shape where the two answers differ — a window whose aspect matches
+    neither the video's nor the frame's. Letterbox alone and pillarbox alone each return the same
+    number down both branches, so a test built on one of those passes with the branch deleted.
+    """
+    boxed = converted.RenderSpace(1920, 1080, (100, 100, 240, 240))
+
+    assert converted.libass_scale_height(boxed, use_margins=False) == 880
+    # 1920/1440 * 880 overshoots the frame, so the fit clamps to it — a 23% larger font either way.
+    assert converted.libass_scale_height(boxed, use_margins=True) == 1080
+    assert converted.font_scale(boxed, use_margins=True) != converted.font_scale(
+        boxed, use_margins=False
+    )
 
 
-def test_a_pillarboxed_frame_uses_the_fitted_height_when_margins_are_on() -> None:
-    pillarboxed = converted.RenderSpace(1920, 1080, (0, 0, 240, 240))
+@pytest.mark.parametrize(
+    ("margins", "height"),
+    [
+        ((135, 135, 0, 0), 810),  # letterbox: the fitted height is the visible height
+        ((0, 0, 240, 240), 1080),  # pillarbox: the fit clamps to the frame
+    ],
+)
+def test_a_single_pair_of_bars_scales_the_same_either_way(
+    margins: tuple[int, int, int, int], height: float
+) -> None:
+    """Boundary cases, named for what they are. Neither discriminates the branch; both pin the
+    arithmetic that produces the same answer down each side."""
+    space = converted.RenderSpace(1920, 1080, margins)
 
-    assert converted.libass_scale_height(pillarboxed, use_margins=False) == 1080
-    # width / video_width * video_height = 1920/1440 * 1080, clamped to the frame height.
-    assert converted.libass_scale_height(pillarboxed, use_margins=True) == 1080
+    assert converted.libass_scale_height(space, use_margins=False) == height
+    assert converted.libass_scale_height(space, use_margins=True) == height
 
 
 def test_scale_by_window_off_normalises_to_a_720p_reference() -> None:

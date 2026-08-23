@@ -183,5 +183,7 @@ def test_the_colour_lands_on_the_pixels_the_measurement_measured() -> None:
     lit = inside[..., 3] > 0
     assert lit.any(), "the first token's mask is empty"
     assert np.all(inside[lit][:, 0] == 0xFF) and np.all(inside[lit][:, 2] == 0xFF)
-    # And the alpha is the render's own, not a threshold: a real glyph edge is partly covered.
-    assert 0 < inside[..., 3].min() < 255 or (inside[..., 3] < 255).any()
+    # And the alpha is the render's own, not a threshold: an anti-aliased glyph edge is partly
+    # covered, so among the pixels the mask lit at all, some must be neither absent nor opaque.
+    # Read over the whole rect this would be trivially true — a bounding box is mostly background.
+    assert ((inside[lit][:, 3] > 0) & (inside[lit][:, 3] < 255)).any()
