@@ -151,6 +151,62 @@ def test_the_style_row_states_alpha_the_way_a_style_row_states_it() -> None:
     assert fields[6] == "&H50000000"  # BackColour: black at mpv's default opacity
 
 
+CUE, SPANS = "（鳥のさえずり）", ((1, 2), (2, 3), (3, 7))
+ROW = f"Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,{CUE}"
+
+
+def _render_cue(backend: object, style: converted.SubStyle | None = None) -> list:
+    """The tokens real libass paints for a converted cue laid out under `style`."""
+    from saitenka.subtitles import (
+        GeometryPaletteEntry,
+        GeometryRequest,
+        SubtitleTrackId,
+        TokenAnnotation,
+    )
+    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+
+    frame = (HD.width, HD.height)
+    scale = converted.font_scale(HD)
+    track = SubtitleTrackId("converted-render")
+    prepared = prepare_ass_hit_map_frame(
+        converted.document(ROW, HD, style=style, scale=scale),
+        track,
+        active_rows=ROW,
+        text=CUE,
+        tokens=[TokenAnnotation(index, *span) for index, span in enumerate(SPANS)],
+    )
+    snapshot = backend.render(  # type: ignore[attr-defined]
+        GeometryRequest(
+            1,
+            track,
+            prepared.frame_id,
+            11_256,
+            frame,
+            frame,
+            prepared.ass,
+            palette=tuple(
+                GeometryPaletteEntry(
+                    entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
+                )
+                for entry in prepared.palette
+            ),
+            reserved_rgb=prepared.reserved_rgb,
+            renderer_state=RendererState(font_scale=scale),
+        )
+    )
+    return list(snapshot.tokens)
+
+
+def _union(tokens: list) -> tuple[int, int, int, int]:
+    boxes = [token.bounds for token in tokens]
+    return (
+        min(box.x for box in boxes),
+        min(box.y for box in boxes),
+        max(box.x + box.width for box in boxes),
+        max(box.y + box.height for box in boxes),
+    )
+
+
 @pytest.mark.integration
 @pytest.mark.timeout(30)
 def test_every_token_of_a_converted_cue_gets_a_box_from_real_libass() -> None:
@@ -160,51 +216,46 @@ def test_every_token_of_a_converted_cue_gets_a_box_from_real_libass() -> None:
     made every glyph fully transparent passed eighteen tests and failed every cue on a user's
     screen.
     """
-    from saitenka.subtitles import (
-        GeometryPaletteEntry,
-        GeometryRequest,
-        SubtitleTrackId,
-        TokenAnnotation,
-    )
-    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
     from saitenka.subtitles.libass_backend import LibassGeometryBackend
-
-    cue, spans = "（鳥のさえずり）", ((1, 2), (2, 3), (3, 7))
-    frame = (HD.width, HD.height)
-    row = f"Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,{cue}"
-    scale = converted.font_scale(HD)
-    track = SubtitleTrackId("converted-render")
-    prepared = prepare_ass_hit_map_frame(
-        converted.document(row, HD, scale=scale),
-        track,
-        active_rows=row,
-        text=cue,
-        tokens=[TokenAnnotation(index, *span) for index, span in enumerate(spans)],
-    )
 
     backend = LibassGeometryBackend()
     try:
-        snapshot = backend.render(
-            GeometryRequest(
-                1,
-                track,
-                prepared.frame_id,
-                11_256,
-                frame,
-                frame,
-                prepared.ass,
-                palette=tuple(
-                    GeometryPaletteEntry(
-                        entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
-                    )
-                    for entry in prepared.palette
-                ),
-                reserved_rgb=prepared.reserved_rgb,
-                renderer_state=RendererState(font_scale=scale),
-            )
-        )
+        tokens = _render_cue(backend)
     finally:
         backend.close()
 
-    assert [token.token_index for token in snapshot.tokens] == [0, 1, 2]
-    assert all(token.bounds.width > 0 and token.bounds.height > 0 for token in snapshot.tokens)
+    assert [token.token_index for token in tokens] == [0, 1, 2]
+    assert all(token.bounds.width > 0 and token.bounds.height > 0 for token in tokens)
+
+
+#: Fields of `SubStyle` a user sets through a `--sub-*` option, each of which moves or resizes the
+#: cue on screen. If the style reaching `document()` is not the one mpv applied, every box drawn
+#: under one of these lands beside its word — which is what a converted track did on every machine
+#: while `document()` was called without a `style=` at all.
+MOVING_STYLE_FIELDS = (
+    ("font_size", converted.SubStyle(font_size=60.0)),
+    ("margin_y", converted.SubStyle(margin_y=120)),
+    ("spacing", converted.SubStyle(spacing=6.0)),
+    ("bold", converted.SubStyle(bold=True)),
+    ("align_y", converted.SubStyle(align_y=-1)),
+    ("margin_x", converted.SubStyle(margin_x=200, align_x=-1)),
+)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_a_style_the_user_changed_moves_the_boxes_libass_paints() -> None:
+    """The oracle the style port never had: not "the row prints the number" but "libass lays the cue
+    out somewhere else because of it". A `Style:` field the row drops, mis-scales, or writes into
+    the wrong column reads green against arithmetic and silently pins every box to mpv's defaults.
+    """
+    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+    backend = LibassGeometryBackend()
+    try:
+        baseline = _union(_render_cue(backend))
+        moved = {name: _union(_render_cue(backend, style)) for name, style in MOVING_STYLE_FIELDS}
+    finally:
+        backend.close()
+
+    assert [name for name, union in moved.items() if union == baseline] == []
