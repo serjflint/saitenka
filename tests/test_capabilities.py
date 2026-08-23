@@ -56,16 +56,21 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     clock = [0.0]
     first = threading.Event()
     second = threading.Event()
+    wedged = threading.Event()
+    counter = threading.Lock()
     calls = 0
 
     def run() -> bool:
         nonlocal calls
-        calls += 1
-        # Generous, because these bound a WEDGE, not a timeout: the first probe must still be stuck
-        # when the replacement publishes. At 1s under `-n auto` it can expire on its own before the
-        # test gets there, unwedge, and publish False — the failure looks like a rejected-late-result
-        # bug and is really the fixture giving up early.
-        if calls == 1:
+        with counter:  # two probe threads reach this; `calls += 1` is not atomic without the GIL
+            calls += 1
+            mine = calls
+        if mine == 1:
+            wedged.set()
+            # Generous, because these bound a WEDGE, not a timeout: the first probe must still be
+            # stuck when the replacement publishes. At 1s under `-n auto` it can expire on its own
+            # before the test gets there, unwedge, and publish False — the failure looks like a
+            # rejected-late-result bug and is really the fixture giving up early.
             first.wait(30)
             return False
         second.wait(30)
@@ -73,6 +78,12 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
 
     probe = CapabilityProbe(run, name="test", ttl=30, retry=1, timeout=5, clock=lambda: clock[0])
     assert probe.request()
+    # The wedged probe must be INSIDE `run`, not merely spawned. The clock is fake, so the
+    # replacement is requested microseconds later and the scheduler decides which thread reaches
+    # `run` first — whichever does takes the wedge branch. When that is the replacement, its
+    # generation-0 sibling publishes a result the probe correctly rejects, and the test reads
+    # "capability probe did not publish" while nothing is wrong with the probe.
+    assert wedged.wait(5), "the first probe never reached the callable it is supposed to wedge in"
     clock[0] = 6.0
     assert probe.request()
     assert not probe.request(force=True)
