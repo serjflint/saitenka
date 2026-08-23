@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 import pytest
@@ -259,6 +260,44 @@ def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
     backend.close()
     backend.close()
     assert created[1].closed
+
+
+def test_building_a_renderer_is_timed_and_reusing_one_is_not(monkeypatch) -> None:
+    """The interval nothing measured. `render_ms` times `renderer.render()` and `extract_ms` a
+    pure-Python walk, so a library init and a font scan fell between the two spans and read as
+    free — which is how a per-cue cost got argued about from console noise instead of a number.
+    Zero on a reuse, so the histogram measures construction rather than diluting it.
+    """
+    from saitenka import otel_metrics
+
+    spans: list[dict[str, object]] = []
+
+    class _Span:
+        def __init__(self, values: dict[str, object]) -> None:
+            self.values = values
+
+        def set(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+    @contextmanager
+    def record(_name: str, **attributes: str):
+        values: dict[str, object] = dict(attributes)
+        spans.append(values)
+        yield _Span(values)
+
+    monkeypatch.setattr(otel_metrics, "traced", record)
+    layers = Result((Layer(1, 1, b"\xff", 0x01020300, 10, 20),))
+    backend = LibassGeometryBackend(renderer_factory=lambda *_a, **_k: FakeRenderer(layers))
+    try:
+        backend.render(request(palette_size=1))
+        backend.render(request(palette_size=1))
+    finally:
+        backend.close()
+
+    built = [span["renderer_built_ms"] for span in spans if "renderer_built_ms" in span]
+    assert len(built) == 2
+    assert built[0] >= 0.0
+    assert built[1] == 0.0, "a cached renderer was billed for a construction that did not happen"
 
 
 def test_backend_forwards_every_font_source_to_the_renderer() -> None:

@@ -46,6 +46,7 @@ sub_text_reconcile_duration_ms: Histogram | None = None
 subtitle_geometry_ready_ms: Histogram | None = None
 subtitle_geometry_prepare_ms: Histogram | None = None
 subtitle_geometry_render_ms: Histogram | None = None
+subtitle_geometry_renderer_build_ms: Histogram | None = None
 subtitle_geometry_extract_ms: Histogram | None = None
 subtitle_geometry_active_events: Histogram | None = None
 subtitle_geometry_eligible_tokens: Histogram | None = None
@@ -391,6 +392,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
     global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_renderer_build_ms
     global subtitle_geometry_active_events
     global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
     global scroll_frame_duration_ms, show_tooltip_duration_ms
@@ -465,6 +467,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_geometry.render_ms",
             unit="ms",
             description="offscreen libass render time",
+        )
+        subtitle_geometry_renderer_build_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.renderer_build_ms",
+            unit="ms",
+            description="libass library init and font scan for a renderer the cache did not hold",
         )
         subtitle_geometry_extract_ms = meter.create_histogram(
             "saitenka.subtitle_geometry.extract_ms",
@@ -678,6 +685,7 @@ def unregister() -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
     global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_renderer_build_ms
     global subtitle_geometry_active_events
     global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
     global scroll_frame_duration_ms, show_tooltip_duration_ms
@@ -716,6 +724,7 @@ def unregister() -> None:
         subtitle_geometry_ready_ms = None
         subtitle_geometry_prepare_ms = None
         subtitle_geometry_render_ms = None
+        subtitle_geometry_renderer_build_ms = None
         subtitle_geometry_extract_ms = None
         subtitle_geometry_active_events = None
         subtitle_geometry_eligible_tokens = None

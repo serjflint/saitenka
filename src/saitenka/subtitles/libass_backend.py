@@ -300,25 +300,40 @@ class LibassGeometryBackend:
             features=list(request.renderer_state.features),
         )
 
-    def _renderer(self, request: GeometryRequest) -> NativeRenderer:
+    def _renderer(self, request: GeometryRequest) -> tuple[NativeRenderer, float]:
+        """This request's renderer, and the milliseconds spent building one when it was not cached.
+
+        Measured because it is not covered by anything else: `render_ms` times `renderer.render()`
+        and `extract_ms` a pure-Python walk, so a library init and a font-directory rescan fell
+        between the two spans and read as free. The cache is keyed on `cache_key()`, which hashes
+        the timestamp and the palette — everything that changes per cue — so in practice this is
+        paid every cue, and how much it costs was never established.
+        """
         key = request.cache_key()
         renderer = self._renderers.pop(key, None)
+        built_ms = 0.0
         if renderer is None:
+            started = time.perf_counter_ns()
             renderer = self._new_renderer(request)
+            built_ms = (time.perf_counter_ns() - started) / 1_000_000
         self._renderers[key] = renderer
         while len(self._renderers) > self._cache_max:
             _key, evicted = self._renderers.popitem(last=False)
             evicted.close()
-        return renderer
+        return renderer, built_ms
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self._closed:
             raise RuntimeError("libass geometry backend is closed")
         if not request.palette:
             raise ValueError("hit-map request needs a token palette")
-        renderer = self._renderer(request)
+        renderer, built_ms = self._renderer(request)
         with otel_metrics.traced("subtitle_geometry_libass") as span:
             span.set("provider", "libasslite")
+            span.set("renderer_built_ms", built_ms)
+            span.set("renderer_cache_size", len(self._renderers))
+            if otel_metrics.subtitle_geometry_renderer_build_ms is not None and built_ms:
+                otel_metrics.subtitle_geometry_renderer_build_ms.record(built_ms)
             span.set("libass_version", f"0x{renderer.library_version():x}")
             span.set("timestamp_ms", request.timestamp_ms)
             started = time.perf_counter_ns()
