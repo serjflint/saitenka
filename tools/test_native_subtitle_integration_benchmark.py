@@ -269,3 +269,20 @@ def test_manifest_lock_rejects_budget_weakening(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="re-locking"):
         load_manifest(path)
+
+
+def test_the_harness_answers_every_option_the_geometry_gate_reads() -> None:
+    """The fake mpv has to hold what production reads, or the benchmark measures a refusal.
+
+    An option the gate reads and the fake does not answer comes back `None`, and `None` is not a
+    supported value for several of them — so the track is refused, no geometry is ever submitted,
+    and the trial reports the interaction as costing nothing. That is worse than a failure: the
+    numbers look like a win.
+    """
+    from saitenka.app.native_subtitles import GATE_OPTIONS, _unsupported_render_inputs
+
+    props = benchmark._IPC().props
+    settings = {name: props.get(f"options/{name}") for name in GATE_OPTIONS}
+
+    assert [name for name in GATE_OPTIONS if f"options/{name}" not in props] == []
+    assert _unsupported_render_inputs(settings) == ()

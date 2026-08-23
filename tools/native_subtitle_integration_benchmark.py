@@ -21,6 +21,7 @@ import psutil
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.panel import Definition, Entry
 from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import (
@@ -301,9 +302,18 @@ class _IPC(NoSessionRuntime):
             "options/sub-ass-use-video-data": "all",
             "options/sub-ass-vsfilter-aspect-compat": None,
             "options/sub-ass-style-overrides": [],
+            "options/sub-scale-with-window": True,
+            "options/sub-scale-by-window": True,
+            "options/blend-subtitles": False,
+            "options/sub-filter-sdh": False,
+            "options/video-crop": "",
+            "options/video-rotate": 0,
             "options/sub-font-provider": "auto",
             "options/embeddedfonts": False,
             "options/sub-fonts-dir": "",
+            "options/sub-font": "sans-serif",
+            "options/osd-fonts-dir": "",
+            "options/osd-font-provider": "auto",
         }
 
     def command(self, *args):
@@ -323,6 +333,11 @@ class _IPC(NoSessionRuntime):
         """Routed through `command`, not read off `props`: one read path, so the trial's command log
         stays the record of everything the renderer actually asked mpv."""
         return self.command("get_property", name).get("data")
+
+    def expand_path(self, path: str) -> str:
+        """mpv expands its own `~~/` forms; nothing here uses one, so the identity is the honest
+        stand-in — and having the member at all is what lets the production font resolver run."""
+        return path
 
     def command_async(self, *args, **_kwargs):
         """Uncorrelated egress, completed inline — again through `command`, so a keybind the tooltip
@@ -474,6 +489,11 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         native.dict_set = _TallDictionary()
         assert native.native_geometry is not None
         native.native_geometry.set_source(source_path, live=True)
+        # A track load is where mpv's font set is read, and a frame measured against an unresolved
+        # environment is refused rather than laid out in substitute faces. Through the production
+        # resolver, not a hand-built environment: a harness that skipped it would benchmark the
+        # refusal path and report the interaction as free.
+        resolve_track_fonts(native.ipc, native.ipc.query, native.native_geometry)
         index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
         native.episode.sub_index = index
         latencies: list[float] = []
