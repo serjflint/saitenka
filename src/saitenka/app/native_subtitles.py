@@ -248,11 +248,22 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         # (gated above) and never reads `sub-scale-by-window` at all, so refusing either there would
         # cost an episode's interaction over an option with no effect on it.
         #
-        # `--blend-subtitles` is different in kind, and stays. It is not arithmetic we skipped: it
-        # moves mpv's glyphs off the OSD surface entirely, into the video frame before interpolation
-        # and colour management. Our overlay is composited after that, at a different resolution and
-        # through a different filter chain, so an overprint drawn there could not register with the
-        # glyphs it is colouring however well the layout agreed.
+        # `--blend-subtitles` stays refused, but NOT because the overprint could not reach it. Our
+        # overlay is still drawn last and at screen resolution — with blend on, the final pass is
+        # `OSD_DRAW_OSD_ONLY` onto the screen (`video/out/gpu/video.c:3650`), so our layer wins
+        # exactly as it does otherwise. What moves is where MPV's glyphs are: it builds a different
+        # `mp_osd_res` for the blend pass (`video.c:3227-3273`), and our boxes would be laid out
+        # against the OSD surface it is no longer drawing into.
+        #
+        # That is a coordinate mapping, and for `=yes` it is derivable — a port of the src/dst rect
+        # geometry (`video/out/aspect.c`) plus the margin scaling right there in the pass. `=video`
+        # has one input nothing exposes: `texture_w/h` AFTER the user's shader hooks, which a
+        # `--glsl-shader` can resize.
+        #
+        # The reason it is not done is verification, not feasibility. `compute_bounds` renders
+        # through mpv's OSD libass, which blend-subtitles does not touch — so the one oracle we have
+        # is blind to this path, and shipping geometry nothing can check is what this gate exists to
+        # stop.
         "blend-subtitles": settings["blend-subtitles"] in {False, "no"},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
