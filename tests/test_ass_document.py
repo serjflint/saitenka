@@ -536,6 +536,9 @@ def test_animated_effect_field_fails_closed() -> None:
         ("{\\fad(100,100)}猫", (0, 1), "animated or karaoke"),
         ("{\\fade(0,255,0,0,100,200,300)}猫", (0, 1), "animated or karaoke"),
         ("{\\t(\\fscx120)}動く", (0, 2), "animated or karaoke"),
+        ("{\\blur4}猫", (0, 1), "extent is not the word"),
+        ("{\\be2}猫", (0, 1), "extent is not the word"),
+        ("{\\blur}猫", (0, 1), "extent is not the word"),
         ("{\\p1}m 0 0{\\p0}字", (0, 1), "drawing events"),
         ("色{\\r}変更", (0, 3), "crosses a token"),
         ("色{\\c&H112233&}変更", (0, 3), "crosses a token"),
@@ -551,6 +554,61 @@ def test_rewrite_fails_closed_for_unsupported_ass(
     source = annotated(raw, span)
     with pytest.raises(UnsupportedAssEvent, match=reason):
         rewrite_ass_event(source, {0: 0x010203}, CATALOG)
+
+
+@pytest.mark.parametrize("raw", ["{\\blur0}猫", "{\\be0}猫", "{\\blur0.0}猫"])
+def test_a_blur_that_spreads_nothing_is_not_a_refusal(raw: str) -> None:
+    """`\\blur0` and `\\be0` are ordinary in real typesetting — a group's template sets them and a
+    line overrides them back. Refusing the tag rather than the effect would refuse those tracks for
+    a command that changes no pixel."""
+    assert rewrite_ass_event(annotated(raw, (0, 1)), {0: 0x010203}, CATALOG) is not None
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_the_blur_refusal_is_measured_not_assumed() -> None:
+    """Why blur is refused, from libass rather than from reasoning about it.
+
+    The first guess was that a spread fill breaks the COLOUR keying — it does not: libass reports
+    the reserved colour exactly, with any alpha in the low byte the hit map shifts out. What it
+    breaks is the EXTENT. Here the images grow by half a glyph and two neighbouring words overlap,
+    which is a hover landing on the wrong word.
+    """
+    libasslite = pytest.importorskip("libasslite")
+    header = (
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
+        "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        "Style: D,sans-serif,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,"
+        "1,0,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+    )
+
+    def render(tag: str) -> list[tuple[int, int, int]]:
+        event = (
+            rf"Dialogue: 0,0:00:01.00,0:00:03.00,D,,0,0,0,,{{\pos(40,40){tag}\1c&H0000FF&}}猫"
+            r"{\1c&H00FF00&}犬" + "\n"
+        )
+        renderer = libasslite.AssRenderer((header + event).encode())
+        try:
+            result = renderer.render(2_000, (640, 360), (640, 360), pixel_aspect=1.0)
+            return [
+                (layer.color >> 8, layer.dst_x, layer.dst_x + layer.width)
+                for layer in result.layers
+                if layer.image_type == 0
+            ]
+        finally:
+            renderer.close()
+
+    sharp = render("")
+    blurred = render(r"\blur4")
+
+    assert [colour for colour, _left, _right in blurred] == [
+        colour for colour, _left, _right in sharp
+    ], "blur changed the reported colour, which is not the reason it is refused"
+    assert sharp[0][2] <= sharp[1][1], "the sharp boxes should not overlap"
+    assert blurred[0][2] > blurred[1][1], "blur is refused because the boxes overlap"
 
 
 def test_hit_map_requires_exact_unique_non_reserved_colors() -> None:

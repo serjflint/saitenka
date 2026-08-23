@@ -30,6 +30,10 @@ _COLOR_STATE = re.compile(
     r"|r(?P<style>[^\\}]*))"
 )
 _PRIMARY_COLOR_COMMAND = re.compile(r"\\1?c")
+#: Effects that spread a token's ink past its own outline. Not a colour problem — libass reports the
+#: reserved colour exactly either way — but a size one: `\blur4` grows a 32px glyph's image to 60px,
+#: which makes two neighbouring words' boxes overlap by half a glyph and hover pick the wrong one.
+_SPREAD = re.compile(r"\\(?:blur|be)(?P<amount>-?\d*\.?\d*)(?![\d.])")
 _ASS_TIME = re.compile(
     r"(?P<hours>\d+):(?P<minutes>[0-5]\d):(?P<seconds>[0-5]\d)\.(?P<centiseconds>\d{2})"
 )
@@ -473,9 +477,24 @@ def _validate_rewrite_envelope(
             raise UnsupportedAssEvent("a token boundary may split a Latin ligature")
 
 
+def _spreads_ink(content: str) -> bool:
+    """Whether a `\\blur`/`\\be` in this block actually spreads anything.
+
+    `\\blur0` and `\\be0` are no-ops and common in real typesetting; refusing them would refuse
+    tracks for a tag that changes nothing. A bare `\\blur` with no amount resets to the style's,
+    which cannot be read from here, so it counts as spreading.
+    """
+    return any(
+        match.group("amount") in {"", "."} or float(match.group("amount")) != 0
+        for match in _SPREAD.finditer(content)
+    )
+
+
 def _validate_static_overrides(source: RawSubtitleEvent, blocks: Sequence[_OverrideBlock]) -> None:
     if any(_UNSAFE.search(block.content) for block in blocks):
         raise UnsupportedAssEvent("animated or karaoke overrides are not color-rewritten")
+    if any(_spreads_ink(block.content) for block in blocks):
+        raise UnsupportedAssEvent("a blurred token's extent is not the word's extent")
     if source.effect.strip():
         raise UnsupportedAssEvent("ASS effects are outside the static interactive envelope")
     for block in blocks:

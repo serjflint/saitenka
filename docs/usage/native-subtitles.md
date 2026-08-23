@@ -150,7 +150,10 @@ introspect mpv's exact libass build and font environment, so a compatible runtim
 envelope can still differ at pixel level; this experimental mode does not claim runtime pixel identity.
 
 Supported frames are static and use the mpv profile above, without application-level style
-overrides. A frame may contain several simultaneous ASS events: Saitenka
+overrides. A cue typeset with animation (`\t`, `\move`, `\fad`), karaoke, a vector drawing, an ASS
+effect, bidirectional text, or a blur (`\blur`/`\be`, which spreads a word's ink past its own box and
+makes neighbouring hit boxes overlap) is reported as `typesetting-unsupported` — a property of the
+track rather than a failure, so no retry will change it and the report says so. A frame may contain several simultaneous ASS events: Saitenka
 matches mpv's public `sub-text/ass-full` rows back to the authored source and keeps event identity in
 each hit box. Whitespace and other non-painting tokenizer tokens remain available to the normal text
 pipeline but are not required to produce libass pixels.

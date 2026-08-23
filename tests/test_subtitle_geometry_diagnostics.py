@@ -32,6 +32,31 @@ def test_contract_and_resource_errors_are_bounded_unsupported_decisions(
 
 
 @pytest.mark.parametrize(
+    "detail",
+    [
+        "animated or karaoke overrides are not color-rewritten",
+        "a blurred token's extent is not the word's extent",
+        "drawing events are not color-rewritten",
+        "ASS effects are outside the static interactive envelope",
+        "bidirectional text is outside the interactive envelope",
+        "a token boundary may split a Latin ligature",
+        "unparsed primary-color command is not color-rewritten",
+    ],
+)
+def test_the_envelope_refusals_are_named_rather_than_reported_as_provider_errors(
+    detail: str,
+) -> None:
+    """Each of these is a property of the track: it refuses the same cue every time, and no retry,
+    reinstall or report will change it. Reporting them as `provider-error` said the opposite —
+    that something broke — and gave a user nothing to act on. Two of them also contain the word
+    "token", so the ordering against `token-mapping-invalid` is part of the claim."""
+    assert geometry_failure_reason(ValueError(detail)) == (
+        "subtitle-frame-unsupported",
+        GeometryErrorCode.TYPESETTING,
+    )
+
+
+@pytest.mark.parametrize(
     ("detail", "code"),
     [
         ("missing libass token colors", GeometryErrorCode.MISSING_PALETTE_PIXELS),
