@@ -115,6 +115,10 @@ cue_settles: Counter | None = None
 #: the system providers, so this says how often a track's typesetting came from somewhere it could
 #: not reach — the field evidence for whether the other three sources matter here.
 subtitle_geometry_font_sources: Counter | None = None
+#: labeled renderer=legacy|native. A deliberate switch, not a failure: the catastrophic-fallback
+#: counter next door says the native path gave up, and conflating the two would make a user
+#: comparing the engines look like a regression.
+subtitle_renderer_forced: Counter | None = None
 
 
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
@@ -402,7 +406,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global subtitle_geometry_font_sources
+    global subtitle_geometry_font_sources, subtitle_renderer_forced
 
     with _lock:
         _reader = reader
@@ -622,6 +626,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_geometry.font_sources",
             description="font sources resolved per track (sources=system+fonts-dir+attachments+in-file)",
         )
+        subtitle_renderer_forced = meter.create_counter(
+            "saitenka.subtitle.renderer_forced",
+            description="deliberate runtime renderer switches (renderer=legacy|native)",
+        )
         mpv_effect_apply_ms = meter.create_histogram(
             "saitenka.mpv_effect.apply_ms",
             unit="ms",
@@ -670,7 +678,7 @@ def unregister() -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global subtitle_geometry_font_sources
+    global subtitle_geometry_font_sources, subtitle_renderer_forced
 
     with _lock:
         _reader = None
@@ -739,6 +747,7 @@ def unregister() -> None:
         hover_pause_claim = None
         cue_settles = None
         subtitle_geometry_font_sources = None
+        subtitle_renderer_forced = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
         prefetch_queue_depth = None

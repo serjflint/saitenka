@@ -58,6 +58,7 @@ from saitenka.app import (
     subtitle_intents,
     subtitle_modes,
     subtitle_raster,
+    subtitles,
     surfaces,
     telemetry,
     tooltip,
@@ -83,6 +84,7 @@ from saitenka.app.bindings import (
     HELP_TOGGLE_MSG,
     HOVER_PAUSE_MSG,
     KANJI_MSG,
+    LEGACY_RENDERER_MSG,
     MINE_ALL_MSG,
     MINE_MSG,
     MINE_VIDEO_MSG,
@@ -1058,7 +1060,19 @@ class Reader:
             draw_request=self._draw_request,
             source=None if geometry is None else geometry.source_path,
             native_unsupported=geometry is not None and geometry.source_unsupported,
+            legacy_forced=self.subtitle_pipeline.legacy_forced,
         )
+
+    def toggle_legacy_renderer(self) -> bool:
+        """Carry the intent to the coordinator, then redraw the cue under the renderer it chose."""
+        geometry = self.native_geometry
+        if geometry is not None:
+            geometry.invalidate(live=True)
+        forced = self.subtitle_pipeline.force_legacy(
+            self.subtitle_target(), forced=not self.subtitle_pipeline.legacy_forced
+        )
+        self.set_subtitle(self.sub_text)
+        return forced
 
     def _draw_request(self) -> DrawRequest:
         """Snapshot the host once per draw, so the values cannot drift apart mid-render.
@@ -1856,14 +1870,12 @@ class Reader:
 
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:
-        ox, oy = self.sub_origin
-        for b in self.boxes:
-            tok = self.tokens[b.index]
-            if self.tokenizer.is_skippable(tok):
-                continue
-            if b.contains(mx - ox, my - oy):
-                return b.index
-        return -1
+        return subtitles.token_at(
+            self.boxes,
+            (mx, my),
+            self.sub_origin,
+            is_skippable=lambda index: self.tokenizer.is_skippable(self.tokens[index]),
+        )
 
     @staticmethod
     def _in_rect(rect, x: float, y: float) -> bool:
@@ -3330,6 +3342,7 @@ class Reader:
             SUBTITLE_LANGUAGE_MSG: action(Reader.toggle_subtitle_language),
             SUBTITLE_MARK_JP_MSG: action(Reader.mark_current_subtitle_japanese),
             SUBTITLE_RETRY_MSG: action(Reader.retry_japanese_subtitles),
+            LEGACY_RENDERER_MSG: action(Reader.toggle_legacy_renderer),
             ANNOTATION_MSG: action(Reader.toggle_annotation_mode),
             TRANS_MSG: action(Reader.toggle_translation),
             COPY_LINE_MSG: action(Reader.copy_line),

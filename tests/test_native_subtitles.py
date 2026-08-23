@@ -1934,6 +1934,40 @@ def test_a_font_setting_changed_under_a_resolved_track_fails_closed(
     result.close()
 
 
+def test_the_legacy_renderer_can_be_selected_and_given_back(tmp_path: Path) -> None:
+    """The comparison target has to be selectable. Until now the only route to the legacy renderer
+    was catastrophic recovery, and a target you cannot choose is not one."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.NATIVE
+
+    assert result.toggle_legacy_renderer() is True
+    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.LEGACY
+
+    assert result.toggle_legacy_renderer() is False
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.NATIVE
+    result.close()
+
+
+def test_a_forced_legacy_switch_is_told_apart_from_a_failure(tmp_path: Path) -> None:
+    """Both end with the legacy renderer drawing, and a report has to say which happened: one is a
+    user comparing the engines, the other is the native path giving up."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    result.toggle_legacy_renderer()
+
+    assert result.subtitle_pipeline.legacy_forced is True
+    assert result.native_geometry is not None
+    # Not a geometry failure: nothing refused a frame, so no fallback reason is latched.
+    assert result.native_geometry.status.fallback_reason != "mpv-sub-visibility-rejected"
+    result.close()
+
+
 def test_resolving_the_track_again_clears_a_stale_font_environment(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     ipc.props["options/embeddedfonts"] = True

@@ -139,6 +139,10 @@ blocking the player event loop.
 - For responsive subtitles but a delayed tooltip or scroll, run `saitenka trace-report` on that same
   report path. Its hover, tooltip, and scroll summaries distinguish target lookup, preparation, visible
   paint, supersession, cancellation, and failure without recording the hovered text.
+- `Ctrl+Shift+L` hands the current episode to Saitenka's own renderer without restarting, and hands
+  it back. That is the way to compare the two engines on the same cue, and the answer when a track's
+  typesetting is one the native path refuses: coloured, scannable text instead of untouchable pixels.
+  A report tells a deliberate switch from a native-visibility failure.
 - Set `native_visible = false` to restore Saitenka's default redrawn, FSRS-colored subtitle.
 
 For the provider contract, shadow-render pipeline, lifecycle guards, and package diagram, see

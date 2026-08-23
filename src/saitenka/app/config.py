@@ -130,6 +130,10 @@ class KeyOptions:
     sub_picker_key: str = field(
         default="Ctrl+j", metadata={"help": "Open the jimaku subtitle-source download picker."}
     )
+    legacy_renderer_key: str = field(
+        default="Ctrl+Shift+L",
+        metadata={"help": "Draw subtitles with the legacy renderer instead of mpv's."},
+    )
     preview_key: str = field(default="p", metadata={"help": "Toggle the card-preview panel."})
     hover_pause_key: str = field(default="Alt+p", metadata={"help": "Toggle pause-on-hover."})
     sub_prev_key: str = field(

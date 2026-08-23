@@ -103,6 +103,7 @@ _COMMAND_ROUTE_CONTRACT = """\
 saitenka-toggle-overlay|session|global|modal
 saitenka-cycle-profile|session|global|modal
 saitenka-toggle-hover-pause|session|global|modal
+saitenka-toggle-legacy-renderer|session|global|modal
 saitenka-toggle-help|session|global|help
 saitenka-help-prev|session|global|help
 saitenka-help-next|session|global|help

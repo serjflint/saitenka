@@ -363,6 +363,10 @@ class SubtitleTarget:
     #: This source can never produce geometry (see `NativeSubtitleGeometry.source_unsupported`).
     #: A snapshot, not a callable: it is read inside the same call that builds the target.
     native_unsupported: bool = False
+    #: The user asked for the legacy renderer. Separate from `native_unsupported` because the two
+    #: are different facts with the same consequence, and a report has to tell them apart: one is a
+    #: choice and the other is a track the native path cannot serve.
+    legacy_forced: bool = False
 
 
 class NullRenderer(NoPixelOwnership):
@@ -795,19 +799,23 @@ class NativeVisibleRenderer:
             (
                 target.prop("sid") if isinstance(sid, AskMpv) else sid,
                 target.source,
+                # In the selection because a forced switch has to READ as a selection change: this
+                # method returns early on an unchanged one, so a flag outside it would toggle
+                # nothing until the next track load.
+                target.legacy_forced,
             )
         )
         if selection == self._selection:
             return
         self._selection = selection
         # A source geometry can never accept (an .srt, say) would otherwise leave the episode with
-        # mpv's pixels and no hit boxes for its whole run. Choosing the mode HERE is what keeps the
-        # module rule intact — "geometry availability never selects the renderer": this is a
-        # property of the source, evaluated once per selection, not a geometry outcome that could
-        # flip between cues.
+        # mpv's pixels and no hit boxes for its whole run, and a user who asks for the legacy
+        # renderer is asking for the same thing deliberately. Choosing the mode HERE is what keeps
+        # the module rule intact — "geometry availability never selects the renderer": both inputs
+        # are evaluated once per selection, not geometry outcomes that could flip between cues.
         mode = (
             OwnershipMode.LEGACY_OVERLAY
-            if target.native_unsupported
+            if target.native_unsupported or target.legacy_forced
             else OwnershipMode.NATIVE_VISIBLE
         )
         context = OwnershipContext(

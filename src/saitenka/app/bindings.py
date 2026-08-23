@@ -16,6 +16,7 @@ OVERLAY_TOGGLE_MSG = "saitenka-toggle-overlay"
 SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 SUBTITLE_MARK_JP_MSG = "saitenka-mark-subtitle-japanese"
 SUBTITLE_RETRY_MSG = "saitenka-retry-subtitle-providers"
+LEGACY_RENDERER_MSG = "saitenka-toggle-legacy-renderer"
 PROFILE_CYCLE_MSG = "saitenka-cycle-profile"
 SUB_PICKER_MSG = "saitenka-sub-picker"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
@@ -131,6 +132,12 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Download subtitles (pick source)",
         SUB_PICKER_MSG,
         key_attr="sub_picker_key",
+    ),
+    BindingSpec(
+        "Essentials & language",
+        "Draw subtitles with the legacy renderer",
+        LEGACY_RENDERER_MSG,
+        key_attr="legacy_renderer_key",
     ),
     BindingSpec(
         "Essentials & language",

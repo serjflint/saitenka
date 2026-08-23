@@ -19,6 +19,8 @@ from saitenka.render.flow import render_flow
 from saitenka.render.layout import NO_START, Block
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from saitenka.app.tokenize import Token
 
 WHITE = (255, 255, 255, 255)
@@ -47,6 +49,30 @@ class WordBox:
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
+
+
+def token_at(
+    boxes: Sequence[WordBox],
+    point: tuple[float, float],
+    origin: tuple[int, int],
+    *,
+    is_skippable: Callable[[int], bool],
+) -> int:
+    """Which token a pointer position lands on, or -1.
+
+    A function of the boxes rather than a method on the host, because it is the one thing both
+    subtitle engines have to agree about. Their layouts are Pillow and libass and will never agree
+    on pixels; what a user notices is a *different word* under the cursor, so that is where the
+    differential oracle lives — and an oracle that re-implemented the resolution would be comparing
+    two things neither engine does.
+    """
+    origin_x, origin_y = origin
+    for box in boxes:
+        if is_skippable(box.index):
+            continue
+        if box.contains(point[0] - origin_x, point[1] - origin_y):
+            return box.index
+    return -1
 
 
 def box_for_token(boxes: list[WordBox], token_index: int) -> WordBox | None:

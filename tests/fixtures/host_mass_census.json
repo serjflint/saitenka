@@ -2,14 +2,14 @@
   "counts": {
     "alias": 1,
     "delegated": 1,
-    "delegator": 93,
+    "delegator": 94,
     "derived": 45,
     "init_lines": 456,
     "self_delegator": 6,
     "slice": 10,
     "substantive": 187,
-    "substantive_lines": 2348,
-    "total": 343
+    "substantive_lines": 2350,
+    "total": 344
   },
-  "reason": "the subtitle target carries whether the source can ever produce geometry, so an .srt selects the renderer that can draw its hit boxes instead of leaving the episode unscannable"
+  "reason": "the legacy renderer became selectable at runtime, so the host carries one more command verb to its coordinator \u2014 the comparison target this work is measured against was previously reachable only through catastrophic recovery"
 }
