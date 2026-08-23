@@ -602,6 +602,9 @@ class NativeVisibleRenderer:
         #: Whether device 2's raster is on screen, so a cue that needs none takes the last one down
         #: rather than leaving it over the words that follow.
         self._overpaint_shown = False
+        #: Placement and pixels of the raster currently on the slot, so a redraw that changes
+        #: neither can skip the upload. `None` whenever the slot is down — see `_drop_overpaint`.
+        self._overpaint_published: tuple[int, int, bytes] | None = None
         #: Payload shapes already measured against mpv's OSD renderer, so a stall is paid once per
         #: face set per surface rather than once per cue.
         self._calibrated: set[str] = set()
@@ -1246,8 +1249,18 @@ class NativeVisibleRenderer:
     def _hide_overpaint(self, surfaces) -> None:
         if surfaces is None or not self._overpaint_shown:
             return
-        self._overpaint_shown = False
+        self._drop_overpaint()
         surfaces.remove(OverlayId.OVERPAINT, owner=Owner.SUBTITLE)
+
+    def _drop_overpaint(self) -> None:
+        """Forget what is on the slot, because nothing is.
+
+        Every path that takes the raster down goes through here — `clear`, `suspend_for_overlay`,
+        and a cue with no raster of its own. Leaving the memo standing would tell the next publish
+        of the same cue that its pixels are already up, and the raster would never come back after
+        a tooltip closed.
+        """
+        self._overpaint_shown = False
 
     def close(self) -> None:
         self._fallback.close()
@@ -1298,10 +1311,18 @@ class NativeVisibleRenderer:
         image = overpaint_image(request, drifting=self._drifting)
         if image is None:
             if self._overpaint_shown:
-                self._overpaint_shown = False
+                self._drop_overpaint()
                 surfaces.remove(OverlayId.OVERPAINT, owner=Owner.SUBTITLE)
             return
+        # A hover redraws the whole cue, and the raster is the one part of it a hover cannot
+        # change — the highlight is device 1's slot, not this one. One live cue published fifteen
+        # byte-identical frames against seven tooltips; each is an upload of the cue's pixels to
+        # mpv for a screen that already shows them.
+        published = (image.x, image.y, image.rgba.tobytes())
+        if self._overpaint_shown and published == self._overpaint_published:
+            return
         self._overpaint_shown = True
+        self._overpaint_published = published
         _trace_overpaint_placement(request, image)
         # The array path, not `present`: these pixels were composited into numpy and never were a
         # PIL image. Wrapping one to unwrap it again is two copies of every cue.

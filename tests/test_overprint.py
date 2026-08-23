@@ -277,6 +277,85 @@ def test_the_payload_lands_where_the_measurement_said_the_token_was() -> None:
         )
 
 
+class FakeSurfaces:
+    """Records what reached mpv's presentation slots, in order."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object, object]] = []
+
+    def present_rgba(self, rgba, x, y, *, oid, owner) -> None:
+        self.calls.append(("present", oid, (x, y, len(rgba.tobytes()), owner)))
+
+    def remove(self, oid, *, owner) -> None:
+        self.calls.append(("remove", oid, owner))
+
+    def overpaint_traffic(self) -> list[str]:
+        """Just the raster slot: the focus slot and the fallback share this recorder."""
+        from saitenka.app.overlay_ids import OverlayId
+
+        return [kind for kind, oid, _ in self.calls if oid == OverlayId.OVERPAINT]
+
+
+class FakeIpc:
+    """A disconnected egress: every submission is refused, which is a path `clear` already handles."""
+
+    def submit_runtime_mpv(self, **_kwargs) -> bool:
+        return False
+
+    def send(self, *_args, **_kwargs) -> None: ...
+
+    def query(self, *_args, **_kwargs) -> None: ...
+
+
+def _overpaint_renderer():
+    from saitenka.app.subtitle_render import NativeVisibleRenderer
+
+    return NativeVisibleRenderer()
+
+
+def _colored_request(hover: int = -1):
+    from dataclasses import replace
+
+    from saitenka.app.subtitles import WordBox
+
+    boxes = [
+        WordBox(index, 100 + index * 60, 600, 50, 40, "", 48.0, coverage=bytes(50 * 40))
+        for index in range(3)
+    ]
+    return replace(draw_request(styles=[Style((9, 9, 9, 255))] * 3, boxes=boxes), hover=hover)
+
+
+def test_a_hover_that_changes_no_pixel_uploads_nothing() -> None:
+    """The raster is the one part of a cue a hover cannot change — the highlight is device 1's slot,
+    not this one — yet every hover redraws the whole cue. One live cue published fifteen
+    byte-identical frames against seven tooltips, each an upload of the cue's pixels to a screen
+    that already showed them.
+    """
+    renderer = _overpaint_renderer()
+    surfaces = FakeSurfaces()
+
+    renderer._publish_overpaint(_colored_request(), surfaces)
+    for hover in range(3):
+        renderer._publish_overpaint(_colored_request(hover=hover), surfaces)
+
+    assert surfaces.overpaint_traffic() == ["present"]
+
+
+def test_the_raster_comes_back_after_the_slot_was_taken_down_under_it() -> None:
+    """The trap the skip opens: `suspend_for_overlay` drops the slot behind the memo's back. A cache
+    that is not invalidated there tells the next publish of the same cue that its pixels are already
+    up, and the words stay uncolored for the rest of the cue — every time a tooltip closes."""
+    renderer = _overpaint_renderer()
+    surfaces = FakeSurfaces()
+    request = _colored_request()
+
+    renderer._publish_overpaint(request, surfaces)
+    renderer.clear(surfaces, FakeIpc())
+    renderer._publish_overpaint(request, surfaces)
+
+    assert surfaces.overpaint_traffic() == ["present", "remove", "present"]
+
+
 def test_the_overpaint_placement_records_both_spaces_it_reconciles() -> None:
     """The raster is composed against the geometry frame and addressed in mpv's OSD space, which
     differ by the letterbox. A placement that skipped the conversion looks exactly like one that
