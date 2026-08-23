@@ -18,11 +18,13 @@ from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
+from saitenka.app.scoring import Scorer
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
+from saitenka.app.wordlists import KnownWords
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, events
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
@@ -259,10 +261,12 @@ class FakeBackend:
         self.closed = False
         self.error: Exception | None = None
         self.token_index_offset = 0
-        #: The face a real measuring render resolves per token; empty is the "did not resolve" case
-        #: the overprint has to leave uncoloured.
-        self.font_name = ""
-        self.font_size = 0.0
+        #: `None` echoes the request's palette, which is what the real backend does
+        #: (`libass_backend._token_geometry` copies the key straight through). A fake that answered
+        #: a constant instead is how the palette shipped reading zero for every cue with the whole
+        #: suite green: nothing downstream of the request was ever driven by the request.
+        self.font_name: str | None = None
+        self.font_size: float | None = None
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         self.requests.append(request)
@@ -274,8 +278,8 @@ class FakeBackend:
                 entry.token_index + self.token_index_offset,
                 Rect(100 + entry.token_index * 60, 600, 50, 40),
                 (),
-                self.font_name,
-                self.font_size,
+                entry.font_name if self.font_name is None else self.font_name,
+                entry.font_size if self.font_size is None else self.font_size,
             )
             for entry in request.palette
         )
@@ -339,7 +343,11 @@ class _AllSkippableTokenizer(_SingleTokenizer):
 
 
 def reader(
-    tmp_path: Path, *, correlated_surfaces: bool = False, native_visible: bool = True
+    tmp_path: Path,
+    *,
+    correlated_surfaces: bool = False,
+    native_visible: bool = True,
+    scorer=None,
 ) -> tuple[Reader, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
@@ -356,6 +364,7 @@ def reader(
         options=options,
         geometry_backend=backend,
         runtime_submit=ipc.submit_runtime_mpv if correlated_surfaces else None,
+        scorer=scorer,
     )
     # Native geometry exists exactly when the mode does — the legacy renderer lays its own boxes out
     # and has no provider to schedule against.
@@ -2048,23 +2057,31 @@ def overlay_payloads(ipc) -> list[str]:
     ]
 
 
+def attachment_supplying(ipc, *families: str) -> subtitle_fonts.FontEnvironment:
+    """A font environment whose container attachment advertises exactly `families`.
+
+    The names are stated rather than parsed out of real font bytes: what is under test here is which
+    palette entries stand down given a set, and `tests/test_font_names.py` owns the other half —
+    that a real attachment's set is read correctly from its name table.
+    """
+    return subtitle_fonts.FontEnvironment(
+        subtitle_fonts.FontSetup(extract_fonts=True),
+        (("Embedded.otf", b"font"),),
+        subtitle_fonts.option_snapshot(
+            {name: ipc.query(f"options/{name}") for name in subtitle_fonts.FONT_OPTIONS}
+        ),
+        frozenset(families),
+    )
+
+
 def test_a_face_only_the_subtitle_renderer_has_stands_the_overprint_down(tmp_path: Path) -> None:
     """The case the drift probe measured at -29px. mpv's OSD library can never receive a container
     attachment, so an overprint sent through `osd-overlay` would be laid out in a substitute face —
     right words, wrong glyph shapes. The boxes are still right, so the cue stays interactive; only
     the colour stands down, and the demotion is counted rather than silent."""
     result, ipc, backend = reader(tmp_path)
-    backend.font_name, backend.font_size = "Gandhi Sans", 48.0
     assert result.native_geometry is not None
-    result.native_geometry.set_fonts(
-        subtitle_fonts.FontEnvironment(
-            subtitle_fonts.FontSetup(extract_fonts=True),
-            (("GandhiSans.otf", b"font"),),
-            subtitle_fonts.option_snapshot(
-                {name: ipc.query(f"options/{name}") for name in subtitle_fonts.FONT_OPTIONS}
-            ),
-        )
-    )
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -2075,10 +2092,113 @@ def test_a_face_only_the_subtitle_renderer_has_stands_the_overprint_down(tmp_pat
     result.close()
 
 
+def test_only_the_tokens_in_the_embedded_family_lose_their_colour(tmp_path: Path) -> None:
+    """The reason the stand-down is keyed on families and not on the presence of an attachment: a
+    release whose dialogue is a system font and whose signs are attachment-only should lose the
+    colour on its signs, not on the whole episode."""
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(
+        ASS.replace(
+            b"Style: Default,Arial,",
+            b"Style: Sign,Embedded Signs,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,"
+            b"100,100,0,0,1,2,1,2,10,10,30,1\nStyle: Default,Arial,",
+        ).replace(
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る\n".encode(),
+            (
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫\n"
+                "Dialogue: 1,0:00:01.00,0:00:03.00,Sign,,0,0,0,,犬\n"
+            ).encode(),
+        )
+    )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result.native_geometry.set_fonts(attachment_supplying(ipc, "embedded signs"))
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫\n"
+        "Dialogue: 1,0:00:01.00,0:00:03.00,Sign,,0000,0000,0000,,犬"
+    )
+
+    result.set_subtitle("猫\n犬")
+    settle_jobs(result, ipc)
+
+    by_event = {
+        entry.event_id.source_order: entry.font_name for entry in backend.requests[-1].palette
+    }
+    assert by_event == {0: "Arial", 1: ""}
+    result.close()
+
+
+def test_a_document_that_embeds_its_own_fonts_stands_those_families_down(tmp_path: Path) -> None:
+    """The fourth font source: an `[Fonts]` section inside the `.ass` reaches mpv's subtitle renderer
+    through `ass_set_extract_fonts` and never its OSD one, exactly like a container attachment. It
+    arrives with the source rather than with the font environment, so the two halves have to be
+    combined on read or one of them is silently dropped.
+
+    Driven through `set_source` with a real encoded font, because the families are only known by
+    decoding the section — setting the derived set directly would test the combination and skip the
+    decode that has to happen for it to hold any names at all."""
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "embedded.ass"
+    source.write_bytes(
+        ASS.decode().replace("[V4+ Styles]", util.ass_fonts_section("Arial") + "[V4+ Styles]").encode()
+    )  # fmt: skip
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result.native_geometry.set_fonts(attachment_supplying(ipc))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
+    result.close()
+
+
+def test_a_document_that_embeds_a_family_nobody_uses_costs_no_colour(tmp_path: Path) -> None:
+    """The negative control for the test above: the section is decoded either way, so a green run
+    there proves the demotion only if a section naming an unused family leaves the colour alone."""
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "embedded.ass"
+    source.write_bytes(
+        ASS.decode()
+        .replace("[V4+ Styles]", util.ass_fonts_section("Embedded Signs") + "[V4+ Styles]")
+        .encode()
+    )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result.native_geometry.set_fonts(attachment_supplying(ipc))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    assert {entry.font_name for entry in backend.requests[-1].palette} == {"Arial"}
+    result.close()
+
+
+def test_the_overprint_reaches_mpv_in_the_measured_face_and_size(tmp_path: Path) -> None:
+    """The feature end to end, on the wire: a cue mpv is drawing gets a per-token `osd-overlay`
+    payload naming the face and the frame-pixel size the measurement resolved.
+
+    The one test the whole path had no positive for — which is why a palette carrying zero for every
+    cue, and so an overprint that never drew anywhere, passed the suite.
+    """
+    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    drawn = [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
+    assert drawn, "no overprint reached mpv"
+    # The style's 48 script units at this document's PlayResY 720, into a 720-tall frame: unchanged.
+    assert r"{\an7\pos(100,600)\fnArial\fs48" in drawn[-1]
+    result.close()
+
+
 def test_an_unmeasured_face_leaves_the_cue_uncoloured_rather_than_guessed(tmp_path: Path) -> None:
     """A token whose face the measurement did not resolve is not drawn at a guess: the wrong glyph
     shape over the right word is worse than no colour, because nothing shows it is wrong."""
-    result, ipc, _backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
+    backend.font_name, backend.font_size = "", 0.0
 
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)

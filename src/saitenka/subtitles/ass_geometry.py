@@ -59,7 +59,9 @@ class PreparedAssFrame:
     #: The document's script height, which is what libass scales its font sizes from. Carried so a
     #: caller that knows the frame can turn a style's script-unit size into frame pixels; `0` when
     #: the document declares none, which is the case where nothing may be drawn over the cue.
-    play_res_y: int = 0
+    #: Required, not defaulted: a default is what let this field ship reading zero for every cue,
+    #: which silently switched the overprint off everywhere rather than failing anywhere.
+    play_res_y: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +72,7 @@ class _ParsedAssSource:
     signature_index: Mapping[tuple[object, ...], tuple[RawSubtitleEvent, ...]]
     reserved_bgr: tuple[int, ...]
     has_bom: bool
-    play_res_y: int = 0
+    play_res_y: int
 
 
 def _token_faces(
@@ -364,6 +366,7 @@ def prepare_ass_hit_map_frame(
             for item in colors
         ),
         tuple(_bgr_to_rgb(color) for color in reserved_bgr),
+        parsed.play_res_y,
     )
 
 

@@ -224,22 +224,63 @@ def test_a_non_font_attachment_is_left_where_mpv_leaves_it(tmp_path: Path) -> No
     assert subtitle_fonts.container_fonts(video, cache_dir=tmp_path / "cache") == ()
 
 
-@pytest.mark.parametrize(
-    ("embedded", "reachable"),
-    [(False, True), (True, False)],
-)
-def test_an_in_container_face_is_one_the_osd_library_can_never_load(
-    tmp_path: Path, *, embedded: bool, reachable: bool
-) -> None:
+def test_an_in_document_face_is_one_the_osd_library_can_never_load(tmp_path: Path) -> None:
     """mpv's OSD library is built from `osd_style` plus `mpv-osd-symbols` and has no attachment path
     at all. A family that came from the container or an in-file `[Fonts]` section therefore reaches
     the subtitle renderer and never the OSD one — which is what decides whether the overprint may
-    draw through `osd-overlay` or has to stand down."""
+    draw that token through `osd-overlay` or has to leave it uncoloured."""
     resolved = subtitle_fonts.resolve(
         expand=expander(tmp_path),
-        settings={"embeddedfonts": embedded, "sub-font-provider": "auto"},
+        settings={"embeddedfonts": True, "sub-font-provider": "auto"},
         video=None,
         cache_dir=tmp_path / "cache",
     )
 
-    assert resolved.osd_reachable is reachable
+    assert resolved.osd_unreachable(frozenset({"signs"})) == frozenset({"signs"})
+
+
+def test_a_document_face_is_reachable_again_once_mpv_stops_extracting_them(tmp_path: Path) -> None:
+    """`--embeddedfonts=no` makes mpv ignore the `[Fonts]` section, so its subtitle renderer resolves
+    that family the same way the OSD one does — from the system. Nothing to stand down for."""
+    resolved = subtitle_fonts.resolve(
+        expand=expander(tmp_path),
+        settings={"embeddedfonts": False, "sub-font-provider": "auto"},
+        video=None,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert resolved.osd_unreachable(frozenset({"signs"})) == frozenset()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(60)
+def test_an_attachments_own_family_name_is_what_the_overprint_stands_down_on(
+    tmp_path: Path,
+) -> None:
+    """The whole point of naming families rather than counting sources: a release whose dialogue is
+    a system font and whose signs are attachment-only must lose the colour on its signs only."""
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        pytest.skip("test requires ffmpeg and ffprobe")
+    video = tmp_path / "episode.mkv"
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1",
+            "-attach", str(REPO_FONT),
+            "-metadata:s:t:0", "mimetype=application/x-truetype-font",
+            "-metadata:s:t:0", f"filename={REPO_FONT.name}",
+            "-c:v", "libx264", str(video),
+        ],
+        check=True,
+        capture_output=True,
+    )  # fmt: skip
+
+    resolved = subtitle_fonts.resolve(
+        expand=expander(tmp_path),
+        settings={"embeddedfonts": True, "sub-font-provider": "auto"},
+        video=video,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert "noto sans" in resolved.osd_unreachable()
+    assert "helvetica" not in resolved.osd_unreachable()

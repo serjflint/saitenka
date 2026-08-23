@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from saitenka.subtitles import font_names
 from saitenka.subtitles.geometry import FontProvider, FontSetup
 
 if TYPE_CHECKING:
@@ -84,18 +85,20 @@ class FontEnvironment:
     setup: FontSetup = field(default_factory=FontSetup)
     attachments: tuple[tuple[str, bytes], ...] = ()
     options: tuple[tuple[str, str], ...] = ()
+    attachment_families: frozenset[str] = frozenset()
 
-    @property
-    def osd_reachable(self) -> bool:
-        """Whether every face in play is one mpv's **OSD** library can also load.
+    def osd_unreachable(self, in_document: frozenset[str] = frozenset()) -> frozenset[str]:
+        """The families that reach mpv's subtitle renderer and never its **OSD** one.
 
         Its library is built from `osd_style` plus `mpv-osd-symbols` (`osd_libass.c:51-52`) and has
         no attachment path at all — so a family supplied by the container or by an in-file `[Fonts]`
-        section reaches the subtitle renderer and never the OSD one. An overprint drawn through
-        `osd-overlay` would then be laid out in a substitute face: right words, wrong glyph shapes,
-        measured at −29px against the correct layout in the drift probe.
+        section is one an `osd-overlay` overprint would draw in a substitute face: right words, wrong
+        glyph shapes, measured at −29px against the correct layout in the drift probe.
+
+        Per family rather than per track, because a release whose dialogue is a system font and whose
+        signs are attachment-only should lose the colour on its signs, not on the whole episode.
         """
-        return not ({"attachments", "in-file"} & set(self.sources))
+        return self.attachment_families | (in_document if self.setup.extract_fonts else frozenset())
 
     @property
     def sources(self) -> tuple[str, ...]:
@@ -261,4 +264,11 @@ def resolve(
         font_provider=_font_provider(settings.get("sub-font-provider")),
     )
     attachments = container_fonts(video, cache_dir=cache_dir) if embedded and video else ()
-    return FontEnvironment(setup, attachments, option_snapshot(settings))
+    return FontEnvironment(
+        setup,
+        attachments,
+        option_snapshot(settings),
+        frozenset().union(*(font_names.families(data) for _name, data in attachments))
+        if attachments
+        else frozenset(),
+    )

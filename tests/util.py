@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import io
 import os
 import sys
 import threading
@@ -83,6 +84,7 @@ def drain_for(pump: Callable[[], None], *, seconds: float = 0.2) -> None:
         time.sleep(0.001)
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
 
@@ -106,6 +108,52 @@ def _golden_target(name: str) -> Path:
         if override.exists() or UPDATE:
             return override
     return GOLDEN_DIR / name
+
+
+def tiny_font(family: str) -> bytes:
+    """A real, valid font of a couple of kilobytes, advertising `family` and nothing else.
+
+    Real because the family names are read out of an actual name table — a hand-built stub would
+    test the reader against the reader's own assumptions. Subset because an unmodified face is two
+    megabytes, and a `[Fonts]` section carrying one costs every cue in the test a re-parse.
+    """
+    from fontTools import subset
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(REPO_ROOT / "src/saitenka/assets/fonts/NotoSans.ttf")
+    subset.Subsetter(subset.Options(layout_features=[], notdef_outline=True)).subset(font)
+    font["name"].names = [
+        record for record in font["name"].names if record.nameID in {1, 2, 4, 6, 16}
+    ]
+    for record in font["name"].names:
+        if record.nameID in {1, 4, 16}:
+            record.string = family
+    buffer = io.BytesIO()
+    font.save(buffer)
+    return buffer.getvalue()
+
+
+def uuencode(raw: bytes) -> str:
+    """The inverse of libass's `decode_chars`: 3 bytes to 4 characters, big-endian, offset by 33.
+
+    Stated here independently of the decoder under test — a decoder checked against its own inverse
+    proves only that it is self-consistent.
+    """
+    chars: list[str] = []
+    for start in range(0, len(raw), 3):
+        group = raw[start : start + 3]
+        value = sum(byte << (8 * (2 - index)) for index, byte in enumerate(group))
+        chars += [chr(((value >> (6 * (3 - i))) & 63) + 33) for i in range(len(group) + 1)]
+    return "\n".join("".join(chars[i : i + 80]) for i in range(0, len(chars), 80))
+
+
+def ass_fonts_section(*families: str) -> str:
+    """An ASS ``[Fonts]`` section supplying one real font per family, encoded as libass reads it."""
+    entries = "".join(
+        f"fontname: {family.replace(' ', '')}_0.ttf\n{uuencode(tiny_font(family))}\n"
+        for family in families
+    )
+    return f"[Fonts]\n{entries}\n"
 
 
 def bgra_to_image(bgra: np.ndarray) -> Image.Image:
