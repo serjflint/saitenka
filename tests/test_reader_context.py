@@ -1,4 +1,4 @@
-"""EpisodeContext composition + Reader delegation — the #30 lifetime split and the #100 re-slot seam.
+"""Lifetime contexts and feature-owned state projections.
 
 The behavioural contract: episode-scoped state lives in one swappable object, and rebinding it resets
 *all* of that state in a single move (no field can leak into the next episode). That leak-freedom is
@@ -7,6 +7,7 @@ exactly what the future file-change re-slot relies on, so it is asserted here di
 
 from __future__ import annotations
 
+import pytest
 import util
 
 from saitenka.app.controller import Reader
@@ -85,29 +86,21 @@ def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
     assert r._translation_secondary_sid is None  # the lease goes with the selection
 
 
-def test_reader_delegates_tooltip_fields_to_tip_state():
+def test_reader_projects_the_tooltip_controllers_state():
     r = Reader(FakeIPC())
     assert isinstance(r.tip, TooltipState)
-    # the historical private names read/write through the grouped state, incl. the nested-popup handle
     assert r.tip.nest is r.tip.nest and isinstance(r.tip.nest, PopupView)
     r.tip.view.scroll = 4
     r.tip.hover_reading = "よむ"
-    # base view-state fields live on the shared PopupView (tip.view); FSM fields stay flat on TooltipState
     assert r.tip.view.scroll == 4 and r.tip.hover_reading == "よむ"
 
 
-def test_rebinding_tip_resets_the_whole_hover_stack():
-    """Tearing down / re-slotting the tooltip is one rebind: every hover-FSM field (shown panel, scroll,
-    panel and its caches) returns to its no-hover default in a single move,
-    leak-free by construction — the same property the episode re-slot relies on, one tier down."""
+def test_tooltip_state_has_one_read_only_owner():
     r = Reader(FakeIPC())
-    r.tip.view.rect = (1, 2, 3, 4)
-    r.tip.view.scroll = 9
 
-    r.tip = TooltipState()  # the teardown/re-slot move
-
-    assert r.tip.view.rect is None
-    assert r.tip.view.scroll == 0
+    assert r.tip is r.interaction.tip is r.tooltip_controller.state
+    with pytest.raises(AttributeError):
+        r.tip = TooltipState()
 
 
 def test_session_state_survives_an_episode_reslot():

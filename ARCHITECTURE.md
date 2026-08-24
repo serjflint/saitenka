@@ -49,8 +49,10 @@ internal modules with explicit dependency contracts, not independently published
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
-- **`app/`** — the application layer. `controller.py`'s `Reader` is the production driver and
-  owns the mpv session lifecycle and interactive state. `app/runtime/` owns its closed command table;
+- **`app/`** — the application layer. `controller.py`'s `Reader` is the production study-session
+  controller: it owns mpv mutation and cross-feature ordering, while bounded collaborators own feature
+  state and policy. `tooltip_controller.py`, for example, owns the tooltip's mutable presentation state
+  and three volatile work protocols. `app/runtime/` owns the closed command table;
   `reader_factory.py` is the production `Reader` construction seam. `cli.py` owns process setup and
   Cyclopts registration, `commands/` owns domain command surfaces and attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
@@ -137,13 +139,19 @@ flowchart TB
 
     srouter --> L1
     slice --> L2
-    gather -. "host protocol" .-> host[(Reader)]
+    gather -. "host protocol" .-> host["Reader<br/>session controller"]
     perform -. "host protocol" .-> host
     reduce --- state[(SessionState)]
 ```
 
 The dotted edges are the whole asymmetry: the stateful half reaches its own slice, the stateless
 half reaches the host — but only through members its protocol names.
+
+The `Reader` node denotes the live session controller, distinct from the immutable reducer-state store
+shown beside it. Reader still carries session assembly and mutable state that has not moved behind a
+bounded owner. Owners such as `TooltipController` retain feature state and operation protocols; Reader
+assembles fresh per-turn ports and keeps cross-feature order explicit. The name is historical and
+remains a separately priced migration.
 
 The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
 feature's adapter has to touch the live session, so it declares the host members it needs as a
@@ -634,7 +642,8 @@ baseline instead.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
 - **Composition is explicit at the application boundary.** `cli.py` registers commands and process
   policy; domain commands call launch use cases; `reader_factory.py` constructs `Reader`. Runtime
-  command primitives never receive a god context, although `Reader` still owns their assembly.
+  command primitives never receive a god context. `Reader` owns session assembly and ordering, while
+  bounded controllers own feature state and policy.
 - **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
   sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`

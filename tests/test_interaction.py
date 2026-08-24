@@ -333,13 +333,13 @@ def test_scroll_warms_native_bands_ahead_at_hidpi():
     # scrolling composites crisp without a synchronous raster (the old bug: only the first band was crisp).
     r = _reader()
     submitted = []
-    r._render_ahead_submit = lambda **kwargs: submitted.append(kwargs) or True
+    r.tooltip_controller.render_ahead_submitter = lambda **kwargs: submitted.append(kwargs) or True
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
     ui = Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
     assert r.tip.view.state.full_height > r.tip.view.view_h  # scrollable
     ui.wheel(1)
     assert r.tip.view.scroll > 0  # scrolled
-    pending = r._render_ahead.pending
+    pending = r.tooltip_controller.render_ahead.pending
     assert pending is not None
     req = pending[1]
     assert (

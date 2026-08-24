@@ -995,8 +995,7 @@ def _capture_tip_view(ports: TipPorts) -> tuple:
     source token so a restored HOVERED view can still re-request crisp band-warming on scroll.
 
     Takes the port, not the host: seven of the eight fields live on the tooltip's own state and
-    the reading is the slice's. Eight `Delegated` reads through a Reader was the flat-name layer
-    showing through — the snapshot is of one feature and now says so.
+    the reading is the slice's. The snapshot is of one feature and says so.
     """
     tip = ports.tip
     return (

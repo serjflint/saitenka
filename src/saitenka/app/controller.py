@@ -1,8 +1,7 @@
-"""The MVP reader loop: mpv subtitle → my overlay → hover → dictionary tooltip.
+"""The live study-session controller and its explicit feature composition.
 
-Polls mpv over IPC (no Lua): reads ``sub-text`` (native subs hidden) and ``mouse-pos``, draws the
-subtitle as overlay #1 with per-word hitboxes, and on hover draws the looked-up entry as overlay #2
-near the word. Both overlays live in mpv's own OSD surface → fullscreen-safe.
+``Reader`` owns session ordering and mpv mutation. Bounded collaborators own feature state and policy;
+the controller assembles their current inputs and coordinates cross-feature turns.
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ from saitenka.app import (
     episode_reslot,
     geometry_refresh,
     hover_intents,
-    hover_metadata,
     hover_snapshot,
     mask_atlas_startup,
     mine_intents,
@@ -44,7 +42,6 @@ from saitenka.app import (
     native_subtitles,
     nested_popup,
     panel_intents,
-    popups,
     prefetch,
     reader_deps,
     session_intents,
@@ -62,9 +59,9 @@ from saitenka.app import (
     surfaces,
     telemetry,
     tooltip,
+    tooltip_controller,
     tooltip_engaged,
     tooltip_panel,
-    tooltip_raster,
     translation,
 )
 from saitenka.app import sidebar as sidebar_module
@@ -135,11 +132,11 @@ from saitenka.app.popups import (
     PopupView,
     ShowActions,
     TipPorts,
+    TooltipState,
     WordLookup,
 )
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
 from saitenka.app.reader_context import (
-    Delegated,
     EpisodeContext,
     InteractionContext,
     RenderCacheState,
@@ -351,12 +348,10 @@ _Nested = PopupView
 class Reader:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
-    # The last `Delegated`. All five OSD surfaces are slice features now, so what is left here is
-    # the tooltip's *panel* — two rendered popups, their cache and their build lanes — which is a
-    # mutable object no reducer can hold. Every flat alias is gone: the lifetime containers are
-    # addressed directly (`episode.nav_idx`, `session.mined`, `tip.view.state`), because an alias
-    # per field made one object look like N host members to every ratchet.
-    tip = Delegated[popups.TooltipState]("interaction", "tip")
+    @property
+    def tip(self) -> TooltipState:
+        """Read-only compatibility projection of the tooltip feature's owned state."""
+        return self.tooltip_controller.state
 
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
         self,
@@ -466,8 +461,6 @@ class Reader:
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
         self._pending_deps: dict | None = None
         self.mined_seed = mined_seed.MinedSeedLane()
-        self._interaction_metadata = hover_metadata.InteractionMetadataState()
-        self._interaction_metadata_submit = hover_metadata.configure_runtime_job(ipc)
         self._loading = False
         self._load_frame = 0
         # The whole group, not a field per key: `active_bindings` resolves `key_attr` against it, and
@@ -536,15 +529,11 @@ class Reader:
         # (native glyph masks over 1× geometry). ``crisp_upscale`` off → soft-only (never native).
         self._crisp_on = o.tooltip.crisp_upscale
         self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes TipScale.display (see config)
-        # What one paint of the tooltip stack produced, plus the machinery producing it
-        # (app/popups.py TooltipState). Everything it once held that was *decided* — the hysteresis,
-        # the back-stack, the pulse, the pause claim, the hovered word — is INTERACTION's slice.
+        # The tooltip owner is assembled after the cache/build capabilities it needs. The lock is
+        # created here because telemetry also reads the cache under it.
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
-        self.tip = popups.TooltipState(
-            panel_cache_max=self.panel_cache_max, cache_lock=self._cache_lock
-        )
 
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
         # import chokepoint; missing → default). Threaded to every Panel.from_rows so all popups agree.
@@ -577,13 +566,13 @@ class Reader:
         self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
         # A dedicated broker lane keeps speculative work behind interactive raster work.
         self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
-        self._engaged_tooltip = tooltip_engaged.EngagedState()
-        self._engaged_tooltip_backend = tooltip_engaged.ReaderEngagedBackend(self)
-        self._engaged_tooltip_submit = tooltip_engaged.configure_runtime_job(
-            ipc, self._engaged_tooltip_backend
+        self.tooltip_controller = tooltip_controller.TooltipController(
+            ipc,
+            self.engaged_build_ports,
+            panel_cache_max=self.panel_cache_max,
+            cache_lock=self._cache_lock,
         )
-        self._render_ahead = tooltip_raster.RenderAheadState()
-        self._render_ahead_submit = tooltip_raster.configure_runtime_job(ipc)
+        self.interaction.tooltip = self.tooltip_controller
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
         # so a looped/re-watched/nav-back line annotates at cue time with no plain-then-upgrade flicker.
         self.token_cache = TokenCache(o.perf.token_cache_max)
@@ -1395,7 +1384,7 @@ class Reader:
         a cue change while a tooltip is showing always clears it via the real path — unconditional
         because `retire_hover` early-returns when hover is already -1, which a tip still on screen
         does not imply."""
-        self.tip.jobs.cancel_all()
+        self.tooltip_controller.cancel_jobs()
         hide = getattr(self.ov, "hide_interactive", self.ov.hide)
         hide(TIP_ID)
         self._hide_nested()
@@ -1934,13 +1923,7 @@ class Reader:
 
     def prepare_hover_blocking(self, index: int) -> None:
         """Build the deterministic demo/screenshot hover before the event loop starts."""
-        metadata_submit, engaged_submit = (
-            self._interaction_metadata_submit,
-            self._engaged_tooltip_submit,
-        )
-        self._interaction_metadata_submit = None
-        self._engaged_tooltip_submit = None
-        try:
+        with self.tooltip_controller.blocking():
             tooltip.set_hover(
                 self.tip_ports,
                 self.panel_ports,
@@ -1949,9 +1932,6 @@ class Reader:
                 self.show_actions,
                 index,
             )
-        finally:
-            self._interaction_metadata_submit = metadata_submit
-            self._engaged_tooltip_submit = engaged_submit
 
     def set_annotation_hover(self, *, revealed: bool) -> None:
         target = bool(
@@ -2190,8 +2170,19 @@ class Reader:
             prefetch_gen=self.prefetch_state.gen,
             dependency_gen=self._dependency_generation,
             cue_identity=self._current_cue_identity,
-            deferred=self._interaction_metadata_submit is not None,
+            deferred=self.tooltip_controller.metadata_deferred,
             submit=self._request_interaction_metadata,
+        )
+
+    def _tooltip_apply(self) -> tooltip_controller.TooltipApply:
+        """Fresh values for applying one tooltip worker completion on the owner thread."""
+        return tooltip_controller.TooltipApply(
+            ports=self.tip_ports,
+            panel=self.panel_ports,
+            lookup=self.word_lookup,
+            hover=self.hover_inputs,
+            show=self.show_actions,
+            generation=self.prefetch_state.gen,
         )
 
     @property
@@ -2400,6 +2391,21 @@ class Reader:
         )
 
     @property
+    def engaged_build_ports(self) -> tooltip_engaged.EngagedBuildPorts:
+        """The exact session capabilities available to tooltip build workers."""
+        return tooltip_engaged.EngagedBuildPorts(
+            nested_max_frac=self.nested_max_frac,
+            tip_scale=lambda: self.tip_scale,
+            panel_for=self._panel_for,
+            worker_seed_head=self._worker_seed_head,
+            precompose_head=self._precompose_head,
+            mem_fill=self._mem_fill,
+            cap_for=self._cap_for,
+            navigated_panel=self._navigated_panel,
+            engaged_open_panel=self._engaged_open_panel,
+        )
+
+    @property
     def panel_style(self) -> tooltip_panel.PanelStyle:
         """The session-lifetime half of a panel build, as one value.
 
@@ -2605,8 +2611,7 @@ class Reader:
         generation = self.prefetch_state.gen
         prefetch.update_prefetch(self.prefetch_ports, self.head_probe)
         if self.prefetch_state.gen != generation:
-            self._cancel_engaged_tooltip()
-            self._cancel_render_ahead()
+            self.tooltip_controller.cancel_current_work()
 
     def _finish_speculative_prefetch(self, completion: EffectFinished) -> None:
         prefetch.finish(self.prefetch_state, completion, self._finish_speculative_prefetch)
@@ -3522,174 +3527,45 @@ class Reader:
         if changed:
             self._draw_analysis()
 
-    def _request_interaction_metadata(self, request: hover_metadata.MetadataRequest) -> bool:
-        return hover_metadata.submit(
-            self._interaction_metadata,
-            request,
-            self._interaction_metadata_submit,
-            self._finish_interaction_metadata,
-        )
+    def _request_interaction_metadata(self, request) -> bool:
+        return self.tooltip_controller.request_metadata(request, self._finish_interaction_metadata)
 
     def _finish_interaction_metadata(self, completion: EffectFinished) -> None:
-        result = hover_metadata.finish(self._interaction_metadata, completion)
-        try:
-            if isinstance(result, hover_metadata.HoverMetadata):
-                tooltip.apply_hover_metadata(
-                    self.tip_ports,
-                    self.panel_ports,
-                    self.word_lookup,
-                    self.hover_inputs,
-                    self.show_actions,
-                    result,
-                )
-            elif isinstance(result, hover_metadata.NestedMetadata):
-                nested_popup.apply_nested_metadata(
-                    self.tip_ports, self.panel_ports, self.word_lookup, result
-                )
-        finally:
-            hover_metadata.finish_publication(self._interaction_metadata)
-            hover_metadata.submit_pending(
-                self._interaction_metadata,
-                self._interaction_metadata_submit,
-                self._finish_interaction_metadata,
-            )
+        self.tooltip_controller.finish_metadata(
+            completion, self._tooltip_apply, self._finish_interaction_metadata
+        )
 
     def _request_render_ahead(self, view: PopupView, direction: int) -> bool:
-        panel = view.state
-        if panel is None:
-            return False
-        return tooltip_raster.request(
-            self._render_ahead,
-            tooltip_raster.RenderAheadRequest(
-                panel,
-                view.desired_scroll,
-                view.view_h,
-                direction,
-                self.tip_scale.raster,
-                threading.Event(),
-            ),
+        return self.tooltip_controller.request_render_ahead(
+            view,
+            direction,
             generation=self.prefetch_state.gen,
-            job_id=view.job_id,
-            submit=self._render_ahead_submit,
+            scale=self.tip_scale.raster,
             on_finished=self._finish_render_ahead,
         )
 
     def _request_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> bool:
-        return tooltip_engaged.submit(
-            self._engaged_tooltip,
+        return self.tooltip_controller.request_engaged(
             request,
             generation=self.prefetch_state.gen,
-            submitter=self._engaged_tooltip_submit,
             on_finished=self._finish_engaged_tooltip,
         )
 
     def _finish_engaged_tooltip(self, completion: EffectFinished) -> None:
-        finished = tooltip_engaged.finish(
-            self._engaged_tooltip,
+        self.tooltip_controller.finish_engaged(
             completion,
-            self._engaged_tooltip_submit,
-            self._finish_engaged_tooltip,
+            generation=self.prefetch_state.gen,
+            apply_factory=self._tooltip_apply,
+            on_finished=self._finish_engaged_tooltip,
         )
-        if finished is None:
-            return
-        identity, request, result, succeeded, superseded, rejected = finished
-        if rejected is not None:
-            rejected_identity, rejected_request = rejected
-            if rejected_identity.generation == self.prefetch_state.gen:
-                self._fallback_engaged_tooltip(rejected_request)
-        if identity.generation != self.prefetch_state.gen:
-            return
-        if superseded:
-            return
-        if isinstance(request, tooltip_engaged.HoverRequest) and not succeeded:
-            self.tip.jobs.finish("tooltip", "failed", job_id=request.job_id)
-            return
-        if not succeeded:
-            self._fallback_engaged_tooltip(request)
-            return
-        if isinstance(result, tooltip_engaged.HoverReady):
-            tooltip.apply_engaged_hover(
-                self.tip_ports, self.panel_ports, self.hover_inputs, self.show_actions, result
-            )
-        elif isinstance(result, tooltip_engaged.NavigateReady):
-            tooltip.apply_engaged_nav(self.tip_ports, result)
-        elif isinstance(result, tooltip_engaged.OpenReady):
-            tooltip.apply_engaged_open(self.tip_ports, self.panel_ports, result)
-
-    def _fallback_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> None:
-        if isinstance(request, tooltip_engaged.NavigateRequest | tooltip_engaged.OpenRequest) and (
-            request.origin != id(self.tip.view.state)
-        ):
-            return
-        try:
-            result = tooltip_engaged.run_engaged(
-                tooltip_engaged.EngagedWork(request, threading.Event()),
-                threading.Event(),
-                self._engaged_tooltip_backend,
-            )
-        except Exception:
-            log.warning("engaged tooltip fallback failed", exc_info=True)
-            return
-        if isinstance(result, tooltip_engaged.HoverReady):
-            tooltip.apply_engaged_hover(
-                self.tip_ports, self.panel_ports, self.hover_inputs, self.show_actions, result
-            )
-        elif isinstance(result, tooltip_engaged.NavigateReady):
-            tooltip.apply_engaged_nav(self.tip_ports, result)
-        elif isinstance(result, tooltip_engaged.OpenReady):
-            tooltip.apply_engaged_open(self.tip_ports, self.panel_ports, result)
-
-    def _cancel_engaged_tooltip(self) -> None:
-        tooltip_engaged.cancel(self._engaged_tooltip)
 
     def _finish_render_ahead(self, completion: EffectFinished) -> None:
-        finished = tooltip_raster.finish(
-            self._render_ahead,
+        self.tooltip_controller.finish_render_ahead(
             completion,
-            self._render_ahead_submit,
-            self._finish_render_ahead,
+            generation=self.prefetch_state.gen,
+            ports=self.tip_ports,
+            on_finished=self._finish_render_ahead,
         )
-        if finished is None:
-            return
-        identity, request, succeeded = finished
-        if identity.generation != self.prefetch_state.gen:
-            return
-        for view in (self.tip.view, self.tip.nest):
-            if (
-                view.state is request.panel
-                and view.desired_scroll == identity.scroll
-                and view.job_id == identity.job_id
-            ):
-                if succeeded:
-                    tooltip_panel.apply_pending_scroll(self.tip_ports, view)
-                else:
-                    view.desired_scroll = view.scroll
-                    self.tip.jobs.finish("scroll", "failed", job_id=identity.job_id)
-                break
-        if not succeeded:
-            return
-        # Both views, not just the one this job was for. Warming is per panel-and-scale, so a job
-        # raised for the nested popup can leave the base tooltip's viewport warm — and that upgrade
-        # is exactly what the tick used to notice. `apply_pending_crisp` is a no-op unless a view
-        # is both pending and warm, so asking twice costs a flag check.
-        for view in (self.tip.view, self.tip.nest):
-            tooltip_panel.apply_pending_crisp(self.tip_ports, view)
-
-    def _publish_pending_popups(self) -> None:
-        """Show the newest scrolled-to viewport (and its crisp upgrade) as soon as its bands are warm.
-
-        Warmth is a property of the panel cache, not of any one job, so the turn asks — not the
-        completion. Asking only on completion means a burst never publishes: every notch supersedes
-        the job before it, the identity fence in `_finish_render_ahead` matches none of them, and
-        the tooltip holds one frame until the wheel stops (measured at 1–3.4s, or never when the
-        popup closes first). Both are no-ops unless a view is pending and warm.
-        """
-        for view in (self.tip.view, self.tip.nest):
-            tooltip_panel.apply_pending_scroll(self.tip_ports, view)
-            tooltip_panel.apply_pending_crisp(self.tip_ports, view)
-
-    def _cancel_render_ahead(self) -> None:
-        tooltip_raster.cancel(self._render_ahead)
 
     def submit_subtitle_fetch(
         self,
@@ -3866,7 +3742,7 @@ class Reader:
         """
         self._feed_episode_annotation()
         self._sync_mouse_capture()
-        self._publish_pending_popups()
+        self.tooltip_controller.publish_pending(self.tip_ports)
         self._update_prefetch()
         if self.translation_visible() and self._secondary_text() != self._trans_text:
             self.draw_translation()
@@ -4639,17 +4515,17 @@ class Reader:
                 (
                     self._close_tts_capability,
                     self._close_anki_capability,
-                    lambda: self.tip.jobs.cancel_all(),
-                    lambda: hover_metadata.close(self._interaction_metadata),
+                    self.tooltip_controller.cancel_jobs,
+                    self.tooltip_controller.close_metadata,
                     start_lane_budget,
                     lane("subtitle-fetch"),
                     lane("subtitle-picker"),
                     lane(GEOMETRY_LANE),
                     self._close_annotation,
                     lane("cue-annotation"),
-                    lambda: tooltip_raster.close(self._render_ahead),
+                    self.tooltip_controller.close_render_ahead,
                     lane("tooltip-render-ahead"),
-                    lambda: tooltip_engaged.close(self._engaged_tooltip),
+                    self.tooltip_controller.close_engaged,
                     lane("tooltip-engaged"),
                     lambda: prefetch.close(self.prefetch_state),
                     lane("speculative-prefetch"),
