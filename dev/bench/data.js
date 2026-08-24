@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787607480794,
+  "lastUpdate": 1787608635576,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -11117,6 +11117,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 2.195456,
             "range": "3 replicas; min 1.67117; max 2.19955; MAD 0.004096",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "id": "587f7ba99e96884a4e12fc4e46651a0d562048e1",
+          "message": "fix(ci): give the Linux e2e leg the CJK face libass measures against\n\nWith a libass to load, the three ASS-oracle tests run — and two of them then failed on geometry\n(`test_the_blur_refusal_is_measured_not_assumed`, `test_a_style_the_user_changed_moves_the_boxes_libass_paints`).\nlibass measures the text it is handed, so a leg with no CJK face measures something else entirely.\nBoth pass locally against the same bundled libass with fonts present, and the gate and tests-ft legs\nalready install `fonts-noto-cjk` for this reason; e2e was the one that did not.",
+          "timestamp": "2026-08-24T21:55:55Z",
+          "url": "https://github.com/serjflint/saitenka/commit/587f7ba99e96884a4e12fc4e46651a0d562048e1"
+        },
+        "date": 1787608634098,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 3.953952,
+            "range": "3 replicas; min 3.67622; max 31.9231; MAD 0.277731; worst 31.9231",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 5.363204,
+            "range": "3 replicas; min 4.54602; max 87.9618; MAD 0.817188; worst 87.9618",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 2.199552,
+            "range": "3 replicas; min 0.790528; max 2.19955; MAD 2.84217e-14",
             "unit": "MB"
           }
         ]
