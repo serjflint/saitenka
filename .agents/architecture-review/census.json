@@ -3,10 +3,23 @@
     "src/saitenka/render/banded.py",
     "src/saitenka/app/tooltip_panel.py",
     "src/saitenka/app/profile_controller.py",
+    "src/saitenka/app/tooltip_controller.py",
     "src/saitenka/app/session_controller.py",
-    "src/saitenka/runtime/jobs.py"
+    "src/saitenka/app/session_routes.py",
+    "src/saitenka/runtime/reactor.py",
+    "src/saitenka/runtime/jobs.py",
+    "src/saitenka/runtime/loop.py"
   ],
   "claims": [
+    {
+      "id": "L1",
+      "module": "src/saitenka/runtime/loop.py",
+      "claim": "SessionLoop hands accepted payloads to the application in mailbox sequence",
+      "class": 1,
+      "status": "tested",
+      "evidence": "tests/test_session_runner.py::test_the_loop_hands_each_payload_over_in_mailbox_sequence",
+      "settles": null
+    },
     {
       "id": "B1",
       "module": "src/saitenka/render/banded.py",
@@ -249,6 +262,60 @@
       "status": "argued",
       "evidence": "profile command registration and adapter tests cover the current dispatch path but do not prove policy absence or owner-thread application",
       "settles": "a structural census of SessionController profile-policy methods plus an owner-thread application oracle"
+    },
+    {
+      "id": "P3",
+      "module": "src/saitenka/app/profile_controller.py",
+      "claim": "ProfileController owns the complete profile-scoped runtime environment, including mining configuration and dictionary dependency identity",
+      "class": 1,
+      "status": "argued",
+      "evidence": "falsified on the reviewed tree: a live switch retains SessionController.mine_cfg, and tests/test_profile_switcher.py explicitly accepts a late launch-profile dictionary result after switching",
+      "settles": "an observable live-cycle-to-mine oracle plus a planted stale dependency result that cannot overwrite the selected profile"
+    },
+    {
+      "id": "P4",
+      "module": "src/saitenka/app/profile_controller.py",
+      "claim": "Every production profile transaction is applied on the session owner thread",
+      "class": 2,
+      "status": "argued",
+      "evidence": "the normal command path reaches ProfileController through the owner-thread command performer, but no test records the thread for every state write and transaction callback",
+      "settles": "publish PROFILE_CYCLE_MSG from another thread, record every profile write and callback, and demonstrate an off-owner negative control"
+    },
+    {
+      "id": "T1",
+      "module": "src/saitenka/app/tooltip_controller.py",
+      "claim": "TooltipController and its delegated presentation helpers are the only writers of mutable tooltip state and volatile-work state",
+      "class": 1,
+      "status": "argued",
+      "evidence": "behavioral tests cover owner-thread publication and stale refusal, but no structural writer census covers TooltipState, metadata, engaged-build, and render-ahead state",
+      "settles": "a structural writer census with a planted mutation outside the controller and its declared helpers"
+    },
+    {
+      "id": "R1",
+      "module": "src/saitenka/app/session_routes.py",
+      "claim": "A runtime-owned close phase is recorded successful only when every registered resource in that phase closed successfully",
+      "class": 1,
+      "status": "argued",
+      "evidence": "falsified on the reviewed tree: _retire returns False after an isolated close failure, but SessionReactor drops the dispatcher result and SessionController records only event delivery",
+      "settles": "a close-ledger oracle with a throwing runtime-owned resource and a negative control proving the phase cannot be reported clean"
+    },
+    {
+      "id": "R2",
+      "module": "src/saitenka/runtime/reactor.py",
+      "claim": "The reactor preserves the outcome of fire-and-forget lifecycle effect dispatch where later lifecycle accounting depends on it",
+      "class": 2,
+      "status": "argued",
+      "evidence": "fire-and-forget dispatch invokes self._dispatch(effect) and discards the returned bool; close accounting therefore observes delivery rather than retirement success",
+      "settles": "an explicit result propagation contract from lifecycle performer through the close ledger, with a failing-resource control"
+    },
+    {
+      "id": "S1",
+      "module": "src/saitenka/app/session_controller.py",
+      "claim": "The typed adapter and capability forwarding seams add no material latency to the interactive owner-thread path",
+      "class": 3,
+      "status": "argued",
+      "evidence": "no performance claim was admitted by the review: the structural censuses do not measure runtime cost, and no live mpv profile compared the pre- and post-pilot paths",
+      "settles": "dated live Perfetto or py-spy traces for cue settlement, hover, profile cycling, and scroll, isolating owner-thread self-time and queue transitions against BENCHMARKS.md"
     }
   ]
 }
