@@ -518,7 +518,10 @@ lint = { shell = "uv run ruff check --fix . && uv run ruff format ." }
 # see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
 # strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
 # scope for visibility, same posture as `ty` (never a hard gate here).
-types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src && (uv run --extra full pyrefly check examples tools install .agents || true) && (uv run --extra full ty check --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src examples tools install .agents || true)" }
+# Both advisory passes print one line per diagnostic (`min-text` / `concise`): their default renderers
+# quote source and draw carets, which cost 922 lines of a green gate for 78 findings nothing acts on in
+# that run. A finding still names its file:line, which is what a follow-up needs to re-run it in full.
+types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src && (uv run --extra full pyrefly check --output-format=min-text examples tools install .agents || true) && (uv run --extra full ty check --output-format concise --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src examples tools install .agents || true)" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
@@ -556,7 +559,10 @@ call-args-test = { shell = "ast-grep test -c sgconfig-call-args.yml --skip-snaps
 invariants-taint = { shell = "uvx --python 3.13 semgrep scan --config tools/semgrep/rules.yml src" }
 # Cognitive-complexity gate, ratcheted against complexipy-snapshot.json (config: root [tool.complexipy]).
 # Fails only on NEW complexity growth past max-complexity-allowed=15, not on pre-existing debt.
-complexity = { cmd = "uv run complexipy" }
+# `--failed` prints only breaches (threshold or snapshot watermark); the default emits a PASSED row per
+# function — 4122 lines, over half of a whole `poe all` log. The ratchet still bites: a raised complexity
+# exits 1 and names the function and both watermarks.
+complexity = { cmd = "uv run complexipy --failed" }
 # Regenerate the baseline after a DELIBERATE refactor changes function complexity on purpose (run,
 # review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
 complexity-baseline = { cmd = "uv run complexipy --snapshot-create" }
