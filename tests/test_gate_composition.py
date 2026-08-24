@@ -30,6 +30,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+E2E = ROOT / ".github" / "workflows" / "e2e.yml"
 
 #: (job, step name) → the poe task whose marker expression that step must carry verbatim. Keyed by step
 #: rather than by expression: expressions collide (`not integration` is also `loop-tools-test`'s) and
@@ -42,6 +43,10 @@ BOUND_STEPS = {
 
 def _workflow() -> dict:
     return yaml.safe_load(CI.read_text(encoding="utf-8"))
+
+
+def _e2e_workflow() -> dict:
+    return yaml.safe_load(E2E.read_text(encoding="utf-8"))
 
 
 def _poe_tasks() -> dict:
@@ -144,6 +149,52 @@ def test_free_threaded_split_uses_the_published_bundle_runtime() -> None:
 
     tests = shlex.split(_step_command("tests-ft", "Tests (free-threaded)"))
     assert tests[:3] == ["uv", "run", "--no-sync"]
+
+
+def test_e2e_installs_the_same_bundle_runtime_the_extra_pins() -> None:
+    """The `full` sync installs libasslite, whose ASS-oracle tests error rather than skip when no
+    libass can be dlopened. Every e2e leg must therefore reach one, and the version must track the
+    extra's pin — a bumped pin with a stale workflow tests a runtime nobody ships."""
+    steps = {
+        step["name"]: step for step in _e2e_workflow()["jobs"]["e2e"]["steps"] if "name" in step
+    }
+
+    bundle_requirement = next(
+        requirement
+        for requirement in _optional_dependencies()["subtitle-geometry-bundle"]
+        if requirement.startswith("libasslite-bundle==")
+    )
+    install = steps["Install the published libass runtime"]
+    assert shlex.split(install["run"]) == [
+        "uv",
+        "pip",
+        "install",
+        "--no-deps",
+        "--only-binary",
+        "libasslite-bundle",
+        "--no-sources-package",
+        "libasslite-bundle",
+        bundle_requirement,
+    ]
+
+    # The bundle's wheel matrix has no macOS x86_64, so that one leg is covered by Homebrew instead.
+    # These two conditions must stay complements: an overlap double-installs, a gap silently returns
+    # the leg to the ERROR it started as.
+    excluded = "macos-15-intel"
+    assert install["if"] == f"matrix.os != '{excluded}'"
+    assert (
+        steps["Install libass (macOS x86_64 — no bundle wheel)"]["if"]
+        == f"matrix.os == '{excluded}'"
+    )
+    assert excluded in _e2e_workflow()["jobs"]["e2e"]["strategy"]["matrix"]["os"]
+
+    # The bundle is pip-installed on top of the locked env; a re-syncing `uv run` would prune it.
+    assert shlex.split(steps["Real-boundary + per-OS suite"]["run"])[:3] == [
+        "uv",
+        "run",
+        "--no-sync",
+    ]
+    assert "--no-sync" in shlex.split(steps["GUI tier (Linux/Xvfb, real mpv)"]["run"])
 
 
 def test_the_bound_expressions_are_not_vacuous() -> None:
