@@ -24,15 +24,17 @@ def resolve_overlay_bin() -> str:
     """Absolute path to the ``saitenka`` executable, for baking into the plugin.
 
     A Finder/Dock-launched mpv inherits only launchd's minimal PATH (no ~/.local/bin, no Homebrew
-    bin), so the bare command name wouldn't resolve. Prefer PATH lookup; fall back to the console
-    script next to the running interpreter; last resort, the bare name."""
-    found = shutil.which("saitenka")
-    if found:
-        return found
+    bin), so the bare command name wouldn't resolve.
+
+    The console script beside the RUNNING interpreter wins over a PATH lookup, because `which` answers
+    a different question: which `saitenka` this shell would start, not which one is asking. Run under
+    `uv run`, PATH leads with the project's cache environment, so `install-plugin` baked that instead
+    of the tool install the user had just made — and mpv then launched a copy nobody chose.
+    """
     candidate = Path(sys.executable).with_name("saitenka")
     if candidate.exists():
         return str(candidate)
-    return "saitenka"
+    return shutil.which("saitenka") or "saitenka"
 
 
 def _bake_bin(text: str, bin_path: str) -> str:

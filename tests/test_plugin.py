@@ -158,3 +158,39 @@ def test_windows_attach_has_platform_default(monkeypatch):
     monkeypatch.setattr(ipc_module.sys, "platform", "win32")
 
     assert ipc_module.default_attach_ipc_path() == r"\\.\pipe\mpvsocket"
+
+
+def test_the_baked_binary_is_the_one_asking_not_the_one_on_path(tmp_path, monkeypatch):
+    """`which` answers which `saitenka` this shell would start, not which one is running.
+
+    Under `uv run` the project's cache environment leads PATH, so `install-plugin` baked that
+    instead of the tool install the user had just made — and a Finder-launched mpv then started a
+    copy nobody chose. The console script beside the running interpreter is the one that asked.
+    """
+    from saitenka.app import plugin
+
+    running = tmp_path / "tool" / "bin"
+    running.mkdir(parents=True)
+    (running / "saitenka").write_text("#!/bin/sh\n")
+    (running / "python").write_text("#!/bin/sh\n")
+    on_path = tmp_path / "cache-env" / "bin" / "saitenka"
+    on_path.parent.mkdir(parents=True)
+    on_path.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(plugin.sys, "executable", str(running / "python"))
+    monkeypatch.setattr(plugin.shutil, "which", lambda _name: str(on_path))
+
+    assert plugin.resolve_overlay_bin() == str(running / "saitenka")
+
+
+def test_an_interpreter_with_no_console_script_still_falls_back_to_path(tmp_path, monkeypatch):
+    """The negative control: `python -m saitenka` from a bare venv has no script beside it, and a
+    PATH answer is better than baking a bare name a Finder-launched mpv cannot resolve."""
+    from saitenka.app import plugin
+
+    on_path = tmp_path / "bin" / "saitenka"
+    on_path.parent.mkdir(parents=True)
+    on_path.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(plugin.sys, "executable", str(tmp_path / "nowhere" / "python"))
+    monkeypatch.setattr(plugin.shutil, "which", lambda _name: str(on_path))
+
+    assert plugin.resolve_overlay_bin() == str(on_path)
