@@ -6,8 +6,10 @@ license, at your option.
 
 It is a binding of, and vendors at build time, the following third-party crates:
 
-- resvg / usvg / tiny-skia (https://github.com/linebender/resvg) — MPL-2.0 license.
-  The pure-Rust SVG parser + rasterizer. resvglite is a thin wrapper over its public
-  API; the MPL-2.0 covers only the vendored resvg source files, not this wrapper.
+- resvg / usvg (https://github.com/linebender/resvg) — Apache-2.0 OR MIT license
+  (resvg relicensed from MPL-2.0 at 0.45.0; this vendors 0.45.1).
+  The pure-Rust SVG parser. resvglite is a thin wrapper over its public API.
+- tiny-skia (https://github.com/linebender/tiny-skia) — BSD-3-Clause license.
+  The rasterizer backend.
 - pyo3 (https://github.com/PyO3/pyo3) — Apache-2.0 OR MIT license.
   The Rust ↔ Python binding layer.

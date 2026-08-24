@@ -50,10 +50,9 @@ deinflect = ["saitenka-deinflect>=0.2.0"]  # >=0.2.0: French rule set + language
 layout-engine = ["taffylite>=0.2.0"]
 # Optional SVG rasterizer: the resvg PyO3 binding that turns Yomitan inline `img` gaiji (SVG labels /
 # reference glyphs) into PNGs at import, so the panel draws the real glyph instead of a ▢ (#283). A Rust
-# extension whose own code is MIT and which links resvg (MPL-2.0); MPL is file-scoped, so it covers
-# resvg's own sources, not the wrapper or anything combined with it — see LICENSING.md. Without it,
-# import stores no media and the renderer falls back to ▢ — fully additive. The Apache-2.0-clean
-# install is bare `saitenka` / `saitenka[minimal]`, not `full`.
+# extension, MIT over an entirely permissive native graph (resvg/usvg Apache-2.0 OR MIT, tiny-skia
+# BSD-3-Clause) — see LICENSING.md. Without it, import stores no media and the renderer falls back to
+# ▢ — fully additive. The Apache-2.0-clean install is bare `saitenka` / `saitenka[minimal]`, not `full`.
 # Pinned exactly: resvg-py is pre-1.0 and `svg_to_bytes` is its whole API surface, so a minor bump can
 # move rendering under us with no signal — widen only with a re-render check (#283 tofu).
 images = ["resvg-py==0.5.0"]
@@ -94,9 +93,8 @@ linux-keyring = ["keyring>=25.7.0; sys_platform == 'linux'"]
 #
 # `full` is GPL-3.0, not Apache-2.0 — it includes the `deinflect` add-on (see LICENSING.md). The
 # Apache-2.0-clean install is bare `saitenka` / `saitenka[minimal]`. The native add-ons here are all
-# GPL-3.0-compatible (MIT / Apache-2.0 wrappers; the resvg that resvg-py links is MPL-2.0, which §3.3
-# permits combining under GPL), so they change what a redistributor must ship, not the combined
-# licence: honour resvg's MPL notices and source offer.
+# GPL-3.0-compatible and permissive throughout (MIT / Apache-2.0 / BSD-3-Clause), so they change what
+# notices a redistributor must ship, not the combined licence.
 #
 # `subtitle-geometry-bundle` is deliberately NOT here. It ships a native runtime closure (vcpkg libass
 # and its shaping/font dependencies) carrying its own notices and relinking obligations — and the
