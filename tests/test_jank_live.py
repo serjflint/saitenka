@@ -150,6 +150,38 @@ def test_the_stuck_scroll_message_names_the_reason(state, expected):
     assert "nest_rect=" in str(excinfo.value)
 
 
+def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order():
+    """The regression the live replicas kept hitting, without a display: the workload's own dictionary
+    has to be in place *before* the cue resolves its entries.
+
+    Driving the cue first and swapping afterwards is what the harness used to do, and it silently kept
+    the one-line entries — the panel came out exactly its viewport's height, so the wheel had nothing to
+    move and `_scroll_four` raised. Asserting the height relation rather than a pixel count: the point
+    is that something is there to scroll, not how much.
+    """
+    from driver import Driver
+    from util import FakeIPC
+
+    from saitenka.app.session_controller import SessionController
+
+    mod = _jank_module()
+    reader = SessionController(FakeIPC(), dict_set=mod.TallDS())
+    reader.osd = (1280, 720)
+    reader.set_subtitle("門前の小僧習わぬ経を読む")
+    word = next(
+        i for i, t in enumerate(reader.tokens) if reader.profile_controller.tokenizer.is_content(t)
+    )
+    Driver(reader).move_to_word(word).leave()  # resolve the cue's entries, as the live harness does
+    for _ in range(4):
+        reader.pump()
+
+    Driver(reader).move_to_word(word)
+    view = reader.tip.view
+    assert view.state is not None
+    assert view.state.full_height > view.view_h, mod._why_stuck(reader)
+    mod._scroll_four(reader)  # raises if the viewport did not move
+
+
 def test_live_latency_boundary_repaints_the_overlay():
     mod = _jank_module()
 

@@ -63,10 +63,14 @@ def make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
 
 
 @contextmanager
-def live_reader(*, paused: bool = True):
+def live_reader(*, paused: bool = True, dict_set=None):
     """A live mpv window with the demo cue loaded and a :class:`SessionController` observing it. ``paused=False``
     lets playback run so mpv's VO advances frames — required for the jank harness to see real
-    ``frame-drop-count`` / ``vo-delayed-frame-count`` movement (the smoke tests keep it paused)."""
+    ``frame-drop-count`` / ``vo-delayed-frame-count`` movement (the smoke tests keep it paused).
+
+    ``dict_set`` is taken at construction, before the cue is driven, because a swap afterwards does not
+    reach the cue's already-resolved entries: `replace_dictionary_set` is the async-arrival installer,
+    and only `switch_to` pairs it with the invalidation that clears them."""
     from saitenka.app.session_controller import SessionController
     from saitenka.app.session_routes import install_session_runtime
     from saitenka.mpvio.discover import find_mpv
@@ -100,7 +104,7 @@ def live_reader(*, paused: bool = True):
         # transport routes no replies, so even the OSD-dimensions seed comes back None and nothing
         # downstream draws. No breadcrumb — this harness screenshots.
         gateway = install_session_runtime(ipc, startup_hint=False)
-        reader = SessionController(ipc, dict_set=MiniDS())
+        reader = SessionController(ipc, dict_set=dict_set if dict_set is not None else MiniDS())
         reader.refresh_osd()
         reader.start_observing()
         reader._register_keybinds()

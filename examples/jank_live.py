@@ -130,33 +130,40 @@ def _present_overlay(reader) -> None:
     reader.ov.repaint()
 
 
+class TallDS:
+    """Entries tall enough that the tooltip has somewhere to scroll — the scroll step's precondition.
+
+    Handed to the harness at construction, not swapped in afterwards. A post-hoc
+    ``replace_dictionary_set`` is the async-arrival installer and carries no invalidation (only
+    ``switch_to`` pairs it with one), so the cue's already-resolved entries keep the harness's own
+    one-line dictionary: the panel comes out exactly its viewport's height and the wheel has nothing to
+    move. That is what the four live-jank replicas were failing on.
+    """
+
+    dicts = ()
+    freqs = ()
+    pitches = ()
+
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # match DictionarySet
+        from saitenka.panel import Definition, Entry
+
+        paragraph = "とても長い定義の本文で" * 8
+        return Entry(
+            headword=[tok.surface],
+            reading=getattr(tok, "reading", "") or tok.surface,
+            defs=[Definition(f"辞書{i}", [paragraph]) for i in range(6)],
+        )
+
+    def has_term(self, *_forms):
+        return False
+
+
 def run(*, settle_s: float = 0.4) -> dict:
     """Drive the scripted workload against a live, PLAYING mpv and return the reduced jank report."""
     from live_harness import live_reader, poll_until
 
-    with live_reader(paused=False) as (_tmp, reader, ipc):
+    with live_reader(paused=False, dict_set=TallDS()) as (_tmp, reader, ipc):
         samples: list[dict] = []
-
-        class TallDS:
-            dicts = ()
-            freqs = ()
-            pitches = ()
-
-            def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002
-                from saitenka.panel import Definition, Entry
-
-                paragraph = "とても長い定義の本文で" * 8
-                return Entry(
-                    headword=[tok.surface],
-                    reading=getattr(tok, "reading", "") or tok.surface,
-                    defs=[Definition(f"辞書{i}", [paragraph]) for i in range(6)],
-                )
-
-            def has_term(self, *_forms):
-                return False
-
-        reader.profile_controller.replace_dictionary_set(TallDS())
-        reader.tip.panel_cache.clear()
 
         def sample(step: str, interaction_ms: float = 0.0) -> None:
             # let playback advance so any overlay-induced VO delay accrues before we read the counters
