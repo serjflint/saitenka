@@ -1,5 +1,4 @@
-"""The tokenizer-strategy seam (app/tokenizer.py): registry, UnidicTokenizer delegation parity, and the
-SessionController-owned swappable seam a profile switch (#254) flips."""
+"""The tokenizer-strategy seam: registry, delegation parity, and ProfileController ownership."""
 
 import pytest
 import util

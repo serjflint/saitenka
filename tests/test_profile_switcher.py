@@ -237,7 +237,7 @@ def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_t
         reader, "toast", lambda text, kind="ok", _seconds=2.8: notices.append((text, kind))
     )
 
-    outcome = reader.profile_controller.cycle()  # → fr, but the file has no fr track
+    outcome = reader.profile_controller.switch_to(1)  # fr, but the file has no fr track
 
     assert reader.profile_controller.langs.main == "fr"  # the engine switched
     assert reader.subtitle_slang == "ja,jpn,jp"  # ...the track was left untouched

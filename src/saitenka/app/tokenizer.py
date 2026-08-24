@@ -1,10 +1,11 @@
-"""Tokenizer strategy seam — the per-language morphology operations the reader routes through.
+"""Tokenizer strategy seam — per-language morphology routed through the active profile.
 
-The SessionController owns a :class:`Tokenizer` instance rather than calling the ``tokenize.py`` module functions
-directly, so a profile switch (#254) can swap the whole segmentation/inflection stack in one place. Today
-only Japanese exists: :class:`UnidicTokenizer` wraps the fugashi/unidic-lite pipeline. It **delegates to
-the free functions in** ``tokenize.py`` — a one-directional dependency (no import cycle) that leaves the
-Japanese behaviour and its goldens untouched; this module only adds the swappable OO seam on top.
+The ProfileController owns a :class:`Tokenizer` instance rather than calling the ``tokenize.py``
+module functions directly, so a profile switch (#254) can swap the whole segmentation/inflection
+stack in one place. Today only Japanese exists: :class:`UnidicTokenizer` wraps the
+fugashi/unidic-lite pipeline. It **delegates to the free functions in** ``tokenize.py`` — a
+one-directional dependency (no import cycle) that leaves the Japanese behaviour and its goldens
+untouched; this module only adds the swappable OO seam on top.
 
 Selection is by name (a profile's ``tokenizer`` value) against a registry, so one strategy can serve a
 whole language family (a future ``latin`` strategy for fr/es/de/…) and a new language can point at an

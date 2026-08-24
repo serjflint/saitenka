@@ -132,13 +132,6 @@ class ProfileController:
         self._tokenizer = tokenizer
         self._invalidation.invalidate_tokenizer()
 
-    def cycle(self) -> ProfileSwitchOutcome:
-        if len(self._profiles) <= 1:
-            return ProfileSwitchOutcome(
-                ProfileSwitchStatus.NOOP, self._profile, self._profile_index
-            )
-        return self.switch_to((self._profile_index + 1) % len(self._profiles))
-
     def switch_to(self, index: int) -> ProfileSwitchOutcome:
         target = self._profiles[index]
         try:
