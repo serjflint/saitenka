@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787549172429,
+  "lastUpdate": 1787549941967,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -8861,6 +8861,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.690888,
             "range": "3 replicas; min 1.38437; max 29.4685; MAD 0.306514; worst 29.4685",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "663188e33e1e8ec4ba4142a5a295c9637b4dc006",
+          "message": "Merge pull request #421 from serjflint/refactor/tooltip-controller-pilot\n\nrefactor(app): give tooltip work a bounded owner",
+          "timestamp": "2026-08-24T10:37:57+05:00",
+          "tree_id": "e92f8e783a60b614a9f43b6c7a469eec30c1602a",
+          "url": "https://github.com/serjflint/saitenka/commit/663188e33e1e8ec4ba4142a5a295c9637b4dc006"
+        },
+        "date": 1787549940624,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.376927,
+            "range": "3 replicas; min 5.75229; max 6.40752; MAD 0.030591",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.824204,
+            "range": "3 replicas; min 8.52722; max 8.99669; MAD 0.172489; worst 8.99669",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.55353,
+            "range": "3 replicas; min 17.4784; max 20.6123; MAD 0.058774",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.703953,
+            "range": "3 replicas; min 17.7391; max 20.9349; MAD 0.230963; worst 20.9349",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 22.727663,
+            "range": "3 replicas; min 18.9954; max 23.2839; MAD 0.556221",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.169355,
+            "range": "3 replicas; min 0.111509; max 0.169818; MAD 0.000463; worst 0.169818",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.716959,
+            "range": "3 replicas; min 42.7414; max 43.7351; MAD 0.018111; worst 43.7351",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.379772,
+            "range": "3 replicas; min 3.22642; max 4.27613; MAD 0.153356; worst 4.27613",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.589523,
+            "range": "3 replicas; min 1.50908; max 3.14687; MAD 0.080439; worst 3.14687",
             "unit": "ms"
           }
         ]
