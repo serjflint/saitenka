@@ -64,6 +64,13 @@ jobs:
         with:
           enable-cache: true
 
+      # libass measures the text it is given, so a leg with no CJK face measures something else: the
+      # boxes it paints move and the ASS-oracle tests fail on geometry rather than on a real defect.
+      # The gate and tests-ft legs already install this for the same reason.
+      - name: Install CJK fonts (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
       - name: Sync
         run: |
           uv python install
