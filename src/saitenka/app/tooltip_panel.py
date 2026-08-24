@@ -4,11 +4,11 @@ viewport and upload it. The base tooltip and every nested/kanji/search popup ren
 Split out of ``tooltip.py`` because the dependency between the two popup modules only runs one way
 without a cycle. ``nested_popup`` is the leaf and needs the panel machinery; ``tooltip`` owns the
 hover/click policy on top of it. While these lived in ``tooltip``, every nested call reached them
-back through a one-line ``Reader`` delegation — a round trip through the host for an intra-feature
+back through a one-line ``SessionController`` delegation — a round trip through the host for an intra-feature
 call, and the reason both modules read the host for things neither one owns.
 
 Host-taking (the AGENTS.md seam pattern) for now, but the build configuration is not: it arrives as
-`Reader.panel_style`, one member rather than the eleven it gathers. As a host-taking snapshot every
+`SessionController.panel_style`, one member rather than the eleven it gathers. As a host-taking snapshot every
 caller in the chain inherited all eleven, which is most of what made the tooltip cluster measure as
 coupled to the host. The blit path still reaches the host for the display scale and the surfaces.
 """
@@ -224,7 +224,7 @@ class PanelStyle:
     """Everything a panel build needs that does not change between hovers.
 
     Deliberately NOT "the panel context": the union across the whole build chain is sixteen fields
-    including a live mined set and a per-turn flag, and a value object holding those is `Reader`
+    including a live mined set and a per-turn flag, and a value object holding those is `SessionController`
     under another name. This is the session-lifetime half; per-turn facts stay parameters.
     """
 

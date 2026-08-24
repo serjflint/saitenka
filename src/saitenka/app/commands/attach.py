@@ -341,10 +341,10 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
-    from saitenka.app.reader_factory import create_reader
+    from saitenka.app.session_factory import create_session_controller
 
     with otel_metrics.traced("startup.reader_create"):
-        reader = create_reader(
+        reader = create_session_controller(
             ipc,
             options=opts,
             profile=active_profile,

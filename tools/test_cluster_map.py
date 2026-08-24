@@ -12,7 +12,7 @@ import cluster_map
 
 
 def _classify(source, tmp_path, monkeypatch) -> dict[str, cluster_map.Member]:
-    controller = tmp_path / "controller.py"
+    controller = tmp_path / "session_controller.py"
     controller.write_text(source, encoding="utf-8")
     monkeypatch.setattr(cluster_map, "CONTROLLER", controller)
     return cluster_map.classify_host()
@@ -21,7 +21,7 @@ def _classify(source, tmp_path, monkeypatch) -> dict[str, cluster_map.Member]:
 def test_two_names_over_one_owner_slice_are_one_fact(tmp_path, monkeypatch):
     """`jp_sid` and `en_sid` are one port with two fields, not two members to pass separately."""
     members = _classify(
-        "class Reader:\n"
+        "class SessionController:\n"
         "    @property\n"
         "    def jp_sid(self):\n"
         "        return self._tracks.current.jp_sid\n"
@@ -38,7 +38,7 @@ def test_two_names_over_one_owner_slice_are_one_fact(tmp_path, monkeypatch):
 def test_a_delegated_descriptor_resolves_to_the_context_field_it_forwards_to(tmp_path, monkeypatch):
     """The flat-name compatibility layer: its own name says nothing about what it is."""
     members = _classify(
-        'class Reader:\n    _sub_index = Delegated[CueIndex | None]("episode", "sub_index")\n',
+        'class SessionController:\n    _sub_index = Delegated[CueIndex | None]("episode", "sub_index")\n',
         tmp_path,
         monkeypatch,
     )
@@ -51,7 +51,7 @@ def test_a_property_that_does_more_than_read_is_not_reported_as_a_slice(tmp_path
     """An unresolved member is a prompt to look, not a fact to design against — so a body the tool
     cannot reduce must not be flattened into the owner it happens to mention."""
     members = _classify(
-        "class Reader:\n"
+        "class SessionController:\n"
         "    @property\n"
         "    def jp_sid(self):\n"
         "        if self._paused:\n"

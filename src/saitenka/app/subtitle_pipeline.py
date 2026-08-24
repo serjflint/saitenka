@@ -22,7 +22,7 @@ class CurrentSubtitleRenderer(Protocol):
     """One member per renderer, so the widest of them sets the signature for all.
 
     That is precisely why the draw members take a request rather than a host: while `draw` took a
-    `Reader`, the native renderer could never be narrower than the legacy one it shares this
+    `SessionController`, the native renderer could never be narrower than the legacy one it shares this
     protocol with. The lifecycle members follow the same rule and take a `SubtitleTarget` — the
     widest renderer was measured, and outside the draw request it reaches five host members.
 
@@ -102,7 +102,7 @@ class GeometryPrefetchResolution:
 
 
 class SubtitleModeCoordinator:
-    """Reject obsolete geometry while keeping provider ownership out of ``Reader``."""
+    """Reject obsolete geometry while keeping provider ownership out of ``SessionController``."""
 
     def __init__(
         self,

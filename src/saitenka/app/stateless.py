@@ -3,7 +3,7 @@
 The stateful half registers: `SliceReducer({name: reducer})` puts a feature's decision function in a
 table and a `RouteKey` says what reaches it, so a new stateful feature is a registration. The
 stateless half had no equivalent — its policies are pure `reduce(command, inputs)` functions in
-`app/*_intents.py`, and the two impure ends around them had nowhere to live but `Reader`. Purity
+`app/*_intents.py`, and the two impure ends around them had nowhere to live but `SessionController`. Purity
 relocates impurity; absent a seam it relocates onto the object being retired, which is the growth
 `poe host-mass` measures.
 

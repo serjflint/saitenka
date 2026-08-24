@@ -1,7 +1,7 @@
 """Subtitle navigation (Alt+←/→/↓): render the target cue from a parsed subtitle-file index
 INSTANTLY, then let mpv's own ``sub-seek`` catch the video up behind it.
 
-Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating methods on Reader.
+Takes ``reader: SessionController`` (the AGENTS.md seam pattern) with thin delegating methods on SessionController.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def _get_float(get: Callable[[str], object], prop: str) -> float | None:
     """Read one mpv property as a float, or None if it is absent or not numeric.
 
     Takes the getter rather than the host *or* the IPC: taking `ipc` would only trade this row of
-    `reader-parameter` debt for a row of `direct-mpv-read`, since `Reader._get` is a bare
+    `reader-parameter` debt for a row of `direct-mpv-read`, since `SessionController._get` is a bare
     `get_property`. A callable leaves the caller owning how the read happens.
     """
     v = get(prop)  # a direct get_property is fine: nav keys are rare, not per-tick

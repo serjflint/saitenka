@@ -13,13 +13,13 @@ from util import record_spans
 
 from saitenka.app import native_subtitles, subtitle_fonts, subtitle_render
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-from saitenka.app.controller import Reader
 from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
@@ -362,7 +362,7 @@ def reader(
     correlated_surfaces: bool = False,
     native_visible: bool = True,
     scorer=None,
-) -> tuple[Reader, FakeIPC, FakeBackend]:
+) -> tuple[SessionController, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
     ipc = FakeIPC()
@@ -373,7 +373,7 @@ def reader(
     )
     # Overlay egress is a composition decision, so the surface path is only correlated when a test
     # asks for it; without it the overlay writes run inline, as they do with no gateway.
-    result = Reader(
+    result = SessionController(
         ipc,
         options=options,
         geometry_backend=backend,
@@ -392,7 +392,7 @@ def reader(
     return result, ipc, backend
 
 
-def settle_jobs(result: Reader, ipc: FakeIPC) -> None:
+def settle_jobs(result: SessionController, ipc: FakeIPC) -> None:
     """Let the geometry lane finish and deliver its terminals.
 
     Two steps because they are two facts: the work completing, and the host being told. The broker
@@ -431,7 +431,7 @@ def visible_pixel_changes(ipc: FakeIPC) -> list[tuple[object, object]]:
     return changes
 
 
-def settle_geometry(result: Reader, ipc: FakeIPC) -> None:
+def settle_geometry(result: SessionController, ipc: FakeIPC) -> None:
     """Advance past the batch boundary the way the next drain would.
 
     Geometry-input changes arm one zero-delay deadline rather than refreshing per observation, so
@@ -629,7 +629,7 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     """WP4.3's gate, asserted on the owner itself rather than on the absence of a write.
 
     Whether hit boxes exist is an interaction fact; who owns the pixels is a visibility fact. The
-    pure FSM keeps them apart, but that is not evidence the system does — the Reader-side degrade
+    pure FSM keeps them apart, but that is not evidence the system does — the SessionController-side degrade
     path clears `boxes` and drives the FSM in the same call, which is exactly where the two would
     get welded together.
     """
@@ -2468,8 +2468,8 @@ def test_every_gate_option_is_observed_and_counted_a_render_space_input() -> Non
 
     Four options landed on this branch reading the gate but neither list, which is why this exists.
     """
-    from saitenka.app.controller import OBSERVED_PROPS
     from saitenka.app.native_subtitles import GATE_OPTIONS
+    from saitenka.app.session_controller import OBSERVED_PROPS
     from saitenka.runtime.playback import RENDER_SPACE_PROPERTIES
 
     qualified = {f"options/{name}" for name in GATE_OPTIONS}
@@ -3076,7 +3076,7 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     result.close()
 
 
-def _establish_native(result: Reader, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
+def _establish_native(result: SessionController, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
     """Own the pixels for `sid`, the way a session that has been playing a track already does."""
     renderer = result.subtitle_pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)

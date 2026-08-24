@@ -361,7 +361,7 @@ def finish(recorder: SessionRecorder | None, analysis: EpisodeAnalysis | None = 
     """Close a recorder's row and render its summary, or None when nothing was recording.
 
     Takes the recorder rather than the host: retiring the host's field is the host's business, and
-    a close participant that reaches into a `Reader` cannot be driven by the session runtime.
+    a close participant that reaches into a `SessionController` cannot be driven by the session runtime.
     """
     if recorder is None:
         return None

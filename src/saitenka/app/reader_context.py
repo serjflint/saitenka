@@ -1,6 +1,6 @@
-"""Reader state grouped by lifetime — the composition that shrinks the ``controller`` god-object (#30).
+"""SessionController state grouped by lifetime — the composition that shrinks the ``controller`` god-object (#30).
 
-An mpv session outlives the file it plays; a hover outlives nothing. Grouping Reader state by *when it
+An mpv session outlives the file it plays; a hover outlives nothing. Grouping SessionController state by *when it
 is born and dies* — session ⊃ episode ⊃ interaction — is what makes a re-slot (swap the episode on a
 file change, #100) correct by construction: rebind the context and no prior-episode state can leak. This
 module owns the **episode** tier (and its cohesive sub-clusters, e.g. ``SubtitleSource``) plus the
@@ -101,7 +101,7 @@ class InteractionContext:
     here is what lets a surface hook stop taking the whole host to reach one of them.
     """
 
-    #: Assigned by `Reader.__init__`; the owner needs runtime/build collaborators this lifetime
+    #: Assigned by `SessionController.__init__`; the owner needs runtime/build collaborators this lifetime
     #: container has no business constructing.
     tooltip: TooltipStateOwner
 

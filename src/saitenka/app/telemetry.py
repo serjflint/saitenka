@@ -98,16 +98,16 @@ def dropped_span_count() -> int:
     return _span_processor.dropped_count if _span_processor is not None else 0
 
 
-#: Live state-gauge provider (cache sizes) registered by the running Reader — see
+#: Live state-gauge provider (cache sizes) registered by the running SessionController — see
 #: ``set_gauge_provider``. Sampled on the writer thread's interval alongside the OTel counters, NOT
-#: an OTel instrument itself: the values it reports (panel/dict cache occupancy) are the Reader's own
-#: live state, cheaper to read directly than to mirror into an observable gauge the Reader would have
-#: to keep pushing. RSS is read straight from ``perf`` (process-global, no Reader needed).
+#: an OTel instrument itself: the values it reports (panel/dict cache occupancy) are the SessionController's own
+#: live state, cheaper to read directly than to mirror into an observable gauge the SessionController would have
+#: to keep pushing. RSS is read straight from ``perf`` (process-global, no SessionController needed).
 _gauge_provider: Callable[[], dict[str, float]] | None = None
 
 
 def set_gauge_provider(fn: Callable[[], dict[str, float]] | None) -> None:
-    """Register (or clear, with ``None``) the state-gauge source sampled each interval. The Reader
+    """Register (or clear, with ``None``) the state-gauge source sampled each interval. The SessionController
     registers its cache-size gauges here in ``run`` and clears them in ``close``."""
     global _gauge_provider
     _gauge_provider = fn
@@ -256,5 +256,7 @@ def shutdown() -> None:
         _tracer_provider = None
         _meter_provider = None
         _span_processor = None
-        set_gauge_provider(None)  # drop the Reader's cache-gauge closure with the providers
+        set_gauge_provider(
+            None
+        )  # drop the SessionController's cache-gauge closure with the providers
         span_gate.set(value=False)

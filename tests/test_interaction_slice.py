@@ -1,6 +1,6 @@
 """`Owner.INTERACTION`'s reducers, their outboxes, and their stores.
 
-The store test is the point of the file, as it is for subtitle: a Reader with a session reactor and
+The store test is the point of the file, as it is for subtitle: a SessionController with a session reactor and
 one without must decide the same hover, because only one of the two paths is the one production
 takes and the other is the one almost every test takes.
 
@@ -197,11 +197,13 @@ def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
     the machine armed, with no mirrored copy in between that can go stale."""
     from driver import Driver
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer(), hover_switch_delay=10.0)
+    reader = SessionController(
+        ipc, prefetch=False, renderer=NullRenderer(), hover_switch_delay=10.0
+    )
     try:
         reader.tokens = [object(), object()]
         reader.hover = 0

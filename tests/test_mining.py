@@ -199,11 +199,11 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     # end-to-end: an already-mined word is detected under card_format (the both-KeyError/false-negative fix)
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(card_format={"Word": "{expression}"}))
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(card_format={"Word": "{expression}"}))
     r.set_subtitle("本を読む")
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
@@ -384,13 +384,13 @@ class _FakeAnki:
 def test_mine_token_adds_note_with_fields(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     ipc.props["path"] = "/x/[Grp] Show - 03 [1080p].mkv"
     ipc.props["time-pos"] = 63
     anki = _FakeAnki()
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
@@ -411,9 +411,9 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
 def _capture_reader(tmp_path, *, animated_enabled: bool):
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
-    r = Reader(
+    r = SessionController(
         FakeIPC(),
         anki=_FakeAnki(),
         mine_cfg=MineConfig(animated=AnimatedClip(enabled=animated_enabled)),
@@ -493,12 +493,12 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     not whatever the default dict-first pick would derive for the token."""
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
     from saitenka.app.lookup import CardData
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
@@ -512,11 +512,11 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
 def test_mine_token_duplicate_shows_existing(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     previewed = []
     monkeypatch.setattr(
@@ -535,9 +535,9 @@ def test_preview_replay_key_is_tooltip_scoped():
     from util import FakeIPC
 
     from saitenka.app.bindings import PREVIEW_MSG, active_bindings
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
-    r = Reader(FakeIPC(), anki=object(), mine_cfg=MineConfig())
+    r = SessionController(FakeIPC(), anki=object(), mine_cfg=MineConfig())
     global_msgs = {b.spec.message for b in active_bindings(r.keys, "global")}
     tooltip_msgs = {b.spec.message for b in active_bindings(r.keys, "tooltip")}
     assert PREVIEW_MSG not in global_msgs
@@ -552,10 +552,10 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
     from saitenka.app import miner_ui
     from saitenka.app.bindings import PREVIEW_CLOSE_MSG
     from saitenka.app.card_preview import PreviewData
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
-    r = Reader(ipc, anki=object(), mine_cfg=MineConfig())
+    r = SessionController(ipc, anki=object(), mine_cfg=MineConfig())
     # skip the PIL render
     monkeypatch.setattr(miner_ui, "render_preview", lambda *_args: None)
     pv = PreviewData(
@@ -575,11 +575,11 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
@@ -637,11 +637,11 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
 def test_bulk_mine_counts_and_toasts(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     toasts = []
@@ -671,7 +671,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     from util import FakeIPC
 
     from saitenka.app import tooltip
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.tokenize import Token
     from saitenka.model import LinkBox
 
@@ -684,7 +684,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     ipc = FakeIPC()
     ipc.props["path"] = "/x/S - 01.mkv"
     anki = _FakeAnki()
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("退いた")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
@@ -708,7 +708,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     d = _make_dict(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
     pz = dicthelp.meta_zip(
@@ -730,7 +730,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
             "Freq": "{frequency-rank}",
         }
     )
-    r = Reader(ipc, anki=anki, mine_cfg=cfg, dict_set=ds)
+    r = SessionController(ipc, anki=anki, mine_cfg=cfg, dict_set=ds)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
@@ -761,13 +761,13 @@ def _word_audio_pack(tmp_path, term: str, reading: str, filename: str):
 def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path):
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     pack = _word_audio_pack(tmp_path, "読む", "よむ", "yomu.opus")
     ipc = FakeIPC()
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
-    r = Reader(ipc, anki=anki, mine_cfg=cfg)
+    r = SessionController(ipc, anki=anki, mine_cfg=cfg)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
@@ -783,13 +783,13 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     """The pack has no entry for this word — the field must stay unset, not an empty [sound:] tag."""
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     pack = _word_audio_pack(tmp_path, "書く", "かく", "kaku.opus")  # different word
     ipc = FakeIPC()
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
-    r = Reader(ipc, anki=anki, mine_cfg=cfg)
+    r = SessionController(ipc, anki=anki, mine_cfg=cfg)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
@@ -808,7 +808,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
 
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     secret = tmp_path / "secret.txt"
     secret.write_bytes(b"top-secret")
@@ -822,7 +822,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
     )
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = Reader(
+    r = SessionController(
         ipc, anki=anki, mine_cfg=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     )
     r.set_subtitle("本を読む")
@@ -839,11 +839,11 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
@@ -860,7 +860,7 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     from util import FakeIPC
 
     from saitenka.app import tooltip_panel
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.tokenize import Token
 
     d = _make_dict(
@@ -869,7 +869,7 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
         [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
     )
     ds = dicthelp.load_set([d])
-    r = Reader(FakeIPC(), dict_set=ds)
+    r = SessionController(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
         tooltip_panel.group_mined_of(tok, r.session.mined, r.dict_set) == ()
@@ -887,14 +887,14 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
     ds = dicthelp.load_set([d])
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = _FakeAnki()
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
@@ -913,8 +913,8 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     from util import FakeIPC
 
     from saitenka.app.config import DictDbOptions
-    from saitenka.app.controller import Reader
     from saitenka.app.dictdb import DictionaryDb
+    from saitenka.app.session_controller import SessionController
 
     d = _make_dict(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
     db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
@@ -922,7 +922,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = _FakeAnki()
-    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
+    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)

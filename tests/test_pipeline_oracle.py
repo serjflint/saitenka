@@ -6,7 +6,7 @@ Every French bug of 2026-08-10 shipped with all component unit tests green, beca
 hand and can't see the wiring bug (the run path built it ``language="jp"`` and deinflection no-oped).
 
 So this drives the ACTUAL run assembly: ``resolve_launch_identity`` → ``_build_run_deps`` (which calls
-``build_reader_deps`` and opens the real, hermetic ``DictionaryDb``) → ``Reader.set_subtitle`` (real
+``build_reader_deps`` and opens the real, hermetic ``DictionaryDb``) → ``SessionController.set_subtitle`` (real
 tokenize) → ``tooltip.resolve_hover`` (forward longest-match) → ``entry_for_tok``. Fixtures are tiny
 REAL Yomitan zips imported through the real importer, so the combined-dict import path is covered too.
 Assertions are structural invariants (headword, inflection reasons, which gloss, group order, the
@@ -19,10 +19,10 @@ import pytest
 from dicthelp import AT, db, term_zip
 from util import FakeIPC
 
-from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.launch.run import RunDepsRequest, _build_run_deps
 from saitenka.app.profiles import resolve_launch_identity
+from saitenka.app.session_controller import SessionController
 from saitenka.app.tooltip import entry_for_tok, resolve_hover
 from saitenka.render.sc_adapter import _text_of
 from saitenka.runtime.events import SubtitleLanguageChanged
@@ -185,7 +185,7 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     _import_fixture(fixture, tmp_path)
     ident = resolve_launch_identity(_cfg_for(profile), profile_override=None, slang="ja,jpn,jp")
     dict_set = _dict_set_via_run(ident)
-    reader = Reader(FakeIPC(), dict_set=dict_set, profile=ident.profile)
+    reader = SessionController(FakeIPC(), dict_set=dict_set, profile=ident.profile)
     reader.osd = (1920, 1080)
     # main track → tokenize (not the plain secondary path)
     reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))

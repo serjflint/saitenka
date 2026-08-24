@@ -48,13 +48,14 @@ internal modules with explicit dependency contracts, not independently published
   wires `LibassGeometryBackend` while leaving mpv as the visible owner.
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
-  without constructing a `Reader`.
-- **`app/`** — the application layer. `controller.py`'s `Reader` is the production study-session
-  controller: it owns mpv mutation and cross-feature ordering, while bounded collaborators own feature
-  state and policy. `tooltip_controller.py`, for example, owns the tooltip's mutable presentation state
-  and three volatile work protocols. `app/runtime/` owns the closed command table;
-  `reader_factory.py` is the production `Reader` construction seam. `cli.py` owns process setup and
-  Cyclopts registration, `commands/` owns domain command surfaces and attach orchestration, and
+  without constructing a `SessionController`.
+- **`app/`** — the application layer. `session_controller.py`'s `SessionController` is the production
+  study-session controller: it owns mpv mutation and cross-feature ordering, while bounded
+  collaborators own feature state and policy. `tooltip_controller.py`, for example, owns the
+  tooltip's mutable presentation state and three volatile work protocols. `app/runtime/` owns the
+  closed command table; `session_factory.py` is the production `SessionController` construction seam.
+  `cli.py` owns process setup and Cyclopts registration, `commands/` owns domain command surfaces and
+  attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
   strategy); `profiles.py`/`profile_cli.py`/`languages.py` (the second-language reading-profile engine
@@ -68,7 +69,7 @@ internal modules with explicit dependency contracts, not independently published
   terminal capacity, a deterministic lifecycle ledger, named timers, the owner slices, and
   `SessionLoop`, which drives the session off the mailbox. It knows nothing about `app/`; the edge
   runs one way. The [runtime architecture](docs/contributing/runtime.md) describes its relationship
-  to `Reader` and the maintained invariants.
+  to `SessionController` and the maintained invariants.
 - **Root leaf modules** — dependency-neutral types and policies shared across layers live directly in
   `saitenka` rather than a generic `utils` package: `model.py`, `bgra.py`, `fonts.py`, `mask_atlas.py`,
   `otel_metrics.py`, `parallel.py`, `resources.py`, `session.py`, and `version.py`. A root module should
@@ -96,14 +97,14 @@ The process entry point does not construct the reader graph itself. The assembly
 ```
 cli.create_app
   -> app.commands.<domain>
-     -> run: app.launch.run -> reader_factory.create_reader(...)
-     -> attach: app.commands.attach -> reader_factory.create_reader(...)
-        -> Reader
+     -> run: app.launch.run -> session_factory.create_session_controller(...)
+     -> attach: app.commands.attach -> session_factory.create_session_controller(...)
+        -> SessionController
 ```
 
-Inside a `Reader`, mpv script messages go through a closed `CommandExecutor`: a declared spec per
+Inside a `SessionController`, mpv script messages go through a closed `CommandExecutor`: a declared spec per
 command (owner, whether it needs a current cue) separate from the bound handler, so ordering and
-ownership are testable without a session. `Reader` assembles the handler half, which makes this an
+ownership are testable without a session. `SessionController` assembles the handler half, which makes this an
 explicit internal composition seam rather than an open third-party plugin API.
 
 A feature joins the session on one of two layers, and which one follows from whether it needs a
@@ -139,7 +140,7 @@ flowchart TB
 
     srouter --> L1
     slice --> L2
-    gather -. "host protocol" .-> host["Reader<br/>session controller"]
+    gather -. "host protocol" .-> host["SessionController<br/>session controller"]
     perform -. "host protocol" .-> host
     reduce --- state[(SessionState)]
 ```
@@ -147,15 +148,14 @@ flowchart TB
 The dotted edges are the whole asymmetry: the stateful half reaches its own slice, the stateless
 half reaches the host — but only through members its protocol names.
 
-The `Reader` node denotes the live session controller, distinct from the immutable reducer-state store
-shown beside it. Reader still carries session assembly and mutable state that has not moved behind a
-bounded owner. Owners such as `TooltipController` retain feature state and operation protocols; Reader
-assembles fresh per-turn ports and keeps cross-feature order explicit. The name is historical and
-remains a separately priced migration.
+The `SessionController` node denotes the live session controller, distinct from the immutable reducer-state store
+shown beside it. SessionController still carries session assembly and mutable state that has not moved behind a
+bounded owner. Owners such as `TooltipController` retain feature state and operation protocols; SessionController
+assembles fresh per-turn ports and keeps cross-feature order explicit.
 
 The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
 feature's adapter has to touch the live session, so it declares the host members it needs as a
-protocol instead of taking the host itself — which is also what keeps the count of `Reader`-taking
+protocol instead of taking the host itself — which is also what keeps the count of `SessionController`-taking
 functions at zero.
 
 **The known cost.** That protocol's width counts the state the feature has not moved into a slice of
@@ -175,7 +175,7 @@ protocol-shaped class from being mistaken for production swappability.
 | Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
-| Reader commands | `CommandExecutor` | Explicit and unit-testable; the spec table is closed, the handler table is assembled inside `Reader`, and neither is externally injected. |
+| SessionController commands | `CommandExecutor` | Explicit and unit-testable; the spec table is closed, the handler table is assembled inside `SessionController`, and neither is externally injected. |
 | Stateful features | `SliceReducer` + `RouteKey` | Live: a reducer registers against the `(event, owner)` pairs it owns, and is pure by gate. |
 | Stateless features | `StatelessRouter` | Live: a policy registers by command type; its adapter's host protocol is the coupling, and its width is not gated. |
 | Session events and effects | `saitenka.runtime` | Live: the mailbox is the session's ingress, `SessionLoop` drives it, and effects return as correlated terminals. |
@@ -238,7 +238,7 @@ authored external .ass
                        ├─ inject a unique color per paintable token into an in-memory copy
                        ├─ libasslite ──> selected libass ──> public ASS_Image layers
                        ├─ color pixels ──> TokenGeometry[]
-                       └─ identity/generation gate ──> Reader.boxes
+                       └─ identity/generation gate ──> SessionController.boxes
                                                       ├─ hover focus box
                                                       └─ normal lookup/tooltip/mining path
 ```
@@ -287,7 +287,7 @@ resolve complete active-frame observation
                                       stale ──> discard │ publish ──> tick
                                                        │
                                                        v
-                                      Reader.boxes + native focus overlay
+                                      SessionController.boxes + native focus overlay
 ```
 
 The main loop drains related mpv property changes before making one geometry decision. The worker
@@ -357,7 +357,7 @@ handled as misses on every read path.
 1. `MpvIPC`'s reader thread buffers observed properties and client messages while resolving correlated
    reply futures directly. `SessionLoop` blocks on the mailbox — bounded by the earliest armed timer,
    so an idle session with nothing armed does not wake at all — and hands each envelope to the
-   session's reactor and then, unless the reactor claimed it, to `Reader`'s turn.
+   session's reactor and then, unless the reactor claimed it, to `SessionController`'s turn.
 2. A new subtitle line is normalized, tokenized by the active profile, compound-merged against the
    dictionary capability, scored, and cached as a `TokenizedCue`. Subtitle rendering returns the
    visible word boxes used by the hover test.
@@ -377,7 +377,7 @@ handled as misses on every read path.
    hover-to-paint path.
 
 Background workers never read the mpv socket or mutate displayed state directly. Cache warmers operate
-through the shared `Reader` and mutate thread-safe dictionary, token, panel, and raster caches. Jobs
+through the shared `SessionController` and mutate thread-safe dictionary, token, panel, and raster caches. Jobs
 that would change the visible interaction publish a result to a queue; the tick applies it only when
 the appropriate generation and target-identity guards still match. This keeps IPC and UI publication
 single-owner and prevents a result for an abandoned word, seek, episode, or profile from flashing on
@@ -513,7 +513,7 @@ then per-dict `(def-name chip, def-body)` pairs. **Nothing is walked or drawn he
 closes over one memoised `layout_body_block` handle and exposes `measure()`, `render_window(y0,y1)`,
 `geometry()`, plus the full `render()` (the golden/finish source of truth). `Panel.from_rows` wraps
 them in a `WindowedPanel(tuning=BandedTuning(compress=True))`. `panel_rows` has a standalone default
-width, but production passes `Reader.tip_width`: a fixed 640px reference geometry. At upload, the
+width, but production passes `SessionController.tip_width`: a fixed 640px reference geometry. At upload, the
 composited result scales with display height; layout and persistent render-cache identity remain
 resolution-independent.
 
@@ -641,9 +641,9 @@ baseline instead.
   incremental renderer is not yet fully swappable through `RasterBackend`.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
 - **Composition is explicit at the application boundary.** `cli.py` registers commands and process
-  policy; domain commands call launch use cases; `reader_factory.py` constructs `Reader`. Runtime
-  command primitives never receive a god context. `Reader` owns session assembly and ordering, while
-  bounded controllers own feature state and policy.
+  policy; domain commands call launch use cases; `session_factory.py` constructs `SessionController`.
+  Runtime command primitives never receive a god context. `SessionController` owns session assembly
+  and ordering, while bounded controllers own feature state and policy.
 - **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
   sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`
@@ -655,9 +655,9 @@ baseline instead.
 ## Test doubles (for the mpv boundary)
 
 - **`FakeIPC`** (`tests/util.py`) — in-process double for the mpv IPC client; feeds
-  subtitle/mouse properties and property-change events so `Reader`'s full loop runs without a real
+  subtitle/mouse properties and property-change events so `SessionController`'s full loop runs without a real
   mpv.
-- **`Driver`** (`tests/driver.py`) — wraps a `Reader` + `FakeIPC`, drives it through the *real*
+- **`Driver`** (`tests/driver.py`) — wraps a `SessionController` + `FakeIPC`, drives it through the *real*
   input path (mouse moves, clicks, keys) so tests read as interaction scripts while still
   exercising genuine hit-testing.
 - **`FakeMpvServer`** (`tests/fake_mpv_server.py`) — a real unix-socket server double, one layer

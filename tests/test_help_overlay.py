@@ -14,12 +14,12 @@ from saitenka.app.bindings import (
     active_bindings,
 )
 from saitenka.app.config import KeyOptions, PanelOptions, ReaderOptions
-from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.session_controller import SessionController
 from saitenka.render.help import render_page
 
 
-def _entries(reader: Reader):
+def _entries(reader: SessionController):
     return [
         (section.title, entry)
         for page in reader._help_document().pages
@@ -30,12 +30,12 @@ def _entries(reader: Reader):
 
 def test_default_and_configured_help_keys_are_registered():
     default_ipc = FakeIPC()
-    Reader(default_ipc)._register_keybinds()
+    SessionController(default_ipc)._register_keybinds()
     assert keybind_registry(default_ipc)["F1"] == "saitenka-toggle-help"
 
     custom_ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(help_key="Ctrl+h"))
-    Reader(custom_ipc, options=options)._register_keybinds()
+    SessionController(custom_ipc, options=options)._register_keybinds()
     custom_binds = keybind_registry(custom_ipc)
     assert custom_binds["Ctrl+h"] == "saitenka-toggle-help"
     assert "F1" not in custom_binds
@@ -51,7 +51,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
             mine_key="Ctrl+x",
         )
     )
-    reader = Reader(FakeIPC(), anki=object(), options=options)
+    reader = SessionController(FakeIPC(), anki=object(), options=options)
     entries = _entries(reader)
     by_label = {entry.label: entry for _section, entry in entries}
     sections = {section for section, _entry in entries}
@@ -84,7 +84,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
 
 
 def test_small_osd_pages_and_repeats_navigation_hints():
-    reader = Reader(FakeIPC(), anki=object())
+    reader = SessionController(FakeIPC(), anki=object())
     reader.osd = (480, 220)
     document = reader._help_document()
 
@@ -104,8 +104,8 @@ def test_small_osd_pages_and_repeats_navigation_hints():
 
 
 def test_ui_scale_enlarges_help_document():
-    normal = Reader(FakeIPC(), options=ReaderOptions())
-    enlarged = Reader(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
+    normal = SessionController(FakeIPC(), options=ReaderOptions())
+    enlarged = SessionController(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
     normal.osd = enlarged.osd = (1920, 1080)
 
     normal_document = normal._help_document()
@@ -118,7 +118,7 @@ def test_ui_scale_enlarges_help_document():
 
 def test_toggle_navigation_and_escape_are_playback_neutral():
     ipc = FakeIPC()
-    reader = Reader(ipc, anki=object())
+    reader = SessionController(ipc, anki=object())
     reader.osd = (480, 220)
 
     reader._handle(HELP_TOGGLE_MSG)
@@ -137,7 +137,7 @@ def test_toggle_navigation_and_escape_are_playback_neutral():
 
 def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     ipc = FakeIPC()
-    reader = Reader(ipc, anki=object())
+    reader = SessionController(ipc, anki=object())
     hover_updates: list[str] = []
     actions: list[str] = []
     monkeypatch.setattr(tooltip, "update_hover", lambda *_a: hover_updates.append("hover"))
@@ -157,7 +157,7 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
 
 def test_closing_help_restores_active_tooltip_escape_binding():
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader._bind_tip_keys()
 
     reader._handle(HELP_TOGGLE_MSG)
@@ -169,7 +169,7 @@ def test_closing_help_restores_active_tooltip_escape_binding():
 
 def test_tooltip_teardown_does_not_steal_escape_while_help_is_open():
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader._bind_tip_keys()
 
     reader._handle(HELP_TOGGLE_MSG)

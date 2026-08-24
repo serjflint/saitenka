@@ -124,7 +124,7 @@ def _active_index(index: CueIndex | None, text: str, *, sub_start, time_pos, pre
     """Which cue the sidebar highlights: the one matching `text`, disambiguated by timing.
 
     Pure, and takes the facts rather than the host — the whole body was already a `locate` over
-    four values the caller reads anyway, so holding the Reader only made it untestable without one.
+    four values the caller reads anyway, so holding the SessionController only made it untestable without one.
     """
     if index is None:
         return -1

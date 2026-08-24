@@ -2,7 +2,7 @@
 
 The overlay never sees OS events: a MOVE is mpv's ``mouse-pos`` property (read by ``_update_hover``),
 and a CLICK / WHEEL / key is a ``keybind → script-message`` client-message (dispatched by ``_handle`` /
-``on_click``). This wraps a :class:`Reader` + ``FakeIPC`` so controller tests read as interaction
+``on_click``). This wraps a :class:`SessionController` + ``FakeIPC`` so controller tests read as interaction
 scripts — ``ui.move_to_word(0).click()`` — AND exercise the real hit-testing (``_hit`` / ``on_click``
 map screen coords → word/button), instead of poking ``set_hover`` / ``_show_tooltip`` directly.
 """

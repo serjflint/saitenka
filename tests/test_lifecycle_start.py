@@ -1,6 +1,6 @@
 """Setup is a sequence the runtime owns, phase by phase — `test_close_ledger`'s mirror.
 
-The motivating shape is the same one close had: `Reader.run` named every step itself, so a step's
+The motivating shape is the same one close had: `SessionController.run` named every step itself, so a step's
 lifetime was split between the subsystem that owns it and a line in a setup sequence far away.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.effects import STARTUP_EFFECTS
@@ -56,7 +56,7 @@ def test_setup_brings_the_same_session_up_with_or_without_a_runtime(
 ) -> None:
     """The differential, and the reason the fallback exists at all.
 
-    A screenshot capture and most unit tests are a `Reader` with no runtime. The two paths run the
+    A screenshot capture and most unit tests are a `SessionController` with no runtime. The two paths run the
     same steps in the same order or the migration changed behaviour for exactly those sessions.
     """
     ipc = FakeIPC()
@@ -64,7 +64,7 @@ def test_setup_brings_the_same_session_up_with_or_without_a_runtime(
         gateway = runtime_gateway(ipc)
         request.addfinalizer(gateway.close)
         install_session_reactor(gateway)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     request.addfinalizer(reader.close)
 
     for phase in StartPhase:
@@ -124,7 +124,7 @@ def test_the_render_guard_is_disarmed_by_the_session_that_armed_it() -> None:
     """
     from saitenka.render import banded
 
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
         reader._announce_start(StartPhase.PROCESS)
         assert banded._GUARD_MAIN_RENDER  # negative control: the oracle can fail

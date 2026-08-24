@@ -153,11 +153,11 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
     """
     import util
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import SubtitleRenderer
 
     def origin_for(frac: float) -> tuple[int, int]:
-        reader = Reader(util.FakeIPC())
+        reader = SessionController(util.FakeIPC())
         reader.osd = (1920, 1080)
         reader.bottom_margin_frac = frac
         reader.sub_origin = (999, 999)  # a stale origin the draw has to replace

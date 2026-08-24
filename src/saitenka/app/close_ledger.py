@@ -1,4 +1,4 @@
-"""Isolate each participant in `Reader.close` so one failure cannot strand the rest.
+"""Isolate each participant in `SessionController.close` so one failure cannot strand the rest.
 
 Close is a fixed sequence of ~18 participants — capabilities, job lanes, stores, surfaces, the
 transport. It ran unguarded, so the FIRST one to raise aborted every later one: a capability that

@@ -1,7 +1,7 @@
 """The two pieces of the tooltip show that need no host.
 
 `show_tooltip_impl` was a 120-line function touching 38 host members and writing 16 of them, which
-made every one of its decisions reachable only by driving a whole Reader. These two are the parts
+made every one of its decisions reachable only by driving a whole SessionController. These two are the parts
 that were never about a host at all — freezing the frame and placing the panel — and they are worth
 testing directly because the bugs they can carry are arithmetic, not integration.
 """
@@ -89,11 +89,11 @@ def test_placement_lands_inside_the_screen() -> None:
 
 
 def test_a_panel_build_needs_no_host() -> None:
-    """`_build_panel` used to read eleven Reader attributes mid-render.
+    """`_build_panel` used to read eleven SessionController attributes mid-render.
 
     It now takes a `PanelStyle` snapshotted at the boundary, so a build cannot observe the config
     changing underneath it — the same reason `DrawRequest` is frozen. That it constructs at all with
-    no Reader in scope is the assertion.
+    no SessionController in scope is the assertion.
     """
     from saitenka.app.tokenize import Token
     from saitenka.app.tooltip_panel import PanelKey, PanelStyle, _build_panel

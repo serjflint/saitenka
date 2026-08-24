@@ -10,15 +10,15 @@ from __future__ import annotations
 import pytest
 import util
 
-from saitenka.app.controller import Reader
 from saitenka.app.popups import PopupView, TooltipState
 from saitenka.app.reader_context import EpisodeContext
+from saitenka.app.session_controller import SessionController
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleStartupConfigured
 from saitenka.subtitles import Cue
 
 
 class FakeIPC(util.FakeIPC):
-    """Minimal mpv IPC stand-in — enough to build a Reader."""
+    """Minimal mpv IPC stand-in — enough to build a SessionController."""
 
 
 def test_episode_context_defaults_are_the_no_episode_state():
@@ -40,7 +40,7 @@ def test_episode_context_defaults_are_the_no_episode_state():
 
 
 def test_reader_delegates_episode_fields_to_the_context():
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     # a nested field (episode.subtitle) and a direct one (episode) both read through…
     assert r.episode.subtitle.retry_active is False
     assert r.episode.nav_idx == r.episode.nav_idx == -1
@@ -51,12 +51,14 @@ def test_reader_delegates_episode_fields_to_the_context():
 
 
 def test_reslot_rebinds_the_episode_without_leaking_prior_state():
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.episode.nav_idx = 9
     r.episode.sub_settle = r.episode.sub_settle.begin()
-    r.episode.subtitle.retry_active = True  # a nested-cluster field, migrated fully off the Reader
+    r.episode.subtitle.retry_active = (
+        True  # a nested-cluster field, migrated fully off the SessionController
+    )
     # A geometry hint names a cue of *this* file, so carrying one over would aim the next episode's
-    # first decision at a line that is nowhere in it. It was a Reader field, where nothing cleared it.
+    # first decision at a line that is nowhere in it. It was a SessionController field, where nothing cleared it.
     r.episode.geometry_cue_hint = Cue(1.0, 2.0, "犬")
 
     r.episode = EpisodeContext()  # the re-slot move: one rebind resets every episode field
@@ -74,7 +76,7 @@ def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
     declaration is a whole-state reset. Asserted here because it is the one episode fact the
     leak-free-by-construction rebind no longer covers.
     """
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.declare_subtitle(SubtitleStartupConfigured(5, 6, "en", "ja,jpn,jp"))
     r.declare_subtitle(SubtitleSecondaryLeased(6))
 
@@ -87,7 +89,7 @@ def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
 
 
 def test_reader_projects_the_tooltip_controllers_state():
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     assert isinstance(r.tip, TooltipState)
     assert r.tip.nest is r.tip.nest and isinstance(r.tip.nest, PopupView)
     r.tip.view.scroll = 4
@@ -96,7 +98,7 @@ def test_reader_projects_the_tooltip_controllers_state():
 
 
 def test_tooltip_state_has_one_read_only_owner():
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
 
     assert r.tip is r.interaction.tip is r.tooltip_controller.state
     with pytest.raises(AttributeError):
@@ -107,7 +109,7 @@ def test_session_state_survives_an_episode_reslot():
     """The other half of the lifetime contract: session-scoped state (the deck-mined set, the Anki
     reachability cache, the backlog handle) is durable — an episode swap must NOT reset it, or #100's
     re-slot would forget what's already in the deck on every file change."""
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.session.mined.add("読む")
     r.session.anki_cache = (123.0, True)
     session_before = r.session

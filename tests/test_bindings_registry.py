@@ -13,7 +13,7 @@ import pytest
 from util import FakeIPC, keybind_registry, press
 
 from saitenka.app.bindings import BINDINGS, active_bindings
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 
 # --- exhaustive registration: no binding may be gated on a dependency ------------------------------
@@ -25,7 +25,7 @@ def test_every_global_saitenka_binding_registers_without_deps():
     ("anki"/"tts") is advisory metadata, never a registration gate — the handler checks the dep live.
     A future `requires`-gated binding fails here automatically."""
     ipc = FakeIPC()
-    r = Reader(ipc, anki=None)  # deps absent at registration, exactly like attach mode
+    r = SessionController(ipc, anki=None)  # deps absent at registration, exactly like attach mode
     r._register_keybinds()
     reg = keybind_registry(ipc)
 
@@ -41,7 +41,7 @@ def test_requires_gated_bindings_still_register_when_the_dep_is_absent():
     still register when the dep is down. This is the exact set a `requires`-gate would have silently
     dropped."""
     ipc = FakeIPC()
-    r = Reader(ipc, anki=None)  # no anki, no tts
+    r = SessionController(ipc, anki=None)  # no anki, no tts
     r._register_keybinds()
     reg = keybind_registry(ipc)
 
@@ -66,7 +66,7 @@ def test_binding_messages_and_handlers_correspond_exactly():
     slips through. Assert the sets agree both ways so "defined but never wired" (either direction) is
     a red test."""
     binding_msgs = {b.message for b in BINDINGS if b.source == "saitenka" and b.message is not None}
-    handler_msgs = set(Reader(FakeIPC()).commands.names())
+    handler_msgs = set(SessionController(FakeIPC()).commands.names())
 
     unhandled = binding_msgs - handler_msgs
     assert not unhandled, (
@@ -84,7 +84,7 @@ def test_every_command_spec_is_routed_and_keeps_its_owner_and_gates():
     command was routed while some were still imperative; every row read `migrated` long before this,
     so it had stopped being able to fail and went with the machinery it measured.
     """
-    commands = Reader(FakeIPC()).commands
+    commands = SessionController(FakeIPC()).commands
     actual = {
         spec.name: (spec.owner.value, spec.requires_cue, spec.allowed_while_help_open)
         for spec in commands.policy.specs
@@ -147,7 +147,7 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
     `help.open`. Exercises client-message → _drain_events → _handle → router with a genuine state
     mutation, not a spy."""
     ipc = FakeIPC()
-    r = Reader(ipc)
+    r = SessionController(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.osd = (1920, 1080)
     r._register_keybinds()
@@ -163,7 +163,7 @@ def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypat
     async AFTER registration with no re-register, then press the mine key — it must reach mine_current
     through the real dispatch chain. A plain registration check can't prove this; only firing does."""
     ipc = FakeIPC()
-    r = Reader(ipc, anki=None)
+    r = SessionController(ipc, anki=None)
     r._register_keybinds()  # bound while the dep is down
     calls: list[dict] = []
     monkeypatch.setattr(r, "mine_current", lambda **k: calls.append(k))
@@ -178,7 +178,7 @@ def test_pressing_an_unbound_key_raises_so_the_fake_cant_pass_silently():
     """Negative control: press must distinguish bound from unbound, or a firing test could pass against
     a dead shortcut. A key never registered raises KeyError."""
     ipc = FakeIPC()
-    Reader(ipc)._register_keybinds()
+    SessionController(ipc)._register_keybinds()
     with pytest.raises(KeyError):
         # a plausible-but-unbound key: registration emits real key names, never this sentinel
-        press(Reader(ipc), ipc, "Ctrl+Alt+NeverBound")
+        press(SessionController(ipc), ipc, "Ctrl+Alt+NeverBound")

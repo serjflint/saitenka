@@ -7,8 +7,8 @@ from driver import Driver
 from util import FakeIPC
 
 from saitenka.app import cue_annotation, hover_metadata, tooltip, tooltip_controller
-from saitenka.app.controller import Reader
 from saitenka.app.hover_metadata import HoverMetadata, HoverMetadataKey, HoverMetadataRequest
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
@@ -68,7 +68,7 @@ def test_metadata_worker_resolves_off_the_event_thread():
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc, dict_set=Dictionary())
+    reader = SessionController(ipc, dict_set=Dictionary())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     submitter = reader.tooltip_controller.metadata_submitter
     assert submitter is not None
@@ -110,7 +110,7 @@ def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc, dict_set=Dictionary())
+    reader = SessionController(ipc, dict_set=Dictionary())
     monkeypatch.setattr(tooltip_controller.tooltip, "apply_hover_metadata", apply_metadata)
 
     try:
@@ -128,7 +128,7 @@ def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
 
 
 def test_metadata_completion_refuses_facts_that_changed_after_submission():
-    reader = Reader(FakeIPC())
+    reader = SessionController(FakeIPC())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     reader.hover = 0
     reader.tip.view.job_id = reader.tip.jobs.begin("tooltip")
@@ -175,7 +175,7 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
 
 
 def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch):
-    reader = Reader(FakeIPC())
+    reader = SessionController(FakeIPC())
 
     def unexpected_apply():
         raise AssertionError("uncorrelated completion assembled tooltip apply ports")
@@ -192,7 +192,7 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
         def has_term(self, _term: str) -> bool:
             raise AssertionError("dictionary probe ran on the event thread")
 
-    reader = Reader(FakeIPC(), dict_set=Dictionary())
+    reader = SessionController(FakeIPC(), dict_set=Dictionary())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     reader.sub_origin = (0, 0)
     reader.boxes = [WordBox(0, 100, 100, 40, 40)]

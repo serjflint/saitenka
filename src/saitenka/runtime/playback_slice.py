@@ -1,7 +1,7 @@
 """`Owner.PLAYBACK`'s feature: one slice of state and the reducer that advances it.
 
-The reduction lives here rather than at the call site so there is one of it. A Reader with no
-session runtime installed drives this reducer directly; a Reader with one drives it through the
+The reduction lives here rather than at the call site so there is one of it. A SessionController with no
+session runtime installed drives this reducer directly; a SessionController with one drives it through the
 reactor's route table. Only the *store* differs — an inline second copy of the reduction would be
 the untested path that drifts, which is the argument `LocalJobLane` already makes for job lanes.
 """
@@ -43,7 +43,7 @@ class PlaybackSlice:
     `published` is an outbox, not a fact: it holds exactly the deltas of the event just reduced,
     and the next event replaces it. It sits on the state because `ReduceResult` has nowhere else
     for an output that is neither an effect nor an event a registered owner reduces — the
-    consumers are still the Reader's `_apply_playback_delta` branches. When SUBTITLE, INTERACTION
+    consumers are still the SessionController's `_apply_playback_delta` branches. When SUBTITLE, INTERACTION
     and PRESENTATION have slices, these become the turn's internal events and this field goes.
     """
 

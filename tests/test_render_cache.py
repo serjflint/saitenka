@@ -306,11 +306,11 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     from util import FakeIPC
 
     from saitenka.app.config import ReaderOptions, TooltipOptions
-    from saitenka.app.controller import Reader
     from saitenka.app.render_cache import content_key
+    from saitenka.app.session_controller import SessionController
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
-    r = Reader(
+    r = SessionController(
         FakeIPC(),
         dict_set=_TallDS(),
         options=ReaderOptions(tooltip=TooltipOptions(render_cache=True)),
@@ -382,12 +382,12 @@ def _nested_reader(*, two_words: bool = False):
     from util import FakeIPC
 
     from saitenka.app.config import ReaderOptions
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
 
-    r = Reader(
+    r = SessionController(
         FakeIPC(), dict_set=_ScrollTallDS(), options=ReaderOptions(prefetch=True), scan_delay=0.0
     )
     r.tooltip_controller.render_ahead_submitter = _DeferredRenderSubmitter()
@@ -704,10 +704,10 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None):
     from util import FakeIPC
 
     from saitenka.app.config import ReaderOptions, TooltipOptions
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
-    r = Reader(
+    r = SessionController(
         ipc or FakeIPC(),
         dict_set=_TallDS(),
         options=ReaderOptions(tooltip=TooltipOptions(render_cache=True)),

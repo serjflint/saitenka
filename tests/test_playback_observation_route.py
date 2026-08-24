@@ -1,11 +1,11 @@
 """One mpv property observation, three layers deep: who reduces it and who applies what it published.
 
 `Owner.PLAYBACK`'s slice was already the one copy of the projection — what moved here is the
-*decision* that an observation is a property change, from the Reader's drain to the route table.
-The deltas still have to reach the Reader, so they arrive as `ApplyPlaybackDeltas` instead of as a
+*decision* that an observation is a property change, from the SessionController's drain to the route table.
+The deltas still have to reach the SessionController, so they arrive as `ApplyPlaybackDeltas` instead of as a
 return value; a mailbox-delivered observation has no caller to hand them back to.
 
-The hazard this pins is double reduction: `Reader._observe_property` already routes through the
+The hazard this pins is double reduction: `SessionController._observe_property` already routes through the
 reactor, so an observation that was routed *and* left to fall through would reduce twice — the
 projection would hide it (it is idempotent) and the deltas would not.
 """
@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 
@@ -25,7 +25,7 @@ def _session(*, reactor: bool):
     gateway = runtime_gateway(ipc)
     if reactor:
         install_session_reactor(gateway, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader._observing = True
     return ipc, gateway, reader
 
@@ -34,7 +34,7 @@ def _session(*, reactor: bool):
 @pytest.mark.timeout(5)
 def test_an_observation_lands_the_same_whether_the_reactor_owns_it(reactor) -> None:
     """The differential. With a reactor the payload is claimed and its deltas ride an effect; with
-    only a gateway the same typed payload falls through to the Reader's arm. The cue on screen is
+    only a gateway the same typed payload falls through to the SessionController's arm. The cue on screen is
     the observable both paths owe, and it must not depend on which one ran."""
     ipc, gateway, reader = _session(reactor=reactor)
     try:

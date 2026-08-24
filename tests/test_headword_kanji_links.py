@@ -13,7 +13,7 @@ import dicthelp
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -65,7 +65,7 @@ def _fixture_ds(tmp_path):
 
 
 def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
-    r = Reader(FakeIPC(), dict_set=_fixture_ds(tmp_path))
+    r = SessionController(FakeIPC(), dict_set=_fixture_ds(tmp_path))
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]

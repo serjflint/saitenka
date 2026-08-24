@@ -50,7 +50,7 @@ PoC feeds the review, a review finding sends you back to the design.
 3. **Check the design against `ARCHITECTURE.md` before writing it.** Its "Composition and
    extension seams" section says where a feature is *supposed* to plug in — which layer, which
    registration, which gate will refuse you — and `docs/contributing/runtime.md` says how. A design
-   that needs a new host member or a `Reader` parameter is not blocked by a gate being fussy; it has
+   that needs a new host member or a `SessionController` parameter is not blocked by a gate being fussy; it has
    not found its layer. If the code genuinely wants a shape the document forbids, that is a finding
    about the document — say so and update it in the same PR, rather than routing around it.
 4. **Smallest coherent design, then a PoC that proves tractability.** Prefer an existing seam

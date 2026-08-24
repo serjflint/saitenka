@@ -447,7 +447,7 @@ python_version = "3.13"
 # LIBRARY code (#216): the Apache core + the GPL add-on — imported, shipped, contract-bearing, so the
 # heavy checker earns its keep (it already caught a real set/tuple mismatch in deinflect). The dev
 # SCRIPTS (examples, tools, install, .agents) are now IN this tier too (2026-08): a stale
-# cross-module import there (SKIP_POS moving out of controller.py) was caught by NOTHING — ruff doesn't
+# cross-module import there (SKIP_POS moving out of session_controller.py) was caught by NOTHING — ruff doesn't
 # resolve cross-module symbol existence, and the checkers were library-only. Coverage widened; strictness
 # did NOT — still non-strict (below), not `--strict`. `tests/` stays OUT for now (its pervasive
 # `Fake*`-as-real-type doubles are a separate, larger adaptation — see follow-up note). taffylite/python
@@ -696,7 +696,7 @@ scroll-jank-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync -
 # all.sh scroll-jank`.
 bench-pyspy-all = { shell = "bash tools/bench_pyspy_all.sh" }
 # Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
-# controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
+# session_controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
 # out-of-process on the standard interpreter (a separate Go binary), never imported into the
 # free-threaded runtime. Install once: `uv tool install pyscn`.
 arch-report = { shell = "uvx pyscn analyze --select complexity,cbo --no-open src/saitenka" }
@@ -804,7 +804,7 @@ arch-map = { shell = "uv run --extra full python tools/arch_map.py", help = "The
 # host is unchanged, and gating only that would report the growth mode this repo prescribes as
 # progress. Members are discovered live (mixins, import-time attachment), never by parsing one file.
 host-mass = { shell = "uv run --extra full python tools/host_mass.py check" }
-host-mass-census = { shell = "uv run --extra full python tools/host_mass.py", help = "Members on the Reader by kind — substantive, delegator, property, field" }
+host-mass-census = { shell = "uv run --extra full python tools/host_mass.py", help = "Members on the SessionController by kind — substantive, delegator, property, field" }
 # GATE (in `all`) — `getattr(port, "method", fallback)` where the port ALWAYS has the method, so the
 # fallback is unreachable and the probe's only live effect is making a rename silent (a renamed timer
 # method disarms every lifecycle deadline, with nothing red). Resolves the receiver's type and asks

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class PanelHost(Protocol):
     """Exactly what this feature needs from the host — its whole coupling, in one readable block.
 
-    A `Reader` parameter would be shorter to write and is what the host inventory sits at zero to
+    A `SessionController` parameter would be shorter to write and is what the host inventory sits at zero to
     prevent: it hides which members a feature actually touches, so nothing can tell a narrow
     adapter from a wide one. Declaring the surface makes the adapter constructible from a small
     fake, and makes an adapter that grows a dependency show it here first.

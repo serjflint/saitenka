@@ -5,7 +5,7 @@ import util
 
 from saitenka.app import prefetch
 from saitenka.app.config import PerfOptions, ReaderOptions
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
@@ -37,7 +37,7 @@ class _FakeDS:
 
 def _reader(monkeypatch, *, lookahead, props=None):
     ipc = _FakeIPC(props)
-    r = Reader(ipc, dict_set=_FakeDS())
+    r = SessionController(ipc, dict_set=_FakeDS())
     r.osd = (1280, 720)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.episode.sub_index = CueIndex(parse_srt(_SRT))
@@ -54,7 +54,7 @@ def _submitted_items(r):
 
 
 def _upcoming(r, n: int) -> list[str]:
-    """The next `n` cue texts, from the function that owns them rather than through the Reader."""
+    """The next `n` cue texts, from the function that owns them rather than through the SessionController."""
     return prefetch.upcoming_cue_texts(
         r.episode.sub_index, n, text=r.sub_text, preferred=r.episode.nav_idx
     )

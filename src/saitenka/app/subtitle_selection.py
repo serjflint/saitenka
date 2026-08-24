@@ -1,7 +1,7 @@
 """Pure subtitle source/track/role selection policy.
 
 Every decision here is a function of values the caller already read: the track list, the current
-selection, and the active role. Nothing in this module touches mpv, the filesystem, or `Reader` —
+selection, and the active role. Nothing in this module touches mpv, the filesystem, or `SessionController` —
 the adapter in `subtitle_modes` reads the facts, asks for a decision, and executes it.
 """
 

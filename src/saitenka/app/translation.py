@@ -3,7 +3,7 @@ toggled (``t``) or auto-revealed while a tooltip is up (``auto_translate`` opt-i
 
 What is left here is the part that needs no session: cleaning mpv's raw secondary text, and laying
 the box out for a given OSD size. The orchestration — read the property, decide, present — lives on
-the Reader, because it was only ever the host's own state threaded back through a module boundary.
+the SessionController, because it was only ever the host's own state threaded back through a module boundary.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""A read-only snapshot of the Reader's hover stack — the public observation seam (#43).
+"""A read-only snapshot of the SessionController's hover stack — the public observation seam (#43).
 
 Tests assert against ``reader.hover_view()`` instead of reaching into ``_nest`` / ``_tip_*`` /
 ``_paused_by_tip`` / ``_nav_idx`` / ``_scan_target``, so a behaviour-preserving reshape of that state

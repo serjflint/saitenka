@@ -4,7 +4,7 @@
 rows plus its reading. ``PopupView`` is the per-popup VIEW state — overlay id, anchor, viewport,
 scroll, screen rect, linger timer, and its own soft→crisp flags. BOTH the base tooltip (``TooltipState.
 view``) and the nested scan popup (``TooltipState.nest``) are a ``PopupView`` now, so they share one
-blit/scroll/crisp path. ``TooltipController`` owns that shared state; ``Reader.tip`` is its read-only
+blit/scroll/crisp path. ``TooltipController`` owns that shared state; ``SessionController.tip`` is its read-only
 surface projection.
 """
 
@@ -51,7 +51,7 @@ class TipPorts:
     The chain spans `tooltip`, `tooltip_panel` and `nested_popup` and only ever wants the tip's own
     state, the scale it draws at, and the collaborators it hands work to. It is the one port the
     tooltip cluster has: everything outside this chain is the host under another name. Built as
-    `Reader.tip_ports`, so a caller still holding the host pays one member rather than the set.
+    `SessionController.tip_ports`, so a caller still holding the host pays one member rather than the set.
 
     `tip` is the live mutable `TooltipState`, not a copy: the chain writes scroll and crisp flags
     back onto the view it was given, and a snapshot would silently drop those.
@@ -75,7 +75,7 @@ class TipPorts:
     request_render_ahead: Callable[[PopupView, int], bool]
     osd: tuple[int, int]
     nested_max_frac: float
-    #: The in-RAM tier-2 head cache, read on the hover path. Never SQLite — see `Reader._peek_render_cache`.
+    #: The in-RAM tier-2 head cache, read on the hover path. Never SQLite — see `SessionController._peek_render_cache`.
     peek_render_cache: Callable[[object], LoadedView | None]
     #: Arms the deadline that ends a copy-flash pulse; `False` when nothing can arm one (a closing
     #: session). The pulse is only drawn once its own retirement exists, so the port carries both.
@@ -552,10 +552,10 @@ class TooltipState:
     while the owning ``TooltipController`` retains the concrete background protocols and their
     lifecycle.
 
-    Owned by ``TooltipController``; ``Reader.tip`` is a read-only projection."""
+    Owned by ``TooltipController``; ``SessionController.tip`` is a read-only projection."""
 
     def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
-        """`cache_lock` is shared with the Reader's other cache accounting, so it is injected."""
+        """`cache_lock` is shared with the SessionController's other cache accounting, so it is injected."""
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
         # PopupView type + blit machinery as the nested popup.
         self.view = PopupView(OverlayId.TIP)
@@ -577,7 +577,7 @@ class TooltipState:
         self.panel_cache = PanelCache(panel_cache_max, cache_lock or threading.Lock())
         # The tooltip's own bounded background work — the panel build and the scroll-ahead raster.
         # Both lanes are speculative work for the panel this state describes, which is why a hover
-        # that supersedes cancels them together; on the Reader it read as session infrastructure.
+        # that supersedes cancels them together; on the SessionController it read as session infrastructure.
         self.jobs = InteractionJobs()
 
     @property

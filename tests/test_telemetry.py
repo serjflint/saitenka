@@ -155,7 +155,7 @@ def test_sample_counters_has_no_otel_counters_when_not_configured():
 
 
 def test_sample_counters_includes_registered_state_gauges(monkeypatch):
-    # A Reader registers cache-size gauges via set_gauge_provider; the interval sampler folds them in
+    # A SessionController registers cache-size gauges via set_gauge_provider; the interval sampler folds them in
     # alongside RSS. Provider values pass through verbatim, RSS from perf.
     from saitenka.app import perf
 

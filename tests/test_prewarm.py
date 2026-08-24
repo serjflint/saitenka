@@ -92,9 +92,9 @@ class _FakeReader:
         return ("key",)
 
 
-def _job(reader_factory, *, atlas=None, on_progress=None, **kw) -> _PrewarmJob:
+def _job(session_factory, *, atlas=None, on_progress=None, **kw) -> _PrewarmJob:
     return _PrewarmJob(
-        reader_factory=reader_factory,
+        session_factory=session_factory,
         cache=None,  # atlas-only opens no render cache
         atlas=atlas,
         gate=512,

@@ -14,7 +14,7 @@ from util import FakeIPC
 
 from saitenka.app import nested_popup
 from saitenka.app.config import TooltipOptions
-from saitenka.app.controller import NESTED_ID, TIP_ID, Reader
+from saitenka.app.session_controller import NESTED_ID, TIP_ID, SessionController
 from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
 
@@ -36,8 +36,8 @@ class _TallDS:
         )
 
 
-def _reader() -> Reader:
-    r = Reader(FakeIPC(), dict_set=_TallDS())
+def _reader() -> SessionController:
+    r = SessionController(FakeIPC(), dict_set=_TallDS())
     r.osd = (1920, 1080)
     r.sub_origin = (0, 0)
     return r
@@ -47,7 +47,7 @@ def _reader() -> Reader:
 _CORPUS = [f"語{i:03d}" for i in range(PANEL_CACHE_MAX + 24)]
 
 
-def _churn(r: Reader, term: str) -> bool:
+def _churn(r: SessionController, term: str) -> bool:
     """One cold hover → scroll → nested → scroll → dismiss cycle via the real entry points. Setting
     lines+tokens lets `draw_subtitle` build a consistent box for token 0. Returns whether a nested
     popup actually opened (so a test can assert the nested path was exercised)."""

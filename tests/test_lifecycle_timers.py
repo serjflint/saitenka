@@ -65,11 +65,11 @@ def test_cancelled_lifecycle_timer_cannot_apply_late() -> None:
 def test_toast_expiry_removes_the_lifecycle_surface() -> None:
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     port = FakeTimerPort()
     reader.lifecycle_timers = LifecycleTimers(port)
 
@@ -82,11 +82,11 @@ def test_toast_expiry_removes_the_lifecycle_surface() -> None:
 def test_loading_frames_are_timer_driven_and_stop_when_loading_finishes() -> None:
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     port = FakeTimerPort()
     reader.lifecycle_timers = LifecycleTimers(port)
     reader._loading = True
@@ -104,11 +104,11 @@ def test_loading_frames_are_timer_driven_and_stop_when_loading_finishes() -> Non
 def test_completed_dependencies_suppress_a_pending_loading_frame() -> None:
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     port = FakeTimerPort()
     reader.lifecycle_timers = LifecycleTimers(port)
     reader._loading = True

@@ -123,7 +123,7 @@ the floor for every change; 3–6 are escalations, not replacements.
   exact and far cheaper than grep-and-read. pyrefly here is the **nav backend only** — which type-checkers
   the gate runs is `poe types` (SSOT), separate from this. Register the LSP via the `pyrefly-lsp` skill.
 - **Mechanical edits go through a codemod.** For repo-wide renames/moves or splitting a big module
-  (`app/controller.py` is the standing example), author a **LibCST** or **ast-grep** codemod and apply it
+  (`app/session_controller.py` is the standing example), author a **LibCST** or **ast-grep** codemod and apply it
   rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched. LibCST
   lives in the opt-in `codemod` dependency group (its pyo3 build has no free-threaded 3.15t wheel, so it's
   kept out of the default `dev` env): run codemods with `uv run --group codemod <script>`.
@@ -131,7 +131,7 @@ the floor for every change; 3–6 are escalations, not replacements.
   its leverage device (and the rejected ones), and a retirement meter beside its debt meter, on day 1
   — the **`plan-migration`** skill (`.agents/skills/plan-migration/`) is the procedure.
 - **Extract behind a stable seam.** Move logic into a new module as functions taking the host
-  (`def f(reader: Reader)`) and leave thin delegating methods, so the public API is unchanged and both
+  (`def f(reader: SessionController)`) and leave thin delegating methods, so the public API is unchanged and both
   mypy and basedpyright stay green (a `self: Subclass` mixin trips mypy's supertype rule). Repoint any
   `monkeypatch.setattr` to the symbol's new lookup site, or tests raise `AttributeError`.
 
@@ -217,7 +217,7 @@ Consult it when adding or rewriting a test.
   moves the source of truth, then fails somewhere else entirely — the setup's owner is never in the
   traceback. So when the assertion reads state downstream of a seam, drive the setup *through* that
   seam: a cue arrives by observing `sub-text`, not by calling `set_subtitle` (the projection owns cue
-  identity, and the Reader-side writer does not publish to it). Convenience back doors are fine for a
+  identity, and the SessionController-side writer does not publish to it). Convenience back doors are fine for a
   test that stays on one side of the seam they bypass. The same divergence bites fakes: a `Fake*` with
   two write paths for one channel (`command_async` recording directly instead of delegating to
   `command`) reads as a production regression.

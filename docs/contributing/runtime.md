@@ -2,7 +2,7 @@
 
 Saitenka has two runtime packages with different jobs:
 
-- `saitenka.app.runtime` holds the per-command policy `Reader` consults before dispatch: who owns
+- `saitenka.app.runtime` holds the per-command policy `SessionController` consults before dispatch: who owns
   a command, whether it needs a current cue, whether it survives with the help overlay open.
 - `saitenka.runtime` holds the runtime itself — events, effects, mailbox admission, effect
   lifecycle, timers, the owner slices and the session loop. `app/session_routes.py` composes it, and
@@ -17,7 +17,8 @@ its supported operating envelope are documented in
 
 ## Adding a feature
 
-Paths are relative to `src/saitenka/`. The host is `Reader`, in `app/controller.py`.
+Paths are relative to `src/saitenka/`. The host is `SessionController`, in
+`app/session_controller.py`.
 
 **Does it need a place to remember that does not exist yet?** Not "does it have state" — a toggle
 obviously does. An adapter may read *and write* the host members it declares, so a feature whose
@@ -49,22 +50,24 @@ is stateful, and it creates it in a slice.
 - `app/runtime/commands.py` — a spec row. Not optional: `CommandExecutor` refuses at construction
   if a handler has no spec. Commands are cue-dependent by default; `_CUE_INDEPENDENT` opts out and
   `_HELP_COMMANDS` allows the command while help is open.
-- `app/controller.py` — one row in `Reader._build_command_router`. Use `interaction(YourCommand.X)`,
-  which routes through the stateless router; `action(Reader.verb)` is the older form and costs a new
-  `Reader` member, which `poe host-mass` refuses.
+- `app/session_controller.py` — one row in `SessionController._build_command_router`. Use
+  `interaction(YourCommand.X)`, which routes through the stateless router;
+  `action(SessionController.verb)` is the older form and costs a new `SessionController` member,
+  which `poe host-mass` refuses.
 
 Four gates enforce the above:
 
 | gate | what tripped it |
 | --- | --- |
 | `tests/test_stateless_registration.py` | An `app/*_intents.py` exposing `reduce` that nothing registers. |
-| `tests/test_reader_host_contract.py` | A function under `app/` takes a `Reader` **parameter**. Declare a `Protocol`. |
-| `poe host-mass` | You added a **member** to `Reader` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
+| `tests/test_session_controller_host_contract.py` | A function under `app/` takes a `SessionController` **parameter**. Declare a `Protocol`. |
+| `poe host-mass` | You added a **member** to `SessionController` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
 | `poe reducer-purity` | A **registered** stateful reducer branches on something outside `(state, event)`. Stateless policies are not in the route table and are not measured. |
 
 ## Production session
 
-`Reader` owns the live session, interaction, and presentation state. `Reader.run()` hands the thread to
+`SessionController` owns owner-thread session lifetime, cross-feature ordering, and application.
+Bounded controllers own feature state and policy. `SessionController.run()` hands the thread to
 `SessionLoop`, which blocks on the mailbox rather than waking at a cadence:
 
 ```text
@@ -76,12 +79,12 @@ SessionLoop.receive(timeout bounded by the earliest armed timer)
           │  one envelope at a time, in mailbox sequence
           ├──────────────────────┐
           ▼                      ▼
-     SessionReactor.handle    Reader's turn, unless the reactor claimed it
+     SessionReactor.handle    SessionController's turn, unless the reactor claimed it
      (owner slices, effects)   ├─ reconcile subtitles
                                ├─ apply results
 worker result queues ─────────►└─ update interaction
 
-Reader and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
+SessionController and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
 ```
 
 The IPC reader performs blocking transport reads away from the session thread. It appends events to
@@ -97,7 +100,7 @@ takes one turn off the loop. A conflicting subtitle observation retires the acti
 before a later cue-dependent command in the same batch can use its tokens or hit boxes.
 
 `CommandExecutor` splits the command table in two: `CommandPolicy` holds the closed spec set
-(`app/runtime/commands.py`) and rejects a duplicate name; `Reader` supplies the bound handlers and
+(`app/runtime/commands.py`) and rejects a duplicate name; `SessionController` supplies the bound handlers and
 the executor refuses any handler with no spec. So ownership and cue eligibility are decided
 without a session, and the composition seam adds no second state owner.
 
@@ -141,7 +144,7 @@ hit boxes while keeping the selected pixel owner stable.
 ## Playback projection
 
 `PlaybackProjection` (`saitenka/runtime/playback.py`) is the sole interpreter of raw mpv property
-observations. `Reader` hands it one ordered observation at a time and applies the typed deltas it
+observations. `SessionController` hands it one ordered observation at a time and applies the typed deltas it
 publishes; nothing downstream compares raw property values or decides what a property means.
 
 ```text
@@ -169,7 +172,7 @@ withhold-list for facts a downstream owner has not taken yet, and it is empty.
 `saitenka.runtime` drives the production session: `app/session_routes.py` installs the reactor and
 registers the feature reducers it dispatches to (`poe arch-map` prints the live owner → feature →
 event table, which is the count rather than a figure kept here). What the package still *is* —
-definable and testable independently of `Reader`, mpv, Pillow, libass, SQLite and Anki — is the
+definable and testable independently of `SessionController`, mpv, Pillow, libass, SQLite and Anki — is the
 event/effect lifecycle itself:
 
 ```text
@@ -207,7 +210,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 
 | Invariant | Current contract |
 | --- | --- |
-| One live state owner | The `Reader` thread mutates production session and presentation state. Background actors return values; the IPC writer owns transport writes, not domain state. |
+| One live state owner | The `SessionController` thread applies production session and presentation mutations. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
 | Ordered input | mpv events are drained in arrival order. Conflicting cue observations retire cue-dependent interaction before a later command is dispatched. |
 | One observation interpreter | `PlaybackProjection` alone turns raw mpv properties into typed facts, explicit revisions, and deltas. A transport burst has no semantic meaning: split and joined delivery of the same ordered observations converge to the same state. |
 | Identity-qualified publication | Annotation, geometry, tooltip, and related background results publish only when their semantic identity is still current. |
@@ -216,7 +219,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Nonblocking startup clear | Interactive readiness does not wait for the startup OSD clear reply. |
 | Explicit close | Owned surfaces are removed, new work is rejected, and late identity-qualified results cannot republish closed UI. |
 | Closed behavior oracle | `BehaviorTrace` accepts only its enumerated, text-free event, state, and outcome vocabulary. |
-| Exact host inventory | The checked-in per-module count of functions accepting a `Reader` **parameter** may not grow. The census is currently empty, so any such function under `app/` fails; a removal tightens the baseline in place rather than failing. Separate from `poe host-mass`, which counts `Reader`'s **members**. |
+| Exact host inventory | The checked-in per-module count of functions accepting a `SessionController` **parameter** may not grow. The census is currently empty, so any such function under `app/` fails; a removal tightens the baseline in place rather than failing. Separate from `poe host-mass`, which counts `SessionController`'s **members**. |
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
 | Effect interpreter ownership | An owner's effects are applied by that owner's adapter, never by the host. Both layers return effects; the object that interprets them belongs to the feature. |
@@ -228,9 +231,9 @@ The executable sources of truth are:
   for ordered production behavior;
 - [`tests/runtime_behavior.py`](https://github.com/serjflint/saitenka/blob/main/tests/runtime_behavior.py)
   for the closed behavior-record vocabulary;
-- [`tests/test_reader_host_contract.py`](https://github.com/serjflint/saitenka/blob/main/tests/test_reader_host_contract.py)
-  and its [inventory](https://github.com/serjflint/saitenka/blob/main/tests/fixtures/reader_host_allowlist.json)
-  for `Reader`-accepting function counts;
+- [`tests/test_session_controller_host_contract.py`](https://github.com/serjflint/saitenka/blob/main/tests/test_session_controller_host_contract.py)
+  and its [inventory](https://github.com/serjflint/saitenka/blob/main/tests/fixtures/session_controller_host_allowlist.json)
+  for `SessionController`-accepting function counts;
 - [`tests/test_session_runtime.py`](https://github.com/serjflint/saitenka/blob/main/tests/test_session_runtime.py)
   for mailbox, lifecycle, reconnect, overload, timer, and close contracts;
 - [`.importlinter`](https://github.com/serjflint/saitenka/blob/main/.importlinter) for package dependency

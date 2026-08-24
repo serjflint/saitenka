@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class MinedSeedLane:
     """The seed attempt's own state: is one out, did one land, how many have failed, is a retry armed.
 
-    Five loose `Reader` fields before this, written from four sites — the shape the one-writer
+    Five loose `SessionController` fields before this, written from four sites — the shape the one-writer
     invariant names: nobody competed for them, but `apply_deps` reset four of them by hand and the
     close bumped a fifth, so "start over" and "invalidate what is in flight" had no name. The
     generation is the fence a completion is checked against, so bumping it IS the invalidation.

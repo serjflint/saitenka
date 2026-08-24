@@ -1,4 +1,4 @@
-"""attach/plugin mode builds the Reader's coloring/dict/mining collaborators from config alone.
+"""attach/plugin mode builds the SessionController's coloring/dict/mining collaborators from config alone.
 Anki-dependent pieces must degrade to None (never raise) so a closed Anki can't block attaching."""
 
 from __future__ import annotations

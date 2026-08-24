@@ -1,8 +1,8 @@
 """The session's close participants, as a reducer — D3's second migrated route.
 
-`Reader.close` names every participant itself, so each one's *lifetime* is split between the
+`SessionController.close` names every participant itself, so each one's *lifetime* is split between the
 subsystem that installs it and a line in a teardown table far away. This feature holds the ones the
-runtime has taken over: `SessionClosing` arrives, it emits their effects, and the Reader's table no
+runtime has taken over: `SessionClosing` arrives, it emits their effects, and the SessionController's table no
 longer mentions them.
 
 Latched, because close is not idempotent by accident: a second `SessionClosing` (a stop racing an
@@ -44,7 +44,7 @@ def _effects(event: SessionClosing) -> tuple[Effect, ...]:
     if event.phase is ClosePhase.CAPABILITIES:
         return (CloseCapabilityActors(),)
     if event.phase is ClosePhase.PARTICIPANTS:
-        # Order is the contract, and it is the order the Reader's table already had: cancel the
+        # Order is the contract, and it is the order the SessionController's table already had: cancel the
         # interaction work, then the capture — a write to mpv, so it goes while the transport still
         # works — and only then diagnostics, which is the point past which the session stops being
         # observable.

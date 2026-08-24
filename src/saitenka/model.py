@@ -137,7 +137,7 @@ def claims_pointer(rect, mouse_pos, *, open_: bool) -> bool:
 def in_rect(rect: tuple[float, float, float, float], x: float, y: float) -> bool:
     """Whether (x, y) falls in ``rect`` — half-open on the right and bottom, so adjacent rects tile
     without a shared edge that hits twice. Lives here, beside the box types, because three modules
-    were reaching into the Reader for it.
+    were reaching into the SessionController for it.
     """
     rx, ry, rw, rh = rect
     return rx <= x < rx + rw and ry <= y < ry + rh

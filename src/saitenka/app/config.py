@@ -84,9 +84,9 @@ SUB_NAV_DEFAULTS: dict[str, str] = {
 }
 
 
-# --- Reader options schema -----------------------------------------------------------------------
+# --- SessionController options schema -----------------------------------------------------------------------
 # The controller's knobs, grouped by concern. This IS the settings schema: a new knob is one field
-# here (plus reading it in Reader.__init__) — no more 22-parameter signatures. The CLI binds these
+# here (plus reading it in SessionController.__init__) — no more 22-parameter signatures. The CLI binds these
 # via cyclopts; legacy exploded kwargs still route through ``ReaderOptions.with_overrides``.
 
 
@@ -382,7 +382,7 @@ _OPTION_GROUPS: dict[str, str] = {
 
 @dataclass(frozen=True)
 class ReaderOptions:
-    """All Reader knobs, grouped by concern."""
+    """All SessionController knobs, grouped by concern."""
 
     keys: KeyOptions = KeyOptions()
     tooltip: TooltipOptions = TooltipOptions()
@@ -431,7 +431,7 @@ class ReaderOptions:
             elif group == "subtitle_geometry":
                 subtitle_geometry = replace(subtitle_geometry, **{name: value})
             else:
-                raise TypeError(f"unknown Reader option: {name!r}")
+                raise TypeError(f"unknown SessionController option: {name!r}")
         return ReaderOptions(
             keys=keys,
             tooltip=tooltip,

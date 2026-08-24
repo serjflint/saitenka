@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING, cast
 import psutil
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-from saitenka.app.controller import Reader
 from saitenka.app.embedded_subs import resolve_track_fonts
+from saitenka.app.session_controller import SessionController
 from saitenka.panel import Definition, Entry
 from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import (
@@ -421,9 +421,9 @@ class _IPC(NoSessionRuntime):
         pass
 
 
-def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> Reader:
+def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> SessionController:
     geometry = SubtitleGeometryOptions(native_visible=backend is not None, cache_max=3, lookahead=2)
-    return Reader(
+    return SessionController(
         cast("MpvIPC", ipc),
         options=ReaderOptions(subtitle_geometry=geometry, prefetch=False),
         renderer=None,
@@ -434,9 +434,9 @@ def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> Reade
 @contextmanager
 def _managed_readers(
     baseline_ipc: _IPC, native_ipc: _IPC, backend: LibassGeometryBackend
-) -> Iterator[tuple[Reader, Reader]]:
-    baseline: Reader | None = None
-    native: Reader | None = None
+) -> Iterator[tuple[SessionController, SessionController]]:
+    baseline: SessionController | None = None
+    native: SessionController | None = None
     try:
         baseline = _reader(baseline_ipc)
         native = _reader(native_ipc, backend=backend)
@@ -465,7 +465,7 @@ class _TallDictionary:
         return False
 
 
-def _present(reader: Reader, text: str, *, native: bool) -> bool:
+def _present(reader: SessionController, text: str, *, native: bool) -> bool:
     """Whether the cue is presented with geometry behind it.
 
     Observed, not taken from `apply`'s return: publication moved into the geometry lane's terminal,
@@ -480,7 +480,7 @@ def _present(reader: Reader, text: str, *, native: bool) -> bool:
     return bool(reader.boxes)
 
 
-def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, bool, bool]:
+def _open_tooltip(reader: SessionController, ipc: _IPC, *, native: bool) -> tuple[bool, bool, bool]:
     if not reader.boxes:
         return False, False, False
     box = reader.boxes[0]
@@ -500,7 +500,7 @@ def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, boo
     return hit, focus, opened
 
 
-def _scroll_and_close_tooltip(reader: Reader) -> bool:
+def _scroll_and_close_tooltip(reader: SessionController) -> bool:
     opened = reader.tip.view.state is not None
     reader.scroll_tip(1)
     scrolled = (

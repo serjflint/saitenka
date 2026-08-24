@@ -1,4 +1,4 @@
-"""Ratcheted inventory of feature functions that accept the Reader host object."""
+"""Ratcheted inventory of feature functions that accept the SessionController host object."""
 
 from __future__ import annotations
 
@@ -12,12 +12,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _reader_aliases(tree: ast.Module) -> set[str]:
-    aliases = {"Reader"}
+def _session_controller_aliases(tree: ast.Module) -> set[str]:
+    aliases = {"SessionController"}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             aliases.update(
-                alias.asname or alias.name for alias in node.names if alias.name == "Reader"
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "SessionController"
             )
     changed = True
     while changed:
@@ -58,17 +60,17 @@ def _expression_mentions_alias(expression: ast.expr, aliases: set[str]) -> bool:
     )
 
 
-def _mentions_reader(annotation: ast.expr | None, aliases: set[str]) -> bool:
+def _mentions_session_controller(annotation: ast.expr | None, aliases: set[str]) -> bool:
     if annotation is None:
         return False
     return _expression_mentions_alias(annotation, aliases)
 
 
-def reader_parameter_counts(root: Path) -> Counter[str]:
+def session_controller_parameter_counts(root: Path) -> Counter[str]:
     counts: Counter[str] = Counter()
     for path in sorted((root / "src/saitenka/app").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        aliases = _reader_aliases(tree)
+        aliases = _session_controller_aliases(tree)
         module = path.relative_to(root / "src").with_suffix("").as_posix().replace("/", ".")
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -80,7 +82,9 @@ def reader_parameter_counts(root: Path) -> Counter[str]:
                 *(arg for arg in (node.args.vararg, node.args.kwarg) if arg is not None),
             )
             if any(
-                arg.arg == "reader" or _mentions_reader(arg.annotation, aliases) for arg in args
+                arg.arg in {"reader", "session_controller"}
+                or _mentions_session_controller(arg.annotation, aliases)
+                for arg in args
             ):
                 counts[module] += 1
     return counts
@@ -95,18 +99,20 @@ def load_allowlist(path: Path) -> dict[str, int]:
         or limit < 0
         for module, limit in value.items()
     ):
-        raise ValueError("Reader host allow-list must map module names to non-negative limits")
+        raise ValueError(
+            "SessionController host allow-list must map module names to non-negative limits"
+        )
     return value
 
 
-def unexpected_reader_parameters(root: Path, allowlist: Path) -> set[str]:
+def unexpected_session_controller_parameters(root: Path, allowlist: Path) -> set[str]:
     """Every module whose count differs from its baseline, in either direction.
 
     The raw comparison — used by the unit tests below against synthetic trees. The gate itself goes
-    through :func:`enforce_reader_host_contract`, which treats the two directions differently.
+    through :func:`enforce_session_controller_host_contract`, which treats the directions differently.
     """
     limits = load_allowlist(allowlist)
-    counts = reader_parameter_counts(root)
+    counts = session_controller_parameter_counts(root)
     modules = counts.keys() | limits.keys()
     return {
         f"{module}: current={counts.get(module, 0)} baseline={limits.get(module, 0)}"
@@ -115,10 +121,10 @@ def unexpected_reader_parameters(root: Path, allowlist: Path) -> set[str]:
     }
 
 
-def enforce_reader_host_contract(root: Path, allowlist: Path) -> set[str]:
+def enforce_session_controller_host_contract(root: Path, allowlist: Path) -> set[str]:
     """Fail on GROWTH; tighten the baseline on a decrease. Returns only the modules that grew.
 
-    The contract this file exists for is "no new `Reader` coupling", and only growth violates it. A
+    The contract this file exists for is "no new `SessionController` coupling"; only growth violates it. A
     decrease is the migration working, and failing on it cost a re-bless per conversion — the same
     ceremony the runtime-debt manifest had.
 
@@ -127,7 +133,7 @@ def enforce_reader_host_contract(root: Path, allowlist: Path) -> set[str]:
     could slip back into unnoticed. Rewritten here, so there is never any.
     """
     limits = load_allowlist(allowlist)
-    counts = reader_parameter_counts(root)
+    counts = session_controller_parameter_counts(root)
     grew = {
         f"{module}: current={counts.get(module, 0)} baseline={limits.get(module, 0)}"
         for module in counts.keys() | limits.keys()
@@ -157,7 +163,9 @@ def bless(root: Path, allowlist: Path) -> dict[str, int]:
     class of silent no-op and pays in mechanical rows. Hand-editing this fixture is how that used
     to be said, which is not saying it at all — this is, and the commit message carries the reason.
     """
-    return _write_allowlist(allowlist, reader_parameter_counts(root), load_allowlist(allowlist))
+    return _write_allowlist(
+        allowlist, session_controller_parameter_counts(root), load_allowlist(allowlist)
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - operator entry point
@@ -165,8 +173,8 @@ if __name__ == "__main__":  # pragma: no cover - operator entry point
     from pathlib import Path
 
     _root = Path(__file__).resolve().parent.parent
-    _allowlist = _root / "tests/fixtures/reader_host_allowlist.json"
+    _allowlist = _root / "tests/fixtures/session_controller_host_allowlist.json"
     if sys.argv[1:2] != ["bless"]:
-        print("usage: python tests/reader_host_contract.py bless")  # noqa: T201
+        print("usage: python tests/session_controller_host_contract.py bless")  # noqa: T201
         raise SystemExit(2)
     print(f"reader-host: blessed ({sum(bless(_root, _allowlist).values())} rows)")  # noqa: T201

@@ -1,11 +1,11 @@
 """The hover hysteresis, decided rather than performed.
 
-These used to be `Reader` tests that stubbed `set_hover` — the only way to watch a dwell decide
+These used to be `SessionController` tests that stubbed `set_hover` — the only way to watch a dwell decide
 without letting it build a panel. The machine is pure, so the decision is the return value and the
 oracle is what it says, not which method got called.
 
-The refusal policy has no `Reader` test at all and could not have one: it fires when a deadline
-cannot be armed, which on a real Reader means no timer service.
+The refusal policy has no `SessionController` test at all and could not have one: it fires when a deadline
+cannot be armed, which on a real SessionController means no timer service.
 """
 
 from __future__ import annotations

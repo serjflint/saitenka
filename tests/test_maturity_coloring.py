@@ -6,9 +6,9 @@ from util import RecordingRasterProvider
 
 from saitenka.app import reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
-from saitenka.app.controller import Reader
 from saitenka.app.fsrs import KnownSnap
 from saitenka.app.scoring import Palette, Scorer
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.tokenize import Token
 from saitenka.app.wordlists import FreqDict, KnownWords
@@ -99,7 +99,7 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
         enable_freq=False,
         enable_jlpt=False,
     )
-    reader = Reader(
+    reader = SessionController(
         _IPC(),
         scorer=scorer,
         options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")),

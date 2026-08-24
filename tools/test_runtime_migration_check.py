@@ -54,7 +54,7 @@ def test_a_terminal_row_whose_symbol_moved_is_a_failure() -> None:
     """
     checker = _module()
     actual, symbols, evidence = checker.scan()
-    source = "src/saitenka/app/reader_factory.py::create_reader"
+    source = "src/saitenka/app/session_factory.py::create_session_controller"
     checker._TERMINAL_DEBT = {"synthetic": frozenset({("reader-parameter", source)})}
     manifest = {
         "debt": [[item.kind, item.source] for item in sorted(actual)],
@@ -67,7 +67,7 @@ def test_a_terminal_row_whose_symbol_moved_is_a_failure() -> None:
 def test_scanner_detects_each_debt_category() -> None:
     checker = _module()
     source = """
-class Reader:
+class SessionController:
     # Not `run`: WP6 emptied `_TICK_METHODS`, so no name is a tick stage any more.
     def drive(self):
         self.ipc.command("get_property", "pause")
@@ -75,14 +75,14 @@ class Reader:
         self._queue.get_nowait()
         return self.manual_until
 
-def feature(reader: Reader):
+def feature(reader: SessionController):
     return reader
 
-def keyword_feature(*, reader: Reader):
+def keyword_feature(*, reader: SessionController):
     return reader
 
-def untyped_feature(reader):
-    return reader
+def untyped_feature(session_controller):
+    return session_controller
 
 def aliased_command(player):
     player.command("set_property", "pause", True)
@@ -267,12 +267,16 @@ def test_manifest_rejects_deleted_added_and_moved_lifecycle_duties() -> None:
     )
 
     moved = copy.deepcopy(original)
-    moved["entrypoints"][0]["source"] = "src/saitenka/app/controller.py::Reader.run"
+    moved["entrypoints"][0]["source"] = (
+        "src/saitenka/app/session_controller.py::SessionController.run"
+    )
     problems = checker.failures(moved, actual, symbols, evidence)
     # The key names the SITE as well as the duty: a duty can be sourced at several entrypoints,
     # and "one of them still does it by hand" is exactly what this census exists to report.
     assert any(
-        item.startswith("run-owned-player@src/saitenka/app/controller.py::Reader.run:")
+        item.startswith(
+            "run-owned-player@src/saitenka/app/session_controller.py::SessionController.run:"
+        )
         for item in problems["missing_evidence"]
     )
 
@@ -518,18 +522,18 @@ def test_a_duty_sourced_at_two_entrypoints_is_watched_at_both() -> None:
 def test_a_host_parameter_is_the_host_and_not_a_value_named_after_it() -> None:
     """The census is zero, so the scanner has to be shown still biting — and shown where it stopped.
 
-    A substring test on the annotation counted `ReaderOptions` and `ReaderServices` as host
+    A substring test on the annotation counted `ReaderOptions` and `SessionServices` as host
     parameters. Both were then filed under terminal composition debt, where being unconvertible is
     the point, so nothing re-examined them and the last two rows of the migration were a spelling.
     """
     checker = _module()
     bites = [
         "def by_name(reader): ...",
-        "def annotated(host: Reader): ...",
-        'def quoted(host: "Reader"): ...',
-        "def optional(host: Reader | None): ...",
-        "def qualified(host: controller.Reader): ...",
-        "def keyword_only(*, host: Reader): ...",
+        "def annotated(host: SessionController): ...",
+        'def quoted(host: "SessionController"): ...',
+        "def optional(host: SessionController | None): ...",
+        "def qualified(host: session_controller.SessionController): ...",
+        "def keyword_only(*, host: SessionController): ...",
     ]
     for source in bites:
         annotation = ast.parse(source).body[0].args
@@ -541,7 +545,7 @@ def test_a_host_parameter_is_the_host_and_not_a_value_named_after_it() -> None:
 
     passes = [
         "def config(options: ReaderOptions): ...",
-        "def services(services: ReaderServices | None): ...",
+        "def services(services: SessionServices | None): ...",
         "def unrelated(x: int): ...",
         "def bare(x): ...",
     ]

@@ -7,7 +7,7 @@ whether a row can be converted mechanically: how many parameters it would end up
 The number that matters is TRANSITIVE. A function that forwards the host must receive the union of
 everything downstream, so a leaf with three reads can still be unconvertible because its caller's
 caller needs sixty-eight. It is also transitive through a shared *signature*: functions bound into one
-`Callable[[Reader], ...]` field cannot diverge from each other. Read every number from `over`.
+`Callable[[SessionController], ...]` field cannot diverge from each other. Read every number from `over`.
 
   uv run python tools/host_arity.py            # gate the census against the manifest
   uv run python tools/host_arity.py explain     # which dispatches resolved rather than widened
@@ -35,7 +35,7 @@ MAX_ARGS = 8
 
 #: Held the host because the host was what they built or owned — `_TERMINAL_DEBT` in the runtime
 #: manifest, and empty for the same reason it is: the last two rows named `ReaderOptions` and
-#: `ReaderServices`, not the host, and neither tool was matching the name (`_names_the_host`).
+#: `SessionServices`, not the host, and neither tool was matching the name (`_names_the_host`).
 #: Kept as a closed empty set so a real composition root is exempt again rather than reported as an
 #: unconvertible monster.
 EXEMPT: frozenset[str] = frozenset()
@@ -380,13 +380,17 @@ def _resolve_dispatch(
 
 #: Identifiers that ARE the host. Kept in lockstep with `runtime_migration_check._HOST_NAMES`: the
 #: two tools disagreeing about what a host parameter is makes WP5's exit unanswerable from either.
-_HOST_NAMES = {"Reader", "controller.Reader", "saitenka.app.controller.Reader"}
+_HOST_NAMES = {
+    "SessionController",
+    "session_controller.SessionController",
+    "saitenka.app.session_controller.SessionController",
+}
 
 
 def _names_the_host(annotation: ast.expr | None) -> bool:
-    """Does this annotation name the `Reader`, rather than merely containing the word.
+    """Does this annotation name the `SessionController`, rather than merely containing the word.
 
-    A substring test counted `options: ReaderOptions` and `services: ReaderServices` as host
+    A substring test counted `options: ReaderOptions` and `services: SessionServices` as host
     parameters. Taking a config dataclass is not holding the host.
     """
     if annotation is None:
@@ -400,7 +404,7 @@ def _names_the_host(annotation: ast.expr | None) -> bool:
 
 def _host_argument(arguments: list[ast.arg]) -> str | None:
     for argument in arguments:
-        if argument.arg == "reader" or _names_the_host(argument.annotation):
+        if argument.arg in {"reader", "session_controller"} or _names_the_host(argument.annotation):
             return argument.arg
     return None
 
@@ -494,7 +498,7 @@ def resolve(functions: list[Function], bindings: dict[str, set[str]]) -> dict[st
     of the mechanical tier, never into it.
 
     Such a call is dispatch through a value, and every candidate it might land on therefore shares
-    ONE signature — `SurfaceSpec` holds its hooks as `Callable[[Reader], bool]` fields, so
+    ONE signature — `SurfaceSpec` holds its hooks as `Callable[[SessionController], bool]` fields, so
     `help_overlay.scroll` cannot take different parameters from `sub_picker.scroll`. So the family
     members are joined to each other, not merely to the caller. Without that, a two-read hook reads
     as trivially convertible while its sibling in the same field needs forty.

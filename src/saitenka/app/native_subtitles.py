@@ -1322,7 +1322,7 @@ class NativeSubtitleGeometry:
         """Read the mpv properties native geometry depends on, then decide.
 
         Takes the property reader and the OSD surface rather than the host: those two are all it
-        ever wanted, and a shim that takes the whole `Reader` cannot be driven by the session
+        ever wanted, and a shim that takes the whole `SessionController` cannot be driven by the session
         runtime. The surface is the host's, and is the frame — see `render_inputs_of`.
         """
         return render_inputs_of(

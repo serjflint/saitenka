@@ -1,10 +1,10 @@
 """The tokenizer-strategy seam (app/tokenizer.py): registry, UnidicTokenizer delegation parity, and the
-Reader-owned swappable seam a profile switch (#254) flips."""
+SessionController-owned swappable seam a profile switch (#254) flips."""
 
 import pytest
 import util
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.token_cache import TokenizedCue
 from saitenka.app.tokenize import (
     Token,
@@ -121,7 +121,7 @@ def test_unidic_merge_dict_compounds_matches_module_function():
 
 
 def test_reader_owns_unidic_tokenizer_by_default():
-    reader = Reader(FakeIPC())
+    reader = SessionController(FakeIPC())
     assert reader.tokenizer.name == "unidic"
 
 
@@ -154,7 +154,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
         def has_term(self, *_forms):
             return True
 
-    reader = Reader(FakeIPC(), dict_set=_DS())
+    reader = SessionController(FakeIPC(), dict_set=_DS())
     spy = _SpyTokenizer()
     reader.use_tokenizer(spy)
     reader.tokens = [Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
@@ -170,7 +170,7 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     from saitenka.app import nested_popup
     from saitenka.model import LinkBox
 
-    reader = Reader(FakeIPC(), dict_set=object())
+    reader = SessionController(FakeIPC(), dict_set=object())
     spy = _SpyTokenizer()
     reader.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
@@ -207,18 +207,18 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
     particle = Token("は", "は", "は", "助詞", 0, 1)
     noun = Token("本", "本", "ほん", "名詞", 1, 2)
 
-    jp = Reader(FakeIPC())
+    jp = SessionController(FakeIPC())
     jp.tokens = [particle, noun]
     assert mine_target(jp.mine_cue) == 1  # unidic: the noun is the content word
 
-    swapped = Reader(FakeIPC())
+    swapped = SessionController(FakeIPC())
     swapped.use_tokenizer(_ParticleContentTokenizer())
     swapped.tokens = [particle, noun]
     assert mine_target(swapped.mine_cue) == 0  # swapped: the particle is now "content"
 
 
 def test_use_tokenizer_swaps_strategy_and_clears_cache():
-    reader = Reader(FakeIPC())
+    reader = SessionController(FakeIPC())
     tok = Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)
     reader.token_cache.put("本", TokenizedCue(lines=[[tok]], tokens=[tok], styles=None))
     assert len(reader.token_cache) == 1

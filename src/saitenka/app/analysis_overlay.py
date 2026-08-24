@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class AnalysisState:
-    """Runtime state for background episode analysis, grouped off the Reader."""
+    """Runtime state for background episode analysis, grouped off the SessionController."""
 
     open: bool = False
     status: str = "Analyzing…"

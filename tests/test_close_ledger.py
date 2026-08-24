@@ -1,6 +1,6 @@
 """Close must complete even when a participant raises, and must say which one did.
 
-The motivating shape: `Reader.close` ran its ~18 participants unguarded, so the first to raise
+The motivating shape: `SessionController.close` ran its ~18 participants unguarded, so the first to raise
 aborted every later one — leaving the transport open, the overlay live and the scratch dir on disk,
 with a traceback naming only the thrower.
 """
@@ -11,7 +11,7 @@ import pytest
 from util import FakeIPC, runtime_gateway
 
 from saitenka.app.close_ledger import CloseLedger
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 
 
@@ -72,8 +72,8 @@ def test_an_interrupt_during_teardown_still_runs_the_rest() -> None:
 
 
 def test_close_returns_a_clean_ledger_for_a_healthy_reader() -> None:
-    """Against the real `Reader`, so the participant list cannot drift away from the wrapper."""
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    """Against the real `SessionController`, so the participant list cannot drift away from the wrapper."""
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
     ledger = reader.close()
     assert ledger.report() is None
     assert "transport" in ledger.completed
@@ -82,7 +82,7 @@ def test_close_returns_a_clean_ledger_for_a_healthy_reader() -> None:
 
 def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
     """The end-to-end claim: one broken collaborator cannot cost us the transport."""
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
 
     class Wedged:
         def close(self) -> None:
@@ -103,7 +103,7 @@ def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
 
 @pytest.mark.parametrize("attribute", ["lifecycle_timers", "lifecycle_surfaces"])
 def test_a_late_participant_failing_does_not_lose_the_scratch_directory(attribute: str) -> None:
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
     scratch = reader._tmp
 
     class Wedged:
@@ -124,7 +124,7 @@ def test_the_lane_budget_is_armed_after_the_capabilities_come_down() -> None:
     Hoisting it would spend that window on capability teardown, and the only symptom is lanes
     getting less time to drain on a slow machine — invisible until a close silently truncates.
     """
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
     assert reader._lane_deadline == 0.0  # negative control: unarmed before close
 
     order = reader.close().completed
@@ -138,7 +138,7 @@ def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
     """The table is a sequence, not a set: the checker pins several pairs by order, and the
     hazards it pins are real (a geometry job admitted after its provider closed, a lane drained
     after the store it writes to went away)."""
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
 
     ledger = reader.close()
 
@@ -157,7 +157,7 @@ def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
 # --- close participants the runtime owns ---------------------------------------------------------
 #
 # The `telemetry` close duty: the gauge provider is dropped by a session reducer emitting
-# `DetachDiagnostics`, not by a line in `Reader.close`. The Reader's remaining part is announcing
+# `DetachDiagnostics`, not by a line in `SessionController.close`. The SessionController's remaining part is announcing
 # that close reached the runtime's participants.
 
 
@@ -171,7 +171,7 @@ def test_closing_a_session_detaches_the_diagnostic_gauges_through_the_runtime() 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     telemetry.set_gauge_provider(lambda: {"panel_cache.size": 1.0})
     try:
         assert telemetry._gauge_provider is not None  # negative control: the oracle can fail
@@ -187,9 +187,9 @@ def test_closing_a_session_detaches_the_diagnostic_gauges_through_the_runtime() 
 
 
 def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runtime() -> None:
-    """The duty's oracle: the section is disabled with the Reader's own fallback step skipped.
+    """The duty's oracle: the section is disabled with the SessionController's own fallback step skipped.
 
-    Skipped, not absent — a Reader with no runtime still forced the section, so somebody has to
+    Skipped, not absent — a SessionController with no runtime still forced the section, so somebody has to
     hand it back. The two must not both run: the second `disable-section` would be a write to a
     transport the close is already tearing down.
     """
@@ -201,7 +201,7 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader._register_keybinds()
     reader.tip.view.rect = (0, 0, 10, 10)
     reader._sync_mouse_capture()
@@ -219,7 +219,7 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
 def test_a_session_without_a_runtime_still_closes_cleanly() -> None:
     """`deliver_runtime_event` returns False rather than raising when no gateway owns the session —
     a screenshot capture and most unit tests are exactly that, and close must not care."""
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
 
     ledger = reader.close()
 
@@ -268,7 +268,7 @@ def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() ->
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     scratch = reader._tmp
     assert scratch.exists()  # negative control
     try:
@@ -300,7 +300,7 @@ def test_the_artifacts_phase_is_separate_from_the_participants_phase() -> None:
 
 
 def test_the_runtime_closes_the_surfaces_it_was_handed() -> None:
-    """The `SURFACES` phase. The Reader still *uses* the surfaces; what moved is who ends them.
+    """The `SURFACES` phase. The SessionController still *uses* the surfaces; what moved is who ends them.
 
     Asserted through the registration, which is the seam: a session that handed its surfaces over
     must not also close them itself, or the migration is an extra call rather than a moved
@@ -310,7 +310,7 @@ def test_the_runtime_closes_the_surfaces_it_was_handed() -> None:
 
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     closed: list[str] = []
     gateway.session_resources[SURFACES_RESOURCE] = _RecordingSurfaces(closed)
     try:
@@ -341,7 +341,7 @@ def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
     """The negative control for the seam: the fallback is what makes the duty safe to migrate at
     all, so it has to be exercised, not assumed."""
     ipc = FakeIPC()  # no gateway, so no runtime owns anything
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     closed: list[str] = []
     reader.lifecycle_surfaces = _RecordingSurfaces(closed)  # type: ignore[assignment]  # local fake
 
@@ -380,7 +380,7 @@ def test_composing_a_session_runtime_leaves_its_close_duties_reachable(
     monkeypatch.setattr(telemetry, "_gauge_provider", lambda: {"cache": 1.0})
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=startup_hint)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     try:
         ledger = reader.close()
     finally:
@@ -410,7 +410,7 @@ def test_close_announces_every_phase_in_teardown_order() -> None:
 
     ipc = RecordingIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     try:
         reader.close()
     finally:
@@ -435,7 +435,7 @@ def test_a_closed_session_reactor_rejects_further_work() -> None:
 
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
 
     assert reader.close().report() is None
 
@@ -494,7 +494,7 @@ def test_the_participants_phase_retires_the_input_capture_and_nothing_else_does(
         seen[phase] = [type(effect) for effect in result.effects]
 
     # Second, not first: the interaction work is cancelled before the capture goes, which is the
-    # order the Reader's table had — a click routed to a cancelled job is worse than one dropped.
+    # order the SessionController's table had — a click routed to a cancelled job is worse than one dropped.
     assert seen[ClosePhase.PARTICIPANTS][1] is ReleaseInputCapture
     assert [p for p, kinds in seen.items() if ReleaseInputCapture in kinds] == [
         ClosePhase.PARTICIPANTS
@@ -502,7 +502,7 @@ def test_the_participants_phase_retires_the_input_capture_and_nothing_else_does(
 
 
 def test_the_dispatcher_retires_the_input_capture_through_its_registered_resource() -> None:
-    """The link the close run cannot show: the effect finds the capture, not the Reader's step."""
+    """The link the close run cannot show: the effect finds the capture, not the SessionController's step."""
     from util import runtime_gateway
 
     from saitenka.app.session_routes import INPUT_CAPTURE_RESOURCE, _dispatcher
@@ -568,7 +568,7 @@ def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> Non
 
 
 def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
-    """The Reader keeps the three steps as the no-runtime fallback; both paths must not run."""
+    """The SessionController keeps the three steps as the no-runtime fallback; both paths must not run."""
     from util import runtime_gateway
 
     from saitenka.app.session_routes import install_session_reactor
@@ -576,7 +576,7 @@ def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     closed: list[str] = []
     reader._close_backlog_store = lambda: closed.append("backlog")  # type: ignore[method-assign]
     reader._close_mined_store = lambda: closed.append("mined")  # type: ignore[method-assign]
@@ -590,7 +590,7 @@ def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
 
 
 def test_a_runtime_owned_session_closes_the_subtitle_raster_exactly_once() -> None:
-    """The Reader keeps the three steps as the no-runtime fallback; both paths must not run."""
+    """The SessionController keeps the three steps as the no-runtime fallback; both paths must not run."""
     from util import runtime_gateway
 
     from saitenka.app.session_routes import install_session_reactor
@@ -598,7 +598,7 @@ def test_a_runtime_owned_session_closes_the_subtitle_raster_exactly_once() -> No
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     closed: list[str] = []
     reader._clear_subtitle_pixels = lambda: closed.append("clear")  # type: ignore[method-assign]
     reader._close_subtitle_raster = lambda: closed.append("close")  # type: ignore[method-assign]
@@ -644,7 +644,7 @@ def test_a_gateway_without_a_reactor_still_runs_every_close_participant() -> Non
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)  # a gateway, deliberately without `install_session_reactor`
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     lanes: list[str] = []
     ipc.close_runtime_job_lane = lambda name, _timeout: bool(lanes.append(name)) or True
     try:
@@ -652,7 +652,7 @@ def test_a_gateway_without_a_reactor_still_runs_every_close_participant() -> Non
     finally:
         gateway.close()
 
-    assert "subtitle-fetch" in lanes  # the Reader ran them itself
+    assert "subtitle-fetch" in lanes  # the SessionController ran them itself
     assert ledger.report() is None
 
 
@@ -660,7 +660,7 @@ def test_every_registered_participant_is_named_by_an_effect_and_the_reverse() ->
     """The verb tables and the registrations have to agree, and nothing else checks that they do.
 
     A name registered but never named by an effect is a participant the runtime silently never
-    retires — the Reader's fallback carries it forever and the duty reads as migrated. A name in a
+    retires — the SessionController's fallback carries it forever and the duty reads as migrated. A name in a
     table but never registered is the mirror: `_retire` answers False and the phase reports a
     failure nobody caused.
     """
@@ -668,7 +668,7 @@ def test_every_registered_participant_is_named_by_an_effect_and_the_reverse() ->
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     try:
         registered = set(gateway.session_resources)
     finally:
@@ -709,7 +709,7 @@ def test_every_lane_the_session_opens_the_session_closes_by_name() -> None:
 
     ipc = RecordingIPC()
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     try:
         reader.close()
     finally:

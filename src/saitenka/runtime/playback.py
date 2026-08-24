@@ -488,9 +488,9 @@ class PlaybackProjection:
     def cue_replaced(self, state: PlaybackState, text: str) -> PlaybackState:
         """Record a cue the owning reducer chose itself rather than observed from mpv.
 
-        A Reader-side cue change — a language or track switch clearing the line — is a statement
+        A SessionController-side cue change — a language or track switch clearing the line — is a statement
         about the very fact ``sub-text`` names. Without it the projection keeps mpv's last text and
-        the next changed cue fact reconciles that back over the Reader's, so the cleared cue
+        the next changed cue fact reconciles that back over the SessionController's, so the cleared cue
         returns: two representations of one fact, which is what invariant 13 forbids.
 
         The observed value moves with it, so a later mpv observation of the *old* text is a change

@@ -4,7 +4,7 @@
 still owns the rest. The seam has two halves, and the tests here pin both:
 
 * **observe** — the reactor sees every envelope, so it can track epochs and its own completions.
-* **claim** — a payload it owns is withheld from the legacy Reader, so a migrated duty runs once
+* **claim** — a payload it owns is withheld from the legacy SessionController, so a migrated duty runs once
   instead of twice. Claiming is *declared*, never derived from the route table: the two answer
   different questions, and conflating them is silent.
 
@@ -76,7 +76,7 @@ def _drain(consumer, timeout: float | None = 0.0) -> list:
 
 
 def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
-    """`RouteError` subclasses `ValueError`, and `Reader.pump` reads `ValueError` as "mpv went away".
+    """`RouteError` subclasses `ValueError`, and `SessionController.pump` reads `ValueError` as "mpv went away".
 
     So letting one escape would end the session silently the first time an unmigrated event arrived
     — which, during a migration, is most of them.
@@ -94,7 +94,7 @@ def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
 
 
 def test_a_claimed_event_is_withheld_from_the_reader() -> None:
-    """The fallthrough seam: a migrated duty runs in the reactor *instead of* the Reader.
+    """The fallthrough seam: a migrated duty runs in the reactor *instead of* the SessionController.
 
     Without the claim both act on the same envelope and the duty runs twice.
     """
@@ -115,7 +115,7 @@ def test_a_claimed_event_is_withheld_from_the_reader() -> None:
 
 
 def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> None:
-    """Claiming withholds a payload from the Reader, so an act the Reader was performing has to
+    """Claiming withholds a payload from the SessionController, so an act the SessionController was performing has to
     have somewhere else to land — an effect with a registered performer.
 
     This is the failure the seam cannot report on its own. A claim added ahead of its performer
@@ -126,7 +126,7 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     """
     from util import runtime_gateway
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.session_routes import (
         _CLAIMED,
         _PARTICIPANT_OF,
@@ -148,7 +148,7 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     try:
         registered = set(gateway.session_resources)
     finally:
@@ -232,7 +232,7 @@ def test_a_completion_reaches_the_correlator_that_issued_it_past_the_observer() 
 
 
 def test_the_observer_sees_domain_events_without_consuming_them() -> None:
-    """TRANSITIONAL (dies with D4). A second observer must cost the Reader nothing: `handle` takes an envelope, it does not read
+    """TRANSITIONAL (dies with D4). A second observer must cost the SessionController nothing: `handle` takes an envelope, it does not read
     the mailbox. (`run_until_idle` does, and must not be used while this router exists.)"""
     mailbox = SessionMailbox()
     seen: list[object] = []
@@ -259,7 +259,9 @@ def test_the_observer_sees_domain_events_without_consuming_them() -> None:
     events = _drain(consumer)
 
     assert len(seen) == 1  # the reactor saw it
-    assert events == [{"event": "property-change", "name": "pause"}]  # and so did the Reader
+    assert events == [
+        {"event": "property-change", "name": "pause"}
+    ]  # and so did the SessionController
 
 
 def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None:
@@ -270,13 +272,13 @@ def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None
     """
     from util import runtime_gateway
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     def commands_for(*, observing: bool) -> list[tuple]:
         ipc = FakeIPC()
         gateway = runtime_gateway(ipc)  # the REAL gateway, whose router is the sole consumer
-        reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+        reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
         try:
             if observing:
                 gateway.observe(

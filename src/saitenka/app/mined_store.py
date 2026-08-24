@@ -6,7 +6,7 @@ The only prior link from a mined card back to its scene lived inside the Anki no
 already agrees on (:func:`saitenka.app.continuity.episode_identity`) and the cue span, so the sidebar Mine
 tab can list an episode's mined cards without Anki and round-trip a preview to the exact line.
 
-Mirrors :class:`saitenka.app.backlog.BacklogStore`: one SQLite connection owned by the Reader thread.
+Mirrors :class:`saitenka.app.backlog.BacklogStore`: one SQLite connection owned by the SessionController thread.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class MinedCard:
 
 
 class MinedCardStore:
-    """One SQLite connection owned by the Reader thread; a card per mined note."""
+    """One SQLite connection owned by the SessionController thread; a card per mined note."""
 
     def __init__(self, path: str | Path | None = None, *, clock: Callable[[], float] = time.time):
         self.path = Path(path or db_path())

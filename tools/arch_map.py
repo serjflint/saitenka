@@ -244,7 +244,7 @@ def _adapter_ports() -> list[dict]:
 
     The width is the meter that matters after the seam exists: a port is the state the feature has
     not moved into a slice of its own, so it falls when that state does — and it cannot be narrowed
-    by hiding it, because a `Reader` parameter is what the host inventory sits at zero to forbid.
+    by hiding it, because a `SessionController` parameter is what the host inventory sits at zero to forbid.
     """
     ports = []
     for path in sorted((SRC / "app").glob("*_adapter.py")):
@@ -287,10 +287,10 @@ def _host_residue() -> dict[str, list[str]]:
     stateless feature's interpreter at all. A prefix names a shape, never a family — which is the
     error this whole migration kept making, so the report says so rather than implying a worklist.
     """
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     roles = collections.defaultdict(list)
-    for name, value in vars(Reader).items():
+    for name, value in vars(SessionController).items():
         if not callable(value) and not isinstance(value, property):
             continue
         if name.startswith("_run_") and name.endswith("_command"):
@@ -360,14 +360,16 @@ def seams_view() -> dict:
 
 def command_view() -> dict:
     """What a keypress reaches. The router is a table, so it reads statically — but the rows are
-    `action(Reader.verb)`, resolved by name at call time, which is why a verb reached only from
+    `action(SessionController.verb)`, resolved by name at call time, which is why a verb reached only from
     here looks dead to every tool that follows symbols."""
-    source = (SRC / "app" / "controller.py").read_text(encoding="utf-8")
+    source = (SRC / "app" / "session_controller.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
-    reader = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Reader")
+    controller = next(
+        n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionController"
+    )
     builder = next(
         n
-        for n in reader.body
+        for n in controller.body
         if isinstance(n, ast.FunctionDef) and n.name == "_build_command_router"
     )
     # The handler table is the only large dict literal in the builder; a smaller one would be a
@@ -442,7 +444,7 @@ def markdown(state: dict) -> str:
         "",
         (
             f"Broadcast to every slice: {', '.join(f'`{e}`' for e in own['broadcast'])}."
-            f" Withheld from the `Reader`: {len(own['claimed_from_reader'])} payloads."
+            f" Withheld from the `SessionController`: {len(own['claimed_from_reader'])} payloads."
         ),
         "",
     ]
@@ -452,7 +454,7 @@ def markdown(state: dict) -> str:
         "## 3. Command — what a keypress reaches",
         "",
         (
-            f"{len(cmd['rows'])} rows; {cmd['verbs']} resolve to a `Reader` verb by name, the"
+            f"{len(cmd['rows'])} rows; {cmd['verbs']} resolve to a `SessionController` verb by name, the"
             " rest carry an intent to a policy."
         ),
         "",
@@ -489,7 +491,7 @@ def markdown(state: dict) -> str:
     out += [
         "",
         (
-            "Each adapter declares the host members it needs as a protocol — never a `Reader`"
+            "Each adapter declares the host members it needs as a protocol — never a `SessionController`"
             " parameter, which the host inventory sits at zero to forbid. The width is the state"
             " the feature has not moved into a slice of its own, so it is a debt meter, not a"
             " style complaint:"

@@ -51,7 +51,7 @@ def build_mpv_argv(
 
     ``opts.extra_args`` (SubMiner's ``-a/--args`` precedent) land after our own overridable defaults so
     a matching flag wins there (mpv is last-flag-wins), but before the socket/script-opts/log-file flags
-    below — those three always win regardless of ``extra_args``: the Reader connects to the exact
+    below — those three always win regardless of ``extra_args``: the SessionController connects to the exact
     ``sock`` path, `report`/crashlog bundle the log from the fixed ``mpv_log`` path, and the script-opts
     marker prevents a globally-installed saitenka.lua from double-attaching (see the comment there)."""
     cmd = [
@@ -102,7 +102,7 @@ def build_mpv_argv(
             # autoloads under mpv's own script-autoload — `--no-config` doesn't suppress that. It reuses
             # whatever input-ipc-server is already set (see saitenka.lua's ensure_socket()), so without
             # this marker it would spawn a SECOND `saitenka attach` onto the socket `run` mode
-            # already owns: two independent Reader/telemetry instances driving one mpv. This script-opt
+            # already owns: two independent SessionController/telemetry instances driving one mpv. This script-opt
             # is the handshake — saitenka.lua's spawn_overlay() checks it and no-ops when set.
             "--script-opts=saitenka-managed=yes",
             f"--log-file={mpv_log}",

@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "codemods"))
 
 import harness
 import move_member
+import rename_session_controller
 
 
 def test_a_rewrite_preserves_the_formatting_around_it(tmp_path):
@@ -58,3 +59,7 @@ def test_an_unrelated_attribute_of_the_same_name_tail_is_left_alone(tmp_path):
         )
         == 0
     )
+
+
+def test_the_session_controller_rename_is_idempotent():
+    assert rename_session_controller.main(["--check"]) == 0

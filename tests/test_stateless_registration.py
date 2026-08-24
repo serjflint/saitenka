@@ -10,7 +10,7 @@ from saitenka.app.session_routes import stateless_features
 ROOT = Path(__file__).resolve().parent.parent
 INTENTS = ROOT / "src/saitenka/app"
 
-#: Policies whose adapter still lives on `Reader`. Closed by being written down: a new
+#: Policies whose adapter still lives on `SessionController`. Closed by being written down: a new
 #: `*_intents.py` is not on this list, so it fails until it registers. Only shrinks —
 #: `vibe/stateless-seam-plan.md` says what each is blocked on (the width of its host port).
 NOT_YET_REGISTERED: frozenset[str] = frozenset()
@@ -27,7 +27,7 @@ def _policies() -> set[str]:
 
 
 class _Host:
-    """Not a `Reader`: the point of the ports is that a registration needs no live session."""
+    """Not a `SessionController`: the point of the ports is that a registration needs no live session."""
 
     def __getattr__(self, name: str) -> object:
         return None

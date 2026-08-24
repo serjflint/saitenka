@@ -11,7 +11,7 @@ which stays green until the path changes and then fails somewhere else entirely.
 **The classifier over-counted three times before it was believed**, each time the same shape: a name
 matched and a meaning did not (`tests/driver.py` counting itself; a class that had become sanctioned
 when the hover decision got its own home; `sidebar.on_click(ports, x, y)`, a module function, read as
-`Reader.on_click()`). So the exemptions below are a *per-site list with a reason each*, never a rule:
+`SessionController.on_click()`). So the exemptions below are a *per-site list with a reason each*, never a rule:
 a rule excuses the next test of the same shape, which is exactly how the over-counts survived.
 """
 
@@ -25,15 +25,18 @@ TESTS = Path(__file__).resolve().parent
 #: Sites that reach past `Driver` on purpose, one argument each. Adding a row is a deliberate
 #: re-blessing, like a golden or the corpus lock — not a way to make a red test green.
 _ARGUED: dict[tuple[str, str], str] = {
-    ("test_controller.py", "test_set_hover_refuses_the_nothing_hovered_sentinel"): (
+    ("test_session_controller.py", "test_set_hover_refuses_the_nothing_hovered_sentinel"): (
         "asserts the seam refuses an argument the input path cannot produce; calling the seam IS "
         "the test"
     ),
-    ("test_controller.py", "test_property_change_event_drives_hover"): (
+    ("test_session_controller.py", "test_property_change_event_drives_hover"): (
         "the subject is that hover reads the *observed* property; a `Driver.move` writes "
         "`ipc.props` directly and would answer the question it is asking"
     ),
-    ("test_controller.py", "test_show_tooltip_renders_only_the_head_then_grows_on_scroll"): (
+    (
+        "test_session_controller.py",
+        "test_show_tooltip_renders_only_the_head_then_grows_on_scroll",
+    ): (
         "a jump to `full_height` — the deferred tail only measures at the bottom, and a notch "
         "count does not reach it"
     ),
@@ -64,7 +67,7 @@ def _residue_class(node: ast.Call, *, hover_written: bool) -> str | None:
     if attribute == "_update_hover":
         return "hover-without-a-cursor"
     if attribute in {"on_click", "copy_click"}:
-        # `Reader.on_click()` takes nothing — it reads the cursor. Anything with arguments is a
+        # `SessionController.on_click()` takes nothing — it reads the cursor. Anything with arguments is a
         # different symbol (`sidebar.on_click(ports, x, y)`), a predicate under the seam rather than
         # an input entry point. Matching the bare name counted ten of those as residue.
         return None if (node.args or node.keywords) else "click-without-a-cursor"

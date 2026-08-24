@@ -11,7 +11,7 @@ from driver import Driver
 from util import FakeIPC
 
 from saitenka.app import tooltip_panel
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.panel import Definition, Entry
 
 
@@ -33,14 +33,14 @@ class _FakeDS:
         return True
 
 
-def _reader() -> Reader:
-    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+def _reader() -> SessionController:
+    r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
     return r
 
 
-def _content_word(r: Reader) -> int:
+def _content_word(r: SessionController) -> int:
     return next(i for i, t in enumerate(r.tokens) if r.tokenizer.is_content(t))
 
 

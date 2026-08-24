@@ -1,4 +1,4 @@
-"""Shared real-mpv setup for the live tier — a real mpv window + subtitle + a Reader wired to it.
+"""Shared real-mpv setup for the live tier — a real mpv window + subtitle + a SessionController wired to it.
 
 Extracted from ``test_live_mpv.py`` so the L3 smoke tests AND the live-mpv jank harness
 (``examples/jank_live.py``, #32) drive one identical setup. Needs a real display + mpv binary; every
@@ -64,10 +64,10 @@ def make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
 
 @contextmanager
 def live_reader(*, paused: bool = True):
-    """A live mpv window with the demo cue loaded and a :class:`Reader` observing it. ``paused=False``
+    """A live mpv window with the demo cue loaded and a :class:`SessionController` observing it. ``paused=False``
     lets playback run so mpv's VO advances frames — required for the jank harness to see real
     ``frame-drop-count`` / ``vo-delayed-frame-count`` movement (the smoke tests keep it paused)."""
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.session_routes import install_session_runtime
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
@@ -96,11 +96,11 @@ def live_reader(*, paused: bool = True):
     reader = ipc = gateway = None
     try:
         ipc = MpvIPC(sock).connect(timeout=15)
-        # Before the Reader, exactly as `run`/`attach` do it: without a runtime ingress the
+        # Before the SessionController, exactly as `run`/`attach` do it: without a runtime ingress the
         # transport routes no replies, so even the OSD-dimensions seed comes back None and nothing
         # downstream draws. No breadcrumb — this harness screenshots.
         gateway = install_session_runtime(ipc, startup_hint=False)
-        reader = Reader(ipc, dict_set=MiniDS())
+        reader = SessionController(ipc, dict_set=MiniDS())
         reader.refresh_osd()
         reader.start_observing()
         reader._register_keybinds()

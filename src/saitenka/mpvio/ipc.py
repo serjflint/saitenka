@@ -247,7 +247,7 @@ class MpvIPC:
                 sink("lost", epoch)
 
     def _feed(self, chunk: bytes, *, connection_epoch: int | None = None) -> None:
-        """Accumulate bytes, split complete JSON lines, route events vs replies. Reader-thread only
+        """Accumulate bytes, split complete JSON lines, route events vs replies. SessionController-thread only
         (except tests, which drive it directly to exercise parsing without a real transport)."""
         with self._feed_lock:
             if connection_epoch is not None and connection_epoch != self._connection_epoch:
@@ -670,7 +670,7 @@ class MpvIPC:
         """Hand a resource's teardown to the runtime. False when no gateway owns this session.
 
         The owner keeps using it; what moves is *when it closes*. A False here is what keeps the
-        caller's own fallback teardown honest — a `Reader` built without a runtime still has to
+        caller's own fallback teardown honest — a `SessionController` built without a runtime still has to
         close what it made.
         """
         gateway = self._runtime_gateway
@@ -719,7 +719,7 @@ class MpvIPC:
     def wake_session_runtime(self) -> bool:
         """Release a blocked mailbox receiver. False when there is no runtime.
 
-        Not a close and not an event: the stop flag lives on the Reader and another thread sets it,
+        Not a close and not an event: the stop flag lives on the SessionController and another thread sets it,
         so a receiver blocked on the mailbox has to be let go before it can look. Today the poll
         interval bounds that wait; this is what lets the interval go.
         """
@@ -733,7 +733,7 @@ class MpvIPC:
         """Ask the session's reactor for the closed transition. False when there is no reactor.
 
         Through the port, like every other runtime call, rather than by reaching into the gateway:
-        the reactor is the session's, and `Reader` knows the session only through this transport.
+        the reactor is the session's, and `SessionController` knows the session only through this transport.
         """
         gateway = self._runtime_gateway
         reactor = None if gateway is None else gateway.session_reactor

@@ -1,9 +1,9 @@
 """The mining flow: one-key + bulk mining into Anki.
 
-Owns the mine→dedupe→capture→build-note pipeline and the provenance/tag helpers; the Reader keeps
+Owns the mine→dedupe→capture→build-note pipeline and the provenance/tag helpers; the SessionController keeps
 the view side (previews, ⊕→✓ refresh, toasts) and delegates its public mining API here.
 
-`MinerPorts` is the feature's value, built per operation by `Reader.miner_ports`: the collaborators
+`MinerPorts` is the feature's value, built per operation by `SessionController.miner_ports`: the collaborators
 mining needs, the cue it is mining, and the acts that land elsewhere. Per operation and not stored,
 because half of it is *this* cue — a value kept on a session-lived object would mine the line that
 was on screen when the session started. The mpv reads happen once at build time for the same
@@ -63,7 +63,7 @@ class MinerPorts:
     """One mine's collaborators, cue and acts. Built per operation — see the module docstring."""
 
     cue: MineCue
-    #: Non-optional by construction: `Reader.miner_ports` answers `None` when mining is not
+    #: Non-optional by construction: `SessionController.miner_ports` answers `None` when mining is not
     #: configured, so "is there a deck to mine into" is decided once instead of at every entry point.
     anki: Anki
     mine_cfg: MineConfig

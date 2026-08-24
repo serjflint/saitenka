@@ -119,8 +119,8 @@ def test_every_slot_holds_at_least_one_feature(reactor):
 
 
 def test_every_claimed_payload_is_one_the_reactor_routes():
-    """`_CLAIMED` withholds a payload from the Reader. A claim ahead of its route routes fine,
-    reduces nothing, and silently stops doing the thing the Reader used to do — the failure the
+    """`_CLAIMED` withholds a payload from the SessionController. A claim ahead of its route routes fine,
+    reduces nothing, and silently stops doing the thing the SessionController used to do — the failure the
     migration plan names, stated as a test rather than as a paragraph."""
     unroutable = [
         payload.__name__
@@ -129,15 +129,15 @@ def test_every_claimed_payload_is_one_the_reactor_routes():
         and payload not in session_routes.LIFETIME_EVENTS
     ]
 
-    assert not unroutable, f"claimed from the Reader but routed to nobody: {unroutable}"
+    assert not unroutable, f"claimed from the SessionController but routed to nobody: {unroutable}"
 
 
-def test_no_arm_of_the_readers_fallback_drain_is_still_live_work():
+def test_no_arm_of_the_session_controllers_fallback_drain_is_still_live_work():
     """Uplifted from the ledger's `loop_residue`, which lives in a git-ignored scratch file and so
     has never run in CI.
 
-    `Reader._drain_event` is the no-reactor fallback. An arm whose payload the reactor *claims* is
-    dead in a session that has one; an arm whose payload is unclaimed is a duty the Reader still
+    `SessionController._drain_event` is the no-reactor fallback. An arm whose payload the reactor *claims* is
+    dead in a session that has one; an arm whose payload is unclaimed is a duty the SessionController still
     performs, and the session-loop migration is not finished while one exists.
 
     **Arms are a subset of claims, never equal to them** — `_CLAIMED` also carries payloads that are
@@ -148,10 +148,10 @@ def test_no_arm_of_the_readers_fallback_drain_is_still_live_work():
     import ast
     from pathlib import Path
 
-    controller = Path(session_routes.__file__).with_name("controller.py")
+    session_controller = Path(session_routes.__file__).with_name("session_controller.py")
     drain = next(
         node
-        for node in ast.walk(ast.parse(controller.read_text(encoding="utf-8")))
+        for node in ast.walk(ast.parse(session_controller.read_text(encoding="utf-8")))
         if isinstance(node, ast.FunctionDef) and node.name == "_drain_event"
     )
     narrowed = {
@@ -170,8 +170,8 @@ def test_no_arm_of_the_readers_fallback_drain_is_still_live_work():
 
     assert arms, "no typed arm found in `_drain_event` — the sweep would be vacuous"
     assert arms <= claimed, (
-        f"arms of the Reader's fallback drain that the reactor does not claim: {sorted(arms - claimed)}. "
-        "Each is a duty the Reader still performs for a session that has a runtime."
+        f"arms of the SessionController's fallback drain that the reactor does not claim: {sorted(arms - claimed)}. "
+        "Each is a duty the SessionController still performs for a session that has a runtime."
     )
 
 

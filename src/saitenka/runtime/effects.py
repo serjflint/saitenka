@@ -153,7 +153,7 @@ class CloseSessionSurfaces:
 
     Carries no handle for the same reason `DetachDiagnostics` carries no callable: the surfaces
     are a session resource the runtime owns, so the dispatcher already knows where they are. An
-    effect that named its target would make the vocabulary depend on the Reader's field layout.
+    effect that named its target would make the vocabulary depend on the SessionController's field layout.
     """
 
 

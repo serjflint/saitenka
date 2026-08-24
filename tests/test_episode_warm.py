@@ -6,7 +6,7 @@ from __future__ import annotations
 from util import FakeIPC
 
 from saitenka.app import prefetch
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.subtitles import CueIndex, parse_srt
 
@@ -23,8 +23,8 @@ class _ExistsDS:
         return set()
 
 
-def _reader(*, dict_set=None) -> Reader:
-    reader = Reader(FakeIPC(), dict_set=dict_set)
+def _reader(*, dict_set=None) -> SessionController:
+    reader = SessionController(FakeIPC(), dict_set=dict_set)
     reader.osd = (1280, 720)
     reader.renderer = NullRenderer()
     reader.episode.sub_index = CueIndex(parse_srt(_SRT))

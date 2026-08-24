@@ -2,7 +2,7 @@
 before or after mining.
 
 Mining itself (Anki note creation, media capture, provenance/tags) lives in :class:`~saitenka.app.miner.Miner`
-— this module is the Reader-side glue for one INTERACTION surface: rendering the preview panel and
+— this module is the SessionController-side glue for one INTERACTION surface: rendering the preview panel and
 handling clicks on it (dismiss / zoom / play). The ⊕→✓ feedback is
 :mod:`~saitenka.app.mined_feedback`; it writes a session fact and redraws the popups, which this
 surface is not one of.

@@ -16,4 +16,4 @@ invalid:
   # 2-arg dotted-string ending in a private symbol
   - monkeypatch.setattr("saitenka.app.mpvio._send", fake)
   # 2-arg dotted-string, name-mangled private
-  - monkeypatch.setattr("saitenka.app.controller._Reader__state", x)
+  - monkeypatch.setattr("saitenka.app.session_controller._SessionController__state", x)

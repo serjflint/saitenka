@@ -11,7 +11,7 @@ import util
 from util import record_spans
 
 from saitenka.app import backlog, sidebar
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitles import SidebarHitBox
 from saitenka.runtime import events
 
@@ -30,7 +30,7 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     # A sidebar click emits a sidebar_click span tagged with the action kind — the click-latency signal.
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
-    reader = Reader(_FakeIPC({}))
+    reader = SessionController(_FakeIPC({}))
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
@@ -52,7 +52,7 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
 def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
     spans = record_spans(monkeypatch)
-    reader = Reader(_FakeIPC({}))
+    reader = SessionController(_FakeIPC({}))
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
@@ -72,7 +72,7 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     spans = record_spans(monkeypatch)
     video = tmp_path / "Show - 01.mkv"
     video.write_bytes(b"v")
-    reader = Reader(
+    reader = SessionController(
         _FakeIPC({"path": str(video), "sub-start": 1.0, "sub-end": 3.0, "track-list": []})
     )
     reader.sub_text = "猫です"
@@ -90,7 +90,7 @@ def test_mined_store_write_is_spanned(monkeypatch):
     from saitenka.app import miner
 
     spans = record_spans(monkeypatch)
-    reader = Reader(_FakeIPC({"sub-start": 1.0, "sub-end": 3.0}))
+    reader = SessionController(_FakeIPC({"sub-start": 1.0, "sub-end": 3.0}))
     # Seed the store through the field the property initialises, rather than stubbing a seam: the
     # property returns whatever is already there, so this is the same state a real open produces.
     reader.session.mined_store = SimpleNamespace(record=lambda **_kw: None)  # type: ignore[assignment]  # local fake

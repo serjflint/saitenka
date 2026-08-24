@@ -54,7 +54,7 @@ class ClosePhase(StrEnum):
     phase per migrated duty: a duty picks the phase matching where its step already sits, instead
     of inventing one and serialising behind the duty that invented the last.
 
-    `Reader.close` is a sequence, so this ordering *is* the contract — announcing everything at
+    `SessionController.close` is a sequence, so this ordering *is* the contract — announcing everything at
     `PARTICIPANTS` would run a participant tens of steps early, removing overlays while a lane can
     still add one. A phase with no effects yet is legitimate; it marks the seam for the duty that
     lands there next.
@@ -87,7 +87,7 @@ class SessionClosing:
     stopped session.
 
     `scratch` is the session's per-run directory, carried here because the runtime outlives no
-    Reader and the path is created per Reader — the *decision* to remove it, once and only after
+    SessionController and the path is created per SessionController — the *decision* to remove it, once and only after
     everything that could still write to it has stopped, is what has moved.
     """
 
@@ -99,7 +99,7 @@ class StartPhase(StrEnum):
     """How far setup has got — `ClosePhase`'s mirror, and for the same reason.
 
     A phase is defined by what is already *up*, because that is the only thing a step can depend
-    on. `Reader.run` is a sequence, so this ordering is the contract: observing properties before
+    on. `SessionController.run` is a sequence, so this ordering is the contract: observing properties before
     the render space is known would seed geometry against dimensions nobody has read.
 
     Declared whole rather than one phase per migrated duty, exactly as the close half is — a duty
@@ -127,7 +127,7 @@ class StartPhase(StrEnum):
 class SessionStarting:
     """The setup sequence has reached the runtime's steps for `phase`.
 
-    `SessionClosing`'s mirror. Not a claim on startup — the Reader still announces, and what has
+    `SessionClosing`'s mirror. Not a claim on startup — the SessionController still announces, and what has
     moved is which side decides *what* the phase does.
     """
 
@@ -226,7 +226,7 @@ class CommandHandled:
 
 #: `Owner.PLAYBACK`'s vocabulary. Two kinds, and the difference decides who acts on the deltas:
 #: an *observation* is mpv reporting a fact, so what the projection publishes is news; a
-#: *declaration* is the Reader announcing a decision it is already carrying out, so the same
+#: *declaration* is the SessionController announcing a decision it is already carrying out, so the same
 #: deltas reflected back would be that action performed twice.
 
 

@@ -568,7 +568,7 @@ class FakeIPC:
     def route_session_playback(self, envelope) -> object | None:
         """Mirror the transport's `Owner.PLAYBACK` port, including its no-reactor refusal.
 
-        A fake that always refused would keep every controller test on the Reader-owned store and
+        A fake that always refused would keep every controller test on the SessionController-owned store and
         leave the routed path — the one production takes — exercised only where a test installs a
         gateway by hand.
         """

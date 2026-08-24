@@ -5,7 +5,7 @@ import util
 from util import keybind_registry
 
 from saitenka.app.backlog import BacklogStore, Capture, normalize_match_name
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
 
 
@@ -182,7 +182,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
             ],
         }
     )
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.sub_text = "日本語"
     reader.declare_subtitle(SubtitleTracksDiscovered(3, 4))
     reader.tokens = [SimpleNamespace(surface="日本", lemma="日本")]
@@ -238,7 +238,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
             "track-list": [],
         }
     )
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.sub_text = "English line"
     store = BacklogStore(tmp_path / "reader.sqlite")
@@ -254,7 +254,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
 
 def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
     ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     shown = []
     monkeypatch.setattr(reader, "toast", lambda *args: shown.append(args))
 
@@ -268,7 +268,7 @@ def test_bookmark_key_is_configurable():
     from saitenka.app.config import KeyOptions, ReaderOptions
 
     ipc = _IPC({})
-    reader = Reader(ipc, options=ReaderOptions(keys=KeyOptions(bookmark_key="Alt+q")))
+    reader = SessionController(ipc, options=ReaderOptions(keys=KeyOptions(bookmark_key="Alt+q")))
     reader._register_keybinds()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"

@@ -1,6 +1,6 @@
 """`Owner.SUBTITLE`'s reducer and store.
 
-The store test is the point of the file: a Reader with a session reactor and one without must end
+The store test is the point of the file: a SessionController with a session reactor and one without must end
 on the same selection, because only one of the two paths is the one production takes and the other
 is the one almost every test takes.
 """

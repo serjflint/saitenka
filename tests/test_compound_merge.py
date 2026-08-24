@@ -12,8 +12,8 @@ from __future__ import annotations
 import dicthelp
 from util import FakeIPC
 
-from saitenka.app.controller import Reader
 from saitenka.app.scoring import Palette, Scorer
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token, merge_dict_compounds, tokenize
 from saitenka.app.wordlists import KnownWords
@@ -208,7 +208,7 @@ class _ExistsDS:
 
 
 def test_controller_tokens_carry_the_merged_compound(monkeypatch):
-    reader = Reader(FakeIPC(), dict_set=_ExistsDS("応急処置"))
+    reader = SessionController(FakeIPC(), dict_set=_ExistsDS("応急処置"))
     reader.osd = (1920, 1080)
     monkeypatch.setattr(reader, "renderer", NullRenderer())
     # decouple from the live unidic split: the cue tokenises to 応急 + 処置
@@ -219,7 +219,7 @@ def test_controller_tokens_carry_the_merged_compound(monkeypatch):
 
 
 def test_controller_leaves_fragments_when_dict_set_has_no_probe(monkeypatch):
-    reader = Reader(FakeIPC(), dict_set=object())  # no terms_exist → merge is skipped
+    reader = SessionController(FakeIPC(), dict_set=object())  # no terms_exist → merge is skipped
     reader.osd = (1920, 1080)
     monkeypatch.setattr(reader, "renderer", NullRenderer())
     monkeypatch.setattr(reader.tokenizer, "tokenize", lambda _ln: [_at("応急", 0), _at("処置", 2)])

@@ -36,7 +36,7 @@ _PLATEAU_MIN_NEW = 64  # a checkpoint adding fewer new masks than this counts as
 
 
 class _PrewarmIPC(NoSessionRuntime):
-    """A no-socket mpv stand-in: a fixed OSD and inert commands, so a headless Reader can build panels
+    """A no-socket mpv stand-in: a fixed OSD and inert commands, so a headless SessionController can build panels
     without a running mpv (mirrors the benchmark's FakeIPC).
 
     There is no session here — no socket, no gateway, no events to reduce — so it **refuses** the
@@ -115,7 +115,7 @@ def _popular_terms(ds, limit: int) -> list[tuple[str, str]]:
     ]
 
 
-def _make_reader(
+def _make_session_controller(
     width: int,
     height: int,
     dict_titles,
@@ -125,17 +125,17 @@ def _make_reader(
     *,
     render_cache_on: bool = True,
 ):
-    """A fresh headless Reader with its OWN dict set (own SQLite conns + entry caches → no cross-thread
+    """A fresh headless SessionController with its OWN dict set (own SQLite conns + entry caches → no cross-thread
     race) but the SHARED render cache injected, so N worker threads render in parallel into one cache.
     ``render_cache_on=False`` (atlas-only fill) keeps the reader off the render cache entirely, so it
     always BUILDS+RASTERS a panel (never seeds pixels from disk) — required to feed the mask atlas."""
     from saitenka.app.config import ReaderOptions, TooltipOptions
-    from saitenka.app.controller import Reader
     from saitenka.app.dictdb import DictionaryDb
     from saitenka.app.dictionary import DictionarySet
+    from saitenka.app.session_controller import SessionController
 
     ds = DictionarySet.from_db(DictionaryDb.open(), dict_titles, freqs, pitches)
-    reader = Reader(
+    reader = SessionController(
         cast("MpvIPC", _PrewarmIPC(width, height)),  # headless stand-in — no socket, fixed OSD
         dict_set=ds,
         options=ReaderOptions(tooltip=TooltipOptions(render_cache=render_cache_on), prefetch=False),
@@ -176,7 +176,7 @@ class _PrewarmJob:
 
     def __init__(
         self,
-        reader_factory,
+        session_factory,
         cache: RenderCache | None,
         atlas,
         gate: int,
@@ -185,7 +185,7 @@ class _PrewarmJob:
         on_progress,
         tuning: PrewarmTuning,
     ):
-        self._make = reader_factory  # () -> a fresh headless Reader with the shared cache
+        self._make = session_factory  # () -> a fresh headless controller with the shared cache
         self.cache = cache  # None in atlas-only mode (the render cache is left untouched)
         self.atlas = atlas  # mask atlas (getmask2 write-back builds it too); None if unavailable
         self.atlas_only = tuning.atlas_only
@@ -507,7 +507,7 @@ def prewarm(
 
     from saitenka import fonts
 
-    template = _make_reader(width, height, dict_titles, freqs, pitches, None)
+    template = _make_session_controller(width, height, dict_titles, freqs, pitches, None)
     cache, atlas = _open_build_caches(template, atlas_only=opts.atlas_only)
 
     terms = _popular_terms(template.dict_set, limit)
@@ -519,7 +519,7 @@ def prewarm(
     if on_start is not None:
         on_start(plan)
     job = _PrewarmJob(
-        reader_factory=lambda: _make_reader(
+        session_factory=lambda: _make_session_controller(
             width, height, dict_titles, freqs, pitches, cache, render_cache_on=not opts.atlas_only
         ),
         cache=cache,
