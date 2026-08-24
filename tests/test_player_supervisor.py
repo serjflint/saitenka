@@ -194,9 +194,12 @@ def test_the_watchdog_dumps_every_thread_and_forces_exit_on_a_hung_shutdown(tmp_
     assert len(dumps) == 1, "a surviving dump is the record that this exit hung"
     text = dumps[0].read_text()
     assert "_python_exit" in text, "the dump names the join nothing on the Python side can observe"
-    # A prefix, not the whole name: faulthandler prints the OS thread name, and Linux caps that at 15
-    # bytes — the same truncation that turns our own `saitenka-exit-watchdog` into `saitenka-exit-w`.
-    assert "ThreadPoolExecu" in text, "…and the worker it is waiting on"
+    if sys.version_info >= (3, 14):
+        # faulthandler only started labelling threads with their name in 3.14 — measured, not assumed:
+        # 3.13 writes a bare `Thread 0x...` header, so the worker is in the dump but unnameable there.
+        # A prefix, not the whole name: it prints the OS thread name, and Linux caps that at 15 bytes —
+        # the same truncation that turns our own `saitenka-exit-watchdog` into `saitenka-exit-w`.
+        assert "ThreadPoolExecu" in text, "…and the worker it is waiting on"
 
 
 def test_a_clean_exit_leaves_no_shutdown_dump_behind(tmp_path):
