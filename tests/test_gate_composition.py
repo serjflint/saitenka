@@ -88,6 +88,11 @@ def test_gate_matrix_runs_every_leg_of_poe_all() -> None:
     assert set(matrix) == set(_poe_tasks()["all"])
 
 
+def test_free_threaded_split_installs_the_gate_runtime_dependencies() -> None:
+    step = "Install MeCab (fugashi build dep) and libass (libasslite runtime)"
+    assert _step_command("tests-ft", step) == _step_command("gate", step)
+
+
 def test_the_bound_expressions_are_not_vacuous() -> None:
     """Negative control: a mistyped YAML path yields None on both sides, and `None == None` would make
     every assertion above pass while binding nothing."""

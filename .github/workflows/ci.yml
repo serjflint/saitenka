@@ -440,8 +440,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install MeCab (fugashi build dep)
-        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+      # Unlike the GIL-ON matrix, `test-ft` includes integration tests. Keep its native runtime
+      # prerequisites aligned with the canonical gate job above.
+      - name: Install MeCab (fugashi build dep) and libass (libasslite runtime)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev libass9 fonts-noto-cjk
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
