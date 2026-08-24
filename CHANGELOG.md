@@ -7,14 +7,44 @@ logs.
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-08-24
+
 ### Changed
 
+- **`saitenka[full]` now installs the portable native add-ons** — the taffy layout engine, the SVG
+  gaiji rasterizer, and native subtitle geometry — instead of leaving each as a separate opt-in. All
+  three publish prebuilt wheels across every interpreter Saitenka supports, and all three are
+  permissively licensed, so they change what notices a redistributor ships and nothing about what
+  `full` already was. `subtitle-geometry-bundle` deliberately stays out: it ships a native runtime
+  closure carrying its own notices and relinking obligations, so installing it remains a separate,
+  deliberate choice — see [LICENSING.md](LICENSING.md).
 - **The `images` extra now installs [`resvg-py`](https://github.com/baseplate-admin/resvg-py) instead
   of the in-tree `resvglite`.** Upstream now covers the same wheel matrix and error contract Saitenka
   needed the local binding for, so there is no reason to keep maintaining a second one. Gaiji render
   slightly heavier: `resvg-py` embeds resvg 0.48, which applies variable-font weights the 0.45 build
   ignored, so the bundled Noto draws at its real weight instead of thin. `resvglite/` is retained
   in-tree for now but is no longer installed by any extra.
+
+### Fixed
+
+- **`saitenka install-plugin` baked whichever `saitenka` led `PATH`, not the one that was running.**
+  Under `uv run` that is the project's cache environment, so an mpv started from Finder ran a copy
+  nobody chose — and `saitenka doctor` reported the mismatch on a clean editable install. The console
+  script beside the running interpreter now wins, with the `PATH` lookup kept as the fallback for
+  `python -m saitenka` out of a bare venv.
+- **Dictionary connections opened by background workers were never closed.** A thread-local store's
+  `close()` could only reach the calling thread's connection, so every prefetch and prewarm worker's
+  stayed open until the interpreter exited.
+- **No `saitenka report` bundle had ever carried a session summary.** The startup banner and the
+  end-of-session summary bypassed logging to reach a terminal at all, so neither was redacted and
+  the summary never reached `overlay.log`. Both now go through a console channel that renders them
+  plainly and still writes to the log file. The banner moves to stderr, beside every other line the
+  overlay emits — redirecting stdout no longer captures it.
+
+### Development
+
+- The reading session's largest object is decomposing: `Reader` is now `SessionController`, and
+  reading profiles and tooltip work each moved behind a bounded owner of their own.
 
 ## [4.0.0] - 2026-08-24
 
