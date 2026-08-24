@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787578773640,
+  "lastUpdate": 1787579501159,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -9407,6 +9407,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.195379,
             "range": "3 replicas; min 1.11091; max 158.66; MAD 0.084469; worst 158.66",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "87055d330f0e9f9c22b7ae93d2860d4f5e3cdfd2",
+          "message": "Merge pull request #428 from serjflint/chore/bind-gate-copies-and-store-wiring\n\nBind CI's gate copies, and assert each store is wired to the sqlite mechanism",
+          "timestamp": "2026-08-24T18:50:28+05:00",
+          "tree_id": "462a0924943e75cc78b60a6bedee58368c0b03fc",
+          "url": "https://github.com/serjflint/saitenka/commit/87055d330f0e9f9c22b7ae93d2860d4f5e3cdfd2"
+        },
+        "date": 1787579499587,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.373775,
+            "range": "3 replicas; min 6.29914; max 6.43352; MAD 0.059746",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.030419,
+            "range": "3 replicas; min 8.82602; max 9.72113; MAD 0.2044; worst 9.72113",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.394442,
+            "range": "3 replicas; min 18.7638; max 20.4561; MAD 0.061676",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.722774,
+            "range": "3 replicas; min 18.8767; max 20.8116; MAD 0.08882; worst 20.8116",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 25.862982,
+            "range": "3 replicas; min 15.8658; max 28.6214; MAD 2.75843",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.167963,
+            "range": "3 replicas; min 0.136994; max 0.172533; MAD 0.00457; worst 0.172533",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.235251,
+            "range": "3 replicas; min 44.1611; max 71.2145; MAD 0.074154; worst 71.2145",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.293451,
+            "range": "3 replicas; min 2.5093; max 4.55989; MAD 0.784149; worst 4.55989",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 2.244591,
+            "range": "3 replicas; min 1.02114; max 2.5934; MAD 0.348807; worst 2.5934",
             "unit": "ms"
           }
         ]
