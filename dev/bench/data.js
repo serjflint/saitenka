@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787609994711,
+  "lastUpdate": 1787610028015,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10637,6 +10637,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 92.537696,
             "range": "3 replicas; min 89.064; max 92.8771; MAD 0.339367",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "id": "b4a768404e62f496c483a1f32ac75e468dea70f2",
+          "message": "fix(ci): drop the macOS x86_64 e2e leg, and fix two Windows-only test defects\n\nThe Intel leg was covering a platform none of the native add-ons `full` now installs publishes a wheel\nfor: libasslite, libasslite-bundle and taffylite are all arm64 + manylinux + win_amd64, so it built\nRust from source and, with libass supplied by Homebrew, measured text against the faces that came with\nit — three rendering goldens moved for that reason alone. Removing it also removes the bundle install's\none exception; the remaining legs are exactly the runners the bundle publishes for, which is what\ntest_gate_composition now binds.\n\nTwo real Windows defects, both of which had nothing to do with libass:\n\n- `Path.read_text()` uses the locale encoding, so reading a repo file (UTF-8 by declaration, and full\n  of em dashes) raised `UnicodeDecodeError: 'charmap'` on Windows. Pinned at the sites that read files\n  the repo ships, including `install/release.py` — which also *writes* CHANGELOG.md and pyproject.toml,\n  where the same default would have mangled them for a Windows maintainer.\n- `_hermetic` redirected the home directory with `HOME`, which `Path.home()` ignores on Windows in\n  favour of `USERPROFILE`. The test read the real profile there, so its isolation was silently absent\n  — the failing assertion was the mild symptom.",
+          "timestamp": "2026-08-24T22:18:35Z",
+          "url": "https://github.com/serjflint/saitenka/commit/b4a768404e62f496c483a1f32ac75e468dea70f2"
+        },
+        "date": 1787610026707,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 3; MAD 0; worst 3",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 193.493973,
+            "range": "3 replicas; min 123.091; max 315.219; MAD 70.4029",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 53.794789,
+            "range": "3 replicas; min 38.8073; max 84.2373; MAD 14.9875",
             "unit": "ms"
           }
         ]
