@@ -86,7 +86,8 @@ export PATH="$HOME/.local/bin:$PATH"
 if [ -d "$REPO/deinflect" ]; then extra=full; log "including GPL-3.0 deinflect add-on (inflection chains)"
 else extra=jmdict; warn "no deinflect/ in this checkout — installing [jmdict] only (no inflection chains)"; fi
 log "Installing/updating saitenka[$extra] from $REPO"
-run uv tool install --reinstall --quiet "$REPO[$extra]"
+# Braced: bash reads `$REPO[` as an array index, so the unbraced form is ambiguous (SC1087).
+run uv tool install --reinstall --quiet "${REPO}[$extra]"
 
 # ── 3. Dev/authoring extras (--dev only): repo + vault tooling ──────────────
 if $DEV && have brew; then
