@@ -96,14 +96,14 @@ def test_no_lookahead_when_disabled(monkeypatch):
 def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
     r = _reader(monkeypatch, lookahead=10_000)
     calls = 0
-    tokenize = r.tokenizer.tokenize
+    tokenize = r.profile_controller.tokenizer.tokenize
 
     def counted(text):
         nonlocal calls
         calls += 1
         return tokenize(text)
 
-    monkeypatch.setattr(r.tokenizer, "tokenize", counted)
+    monkeypatch.setattr(r.profile_controller.tokenizer, "tokenize", counted)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
     r.set_subtitle("本を読む")
@@ -151,8 +151,8 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
         return False
 
     r.scorer = _Scorer()
-    monkeypatch.setattr(r.tokenizer, "tokenize", lambda _text: tokens)
-    monkeypatch.setattr(r.tokenizer, "is_content", lambda _token: True)
+    monkeypatch.setattr(r.profile_controller.tokenizer, "tokenize", lambda _text: tokens)
+    monkeypatch.setattr(r.profile_controller.tokenizer, "is_content", lambda _token: True)
     monkeypatch.setattr(r, "_is_mined", is_mined)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["long"])
 
@@ -179,8 +179,10 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
             ][: len(values)]
 
     r.scorer = _Scorer()
-    monkeypatch.setattr(r.tokenizer, "tokenize", lambda _text: tokens)
-    monkeypatch.setattr(r.tokenizer, "is_content", lambda token: token.surface == "語")
+    monkeypatch.setattr(r.profile_controller.tokenizer, "tokenize", lambda _text: tokens)
+    monkeypatch.setattr(
+        r.profile_controller.tokenizer, "is_content", lambda token: token.surface == "語"
+    )
     monkeypatch.setattr(r, "_is_mined", lambda _token: False)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["ordinary"])
 
@@ -217,7 +219,9 @@ def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
 
     r.tip.panel_cache.setdefault("a", _Panel(100))
     r.tip.panel_cache.setdefault("b", _Panel(250))
-    monkeypatch.setattr(r.dict_set, "decoded_entry_count", lambda: 7, raising=False)
+    monkeypatch.setattr(
+        r.profile_controller.dict_set, "decoded_entry_count", lambda: 7, raising=False
+    )
     gauges = r._telemetry_gauges()
     assert gauges["panel_cache.size"] == 2.0
     assert gauges["panel_cache.bytes"] == 350.0

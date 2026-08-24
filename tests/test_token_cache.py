@@ -94,7 +94,9 @@ def test_cue_while_dicts_load_draws_plain_then_upgrades_on_deps_ready():
     assert reader.tokens  # tokens ARE populated (fast) for hover/mining — only the DRAW is plain
     assert len(reader.token_cache) == 0  # incomplete → not memoized
 
-    reader.dict_set = _ExistsDS()  # deps land → reader_deps re-renders the on-screen cue
+    reader.profile_controller.replace_dictionary_set(
+        _ExistsDS()
+    )  # deps land → reader_deps re-renders the on-screen cue
     reader.set_subtitle("猫を見る")
 
     assert reader._sub_pending is None  # now annotated in place
@@ -108,10 +110,12 @@ def test_upgrade_re_attempts_rather_than_serving_the_incomplete_result(monkeypat
     reader.set_subtitle("本を読む")
 
     calls: list[str] = []
-    real = reader.tokenizer.tokenize
-    monkeypatch.setattr(reader.tokenizer, "tokenize", lambda ln: calls.append(ln) or real(ln))
+    real = reader.profile_controller.tokenizer.tokenize
+    monkeypatch.setattr(
+        reader.profile_controller.tokenizer, "tokenize", lambda ln: calls.append(ln) or real(ln)
+    )
 
-    reader.dict_set = _ExistsDS()
+    reader.profile_controller.replace_dictionary_set(_ExistsDS())
     reader.set_subtitle("本を読む")
 
     assert calls == ["本を読む"]  # re-attempted (a cached miss would have skipped tokenize)
@@ -123,7 +127,7 @@ def test_repeated_line_is_a_cache_hit_and_skips_tokenization(monkeypatch):
     assert reader._sub_pending is None
 
     monkeypatch.setattr(
-        reader.tokenizer,
+        reader.profile_controller.tokenizer,
         "tokenize",
         lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a cached line")),
     )
@@ -162,7 +166,7 @@ def test_annotation_failure_keeps_plain_subtitle_on_later_redraw():
         def tokenize(self, _line: str):
             raise ValueError("broken tokenizer")
 
-    reader.tokenizer = FailingTokenizer()
+    reader.profile_controller.use_tokenizer(FailingTokenizer())
 
     def submit(**kwargs) -> bool:
         completion = reader._annotation_executor.run(kwargs["request"], threading.Event())

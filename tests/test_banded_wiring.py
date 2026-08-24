@@ -41,7 +41,7 @@ def _reader() -> SessionController:
 
 
 def _content_word(r: SessionController) -> int:
-    return next(i for i, t in enumerate(r.tokens) if r.tokenizer.is_content(t))
+    return next(i for i, t in enumerate(r.tokens) if r.profile_controller.tokenizer.is_content(t))
 
 
 def test_tooltip_renders_lazily_and_hit_tests_end_to_end():

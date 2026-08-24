@@ -23,7 +23,7 @@ from saitenka.mpvio.ipc import IPCRequest
 
 def test_reader_starts_without_deps():
     r = SessionController(FakeIPC())
-    assert r.scorer is None and r.dict_set is None and r.anki is None
+    assert r.scorer is None and r.profile_controller.dict_set is None and r.anki is None
 
 
 @pytest.mark.timeout(5)
@@ -368,7 +368,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     gateway = runtime_gateway(ipc)
     reader = SessionController(ipc)
     reader.renderer = NullRenderer()
-    reader.tokenizer = _Tokenizer()
+    reader.profile_controller.use_tokenizer(_Tokenizer())
     reader._enable_async_annotation()
     reader.set_subtitle("猫")
     dictionary = _BlockingDictionary()

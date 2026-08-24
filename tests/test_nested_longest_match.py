@@ -98,7 +98,7 @@ def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
     reader = SessionController(FakeIPC(), dict_set=_DS())
     reader.osd = (1920, 1080)
     # Decouple from the live unidic split: the scan tail tokenises to コン + サート.
-    monkeypatch.setattr(reader.tokenizer, "tokenize", lambda _s: _SPLIT)
+    monkeypatch.setattr(reader.profile_controller.tokenizer, "tokenize", lambda _s: _SPLIT)
 
     nested_popup.show_nested(
         reader.tip_ports,

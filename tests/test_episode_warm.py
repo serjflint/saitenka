@@ -44,7 +44,7 @@ def test_warmed_cue_is_a_hit_with_no_retokenization(monkeypatch):
     prefetch._warm_episode_loop(reader.episode.sub_index, ports=reader.warm_ports.loop)
 
     monkeypatch.setattr(
-        reader.tokenizer,
+        reader.profile_controller.tokenizer,
         "tokenize",
         lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a warmed cue")),
     )

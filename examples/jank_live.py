@@ -134,7 +134,7 @@ def run(*, settle_s: float = 0.4) -> dict:
             def has_term(self, *_forms):
                 return False
 
-        reader.dict_set = TallDS()
+        reader.profile_controller.replace_dictionary_set(TallDS())
         reader.tip.panel_cache.clear()
 
         def sample(step: str, interaction_ms: float = 0.0) -> None:

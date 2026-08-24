@@ -1,4 +1,4 @@
-"""The impure ends of the session-wide commands (overlay, translation, profile)."""
+"""The impure ends of the session-wide overlay and translation commands."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ from saitenka.app import session_intents, subtitle_modes
 from saitenka.app.intents import DismissHover
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.overlay import Overlay
     from saitenka.app.subtitle_modes import TrackPorts
@@ -22,15 +20,8 @@ class SessionHost(Protocol):
 
     hover: int
     ov: Overlay
-    profile_index: int
     lifecycle_surfaces: LifecycleSurfaces
     subtitle_pipeline: SubtitleModeCoordinator
-
-    @property
-    def profiles(self) -> Sequence[object]:
-        """Read only for its length. A property, not a field: a settable one would be invariant,
-        and `tuple[Profile, ...]` is not `tuple[object, ...]`."""
-        ...
 
     @property
     def track_ports(self) -> TrackPorts: ...
@@ -45,8 +36,6 @@ class SessionHost(Protocol):
 
     def draw_translation(self) -> None: ...
 
-    def switch_to_profile(self, idx: int) -> None: ...
-
 
 class SessionAdapter:
     def __init__(self, host: SessionHost) -> None:
@@ -57,8 +46,6 @@ class SessionAdapter:
         return session_intents.SessionInputs(
             overlay_visible=host.ov.visible,
             translation_wanted=host.translation_wanted(),
-            profile_count=len(host.profiles),
-            profile_index=host.profile_index,
         )
 
     def apply(self, effect: object, /) -> None:
@@ -77,5 +64,3 @@ class SessionAdapter:
         elif isinstance(effect, session_intents.ShowTranslation):
             host.setup_secondary()
             host.draw_translation()
-        elif isinstance(effect, session_intents.SwitchProfile):
-            host.switch_to_profile(effect.index)

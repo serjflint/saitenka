@@ -2493,7 +2493,10 @@ def test_jlpt_pill_leads_the_frequency_row():
 
     r = SessionController(FakeIPC(), dict_set=_FakeDS(), scorer=_jlpt_scorer({"本命": "N2"}))
     entry = tooltip_panel.entry_for_tok(
-        Token("本命", "本命", "ほんめい", "名詞", 0, 2), None, dict_set=r.dict_set, scorer=r.scorer
+        Token("本命", "本命", "ほんめい", "名詞", 0, 2),
+        None,
+        dict_set=r.profile_controller.dict_set,
+        scorer=r.scorer,
     )
     assert entry.freqs and entry.freqs[0].name == "JLPT" and entry.freqs[0].value == "N2"
 
@@ -2505,7 +2508,12 @@ def test_no_jlpt_pill_without_level_or_scorer():
     # word not in the JLPT dict → no pill, frequency row untouched
     r = SessionController(FakeIPC(), dict_set=_FakeDS(), scorer=_jlpt_scorer({"本命": "N2"}))
     assert tooltip_panel.jlpt_pill(tok, r.scorer) is None
-    assert tooltip_panel.entry_for_tok(tok, None, dict_set=r.dict_set, scorer=r.scorer).freqs == []
+    assert (
+        tooltip_panel.entry_for_tok(
+            tok, None, dict_set=r.profile_controller.dict_set, scorer=r.scorer
+        ).freqs
+        == []
+    )
     # no scorer at all → no pill (coloring is optional)
     assert (
         tooltip_panel.jlpt_pill(tok, SessionController(FakeIPC(), dict_set=_FakeDS()).scorer)
@@ -2526,7 +2534,7 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
     ds = dicthelp.load_set(freq_zips=[fa, fb])
     r = SessionController(FakeIPC(), dict_set=ds)
     tok = Token("猫", "猫", "ねこ", "名詞", 0, 1)
-    pill = tooltip_panel.rareness_pill(tok, r.dict_set)
+    pill = tooltip_panel.rareness_pill(tok, r.profile_controller.dict_set)
     assert pill is not None and pill.name == "diff"
     assert pill.color == rareness_color(harmonic_of([1000.0, 2000.0]))  # ≈1333 → common (green)
 
@@ -2545,7 +2553,9 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
     )
     ds = dicthelp.load_set(freq_zips=[rank_z, occ_z])
     r = SessionController(FakeIPC(), dict_set=ds)
-    pill = tooltip_panel.rareness_pill(Token("猫", "猫", "ねこ", "名詞", 0, 1), r.dict_set)
+    pill = tooltip_panel.rareness_pill(
+        Token("猫", "猫", "ねこ", "名詞", 0, 1), r.profile_controller.dict_set
+    )
     assert pill is not None and pill.value == "1.5k"  # blend of {1500} alone, not pulled toward 1
 
 
@@ -2559,7 +2569,7 @@ def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
     r = SessionController(FakeIPC(), dict_set=ds)
     assert (
         tooltip_panel.rareness_pill(
-            Token("存在しない語", "存在しない語", "", "名詞", 0, 6), r.dict_set
+            Token("存在しない語", "存在しない語", "", "名詞", 0, 6), r.profile_controller.dict_set
         )
         is None
     )
@@ -2567,7 +2577,7 @@ def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
     assert (
         tooltip_panel.rareness_pill(
             Token("猫", "猫", "ねこ", "名詞", 0, 1),
-            SessionController(FakeIPC(), dict_set=_FakeDS()).dict_set,
+            SessionController(FakeIPC(), dict_set=_FakeDS()).profile_controller.dict_set,
         )
         is None
     )
@@ -2782,8 +2792,12 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
     )
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     # Call entry_for twice directly via entry_for_tok so the lru_cache is hit on the second call.
-    e1 = tooltip_panel.entry_for_tok(tok, None, dict_set=r.dict_set, scorer=r.scorer)
-    e2 = tooltip_panel.entry_for_tok(tok, None, dict_set=r.dict_set, scorer=r.scorer)
+    e1 = tooltip_panel.entry_for_tok(
+        tok, None, dict_set=r.profile_controller.dict_set, scorer=r.scorer
+    )
+    e2 = tooltip_panel.entry_for_tok(
+        tok, None, dict_set=r.profile_controller.dict_set, scorer=r.scorer
+    )
     jlpt_pills_1 = [f for f in e1.freqs if f.name == "JLPT"]
     jlpt_pills_2 = [f for f in e2.freqs if f.name == "JLPT"]
     assert len(jlpt_pills_1) == 1, f"first call: {len(jlpt_pills_1)} JLPT pills, want 1"

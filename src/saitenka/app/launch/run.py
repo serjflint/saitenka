@@ -1163,7 +1163,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 profile=active_profile,
                 tokenizer_warm=tokenizer_warm,
             )
-        reader.set_profile_cycle(
+        reader.profile_controller.configure_cycle(
             profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
         )
     if not (demo_word or screenshot):

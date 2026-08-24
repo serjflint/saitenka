@@ -189,7 +189,7 @@ def test_a_cue_publishes_plain_immediately_and_styled_onto_the_same_identity(rec
     reader = _reader(recorder)
 
     reader.set_subtitle("猫を見る")
-    reader.dict_set = _ExistsDS()
+    reader.profile_controller.replace_dictionary_set(_ExistsDS())
     reader.set_subtitle("猫を見る")
 
     assert recorder.styles == ["plain", "styled"]

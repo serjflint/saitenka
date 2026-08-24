@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
+    from saitenka.app.profiles import Profile
     from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
@@ -44,6 +45,7 @@ from saitenka.app import (
     nested_popup,
     panel_intents,
     prefetch,
+    profile_intents,
     reader_deps,
     session_intents,
     session_resources,
@@ -136,7 +138,12 @@ from saitenka.app.popups import (
     TooltipState,
     WordLookup,
 )
-from saitenka.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
+from saitenka.app.profile_controller import (
+    ProfileAftermath,
+    ProfileController,
+    ProfileInvalidation,
+    ProfileSubtitles,
+)
 from saitenka.app.reader_context import (
     EpisodeContext,
     InteractionContext,
@@ -192,7 +199,6 @@ from saitenka.app.subtitle_render import (
 )
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
-from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.mpvio.osd import Overlay
 from saitenka.render.layout_backend import backend_label, resolve_backend
@@ -235,9 +241,8 @@ from saitenka.runtime.runner import SessionRunner
 from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
-    from saitenka.app.dictionary import DictionarySet
     from saitenka.app.render_cache import RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
@@ -459,7 +464,6 @@ class SessionController:
         self.styles: list | None = None
         self.anki = anki  # app.anki.Anki | None — enables one-key mining
         self.mine_cfg = mine_cfg
-        self.dict_set = dict_set  # app.dictionary.DictionarySet | None — multi-dict tooltip
         # Progressive startup: deps loaded on a background thread, injected on the main thread by the
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
         self._pending_deps: dict | None = None
@@ -595,25 +599,25 @@ class SessionController:
         self._cue_identity_ever_installed = False
         self._annotation_episode_index: CueIndex | None = None
         self._annotation_episode_cursor = 0
-        # Active reading profile (#254) — the identity layer (main/second language codes + tokenizer
-        # name), held as swappable state for a live switch (D8). Distinct from the subtitle *role*
-        # sentinels the primary/secondary state machine compares. Default = today's JP profile.
-        self.profile: Profile = profile or DEFAULT_PROFILE
-        self.langs = self.profile.langs  # concrete language codes; consumers key identity off this
-        self._apply_font_mode()  # Latin-first font order for a non-JP profile (nicer Latin typography)
-        # The ordered cycle the live switcher (#254 D8) rotates through; a single entry (the default
-        # path) makes cycle_profile a no-op. cli installs the real cycle via set_profile_cycle.
-        self.profiles: tuple[Profile, ...] = (self.profile,)
-        self.profile_index = 0
-        # The raw CLI/config slang the switcher falls back to for a profile with no slang of its own
-        # (the JP default), so cycling back to it re-selects the original track. Set by set_profile_cycle.
-        self._profile_base_slang = "ja,jpn,jp"
-        # Optional dict re-scoper (#254 W3): profile → its scoped DictionarySet, installed by the CLI
-        # alongside the cycle so a live switch re-scopes dictionaries too, not just the tokenizer.
-        self._dict_scoper: Callable[[Profile], DictionarySet | None] | None = None
-        # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam, selected
-        # by the profile's tokenizer name. A profile switch (#254) swaps it via use_tokenizer.
-        self.tokenizer: Tokenizer = get_tokenizer(self.profile.tokenizer)
+        self.profile_controller = ProfileController(
+            profile,
+            dict_set,
+            ProfileInvalidation(
+                invalidate_tokenizer=lambda: self._invalidate_profile_tokenizer(),
+                invalidate_dictionary=lambda: self._invalidate_profile_dictionary(),
+                reset_episode_warm=lambda: self._reset_profile_episode_warm(),
+            ),
+            ProfileSubtitles(
+                current_subtitle_slang=lambda: self.subtitle_slang,
+                has_subtitle_track=self._has_profile_subtitle_track,
+                select_subtitle_track=lambda slang: self._select_profile_subtitle_track(slang),
+                retokenize_current_cue=lambda: self._retokenize_current_cue(),
+            ),
+            ProfileAftermath(
+                warm_episode=lambda: self.warm_episode_tokens(),
+                notify=lambda text, kind: self.toast(text, kind),
+            ),
+        )
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
         # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
@@ -1058,7 +1062,7 @@ class SessionController:
             nav_index=self.episode.nav_idx,
             cue_hint=self.episode.geometry_cue_hint,
             cue_revision=self.cue_revision,
-            is_skippable=self.tokenizer.is_skippable,
+            is_skippable=self.profile_controller.tokenizer.is_skippable,
         )
 
     def subtitle_target(self) -> SubtitleTarget:
@@ -1499,7 +1503,7 @@ class SessionController:
         # are still loading the tokenization can't be complete (no compound merge, no coloring), so
         # draw the cue PLAIN now; reader_deps re-renders it in place once deps land. A cache hit or a
         # deps-ready miss tokenizes synchronously (fast) and annotates immediately.
-        self._sub_pending = norm if self.dict_set is None else None
+        self._sub_pending = norm if self.profile_controller.dict_set is None else None
         if self.native_geometry is not None:
             self.boxes = []
             self.native_geometry.schedule(self._geometry_observation())
@@ -1585,10 +1589,10 @@ class SessionController:
     def _annotation_inputs(self, norm: str) -> cue_annotation.AnnotationInputs:
         return cue_annotation.AnnotationInputs(
             norm,
-            self.tokenizer,
-            getattr(self.dict_set, "terms_exist", None),
+            self.profile_controller.tokenizer,
+            getattr(self.profile_controller.dict_set, "terms_exist", None),
             self.scorer,
-            len(getattr(self.dict_set, "dicts", ())),
+            len(getattr(self.profile_controller.dict_set, "dicts", ())),
         )
 
     def _schedule_current_annotation(self, norm: str) -> None:
@@ -1712,10 +1716,17 @@ class SessionController:
         its captured value) gates the store: a profile swap that cleared the cache mid-warm drops it."""
         # Dictionary-attested compound merge (応急+処置 → 応急処置) — one hover/color/mine unit like
         # Yomitan. Optional dict capability, absent until the dicts finish loading (like has_term).
-        exists = getattr(self.dict_set, "terms_exist", None)
+        exists = getattr(self.profile_controller.dict_set, "terms_exist", None)
         with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
-            raw = (self.tokenizer.tokenize(ln) for ln in norm.split("\n") if ln.strip())
-            lines = [self.tokenizer.merge_dict_compounds(t, exists) if exists else t for t in raw]
+            raw = (
+                self.profile_controller.tokenizer.tokenize(ln)
+                for ln in norm.split("\n")
+                if ln.strip()
+            )
+            lines = [
+                self.profile_controller.tokenizer.merge_dict_compounds(t, exists) if exists else t
+                for t in raw
+            ]
         tokens = [t for line in lines for t in line]
         # score the whole cue (N+1 splits by sentence punctuation across lines); warms lookup cache
         with otel_metrics.traced("score_line"):
@@ -1729,111 +1740,27 @@ class SessionController:
     def _apply_tokenized_cue(self, cue: TokenizedCue) -> None:
         self.lines, self.tokens, self.styles = cue.lines, cue.tokens, cue.styles
 
-    def use_tokenizer(self, tokenizer: Tokenizer) -> None:
-        """Swap the active tokenizer strategy (a profile switch, #254). Clears the token cache —
-        cached tokenizations are strategy-specific, so a stale entry would leak the old language's
-        segmentation into the new profile."""
-        self.tokenizer = tokenizer
+    def _invalidate_profile_tokenizer(self) -> None:
         if self.native_geometry is not None:
             self.native_geometry.invalidate(live=True)
         else:
             self.subtitle_pipeline.invalidate()
         self.token_cache.clear()
 
-    def set_profile_cycle(
-        self,
-        profiles: Sequence[Profile],
-        dict_scoper: Callable[[Profile], DictionarySet | None] | None = None,
-        *,
-        base_slang: str = "ja,jpn,jp",
-    ) -> None:
-        """Install the ordered profile cycle the live switcher rotates through (cli wiring, #254 D8). An
-        empty or single-entry cycle keeps the switcher inert; the cursor starts at the active profile.
-        ``dict_scoper`` (optional) maps a profile → its scoped ``DictionarySet`` so a live switch
-        re-scopes dictionaries too (#254 W3); ``None`` keeps the current dict set across a cycle.
-        ``base_slang`` is the raw CLI/config slang a slang-less profile (the JP default) falls back to,
-        so a cycle re-selects that profile's own subtitle track."""
-        self.profiles = tuple(profiles) or (self.profile,)
-        self._dict_scoper = dict_scoper
-        self._profile_base_slang = base_slang
-        self.profile_index = next(
-            (i for i, p in enumerate(self.profiles) if p.name == self.profile.name), 0
-        )
+    def _invalidate_profile_dictionary(self) -> None:
+        self.session.render_cache.config_sig = None
 
-    def _apply_font_mode(self) -> None:
-        """Lead the font fallback chain with the font best suited to the active profile's script (a
-        European profile → NotoSans; JP → the universal default). One source of truth for both __init__
-        and cycle_profile so the two can't drift."""
-        from saitenka import fonts
-        from saitenka.app.profiles import primary_font_for
+    def _reset_profile_episode_warm(self) -> None:
+        self._warmed_index = None
 
-        fonts.set_primary_font(primary_font_for(self.profile.langs.main))
+    def _has_profile_subtitle_track(self, slang: str) -> bool:
+        return subtitle_modes.has_track_for_slang(self.ipc, slang)
 
-    def switch_to_profile(self, idx: int) -> None:
-        """Make profile ``idx`` live among the configured ``[profiles.*]`` at runtime (#254 D8).
-        A no-op with a single configured profile (the default path). Resolves the new tokenizer FULLY
-        before touching any live state, so an unresolvable profile leaves the old one intact (atomic
-        revert). On success re-resolves the reader's identity — tokenizer, ``langs`` (which gates
-        providers), ``profile`` — clears+re-arms the token warm (the cache-clear-vs-warm race is closed
-        by the cache generation gate), re-selects the subtitle track for the new profile's language, and
-        flashes the new profile. Re-selecting the track is what makes the cycle a FULL switch: the new
-        language's track lands in the target slot (colored + scanned), instead of the engine reading the
-        old language's track — or the profile-blind role machine filing a manual pick as the secondary."""
-        new = self.profiles[idx]
-        # Resolve BOTH the tokenizer and the re-scoped dict set FULLY before mutating any live state, so
-        # an unresolvable profile (bad tokenizer / DB error) leaves the old one intact (atomic revert).
-        try:
-            tok = get_tokenizer(new.tokenizer)
-        except ValueError:
-            self.toast(f"profile {new.name!r}: unknown tokenizer {new.tokenizer!r}", "warn")
-            return
-        rescope = self._dict_scoper is not None
-        new_dict_set = self.dict_set
-        if rescope:
-            try:
-                new_dict_set = self._dict_scoper(new)  # type: ignore[misc]  # guarded by `rescope`
-            except Exception:  # noqa: BLE001 — a rescope failure must not kill the switch; keep old dicts
-                self.toast(f"profile {new.name!r}: dictionary rescope failed", "warn")
-                return
-        self.profile_index = idx
-        self.profile = new
-        self.langs = new.langs  # provider gating + identity read live off this
-        self._apply_font_mode()  # switch Latin-first font order with the profile
-        self.use_tokenizer(
-            tok
-        )  # swaps the strategy AND clears the token cache (bumps its generation)
-        if rescope:
-            self.dict_set = new_dict_set  # #254 W3 — the new profile's scoped dictionaries, live
-            # Force the memoised render-cache signature to recompute off the NEW dict set, else composed
-            # tooltips from the old profile's dicts would keep being served under the stale signature.
-            self.session.render_cache.config_sig = None
-        self._warmed_index = None  # re-arm the episode warm under the new tokenizer/generation
-        if not self._switch_subtitle_track(effective_slang(new, self._profile_base_slang)):
-            # Same track (or none for this language) — refresh the on-screen cue under the new tokenizer.
-            # When the track DID switch, the new track's own sub-text event repaints, so re-tokenizing the
-            # stale old-language cue under the new tokenizer would only flash garbage.
-            self._retokenize_current_cue()
-        self.warm_episode_tokens()
-        self.toast(f"profile: {new.name} ({new.langs.main})")
-
-    def _switch_subtitle_track(self, new_slang: str) -> bool:
-        """Re-select the mpv subtitle track for the new profile's language via the SAME path launch uses
-        (select_initial → configure_subtitle_mode → rebuild the cue index), so the target-language track
-        lands in the target slot — colored, scanned, and nav/prefetch-indexed. Returns ``True`` when a
-        track was switched. A missing target track keeps the current one and toasts (the file just has no
-        track for that language); an unchanged slang is a no-op so the engine swap alone stands."""
-        if new_slang == self.subtitle_slang:
-            return False
-        if not subtitle_modes.has_track_for_slang(self.ipc, new_slang):
-            self.toast(f"profile {self.profile.name!r}: no {new_slang!r} subtitle track", "warn")
-            return False
+    def _select_profile_subtitle_track(self, new_slang: str) -> None:
         startup = subtitle_modes.select_initial(self.ipc, new_slang)
         self.configure_subtitle_mode(startup, slang=new_slang)
-        self.episode.sub_index = (
-            None  # the old track's index is wrong for the new one; rebuild from disk
-        )
+        self.episode.sub_index = None
         self.rebuild_sub_index()
-        return True
 
     def _retokenize_current_cue(self) -> None:
         """Re-render the on-screen cue under the freshly-swapped tokenizer — set_subtitle's tokenize
@@ -1897,7 +1824,9 @@ class SessionController:
             self.boxes,
             (mx, my),
             self.sub_origin,
-            is_skippable=lambda index: self.tokenizer.is_skippable(self.tokens[index]),
+            is_skippable=lambda index: self.profile_controller.tokenizer.is_skippable(
+                self.tokens[index]
+            ),
         )
 
     @staticmethod
@@ -2034,7 +1963,7 @@ class SessionController:
             mined_exists=self.session.mined_store is not None or mined_store.db_path().exists(),
             backlog_exists=self.session.backlog_store is not None or backlog.db_path().exists(),
             scorer=self.scorer,
-            tokenizer=self.tokenizer,
+            tokenizer=self.profile_controller.tokenizer,
             analysis=self.analysis.current,
             can_mine=bool(self.anki and self.mine_cfg),
         )
@@ -2167,8 +2096,8 @@ class SessionController:
         that would still report itself as deferred.
         """
         return WordLookup(
-            tokenizer=self.tokenizer,
-            dict_set=self.dict_set,
+            tokenizer=self.profile_controller.tokenizer,
+            dict_set=self.profile_controller.dict_set,
             mined=self.session.mined,
             prefetch_gen=self.prefetch_state.gen,
             dependency_gen=self._dependency_generation,
@@ -2251,7 +2180,7 @@ class SessionController:
     def prefetch_ports(self) -> prefetch.PrefetchPorts:
         """What one speculative-warming pass reads. Paired with `head_probe`."""
         return prefetch.PrefetchPorts(
-            enabled=bool(self.prefetch and self.dict_set is not None),
+            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
             engaged=bool(self.observed_property("pause")) or self._mouse_in,
             state=self.prefetch_state,
             cues=prefetch.LookaheadCues(
@@ -2262,7 +2191,7 @@ class SessionController:
             ),
             tokens=self.tokens,
             styles=self.styles,
-            tokenizer=self.tokenizer,
+            tokenizer=self.profile_controller.tokenizer,
             inflected=self._inflected_surface,
             is_mined=self._is_mined,
             finish=self._finish_speculative_prefetch,
@@ -2282,7 +2211,7 @@ class SessionController:
     def warm_ports(self) -> prefetch.WarmPorts:
         """What starting the background episode warm decides on."""
         return prefetch.WarmPorts(
-            enabled=bool(self.prefetch and self.dict_set is not None),
+            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
             index=self.episode.sub_index,
             claim=self._claim_warm_index,
             annotate_async=self._annotation_async,
@@ -2425,9 +2354,9 @@ class SessionController:
             layout_engine=self.layout_engine,
             add_button=tooltip_panel.anki_ok(self.anki, self._anki_capability),
             speak_button=self._tts_ok,
-            dict_set=self.dict_set,
+            dict_set=self.profile_controller.dict_set,
             scorer=self.scorer,
-            tokenizer=self.tokenizer,
+            tokenizer=self.profile_controller.tokenizer,
             kanji_stroke_order=self.kanji_stroke_order,
         )
 
@@ -2462,7 +2391,7 @@ class SessionController:
         ``render-cache.sqlite`` already exists (``saitenka prewarm`` builds it). ``None`` when opted out,
         no dict set, or no prebuilt cache — so a fresh install creates nothing and costs nothing."""
         rc = self.session.render_cache
-        if not rc.cache_on or self.dict_set is None:
+        if not rc.cache_on or self.profile_controller.dict_set is None:
             return None
         if not rc.built:
             rc.built = True
@@ -2488,10 +2417,12 @@ class SessionController:
             from saitenka.app.render_cache import config_signature, dict_set_signature
 
             assert (
-                self.dict_set is not None
+                self.profile_controller.dict_set is not None
             )  # _render_cache() gated on it before any caller reaches here
             rc.config_sig = config_signature(
-                width=self.tip_scale.width, cap=cap, dict_sig=dict_set_signature(self.dict_set)
+                width=self.tip_scale.width,
+                cap=cap,
+                dict_sig=dict_set_signature(self.profile_controller.dict_set),
             )
             rc.sig_key = ck
         return rc.config_sig
@@ -2605,9 +2536,9 @@ class SessionController:
             self.ipc,
             self.prefetch_state,
             prefetch.HostPrefetchBackend(self),
-            self.tokenizer,
+            self.profile_controller.tokenizer,
             self.prefetch_workers,
-            enabled=bool(self.prefetch and self.dict_set is not None),
+            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
         )
 
     def _update_prefetch(self) -> None:
@@ -2620,7 +2551,7 @@ class SessionController:
         prefetch.finish(self.prefetch_state, completion, self._finish_speculative_prefetch)
 
     def _inflected_surface(self, index: int) -> str:
-        return self.tokenizer.inflected_in(self.tokens, index)
+        return self.profile_controller.tokenizer.inflected_in(self.tokens, index)
 
     def _telemetry_gauges(self) -> dict[str, float]:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
@@ -2630,7 +2561,11 @@ class SessionController:
         with self._cache_lock:
             panel_n = len(self.tip.panel_cache)
             panel_bytes = sum(st.retained_nbytes for st in self.tip.panel_cache.values())
-        dict_n = self.dict_set.decoded_entry_count() if self.dict_set is not None else 0
+        dict_n = (
+            self.profile_controller.dict_set.decoded_entry_count()
+            if self.profile_controller.dict_set is not None
+            else 0
+        )
         gauges = {
             "panel_cache.size": float(panel_n),
             "panel_cache.bytes": float(panel_bytes),
@@ -2799,7 +2734,9 @@ class SessionController:
     @property
     def mine_cue(self) -> MineCue:
         """What picking a target reads. Its own value, so the tooltip's ⊕ does not pay for a mine."""
-        return MineCue(self.tokens, self.styles, self.hover, self.tokenizer, self.max_bulk)
+        return MineCue(
+            self.tokens, self.styles, self.hover, self.profile_controller.tokenizer, self.max_bulk
+        )
 
     @property
     def miner_ports(self) -> MinerPorts | None:
@@ -2815,7 +2752,7 @@ class SessionController:
             cue=self.mine_cue,
             anki=self.anki,
             mine_cfg=self.mine_cfg,
-            dict_set=self.dict_set,
+            dict_set=self.profile_controller.dict_set,
             mined_store=self.mined_store,
             ipc=self.ipc,
             scratch=self._tmp,
@@ -2940,7 +2877,7 @@ class SessionController:
         self._stateless.run(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
 
     def _frequency(self, tok) -> tuple[str, str]:
-        return miner.frequency(self.dict_set, tok)
+        return miner.frequency(self.profile_controller.dict_set, tok)
 
     def _capture_media(self, base: str, video) -> tuple[str, str]:
         ports = self.miner_ports
@@ -3000,7 +2937,7 @@ class SessionController:
         self._stateless.run(session_intents.SessionCommand.TOGGLE_OVERLAY)
 
     def cycle_profile(self) -> None:
-        self._stateless.run(session_intents.SessionCommand.CYCLE_PROFILE)
+        self._stateless.run(profile_intents.ProfileCommand.CYCLE)
 
     def configure_subtitle_mode(
         self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
@@ -3102,7 +3039,7 @@ class SessionController:
             index=self.episode.sub_index,
             loading=self._loading,
             scorer=self.scorer,
-            tokenizer=self.tokenizer,
+            tokenizer=self.profile_controller.tokenizer,
         )
         self._draw_analysis()
         if analysis_overlay.submit_pending(
@@ -4078,7 +4015,7 @@ class SessionController:
             prop=self.observed_property,
             get=self._get,
             tokens=lambda: self.tokens,
-            is_content_token=lambda token: self.tokenizer.is_content(token),
+            is_content_token=lambda token: self.profile_controller.tokenizer.is_content(token),
             osd_height=lambda: self.osd[1],
             painted=lambda: (
                 self.lifecycle_surfaces.settled() and self.interaction_surfaces.settled()
@@ -4152,7 +4089,7 @@ class SessionController:
         self.scorer = deps.get("scorer")
         self.anki = deps.get("anki")
         self.mine_cfg = deps.get("mine_cfg")
-        self.dict_set = deps.get("dict_set")
+        self.profile_controller.replace_dictionary_set(deps.get("dict_set"))
         if self.anki is None:
             return
         from saitenka.app.anki import anki_reachable
@@ -4227,7 +4164,7 @@ class SessionController:
         # so construction-time start_prefetch was a no-op and the worker count is 0. Defer the banner to when
         # prefetch actually starts (apply_deps → _announce_runtime); only announce now on the sync path
         # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
-        if self.dict_set is not None:
+        if self.profile_controller.dict_set is not None:
             self._announce_runtime()
         loop = self.ipc.session_loop
         if loop is None:

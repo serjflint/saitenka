@@ -52,8 +52,7 @@ def canonical_language(code: str) -> str:
 
 @dataclass(frozen=True)
 class Profile:
-    """The resolved active profile — the one object the reader holds and every identity consumer reads
-    off (tokenizer selection, provider gating, dict scoping). Swappable state for the live switcher (D8)."""
+    """The active reading identity for tokenizer, provider, and dictionary selection."""
 
     name: str
     langs: ReaderLanguages

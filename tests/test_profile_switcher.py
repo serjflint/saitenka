@@ -14,6 +14,7 @@ from util import FakeIPC, keybind_registry, press, runtime_gateway
 
 from saitenka.app import prefetch
 from saitenka.app.languages import MAIN_LANG, ReaderLanguages
+from saitenka.app.profile_controller import ProfileSwitchStatus
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
 from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
@@ -89,7 +90,7 @@ def _headless(request, profile=None, profiles=None) -> SessionController:
         reader.close
     )  # LIFO: the SessionController closes before the gateway it publishes to
     if profiles is not None:
-        reader.set_profile_cycle(profiles)
+        reader.profile_controller.configure_cycle(profiles)
     reader.osd = (1280, 720)
     return reader
 
@@ -102,11 +103,19 @@ def test_cycle_is_a_noop_with_a_single_profile(request):
     changes nothing — same tokenizer, same languages, same profile. Byte-identical to pre-#254."""
     reader = _headless(request)  # profiles defaults to (DEFAULT_PROFILE,)
     reader._register_keybinds()
-    before = (reader.tokenizer.name, reader.langs.main, reader.profile)
+    before = (
+        reader.profile_controller.tokenizer.name,
+        reader.profile_controller.langs.main,
+        reader.profile_controller.profile,
+    )
 
     reader.cycle_profile()
 
-    assert (reader.tokenizer.name, reader.langs.main, reader.profile) == before
+    assert (
+        reader.profile_controller.tokenizer.name,
+        reader.profile_controller.langs.main,
+        reader.profile_controller.profile,
+    ) == before
 
 
 def test_profile_cycle_key_is_registered_even_on_the_default_path():
@@ -136,22 +145,39 @@ def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
 
     ipc = FakeIPC()
     reader = SessionController(ipc, profile=DEFAULT_PROFILE, renderer=NullRenderer())
-    reader.set_profile_cycle([DEFAULT_PROFILE, _FR])
+    reader.profile_controller.configure_cycle([DEFAULT_PROFILE, _FR])
     reader.osd = (1280, 720)
     reader._register_keybinds()
-    assert reader.tokenizer.name == "unidic" and reader.langs.main == "jp"
-    assert enabled_providers_for(reader.langs.main, flags) == ("jimaku", "universal")
+    assert (
+        reader.profile_controller.tokenizer.name == "unidic"
+        and reader.profile_controller.langs.main == "jp"
+    )
+    assert enabled_providers_for(reader.profile_controller.langs.main, flags) == (
+        "jimaku",
+        "universal",
+    )
 
     press(reader, ipc, reader.keys.profile_cycle_key)  # → fr
 
-    assert reader.tokenizer.name == "latin" and reader.langs.main == "fr"
-    assert reader.profile is _FR
-    assert enabled_providers_for(reader.langs.main, flags) == ("universal",)  # jp-only dropped
+    assert (
+        reader.profile_controller.tokenizer.name == "latin"
+        and reader.profile_controller.langs.main == "fr"
+    )
+    assert reader.profile_controller.profile is _FR
+    assert enabled_providers_for(reader.profile_controller.langs.main, flags) == (
+        "universal",
+    )  # jp-only dropped
 
     press(reader, ipc, reader.keys.profile_cycle_key)  # wraps → back to the JP default
 
-    assert reader.tokenizer.name == "unidic" and reader.langs.main == "jp"
-    assert enabled_providers_for(reader.langs.main, flags) == ("jimaku", "universal")
+    assert (
+        reader.profile_controller.tokenizer.name == "unidic"
+        and reader.profile_controller.langs.main == "jp"
+    )
+    assert enabled_providers_for(reader.profile_controller.langs.main, flags) == (
+        "jimaku",
+        "universal",
+    )
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -174,13 +200,15 @@ def test_cycle_clears_the_token_cache_so_stale_segmentation_cannot_leak(request)
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_selects_the_new_profiles_language_track(request):
+def test_cycle_selects_the_new_profiles_language_track(request, monkeypatch):
     """The reported bug: cycling to French swapped the engine but left mpv on the JP track, so lookups
     missed. A profile with its own slang now re-selects THAT language's track (into the target slot, so
     it colors + scans) exactly as a ``--profile french`` launch does."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
     reader.ipc.props["track-list"] = _JA_FR_TRACKS
+    retokenized: list[bool] = []
+    monkeypatch.setattr(reader, "_retokenize_current_cue", lambda: retokenized.append(True))
 
     reader.cycle_profile()  # → fr
 
@@ -189,35 +217,59 @@ def test_cycle_selects_the_new_profiles_language_track(request):
     assert (
         reader.subtitle_language == MAIN_LANG
     )  # target role → colored + scanned, not the secondary
+    assert retokenized == []
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_the_engine(request):
+def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_the_engine(
+    request, monkeypatch
+):
     """No tagged track for the new language → keep the current track (don't grab an unrelated one via the
     untagged fallback) and warn, while the reading engine still switches. select_initial is never reached,
     so no ``sid`` is set."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
     reader.ipc.props["track-list"] = [{"type": "sub", "id": 1, "lang": "jpn"}]
+    retokenized: list[bool] = []
+    notices: list[tuple[str, str]] = []
+    monkeypatch.setattr(reader, "_retokenize_current_cue", lambda: retokenized.append(True))
+    monkeypatch.setattr(
+        reader, "toast", lambda text, kind="ok", _seconds=2.8: notices.append((text, kind))
+    )
 
-    reader.cycle_profile()  # → fr, but the file has no fr track
+    outcome = reader.profile_controller.cycle()  # → fr, but the file has no fr track
 
-    assert reader.langs.main == "fr"  # the engine switched
+    assert reader.profile_controller.langs.main == "fr"  # the engine switched
     assert reader.subtitle_slang == "ja,jpn,jp"  # ...the track was left untouched
     assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.ipc.commands)
+    assert retokenized == [True]
+    assert outcome.status is ProfileSwitchStatus.DEGRADED
+    assert any("no 'fr' subtitle track" in text and kind == "warn" for text, kind in notices)
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_same_track_switch_retokenizes_the_current_cue(request, monkeypatch):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])
+    retokenized: list[bool] = []
+    monkeypatch.setattr(reader, "_retokenize_current_cue", lambda: retokenized.append(True))
+
+    reader.cycle_profile()
+
+    assert retokenized == [True]
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request):
-    """Wrapping back to the slang-less JP default re-selects ITS track using the base slang the launcher
-    threaded through set_profile_cycle — proving the fallback isn't hard-coded to the default string."""
+    """Wrapping back to the slang-less JP default re-selects its track using the launcher's base slang,
+    proving that the fallback is not hard-coded to the default string."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)  # selection issues correlated commands
     request.addfinalizer(gateway.close)
     reader = SessionController(ipc, profile=DEFAULT_PROFILE, renderer=NullRenderer())
     request.addfinalizer(reader.close)
-    reader.set_profile_cycle([DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn")
+    reader.profile_controller.configure_cycle([DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn")
     reader.osd = (1280, 720)
     reader.ipc.props["track-list"] = _JA_FR_TRACKS
 
@@ -257,9 +309,49 @@ def test_cycle_reverts_atomically_when_the_new_tokenizer_is_unknown(request):
 
     reader.cycle_profile()  # _BROKEN.tokenizer 'nonexistent' is not registered
 
-    assert reader.profile is DEFAULT_PROFILE  # unchanged
-    assert reader.tokenizer.name == "unidic" and reader.langs.main == "jp"
-    assert reader.profile_index == 0  # cursor did not advance past the failed switch
+    assert reader.profile_controller.profile is DEFAULT_PROFILE  # unchanged
+    assert (
+        reader.profile_controller.tokenizer.name == "unidic"
+        and reader.profile_controller.langs.main == "jp"
+    )
+    assert (
+        reader.profile_controller.profile_index == 0
+    )  # cursor did not advance past the failed switch
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_reverts_atomically_when_dictionary_rescope_fails(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE)
+    original_dicts = object()
+    reader.profile_controller.replace_dictionary_set(original_dicts)
+
+    def fail_scope(_profile):
+        raise RuntimeError("broken dictionary")
+
+    reader.profile_controller.configure_cycle([DEFAULT_PROFILE, _FR], fail_scope)
+
+    reader.cycle_profile()
+
+    assert reader.profile_controller.profile is DEFAULT_PROFILE
+    assert reader.profile_controller.tokenizer.name == "unidic"
+    assert reader.profile_controller.dict_set is original_dicts
+    assert reader.profile_controller.profile_index == 0
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_late_dependency_result_keeps_the_existing_last_arrival_dictionary_policy(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE)
+    active_dicts = object()
+    late_launch_dicts = object()
+    reader.profile_controller.configure_cycle([DEFAULT_PROFILE, _FR], lambda _p: active_dicts)
+    reader.cycle_profile()
+
+    reader._install_collaborators({"dict_set": late_launch_dicts})
+
+    assert reader.profile_controller.profile is _FR
+    assert reader.profile_controller.dict_set is late_launch_dicts
 
 
 # --- the cache-clear vs episode-warm race (the carried P2) -----------------------------------------
@@ -289,13 +381,15 @@ class _SwapMidWarmTokenizer(_MinimalTokenizer):
         toks = super().tokenize(line, strip_furigana=strip_furigana, merge=merge)
         if not self._swapped:
             self._swapped = True
-            self._reader.use_tokenizer(self._replacement)  # the swap lands mid-warm
+            self._reader.profile_controller.use_tokenizer(
+                self._replacement
+            )  # the swap lands mid-warm
         return toks
 
 
 def _warm_reader(request) -> SessionController:
     reader = _headless(request)
-    reader.dict_set = _ExistsDS()
+    reader.profile_controller.replace_dictionary_set(_ExistsDS())
     reader.episode.sub_index = CueIndex(parse_srt(_SRT))
     return reader
 
@@ -306,13 +400,13 @@ def test_swap_during_warm_drops_the_stale_language_entry(request):
     Without the gate this cue's put would survive (len == 1), so this asserts the guard has teeth."""
     reader = _warm_reader(request)
     new = _MinimalTokenizer("new")
-    reader.use_tokenizer(_SwapMidWarmTokenizer(reader, new))  # active = OLD
+    reader.profile_controller.use_tokenizer(_SwapMidWarmTokenizer(reader, new))  # active = OLD
 
     prefetch._warm_episode_loop(
         reader.episode.sub_index, ports=reader.warm_ports.loop
     )  # swaps to NEW mid-loop
 
-    assert reader.tokenizer is new  # the swap took effect
+    assert reader.profile_controller.tokenizer is new  # the swap took effect
     assert len(reader.token_cache) == 0  # the OLD-tokenizer cue never landed
 
 
@@ -320,7 +414,7 @@ def test_warm_under_the_new_generation_stores_cleanly_after_a_swap(request):
     """Positive control: once the swap has settled, warming under the current generation caches every
     cue normally — the generation gate drops only the stale in-flight put, not all future work."""
     reader = _warm_reader(request)
-    reader.use_tokenizer(_MinimalTokenizer("new"))  # settled generation
+    reader.profile_controller.use_tokenizer(_MinimalTokenizer("new"))  # settled generation
     reader._warmed_index = None
 
     prefetch._warm_episode_loop(reader.episode.sub_index, ports=reader.warm_ports.loop)

@@ -317,7 +317,7 @@ def _tallest(reader, idxs) -> int:
     best, best_h = idxs[0], 0
     for i in idxs:
         tok = reader.tokens[i]
-        entry = reader.dict_set.entry_for(tok, reader._inflected_surface(i))
+        entry = reader.profile_controller.dict_set.entry_for(tok, reader._inflected_surface(i))
         h = (
             LazyPanel(panel_rows(entry, reader.tip_scale.width), reader.tip_scale.width)
             .finish()

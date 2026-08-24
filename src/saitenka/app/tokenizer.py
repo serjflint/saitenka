@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 class Tokenizer(Protocol):
-    """The language-dependent operations the reader/tooltip/mining route through. A profile owns one;
+    """Language-dependent operations used by profile, tooltip, and mining code. A profile owns one;
     swapping it reroutes tokenization, content/skip classification, phrase probing and inflection
     without touching any call site — so a non-Japanese strategy defines its own content-ness."""
 

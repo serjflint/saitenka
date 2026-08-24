@@ -17,6 +17,7 @@ from saitenka.runtime.jobs import JobLanePolicy
 if TYPE_CHECKING:
     from collections.abc import Callable, Container
 
+    from saitenka.app.profile_controller import ProfileController
     from saitenka.app.scoring import Scorer
     from saitenka.app.token_cache import TokenCache
     from saitenka.app.tokenize import Token
@@ -144,7 +145,7 @@ class PrefetchWork:
 
 
 class PrefetchHost(Protocol):
-    dict_set: PrefetchDictionary | None
+    profile_controller: ProfileController
     tip_scale: TipScale
 
     def _panel_for(self, token, inflected, **kwargs): ...
@@ -186,8 +187,8 @@ class HostPrefetchBackend:
             if item.full:
                 return self._render_head(item, should_cancel)
             reader = self._reader
-            if reader.dict_set is not None and not should_cancel():
-                reader.dict_set.entry_for(item.token, item.inflected)
+            if reader.profile_controller.dict_set is not None and not should_cancel():
+                reader.profile_controller.dict_set.entry_for(item.token, item.inflected)
         return not should_cancel()
 
     def _render_head(self, item: PrefetchItem | HeadPrefetchItem, should_cancel) -> bool:

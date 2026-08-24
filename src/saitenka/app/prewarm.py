@@ -510,7 +510,7 @@ def prewarm(
     template = _make_session_controller(width, height, dict_titles, freqs, pitches, None)
     cache, atlas = _open_build_caches(template, atlas_only=opts.atlas_only)
 
-    terms = _popular_terms(template.dict_set, limit)
+    terms = _popular_terms(template.profile_controller.dict_set, limit)
     if atlas is not None:
         atlas.backfill_reference_done()  # native-done ⇒ reference-done, so cross-scale runs can skip it
     plan, already_done, before = _startup_plan(
