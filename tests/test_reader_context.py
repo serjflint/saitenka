@@ -110,7 +110,7 @@ def test_session_state_survives_an_episode_reslot():
     reachability cache, the backlog handle) is durable — an episode swap must NOT reset it, or #100's
     re-slot would forget what's already in the deck on every file change."""
     r = SessionController(FakeIPC())
-    r.mining_controller.record_expression("読む")
+    r.mining_controller.record_mined_expression("読む")
     backlog = object()
     r.session.backlog_store = backlog  # type: ignore[assignment]  # lifetime sentinel
     session_before = r.session

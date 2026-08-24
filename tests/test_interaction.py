@@ -51,12 +51,10 @@ def _content_word(r) -> int:
 def _enable_mining(reader: SessionController) -> None:
     identity = reader.mining_controller.desired_spec.identity
     config = MineConfig()
-    reader.mining_controller.select_spec(
+    reader.mining_controller.select_mining_spec(
         MiningSpec(identity, {"deck": config.deck, "model": config.model})
     )
-    assert reader.mining_controller.publish_prepared_target(
-        MiningTarget(identity, object(), config)
-    )
+    assert reader.mining_controller.publish_mining_target(MiningTarget(identity, object(), config))
     reader.mining_controller.close_capability()
 
 
@@ -324,7 +322,7 @@ def test_empty_body_click_does_nothing(monkeypatch):
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown
     events: list[str] = []
-    monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
+    monkeypatch.setattr(r._stateless, "run", lambda _command: events.append("mine"))
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     # click low in the body, away from the ⊕/🔊 header buttons
     x, y, w, h = r.tip.view.rect

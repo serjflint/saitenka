@@ -82,7 +82,7 @@ def _controller(tmp_path, monkeypatch):
         encounter=encounters,
         apply=_apply,
     )
-    assert controller.publish_prepared_target(
+    assert controller.publish_mining_target(
         MiningTarget(identity, object(), MineConfig(deck="Deck A"))
     )
     return controller, seed, encounters
@@ -102,27 +102,27 @@ def _finish(call: dict, values: set[str]) -> None:
 
 def test_selecting_a_new_spec_hides_old_target_state_before_return(tmp_path, monkeypatch) -> None:
     controller, _seed, _encounters = _controller(tmp_path, monkeypatch)
-    controller.record_expression("old")
+    controller.record_mined_expression("old")
     old_target = controller.active_target
     assert old_target is not None
 
     identity = MiningIdentity("b", 1)
-    controller.select_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
+    controller.select_mining_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
 
     snapshot = controller.index_snapshot()
     assert controller.active_target is None
     assert snapshot.values == set() and snapshot.seed_status is SeedStatus.EMPTY
-    assert controller.publish_prepared_target(old_target) is False
+    assert controller.publish_mining_target(old_target) is False
     controller.close()
 
 
 def test_prepared_target_must_match_the_selected_deck_and_model(tmp_path, monkeypatch) -> None:
     controller, _seed, _encounters = _controller(tmp_path, monkeypatch)
     identity = MiningIdentity("b", 1)
-    controller.select_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
+    controller.select_mining_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
 
     assert (
-        controller.publish_prepared_target(
+        controller.publish_mining_target(
             MiningTarget(identity, object(), MineConfig(deck="Wrong Deck"))
         )
         is False
@@ -140,11 +140,13 @@ def test_seed_for_current_target_merges_local_mines_and_rejects_old_completion(
 
     identity = MiningIdentity("b", 1)
     config = MineConfig(deck="Deck B")
-    controller.select_spec(MiningSpec(identity, {"deck": config.deck, "model": config.model}))
-    assert controller.publish_prepared_target(MiningTarget(identity, object(), config))
+    controller.select_mining_spec(
+        MiningSpec(identity, {"deck": config.deck, "model": config.model})
+    )
+    assert controller.publish_mining_target(MiningTarget(identity, object(), config))
     controller.request_seed()
     current = seed.calls[-1]
-    controller.record_expression("local")
+    controller.record_mined_expression("local")
 
     _finish(old, {"old"})
     assert controller.index_snapshot().values == {"local"}

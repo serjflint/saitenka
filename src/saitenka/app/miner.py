@@ -53,7 +53,11 @@ class MineCue:
 
 @dataclass(frozen=True, slots=True)
 class MiningEncounter:
-    """Facts sampled once when the owner admits an operation."""
+    """Facts current behavior samples once when the owner admits an operation.
+
+    ``ipc`` remains a live capability: cue bounds are intentionally sampled during media capture and
+    again after commit. Freezing those bounds is a separate mining-reliability decision.
+    """
 
     cue: MineCue
     dict_set: DictionarySet | None

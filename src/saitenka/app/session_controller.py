@@ -1976,7 +1976,7 @@ class SessionController:
                 self.ipc, name, "set_property", "time-pos", at, owner=Owner.PLAYBACK
             ),
             bookmark=self.toggle_bookmark,
-            mine=self.mine_current,
+            mine=lambda: self._stateless.run(mine_intents.MineCommand.WORD),
             open_mined=lambda note_id: sidebar_module._open_mined(
                 self.sidebar_view,
                 self.sidebar_actions,
@@ -2062,8 +2062,8 @@ class SessionController:
     def click_ports(self) -> ClickPorts:
         """What a click on a popup can do. Paired with `tip_ports` and `panel_ports`."""
         return ClickPorts(
-            mine_token=self._mine_token,
-            mine_current=self.mine_current,
+            mine_token=self.mining_controller.mine_token,
+            mine_current=lambda: self._stateless.run(mine_intents.MineCommand.WORD),
             speak_hovered=self.speak_hovered,
             click_preview=self._click_preview,
             cursor=lambda: self._get_mapping("mouse-pos") or None,
@@ -2159,7 +2159,9 @@ class SessionController:
             tip_width=self.tip_scale.width,
             ipc=self.ipc,
             keys=self.keys,
-            add_duplicate=self._add_duplicate,
+            add_duplicate=lambda: self.mining_controller.force_duplicate(
+                ForceDuplicate(miner_ui.duplicate_token(self.interaction.preview_panel))
+            ),
             play_audio=self.play_audio,
         )
 
@@ -2819,20 +2821,6 @@ class SessionController:
             and self.sub_text.strip()
         )
 
-    def mine_current(self, *, animated: bool | None = None) -> None:
-        self._stateless.run(
-            mine_intents.MineCommand.WORD_VIDEO if animated else mine_intents.MineCommand.WORD
-        )
-
-    def mine_current_video(self) -> None:
-        """The video-mine shortcut: mine the hovered word with an animated (motion) screenshot, even when
-        ``[mine].animated_screenshot`` is off."""
-        self.mine_current(animated=True)
-
-    def _mine_token(self, tok, *, card=None) -> None:
-        with otel_metrics.traced("anki_mine", source="nested"):
-            self.mining_controller.mine_token(tok, card=card)
-
     def _mark_mined(self, expression: str) -> None:
         mined_feedback.mark_mined(
             self.tip_ports,
@@ -2851,13 +2839,6 @@ class SessionController:
             self.toast(f"mined {card.expression}")  # preview off → a terse confirmation instead
             return
         miner_ui.preview_mined(self.preview_ports, self.card_source, card, tok, video, status)
-
-    def _add_duplicate(self) -> None:
-        """The preview's ＋ button: mine a second card for the current scene even though the
-        expression is already in the deck (a different line/episode/anime)."""
-        duplicate = self.interaction.preview_panel.dup_tok
-        if duplicate is not None:
-            self.mining_controller.force_duplicate(ForceDuplicate(duplicate))
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         if not self.show_preview:
@@ -2878,9 +2859,6 @@ class SessionController:
 
     def replay_preview(self) -> None:
         self._stateless.run(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
-
-    def bulk_mine(self) -> None:
-        self._stateless.run(mine_intents.MineCommand.EPISODE)
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def setup_secondary(self) -> int | None:
@@ -3334,9 +3312,9 @@ class SessionController:
             COPY_MSG: action(SessionController.copy_hovered),
             KANJI_MSG: action(SessionController.kanji_current),
             HOVER_PAUSE_MSG: action(SessionController.toggle_hover_pause),
-            MINE_MSG: action(SessionController.mine_current),
-            MINE_VIDEO_MSG: action(SessionController.mine_current_video),
-            MINE_ALL_MSG: action(SessionController.bulk_mine),
+            MINE_MSG: lambda: self._stateless.run(mine_intents.MineCommand.WORD),
+            MINE_VIDEO_MSG: lambda: self._stateless.run(mine_intents.MineCommand.WORD_VIDEO),
+            MINE_ALL_MSG: lambda: self._stateless.run(mine_intents.MineCommand.EPISODE),
             BOOKMARK_MSG: action(SessionController.toggle_bookmark),
             PROFILE_CYCLE_MSG: action(SessionController.cycle_profile),
             SIDEBAR_MSG: action(SessionController.toggle_sidebar),
@@ -3977,8 +3955,8 @@ class SessionController:
             scroll_tip=self.scroll_tip,
             setup_secondary=self.setup_secondary,
             toggle_translation=self.toggle_translation,
-            mine_current=self.mine_current,
-            bulk_mine=self.bulk_mine,
+            mine_current=lambda: self._stateless.run(mine_intents.MineCommand.WORD),
+            bulk_mine=lambda: self._stateless.run(mine_intents.MineCommand.EPISODE),
         )
 
     @property
@@ -3996,7 +3974,7 @@ class SessionController:
         return reader_deps.ProfileDependencyApply(
             load_ports=lambda: self.deps_load,
             selected_profile=lambda: self.profile_controller.profile,
-            select_mining=self.mining_controller.select_spec,
+            select_mining=self.mining_controller.select_mining_spec,
             retire_current=self._retire_profile_dependencies,
             stop_loading=self._stop_loading,
             install=self._install_collaborators,
@@ -4048,8 +4026,10 @@ class SessionController:
         """Swap in what the build produced, and probe the deck it came with."""
         self.scorer = deps.scorer
         self.profile_controller.replace_dictionary_set(deps.dictionaries)
-        if deps.mining is not None:
-            self.mining_controller.publish_prepared_target(deps.mining)
+        if deps.mining is None:
+            self.mining_controller.clear_mining_target(deps.identity)
+        else:
+            self.mining_controller.publish_mining_target(deps.mining)
 
     def _dependencies_arrived(self) -> None:
         """Everything that has to hear about a new vocabulary, in the order it has to hear it."""

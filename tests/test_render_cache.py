@@ -1024,7 +1024,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     r.tip.view.job_id = r.tip.jobs.begin("tooltip")
     tooltip._request_hover_metadata(r.tip_ports, r.word_lookup, r.hover_inputs, index)
     original = requests[-1]
-    r.mining_controller.record_expression("__newly-mined__")
+    r.mining_controller.record_mined_expression("__newly-mined__")
     tooltip.apply_hover_metadata(
         r.tip_ports,
         r.panel_ports,

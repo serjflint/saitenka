@@ -159,17 +159,18 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
 
 
 def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypatch):
-    """The #244 flagship at the firing level: register while anki=None (attach mode), let anki land
-    async AFTER registration with no re-register, then press the mine key — it must reach mine_current
-    through the real dispatch chain. A plain registration check can't prove this; only firing does."""
+    """The #244 flagship at the firing level: register while anki=None (attach mode), then press the
+    mine key — it must reach the mining command route without re-registering the binding."""
+    from saitenka.app.mine_intents import MineCommand
+
     ipc = FakeIPC()
     r = SessionController(ipc, anki=None)
     r._register_keybinds()  # bound while the dep is down
-    calls: list[dict] = []
-    monkeypatch.setattr(r, "mine_current", lambda **k: calls.append(k))
+    calls: list[object] = []
+    monkeypatch.setattr(r._stateless, "run", calls.append)
     press(r, ipc, r.keys.mine_key)
 
-    assert calls == [{}], "the mine key did not reach mine_current after async anki load"
+    assert calls == [MineCommand.WORD]
 
 
 def test_pressing_an_unbound_key_raises_so_the_fake_cant_pass_silently():

@@ -40,10 +40,10 @@ class FakeIPC(RuntimeFakeIPC):
 def _enable_mining(r: SessionController, anki=None, config: MineConfig | None = None) -> None:
     target_config = config or MineConfig()
     identity = r.mining_controller.desired_spec.identity
-    r.mining_controller.select_spec(
+    r.mining_controller.select_mining_spec(
         MiningSpec(identity, {"deck": target_config.deck, "model": target_config.model})
     )
-    assert r.mining_controller.publish_prepared_target(
+    assert r.mining_controller.publish_mining_target(
         MiningTarget(identity, anki or object(), target_config)
     )
     r.mining_controller.close_capability()
@@ -432,10 +432,12 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
 
 def test_mine_current_video_forces_the_animated_clip(monkeypatch):
     ipc = FakeIPC()
-    r = SessionController(ipc)
+    r = _reader_with_word(ipc)
+    _enable_mining(r)
+    r.hover = 0
     captured: dict = {}
-    monkeypatch.setattr(r, "mine_current", lambda **k: captured.update(k))
-    r.mine_current_video()
+    monkeypatch.setattr(r.mining_controller, "mine_index", lambda _index, **k: captured.update(k))
+    r._handle(C.MINE_VIDEO_MSG)
     assert captured == {
         "animated": True
     }  # the video-mine shortcut forces a motion clip for this mine
@@ -461,14 +463,20 @@ def test_mine_video_key_registers_and_routes_to_the_video_mine(monkeypatch):
     from saitenka.app.bindings import MINE_VIDEO_MSG
 
     ipc = FakeIPC()
-    reader = SessionController(ipc, anki=object())
+    reader = _reader_with_word(ipc)
+    _enable_mining(reader)
+    reader.hover = 0
     reader._register_keybinds()  # mine bindings require anki
     assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG  # default shortcut is bound
     # and the message routes to the video-mine action (not the still mine)
     calls: list = []
-    monkeypatch.setattr(reader, "mine_current_video", lambda: calls.append("video"))
+    monkeypatch.setattr(
+        reader.mining_controller,
+        "mine_index",
+        lambda _index, **kwargs: calls.append(kwargs),
+    )
     reader._handle(MINE_VIDEO_MSG)
-    assert calls == ["video"]
+    assert calls == [{"animated": True}]
 
 
 def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
@@ -1554,7 +1562,9 @@ def test_header_add_button_click_mines_hovered_word(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
-    monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
+    monkeypatch.setattr(
+        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_add_button(r).click()
     assert events == ["mine"]  # ⊕ mined; did not fall through to TTS
@@ -1569,7 +1579,9 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
-    monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
+    monkeypatch.setattr(
+        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     tx, ty, tw, th = r.tip.view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + th - 5).click()  # low in the body
@@ -1900,7 +1912,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.token is not None
     mined = []
-    monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
+    monkeypatch.setattr(r.mining_controller, "mine_token", lambda tok: mined.append(tok.surface))
     px, py, pw, ph = header_add_rect(r.tip_scale.width)
     nx, ny = r.tip.nest.xy
     Driver(r, instant=False).move(nx + px + pw / 2, ny + (py - r.tip.nest.scroll) + ph / 2).click()
@@ -2150,7 +2162,9 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     events = []
-    monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
+    monkeypatch.setattr(
+        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_link(r).click()
     assert (
@@ -2389,7 +2403,7 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
     _hover_base_word(r)
     assert r.hover_view().tip.key.mined is False  # not mined yet → ⊕
     expression = card_for(r.tokens[0]).expression
-    r.mining_controller.record_expression(expression)
+    r.mining_controller.record_mined_expression(expression)
     r._mark_mined(expression)
     assert r.hover_view().tip.key.mined is True  # tooltip rebuilt with ✓
 
@@ -2688,7 +2702,7 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
 def test_close_cleans_up_tmp_dir():
     """SessionController.close() must remove the mkdtemp directory it created."""
     r = SessionController(FakeIPC())
-    tmp = r.mining_controller._scratch  # lifecycle artifact under test
+    tmp = r.mining_controller._scratch_dir  # lifecycle artifact under test
     assert tmp.exists()
     r.close()
     assert not tmp.exists(), f"tmp dir {tmp} not cleaned up by close()"
@@ -3269,7 +3283,7 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
     )
     _enable_mining(r)
     r.hover = 0
-    r.mine_current()
+    r._handle(C.MINE_MSG)
     assert mined == [(0, "本命")]
 
 
@@ -3282,7 +3296,7 @@ def test_a_reader_with_no_deck_has_no_active_mining_target(monkeypatch):
     monkeypatch.setattr(miner, "mine_token", lambda *_a, **_k: pytest.fail("mined with no deck"))
 
     assert r.mining_controller.active_target is None
-    r.mine_current()  # must be a no-op, not an AttributeError on the missing client
+    r._handle(C.MINE_MSG)  # must be a no-op, not an AttributeError on the missing client
 
 
 def _accrual_reader(ipc, monkeypatch) -> tuple[SessionController, list]:

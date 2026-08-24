@@ -58,12 +58,10 @@ def _reader(cue_count=20, *, active=0, props=None):
 def _enable_mining(reader: SessionController) -> None:
     config = MineConfig()
     identity = reader.mining_controller.desired_spec.identity
-    reader.mining_controller.select_spec(
+    reader.mining_controller.select_mining_spec(
         MiningSpec(identity, {"deck": config.deck, "model": config.model})
     )
-    assert reader.mining_controller.publish_prepared_target(
-        MiningTarget(identity, object(), config)
-    )
+    assert reader.mining_controller.publish_mining_target(MiningTarget(identity, object(), config))
     reader.mining_controller.close_capability()
 
 
@@ -153,7 +151,10 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
     reader, _ipc = _reader(active=3)
     _capture_render(monkeypatch)
     invoked = []
-    monkeypatch.setattr(reader, method, lambda: invoked.append(method))
+    if kind == "mine":
+        monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
+    else:
+        monkeypatch.setattr(reader, method, lambda: invoked.append(method))
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
@@ -175,7 +176,10 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method,
     reader, _ipc = _reader(active=9)  # the live cue has moved on since the row was drawn
     _capture_render(monkeypatch)
     invoked = []
-    monkeypatch.setattr(reader, method, lambda: invoked.append(method))
+    if kind == "mine":
+        monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
+    else:
+        monkeypatch.setattr(reader, method, lambda: invoked.append(method))
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )

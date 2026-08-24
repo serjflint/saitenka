@@ -131,7 +131,7 @@ class MiningPreviewAccess:
 
 @dataclass(frozen=True, slots=True)
 class ForceDuplicate:
-    token: Token
+    token: Token | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,20 +168,20 @@ class MiningController:
         encounter: Callable[[], miner.MiningEncounter],
         apply: Callable[[], miner.MiningApply],
     ) -> None:
-        self._spec = spec
-        self._target: MiningTarget | None = None
+        self._mining_spec = spec
+        self._mining_target: MiningTarget | None = None
         self._lifecycle = lifecycle
         self._max_bulk = max_bulk
         self._anki_ok_ttl = anki_ok_ttl
         self._anki_ping_timeout = anki_ping_timeout
         self._encounter = encounter
         self._apply = apply
-        self._seed = mined_seed.MinedSeedLane()
-        self._probe: CapabilityProbe | None = None
-        self._scratch = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
-        self._store: MinedCardStore | None = None
+        self._mined_seed = mined_seed.MinedSeedLane()
+        self._anki_probe: CapabilityProbe | None = None
+        self._scratch_dir = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
+        self._mined_store: MinedCardStore | None = None
         self._closed = False
-        self._index = MiningIndexState(spec.target_key, 0, SeedStatus.EMPTY, MinedSet())
+        self._mined_index = MiningIndexState(spec.target_key, 0, SeedStatus.EMPTY, MinedSet())
 
     @classmethod
     def for_session(
@@ -217,17 +217,19 @@ class MiningController:
             apply=assembly.apply,
         )
         if anki is not None and config is not None:
-            controller.publish_prepared_target(MiningTarget(identity, anki, config))
+            controller.publish_mining_target(MiningTarget(identity, anki, config))
         return controller
 
     @property
     def desired_spec(self) -> MiningSpec:
-        return self._spec
+        return self._mining_spec
 
     @property
     def active_target(self) -> MiningTarget | None:
-        target = self._target
-        return target if target is not None and target.identity == self._spec.identity else None
+        target = self._mining_target
+        return (
+            target if target is not None and target.identity == self._mining_spec.identity else None
+        )
 
     @property
     def configured(self) -> bool:
@@ -236,41 +238,43 @@ class MiningController:
     @property
     def target_available(self) -> bool:
         target = self.active_target
-        return bool(target is not None and (self._probe is None or self._probe.value is not False))
+        return bool(
+            target is not None and (self._anki_probe is None or self._anki_probe.value is not False)
+        )
 
     @property
     def seed_lane(self) -> mined_seed.MinedSeedLane:
         """Read-only compatibility observation for tests and telemetry."""
-        return self._seed
+        return self._mined_seed
 
     def index_snapshot(self) -> MiningIndexSnapshot:
         return MiningIndexSnapshot(
-            self._index.target_key,
-            self._index.revision,
-            self._index.values.generation,
-            self._index.seed_status,
-            self._index.values.snapshot(),
+            self._mined_index.target_key,
+            self._mined_index.revision,
+            self._mined_index.values.generation,
+            self._mined_index.seed_status,
+            self._mined_index.values.snapshot(),
         )
 
-    def record_expression(self, expression: str) -> bool:
+    def record_mined_expression(self, expression: str) -> bool:
         """Record one current-target expression through the sole mutation seam."""
-        return self._index.values.add(expression)
+        return self._mined_index.values.add(expression)
 
     @property
     def store_exists(self) -> bool:
         from saitenka.app import mined_store
 
-        return self._store is not None or mined_store.db_path().exists()
+        return self._mined_store is not None or mined_store.db_path().exists()
 
     @property
     def store(self) -> MinedCardStore:
-        if self._store is None:
+        if self._mined_store is None:
             from saitenka.app.mined_store import MinedCardStore
 
-            self._store = MinedCardStore()
-        return self._store
+            self._mined_store = MinedCardStore()
+        return self._mined_store
 
-    def select_spec(self, spec: MiningSpec) -> None:
+    def select_mining_spec(self, spec: MiningSpec) -> None:
         """Make old target membership invisible before returning to command processing."""
         target = self.active_target
         if (
@@ -280,34 +284,48 @@ class MiningController:
             and target.config.deck == spec.config.get("deck")
             and target.config.model == (spec.config.get("model") or spec.config.get("preset"))
         ):
-            self._spec = spec
+            self._mining_spec = spec
             return
         self._retire_target_lifecycle()
-        self._spec = spec
-        self._target = None
-        self._index.target_key = spec.target_key
-        self._index.revision += 1
-        self._index.seed_status = SeedStatus.EMPTY
-        self._index.values.replace(())
+        self._mining_spec = spec
+        self._mining_target = None
+        self._mined_index.target_key = spec.target_key
+        self._mined_index.revision += 1
+        self._mined_index.seed_status = SeedStatus.EMPTY
+        self._mined_index.values.replace(())
 
-    def publish_prepared_target(self, target: MiningTarget) -> bool:
+    def publish_mining_target(self, target: MiningTarget) -> bool:
         """Install the sole active target path, refusing late profile work."""
-        config = self._spec.config
+        config = self._mining_spec.config
         if (
             self._closed
-            or target.identity != self._spec.identity
+            or target.identity != self._mining_spec.identity
             or config is None
             or target.config.deck != config.get("deck")
             or target.config.model != (config.get("model") or config.get("preset"))
         ):
             return False
         self._retire_target_lifecycle()
-        self._target = target
-        self._index.target_key = target.key
-        self._index.seed_status = SeedStatus.PENDING
+        self._mining_target = target
+        self._mined_index.target_key = target.key
+        self._mined_index.seed_status = SeedStatus.PENDING
         self._start_probe()
         if self._lifecycle.seed_submit is None:
-            self._index.seed_status = SeedStatus.DEGRADED
+            self._mined_index.seed_status = SeedStatus.DEGRADED
+        return True
+
+    def clear_mining_target(self, identity: MiningIdentity) -> bool:
+        """Settle a matching bundle without mining into an explicit unavailable target."""
+        if self._closed or identity != self._mining_spec.identity:
+            return False
+        self._retire_target_lifecycle()
+        self._mining_target = None
+        self._mined_index.target_key = self._mining_spec.target_key
+        self._mined_index.revision += 1
+        self._mined_index.seed_status = (
+            SeedStatus.DEGRADED if self._mining_spec.enabled else SeedStatus.EMPTY
+        )
+        self._mined_index.values.replace(())
         return True
 
     def _start_probe(self) -> None:
@@ -316,7 +334,7 @@ class MiningController:
             return
         from saitenka.app.anki import anki_reachable
 
-        self._probe = CapabilityProbe(
+        self._anki_probe = CapabilityProbe(
             lambda: anki_reachable(timeout=self._anki_ping_timeout),
             name="anki",
             ttl=self._anki_ok_ttl,
@@ -325,22 +343,22 @@ class MiningController:
             max_retry=max(self._anki_ok_ttl, 8.0),
             submit=self._lifecycle.capability_submit,
         )
-        self._probe.request(force=True)
+        self._anki_probe.request(force=True)
 
     def refresh_capability(self) -> None:
-        if self._probe is None:
+        if self._anki_probe is None:
             return
-        if self._probe.value:
+        if self._anki_probe.value:
             self.request_seed()
-        self._probe.request()
+        self._anki_probe.request()
 
     def request_seed(self) -> None:
         target = self.active_target
         submit = self._lifecycle.seed_submit
-        if target is None or submit is None or not self._seed.idle:
+        if target is None or submit is None or not self._mined_seed.idle:
             return
-        self._seed.inflight = True
-        identity = (target.identity, self._seed.generation, self._index.revision)
+        self._mined_seed.inflight = True
+        identity = (target.identity, self._mined_seed.generation, self._mined_index.revision)
         submit(
             owner=Owner.SESSION,
             identity=identity,
@@ -354,28 +372,28 @@ class MiningController:
         expected = (
             None
             if target is None
-            else (target.identity, self._seed.generation, self._index.revision)
+            else (target.identity, self._mined_seed.generation, self._mined_index.revision)
         )
         if completion.identity != expected or self._lifecycle.stopped():
             return
-        self._seed.inflight = False
+        self._mined_seed.inflight = False
         values = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
         if not isinstance(values, set):
-            self._seed.failures += 1
-            self._index.seed_status = SeedStatus.DEGRADED
-            self._arm_seed_retry(self._seed.backoff_delay())
+            self._mined_seed.failures += 1
+            self._mined_index.seed_status = SeedStatus.DEGRADED
+            self._arm_seed_retry(self._mined_seed.backoff_delay())
             return
-        self._seed.done = True
-        self._seed.failures = 0
-        self._index.seed_status = SeedStatus.READY
-        self._index.values.update(values)
+        self._mined_seed.done = True
+        self._mined_seed.failures = 0
+        self._mined_index.seed_status = SeedStatus.READY
+        self._mined_index.values.update(values)
 
     def _arm_seed_retry(self, delay: float) -> None:
         def due() -> None:
-            self._seed.retry_pending = False
+            self._mined_seed.retry_pending = False
             self.request_seed()
 
-        self._seed.retry_pending = self._lifecycle.schedule_retry(delay, due)
+        self._mined_seed.retry_pending = self._lifecycle.schedule_retry(delay, due)
 
     def mine_target(self) -> int | None:
         if not self.configured:
@@ -399,13 +417,16 @@ class MiningController:
         miner.mine_token(context, token, card=cards[0] if cards else None, animated=animated)
 
     def mine_token(self, token: Token, *, card=None) -> None:
-        context = self._operation()
-        if context is not None:
-            miner.mine_token(context, token, card=card)
+        from saitenka import otel_metrics
+
+        with otel_metrics.traced("anki_mine", source="nested"):
+            context = self._operation()
+            if context is not None:
+                miner.mine_token(context, token, card=card)
 
     def force_duplicate(self, request: ForceDuplicate) -> None:
         context = self._operation()
-        if context is not None:
+        if context is not None and request.token is not None:
             miner.mine_token(context, request.token, force=True)
 
     def bulk_mine(self) -> None:
@@ -439,7 +460,7 @@ class MiningController:
         external = self._apply()
 
         def mark(expression: str) -> None:
-            self.record_expression(expression)
+            self.record_mined_expression(expression)
             external.mark_mined(expression)
 
         apply = miner.MiningApply(
@@ -455,7 +476,7 @@ class MiningController:
             external.record_mined,
         )
         return miner.MiningTransaction(
-            target.anki, target.config, self.store, self._scratch, encounter, apply
+            target.anki, target.config, self.store, self._scratch_dir, encounter, apply
         )
 
     def preview_access(self) -> MiningPreviewAccess:
@@ -480,15 +501,15 @@ class MiningController:
             tuple(target.config.fields.items()),
             note_info,
             lambda name: miner_ui.media_image(target.anki, name),
-            lambda name: miner_ui.media_tempfile(target.anki, name, self._scratch),
+            lambda name: miner_ui.media_tempfile(target.anki, name, self._scratch_dir),
         )
 
     def _retire_target_lifecycle(self) -> None:
         self._lifecycle.cancel_retry()
-        self._seed.restart()
-        if self._probe is not None:
-            self._probe.close()
-            self._probe = None
+        self._mined_seed.restart()
+        if self._anki_probe is not None:
+            self._anki_probe.close()
+            self._anki_probe = None
 
     def close_capability(self) -> None:
         """Retire mining's probe and seed policy in the capability close phase."""
@@ -496,17 +517,17 @@ class MiningController:
 
     def invalidate(self) -> None:
         """Refuse in-flight seed publication before the fallible close ledger starts."""
-        self._seed.invalidate()
+        self._mined_seed.invalidate()
 
     def close_store(self) -> None:
-        if self._store is not None:
-            self._store.close()
+        if self._mined_store is not None:
+            self._mined_store.close()
 
     def retire_artifacts(self, delegate: Callable[[str], bool] | None = None) -> None:
         try:
-            if delegate is not None and delegate(str(self._scratch)):
+            if delegate is not None and delegate(str(self._scratch_dir)):
                 return
-            shutil.rmtree(self._scratch, ignore_errors=True)
+            shutil.rmtree(self._scratch_dir, ignore_errors=True)
         finally:
             self._closed = True
 

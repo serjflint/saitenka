@@ -84,6 +84,11 @@ class CardSource:
     toast: Callable[..., None]
 
 
+def duplicate_token(panel: PreviewPanel) -> Token | None:
+    """Expose the preview-owned token selected by the duplicate affordance."""
+    return panel.dup_tok
+
+
 def _strip_tags(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s).strip()
 

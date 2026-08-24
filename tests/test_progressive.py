@@ -106,10 +106,10 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
         r.mining_controller.request_seed()
         assert old_started.wait(1)
         identity = MiningIdentity("replacement", 1)
-        r.mining_controller.select_spec(
+        r.mining_controller.select_mining_spec(
             MiningSpec(identity, {"deck": config.deck, "model": config.model})
         )
-        r.mining_controller.publish_prepared_target(MiningTarget(identity, new_anki, config))
+        r.mining_controller.publish_mining_target(MiningTarget(identity, new_anki, config))
         r.mining_controller.request_seed()
         await_ready(
             lambda: bool(r.mining_controller.index_snapshot()),

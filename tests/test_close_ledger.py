@@ -104,7 +104,7 @@ def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
 @pytest.mark.parametrize("attribute", ["lifecycle_timers", "lifecycle_surfaces"])
 def test_a_late_participant_failing_does_not_lose_the_scratch_directory(attribute: str) -> None:
     reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
-    scratch = reader.mining_controller._scratch  # lifecycle artifact under test
+    scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
 
     class Wedged:
         def close(self) -> None:
@@ -269,7 +269,7 @@ def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() ->
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
-    scratch = reader.mining_controller._scratch  # lifecycle artifact under test
+    scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
     assert scratch.exists()  # negative control
     try:
         ledger = reader.close()

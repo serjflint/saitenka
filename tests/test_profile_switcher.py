@@ -364,6 +364,7 @@ def test_late_dependency_result_cannot_overwrite_selected_profile(request):
 def test_profile_environment_refuses_out_of_order_dependency_publication(request, monkeypatch):
     from saitenka.app import miner
     from saitenka.app.anki import MineConfig
+    from saitenka.app.bindings import MINE_MSG
     from saitenka.app.mining_controller import MiningIdentity, MiningSpec, MiningTarget
     from saitenka.app.reader_deps import DependencyBundle
 
@@ -433,7 +434,7 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
     reader.set_subtitle("chat")
 
-    reader.mine_current()
+    reader._handle(MINE_MSG)
 
     assert anki.added[0]["deckName"] == f"Deck::{_FR.name}"
 
@@ -475,6 +476,32 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
     assert reader.mining_controller.desired_spec.enabled is False
     assert reader.mining_controller.active_target is None
     assert reader.mining_controller.index_snapshot().values == set()
+
+
+def test_matching_failed_dependency_bundle_clears_the_active_mining_target(request):
+    from saitenka.app.anki import MineConfig
+    from saitenka.app.mining_controller import SeedStatus
+    from saitenka.app.reader_deps import DependencyBundle
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    reader = SessionController(
+        ipc,
+        renderer=NullRenderer(),
+        anki=object(),
+        mine_cfg=MineConfig(deck="Deck::default"),
+    )
+    request.addfinalizer(reader.close)
+    identity = reader.mining_controller.desired_spec.identity
+    reader.mining_controller.record_mined_expression("old")
+
+    reader._apply_deps(DependencyBundle(identity, failed=True))
+
+    snapshot = reader.mining_controller.index_snapshot()
+    assert reader.mining_controller.active_target is None
+    assert snapshot.values == set()
+    assert snapshot.seed_status is SeedStatus.DEGRADED
 
 
 # --- the cache-clear vs episode-warm race (the carried P2) -----------------------------------------
