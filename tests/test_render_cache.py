@@ -66,7 +66,7 @@ class _DeferredRenderSubmitter:
 
 class _DeferredEngagedSubmitter:
     def __init__(self, reader):
-        self.backend = tooltip_engaged.ReaderEngagedBackend(reader)
+        self.run = reader.tooltip_controller.run_engaged
         self.calls = []
         self.reject_next = False
 
@@ -79,11 +79,7 @@ class _DeferredEngagedSubmitter:
 
     def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
         call = self.calls.pop(0)
-        result = (
-            tooltip_engaged.run_engaged(call["request"], threading.Event(), self.backend)
-            if run
-            else None
-        )
+        result = self.run(call["request"]) if run else None
         call["on_finished"](
             EffectFinished(
                 EffectId(1),
@@ -98,7 +94,7 @@ class _DeferredEngagedSubmitter:
 
 def _enable_engaged(reader):
     submitter = _DeferredEngagedSubmitter(reader)
-    reader._engaged_tooltip_submit = submitter
+    reader.tooltip_controller.engaged_submitter = submitter
     return submitter
 
 
@@ -394,7 +390,7 @@ def _nested_reader(*, two_words: bool = False):
     r = Reader(
         FakeIPC(), dict_set=_ScrollTallDS(), options=ReaderOptions(prefetch=True), scan_delay=0.0
     )
-    r._render_ahead_submit = _DeferredRenderSubmitter()
+    r.tooltip_controller.render_ahead_submitter = _DeferredRenderSubmitter()
     r.osd = (3840, 2160)  # 4K → tip_scale.raster 2.0, so _blit_native takes the crisp path
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
@@ -473,7 +469,7 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
         r.tip_ports, r.tip.nest, r.tip.nest.view_h // 2
     )  # soft-first + records a render-ahead
     assert r.tip.nest.crisp_pending
-    r._render_ahead_submit.finish_all()
+    r.tooltip_controller.render_ahead_submitter.finish_all()
 
     rasters = assert_no_interactive_raster(
         r.tip.nest, lambda: tooltip_panel.apply_pending_crisp(r.tip_ports, r.tip.nest)
@@ -492,7 +488,7 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     )
     nest = r.tip.nest.state
     tooltip_panel.scroll_view(r.tip_ports, r.tip.nest, max(1, r.tip.nest.view_h // 3))
-    pending = r._render_ahead.pending
+    pending = r.tooltip_controller.render_ahead.pending
     assert pending is not None
     req = pending[1]
     assert req is not None and req.panel is nest  # the request targets the nested panel
@@ -501,7 +497,7 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
 def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
     """Drive a flick + one worker render-ahead pass, recording every ``scale`` the panel's render_ahead
     was warmed at — the observable of #297's fix (raw bands warmed ahead, not only native)."""
-    r._render_ahead_submit.finish_all()
+    r.tooltip_controller.render_ahead_submitter.finish_all()
     seen: list[float] = []
     st = view.state
     assert st is not None
@@ -513,7 +509,7 @@ def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
 
     monkeypatch.setattr(st, "render_ahead", spy)
     tooltip_panel.scroll_view(r.tip_ports, view, view.view_h)  # flick → records a render-ahead
-    r._render_ahead_submit.finish_all()
+    r.tooltip_controller.render_ahead_submitter.finish_all()
     return seen
 
 
@@ -730,7 +726,7 @@ def test_preloop_demo_hover_is_ready_with_a_real_runtime_gateway(tmp_path, monke
     try:
         r.prepare_hover_blocking(i)
         assert r.tip.view.state is not None
-        assert r._engaged_tooltip.inflight is None
+        assert r.tooltip_controller.engaged.inflight is None
     finally:
         r.close()
         gateway.close()
@@ -891,7 +887,7 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     )
 
     assert r.tip.view.state is None
-    assert r._engaged_tooltip.pending is None
+    assert r.tooltip_controller.engaged.pending is None
 
 
 # --- nested scan popup: the same tier-3 off-thread treatment (PR A) ------------------------------
@@ -929,7 +925,10 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
         r.tip_ports, r.panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
     )
     assert r.tip.nest.state is not None  # shown synchronously
-    assert r._engaged_tooltip.pending is None and r._engaged_tooltip.inflight is None
+    assert (
+        r.tooltip_controller.engaged.pending is None
+        and r.tooltip_controller.engaged.inflight is None
+    )
 
 
 def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch):
@@ -985,7 +984,7 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
         )
         return True
 
-    r._interaction_metadata_submit = submit_metadata
+    r.tooltip_controller.metadata_submitter = submit_metadata
     submitter = _enable_engaged(r)
     _i, tok, _inflected, _mined = _first_content(r)
     r.tip.view.xy, r.tip.view.scroll = (0, 0), 0
@@ -1086,7 +1085,7 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
     r.prefetch = False
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
-    assert r._engaged_tooltip.inflight is None
+    assert r.tooltip_controller.engaged.inflight is None
     assert len(r.interaction.tip_nav.back) == 1  # synchronous swap pushed the previous view
 
 
@@ -1130,7 +1129,7 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
         )
     )
     r.prefetch_state.gen += 1
-    r._cancel_engaged_tooltip()
+    r.tooltip_controller.cancel_current_work()
     assert r._request_engaged_tooltip(tooltip_engaged.NavigateRequest(tok.surface, id(old)))
     submitter.reject_next = True
 
@@ -1150,7 +1149,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     call = submitter.calls.pop(0)
-    result = tooltip_engaged.run_engaged(call["request"], threading.Event(), submitter.backend)
+    result = submitter.run(call["request"])
     # A word switch in the defer window → a genuinely different panel object under _tip_state.
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
     r.tip.view.state = r._panel_for(

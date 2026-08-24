@@ -1,15 +1,14 @@
 {
   "counts": {
     "alias": 1,
-    "delegated": 1,
-    "delegator": 94,
-    "derived": 45,
-    "init_lines": 459,
+    "delegator": 97,
+    "derived": 46,
+    "init_lines": 453,
     "self_delegator": 6,
-    "slice": 10,
-    "substantive": 187,
-    "substantive_lines": 2353,
-    "total": 344
+    "slice": 11,
+    "substantive": 181,
+    "substantive_lines": 2211,
+    "total": 342
   },
-  "reason": "one port line: the geometry owner can ask for a rebuild, not only a redraw, which is what lets a late font verdict produce the coverage masks the raster device needs"
+  "reason": ""
 }

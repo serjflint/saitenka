@@ -6,9 +6,9 @@ import time
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app import hover_metadata
+from saitenka.app import cue_annotation, hover_metadata, tooltip, tooltip_controller
 from saitenka.app.controller import Reader
-from saitenka.app.hover_metadata import HoverMetadataKey, HoverMetadataRequest
+from saitenka.app.hover_metadata import HoverMetadata, HoverMetadataKey, HoverMetadataRequest
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
@@ -70,7 +70,7 @@ def test_metadata_worker_resolves_off_the_event_thread():
     gateway = runtime_gateway(ipc)
     reader = Reader(ipc, dict_set=Dictionary())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
-    submitter = reader._interaction_metadata_submit
+    submitter = reader.tooltip_controller.metadata_submitter
     assert submitter is not None
     submitter(
         owner=Owner.INTERACTION,
@@ -91,6 +91,102 @@ def test_metadata_worker_resolves_off_the_event_thread():
         gateway.close()
 
 
+def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
+    owner_thread = threading.get_ident()
+    resolved_thread = None
+    applied_thread = None
+
+    class Dictionary:
+        def has_term(self, _term: str) -> bool:
+            nonlocal resolved_thread
+            resolved_thread = threading.get_ident()
+            return False
+
+    def apply_metadata(*_args) -> None:
+        nonlocal applied_thread
+        applied_thread = threading.get_ident()
+
+    from util import runtime_gateway
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc, dict_set=Dictionary())
+    monkeypatch.setattr(tooltip_controller.tooltip, "apply_hover_metadata", apply_metadata)
+
+    try:
+        assert reader._request_interaction_metadata(_request(0, Dictionary()))
+        deadline = time.monotonic() + 1
+        while applied_thread is None and time.monotonic() < deadline:
+            reader._drain_events()
+            time.sleep(0.001)
+
+        assert resolved_thread is not None and resolved_thread != owner_thread
+        assert applied_thread == owner_thread
+    finally:
+        reader.close()
+        gateway.close()
+
+
+def test_metadata_completion_refuses_facts_that_changed_after_submission():
+    reader = Reader(FakeIPC())
+    reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
+    reader.hover = 0
+    reader.tip.view.job_id = reader.tip.jobs.begin("tooltip")
+    submitted = []
+
+    def submitter(**kwargs):
+        submitted.append(kwargs)
+        return True
+
+    reader.tooltip_controller.metadata_submitter = submitter
+    tooltip._request_hover_metadata(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
+    original = submitted[0]["request"]
+
+    reader.session.mined.add("__newly-mined__")
+    reader.prefetch_state.gen += 1
+    reader._dependency_generation += 1
+    reader._current_cue_identity = cue_annotation.CueIdentity(
+        1,
+        "track-b",
+        "primary",
+        "犬",
+        1.0,
+        2.0,
+    )
+    submitted[0]["on_finished"](
+        EffectFinished(
+            EffectId(1),
+            Owner.INTERACTION,
+            submitted[0]["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=HoverMetadata(
+                original.key,
+                phrase_terms=("猫",),
+                phrase_span=(0, 1),
+                mined=False,
+                group_mined=(),
+            ),
+        )
+    )
+
+    assert len(submitted) == 1
+    assert reader.interaction.hovered_word_meta.terms == ()
+    assert reader.tip.view.state is None
+
+
+def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch):
+    reader = Reader(FakeIPC())
+
+    def unexpected_apply():
+        raise AssertionError("uncorrelated completion assembled tooltip apply ports")
+
+    monkeypatch.setattr(reader, "_tooltip_apply", unexpected_apply)
+
+    reader._finish_interaction_metadata(
+        EffectFinished(EffectId(1), Owner.INTERACTION, 999, EffectOutcome.SUCCEEDED)
+    )
+
+
 def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypatch):
     class Dictionary:
         def has_term(self, _term: str) -> bool:
@@ -101,7 +197,7 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
     reader.sub_origin = (0, 0)
     reader.boxes = [WordBox(0, 100, 100, 40, 40)]
     submitted = []
-    reader._interaction_metadata_submit = lambda **kwargs: (
+    reader.tooltip_controller.metadata_submitter = lambda **kwargs: (
         submitted.append(kwargs["request"]) or True
     )
     monkeypatch.setattr(reader, "draw_subtitle", lambda: None)

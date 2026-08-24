@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
@@ -108,34 +108,31 @@ class EngagedBackend(Protocol):
     def open(self, request: OpenRequest, should_cancel: Callable[[], bool]) -> None: ...
 
 
-class EngagedHost(Protocol):
+@dataclass(frozen=True, slots=True)
+class EngagedBuildPorts:
+    """The panel/cache capabilities available to engaged background work."""
+
     nested_max_frac: float
-    tip_scale: TipScale
-
-    def _panel_for(self, token, inflected, **kwargs) -> Panel: ...
-
-    def _worker_seed_head(self, panel, token, inflected, **kwargs) -> bool: ...
-
-    def _precompose_head(self, panel, token, inflected, **kwargs) -> None: ...
-
-    def _mem_fill(self, token, inflected, **kwargs) -> None: ...
-
-    def _cap_for(self, fraction: float) -> int: ...
-
-    def _navigated_panel(self, query: str) -> Panel | None: ...
-
-    def _engaged_open_panel(self, source: str, query: str, **kwargs) -> tuple | None: ...
+    tip_scale: Callable[[], TipScale]
+    panel_for: Callable[..., Panel]
+    worker_seed_head: Callable[..., bool]
+    precompose_head: Callable[..., None]
+    mem_fill: Callable[..., None]
+    cap_for: Callable[[float], int]
+    navigated_panel: Callable[[str], Panel | None]
+    engaged_open_panel: Callable[..., tuple | None]
 
 
-class ReaderEngagedBackend:
-    """Background rendering adapter over the panel/cache seams."""
+class PortsEngagedBackend:
+    """Background rendering adapter over explicit panel/cache capabilities."""
 
-    def __init__(self, host: object) -> None:
-        self._reader = cast("EngagedHost", host)
+    def __init__(self, ports: EngagedBuildPorts) -> None:
+        self._ports = ports
 
     def hover(self, request: HoverRequest, should_cancel: Callable[[], bool]) -> None:
-        reader = self._reader
-        panel = reader._panel_for(
+        ports = self._ports
+        scale = ports.tip_scale()
+        panel = ports.panel_for(
             request.token,
             request.inflected,
             min_h=request.cap,
@@ -146,14 +143,14 @@ class ReaderEngagedBackend:
         if should_cancel():
             return
         if not request.nested:
-            if not reader._worker_seed_head(
+            if not ports.worker_seed_head(
                 panel,
                 request.token,
                 request.inflected,
                 mined=request.mined,
                 cap=request.cap,
             ):
-                reader._precompose_head(
+                ports.precompose_head(
                     panel,
                     request.token,
                     request.inflected,
@@ -161,45 +158,44 @@ class ReaderEngagedBackend:
                     cap=request.cap,
                 )
                 if not should_cancel():
-                    reader._mem_fill(request.token, request.inflected, mined=request.mined)
+                    ports.mem_fill(request.token, request.inflected, mined=request.mined)
             return
-        view_h = min(panel.full_height, reader._cap_for(reader.nested_max_frac))
+        view_h = min(panel.full_height, ports.cap_for(ports.nested_max_frac))
         if view_h <= 0 or should_cancel():
             return
-        scale = reader.tip_scale.raster
-        if scale > 1.0:
-            panel.viewport(0, view_h, overscan=view_h, scale=scale)
+        if scale.raster > 1.0:
+            panel.viewport(0, view_h, overscan=view_h, scale=scale.raster)
         if not should_cancel():
             panel.viewport(0, view_h, overscan=view_h)
 
     def navigate(self, request: NavigateRequest, should_cancel: Callable[[], bool]) -> Panel | None:
-        reader = self._reader
-        panel = reader._navigated_panel(request.query)
+        ports = self._ports
+        scale = ports.tip_scale()
+        panel = ports.navigated_panel(request.query)
         if panel is None or should_cancel():
             return panel
-        panel.render_head(reader.tip_scale.cap)
-        view_h = min(panel.full_height, reader.tip_scale.cap)
+        panel.render_head(scale.cap)
+        view_h = min(panel.full_height, scale.cap)
         if view_h <= 0 or should_cancel():
             return panel
-        scale = reader.tip_scale.raster
-        if scale > 1.0:
-            panel.viewport(0, view_h, overscan=view_h, scale=scale)
+        if scale.raster > 1.0:
+            panel.viewport(0, view_h, overscan=view_h, scale=scale.raster)
         if not should_cancel():
             panel.viewport(0, view_h, overscan=view_h)
         return panel
 
     def open(self, request: OpenRequest, should_cancel: Callable[[], bool]) -> None:
-        reader = self._reader
-        built = reader._engaged_open_panel(request.source, request.query, mined=request.mined)
+        ports = self._ports
+        scale = ports.tip_scale()
+        built = ports.engaged_open_panel(request.source, request.query, mined=request.mined)
         if built is None or should_cancel():
             return
         panel = built[0]
-        view_h = min(panel.full_height, reader._cap_for(reader.nested_max_frac))
+        view_h = min(panel.full_height, ports.cap_for(ports.nested_max_frac))
         if view_h <= 0:
             return
-        scale = reader.tip_scale.raster
-        if scale > 1.0:
-            panel.viewport(0, view_h, overscan=view_h, scale=scale)
+        if scale.raster > 1.0:
+            panel.viewport(0, view_h, overscan=view_h, scale=scale.raster)
         if not should_cancel():
             panel.viewport(0, view_h, overscan=view_h)
 

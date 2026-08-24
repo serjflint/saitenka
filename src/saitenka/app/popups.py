@@ -4,8 +4,8 @@
 rows plus its reading. ``PopupView`` is the per-popup VIEW state — overlay id, anchor, viewport,
 scroll, screen rect, linger timer, and its own soft→crisp flags. BOTH the base tooltip (``TooltipState.
 view``) and the nested scan popup (``TooltipState.nest``) are a ``PopupView`` now, so they share one
-blit/scroll/crisp path; the base's historical ``_tip_*`` names resolve onto ``tip.view.*`` through the
-Reader's ``Delegated`` shims (the hover FSM and its tests stay untouched).
+blit/scroll/crisp path. ``TooltipController`` owns that shared state; ``Reader.tip`` is its read-only
+surface projection.
 """
 
 from __future__ import annotations
@@ -547,17 +547,17 @@ class TooltipState:
     The same cut the picker and the sidebar make: `Owner.INTERACTION`'s slice holds what was
     *decided* — the hysteresis, the back-stack, the copy pulse, the pause claim, the hovered word's
     answer — and this holds the two rendered popups, the source token the crisp pass re-renders
-    from, the LRU panel cache and the build lanes. None of those can live in a frozen slice: a
+    from, the LRU panel cache and job telemetry. None of those can live in a frozen slice: a
     reducer carrying a cache makes the state differ from itself depending on what had been drawn,
-    and nothing here can release a job lane.
+    while the owning ``TooltipController`` retains the concrete background protocols and their
+    lifecycle.
 
-    Grouped off the ``Reader`` god-object (#30)."""
+    Owned by ``TooltipController``; ``Reader.tip`` is a read-only projection."""
 
     def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
         """`cache_lock` is shared with the Reader's other cache accounting, so it is injected."""
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
-        # PopupView type + blit machinery as the nested popup. The historical flat names (_tip_state,
-        # _tip_scroll, …) keep resolving here through the Reader's Delegated("tip.view", …) shims.
+        # PopupView type + blit machinery as the nested popup.
         self.view = PopupView(OverlayId.TIP)
         self.nest = PopupView(
             OverlayId.NESTED

@@ -195,6 +195,10 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     )
     from saitenka.runtime.jobs import NoSessionRuntime
 
+    class TooltipOwner:
+        def __init__(self) -> None:
+            self.state = TooltipState()
+
     interaction = InteractionContext()
     # Two of the five are slice features now, so the context is given their stores rather than
     # their states — and `NoSessionRuntime` is how a transport-less stand-in says "no reactor here".
@@ -205,7 +209,7 @@ def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     interaction.sidebar_panel = SidebarPanel()
     interaction.preview_store = PreviewStore(NoSessionRuntime())
     interaction.preview_panel = PreviewPanel()
-    interaction.tip = TooltipState()
+    interaction.tooltip = TooltipOwner()
 
     assert wants_mouse_capture(interaction) is False
 

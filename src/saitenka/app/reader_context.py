@@ -4,14 +4,13 @@ An mpv session outlives the file it plays; a hover outlives nothing. Grouping Re
 is born and dies* — session ⊃ episode ⊃ interaction — is what makes a re-slot (swap the episode on a
 file change, #100) correct by construction: rebind the context and no prior-episode state can leak. This
 module owns the **episode** tier (and its cohesive sub-clusters, e.g. ``SubtitleSource``) plus the
-``Delegated`` descriptor the Reader uses to expose a context's fields under their historical
-``reader.<field>`` names while call sites migrate onto ``reader.episode.<field>``.
+feature-owned collaborators whose state shares the interaction lifetime.
 """
 
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.mined_set import MinedSet
 from saitenka.app.popups import hovered_meta
@@ -53,37 +52,6 @@ if TYPE_CHECKING:
     from saitenka.subtitles import Cue, CueIndex
 
 
-class Delegated[T]:
-    """A typed attribute that reads/writes ``obj.<context>.<field>`` — ``<context>`` may be a dotted
-    path (e.g. ``episode.subtitle``). The stable seam that lets the Reader own its state as lifetime
-    contexts without breaking the ``reader.<field>`` call sites."""
-
-    __slots__ = ("_field", "_parts")
-
-    def __init__(self, context: str, field: str) -> None:
-        self._parts = context.split(
-            "."
-        )  # precomputed once — the hot path walks this, never re-splits
-        self._field = field
-
-    def _owner(self, obj: object) -> object:
-        for part in self._parts:
-            obj = getattr(obj, part)
-        return obj
-
-    @overload
-    def __get__(self, obj: None, _objtype: type | None = None) -> Delegated[T]: ...
-    @overload
-    def __get__(self, obj: object, _objtype: type | None = None) -> T: ...
-    def __get__(self, obj: object | None, _objtype: type | None = None) -> Delegated[T] | T:
-        if obj is None:
-            return self  # class-level access (e.g. introspection) yields the descriptor
-        return getattr(self._owner(obj), self._field)
-
-    def __set__(self, obj: object, value: T) -> None:
-        setattr(self._owner(obj), self._field, value)
-
-
 class SubtitleSource:
     """The background provider-fetch and retry handshake for one file.
 
@@ -94,6 +62,13 @@ class SubtitleSource:
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()
+
+
+class TooltipStateOwner(Protocol):
+    """The interaction context needs only the tooltip surface state."""
+
+    @property
+    def state(self) -> TooltipState: ...
 
 
 class EpisodeContext:
@@ -126,10 +101,9 @@ class InteractionContext:
     here is what lets a surface hook stop taking the whole host to reach one of them.
     """
 
-    #: Assigned by `Reader.__init__` through the `Delegated` descriptors, because two of the four need
-    #: constructor arguments this container has no business knowing. Declared here so the container
-    #: states its own shape rather than acquiring it from whoever writes first.
-    tip: TooltipState
+    #: Assigned by `Reader.__init__`; the owner needs runtime/build collaborators this lifetime
+    #: container has no business constructing.
+    tooltip: TooltipStateOwner
 
     #: The surfaces that have become slice features ask for their state rather than holding it.
     #: Reached the same way as the others — `interaction.help`, `interaction.sub_picker` — so
@@ -166,6 +140,11 @@ class InteractionContext:
     @property
     def tip_nav(self) -> TipNavState:
         return self.nav_store.current
+
+    @property
+    def tip(self) -> TooltipState:
+        """Read-only surface projection of the tooltip feature's owned state."""
+        return self.tooltip.state
 
     @property
     def copy_pulse(self) -> PulseState:
