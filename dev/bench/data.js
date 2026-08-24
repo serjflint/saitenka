@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787549941967,
+  "lastUpdate": 1787553598363,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10053,6 +10053,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: worst frame",
             "value": 5.190301,
             "range": "3 replicas; min 4.17243; max 9.91334; MAD 1.01787; worst 9.91334",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 0.909312,
+            "range": "3 replicas; min 0.909312; max 0.909312; MAD 0",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "663188e33e1e8ec4ba4142a5a295c9637b4dc006",
+          "message": "Merge pull request #421 from serjflint/refactor/tooltip-controller-pilot\n\nrefactor(app): give tooltip work a bounded owner",
+          "timestamp": "2026-08-24T05:37:57Z",
+          "url": "https://github.com/serjflint/saitenka/commit/663188e33e1e8ec4ba4142a5a295c9637b4dc006"
+        },
+        "date": 1787553597143,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 3.811045,
+            "range": "3 replicas; min 3.62527; max 4.00899; MAD 0.185772; worst 4.00899",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 6.649479,
+            "range": "3 replicas; min 4.48052; max 19.8325; MAD 2.16896; worst 19.8325",
             "unit": "ms"
           },
           {
