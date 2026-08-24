@@ -101,14 +101,15 @@ ignore_imports =
     saitenka.render.layout_backend -> taffylite
 
 [importlinter:contract:svg-images-chokepoint]
-name = only app.dictdb may import the optional resvglite SVG rasterizer
+name = only app.dictdb may import the optional resvg-py SVG rasterizer
 type = forbidden
 source_modules =
     saitenka
 forbidden_modules =
+    resvg_py
     resvglite
 ignore_imports =
-    saitenka.app.dictdb -> resvglite
+    saitenka.app.dictdb -> resvg_py
 
 [importlinter:contract:libasslite-boundary]
 name = production code cannot import the experimental libass binding yet

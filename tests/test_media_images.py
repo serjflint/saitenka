@@ -1,12 +1,13 @@
 """Inline SVG-image gaiji (#283): import-time rasterization + the render-side sprite / ▢ fallback.
 
-Split by dependency: the render-side tests inject a media map directly (no resvglite needed, so they
-run on the default gate env); the import/preload tests `importorskip("resvglite")` because a default
+Split by dependency: the render-side tests inject a media map directly (no rasterizer needed, so they
+run on the default gate env); the import/preload tests `importorskip("resvg_py")` because a default
 install never populates the media table — the renderer just falls back to ▢.
 """
 
 from __future__ import annotations
 
+import gzip
 import logging
 from io import BytesIO
 
@@ -19,7 +20,7 @@ from saitenka.render.flow import ImgBox
 from saitenka.render.sc_adapter import collect_img_paths, walk
 
 # A monochrome gaiji: one black square on transparent — the common 外字 shape. Stored as a PNG so the
-# render-side tests don't need resvglite (the walker consumes decoded image bytes, not SVG).
+# render-side tests don't need the rasterizer (the walker consumes decoded image bytes, not SVG).
 _SVG = (
     b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
     b'<rect x="10" y="10" width="80" height="80" fill="black"/></svg>'
@@ -110,7 +111,7 @@ def test_missing_media_falls_back_to_box():
 
 
 def test_import_rasterizes_svg_media_into_the_db(tmp_path):
-    pytest.importorskip("resvglite")
+    pytest.importorskip("resvg_py")
     zp = dicthelp.term_zip(
         tmp_path / "d.zip",
         "MediaDict",
@@ -124,7 +125,7 @@ def test_import_rasterizes_svg_media_into_the_db(tmp_path):
 
 
 def test_definition_carries_preloaded_media(tmp_path):
-    pytest.importorskip("resvglite")
+    pytest.importorskip("resvg_py")
     zp = dicthelp.term_zip(
         tmp_path / "d.zip",
         "MediaDict",
@@ -140,7 +141,7 @@ def test_definition_carries_preloaded_media(tmp_path):
 
 
 def test_one_bad_svg_does_not_abort_the_import(tmp_path):
-    pytest.importorskip("resvglite")
+    pytest.importorskip("resvg_py")
     zp = dicthelp.term_zip(
         tmp_path / "d.zip",
         "MediaDict",
@@ -155,7 +156,7 @@ def test_one_bad_svg_does_not_abort_the_import(tmp_path):
 def test_text_gaiji_rasterizes_with_its_glyph(tmp_path):
     # #283 regression: a <text> badge (漢) must store MORE ink than the same SVG rendered font-less —
     # i.e. the glyph is drawn, not an empty box. Metamorphic oracle: with-font ink > box-only ink.
-    resvglite = pytest.importorskip("resvglite")
+    resvg_py = pytest.importorskip("resvg_py")
     zp = dicthelp.term_zip(
         tmp_path / "d.zip",
         "MediaDict",
@@ -164,14 +165,34 @@ def test_text_gaiji_rasterizes_with_its_glyph(tmp_path):
     )
     d = dicthelp.load_dict(zp)
     stored = d.db.media_for(d.dict_id, ["m/kan.svg"])["m/kan.svg"]
-    box_only, _w, _h = resvglite.render_svg(_TEXT_SVG, 64)  # no fonts → border only (the old tofu)
+    # No fonts and no system fallback → border only (the old tofu), same knobs _rasterize_svg uses.
+    box_only = resvg_py.svg_to_bytes(
+        svg_string=_TEXT_SVG.decode(), height=64, skip_system_fonts=True
+    )
     assert _opaque(stored) > _opaque(box_only)  # the 漢 glyph adds ink beyond the bare box
+
+
+def test_gzipped_svg_rasterizes_like_its_plain_form(tmp_path):
+    # Yomitan dictionaries carry gzipped payloads under plain `.svg` names. usvg unwrapped those itself,
+    # so decoding the bytes as text instead would turn a renderable gaiji into a silent ▢. Metamorphic:
+    # compressing the input must not change a pixel.
+    pytest.importorskip("resvg_py")
+    zp = dicthelp.term_zip(
+        tmp_path / "d.zip",
+        "MediaDict",
+        [("語", "ご", [{"type": "image", "path": "m/plain.svg"}])],
+        media={"m/plain.svg": _SVG, "m/gz.svg": gzip.compress(_SVG)},
+    )
+    d = dicthelp.load_dict(zp)
+    got = d.db.media_for(d.dict_id, ["m/plain.svg", "m/gz.svg"])
+    assert set(got) == {"m/plain.svg", "m/gz.svg"}  # the gzipped one is not skipped
+    assert _opaque(got["m/gz.svg"]) == _opaque(got["m/plain.svg"])
 
 
 def test_malformed_svg_is_logged_loudly(tmp_path, caplog):
     # "loud errors on failed renders": a skipped SVG must warn (per-file + a per-dict summary), not
     # vanish at debug — the silent ▢ is exactly what hid #283.
-    pytest.importorskip("resvglite")
+    pytest.importorskip("resvg_py")
     zp = dicthelp.term_zip(
         tmp_path / "d.zip",
         "MediaDict",
@@ -181,5 +202,5 @@ def test_malformed_svg_is_logged_loudly(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="saitenka.app.dictdb"):
         dicthelp.load_dict(zp)
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
-    assert any("resvglite failed on m/bad.svg" in m for m in warnings)  # the per-file warning
+    assert any("resvg-py failed on m/bad.svg" in m for m in warnings)  # the per-file warning
     assert any("failed to rasterize" in m for m in warnings)  # the per-dict summary

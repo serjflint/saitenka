@@ -157,7 +157,7 @@ you have. To change the set, `uv tool install --reinstall "saitenka[<extra>]"`:
 | *(none)* / `[minimal]` | the bare overlay — bring your own Yomitan dictionaries | Apache-2.0 |
 | `[jmdict]` | the JMdict English fallback (hover + mined-card glosses when a word isn't in your dicts) | Apache-2.0 |
 | `[deinflect]` | the 🧩 inflection-chain display (Yomitan-derived) | **GPL-3.0** |
-| `[images]` | inline dictionary images, incl. SVG gaiji (resvglite) | Apache-2.0 |
+| `[images]` | inline dictionary images, incl. SVG gaiji (resvg-py) | Apache-2.0 |
 | `[layout-engine]` | optional Rust flexbox tooltip layout backend (taffylite) | Apache-2.0 |
 | `[telemetry]` | OpenTelemetry spans/metrics for performance observability | Apache-2.0 |
 | `[linux-keyring]` | Linux Secret Service storage for the jimaku key on Python 3.15+ | Apache-2.0 |

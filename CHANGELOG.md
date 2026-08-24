@@ -7,6 +7,15 @@ logs.
 
 ## [Unreleased]
 
+### Changed
+
+- **The `images` extra now installs [`resvg-py`](https://github.com/baseplate-admin/resvg-py) instead
+  of the in-tree `resvglite`.** Upstream now covers the same wheel matrix and error contract Saitenka
+  needed the local binding for, so there is no reason to keep maintaining a second one. Gaiji render
+  slightly heavier: `resvg-py` embeds resvg 0.48, which applies variable-font weights the 0.45 build
+  ignored, so the bundled Noto draws at its real weight instead of thin. `resvglite/` is retained
+  in-tree for now but is no longer installed by any extra.
+
 ## [4.0.0] - 2026-08-24
 
 ### Added

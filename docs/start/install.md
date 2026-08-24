@@ -67,7 +67,7 @@ Apache-2.0 — see [LICENSING.md](https://github.com/serjflint/saitenka/blob/mai
 | *(none)* / `minimal` | the bare overlay — bring your own Yomitan dictionaries | Apache-2.0 |
 | `jmdict` | JMdict English fallback (hover + mined-card glosses when a word isn't in your dicts) | Apache-2.0 |
 | `deinflect` | the 🧩 inflection-chain display (Yomitan-derived) | **GPL-3.0** |
-| `images` | inline dictionary images, incl. SVG gaiji (resvglite) | Apache-2.0 |
+| `images` | inline dictionary images, incl. SVG gaiji (resvg-py) | Apache-2.0 |
 | `layout-engine` | optional Rust flexbox tooltip layout backend (taffylite) | Apache-2.0 |
 | [`subtitle-geometry`](../usage/native-subtitles.md) | experimental mpv-native ASS interaction through a system libass | Apache-2.0 core + MIT wrapper |
 | [`subtitle-geometry-bundle`](../usage/native-subtitles.md) | the same mode with a self-contained native runtime | Separate native notices |

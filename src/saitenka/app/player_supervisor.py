@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 REAP_TIMEOUT_S = 5.0
 
 #: Teardown is done and every store is flushed by the time this arms, but a lingering native thread
-#: (pyo3 taffylite/resvglite) can still keep the free-threaded interpreter from exiting, hanging the
+#: (pyo3 taffylite/resvg-py) can still keep the free-threaded interpreter from exiting, hanging the
 #: quit intermittently. Daemon, so a healthy exit never waits for it.
 WATCHDOG_DELAY_S = 3.0
 
