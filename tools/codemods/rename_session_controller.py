@@ -40,9 +40,9 @@ TEXT_EXCLUSIONS = {
     "tools/codemods/rename_session_controller.py",
 }
 TEXT_RENAMES = (
+    (re.compile(r"controller\.Reader\b"), "session_controller.SessionController"),
     (re.compile(r"saitenka\.app\.controller"), "saitenka.app.session_controller"),
     (re.compile(r"app/controller\.py"), "app/session_controller.py"),
-    (re.compile(r"controller\.Reader\b"), "session_controller.SessionController"),
     (re.compile(r"\breader_factory\.py\b"), "session_factory.py"),
     (re.compile(r"\breader_factory\b"), "session_factory"),
     (re.compile(r"\bcreate_reader\b"), "create_session_controller"),
@@ -169,15 +169,17 @@ def _self_test() -> None:
     if rewritten != expected or count != 9:
         raise AssertionError((rewritten, count))
     text, text_count = _rewrite_text(
-        "app/controller.py Reader ReaderOptions reader_factory.create_reader ReaderServices"
+        "app/controller.py Reader ReaderOptions reader_factory.create_reader ReaderServices "
+        "saitenka.app.controller.Reader"
     )
     if (
         text
         != (
             "app/session_controller.py SessionController ReaderOptions "
-            "session_factory.create_session_controller SessionServices"
+            "session_factory.create_session_controller SessionServices "
+            "saitenka.app.session_controller.SessionController"
         )
-        or text_count != 5
+        or text_count != 6
     ):
         raise AssertionError((text, text_count))
 
