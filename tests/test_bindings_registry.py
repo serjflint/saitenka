@@ -167,8 +167,6 @@ def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypat
     r._register_keybinds()  # bound while the dep is down
     calls: list[dict] = []
     monkeypatch.setattr(r, "mine_current", lambda **k: calls.append(k))
-    r.anki = object()  # anki arrives later, no second registration pass
-
     press(r, ipc, r.keys.mine_key)
 
     assert calls == [{}], "the mine key did not reach mine_current after async anki load"

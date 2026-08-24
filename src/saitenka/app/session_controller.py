@@ -7,7 +7,6 @@ the controller assembles their current inputs and coordinates cross-feature turn
 from __future__ import annotations
 
 import logging
-import tempfile
 import threading
 import time
 from functools import cached_property
@@ -17,7 +16,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
+    from saitenka.app.anki import Anki, MineConfig
     from saitenka.app.profiles import Profile
+    from saitenka.app.scoring import Scorer
     from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
@@ -36,8 +37,6 @@ from saitenka.app import (
     mask_atlas_startup,
     mine_intents,
     mined_feedback,
-    mined_seed,
-    mined_store,
     miner,
     miner_ui,
     mouse_capture,
@@ -122,7 +121,13 @@ from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 from saitenka.app.media import (
     tts_available,
 )
-from saitenka.app.miner import MineCue, MinerPorts, tag_slug
+from saitenka.app.miner import MineCue
+from saitenka.app.mining_controller import (
+    ForceDuplicate,
+    MiningController,
+    MiningIdentity,
+    MiningSessionAssembly,
+)
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.paths import cache_dir
@@ -141,6 +146,7 @@ from saitenka.app.popups import (
 from saitenka.app.profile_controller import (
     ProfileAftermath,
     ProfileController,
+    ProfileEnvironment,
     ProfileInvalidation,
     ProfileSubtitles,
 )
@@ -364,7 +370,7 @@ class SessionController:
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
         self,
         ipc: MpvIPC,
-        scorer=None,
+        scorer: Scorer | None = None,
         anki=None,
         mine_cfg=None,
         dict_set=None,
@@ -462,12 +468,10 @@ class SessionController:
         self.sub_bg_opacity = max(0, min(255, o.tooltip.sub_background_opacity))
         self.scorer = scorer  # app.scoring.Scorer | None — per-word coloring
         self.styles: list | None = None
-        self.anki = anki  # app.anki.Anki | None — enables one-key mining
-        self.mine_cfg = mine_cfg
         # Progressive startup: deps loaded on a background thread, injected on the main thread by the
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
-        self._pending_deps: dict | None = None
-        self.mined_seed = mined_seed.MinedSeedLane()
+        initial_profile_name = profile.name if profile is not None else "default"
+        mining_identity = MiningIdentity(initial_profile_name, 0)
         self._loading = False
         self._load_frame = 0
         # The whole group, not a field per key: `active_bindings` resolves `key_attr` against it, and
@@ -480,8 +484,6 @@ class SessionController:
         self._tts_ok = bool(tts_ok)
 
         self._capability_submit = configure_runtime_jobs(ipc)
-        self._mined_seed_submit = mined_seed.configure_runtime_job(ipc)
-
         self._tts_capability = (
             None
             if tts_ok is not None
@@ -493,7 +495,6 @@ class SessionController:
                 submit=self._capability_submit,
             )
         )
-        self._anki_capability: CapabilityProbe | None = None
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
         self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
@@ -551,11 +552,6 @@ class SessionController:
         # Positive, truthful signal in the report bundle (overlay.log): the EFFECTIVE backend vs what was
         # requested — a "taffy" request landing on 'default' is a silent-fallback flag.
         log.info("layout backend: %s (requested %r)", self.layout_engine, o.tooltip.layout_engine)
-        self.max_bulk = o.mining.max_bulk  # cap on words mined in one "mine all" bulk action
-        self.anki_ok_ttl = (
-            o.mining.anki_ok_ttl
-        )  # seconds an AnkiConnect reachability check is cached
-        self.anki_ping_timeout = o.mining.anki_ping_timeout  # reachability ping timeout
         # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
         # CPU-only work (lookup + render + BGRA), NEVER touches the mpv IPC socket (main thread only).
         self.prefetch = o.prefetch
@@ -634,6 +630,11 @@ class SessionController:
         # Where the preview's last paint landed, plus the media the mine captured for it
         # (app/card_preview.py PreviewPanel). What is composed is the slice's.
         self.interaction.preview_panel = card_preview.PreviewPanel()
+        self.mining_controller = self._assemble_mining_controller(mining_identity, anki, mine_cfg)
+        self.profile_dependencies = reader_deps.ProfileDependencies(
+            mining_identity,
+            self._profile_dependency_apply,
+        )
         # INTERACTION's claim on mpv's clicks and wheel, as a resource with a lifetime: the
         # runtime retires it at `PARTICIPANTS`, and an effect can only retire what it can find.
 
@@ -648,7 +649,7 @@ class SessionController:
         for name, retire in (
             (SESSION_SUMMARY_RESOURCE, lambda: self._report_session(self.finish_session_stats())),
             (BACKLOG_RESOURCE, lambda: self._close_backlog_store()),
-            (MINED_RESOURCE, lambda: self._close_mined_store()),
+            (MINED_RESOURCE, lambda: self.mining_controller.close_store()),
         ):
             ipc.register_session_resource(name, session_resources.Retiring(retire))
         # The capability probes, the interaction work, and every worker lane — the close half's
@@ -725,7 +726,6 @@ class SessionController:
         # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
         self.scan_delay = o.tooltip.scan_delay
         self.hover_switch_delay = o.tooltip.hover_switch_delay
-        self._tmp = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
         # Event-driven property state (observe_property); empty + off until run() calls
         # start_observing(), so direct get_property keeps working for tests / pre-run paths.
         self._observing = False
@@ -1926,14 +1926,14 @@ class SessionController:
         """
         return tooltip_panel.PanelPorts(
             style=self.panel_style,
-            mined_set=self.session.mined,
+            mined_set=self.mining_controller.index_snapshot(),
             during_scroll=self._scrolled_this_tick,
             cache=self.tip.panel_cache,
             cap=self.tip_scale.cap,
         )
 
     def _is_mined(self, tok) -> bool:
-        return tooltip_panel.is_mined(tok, self.session.mined)
+        return tooltip_panel.is_mined(tok, self.mining_controller.index_snapshot())
 
     @property
     def sidebar_view(self) -> sidebar_module.SidebarView:
@@ -1959,13 +1959,13 @@ class SessionController:
             surfaces=self.lifecycle_surfaces,
             video=self.text_property("path"),
             backlog=lambda: sidebar_module._ensure_store(self.session),
-            mined=lambda: self.mined_store,
-            mined_exists=self.session.mined_store is not None or mined_store.db_path().exists(),
+            mined=lambda: self.mining_controller.store,
+            mined_exists=self.mining_controller.store_exists,
             backlog_exists=self.session.backlog_store is not None or backlog.db_path().exists(),
             scorer=self.scorer,
             tokenizer=self.profile_controller.tokenizer,
             analysis=self.analysis.current,
-            can_mine=bool(self.anki and self.mine_cfg),
+            can_mine=self.mining_controller.configured,
         )
 
     @property
@@ -2098,7 +2098,7 @@ class SessionController:
         return WordLookup(
             tokenizer=self.profile_controller.tokenizer,
             dict_set=self.profile_controller.dict_set,
-            mined=self.session.mined,
+            mined=self.mining_controller.index_snapshot(),
             prefetch_gen=self.prefetch_state.gen,
             dependency_gen=self._dependency_generation,
             cue_identity=self._current_cue_identity,
@@ -2166,13 +2166,17 @@ class SessionController:
     @property
     def card_source(self) -> miner_ui.CardSource:
         """Where a preview's content comes from. Paired with `preview_ports`."""
+        access = self.mining_controller.preview_access()
         return miner_ui.CardSource(
-            anki=self.anki,
-            mine_cfg=self.mine_cfg,
+            deck=access.deck,
+            model=access.model,
+            fields=access.fields,
+            note_info=access.note_info,
+            fetch_image=access.fetch_image,
+            fetch_media=access.fetch_media,
             lines=self.lines,
             provenance=self._provenance,
             video_path=lambda: self._get("path"),
-            tmp=self._tmp,
             toast=self.toast,
         )
 
@@ -2352,7 +2356,7 @@ class SessionController:
             raw_band_ceiling=self.raw_band_ceiling,
             layout_backend=self.layout_backend,
             layout_engine=self.layout_engine,
-            add_button=tooltip_panel.anki_ok(self.anki, self._anki_capability),
+            add_button=self.mining_controller.target_available,
             speak_button=self._tts_ok,
             dict_set=self.profile_controller.dict_set,
             scorer=self.scorer,
@@ -2730,51 +2734,67 @@ class SessionController:
     def _hide_nested(self) -> None:
         nested_popup.hide_nested(self.tip_ports)
 
-    # --- mining (flow lives in app/miner.py; thin delegates here) --------------------------------
-    @property
-    def mine_cue(self) -> MineCue:
-        """What picking a target reads. Its own value, so the tooltip's ⊕ does not pay for a mine."""
-        return MineCue(
-            self.tokens, self.styles, self.hover, self.profile_controller.tokenizer, self.max_bulk
+    # --- mining -------------------------------------------------------------------------------
+    def _assemble_mining_controller(
+        self,
+        identity: MiningIdentity,
+        anki: Anki | None,
+        config: MineConfig | None,
+    ) -> MiningController:
+        return MiningController.for_session(
+            identity,
+            anki,
+            config,
+            MiningSessionAssembly(
+                ipc=self.ipc,
+                capability_submit=self._capability_submit,
+                timers=self.lifecycle_timers,
+                stopped=self._stop.is_set,
+                settings=self.options.mining,
+                encounter=self._mining_encounter,
+                apply=self._mining_apply,
+            ),
         )
 
-    @property
-    def miner_ports(self) -> MinerPorts | None:
-        """The mining feature's value for THIS cue, or `None` when there is no deck to mine into.
-
-        A property rather than a stored value: half of it is the current cue, and a mining object
-        holding it would mine whatever was on screen when the session was built. The mpv reads
-        happen here, once, so one mine sees one reading of the file and the playhead.
-        """
-        if not self.anki or not self.mine_cfg:
-            return None
-        return MinerPorts(
-            cue=self.mine_cue,
-            anki=self.anki,
-            mine_cfg=self.mine_cfg,
+    def _mining_encounter(self) -> miner.MiningEncounter:
+        return miner.MiningEncounter(
+            cue=MineCue(
+                self.tokens,
+                self.styles,
+                self.hover,
+                self.profile_controller.tokenizer,
+                self.options.mining.max_bulk,
+            ),
             dict_set=self.profile_controller.dict_set,
-            mined_store=self.mined_store,
             ipc=self.ipc,
-            scratch=self._tmp,
             media_path=self.text_property("path"),
             playhead=self._get_number("time-pos") or 0.0,
             sentence_html=self._sentence_html(),
             hovered_terms=self.interaction.hovered_word_meta.terms,
-            preview=self.interaction.preview_panel,
-            session_recorder=self.episode.session_recorder,
-            toast=self.toast,
-            mark_mined=self._mark_mined,
-            mined_here=self._sidebar_mined_here,
-            preview_existing=self._preview_existing,
-            preview_mined=self._preview_mined,
-            merge_mined=self.session.mined.update,
         )
 
-    def mine(self, run: Callable[[MinerPorts], None]) -> None:
-        """Run one mining operation against a freshly-read cue, or do nothing without a deck."""
-        ports = self.miner_ports
-        if ports is not None:
-            run(ports)
+    def _mining_apply(self) -> miner.MiningApply:
+        preview = self.interaction.preview_panel
+
+        def reset_capture() -> None:
+            preview.last_jpg = preview.last_audio = None
+
+        def record_mined(count: int) -> None:
+            if self.episode.session_recorder is not None:
+                self.episode.session_recorder.record_mined(count)
+
+        return miner.MiningApply(
+            toast=self.toast,
+            reset_capture=reset_capture,
+            captured_image=lambda path: setattr(preview, "last_jpg", path),
+            captured_audio=lambda path: setattr(preview, "last_audio", path),
+            mark_mined=self._mark_mined,
+            mined_here=self._sidebar_mined_here,
+            remember_duplicate=lambda token: setattr(preview, "dup_tok", token),
+            preview_existing=self._preview_existing,
+            preview_mined=self._preview_mined,
+            record_mined=record_mined,
+        )
 
     def _sidebar_mined_here(self) -> None:
         """Mark the backlog rows covering this cue mined and redraw. The sidebar's own read set stays
@@ -2783,23 +2803,13 @@ class SessionController:
 
         sidebar.mine_active(self.sidebar_view)
 
-    def mine_target(self) -> int | None:
-        return miner.mine_target(self.mine_cue)
-
     def _sentence_html(self) -> str:
         return "<br>".join("".join(t.surface for t in line) for line in self.lines)
-
-    _tag_slug = staticmethod(tag_slug)
-
-    def _source_meta(self, video):
-        from saitenka.app.miner import source_meta
-
-        return source_meta(video)
 
     def _provenance(self, video) -> str:
         return miner.provenance(self._get_number("time-pos") or 0.0, video)
 
-    # --- what MineHost reads and calls -------------------------------------------------
+    # --- cue capture -------------------------------------------------------------------
     def has_active_cue(self) -> bool:
         """A cue with a path and timings is on screen — what a bookmark would capture."""
         return bool(
@@ -2821,13 +2831,12 @@ class SessionController:
 
     def _mine_token(self, tok, *, card=None) -> None:
         with otel_metrics.traced("anki_mine", source="nested"):
-            self.mine(lambda p: miner.mine_token(p, tok, card=card))
+            self.mining_controller.mine_token(tok, card=card)
 
     def _mark_mined(self, expression: str) -> None:
         mined_feedback.mark_mined(
             self.tip_ports,
             self.panel_ports,
-            self.word_lookup,
             self.hover_inputs,
             self.show_actions,
             expression,
@@ -2848,19 +2857,13 @@ class SessionController:
         expression is already in the deck (a different line/episode/anime)."""
         duplicate = self.interaction.preview_panel.dup_tok
         if duplicate is not None:
-            self.mine(lambda p: miner.mine_token(p, duplicate, force=True))
+            self.mining_controller.force_duplicate(ForceDuplicate(duplicate))
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         if not self.show_preview:
             self.toast(f"already have {card.expression}")
             return
         miner_ui.preview_existing(self.preview_ports, self.card_source, note_id, card, status)
-
-    def _media_image(self, name):
-        return miner_ui.media_image(self.anki, name)
-
-    def _media_tempfile(self, name):
-        return miner_ui.media_tempfile(self.anki, name, self._tmp)
 
     def _render_preview(self) -> None:
         miner_ui.render_preview(
@@ -2875,13 +2878,6 @@ class SessionController:
 
     def replay_preview(self) -> None:
         self._stateless.run(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
-
-    def _frequency(self, tok) -> tuple[str, str]:
-        return miner.frequency(self.profile_controller.dict_set, tok)
-
-    def _capture_media(self, base: str, video) -> tuple[str, str]:
-        ports = self.miner_ports
-        return ("", "") if ports is None else miner.capture_media(ports, base, video)
 
     def bulk_mine(self) -> None:
         self._stateless.run(mine_intents.MineCommand.EPISODE)
@@ -3267,7 +3263,11 @@ class SessionController:
                 GLOBAL_SECTION,
                 owner=Owner.INTERACTION,
             )
-        log.info("registered %d global keybinds (anki=%s)", len(bindings), self.anki is not None)
+        log.info(
+            "registered %d global keybinds (anki=%s)",
+            len(bindings),
+            self.mining_controller.configured,
+        )
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
     def _navigate_previous(self) -> None:
@@ -3405,58 +3405,7 @@ class SessionController:
             if self._tts_capability.value is not None:
                 self._tts_ok = bool(self._tts_capability.value)
             self._tts_capability.request()
-        if self._anki_capability is not None:
-            if self._anki_capability.value:
-                self._request_mined_seed()
-            self._anki_capability.request()
-
-    def _request_mined_seed(self) -> None:
-        if not self.mined_seed.idle or self.anki is None or self.mine_cfg is None:
-            return
-        if self._mined_seed_submit is None:
-            return
-        self.mined_seed.inflight = True
-        generation = self.mined_seed.generation
-        self._mined_seed_submit(
-            owner=Owner.SESSION,
-            identity=generation,
-            lane="mined-seed",
-            request=mined_seed.MinedSeedRequest(self.anki, self.mine_cfg),
-            on_finished=self._finish_mined_seed,
-        )
-
-    def _arm_mined_seed_retry(self, delay_s: float) -> None:
-        """Back off before the next mined-seed attempt.
-
-        Fails open: with no timer the retry simply is not held back, so the seed still lands on a
-        later capability pass. Losing the backoff costs requests; never retrying costs the feature.
-        """
-
-        def due() -> None:
-            self.mined_seed.retry_pending = False
-            self._request_mined_seed()
-
-        self.mined_seed.retry_pending = self.lifecycle_timers.schedule(
-            LifecycleTimerKind.MINED_SEED_RETRY, delay_s, due
-        )
-
-    def _finish_mined_seed(self, completion: EffectFinished) -> None:
-        generation = completion.identity
-        if (
-            not isinstance(generation, int)
-            or generation != self.mined_seed.generation
-            or self._stop.is_set()
-        ):
-            return
-        self.mined_seed.inflight = False
-        values = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
-        if not isinstance(values, set):
-            self.mined_seed.failures += 1
-            self._arm_mined_seed_retry(self.mined_seed.backoff_delay())
-            return
-        self.mined_seed.done = True
-        self.mined_seed.failures = 0
-        self.session.mined.update(values)
+        self.mining_controller.refresh_capability()
 
     def _finish_analysis(self, completion: EffectFinished) -> None:
         changed = analysis_overlay.finish(self.analysis, completion)
@@ -3796,7 +3745,7 @@ class SessionController:
 
         The read stays on the session turn rather than being pushed from the probe's terminal: a
         probe without the runtime lane falls back to its own thread, and letting that thread run
-        `_request_mined_seed` would mutate reader state from off the turn.
+        the mining owner could mutate its seed state from off the turn.
         """
 
         def due() -> None:
@@ -3894,10 +3843,8 @@ class SessionController:
         return True
 
     def _apply_pending_deps(self) -> None:
-        """Inject a finished background dep build, once, on the session turn."""
-        if self._pending_deps is not None:
-            deps, self._pending_deps = self._pending_deps, None
-            self._apply_deps(deps)
+        """Drain completed dependency bundles on the session turn."""
+        self.profile_dependencies.drain()
 
     def _schedule_paused_nudge(self, ops_before: int) -> None:
         """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
@@ -3944,9 +3891,6 @@ class SessionController:
                 secs,
                 bytes_read,
             )
-
-    def _seed_mined(self) -> None:
-        self.mine(miner.seed_mined)
 
     # --- subtitle navigation (instant render, then seek) --------------------------------------
     @property
@@ -4043,8 +3987,20 @@ class SessionController:
         return reader_deps.DepsLoad(
             begin_loading=self._begin_loading,
             enable_async_annotation=self._enable_async_annotation,
-            publish=self._publish_pending_deps,
+            publish=self.profile_dependencies.publish,
             announce=self.arm_deps_ready,
+        )
+
+    @property
+    def _profile_dependency_apply(self) -> reader_deps.ProfileDependencyApply:
+        return reader_deps.ProfileDependencyApply(
+            load_ports=lambda: self.deps_load,
+            selected_profile=lambda: self.profile_controller.profile,
+            select_mining=self.mining_controller.select_spec,
+            retire_current=self._retire_profile_dependencies,
+            stop_loading=self._stop_loading,
+            install=self._install_collaborators,
+            arrived=self._dependencies_arrived,
         )
 
     def _begin_loading(self) -> None:
@@ -4052,24 +4008,33 @@ class SessionController:
         self._loading = True
         self._schedule_loading_frame(delay_s=0.0)
 
-    def _publish_pending_deps(self, deps: dict) -> None:
-        """Hand the built deps over from the build thread. Publishes only — `arm_deps_ready` is
-        what says so, and the injection itself happens on the session turn."""
-        self._pending_deps = deps
+    def configure_profiles(
+        self,
+        profiles,
+        *,
+        dependency_builder_for,
+        mining_spec_for,
+        dict_scoper=None,
+        base_slang: str = "ja,jpn,jp",
+    ) -> None:
+        """Install profile-aware collaborator factories at the composition boundary."""
+        self.profile_dependencies.configure(dependency_builder_for, mining_spec_for)
+        self.profile_controller.configure_cycle(
+            profiles,
+            dict_scoper,
+            base_slang=base_slang,
+            environment=ProfileEnvironment(self.profile_dependencies.select),
+        )
+
+    def _retire_profile_dependencies(self) -> None:
+        self.scorer = None
+        self._dependencies_changed()
 
     def load_deps_async(self, cfg: dict, build=None, *, prebuilt=None) -> None:
-        reader_deps.load_deps_async(self.deps_load, cfg, build, prebuilt=prebuilt)
+        self.profile_dependencies.load(cfg, build, prebuilt=prebuilt)
 
-    def _apply_deps(self, deps: dict) -> None:
-        """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place.
-
-        Lived in `reader_deps` as a host-taking function, which is the round-trip shape: every line
-        of it writes a `SessionController` field or calls a `SessionController` act, so the module that *builds* the
-        collaborators was also performing the state transition that installs them.
-        """
-        self._stop_loading()
-        self._install_collaborators(deps)
-        self._dependencies_arrived()
+    def _apply_deps(self, deps: reader_deps.DependencyBundle) -> None:
+        self.profile_dependencies.accept(deps)
 
     def _stop_loading(self) -> None:
         """Plain-subs mode is over: spinner frame, spinner overlay, and the previous deck's probe."""
@@ -4077,33 +4042,14 @@ class SessionController:
         self._loading = False
         self.lifecycle_timers.cancel(LifecycleTimerKind.LOADING_FRAME)
         self.lifecycle_surfaces.remove(OverlayId.LOADING)
-        if self._anki_capability is not None:
-            self._anki_capability.close()
-        # A backoff armed against the previous deps would retry into the new ones, so retire the
-        # timer too — the lane's flag says a retry is armed, it cannot disarm one.
-        self.lifecycle_timers.cancel(LifecycleTimerKind.MINED_SEED_RETRY)
-        self.mined_seed.restart()
+        self.mining_controller.close_capability()
 
-    def _install_collaborators(self, deps: dict) -> None:
+    def _install_collaborators(self, deps: reader_deps.DependencyBundle) -> None:
         """Swap in what the build produced, and probe the deck it came with."""
-        self.scorer = deps.get("scorer")
-        self.anki = deps.get("anki")
-        self.mine_cfg = deps.get("mine_cfg")
-        self.profile_controller.replace_dictionary_set(deps.get("dict_set"))
-        if self.anki is None:
-            return
-        from saitenka.app.anki import anki_reachable
-
-        self._anki_capability = CapabilityProbe(
-            lambda: anki_reachable(timeout=self.anki_ping_timeout),
-            name="anki",
-            ttl=self.anki_ok_ttl,
-            retry=min(self.anki_ok_ttl, 1.0),
-            timeout=max(self.anki_ping_timeout * 2, 0.1),
-            max_retry=max(self.anki_ok_ttl, 8.0),
-            submit=self._capability_submit,
-        )
-        self._anki_capability.request(force=True)
+        self.scorer = deps.scorer
+        self.profile_controller.replace_dictionary_set(deps.dictionaries)
+        if deps.mining is not None:
+            self.mining_controller.publish_prepared_target(deps.mining)
 
     def _dependencies_arrived(self) -> None:
         """Everything that has to hear about a new vocabulary, in the order it has to hear it."""
@@ -4126,7 +4072,7 @@ class SessionController:
         )
 
     def _loading_frame_due(self) -> None:
-        if not self._loading or self._pending_deps is not None:
+        if not self._loading or self.profile_dependencies.ready:
             return
         self._draw_loading()
         self._schedule_loading_frame(delay_s=0.08)
@@ -4203,7 +4149,7 @@ class SessionController:
         """
 
         self._build_close_participants()
-        self.mined_seed.invalidate()  # in-flight seeds are stale before anything tears down
+        self.mining_controller.invalidate()
         ledger = CloseLedger()
         ledger.run(
             (
@@ -4280,10 +4226,10 @@ class SessionController:
                 ),
                 CloseStep(
                     "mined-store",
-                    self._close_mined_store,
+                    self.mining_controller.close_store,
                     fallback_after(
                         lambda: self._phase_performed(ClosePhase.STORES),
-                        lambda: self.session.mined_store,
+                        lambda: self.mining_controller,
                     ),
                 ),
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
@@ -4358,7 +4304,7 @@ class SessionController:
             self._register_keybinds()
 
     def _seed_collaborators(self) -> None:
-        self._seed_mined()
+        self.mining_controller.request_seed()
         self.arm_capability_refresh()
 
     def _open_session_history(self) -> None:
@@ -4404,8 +4350,7 @@ class SessionController:
             self._tts_capability.close()
 
     def _close_anki_capability(self) -> None:
-        if self._anki_capability is not None:
-            self._anki_capability.close()
+        self.mining_controller.close_capability()
 
     def _close_annotation(self) -> None:
         if self._annotation is not None:
@@ -4526,23 +4471,9 @@ class SessionController:
         `RemoveSessionArtifacts` carries its own path: a reactor that *saw* the event can always
         perform it, which is the one case where `announce`'s return answers the question asked.
         """
-        import shutil
-
-        if not self._announce_close(ClosePhase.ARTIFACTS, str(self._tmp)):
-            shutil.rmtree(self._tmp, ignore_errors=True)
-
-    @property
-    def mined_store(self) -> mined_store.MinedCardStore:
-        """The session-scoped mined-card store, opened on first use.
-
-        A property rather than a module function taking the SessionController: lazily initialising a host's
-        own field is the host's business, and both callers (the mine-time writer and the Mine tab)
-        want the store, not a seam.
-        """
-        store = self.session.mined_store
-        if store is None:
-            store = self.session.mined_store = mined_store.MinedCardStore()
-        return store
+        self.mining_controller.retire_artifacts(
+            lambda path: self._announce_close(ClosePhase.ARTIFACTS, path)
+        )
 
     def finish_session_stats(self) -> str | None:
         """Close the current episode's row and retire the recorder. Idempotent."""
@@ -4564,10 +4495,6 @@ class SessionController:
     def _close_backlog_store(self) -> None:
         if self.session.backlog_store is not None:
             self.session.backlog_store.close()
-
-    def _close_mined_store(self) -> None:
-        if self.session.mined_store is not None:
-            self.session.mined_store.close()
 
     def _report_session(self, summary: str | None) -> None:
         if summary and self.options.stats.summary:

@@ -12,7 +12,6 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app.mined_set import MinedSet
 from saitenka.app.popups import hovered_meta
 from saitenka.app.subnav_settle import SettleWindow
 
@@ -24,7 +23,6 @@ _MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
     from saitenka.app.card_preview import PreviewPanel
-    from saitenka.app.mined_store import MinedCardStore
     from saitenka.app.popups import HoverMetadata, TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
@@ -201,17 +199,8 @@ class RenderCacheState:
 
 
 class SessionContext:
-    """State scoped to the whole mpv session — durable across every episode re-slot (#100): the
-    persistent render caches, the in-deck mined set, the Anki reachability cache, and the review backlog
-    store. Nothing here is rebuilt on a file change (that is EpisodeContext); this is the tier an episode
-    swap must leave untouched."""
+    """Shared session state not already owned by a bounded feature controller."""
 
     def __init__(self, render_cache: RenderCacheState) -> None:
         self.render_cache = render_cache
-        self.mined = MinedSet()  # card expressions already in the deck → header ⊕ becomes ✓
-        self.anki_cache: tuple[float, bool] = (
-            0.0,
-            False,
-        )  # (checked_at, reachable) — see tooltip_panel.anki_ok
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle
-        self.mined_store: MinedCardStore | None = None  # lazy mined-card DB handle (#253)

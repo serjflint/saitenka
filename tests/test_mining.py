@@ -208,7 +208,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
-    assert anki.added == [] and "読む" in r.session.mined  # deduped, not added; ⊕→✓ flipped
+    assert anki.added == [] and "読む" in r.mining_controller.index_snapshot()
 
 
 def test_build_note_card_format_uses_passed_markers():
@@ -351,8 +351,8 @@ def test_dedupe_escapes_special_chars_in_query():
 
 
 def _ports(reader):
-    """The mining value for the reader's current cue — what production builds per operation."""
-    ports = reader.miner_ports
+    """One transaction assembled by the production mining owner."""
+    ports = reader.mining_controller._operation()
     assert ports is not None, "reader has no deck to mine into"
     return ports
 
@@ -408,18 +408,16 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     assert shown == ["読む"]
 
 
-def _capture_reader(tmp_path, *, animated_enabled: bool):
+def _capture_reader(*, animated_enabled: bool):
     from util import FakeIPC
 
     from saitenka.app.session_controller import SessionController
 
-    r = SessionController(
+    return SessionController(
         FakeIPC(),
         anki=_FakeAnki(),
         mine_cfg=MineConfig(animated=AnimatedClip(enabled=animated_enabled)),
     )
-    r._tmp = tmp_path
-    return r
 
 
 def _stub_capture(monkeypatch, *, animated_result):
@@ -438,7 +436,7 @@ def _stub_capture(monkeypatch, *, animated_result):
 
 
 def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
-    r = _capture_reader(tmp_path, animated_enabled=True)
+    r = _capture_reader(animated_enabled=True)
     _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".webp")  # the animated clip becomes the card image
@@ -448,8 +446,8 @@ def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
     )  # still kept for preview/fallback
 
 
-def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch, tmp_path):
-    r = _capture_reader(tmp_path, animated_enabled=True)
+def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch):
+    r = _capture_reader(animated_enabled=True)
     _stub_capture(monkeypatch, animated_result=None)  # no animated encoder present
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".jpg")  # falls back to the mpv still
@@ -457,26 +455,26 @@ def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch, tmp_
 
 def test_capture_media_animated_override_forces_clip_over_config_default(monkeypatch, tmp_path):
     # config default is OFF, but the per-mine override (the video-mine shortcut) forces the clip
-    r = _capture_reader(tmp_path, animated_enabled=False)
+    r = _capture_reader(animated_enabled=False)
     calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv", animated=True)
     assert calls and pic.endswith(".webp")  # the encode ran despite the config default being off
 
 
 def test_capture_media_still_only_when_animated_disabled(monkeypatch, tmp_path):
-    r = _capture_reader(tmp_path, animated_enabled=False)
+    r = _capture_reader(animated_enabled=False)
     calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert calls == [] and pic.endswith(".jpg")  # animated off + no override → never encodes
 
 
-def test_capture_media_survives_a_timespan_read_error(monkeypatch, tmp_path):
+def test_capture_media_survives_a_timespan_read_error(monkeypatch):
     # A transient IPC error reading the cue timespan must NOT escape capture_media — in bulk_mine it would
     # propagate out of the session loop and tear the session down. The still is still captured
     # (image-only mine).
     import saitenka.app.miner as _M
 
-    r = _capture_reader(tmp_path, animated_enabled=False)
+    r = _capture_reader(animated_enabled=False)
     monkeypatch.setattr(_M, "screenshot", lambda *_a: None)
     monkeypatch.setattr(_M, "clip_audio", lambda *_a, **_k: None)
 
@@ -526,7 +524,7 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     r._mine_token(tok)
     assert anki.added == []  # dedupe: nothing added
     assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r.session.mined  # ⊕ flips to ✓
+    assert "読む" in r.mining_controller.index_snapshot()
 
 
 def test_preview_replay_key_is_tooltip_scoped():
@@ -872,10 +870,15 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     r = SessionController(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
-        tooltip_panel.group_mined_of(tok, r.session.mined, r.profile_controller.dict_set) == ()
+        tooltip_panel.group_mined_of(
+            tok, r.mining_controller.index_snapshot(), r.profile_controller.dict_set
+        )
+        == ()
     )  # nothing mined yet → no per-group flags
-    r.session.mined.add("退く")
-    assert tooltip_panel.group_mined_of(tok, r.session.mined, r.profile_controller.dict_set) == (
+    r.mining_controller.record_expression("退く")
+    assert tooltip_panel.group_mined_of(
+        tok, r.mining_controller.index_snapshot(), r.profile_controller.dict_set
+    ) == (
         True,
         True,
     )  # both entries share expression 退く

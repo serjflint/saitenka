@@ -13,20 +13,19 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka.app.interaction_jobs import InteractionJobs
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     import numpy as np
 
     from saitenka.app.hover_store import HoverStore
     from saitenka.app.interaction_surfaces import InteractionSurfaces
     from saitenka.app.lifecycle_timers import LifecycleTimerKind
-    from saitenka.app.mined_set import MinedSet
     from saitenka.app.prefetch import TipScale
     from saitenka.app.render_cache import LoadedView, RenderCache
     from saitenka.app.subtitles import WordBox
@@ -174,12 +173,25 @@ class WordLookup:
 
     tokenizer: Tokenizer
     dict_set: object
-    mined: MinedSet
+    mined: MinedSnapshot
     prefetch_gen: int
     dependency_gen: int
     cue_identity: object
     deferred: bool
     submit: Callable[..., bool]
+
+
+class MinedSnapshot(Protocol):
+    @property
+    def generation(self) -> int: ...
+
+    def snapshot(self) -> frozenset[str]: ...
+
+    def __contains__(self, expression: object) -> bool: ...
+
+    def __iter__(self) -> Iterator[str]: ...
+
+    def __len__(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)

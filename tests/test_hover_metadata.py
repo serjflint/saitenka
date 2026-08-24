@@ -142,7 +142,7 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
     tooltip._request_hover_metadata(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
     original = submitted[0]["request"]
 
-    reader.session.mined.add("__newly-mined__")
+    reader.mining_controller.record_expression("__newly-mined__")
     reader.prefetch_state.gen += 1
     reader._dependency_generation += 1
     reader._current_cue_identity = cue_annotation.CueIdentity(

@@ -200,18 +200,27 @@ def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
 
 
 def test_composition_threads_grouped_optional_services(request):
+    from types import SimpleNamespace
+
+    from saitenka.app.anki import MineConfig
+
+    scorer = SimpleNamespace(score_line=lambda _tokens: [])
+    anki = object()
+    mining = MineConfig()
     services = SessionServices(
-        scorer="score", anki="anki", mining="mine", dictionaries="dict", tts=True
+        scorer=scorer, anki=anki, mining=mining, dictionaries="dict", tts=True
     )
 
     reader = create_session_controller(FakeIPC(), services=services)
 
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
 
-    assert (reader.scorer, reader.anki, reader.mine_cfg, reader.profile_controller.dict_set) == (
-        "score",
-        "anki",
-        "mine",
+    target = reader.mining_controller.active_target
+    assert target is not None
+    assert (reader.scorer, target.anki, target.config, reader.profile_controller.dict_set) == (
+        scorer,
+        anki,
+        mining,
         "dict",
     )
     assert reader._tts_ok is True

@@ -290,11 +290,12 @@ def test_apply_deps_stops_the_spinner():
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.app.reader_deps import DependencyBundle
     from saitenka.app.session_controller import SessionController
 
     r = SessionController(FakeIPC())
     r._loading = True
-    r._apply_deps({})  # background load finished (even with nothing) → spinner off
+    r._apply_deps(DependencyBundle(r.profile_dependencies.identity))
     assert r._loading is False
     assert ("overlay-remove", OverlayId.LOADING) in r.ipc.commands
 
@@ -317,15 +318,10 @@ def test_load_deps_async_uses_a_custom_build():
 
     r.load_deps_async({}, build=_build)
     assert r._loading is True  # spinner armed immediately (subs draw meanwhile)
-    await_ready(lambda: r._pending_deps is not None, "the build thread never published deps")
+    await_ready(lambda: r.profile_dependencies.ready, "the build thread never published deps")
     assert called["n"] == 1
-    assert r._pending_deps == {
-        "scorer": "SCORER",
-        "anki": None,
-        "mine_cfg": None,
-        "dict_set": None,
-    }
-    r._apply_deps(r._pending_deps)  # main-thread injection
+    assert r.profile_dependencies.pending[0].scorer == "SCORER"
+    r._apply_pending_deps()
     assert r.scorer == "SCORER" and r._loading is False
 
 
@@ -348,11 +344,11 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
     r = SessionController(FakeIPC())
     r.ov = _RecOv()
     r.load_deps_async({}, prebuilt=fut)  # consume the in-flight build, don't restart it
-    await_ready(lambda: r._pending_deps is not None, "the build thread never published deps")
+    await_ready(lambda: r.profile_dependencies.ready, "the build thread never published deps")
     assert (
         built["n"] == 1
     )  # built exactly once — by begin_deps_build, not re-run by load_deps_async
-    assert r._pending_deps == {"scorer": "SCORER", "anki": None, "mine_cfg": None, "dict_set": None}
+    assert r.profile_dependencies.pending[0].scorer == "SCORER"
 
 
 def test_each_entrypoint_declares_its_own_startup_hint() -> None:

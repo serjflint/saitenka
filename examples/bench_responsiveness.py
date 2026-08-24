@@ -1175,6 +1175,7 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
 
     from saitenka.app import backlog, mined_store, sidebar
     from saitenka.app import miner as miner_flow
+    from saitenka.app.anki import MineConfig
     from saitenka.subtitles import Cue, CueIndex
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-clicks-"))
@@ -1188,16 +1189,16 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
             "time-pos": 1.0,
         }
     )
-    reader = SessionController(cast("MpvIPC", ipc))
+    mined_store._DB_PATH_OVERRIDE = tmp / "mined.sqlite"
+    reader = SessionController(
+        cast("MpvIPC", ipc), anki=SimpleNamespace(), mine_cfg=MineConfig(deck="Mining")
+    )
     reader.osd = OSD
     cues = [Cue(i * 2.0, i * 2.0 + 1.8, f"これは{i}番目の字幕です") for i in range(60)]
     reader.episode.sub_index = CueIndex(cues)
     reader.sub_text = cues[0].text
     reader.session.backlog_store = backlog.BacklogStore(tmp / "backlog.sqlite")
-    reader.session.mined_store = mined_store.MinedCardStore(tmp / "mined.sqlite")
-    reader.mine_cfg = SimpleNamespace(deck="Mining")
-    reader.anki = SimpleNamespace()  # `miner_ports` refuses to build without a deck to mine into
-    ports = reader.miner_ports
+    ports = reader.mining_controller._operation()
     assert ports is not None
 
     # Open + render the sidebar so on_click has real hitboxes; click a view-tab so the measured cost is
@@ -1227,7 +1228,10 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     def persist_mine() -> None:
         note_id["n"] += 1
         miner_flow._persist_mined(
-            ports, note_id["n"], SimpleNamespace(expression="猫", reading="ねこ"), ports.media_path
+            ports,
+            note_id["n"],
+            SimpleNamespace(expression="猫", reading="ねこ"),
+            ports.encounter.media_path,
         )
 
     sc, bk, mn = (

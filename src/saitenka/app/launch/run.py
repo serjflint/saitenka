@@ -21,7 +21,7 @@ from saitenka.app.continuity import resolve_sibling
 from saitenka.app.jimaku import parse_filename
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
-from saitenka.app.profiles import resolve_launch_identity, resolve_profile
+from saitenka.app.profiles import resolve_launch_identity, resolve_profile, scope_config
 from saitenka.app.session_runtime import SessionEntry, SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
@@ -802,6 +802,25 @@ def reslot_to_current(
         log.info("re-slotted overlay onto %s", video_path.name)
 
 
+def _run_effective_config(req: RunDepsRequest) -> dict:
+    """The profile-scoped config after proven run-option precedence is applied."""
+    return {
+        "dicts": req.dict_titles,
+        "freq": req.freq_titles,
+        "pitch": req.pitch_titles,
+        "known": req.known_cfg,
+        "mine": {
+            **req.raw_mine,
+            "deck": req.mine_deck,
+            "model": req.mine_model,
+            "normalize_audio": req.mine_normalize_audio,
+            "animated_screenshot": req.mine_animated_screenshot,
+        }
+        if req.mine
+        else {},
+    }
+
+
 def _build_run_deps(req: RunDepsRequest):
     """Build the coloring/dict/mining collaborators. This is the slow part (the first-run
     dictionary cache build is 25-66s per dict), so ``run_impl`` defers calling this to a BACKGROUND
@@ -836,23 +855,7 @@ def _build_run_deps(req: RunDepsRequest):
             f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only", file=sys.stderr
         )
 
-    effective_cfg = {
-        "dicts": req.dict_titles,
-        "freq": req.freq_titles,
-        "pitch": req.pitch_titles,
-        "known": req.known_cfg,
-        # start from the raw [mine] config (so config-only keys like animated_height/fps/quality/format
-        # survive the run path — the both-seams trap), then override with the CLI-threaded values
-        "mine": {
-            **req.raw_mine,
-            "deck": req.mine_deck,
-            "model": req.mine_model,
-            "normalize_audio": req.mine_normalize_audio,
-            "animated_screenshot": req.mine_animated_screenshot,
-        }
-        if req.mine
-        else {},
-    }
+    effective_cfg = _run_effective_config(req)
     scorer, anki, mine_conf, dict_set = reader_deps.build_reader_deps(
         effective_cfg,
         color=req.color,
@@ -1008,7 +1011,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift.
-    ident = resolve_launch_identity(load_config(config), profile_override=profile, slang=slang)
+    raw_cfg = load_config(config)
+    mine_deck_override, mine_model_override = mine_deck, mine_model
+    ident = resolve_launch_identity(raw_cfg, profile_override=profile, slang=slang)
     cfg, active_profile, slang, profile_cycle = (
         ident.cfg,
         ident.profile,
@@ -1016,7 +1021,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         ident.profile_cycle,
     )
     # A not-passed --mine-deck/--mine-model (None) yields to the profile's own deck/model.
-    mine_deck, mine_model = _resolvemine_target(cfg, mine_deck, mine_model)
+    mine_deck, mine_model = _resolvemine_target(cfg, mine_deck_override, mine_model_override)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
@@ -1040,12 +1045,36 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         )
         return 2
 
-    # resolve dict/freq/pitch lists: explicit CLI flags win, else fall back to the config file.
-    # These are dictionary TITLES resolved against the consolidated DB — never built here.
-    dict_titles = _resolve_names(dicts, cfg, "dicts")
-    freq_titles = _resolve_names(freq, cfg, "freq")
-    pitch_titles = _resolve_names(pitch, cfg, "pitch")
-    known_cfg = json.loads(anki_decks) if anki_decks else cfg.get("known")
+    def _scoped_for(selected):
+        override = None if selected.name == "default" else selected.name
+        return scope_config(raw_cfg, override=override)
+
+    def _request_for(selected):
+        selected_cfg = _scoped_for(selected)
+        selected_deck, selected_model = _resolvemine_target(
+            selected_cfg, mine_deck_override, mine_model_override
+        )
+        return RunDepsRequest(
+            mine=mine,
+            mine_deck=selected_deck,
+            mine_model=selected_model,
+            mine_key=mine_key,
+            mine_all_key=mine_all_key,
+            mine_normalize_audio=mine_normalize_audio,
+            mine_animated_screenshot=mine_animated_screenshot,
+            raw_mine=selected_cfg.get("mine") or {},
+            known_cfg=json.loads(anki_decks) if anki_decks else selected_cfg.get("known"),
+            known=known,
+            color=color,
+            dict_titles=_resolve_names(dicts, selected_cfg, "dicts"),
+            freq_titles=_resolve_names(freq, selected_cfg, "freq"),
+            pitch_titles=_resolve_names(pitch, selected_cfg, "pitch"),
+            language=selected.langs.main,
+        )
+
+    initial_request = _request_for(active_profile)
+    dict_titles = initial_request.dict_titles
+    known_cfg = initial_request.known_cfg
 
     if not (color or known_cfg or known or dict_titles or mine):
         print(
@@ -1057,32 +1086,21 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         )
 
     def _build_deps():
-        return _build_run_deps(
-            RunDepsRequest(
-                mine=mine,
-                mine_deck=mine_deck,
-                mine_model=mine_model,
-                mine_key=mine_key,
-                mine_all_key=mine_all_key,
-                mine_normalize_audio=mine_normalize_audio,
-                mine_animated_screenshot=mine_animated_screenshot,
-                raw_mine=cfg.get("mine") or {},
-                known_cfg=known_cfg,
-                known=known,
-                color=color,
-                dict_titles=dict_titles,
-                freq_titles=freq_titles,
-                pitch_titles=pitch_titles,
-                language=active_profile.langs.main,
-            )
-        )
+        return _build_run_deps(initial_request)
 
     # Hoist the dep build ahead of mpv launch (interactive path only; demo/screenshot build synchronously
     # below because they force-hover the instant mpv is up). The build touches no mpv IPC, so starting it
     # HERE overlaps mpv's launch/connect dead time (~0.2-0.9s measured) — the ~85ms build is fully hidden
     # and mpv's video is never delayed (separate process). load_deps_async consumes this once the reader
     # exists; without the hoist the build only started after connect, sitting idle through that whole window.
-    deps_future = None if (demo_word or screenshot) else begin_deps_build(cfg, _build_deps)
+    from saitenka.app.mining_controller import MiningIdentity
+
+    initial_identity = MiningIdentity(active_profile.name, 0)
+    deps_future = (
+        None
+        if (demo_word or screenshot)
+        else begin_deps_build(cfg, _build_deps, identity=initial_identity)
+    )
 
     auto_advance = _auto_advance_enabled(cfg, demo_word, screenshot)
 
@@ -1163,8 +1181,20 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 profile=active_profile,
                 tokenizer_warm=tokenizer_warm,
             )
-        reader.profile_controller.configure_cycle(
-            profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
+        from saitenka.app import reader_deps
+
+        def dependency_builder_for(selected, _identity):
+            request = _request_for(selected)
+            return _scoped_for(selected), lambda: _build_run_deps(request)
+
+        reader.configure_profiles(
+            profile_cycle,
+            dependency_builder_for=dependency_builder_for,
+            mining_spec_for=lambda selected, identity: reader_deps.mining_spec_from_config(
+                _run_effective_config(_request_for(selected)), identity, enabled=mine
+            ),
+            dict_scoper=_dict_scoper_for(raw_cfg, profile_cycle),
+            base_slang=ident.base_slang,
         )
     if not (demo_word or screenshot):
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track

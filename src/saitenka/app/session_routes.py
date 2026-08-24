@@ -127,6 +127,7 @@ from saitenka.runtime.user_command import COMMAND_FEATURE, CommandIntake, reduce
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.mining_controller import MiningController
     from saitenka.app.profile_controller import ProfileController
     from saitenka.app.stateless import StatelessFeature
     from saitenka.mpvio.gateway import MpvGateway
@@ -614,6 +615,7 @@ class StatelessHost(
     """
 
     profile_controller: ProfileController
+    mining_controller: MiningController
 
 
 def stateless_features(host: StatelessHost) -> dict[type, StatelessFeature]:

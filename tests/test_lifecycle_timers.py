@@ -105,6 +105,7 @@ def test_completed_dependencies_suppress_a_pending_loading_frame() -> None:
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.app.reader_deps import DependencyBundle
     from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
@@ -112,7 +113,7 @@ def test_completed_dependencies_suppress_a_pending_loading_frame() -> None:
     port = FakeTimerPort()
     reader.lifecycle_timers = LifecycleTimers(port)
     reader._loading = True
-    reader._pending_deps = {}
+    reader.profile_dependencies.publish(DependencyBundle(reader.profile_dependencies.identity))
     reader._schedule_loading_frame(delay_s=0.0)
 
     port.finish(port.history[-1])

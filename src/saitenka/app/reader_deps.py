@@ -20,12 +20,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
+from saitenka.app.mining_controller import MiningIdentity, MiningSpec, MiningTarget
 from saitenka.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.dictionary import DictionarySet
     from saitenka.app.fsrs import KnownSnap
+    from saitenka.app.scoring import Scorer
 
 log = logging.getLogger(__name__)
 
@@ -257,6 +260,22 @@ def _mine_config_from(mc: dict):
     )
 
 
+def mining_spec_from_config(
+    cfg: dict,
+    identity: MiningIdentity,
+    *,
+    enabled: bool = True,
+) -> MiningSpec:
+    """Resolve the desired local target without contacting Anki."""
+    raw = cfg.get("mine")
+    mc = raw if isinstance(raw, dict) else {}
+    if not enabled or not mc:
+        return MiningSpec.disabled(identity)
+    prepared = _mine_config_from(mc)
+    effective = {**mc, "deck": prepared.deck, "model": prepared.model}
+    return MiningSpec(identity, effective)
+
+
 def _validate_mine_fields(anki, mine_conf) -> None:
     """Drop + warn about configured field-map targets that don't exist on the note type, so mining
     writes a valid note instead of silently emptying (or failing on) an unknown field. Best-effort:
@@ -454,7 +473,23 @@ def begin_tokenizer_warm(tokenizer: str = "unidic") -> Future[None]:
     return future
 
 
-def begin_deps_build(cfg: dict, build=None) -> Future[dict]:
+@dataclass(frozen=True, slots=True)
+class DependencyBundle:
+    """A full collaborator set qualified by the profile generation it was built for."""
+
+    identity: MiningIdentity
+    scorer: Scorer | None = None
+    mining: MiningTarget | None = None
+    dictionaries: DictionarySet | None = None
+    failed: bool = False
+
+
+def begin_deps_build(
+    cfg: dict,
+    build=None,
+    *,
+    identity: MiningIdentity | None = None,
+) -> Future[DependencyBundle]:
     """Start the dep build (coloring/dict/mining collaborators — none touch the mpv IPC) on its OWN
     thread and return a Future for the result. This is the HOISTABLE half of progressive startup:
     ``run`` calls it BEFORE launching mpv so the CPU/IO build overlaps mpv's launch/connect dead time
@@ -466,18 +501,22 @@ def begin_deps_build(cfg: dict, build=None) -> Future[dict]:
     (``--dict/--freq/--anki-decks/--mine`` …). The one rule: the builder must NOT touch the mpv IPC.
     The Future resolves to the deps dict, or ``{}`` if the build raised (stay subs-only) — it never
     rejects, so a consumer's ``result()`` can't fault."""
-    fut: Future[dict] = Future()
+    target_identity = identity or MiningIdentity("default", 0)
+    fut: Future[DependencyBundle] = Future()
 
     def _run() -> None:
         try:
             with otel_metrics.traced("load_deps_async"):
                 scorer, anki, mine_cfg, dict_set = build() if build else build_reader_deps(cfg)
-            fut.set_result(
-                {"scorer": scorer, "anki": anki, "mine_cfg": mine_cfg, "dict_set": dict_set}
+            target = (
+                MiningTarget(target_identity, anki, mine_cfg)
+                if anki is not None and mine_cfg is not None
+                else None
             )
+            fut.set_result(DependencyBundle(target_identity, scorer, target, dict_set))
         except Exception:
             log.warning("background dep load failed — staying subs-only", exc_info=True)
-            fut.set_result({})  # signal "done" so the spinner stops
+            fut.set_result(DependencyBundle(target_identity, failed=True))
 
     threading.Thread(target=_run, name="saitenka-deps", daemon=True).start()
     return fut
@@ -496,14 +535,19 @@ class DepsLoad:
     #: Annotation goes off-thread for the duration — the build is holding the CPU.
     enable_async_annotation: Callable[[], None]
     #: Publish the built deps. Called from the *build* thread, so it must not act on them.
-    publish: Callable[[dict], None]
+    publish: Callable[[DependencyBundle], None]
     #: Arm the deadline that injects them on the session turn. Returns whether it armed; nothing
     #: reads that, because with no timer the deps still land on the next session turn.
     announce: Callable[[], object]
 
 
 def load_deps_async(
-    ports: DepsLoad, cfg: dict, build=None, *, prebuilt: Future[dict] | None = None
+    ports: DepsLoad,
+    cfg: dict,
+    build=None,
+    *,
+    prebuilt: Future[DependencyBundle] | None = None,
+    identity: MiningIdentity | None = None,
 ) -> None:
     """Wire a background dep build into the session: when it lands, the session turn injects it on
     the main thread (:func:`apply_deps`). Plain subs draw meanwhile; a named timer animates the spinner.
@@ -516,15 +560,121 @@ def load_deps_async(
     Callers should have already fired :func:`warm_tokenizer` on its own thread as early as possible."""
     ports.begin_loading()
     ports.enable_async_annotation()
-    fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build)
+    fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build, identity=identity)
 
-    def landed(finished: Future[dict]) -> None:
+    def landed(finished: Future[DependencyBundle]) -> None:
         # Order matters and is the whole hand-off: publish the value, then say so. Announcing first
         # would let the due event fire against deps that are still None.
         ports.publish(finished.result())
         ports.announce()
 
     fut.add_done_callback(landed)
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileDependencyApply:
+    """Owner-thread acts used when a profile-qualified dependency bundle settles."""
+
+    load_ports: Callable[[], DepsLoad]
+    selected_profile: Callable[[], object]
+    select_mining: Callable[[MiningSpec], None]
+    retire_current: Callable[[], None]
+    stop_loading: Callable[[], None]
+    install: Callable[[DependencyBundle], None]
+    arrived: Callable[[], None]
+
+
+class ProfileDependencies:
+    """Own profile-qualified dependency admission, handoff, and stale-result refusal."""
+
+    def __init__(self, identity: MiningIdentity, apply: ProfileDependencyApply) -> None:
+        self._identity = identity
+        self._apply = apply
+        self._builder_for: (
+            Callable[[object, MiningIdentity], tuple[dict, Callable[[], tuple]]] | None
+        ) = None
+        self._spec_for: Callable[[object, MiningIdentity], MiningSpec] | None = None
+        self._inflight: set[MiningIdentity] = set()
+        self._pending: list[DependencyBundle] = []
+        self._pending_lock = threading.Lock()
+
+    @property
+    def identity(self) -> MiningIdentity:
+        return self._identity
+
+    @property
+    def ready(self) -> bool:
+        with self._pending_lock:
+            return bool(self._pending)
+
+    @property
+    def pending(self) -> tuple[DependencyBundle, ...]:
+        with self._pending_lock:
+            return tuple(self._pending)
+
+    def configure(self, builder_for, spec_for) -> None:
+        self._builder_for = builder_for
+        self._spec_for = spec_for
+        self._apply.select_mining(
+            self._resolve_spec(self._apply.selected_profile(), self._identity)
+        )
+
+    def select(self, profile) -> None:
+        self._identity = MiningIdentity(profile.name, self._identity.generation + 1)
+        if self._spec_for is not None:
+            self._apply.select_mining(self._resolve_spec(profile, self._identity))
+        self._apply.retire_current()
+        self._submit(profile, self._identity)
+
+    def _resolve_spec(self, profile, identity: MiningIdentity) -> MiningSpec:
+        assert self._spec_for is not None
+        try:
+            return self._spec_for(profile, identity)
+        except (KeyError, TypeError, ValueError) as exc:
+            log.warning("mining disabled for profile %s: %s", profile.name, exc)
+            return MiningSpec.disabled(identity, str(exc))
+
+    def _submit(self, profile, identity: MiningIdentity) -> None:
+        if self._builder_for is None or identity in self._inflight:
+            return
+        cfg, build = self._builder_for(profile, identity)
+        self._inflight.add(identity)
+        load_deps_async(self._apply.load_ports(), cfg, build, identity=identity)
+
+    def load(self, cfg: dict, build=None, *, prebuilt=None) -> None:
+        self._inflight.add(self._identity)
+        load_deps_async(
+            self._apply.load_ports(),
+            cfg,
+            build,
+            prebuilt=prebuilt,
+            identity=self._identity,
+        )
+
+    def publish(self, bundle: DependencyBundle) -> None:
+        """Publish from a build thread; owner-thread application happens in :meth:`drain`."""
+        with self._pending_lock:
+            self._pending.append(bundle)
+
+    def drain(self) -> None:
+        with self._pending_lock:
+            pending, self._pending = self._pending, []
+        for bundle in pending:
+            self.accept(bundle)
+
+    def accept(self, bundle: DependencyBundle) -> bool:
+        """Apply one owner-thread bundle, refusing stale profile generations."""
+        self._inflight.discard(bundle.identity)
+        if bundle.identity != self._identity:
+            if self._builder_for is None:
+                self._apply.stop_loading()
+            else:
+                self._submit(self._apply.selected_profile(), self._identity)
+            return False
+        self._apply.stop_loading()
+        self._apply.install(bundle)
+        self._apply.arrived()
+        return True
 
 
 def draw_loading(surfaces, frame: int) -> None:

@@ -11,7 +11,9 @@ import pytest
 from driver import Driver
 from util import FakeIPC
 
+from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import TIP_CLOSE_MSG
+from saitenka.app.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.session_controller import SessionController
 from saitenka.panel import Definition, Entry
 
@@ -44,6 +46,18 @@ def _reader():
 
 def _content_word(r) -> int:
     return next(i for i, t in enumerate(r.tokens) if r.profile_controller.tokenizer.is_content(t))
+
+
+def _enable_mining(reader: SessionController) -> None:
+    identity = reader.mining_controller.desired_spec.identity
+    config = MineConfig()
+    reader.mining_controller.select_spec(
+        MiningSpec(identity, {"deck": config.deck, "model": config.model})
+    )
+    assert reader.mining_controller.publish_prepared_target(
+        MiningTarget(identity, object(), config)
+    )
+    reader.mining_controller.close_capability()
 
 
 class _RecSpan:
@@ -305,7 +319,7 @@ def test_full_stress_chain_through_the_hit_test_path():
 
 def test_empty_body_click_does_nothing(monkeypatch):
     r = _reader()
-    r.anki = object()
+    _enable_mining(r)
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown

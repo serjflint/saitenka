@@ -241,7 +241,8 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
     # no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/model directly.
-    ident = resolve_launch_identity(load_config(config), profile_override=profile, slang=slang)
+    raw_cfg = load_config(config)
+    ident = resolve_launch_identity(raw_cfg, profile_override=profile, slang=slang)
     cfg, active_profile, slang, profile_cycle = (
         ident.cfg,
         ident.profile,
@@ -350,11 +351,26 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
             profile=active_profile,
             tokenizer_warm=tokenizer_warm,
         )
-    from saitenka.app.reader_deps import make_dict_scoper
+    from saitenka.app import reader_deps
+    from saitenka.app.profiles import scope_config
 
-    reader.profile_controller.configure_cycle(
+    def scoped_for(selected):
+        override = None if selected.name == "default" else selected.name
+        return scope_config(raw_cfg, override=override)
+
+    def dependency_builder_for(selected, _identity):
+        selected_cfg = scoped_for(selected)
+        return selected_cfg, lambda: reader_deps.build_reader_deps(
+            selected_cfg, language=selected.langs.main
+        )
+
+    reader.configure_profiles(
         profile_cycle,
-        make_dict_scoper(cfg) if len(profile_cycle) > 1 else None,
+        dependency_builder_for=dependency_builder_for,
+        mining_spec_for=lambda selected, identity: reader_deps.mining_spec_from_config(
+            scoped_for(selected), identity
+        ),
+        dict_scoper=reader_deps.make_dict_scoper(raw_cfg) if len(profile_cycle) > 1 else None,
         base_slang=ident.base_slang,
     )
     provider_cfg = ProviderConfig(

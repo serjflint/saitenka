@@ -1,13 +1,8 @@
 """The mining flow: one-key + bulk mining into Anki.
 
-Owns the mine→dedupe→capture→build-note pipeline and the provenance/tag helpers; the SessionController keeps
-the view side (previews, ⊕→✓ refresh, toasts) and delegates its public mining API here.
-
-`MinerPorts` is the feature's value, built per operation by `SessionController.miner_ports`: the collaborators
-mining needs, the cue it is mining, and the acts that land elsewhere. Per operation and not stored,
-because half of it is *this* cue — a value kept on a session-lived object would mine the line that
-was on screen when the session started. The mpv reads happen once at build time for the same
-reason: `path`, `time-pos` and the cue span used to be read at three different depths of one mine.
+Owns the mine→dedupe→capture→build-note transaction kernel and provenance/tag helpers. The
+bounded mining owner admits operations and assembles one `_MinerContext`; presentation and session
+accounting cross the boundary only as named `MiningApply` acts.
 
 The cheap leaves take what they need instead of the whole value — `frequency` over a dictionary set
 charges its caller one member, not thirty.
@@ -31,13 +26,11 @@ from saitenka.app.lookup import card_for
 from saitenka.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Sequence
 
     from saitenka.app.anki import Anki, MineConfig
-    from saitenka.app.card_preview import PreviewPanel
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.mined_store import MinedCardStore
-    from saitenka.app.session_stats import SessionRecorder
     from saitenka.tokenize import Tokenizer
 
 log = logging.getLogger(__name__)
@@ -47,7 +40,7 @@ log = logging.getLogger(__name__)
 class MineCue:
     """What the target pick reads: the cue's tokens, how they are coloured, and where the pointer is.
 
-    Its own value rather than a slice of `MinerPorts`, because picking a target is also the tooltip's
+    Its own value because picking a target is also the tooltip's
     question and answering it must not charge a caller the whole mining closure.
     """
 
@@ -59,38 +52,44 @@ class MineCue:
 
 
 @dataclass(frozen=True, slots=True)
-class MinerPorts:
-    """One mine's collaborators, cue and acts. Built per operation — see the module docstring."""
+class MiningEncounter:
+    """Facts sampled once when the owner admits an operation."""
 
     cue: MineCue
-    #: Non-optional by construction: `SessionController.miner_ports` answers `None` when mining is not
-    #: configured, so "is there a deck to mine into" is decided once instead of at every entry point.
-    anki: Anki
-    mine_cfg: MineConfig
     dict_set: DictionarySet | None
-    mined_store: MinedCardStore
     ipc: object
-    #: Per-session scratch dir the captures land in before Anki stores them.
-    scratch: Path
-    #: The cue being mined, read once at build time.
     media_path: object
     playhead: float
     sentence_html: str
-    #: The stacked phrase the tooltip is showing for the hovered word, so mining the hovered word
-    #: defaults to the same entry the user is looking at.
     hovered_terms: tuple
-    #: The preview panel this mine writes its media onto. A panel, not slice state: it holds what one
-    #: capture produced.
-    preview: PreviewPanel
-    session_recorder: SessionRecorder | None
+
+
+@dataclass(frozen=True, slots=True)
+class MiningApply:
+    """Owner-thread effects whose state remains outside mining."""
+
     toast: Callable[..., object]
+    reset_capture: Callable[[], None]
+    captured_image: Callable[[Path], None]
+    captured_audio: Callable[[Path], None]
     mark_mined: Callable[[str], None]
-    #: Tell the sidebar this cue was mined. An act rather than the sidebar's view, so mining does not
-    #: carry the sidebar's read set through the mine.
     mined_here: Callable[[], None]
+    remember_duplicate: Callable[[object], None]
     preview_existing: Callable[..., None]
     preview_mined: Callable[..., None]
-    merge_mined: Callable[[Iterable[str]], object]
+    record_mined: Callable[[int], None]
+
+
+@dataclass(frozen=True, slots=True)
+class MiningTransaction:
+    """One admitted transaction, constructed only by the bounded mining owner."""
+
+    anki: Anki
+    mine_cfg: MineConfig
+    mined_store: MinedCardStore
+    scratch: Path
+    encounter: MiningEncounter
+    apply: MiningApply
 
 
 def tag_slug(text: str) -> str:
@@ -192,7 +191,7 @@ def card_for_token(dict_set, tok):
     return card_for(tok)
 
 
-def _markers_for(p: MinerPorts, tok, card, content: CardContent, *, video, tags):
+def _markers_for(p: MiningTransaction, tok, card, content: CardContent, *, video, tags):
     """The ``{marker} -> value`` map for the ``[mine.card_format]`` path, or ``None`` when it isn't
     configured (so ``build_note`` takes the plain ``[mine.fields]`` route and skips this work).
     Shares the ``CardContent`` the note is built from — same sentence/media/freq, no re-derivation."""
@@ -202,7 +201,7 @@ def _markers_for(p: MinerPorts, tok, card, content: CardContent, *, video, tags)
     from saitenka.app.lookup import POS_EN
 
     title, _ep = source_meta(video)
-    pitch_html, pitch_positions = pitch(p.dict_set, tok)
+    pitch_html, pitch_positions = pitch(p.encounter.dict_set, tok)
     return build_markers(
         MarkerContext(
             card=card,
@@ -223,7 +222,7 @@ def _markers_for(p: MinerPorts, tok, card, content: CardContent, *, video, tags)
 
 # --- media capture ------------------------------------------------------------------------------
 def capture_media(
-    p: MinerPorts, base: str, video, *, animated: bool | None = None
+    p: MiningTransaction, base: str, video, *, animated: bool | None = None
 ) -> tuple[str, str]:
     """Capture the card image (a still frame, or an animated clip of the cue — WebP or GIF) + the cue's
     audio and store both in Anki. Returns (pic, audio).
@@ -238,9 +237,11 @@ def capture_media(
     want_animated = bool(p.mine_cfg) and (
         p.mine_cfg.animated.enabled if animated is None else animated
     )
-    p.preview.last_jpg = p.preview.last_audio = None
+    p.apply.reset_capture()
     try:
-        span = current_timespan(p.ipc)  # guarded: an IPC hiccup must not escape and kill the loop
+        span = current_timespan(
+            p.encounter.ipc
+        )  # guarded: an IPC hiccup must not escape and kill the loop
     except (OSError, ValueError):
         log.debug("cue timespan read failed — image-only mine", exc_info=True)
         span = None
@@ -251,15 +252,15 @@ def capture_media(
 
 
 def _capture_image(
-    p: MinerPorts, base: str, video, span, *, animated: bool
+    p: MiningTransaction, base: str, video, span, *, animated: bool
 ) -> tuple[str, Exception | None]:
     """The card image: the mpv still (always, → ``preview.last_jpg``), replaced by an animated clip when
     ``animated`` and the encode succeeds. Returns (media_name, error-or-None)."""
     try:
         jpg = p.scratch / f"{base}.jpg"
-        screenshot(p.ipc, jpg)
+        screenshot(p.encounter.ipc, jpg)
         # local still — drives the preview and is the fallback (may not be uploaded)
-        p.preview.last_jpg = jpg
+        p.apply.captured_image(jpg)
         if animated and video and span:
             clip = _encode_animated(p, base, video, span)
             if clip:
@@ -270,7 +271,7 @@ def _capture_image(
         return "", e
 
 
-def _encode_animated(p: MinerPorts, base: str, video, span) -> str | None:
+def _encode_animated(p: MiningTransaction, base: str, video, span) -> str | None:
     """Encode + store the animated clip, returning its media name — or None on any failure (a missing
     encoder, a bad encode, a store error), so the caller keeps the still."""
     try:
@@ -283,13 +284,13 @@ def _encode_animated(p: MinerPorts, base: str, video, span) -> str | None:
     return None
 
 
-def _capture_audio(p: MinerPorts, base: str, video, span) -> tuple[str, Exception | None]:
+def _capture_audio(p: MiningTransaction, base: str, video, span) -> tuple[str, Exception | None]:
     """The cue audio clip (→ ``preview.last_audio``). Returns (media_name, error-or-None)."""
     try:
         if video and span:
             aud = p.scratch / f"{base}.m4a"
             clip_audio(video, span, aud, normalize=p.mine_cfg.normalize_audio)
-            p.preview.last_audio = aud
+            p.apply.captured_audio(aud)
             return p.anki.store_media(f"{base}.m4a", aud), None
     except (OSError, subprocess.CalledProcessError, AnkiError, json.JSONDecodeError) as e:
         log.debug("audio capture failed", exc_info=True)
@@ -297,17 +298,17 @@ def _capture_audio(p: MinerPorts, base: str, video, span) -> tuple[str, Exceptio
     return "", None
 
 
-def _warn_capture_failure(p: MinerPorts, pic_err, audio_err) -> None:
+def _warn_capture_failure(p: MiningTransaction, pic_err, audio_err) -> None:
     if pic_err and audio_err:
-        p.toast("media capture failed (no image/audio on card)", "warn")
+        p.apply.toast("media capture failed (no image/audio on card)", "warn")
     elif pic_err:
-        p.toast("screenshot failed — audio only", "warn")
+        p.apply.toast("screenshot failed — audio only", "warn")
     elif audio_err:
-        p.toast("audio clip failed — image only", "warn")
+        p.apply.toast("audio clip failed — image only", "warn")
 
 
 # --- mining -------------------------------------------------------------------------------------
-def _attach_word_audio(p: MinerPorts, note: dict, card) -> None:
+def _attach_word_audio(p: MiningTransaction, note: dict, card) -> None:
     """Populate the configured word-audio field from the local yomichan/yomitan pack (#93) —
     ADDITIVE to the mined scene/sentence audio, never a replacement. Best-effort: an unconfigured
     pack, a resolve miss, or a store failure leaves the field unset (never an empty ``[sound:]``)."""
@@ -325,13 +326,13 @@ def _attach_word_audio(p: MinerPorts, note: dict, card) -> None:
         log.debug("word-audio attach failed", exc_info=True)
 
 
-def _persist_mined(p: MinerPorts, note_id: int, card, video) -> None:
+def _persist_mined(p: MiningTransaction, note_id: int, card, video) -> None:
     """Record the mined note ↔ episode/cue link in the durable mined-card store (#253), so the
     sidebar Mine tab can list this episode's cards offline. Best-effort: a store failure (or a
     non-int ``addNote`` result / no active cue) must never break the mine."""
     if not isinstance(note_id, int) or not video:
         return
-    span = current_timespan(p.ipc)
+    span = current_timespan(p.encounter.ipc)
     try:
         with otel_metrics.traced("mined_store_write"):  # main-thread SQLite on a mine (#253 link)
             p.mined_store.record(
@@ -347,23 +348,23 @@ def _persist_mined(p: MinerPorts, note_id: int, card, video) -> None:
         log.debug("mined-card store write failed", exc_info=True)
 
 
-def mine_current(p: MinerPorts) -> None:
-    idx = mine_target(p.cue)
+def mine_current(p: MiningTransaction) -> None:
+    idx = mine_target(p.encounter.cue)
     if idx is None:
-        p.toast("no word to mine", "warn")
+        p.apply.toast("no word to mine", "warn")
         return
-    tok = p.cue.tokens[idx]
+    tok = p.encounter.cue.tokens[idx]
     # Mining the hovered word defaults to its longest stacked phrase (数ある over 数), matching the
     # tooltip's top entry; the explicit per-entry ⊕ still mines any specific stacked entry.
     cards = (
-        p.dict_set.cards_for(tok, extra_terms=p.hovered_terms)
-        if (p.dict_set and idx == p.cue.hover and p.hovered_terms)
+        p.encounter.dict_set.cards_for(tok, extra_terms=p.encounter.hovered_terms)
+        if (p.encounter.dict_set and idx == p.encounter.cue.hover and p.encounter.hovered_terms)
         else []
     )
     mine_token(p, tok, card=cards[0] if cards else None)
 
 
-def mine_token(p: MinerPorts, tok, *, force: bool = False, card=None, animated=None) -> None:
+def mine_token(p: MiningTransaction, tok, *, force: bool = False, card=None, animated=None) -> None:
     """Mine a specific token into Anki — the hovered subtitle word, or an inner word discovered
     by scanning inside the tooltip (the nested popup's ⊕). ``force`` mines a second card for an
     expression already in the deck (the preview's explicit "add anyway" for a different scene).
@@ -372,22 +373,22 @@ def mine_token(p: MinerPorts, tok, *, force: bool = False, card=None, animated=N
     ``animated`` overrides ``[mine].animated_screenshot`` for this mine (the video-mine shortcut
     passes ``True``)."""
     try:
-        card = card if card is not None else card_for_token(p.dict_set, tok)
+        card = card if card is not None else card_for_token(p.encounter.dict_set, tok)
         if not force:
             existing = dedupe(p.anki, p.mine_cfg, card.expression)
             if existing:
-                p.mark_mined(card.expression)  # already in the deck → ✓
-                p.mined_here()
-                p.preview.dup_tok = tok  # for an explicit "add anyway"
-                p.preview_existing(existing[0], card, "exists")
+                p.apply.mark_mined(card.expression)  # already in the deck → ✓
+                p.apply.mined_here()
+                p.apply.remember_duplicate(tok)
+                p.apply.preview_existing(existing[0], card, "exists")
                 return
-        video = p.media_path
+        video = p.encounter.media_path
         pic, audio = capture_media(
             p, f"saitenka_{int(time.time() * 1000)}", video, animated=animated
         )
-        freq = frequency(p.dict_set, tok)
-        sentence_html = bold_word(p.sentence_html, tok.surface)
-        misc, tags = provenance(p.playhead, video), mine_tags(video)
+        freq = frequency(p.encounter.dict_set, tok)
+        sentence_html = bold_word(p.encounter.sentence_html, tok.surface)
+        misc, tags = provenance(p.encounter.playhead, video), mine_tags(video)
         content = CardContent(
             sentence_html=sentence_html,
             picture=pic,
@@ -399,47 +400,50 @@ def mine_token(p: MinerPorts, tok, *, force: bool = False, card=None, animated=N
         markers = _markers_for(p, tok, card, content, video=video, tags=tags)
         note = build_note(p.mine_cfg, card, content, tags, allow_duplicate=force, markers=markers)
         if not force and not p.anki.can_add(note):
-            p.toast(f"can't add {card.expression}", "err")
+            p.apply.toast(f"can't add {card.expression}", "err")
             return
         _attach_word_audio(p, note, card)
         # --- mine-time add_note seam (shared by #253 note-id retention + #93 word-audio) -------
         note_id = p.anki.add_note(note)
         _persist_mined(p, note_id, card, video)
-        if p.session_recorder is not None:
-            p.session_recorder.record_mined()
-        p.mark_mined(card.expression)
-        p.mined_here()
-        p.preview_mined(card, tok, video, "duplicate" if force else "mined")
+        p.apply.record_mined(1)
+        p.apply.mark_mined(card.expression)
+        p.apply.mined_here()
+        p.apply.preview_mined(card, tok, video, "duplicate" if force else "mined")
     except AnkiError as e:
-        p.toast(f"mine failed: {e}", "err")
+        p.apply.toast(f"mine failed: {e}", "err")
     except Exception as e:  # never let a mine crash the loop
         log.exception("mine_token failed")
-        p.toast(f"mine error: {e}", "err")
+        p.apply.toast(f"mine error: {e}", "err")
 
 
-def bulk_mine(p: MinerPorts) -> None:
+def bulk_mine(p: MiningTransaction) -> None:
     """Mine every unknown content word in the current cue, sharing one screenshot + audio."""
-    if not p.cue.tokens:
-        p.toast("nothing to mine", "warn")
+    if not p.encounter.cue.tokens:
+        p.apply.toast("nothing to mine", "warn")
         return
-    targets = _select_bulk_targets(p.cue)
+    targets = _select_bulk_targets(p.encounter.cue)
     if not targets:
-        p.toast("no new words", "warn")
+        p.apply.toast("no new words", "warn")
         return
-    video = p.media_path
+    video = p.encounter.media_path
     pic, audio = capture_media(p, f"saitenka_{int(time.time() * 1000)}", video)
-    misc, sentence, tags = provenance(p.playhead, video), p.sentence_html, mine_tags(video)
+    misc, sentence, tags = (
+        provenance(p.encounter.playhead, video),
+        p.encounter.sentence_html,
+        mine_tags(video),
+    )
     mined = dup = 0
     try:
         for idx in targets:
-            tok = p.cue.tokens[idx]
-            card = card_for_token(p.dict_set, tok)
+            tok = p.encounter.cue.tokens[idx]
+            card = card_for_token(p.encounter.dict_set, tok)
             if not card.glossary_html:  # no dict entry (name/particle) — skip
                 continue
             if dedupe(p.anki, p.mine_cfg, card.expression):
                 dup += 1
                 continue
-            freq = frequency(p.dict_set, tok)
+            freq = frequency(p.encounter.dict_set, tok)
             content = CardContent(
                 sentence_html=bold_word(sentence, tok.surface),
                 picture=pic,
@@ -452,15 +456,14 @@ def bulk_mine(p: MinerPorts) -> None:
             note = build_note(p.mine_cfg, card, content, tags, markers=markers)
             if p.anki.can_add(note):
                 p.anki.add_note(note)
-                p.mark_mined(card.expression)
+                p.apply.mark_mined(card.expression)
                 mined += 1
             else:
                 dup += 1
-        p.toast(f"mined {mined} · {dup} dup", "ok" if mined else "warn")
-        if p.session_recorder is not None:
-            p.session_recorder.record_mined(mined)
+        p.apply.toast(f"mined {mined} · {dup} dup", "ok" if mined else "warn")
+        p.apply.record_mined(mined)
     except AnkiError as e:
-        p.toast(f"bulk failed: {e}", "err")
+        p.apply.toast(f"bulk failed: {e}", "err")
 
 
 def mined_expressions(anki, mine_cfg) -> set[str] | None:
@@ -483,8 +486,3 @@ def mined_expressions(anki, mine_cfg) -> set[str] | None:
         log.debug("seed_mined failed (AnkiConnect down?)", exc_info=True)
         return None
     return expressions
-
-
-def seed_mined(p: MinerPorts) -> None:
-    """Pre-load already-mined expressions from the mining deck."""
-    p.merge_mined(mined_expressions(p.anki, p.mine_cfg) or ())

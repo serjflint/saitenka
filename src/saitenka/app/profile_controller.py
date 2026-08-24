@@ -44,6 +44,13 @@ class ProfileAftermath:
     notify: Callable[[str, str], None]
 
 
+@dataclass(frozen=True, slots=True)
+class ProfileEnvironment:
+    """Optional collaborators that must follow a committed reading profile."""
+
+    select: Callable[[Profile], None]
+
+
 class ProfileSwitchStatus(StrEnum):
     REJECTED = "rejected"
     COMMITTED = "committed"
@@ -76,6 +83,7 @@ class ProfileController:
         self._profile_index = 0
         self._base_slang = "ja,jpn,jp"
         self._dict_scoper: Callable[[Profile], DictionarySet | None] | None = None
+        self._environment: ProfileEnvironment | None = None
         self._tokenizer = get_tokenizer(self._profile.tokenizer)
         self._dict_set = dict_set
         self._apply_font_mode(self._profile)
@@ -110,10 +118,12 @@ class ProfileController:
         dict_scoper: Callable[[Profile], DictionarySet | None] | None = None,
         *,
         base_slang: str = "ja,jpn,jp",
+        environment: ProfileEnvironment | None = None,
     ) -> None:
         self._profiles = tuple(profiles) or (self._profile,)
         self._dict_scoper = dict_scoper
         self._base_slang = base_slang
+        self._environment = environment
         self._profile_index = next(
             (
                 i
@@ -164,6 +174,13 @@ class ProfileController:
         if rescope:
             self.replace_dictionary_set(dictionary_set)
             self._invalidation.invalidate_dictionary()
+        if self._environment is not None:
+            try:
+                self._environment.select(target)
+            except Exception:  # noqa: BLE001  # optional collaborator cannot veto reading profile
+                self._aftermath.notify(
+                    f"profile {target.name!r}: optional environment unavailable", "warn"
+                )
         self._invalidation.reset_episode_warm()
 
         track = self._switch_subtitle_track(effective_slang(target, self._base_slang))

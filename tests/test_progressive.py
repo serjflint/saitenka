@@ -13,8 +13,11 @@ from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka import otel_metrics
 from saitenka.app import mined_seed as mined_seed_lane
+from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.logsetup import CONSOLE_LOGGER_NAME
+from saitenka.app.mining_controller import MiningIdentity, MiningSpec, MiningTarget
+from saitenka.app.reader_deps import DependencyBundle
 from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
@@ -23,7 +26,11 @@ from saitenka.mpvio.ipc import IPCRequest
 
 def test_reader_starts_without_deps():
     r = SessionController(FakeIPC())
-    assert r.scorer is None and r.profile_controller.dict_set is None and r.anki is None
+    assert (
+        r.scorer is None
+        and r.profile_controller.dict_set is None
+        and not r.mining_controller.configured
+    )
 
 
 @pytest.mark.timeout(5)
@@ -49,7 +56,7 @@ def test_apply_deps_injects_and_stops_loading():
         pass
 
     scorer = _Scorer()
-    r._apply_deps({"scorer": scorer, "dict_set": None, "anki": None, "mine_cfg": None})
+    r._apply_deps(DependencyBundle(r.profile_dependencies.identity, scorer=scorer))
     assert r.scorer is scorer
     assert r._loading is False
     assert any(c and c[0] == "overlay-remove" for c in ipc.commands)  # spinner cleared
@@ -59,18 +66,19 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", lambda _anki, _cfg: {"猫"})
-    r = SessionController(ipc)
-    r.anki = object()
-    r.mine_cfg = object()
+    r = SessionController(ipc, anki=object(), mine_cfg=MineConfig())
     try:
-        r._request_mined_seed()
+        r.mining_controller.request_seed()
         await_ready(
-            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+            lambda: bool(r.mining_controller.index_snapshot()),
+            "mined seed never published",
+            pump=r._drain_events,
         )
 
-        assert r.session.mined == {"猫"}
-        assert r.session.mined.generation == 1
-        assert r.mined_seed.inflight is False
+        snapshot = r.mining_controller.index_snapshot()
+        assert snapshot.values == {"猫"}
+        assert snapshot.generation == 1
+        assert r.mining_controller.seed_lane.inflight is False
     finally:
         r.close()
         gateway.close()
@@ -92,28 +100,31 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
         return {"新しい"}
 
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
-    r = SessionController(ipc)
-    r.anki = old_anki
-    r.mine_cfg = object()
+    config = MineConfig()
+    r = SessionController(ipc, anki=old_anki, mine_cfg=config)
     try:
-        r._request_mined_seed()
+        r.mining_controller.request_seed()
         assert old_started.wait(1)
-        r.mined_seed.restart()  # what replacing the deck does, through the lane's own verb
-        r.anki = new_anki
-        r._request_mined_seed()
+        identity = MiningIdentity("replacement", 1)
+        r.mining_controller.select_spec(
+            MiningSpec(identity, {"deck": config.deck, "model": config.model})
+        )
+        r.mining_controller.publish_prepared_target(MiningTarget(identity, new_anki, config))
+        r.mining_controller.request_seed()
         await_ready(
-            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+            lambda: bool(r.mining_controller.index_snapshot()),
+            "mined seed never published",
+            pump=r._drain_events,
         )
 
-        assert r.session.mined == {"新しい"}
-        assert r.session.mined.generation == 1
+        current = r.mining_controller.index_snapshot()
+        assert current.values == {"新しい"}
         release.set()
         # Not a wait: drain repeatedly to give a late result the chance to arrive, then prove it
         # did not. A deadline helper would return on the first pass and assert nothing.
         drain_for(r._drain_events)
 
-        assert r.session.mined == {"新しい"}
-        assert r.session.mined.generation == 1
+        assert r.mining_controller.index_snapshot() == current
     finally:
         r.close()
         gateway.close()
@@ -122,9 +133,7 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
 def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    r = SessionController(ipc)
-    r.anki = object()
-    r.mine_cfg = object()
+    r = SessionController(ipc, anki=object(), mine_cfg=MineConfig())
     attempts = 0
 
     def fetch(_anki, _cfg):
@@ -136,22 +145,24 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
 
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     try:
-        r._request_mined_seed()
+        r.mining_controller.request_seed()
         await_ready(
-            lambda: not r.mined_seed.inflight,
+            lambda: not r.mining_controller.seed_lane.inflight,
             "the failed seed never settled",
             pump=r._drain_events,
         )
-        assert r.session.mined == set()
+        assert r.mining_controller.index_snapshot().values == set()
 
         # The backoff is a named deadline now, so firing it *is* the retry — and asserting it was
         # armed proves the failure path scheduled one rather than silently giving up.
         assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
         await_ready(
-            lambda: bool(r.session.mined), "mined seed never published", pump=r._drain_events
+            lambda: bool(r.mining_controller.index_snapshot()),
+            "mined seed never published",
+            pump=r._drain_events,
         )
 
-        assert attempts == 2 and r.session.mined == {"猫"}
+        assert attempts == 2 and r.mining_controller.index_snapshot().values == {"猫"}
     finally:
         r.close()
         gateway.close()
@@ -186,10 +197,10 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, monke
     caplog.set_level(logging.INFO, logger=CONSOLE_LOGGER_NAME)
     r = SessionController(FakeIPC())
     monkeypatch.setattr(r, "start_prefetch", lambda: setattr(r.prefetch_state, "workers", 3))
-    r._apply_deps({"scorer": None, "dict_set": None, "anki": None, "mine_cfg": None})
+    r._apply_deps(DependencyBundle(r.profile_dependencies.identity))
     assert "3 prefetch worker(s)" in caplog.text  # real count, not 0
     caplog.clear()
-    r._apply_deps({})  # a second injection must not re-announce
+    r._apply_deps(DependencyBundle(r.profile_dependencies.identity))
     assert "prefetch worker(s)" not in caplog.text
 
 
@@ -306,7 +317,7 @@ def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
     ipc = FakeIPC()
     r = SessionController(ipc)
     applied = []
-    monkeypatch.setattr(r, "_apply_deps", applied.append)
+    monkeypatch.setattr(r.profile_dependencies, "accept", applied.append)
 
     r.load_deps_async({})
     await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed the injection")
@@ -321,7 +332,7 @@ def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
 
 def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
     """Ordering, and the whole hand-off: arming first would let the due event fire against a
-    `_pending_deps` that is still None, and the session would sit loading forever."""
+    dependency owner with no published bundle, and the session would sit loading forever."""
     import saitenka.app.reader_deps as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
@@ -329,12 +340,16 @@ def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
     r = SessionController(ipc)
     seen: list[object] = []
     original = r.arm_deps_ready
-    monkeypatch.setattr(r, "arm_deps_ready", lambda: (seen.append(r._pending_deps), original())[1])
+    monkeypatch.setattr(
+        r,
+        "arm_deps_ready",
+        lambda: (seen.append(r.profile_dependencies.pending), original())[1],
+    )
 
     r.load_deps_async({})
     await_ready(lambda: bool(seen), "the build thread never armed deps-ready")
 
-    assert seen and seen[0] is not None
+    assert seen and seen[0]
 
 
 @pytest.mark.timeout(5)
@@ -375,7 +390,9 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     dispatched = []
     monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
 
-    reader._apply_deps({"dict_set": dictionary})
+    reader._apply_deps(
+        DependencyBundle(reader.profile_dependencies.identity, dictionaries=dictionary)
+    )
     assert dictionary.started.wait(1)
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
