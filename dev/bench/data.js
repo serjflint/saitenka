@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787606336560,
+  "lastUpdate": 1787607480794,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -11077,6 +11077,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 0.913408,
             "range": "3 replicas; min 0.909312; max 1.66707; MAD 0.004096",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "id": "9694b079254a702ecd990c0f60e98c0c0ee8cc69",
+          "message": "fix(bench): make the live jank harness say why the scroll is stuck\n\n`_scroll_four` reported only \"did not advance the tooltip viewport\". `scroll_view` refuses in three\ndistinguishable ways — no rendered panel, a panel no taller than its viewport, or the wheel routed to\nthe nested popup — and they need different fixes, so the bare message is not actionable from a CI log.\nIt has been the whole diagnosis available for the three live-jank replicas that have failed on every\ntag since v4.0.0, and it does not reproduce on macOS (the hover never arrives) or headless (it scrolls).\n\nReport the deciding state instead: panel present, full height vs viewport height, desired scroll, and\nthe nested popup's rect — routing is invisible from the base view alone, so a wheel that landed on the\nnest reads identically to one that landed nowhere.",
+          "timestamp": "2026-08-24T21:36:35Z",
+          "url": "https://github.com/serjflint/saitenka/commit/9694b079254a702ecd990c0f60e98c0c0ee8cc69"
+        },
+        "date": 1787607479454,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 3.725198,
+            "range": "3 replicas; min 3.36208; max 3.9812; MAD 0.256005; worst 3.9812",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 5.771795,
+            "range": "3 replicas; min 4.58686; max 18.1545; MAD 1.18494; worst 18.1545",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 2.195456,
+            "range": "3 replicas; min 1.67117; max 2.19955; MAD 0.004096",
             "unit": "MB"
           }
         ]
