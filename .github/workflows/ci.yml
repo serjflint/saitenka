@@ -2,10 +2,12 @@
 # emulate per-OS behaviour in-process), so a Win/mac runner would re-run identical mocked paths for no
 # extra signal. Real per-OS execution lives in e2e.yml. Public repo ⇒ GitHub-hosted runners are free.
 #
-# Core jobs: `gate` runs the full 14-task gate once on the pinned interpreter (3.14t); `tests` re-runs
-# just the suite across the interpreter matrix (lint/types/arch are version-insensitive — no point ×5),
-# with a GIL-ON control on the free-threaded (`…t`) legs; `tests-ft` runs the no-GIL free-threaded pass
-# for those same legs in parallel, instead of sequentially after `tests`, so wall-time is max() not sum().
+# Core jobs: `gate` runs the gate on the pinned interpreter (3.14t), split across two legs — `poe all`
+# runs the suite TWICE (coverage, then free-threaded), which on a 4-core runner is ~128s each and made
+# one job own most of the run's wall-clock; the legs sync the same dev env, so this is max() not sum().
+# `tests` re-runs just the suite across the interpreter matrix (lint/types/arch are version-insensitive
+# — no point ×5), with a GIL-ON control on the free-threaded (`…t`) legs; `tests-ft` runs the no-GIL pass
+# for those same legs in parallel, instead of sequentially after `tests`, in the lean `test` env.
 name: CI
 
 on:
@@ -23,8 +25,14 @@ permissions:
 
 jobs:
   gate:
-    name: poe all (Linux, 3.14t)
+    name: poe ${{ matrix.task }} (Linux, 3.14t)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Together these two ARE `poe all` (`all = ["gate-no-ft", "test-ft"]` in pyproject) — the split is
+      # the workflow's, not the gate's, so a local `poe all` stays the one command to type.
+      matrix:
+        task: [gate-no-ft, test-ft]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -62,7 +70,7 @@ jobs:
           uv sync --locked --extra full
 
       - name: Dev gate
-        run: uv run poe all
+        run: uv run poe ${{ matrix.task }}
 
   layout-engine:
     name: taffylite wheel (Linux, 3.14t)
