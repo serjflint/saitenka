@@ -26,12 +26,12 @@ from saitenka.app import (
     analysis_overlay,
     backlog,
     card_preview,
-    console,
     cue_annotation,
     episode_reslot,
     geometry_refresh,
     hover_intents,
     hover_snapshot,
+    logsetup,
     mask_atlas_startup,
     mine_intents,
     mined_feedback,
@@ -244,6 +244,8 @@ if TYPE_CHECKING:
     from saitenka.subtitles import CueIndex, GeometryBackend
 
 log = logging.getLogger(__name__)
+#: For the two lines the user is meant to read on the terminal (logsetup.CONSOLE_LOGGER_NAME).
+console_log = logsetup.user_facing_logger()
 
 # Local names for the shared OSD slot registry (overlay_ids.OverlayId is the single source of truth
 # so extracted subsystems can't collide on slot numbers). IntEnum → drop-in int at every call site.
@@ -4200,8 +4202,7 @@ class Reader:
             return
         self._runtime_announced = True
         mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
-        console.announce(f"runtime: {mode} · {self.prefetch_state.workers} prefetch worker(s)")
-        log.info("runtime: %s, %d prefetch worker(s)", mode, self.prefetch_state.workers)
+        console_log.info("runtime: %s · %d prefetch worker(s)", mode, self.prefetch_state.workers)
 
     @property
     def session_entry(self) -> SessionEntry:
@@ -4633,4 +4634,4 @@ class Reader:
 
     def _report_session(self, summary: str | None) -> None:
         if summary and self.options.stats.summary:
-            console.announce(f"session: {summary}")
+            console_log.info("session: %s", summary)

@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 
 ROOT_LOGGER_NAME = "saitenka"
 
+#: Records the person watching mpv is meant to read — a startup banner, a session summary. The root
+#: console handler is WARNING, so these used to be `print` calls inside the runtime, which skipped the
+#: redaction every other record goes through and left the session summary out of `overlay.log`
+#: entirely. Logging them here reaches the terminal AND the file, through the same processors.
+CONSOLE_LOGGER_NAME = f"{ROOT_LOGGER_NAME}.console"
+CONSOLE_PREFIX = "[saitenka]"
+
 
 def _json_dumps(obj: EventDict, **_kw: Any) -> str:
     """``structlog.processors.JSONRenderer``'s serializer hook. msgspec, already a dependency, ships
@@ -58,6 +65,20 @@ def _drop_session(_logger: WrappedLogger, _method_name: str, event_dict: EventDi
     launch banner already prints it once). It stays in the JSON file log for report run-attribution."""
     event_dict.pop("session", None)
     return event_dict
+
+
+def _render_console_line(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> str:
+    """A user-facing line rendered as itself — no level, timestamp, or ``key=value`` tail.
+
+    `ConsoleRenderer` is right for a log the reader is debugging with and wrong for one sentence
+    addressed to them; this is the only sink where the message IS the output.
+    """
+    return f"{CONSOLE_PREFIX} {event_dict.get('event', '')}"
+
+
+def user_facing_logger() -> logging.Logger:
+    """The logger for a line the user is meant to read. See :data:`CONSOLE_LOGGER_NAME`."""
+    return logging.getLogger(CONSOLE_LOGGER_NAME)
 
 
 def configure_logging(log_path: Path) -> None:
@@ -114,3 +135,18 @@ def configure_logging(log_path: Path) -> None:
 
     root.addHandler(fh)
     root.addHandler(sh)
+
+    # INFO, unlike `sh` — that is the whole point. Propagation still carries the record to `fh`, and
+    # `sh`'s WARNING floor is what stops it being printed a second time.
+    announce = logging.StreamHandler()
+    announce.setLevel(logging.INFO)
+    announce.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=shared_processors,
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                _render_console_line,
+            ],
+        )
+    )
+    user_facing_logger().addHandler(announce)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
 from concurrent.futures import Future
@@ -14,6 +15,7 @@ from saitenka import otel_metrics
 from saitenka.app import mined_seed as mined_seed_lane
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
+from saitenka.app.logsetup import CONSOLE_LOGGER_NAME
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.mpvio.ipc import IPCRequest
@@ -173,16 +175,22 @@ def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
     assert spans[-1][1]["outcome"] == "cancelled"
 
 
-def test_runtime_banner_reports_real_worker_count_after_async_deps(capsys, monkeypatch):
-    """Regression: the banner printed from run() BEFORE async deps spawned prefetch workers, so it
+def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, monkeypatch):
+    """Regression: the banner announced from run() BEFORE async deps spawned prefetch workers, so it
     always said '0 prefetch worker(s)'. It must now fire from apply_deps with the live count, exactly
-    once (a later re-inject must not re-print)."""
+    once (a later re-inject must not re-announce).
+
+    Read off the record, not the terminal: which stream a user-facing line reaches is logsetup's
+    (tests/test_logsetup.py), and a Reader built without `configure_logging` has no handler at all.
+    """
+    caplog.set_level(logging.INFO, logger=CONSOLE_LOGGER_NAME)
     r = Reader(FakeIPC())
     monkeypatch.setattr(r, "start_prefetch", lambda: setattr(r.prefetch_state, "workers", 3))
     r._apply_deps({"scorer": None, "dict_set": None, "anki": None, "mine_cfg": None})
-    assert "3 prefetch worker(s)" in capsys.readouterr().out  # real count, not 0
+    assert "3 prefetch worker(s)" in caplog.text  # real count, not 0
+    caplog.clear()
     r._apply_deps({})  # a second injection must not re-announce
-    assert "prefetch worker(s)" not in capsys.readouterr().out
+    assert "prefetch worker(s)" not in caplog.text
 
 
 def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeypatch):
