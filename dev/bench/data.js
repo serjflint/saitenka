@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787576772909,
+  "lastUpdate": 1787578773640,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -9329,6 +9329,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.33986,
             "range": "3 replicas; min 1.23563; max 1.65978; MAD 0.104228; worst 1.65978",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d61af686f1171f06acff39718ad927a3d9a5949a",
+          "message": "Merge pull request #427 from serjflint/refactor/profile-controller\n\nrefactor(app): give reading profiles a bounded controller",
+          "timestamp": "2026-08-24T18:38:24+05:00",
+          "tree_id": "51d02eceb3e22684d205c68f13e8626f76b69d8f",
+          "url": "https://github.com/serjflint/saitenka/commit/d61af686f1171f06acff39718ad927a3d9a5949a"
+        },
+        "date": 1787578772931,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.310915,
+            "range": "3 replicas; min 5.22939; max 6.35873; MAD 0.047813",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.956075,
+            "range": "3 replicas; min 8.12096; max 8.98542; MAD 0.029347; worst 8.98542",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.487937,
+            "range": "3 replicas; min 16.2697; max 18.603; MAD 0.11508",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.62304,
+            "range": "3 replicas; min 17.1796; max 18.777; MAD 0.153957; worst 18.777",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 19.502156,
+            "range": "3 replicas; min 19.0032; max 195.101; MAD 0.498984",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.131698,
+            "range": "3 replicas; min 0.106831; max 0.134001; MAD 0.002303; worst 0.134001",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.242098,
+            "range": "3 replicas; min 38.691; max 198.413; MAD 0.551126; worst 198.413",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.785892,
+            "range": "3 replicas; min 2.53801; max 131.034; MAD 0.247881; worst 131.034",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.195379,
+            "range": "3 replicas; min 1.11091; max 158.66; MAD 0.084469; worst 158.66",
             "unit": "ms"
           }
         ]
