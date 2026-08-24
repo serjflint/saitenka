@@ -73,7 +73,7 @@ ATTACHED: tuple[TerminalStep, ...] = (
 
 
 class Session(Protocol):
-    # `object`, not `None`: `Reader.close` hands back its `CloseLedger` and the terminal sequence
+    # `object`, not `None`: `SessionController.close` hands back its `CloseLedger` and the terminal sequence
     # deliberately does not read it — what a step returns is between it and its own callers.
     def close(self) -> object: ...
 

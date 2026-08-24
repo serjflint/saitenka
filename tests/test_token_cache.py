@@ -13,7 +13,7 @@ import threading
 import pytest
 from util import FakeIPC, RecordingRasterProvider
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
@@ -77,8 +77,8 @@ def test_lru_evicts_oldest_beyond_capacity():
 # --- controller seam: plain-then-upgrade + cache hit ----------------------------------------------
 
 
-def _reader(dict_set=None) -> Reader:
-    reader = Reader(FakeIPC(), dict_set=dict_set)
+def _reader(dict_set=None) -> SessionController:
+    reader = SessionController(FakeIPC(), dict_set=dict_set)
     reader.osd = (1920, 1080)
     reader.renderer = NullRenderer()
     return reader

@@ -1,6 +1,6 @@
 """The live study-session controller and its explicit feature composition.
 
-``Reader`` owns session ordering and mpv mutation. Bounded collaborators own feature state and policy;
+``SessionController`` owns session ordering and mpv mutation. Bounded collaborators own feature state and policy;
 the controller assembles their current inputs and coordinates cross-feature turns.
 """
 
@@ -348,7 +348,7 @@ _DISPLAY_PROBE_PROPS = (
 _Nested = PopupView
 
 
-class Reader:
+class SessionController:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
     @property
@@ -389,7 +389,7 @@ class Reader:
         self.ipc = ipc
         self._interactive_ready = False
         self._connection = ConnectionStore(ipc)
-        # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
+        # Supplied by composition (`create_session_controller`), never probed off `ipc`: which egress the
         # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
         self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
 
@@ -399,7 +399,7 @@ class Reader:
         # what moves is when it closes. False means no runtime owns this session, and the close
         # table's fallback still has to run.
         # `getattr`, like the job-lane port below: a partial IPC (the benches' fake) constructs a
-        # Reader without implementing every runtime port, and construction must not demand one.
+        # SessionController without implementing every runtime port, and construction must not demand one.
 
         self._runtime_owns_surfaces = ipc.register_session_resource(
             SURFACES_RESOURCE, self.lifecycle_surfaces
@@ -418,7 +418,7 @@ class Reader:
         if o.subtitle_geometry.native_visible and renderer is None:
             current_renderer = NativeVisibleRenderer()
         # No provider is chosen here. Which implementation renders geometry is a composition
-        # decision (`reader_factory._geometry_backend`); a host that picks its own provider cannot
+        # decision (`session_factory._geometry_backend`); a host that picks its own provider cannot
         # be handed a different one, which is what makes the fake/null/libass conformance contract
         # testable at all.
         self.subtitle_pipeline = SubtitleModeCoordinator(current_renderer, geometry_backend)
@@ -472,7 +472,7 @@ class Reader:
         self.play_audio = o.mining.play_audio
         self.show_preview = o.mining.show_preview  # auto-pop the card-preview panel after a mine
         # Interactive sessions publish this optional subprocess probe later; deterministic
-        # demo/screenshot assembly supplies it synchronously through ReaderServices.
+        # demo/screenshot assembly supplies it synchronously through SessionServices.
         self._tts_ok = bool(tts_ok)
 
         self._capability_submit = configure_runtime_jobs(ipc)
@@ -499,7 +499,7 @@ class Reader:
         self.annotation_mode: subtitle_intents.AnnotationMode = o.tooltip.annotation_mode
         self.annotation_hover = False
         # Visual-only: draw the kanji panel's big headword in the numbered stroke-order font. Set here
-        # (the shared Reader init) so both the run and attach seams get it from one place; a pure render
+        # (the shared SessionController init) so both the run and attach seams get it from one place; a pure render
         # flag threaded onto the kanji Entry, never gating what's looked up or the panel-cache identity.
         self.kanji_stroke_order = o.tooltip.kanji_stroke_order
         self.hide_delay = o.tooltip.hide_delay  # tooltip linger after the cursor leaves the word
@@ -662,7 +662,7 @@ class Reader:
                 name, session_resources.Retiring(self._participant_for(name))
             )
         # The setup steps, run phase by phase from `run`. Registered here so the runtime owns
-        # *what* each phase does; the Reader keeps only the order and the no-runtime fallback.
+        # *what* each phase does; the SessionController keeps only the order and the no-runtime fallback.
 
         self._startup_steps: dict[events.StartPhase, Callable[[], object]] = {
             events.StartPhase.PROCESS: self._guard_main_render,
@@ -1063,7 +1063,7 @@ class Reader:
 
     def subtitle_target(self) -> SubtitleTarget:
         """What the subtitle renderers act on. Built per call — `native_geometry` is installed
-        after construction, so a target cached on the Reader would predate it.
+        after construction, so a target cached on the SessionController would predate it.
 
         `draw_request` and `refresh` stay callables: the target outlives the observation, and the
         legacy stage needs the request built at stage time rather than at snapshot time.
@@ -1447,7 +1447,7 @@ class Reader:
         self.hover = -1
         self.annotation_hover = False
         self.sub_text = text
-        # Invariant 13: the projection owns which cue is current, so a Reader-side decision about
+        # Invariant 13: the projection owns which cue is current, so a SessionController-side decision about
         # it has to reach the projection too — otherwise the next changed cue fact reconciles mpv's
         # stale text back over this one.
         self._reduce_playback(events.CueTextReplaced(text))
@@ -2415,7 +2415,7 @@ class Reader:
         A property and not a snapshot function: as the latter every caller in the build chain
         inherited all eleven reads it gathers, which is most of what made the tooltip cluster
         measure as coupled to the host. Per-turn facts — the mined set, the scroll flag — stay
-        parameters, because a value holding those would be the Reader under another name.
+        parameters, because a value holding those would be the SessionController under another name.
         """
         return tooltip_panel.PanelStyle(
             width=self.tip_scale.width,
@@ -2758,7 +2758,7 @@ class Reader:
 
     def _navigated_panel(self, query: str):
         """The read-only reference Panel for a nav target — built off the main thread by the engaged
-        tooltip lane, so the seam lives on the Reader (no engaged-tooltip→tooltip import)."""
+        tooltip lane, so the seam lives on the SessionController (no engaged-tooltip→tooltip import)."""
         return tooltip._navigated_panel(self.panel_style, query)
 
     # --- what InteractionHost reads and calls ------------------------------------------
@@ -2779,7 +2779,7 @@ class Reader:
 
     def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
         """The (cached) panel for a clicked/keyed nested open — the shared builder the engaged-tooltip
-        lane and session thread reach via the Reader seam. The worker
+        lane and session thread reach via the SessionController seam. The worker
         passes ``mined`` (jamdict isn't worker-safe); the main thread lets it recompute."""
         return nested_popup._engaged_open_panel(
             self.tip_ports, self.panel_ports, source, query, mined=mined
@@ -3354,11 +3354,11 @@ class Reader:
         """Assemble feature-owned actions once; handlers are bound and receive no god context."""
 
         def action(method: Callable[..., object]) -> Callable[[], None]:
-            """Route to a `Reader` verb, resolved by name at call time.
+            """Route to a `SessionController` verb, resolved by name at call time.
 
-            Annotated by what it reads — `__name__` — and not as a `Reader` method, because a
+            Annotated by what it reads — `__name__` — and not as a `SessionController` method, because a
             parameter that names the host is a host parameter to the contract gate whether or not
-            an instance ever reaches it. `Reader.verb` is what every caller passes; a typo in one
+            an instance ever reaches it. `SessionController.verb` is what every caller passes; a typo in one
             raises at router construction, on the class.
 
             Late binding is deliberate: a keybind test overrides the verb on the *instance* and
@@ -3378,35 +3378,35 @@ class Reader:
         # `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
         # `interaction_intents`. The verb below only carries the intent to one of them.
         handlers: dict[str, Callable[[], None]] = {
-            SUBTITLE_LANGUAGE_MSG: action(Reader.toggle_subtitle_language),
-            SUBTITLE_MARK_JP_MSG: action(Reader.mark_current_subtitle_japanese),
-            SUBTITLE_RETRY_MSG: action(Reader.retry_japanese_subtitles),
-            LEGACY_RENDERER_MSG: action(Reader.toggle_legacy_renderer),
-            ANNOTATION_MSG: action(Reader.toggle_annotation_mode),
-            TRANS_MSG: action(Reader.toggle_translation),
-            COPY_LINE_MSG: action(Reader.copy_line),
-            SUB_PREV_MSG: action(Reader._navigate_previous),
-            SUB_NEXT_MSG: action(Reader._navigate_next),
-            SUB_REPLAY_MSG: action(Reader._replay_cue),
-            SUB_ANCHOR_MSG: action(Reader._anchor_subtitles),
-            HELP_TOGGLE_MSG: action(Reader.toggle_help),
+            SUBTITLE_LANGUAGE_MSG: action(SessionController.toggle_subtitle_language),
+            SUBTITLE_MARK_JP_MSG: action(SessionController.mark_current_subtitle_japanese),
+            SUBTITLE_RETRY_MSG: action(SessionController.retry_japanese_subtitles),
+            LEGACY_RENDERER_MSG: action(SessionController.toggle_legacy_renderer),
+            ANNOTATION_MSG: action(SessionController.toggle_annotation_mode),
+            TRANS_MSG: action(SessionController.toggle_translation),
+            COPY_LINE_MSG: action(SessionController.copy_line),
+            SUB_PREV_MSG: action(SessionController._navigate_previous),
+            SUB_NEXT_MSG: action(SessionController._navigate_next),
+            SUB_REPLAY_MSG: action(SessionController._replay_cue),
+            SUB_ANCHOR_MSG: action(SessionController._anchor_subtitles),
+            HELP_TOGGLE_MSG: action(SessionController.toggle_help),
             HELP_PREV_MSG: lambda: self._run_help_command(HelpCommand.PREVIOUS),
             HELP_NEXT_MSG: lambda: self._run_help_command(HelpCommand.NEXT),
             HELP_CLOSE_MSG: lambda: self._run_help_command(HelpCommand.CLOSE),
-            SPEAK_MSG: action(Reader.speak_hovered),
-            COPY_MSG: action(Reader.copy_hovered),
-            KANJI_MSG: action(Reader.kanji_current),
-            HOVER_PAUSE_MSG: action(Reader.toggle_hover_pause),
-            MINE_MSG: action(Reader.mine_current),
-            MINE_VIDEO_MSG: action(Reader.mine_current_video),
-            MINE_ALL_MSG: action(Reader.bulk_mine),
-            BOOKMARK_MSG: action(Reader.toggle_bookmark),
-            PROFILE_CYCLE_MSG: action(Reader.cycle_profile),
-            SIDEBAR_MSG: action(Reader.toggle_sidebar),
-            SUB_PICKER_MSG: action(Reader.toggle_sub_picker),
-            ANALYSIS_MSG: action(Reader.toggle_analysis),
-            PREVIEW_MSG: action(Reader.replay_preview),
-            PREVIEW_CLOSE_MSG: action(Reader._hide_preview),
+            SPEAK_MSG: action(SessionController.speak_hovered),
+            COPY_MSG: action(SessionController.copy_hovered),
+            KANJI_MSG: action(SessionController.kanji_current),
+            HOVER_PAUSE_MSG: action(SessionController.toggle_hover_pause),
+            MINE_MSG: action(SessionController.mine_current),
+            MINE_VIDEO_MSG: action(SessionController.mine_current_video),
+            MINE_ALL_MSG: action(SessionController.bulk_mine),
+            BOOKMARK_MSG: action(SessionController.toggle_bookmark),
+            PROFILE_CYCLE_MSG: action(SessionController.cycle_profile),
+            SIDEBAR_MSG: action(SessionController.toggle_sidebar),
+            SUB_PICKER_MSG: action(SessionController.toggle_sub_picker),
+            ANALYSIS_MSG: action(SessionController.toggle_analysis),
+            PREVIEW_MSG: action(SessionController.replay_preview),
+            PREVIEW_CLOSE_MSG: action(SessionController._hide_preview),
             SCROLL_UP_MSG: interaction(InteractionCommand.WHEEL_UP),
             SCROLL_DOWN_MSG: interaction(InteractionCommand.WHEEL_DOWN),
             TIP_UP_MSG: interaction(InteractionCommand.TOOLTIP_UP),
@@ -3414,7 +3414,7 @@ class Reader:
             TIP_CLOSE_MSG: interaction(InteractionCommand.TOOLTIP_BACK_OR_CLOSE),
             CLICK_MSG: interaction(InteractionCommand.CLICK),
             COPY_CLICK_MSG: interaction(InteractionCommand.COPY_UNDER_CURSOR),
-            OVERLAY_TOGGLE_MSG: action(Reader.toggle_overlay),
+            OVERLAY_TOGGLE_MSG: action(SessionController.toggle_overlay),
         }
         return CommandExecutor(handlers)
 
@@ -4127,7 +4127,7 @@ class Reader:
         """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place.
 
         Lived in `reader_deps` as a host-taking function, which is the round-trip shape: every line
-        of it writes a `Reader` field or calls a `Reader` act, so the module that *builds* the
+        of it writes a `SessionController` field or calls a `SessionController` act, so the module that *builds* the
         collaborators was also performing the state transition that installs them.
         """
         self._stop_loading()
@@ -4356,7 +4356,7 @@ class Reader:
                 # still add one.
                 CloseStep("lifecycle-surfaces", lambda: self._retire_surfaces()),
                 # Closed by the `SURFACES` phase above when a runtime owns it — this is the
-                # fallback for a Reader that has none, and must stay after the removes it carries.
+                # fallback for a SessionController that has none, and must stay after the removes it carries.
                 CloseStep(
                     "transport",
                     lambda: self.ov.close(),
@@ -4373,7 +4373,7 @@ class Reader:
                 CloseStep("temporary-artifacts", lambda: self._retire_artifacts()),
                 # Last, because it is the session's terminal transition: the reactor rejects new
                 # work and closes the mailbox, so nothing above may still need to publish — including
-                # `_retire_artifacts`, which announces ARTIFACTS through it. A Reader with no runtime
+                # `_retire_artifacts`, which announces ARTIFACTS through it. A SessionController with no runtime
                 # gets False and the step is a no-op.
                 CloseStep("session-runtime", lambda: self.ipc.close_session_runtime()),
             )
@@ -4570,7 +4570,7 @@ class Reader:
     def _retire_surfaces(self) -> None:
         """Announce the `SURFACES` phase, or close them ourselves.
 
-        Same fallback shape as `_retire_artifacts`, and for the same reason: a `Reader` with no
+        Same fallback shape as `_retire_artifacts`, and for the same reason: a `SessionController` with no
         runtime still built the surfaces, so somebody has to remove them.
 
         Gated on the *registration*, not on the announcement's return: `announce` reports only that
@@ -4585,7 +4585,7 @@ class Reader:
         """Hand the scratch dir to the runtime's `ARTIFACTS` phase, or remove it ourselves.
 
         The fallback is not what keeps this unmigrated — every migrated close duty has one, because
-        a `Reader` with no gateway still built the thing. What makes the gate sound here is that
+        a `SessionController` with no gateway still built the thing. What makes the gate sound here is that
         `RemoveSessionArtifacts` carries its own path: a reactor that *saw* the event can always
         perform it, which is the one case where `announce`'s return answers the question asked.
         """
@@ -4598,7 +4598,7 @@ class Reader:
     def mined_store(self) -> mined_store.MinedCardStore:
         """The session-scoped mined-card store, opened on first use.
 
-        A property rather than a module function taking the Reader: lazily initialising a host's
+        A property rather than a module function taking the SessionController: lazily initialising a host's
         own field is the host's business, and both callers (the mine-time writer and the Mine tab)
         want the store, not a seam.
         """

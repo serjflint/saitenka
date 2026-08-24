@@ -5,7 +5,7 @@ click routing, and link navigation. Building, placing and compositing a panel is
 :mod:`saitenka.app.tooltip_panel`, which both this module and the nested popup render through.
 
 Host-free: every entry takes the values its feature needs (`TipPorts`, `PanelPorts`, `WordLookup`,
-`HoverInputs`, `HoverActions`, `ShowActions`, `ClickPorts`), built as `Reader` properties.
+`HoverInputs`, `HoverActions`, `ShowActions`, `ClickPorts`), built as `SessionController` properties.
 """
 
 from __future__ import annotations
@@ -1033,7 +1033,7 @@ def _navigated_panel(style: PanelStyle, query: str) -> Panel | None:
     """The read-only reference Panel for a navigation target: a wildcard/prefix query → search results,
     else the exact term. Built at 1× like every panel; the one-panel blit composites it natively at
     the display scale."""
-    # The dictionary and the tokenizer travel together — `Reader.panel_style` reads both off one host,
+    # The dictionary and the tokenizer travel together — `SessionController.panel_style` reads both off one host,
     # and a navigated query is looked up whole by one and rendered by the other.
     if style.dict_set is None or style.tokenizer is None:
         return None
@@ -1100,7 +1100,7 @@ def tip_back(ports: TipPorts) -> bool:
     """Pop one link-navigation step, restoring the previous base view.
 
     Returns False when there is no history. `interaction_intents` makes that decision from
-    `Reader.tip_can_go_back` now, so the return is for callers that still ask-and-act in one go.
+    `SessionController.tip_can_go_back` now, so the return is for callers that still ask-and-act in one go.
     """
     restored = ports.nav_store.dispatch(events.TipNavPopped())
     if not restored:

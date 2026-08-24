@@ -123,7 +123,7 @@ def test_a_call_through_a_value_over_approximates_rather_than_missing() -> None:
 
 
 def test_functions_bound_into_one_callable_field_share_its_arity() -> None:
-    """`SurfaceSpec` holds its hooks as `Callable[[Reader], bool]` fields.
+    """`SurfaceSpec` holds its hooks as `Callable[[SessionController], bool]` fields.
 
     So `help_overlay.scroll` cannot take different parameters from `sub_picker.scroll`, however
     little it reads itself. Without this the small hook reads as trivially convertible while its

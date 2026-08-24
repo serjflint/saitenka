@@ -1,4 +1,4 @@
-"""Legacy Reader adapter for the implementation-neutral behavior trace."""
+"""Legacy SessionController adapter for the implementation-neutral behavior trace."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState, Interactio
 from saitenka.app.subtitle_render import SUB_ID
 
 if TYPE_CHECKING:
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
 
 def _visible_surfaces(commands: list[tuple]) -> set[object]:
@@ -29,7 +29,7 @@ def _visible_surfaces(commands: list[tuple]) -> set[object]:
     return visible
 
 
-def _cue(reader: Reader) -> CueState:
+def _cue(reader: SessionController) -> CueState:
     if reader._cue_retired and reader._cue_identity_ever_installed:
         return "retired"
     if reader._current_cue_identity is not None or reader.sub_text.strip():
@@ -37,7 +37,7 @@ def _cue(reader: Reader) -> CueState:
     return "none"
 
 
-def _interaction(reader: Reader) -> InteractionState:
+def _interaction(reader: SessionController) -> InteractionState:
     if reader.tip.view.rect is not None:
         return "tooltip"
     if reader.hover >= 0 and reader.boxes:
@@ -45,7 +45,7 @@ def _interaction(reader: Reader) -> InteractionState:
     return "ready" if reader.boxes else "unavailable"
 
 
-def _pixels(reader: Reader, visible: set[object]) -> PixelState:
+def _pixels(reader: SessionController, visible: set[object]) -> PixelState:
     if SUB_ID in visible:
         return "legacy"
     if reader.ipc.props.get("sub-visibility") is True:
@@ -56,7 +56,7 @@ def _pixels(reader: Reader, visible: set[object]) -> PixelState:
 
 
 class LegacyReaderTrace:
-    def __init__(self, reader: Reader) -> None:
+    def __init__(self, reader: SessionController) -> None:
         self.reader = reader
         self.trace = BehaviorTrace()
 

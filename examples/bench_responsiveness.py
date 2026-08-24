@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from saitenka.app import nested_popup, tooltip, tooltip_panel
 from saitenka.app.config import load_config
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.tokenize import Token, tokenize
 from saitenka.mpvio.osd import to_bgra, to_bgra_array
 from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
@@ -69,7 +69,7 @@ HAND_PICKED: list[tuple[str, str]] = [
 class FakeIPC(NoSessionRuntime):
     """Minimal mpv stand-in: fixed osd, no socket. overlay-add just writes a temp file (as mpv wants).
 
-    Refuses job lanes while no gateway is installed — the synchronous bench paths drive the Reader
+    Refuses job lanes while no gateway is installed — the synchronous bench paths drive the SessionController
     themselves and want no background work. A path that MEASURES background work installs one (see
     :func:`_runtime_ipc`), and then the ports delegate for real: refusing with a gateway present
     would silently disable the very thing being measured, which is exactly what happened to
@@ -123,11 +123,11 @@ class FakeIPC(NoSessionRuntime):
         return self.props.get(name)
 
     def receive_session(self, _timeout, _handle) -> None:
-        """No socket, so a turn observes nothing. The bench drives the Reader by calling it."""
+        """No socket, so a turn observes nothing. The bench drives the SessionController by calling it."""
 
 
 def _fake_ipc() -> MpvIPC:
-    """``FakeIPC`` duck-types the ``command``/``drain_events`` surface ``Reader`` calls on ``MpvIPC``
+    """``FakeIPC`` duck-types the ``command``/``drain_events`` surface ``SessionController`` calls on ``MpvIPC``
     (no socket, headless bench) but isn't a subclass — cast documents that at the one boundary instead
     of a per-call-site ``# type: ignore``."""
     return cast("MpvIPC", FakeIPC())
@@ -137,9 +137,9 @@ def _runtime_ipc() -> tuple[MpvIPC, MpvGateway]:
     """A fake with a REAL gateway behind it, for a bench that measures BACKGROUND work.
 
     Prefetch runs on a registered job lane, and `start_prefetch` returns early when the lane is
-    refused — so a bench that omits the gateway measures a Reader whose prefetch never starts, and
+    refused — so a bench that omits the gateway measures a SessionController whose prefetch never starts, and
     reports every hover as "the worker fell behind" when no worker exists. Close the gateway when
-    the run ends; its threads outlive the Reader otherwise.
+    the run ends; its threads outlive the SessionController otherwise.
     """
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.runtime.mailbox import SessionMailbox
@@ -389,10 +389,10 @@ def _timeline_scorer(words: list[list[str]]):
 
 
 def _cold_reader(ds, *, prefetch: bool = False):
-    """A fresh Reader on a fake IPC, head-path forced (as a live run with workers would). With
+    """A fresh SessionController on a fake IPC, head-path forced (as a live run with workers would). With
     ``prefetch=True`` the real background workers run (``start_prefetch``), so scroll-ahead warms the
     next blocks off the main thread exactly as a live session does — the realistic scroll path."""
-    reader = Reader(_fake_ipc(), dict_set=ds, prefetch=prefetch)
+    reader = SessionController(_fake_ipc(), dict_set=ds, prefetch=prefetch)
     reader.osd = OSD
     if prefetch:
         reader.start_prefetch()
@@ -513,7 +513,7 @@ def run_render_cache(
     cache_dir = tempfile.mkdtemp(prefix="saitenka-bench-render-cache-")
     os.environ["SAITENKA_CACHE_DIR"] = cache_dir  # paths.cache_dir() reads this each call
     opts = ReaderOptions(tooltip=TooltipOptions(render_cache=True), prefetch=False)
-    reader = Reader(_fake_ipc(), dict_set=ds, options=opts)
+    reader = SessionController(_fake_ipc(), dict_set=ds, options=opts)
     reader.osd = OSD
     cap = reader.tip_scale.cap
     # The render cache is USE-WHEN-AVAILABLE (opens only if the file exists; prewarm is the builder), so
@@ -665,7 +665,7 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     atlas_path = _cd() / "mask-atlas.sqlite"
 
     # Phase A — COLD: render with atlas WRITE on (builds the atlas), counting getmask2 rasterisations.
-    reader_a = Reader(_fake_ipc(), dict_set=ds, options=opts)
+    reader_a = SessionController(_fake_ipc(), dict_set=ds, options=opts)
     reader_a.osd = OSD
     cap = reader_a.tip_scale.cap
     atlas = mask_atlas.MaskAtlas.open(atlas_path)
@@ -679,7 +679,7 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     mem: dict = {}
     n_masks = atlas.load_into(mem)
     fonts.set_mask_atlas(mem, None)
-    reader_b = Reader(_fake_ipc(), dict_set=ds, options=opts)
+    reader_b = SessionController(_fake_ipc(), dict_set=ds, options=opts)
     reader_b.osd = OSD
     warm_rasters, warm_ms = _atlas_render_pass(reader_b, corpus, cap, count_rasters=True)
     fonts.set_mask_atlas(None, None)
@@ -1188,7 +1188,7 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
             "time-pos": 1.0,
         }
     )
-    reader = Reader(cast("MpvIPC", ipc))
+    reader = SessionController(cast("MpvIPC", ipc))
     reader.osd = OSD
     cues = [Cue(i * 2.0, i * 2.0 + 1.8, f"これは{i}番目の字幕です") for i in range(60)]
     reader.episode.sub_index = CueIndex(cues)
@@ -1598,7 +1598,7 @@ def run_timeline(
     # A REAL gateway: this whole benchmark is about what the background worker gets done during the
     # idle gaps, and prefetch only starts once its job lane registers.
     timeline_ipc, gateway = _runtime_ipc()
-    reader = Reader(
+    reader = SessionController(
         timeline_ipc,
         dict_set=ds,
         scorer=scorer,
@@ -1679,11 +1679,11 @@ def run_timeline(
             reader.retire_hover()
     finally:
         reader._stop.set()
-        gateway.close()  # its worker threads outlive the Reader otherwise
+        gateway.close()  # its worker threads outlive the SessionController otherwise
 
     # `runtime_info()` ran before any tokenizer existed, so its GIL reading (and the worker count
     # derived from it) predates fugashi silently re-enabling the GIL — the exact collapse its own
-    # docstring warns about. The Reader has since started prefetch, so take the count it ACTUALLY
+    # docstring warns about. The SessionController has since started prefetch, so take the count it ACTUALLY
     # got: a header claiming 8 workers while 2 are running is what makes a miss count unreadable.
     rt = {**rt, "prefetch_workers": reader.prefetch_state.workers, "gil_enabled": _gil_enabled()}
     gil_rc = finalize_runtime(rt, require_ft)
@@ -1866,7 +1866,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
 
     ds.entry_for = traced_entry_for
 
-    reader = Reader(
+    reader = SessionController(
         _fake_ipc(),
         dict_set=ds,
         scorer=scorer,
@@ -2334,7 +2334,7 @@ def main() -> int:
         ds = _SyntheticDS()
 
     fake_ipc = FakeIPC()
-    reader = Reader(cast("MpvIPC", fake_ipc), dict_set=ds, prefetch=False)
+    reader = SessionController(cast("MpvIPC", fake_ipc), dict_set=ds, prefetch=False)
     reader.osd = OSD
     reader.set_subtitle(LINE)
     idxs = _content_indices(reader)

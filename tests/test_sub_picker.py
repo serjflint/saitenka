@@ -1,7 +1,7 @@
 """Window 1 — the provider-agnostic subtitle-source download picker.
 
 Behavioural, headless (no real mpv / no network): the panel is driven through a FakeIPC and the real
-Reader, the candidate *lister* is a plain thunk (the CLI builds it from enabled_providers), listing
+SessionController, the candidate *lister* is a plain thunk (the CLI builds it from enabled_providers), listing
 results are applied at the broker-completion seam, and the download click is asserted through the
 SubtitleCandidate.download thunk + the start_fetch seam (monkeypatched at its source module, since
 sub_picker imports it at call time).
@@ -18,8 +18,8 @@ from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
 from saitenka.app import sub_picker, subtitle_modes
-from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.runtime import (
     EffectOutcome,
@@ -41,9 +41,9 @@ class FakeIPC(util.FakeIPC):
         return super().command(*args)
 
 
-def _reader(**props) -> tuple[Reader, FakeIPC]:
+def _reader(**props) -> tuple[SessionController, FakeIPC]:
     ipc = FakeIPC(**props)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.osd = (1920, 1080)
     return reader, ipc
 
@@ -62,12 +62,12 @@ def _lister(candidates, warnings=()):
     return lambda _video: (list(candidates), list(warnings))
 
 
-def _open(reader: Reader) -> None:
+def _open(reader: SessionController) -> None:
     """Put the picker up the way production does: through the slice that owns "open"."""
     reader._picker_store.dispatch(events.PickerOpened())
 
 
-def _adopt(reader: Reader, *, candidates=(), warnings=(), error=None) -> None:
+def _adopt(reader: SessionController, *, candidates=(), warnings=(), error=None) -> None:
     """Land a listing on the picker's current generation."""
     sub_picker.apply_listing(
         reader._picker_store,
@@ -77,11 +77,11 @@ def _adopt(reader: Reader, *, candidates=(), warnings=(), error=None) -> None:
     )
 
 
-def _listed(reader: Reader) -> sub_picker.ListingResult:
+def _listed(reader: SessionController) -> sub_picker.ListingResult:
     return sub_picker.listing_of(reader.sub_picker)
 
 
-def _close(reader: Reader) -> None:
+def _close(reader: SessionController) -> None:
     sub_picker.close_picker(
         reader._picker_store, reader.interaction.picker_panel, reader.lifecycle_surfaces
     )
@@ -91,7 +91,7 @@ def _picker_adds(ipc: FakeIPC) -> list[tuple]:
     return [c for c in ipc.commands if c[:2] == ("overlay-add", OverlayId.PICKER)]
 
 
-def _drain_until(reader: Reader, predicate) -> None:
+def _drain_until(reader: SessionController, predicate) -> None:
     deadline = time.monotonic() + 1
     while not predicate() and time.monotonic() < deadline:
         reader._drain_events()
@@ -103,7 +103,7 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
     ipc = RuntimeFakeIPC()
     ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.osd = (1920, 1080)
     old_started = threading.Event()
     old_release = threading.Event()
@@ -145,7 +145,7 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
 def test_subtitle_picker_lane_rejects_work_beyond_its_bound():
     ipc = RuntimeFakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     release = threading.Event()
     started = [threading.Event(), threading.Event()]
     start_lock = threading.Lock()
@@ -188,7 +188,7 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
     ipc = RuntimeFakeIPC()
     ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.osd = (1920, 1080)
     started = threading.Event()
     release = threading.Event()

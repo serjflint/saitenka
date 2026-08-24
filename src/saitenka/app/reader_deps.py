@@ -1,5 +1,5 @@
-"""Build the Reader's collaborators (scorer, anki, mine config, dict set) from a loaded config, and
-the Reader-side glue that loads them progressively in the background.
+"""Build the SessionController's collaborators (scorer, anki, mine config, dict set) from a loaded config, and
+the SessionController-side glue that loads them progressively in the background.
 
 ``run`` assembles these from CLI flags interleaved with progress prints; ``attach``/plugin mode has
 no flags, so it needs the same objects derived purely from ``overlay.toml``. Without them the overlay
@@ -7,7 +7,7 @@ is a bare subtitle renderer — no FSRS/known coloring, no JLPT underlines, no f
 dictionary tooltips, no mining. Anki-dependent pieces degrade to None (logged) when Anki is closed,
 so a missing Anki never blocks attaching.
 
-``load_deps_async`` takes a ``DepsLoad`` port; injecting what it built is the Reader's own state
+``load_deps_async`` takes a ``DepsLoad`` port; injecting what it built is the SessionController's own state
 transition and lives there.
 """
 

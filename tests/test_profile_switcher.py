@@ -13,9 +13,9 @@ import pytest
 from util import FakeIPC, keybind_registry, press, runtime_gateway
 
 from saitenka.app import prefetch
-from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG, ReaderLanguages
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
@@ -74,8 +74,8 @@ def _restore_tokenizer_registry():
     mod._FACTORIES.update(saved)
 
 
-def _headless(request, profile=None, profiles=None) -> Reader:
-    """A headless Reader with a gateway behind it, both closed when the test ends.
+def _headless(request, profile=None, profiles=None) -> SessionController:
+    """A headless SessionController with a gateway behind it, both closed when the test ends.
 
     Takes `request` because the helper builds the resources, so the helper registers their teardown
     — nine call sites each remembering to close two things is nine chances to leak a session, and a
@@ -84,8 +84,10 @@ def _headless(request, profile=None, profiles=None) -> Reader:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)  # selection issues correlated commands
     request.addfinalizer(gateway.close)
-    reader = Reader(ipc, profile=profile, renderer=NullRenderer())
-    request.addfinalizer(reader.close)  # LIFO: the Reader closes before the gateway it publishes to
+    reader = SessionController(ipc, profile=profile, renderer=NullRenderer())
+    request.addfinalizer(
+        reader.close
+    )  # LIFO: the SessionController closes before the gateway it publishes to
     if profiles is not None:
         reader.set_profile_cycle(profiles)
     reader.osd = (1280, 720)
@@ -111,7 +113,7 @@ def test_profile_cycle_key_is_registered_even_on_the_default_path():
     """Always-register: the switcher binding exists regardless of how many profiles are configured, so
     the handler (not the registration) is what no-ops."""
     ipc = FakeIPC()
-    reader = Reader(ipc, renderer=NullRenderer())
+    reader = SessionController(ipc, renderer=NullRenderer())
     reader._register_keybinds()
     assert keybind_registry(ipc).get(reader.keys.profile_cycle_key) == "saitenka-cycle-profile"
 
@@ -133,7 +135,7 @@ def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
     flags = (("jimaku", True), ("universal", True))
 
     ipc = FakeIPC()
-    reader = Reader(ipc, profile=DEFAULT_PROFILE, renderer=NullRenderer())
+    reader = SessionController(ipc, profile=DEFAULT_PROFILE, renderer=NullRenderer())
     reader.set_profile_cycle([DEFAULT_PROFILE, _FR])
     reader.osd = (1280, 720)
     reader._register_keybinds()
@@ -213,7 +215,7 @@ def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request):
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)  # selection issues correlated commands
     request.addfinalizer(gateway.close)
-    reader = Reader(ipc, profile=DEFAULT_PROFILE, renderer=NullRenderer())
+    reader = SessionController(ipc, profile=DEFAULT_PROFILE, renderer=NullRenderer())
     request.addfinalizer(reader.close)
     reader.set_profile_cycle([DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn")
     reader.osd = (1280, 720)
@@ -279,7 +281,7 @@ class _SwapMidWarmTokenizer(_MinimalTokenizer):
     profile swap (``use_tokenizer``), so the warm's ``put`` for that cue lands AFTER the cache was
     cleared+bumped — exactly the window a background worker hits."""
 
-    def __init__(self, reader: Reader, replacement) -> None:
+    def __init__(self, reader: SessionController, replacement) -> None:
         super().__init__("old")
         self._reader, self._replacement, self._swapped = reader, replacement, False
 
@@ -291,7 +293,7 @@ class _SwapMidWarmTokenizer(_MinimalTokenizer):
         return toks
 
 
-def _warm_reader(request) -> Reader:
+def _warm_reader(request) -> SessionController:
     reader = _headless(request)
     reader.dict_set = _ExistsDS()
     reader.episode.sub_index = CueIndex(parse_srt(_SRT))

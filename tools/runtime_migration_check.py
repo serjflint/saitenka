@@ -97,16 +97,17 @@ _TERMINAL_DEBT: dict[str, frozenset[tuple[str, str]]] = {}
 #: Four of `host-composition`'s rows were mis-filed, in the same way and for the same reason: this
 #: set is where "cannot be converted" lives, so a row parked here is a row nothing re-examines.
 #:
-#:   * `Miner.__init__` did not build or own the Reader, it read twenty-one of its members — a
+#:   * `Miner.__init__` did not build or own the SessionController, it read twenty-one of its members — a
 #:     feature value, and it converted as one;
-#:   * `load_deps_async` *injects into* a built Reader rather than building one, which is the
+#:   * `load_deps_async` *injects into* a built SessionController rather than building one, which is the
 #:     write-back category, not a composition root. Five members, cut facts-from-acts;
-#:   * `apply_deps` was deleted rather than converted: every line wrote a `Reader` field or called a
-#:     `Reader` act, so it moved onto the owner of that state;
-#:   * `SessionRuntime.__init__` held a Reader because it *drives* one — seven facts, nine acts.
+#:   * `apply_deps` was deleted rather than converted: every line wrote a `SessionController` field or called a
+#:     `SessionController` act, so it moved onto the owner of that state;
+#:   * `SessionRuntime.__init__` held a SessionController because it *drives* one — seven facts, nine acts.
 #:
-#: The last two were not debt at all. `Reader.__init__` and `create_reader` were flagged because
-#: their annotations *contain* the word: `options: ReaderOptions`, `services: ReaderServices`. See
+#: The last two were not debt at all. `SessionController.__init__` and
+#: `create_session_controller` were flagged because their annotations *contain* the word:
+#: `options: ReaderOptions`, `services: SessionServices`. See
 #: `_names_the_host`. A measurement bug is invisible while it lives in the set of things nobody
 #: expects to move — check the claim before adding a row, and re-check the ones already here.
 
@@ -144,13 +145,17 @@ _DUTY_IDS = {
 
 #: Identifiers that ARE the host, spelled every way an annotation can carry it (bare, quoted,
 #: qualified, optional, in a union).
-_HOST_NAMES = {"Reader", "controller.Reader", "saitenka.app.controller.Reader"}
+_HOST_NAMES = {
+    "SessionController",
+    "session_controller.SessionController",
+    "saitenka.app.session_controller.SessionController",
+}
 
 
 def _names_the_host(annotation) -> bool:
-    """Does this annotation name the `Reader` itself — as opposed to merely containing the word.
+    """Does this annotation name the `SessionController` itself, not merely containing the word.
 
-    A substring test read `options: ReaderOptions` and `services: ReaderServices` as host parameters
+    A substring test read `options: ReaderOptions` and `services: SessionServices` as host parameters
     and filed both under terminal composition debt, where being unconvertible is the whole point, so
     nothing ever re-examined them. `ReaderOptions` is a config dataclass; taking one is not holding
     the host. Match the name, not the spelling.

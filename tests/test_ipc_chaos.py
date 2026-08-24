@@ -184,7 +184,7 @@ def test_write_failure_mid_conversation_marks_disconnected():
 
 
 class _ScriptedTransport:
-    """Delivers queued byte chunks then EOF (``b""``) — a pipe that drops after its data. Reader-only;
+    """Delivers queued byte chunks then EOF (``b""``) — a pipe that drops after its data. SessionController-only;
     writes are ignored. Used to drive the auto-reconnect path deterministically (no OS race)."""
 
     def __init__(self, chunks: list[bytes] | None = None) -> None:

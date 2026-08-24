@@ -49,7 +49,7 @@ class PrefetchItem:
     decoded-entry LRU) is usually already paid by the time a hover actually happens.
 
     ``gen`` is the prefetch generation at enqueue time — a line change / resume / seek bumps the
-    Reader's counter, so stale items are dropped by the worker. ``mined`` is evaluated on the MAIN
+    SessionController's counter, so stale items are dropped by the worker. ``mined`` is evaluated on the MAIN
     thread (card_for → jamdict is not worker-safe) and selects the ⊕/✓ header variant (unused by a
     warm job, which never builds a header)."""
 
@@ -226,7 +226,7 @@ def prefetch_worker_count(tokenizer, configured: int) -> int:
 
     ``gil_disabled()`` is only trustworthy AFTER fugashi has loaded — it wraps a C extension that
     hasn't declared free-threaded safety and silently re-enables the GIL on first use, not at import
-    (``tokenize.py``). This is called from ``start_prefetch()`` during Reader construction, before any
+    (``tokenize.py``). This is called from ``start_prefetch()`` during SessionController construction, before any
     subtitle line has ever been tokenized, so without this warm-up it always sees the pre-fugashi
     state — spawning the free-threaded worker count on a build that loses the GIL moments later anyway,
     paying the allocator's per-thread-arena memory tax (see ``vibe/hot-path-idle-spreading-plan.md``)

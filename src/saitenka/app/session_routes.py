@@ -148,10 +148,10 @@ _SESSION_EVENTS = (
     SessionClosing,
 )
 
-#: Payload types the reactor handles *instead of* the legacy Reader, not merely as well as it.
+#: Payload types the reactor handles *instead of* the legacy SessionController, not merely as well as it.
 #:
 #: Declared, never derived from `_SESSION_EVENTS` — routing and claiming answer different
-#: questions, and a payload joins this tuple only when the Reader has no remaining part in it.
+#: questions, and a payload joins this tuple only when the SessionController has no remaining part in it.
 #:
 #: What "no remaining part" means is the whole protocol: route the payload, move the act, then
 #: claim. All three connection payloads are here because their acts moved — the stranded cue
@@ -164,10 +164,10 @@ _SESSION_EVENTS = (
 #:
 #: `PropertyObserved` is the first claim that is not `Owner.SESSION`'s, and the first where the act
 #: is *applying what the turn published*. It has to be claimed in the same breath as being routed:
-#: the Reader's own `_reduce_playback` already routes through the reactor, so an observation both
+#: the SessionController's own `_reduce_playback` already routes through the reactor, so an observation both
 #: routed and left to fall through would reduce twice.
 #:
-#: Claiming withholds from the Reader, so what is left in `_drain_event` for these is the
+#: Claiming withholds from the SessionController, so what is left in `_drain_event` for these is the
 #: no-reactor fallback and nothing else. Deleting that would make a session without a runtime stop
 #: noticing its transport, which is most of the unit suite.
 _CLAIMED = (
@@ -203,7 +203,7 @@ SUBTITLE_DEACTIVATE_RESOURCE = "subtitle-deactivate"
 SUBTITLE_CLEAR_RESOURCE = "subtitle-clear"
 SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
 #: The cue identity a lost transport strands. A *retiring* act, so it goes in the close-verb table
-#: with the rest — nothing about that seam is close-specific, and an act moves off the Reader by
+#: with the rest — nothing about that seam is close-specific, and an act moves off the SessionController by
 #: becoming an effect with a registered performer whatever the phase.
 CUE_RETIRE_RESOURCE = "cue-identity-retire"
 #: Re-slotting onto a newly loaded file. A *starting* act — the episode is being established — so it
@@ -344,7 +344,7 @@ def _perform(gateway: MpvGateway, name: str, effect: Effect) -> bool:
     """Hand one effect to its performer, or say it was never registered.
 
     Not isolated, like `_begin` and unlike `_retire`: a command that raises is a bug in the act, and
-    the Reader's own arm has never swallowed one either.
+    the SessionController's own arm has never swallowed one either.
     """
     performer = gateway.session_resources.get(name)
     if performer is None:
@@ -478,7 +478,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     hint's. Only the seeding is optional: a screenshot capture must not carry the breadcrumb.
 
     The hint request is handed to the reactor directly rather than published, because it must
-    reach mpv during the file-load window — before a Reader exists to drain the mailbox. `handle`
+    reach mpv during the file-load window — before a SessionController exists to drain the mailbox. `handle`
     takes an envelope and reads nothing else, so constructing one here is the whole cost; the
     sequence number is the mailbox's ordering device and unused by the reactor.
     """
@@ -505,7 +505,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
-    # `Owner.PLAYBACK` is not claimed: the Reader routes its observations here and then acts on
+    # `Owner.PLAYBACK` is not claimed: the SessionController routes its observations here and then acts on
     # the deltas the turn published. What has moved is the *state* — the slot is where the
     # projection lives, so there is one of it. The duties that read it move next.
     routes.update({RouteKey(event, Owner.PLAYBACK): playback for event in PLAYBACK_EVENTS})
@@ -515,7 +515,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     routes.update({RouteKey(event, Owner.SUBTITLE): subtitle for event in SUBTITLE_EVENTS})
     # `Owner.INTERACTION` is not claimed for the third reason in the set: its events are
     # *observations*, so the reducer is what decides and the decisions come back through the
-    # slice's outbox for the Reader to perform. The slot owns the hysteresis; the acts do not move
+    # slice's outbox for the SessionController to perform. The slot owns the hysteresis; the acts do not move
     # until the tooltip's own state does.
     routes.update({RouteKey(event, Owner.INTERACTION): interaction for event in INTERACTION_EVENTS})
     # `Owner.PRESENTATION` is a declaring slice like SUBTITLE's: the sender has already drawn or
@@ -606,7 +606,7 @@ class StatelessHost(
 
     There is no intersection type, so this is how the composition root types the object it hands
     each adapter. Adding a feature adds a base here — which is the registration cost being visible
-    rather than hidden behind a `Reader` annotation.
+    rather than hidden behind a `SessionController` annotation.
     """
 
 

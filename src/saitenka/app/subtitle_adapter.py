@@ -27,7 +27,7 @@ class SubtitleHost(Protocol):
 
     Declaring these members changes nothing about the coupling except that it can be counted and
     argued about. The port narrows when `annotation_mode` and `annotation_hover` move to a slice —
-    not by hiding them behind a `Reader` parameter.
+    not by hiding them behind a `SessionController` parameter.
     """
 
     annotation_mode: subtitle_intents.AnnotationMode

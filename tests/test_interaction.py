@@ -12,7 +12,7 @@ from driver import Driver
 from util import FakeIPC
 
 from saitenka.app.bindings import TIP_CLOSE_MSG
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.panel import Definition, Entry
 
 
@@ -35,7 +35,7 @@ def _reader():
     # Pin tip_max_frac so the fixed hit-points and layout goldens below are independent of the product
     # default: a change to the default tooltip height must not silently move these interaction goldens.
     # osd = 1080p so the UI scale is 1.0 (REF_H) — the goldens capture the reference (unscaled) layout.
-    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+    r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
     # the default SubtitleRenderer produces the real per-word boxes these goldens hit-test against
     r.set_subtitle("本命を読む")  # → 本命 / を / 読む
@@ -114,7 +114,7 @@ def test_subtitle_render_span_is_emitted(monkeypatch):
     # was produced but never asserted. Patch traced BEFORE set_subtitle so the render is captured.
     spans: list = []
     _patch_traced(monkeypatch, spans)
-    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+    r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
     assert "subtitle_render" in [s.name for s in spans]
@@ -167,7 +167,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
     assert atlas is not None
     atlas.close()
 
-    r = Reader(
+    r = SessionController(
         FakeIPC(),
         dict_set=_FakeDS(),
         options=ReaderOptions(
@@ -186,7 +186,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
 
 def test_main_flow_renders_at_4k_without_caches():
     # Cache-free AND scale ≠ 1: the reference-render → display-upscale path must stand on its own.
-    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+    r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (3840, 2160)  # 4K → tip_scale.display 2.0, no prebuilt caches (hermetic)
     r.set_subtitle("本命を読む")
     ui = Driver(r)
@@ -240,7 +240,7 @@ def test_phrase_reaches_panel_lookup(monkeypatch):
     """Regression: the hovered word's multi-token phrase terms must reach the entry lookup as
     ``extra_terms``. The build once gated extra_terms on a visual toggle, so お休み never stacked —
     hovering お showed the bare 御 instead."""
-    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+    r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
     monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)

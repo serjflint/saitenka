@@ -1,6 +1,6 @@
 """The session's setup steps, as a reducer — `lifecycle_close`'s mirror.
 
-`Reader.run` names every step itself, so each one's *lifetime* is split between the subsystem that
+`SessionController.run` names every step itself, so each one's *lifetime* is split between the subsystem that
 owns it and a line in a setup sequence far away. This feature holds the ones the runtime has taken
 over: `SessionStarting` arrives, it emits their effects, and `run` no longer names them.
 

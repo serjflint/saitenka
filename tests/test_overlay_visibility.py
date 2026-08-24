@@ -5,8 +5,8 @@ from PIL import Image
 from util import keybind_registry
 
 from saitenka.app.config import KeyOptions, ReaderOptions
-from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.session_controller import SessionController
 from saitenka.mpvio.osd import Overlay
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleTracksDiscovered
 
@@ -57,7 +57,7 @@ def test_showing_overlay_restores_latest_hidden_draw():
 
 def test_alt_o_hides_saitenka_and_restores_native_subs():
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.ov.show(_image(), oid=OverlayId.SUB)
     reader._register_keybinds()
     bindings = keybind_registry(ipc)
@@ -74,7 +74,7 @@ def test_alt_o_hides_saitenka_and_restores_native_subs():
 
 def test_showing_overlay_restores_saitenka_subtitle_policy():
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
 
     reader.toggle_overlay()
     reader.toggle_overlay()
@@ -87,7 +87,7 @@ def test_overlay_toggle_key_is_configurable():
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(overlay_toggle_key="Ctrl+o"))
 
-    Reader(ipc, options=options)._register_keybinds()
+    SessionController(ipc, options=options)._register_keybinds()
 
     bindings = set(keybind_registry(ipc))
     assert "Ctrl+o" in bindings and "Alt+o" not in bindings
@@ -95,7 +95,7 @@ def test_overlay_toggle_key_is_configurable():
 
 def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling(monkeypatch):
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.declare_subtitle(SubtitleTracksDiscovered(2, 1))
     reader._observing = True
     reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})

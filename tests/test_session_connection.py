@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.connection import ConnectionState, ConnectionStore, reduce_connection
@@ -93,12 +93,12 @@ def test_a_routed_store_does_not_reduce_what_the_reactor_already_did() -> None:
 
 
 def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
-    """The Reader-side consequence, driven through the drain rather than by setting the state:
+    """The SessionController-side consequence, driven through the drain rather than by setting the state:
     a command that reaches a session whose socket is gone is rejected, not queued at mpv."""
     from saitenka.runtime.events import CommandOutcome, CommandReason, UserCommand
 
     ipc = FakeIPC()
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     try:
         reader._drain_event(LOST)
         reader._drain_event(UserCommand("saitenka-help", command_id=7))
@@ -112,11 +112,11 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
 
 
 def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
-    """All three are claimed, so a session with a reactor never hands one to the Reader — and it
+    """All three are claimed, so a session with a reactor never hands one to the SessionController — and it
     must still end up ready and still have performed the acts.
 
     The census is the oracle rather than the state, because a claim that silently stopped reaching
-    anything looks identical to a working one from the Reader's side: nothing raises, the bit is
+    anything looks identical to a working one from the SessionController's side: nothing raises, the bit is
     right, and the reconnect simply never reaches the pipeline.
     """
     ipc = FakeIPC()
@@ -159,7 +159,7 @@ def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     reslotted: list[str] = []
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     monkeypatch.setattr(reader, "_on_file_loaded", lambda: reslotted.append("reslot"))
     try:
         gateway.publish_session_event(FileLoaded())
@@ -168,5 +168,7 @@ def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
         reader.close()
         gateway.close()
 
-    assert reslotted == ["reslot"], "claimed away from the Reader, so the effect is the only path"
+    assert reslotted == ["reslot"], (
+        "claimed away from the SessionController, so the effect is the only path"
+    )
     assert gateway.claim_census()["FileLoaded"] == (1, 1)

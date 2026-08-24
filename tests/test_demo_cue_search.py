@@ -34,7 +34,7 @@ class FakeIPC(util.FakeIPC):
 def ports_for(texts: list[str], ipc: FakeIPC, clock: list[float]):
     """The two drive values whose `sub-text` follows `texts`, one value per hop.
 
-    A stand-in for the values rather than for a `Reader`: what a cue search reads is six facts and
+    A stand-in for the values rather than for a `SessionController`: what a cue search reads is six facts and
     one act, and standing in for those is what makes the double's surface the drive's surface.
 
     Each hop advances the injected clock by the time it was granted, so a search that never finds a

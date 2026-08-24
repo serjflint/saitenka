@@ -133,7 +133,7 @@ def test_extra_args_can_override_our_own_defaults():
 
 
 def test_extra_args_cannot_override_the_ipc_socket_or_log_file():
-    # These two are load-bearing for our own code (the Reader connects to `sock`; `report` bundles
+    # These two are load-bearing for our own code (the SessionController connects to `sock`; `report` bundles
     # the fixed mpv_log path) — an --mpv-arg re-stating either must still lose.
     argv = _argv(extra_args=["--input-ipc-server=/tmp/evil.sock", "--log-file=/tmp/evil.log"])
     assert argv.index("--input-ipc-server=/tmp/s.sock") > argv.index(

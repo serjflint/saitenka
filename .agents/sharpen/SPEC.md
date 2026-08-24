@@ -54,7 +54,7 @@ Some rules are **actionable** (each hit is a candidate fix); others are **metric
 that ranks coupling — *not* a per-hit to-do list). `test-assert-private-attr` is a **metric**: on
 white-box / god-object code it fires heavily *by design*, because the real output (e.g. OSD pixels) has
 no cheap public handle, so reaching into `_state` is the pragmatic seam, not an over-fit bug. (Audit of
-`test_controller.py`: 92 hits → 83 load-bearing white-box, only ~9 genuinely redundant.) A **high count
+`test_session_controller.py`: 92 hits → 83 load-bearing white-box, only ~9 genuinely redundant.) A **high count
 is an architecture signal** — a missing public observation seam → **Grow/refactor**, not test-by-test
 sharpening. The actionable subset lives in a separate rule, `test-assert-private-compound` (a private
 check *bundled* into a compound assert: drop the redundant half, or split the multi-act). So: rank

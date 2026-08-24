@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.effects import RunUserCommand
@@ -38,12 +38,12 @@ def test_an_unrelated_session_event_decides_no_command() -> None:
 @pytest.mark.timeout(5)
 def test_a_command_reaches_its_handler_once_through_the_reactor(monkeypatch) -> None:
     """Claimed, so the effect is the only path — and the count is the oracle, not the outcome: a
-    claim that also fell through to the Reader would run the handler twice and look identical from
+    claim that also fell through to the SessionController would run the handler twice and look identical from
     the outside for every command that happens to be idempotent."""
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     handled: list[str] = []
     monkeypatch.setattr(reader, "_handle", lambda command: handled.append(command.name))
     try:
@@ -70,7 +70,7 @@ def test_the_transport_decides_whether_a_claimed_command_runs(monkeypatch, trans
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     handled: list[str] = []
     monkeypatch.setattr(reader, "_handle", lambda command: handled.append(command.name))
     try:

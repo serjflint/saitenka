@@ -7,7 +7,7 @@
 The gap that matters is not the shape but the failure mode. `reduce_turn` raises `RouteError` for an
 event with no registered route, which is correct once the migration is done and wrong during it:
 while features move one `Owner` at a time, most events have no route *yet*. Worse, `RouteError`
-subclasses `ValueError`, and `Reader.pump` catches `ValueError` and reports it as "mpv went away" —
+subclasses `ValueError`, and `SessionController.pump` catches `ValueError` and reports it as "mpv went away" —
 so an unmigrated event would end the session silently.
 
 So an unrouted event is ignored here, and **counted**. A route that was never registered otherwise

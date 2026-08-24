@@ -13,7 +13,7 @@ import util
 
 from saitenka.app import sidebar, surfaces
 from saitenka.app.bindings import SCROLL_DOWN_MSG
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.app.surfaces import SurfaceSpec
 from saitenka.runtime import UserCommand, events
@@ -119,16 +119,16 @@ def test_real_registry_z_order():
 
 @pytest.mark.parametrize("spec", surfaces.SURFACES, ids=lambda s: s.name)
 def test_every_surface_state_exposes_open(spec):
-    """Anti-occlusion invariant: each surface's state object exposes ``open`` (bool) on a real Reader, so
+    """Anti-occlusion invariant: each surface's state object exposes ``open`` (bool) on a real SessionController, so
     it participates in the forced-mouse-section OR and can never be shown-but-click-through (#100 picker)."""
-    reader = Reader(_FakeIPC())
+    reader = SessionController(_FakeIPC())
     assert isinstance(spec.captures(reader), bool)
 
 
 def test_scroll_command_routes_to_open_help(monkeypatch):
     from saitenka.runtime.help import HelpCommand
 
-    reader = Reader(_FakeIPC())
+    reader = SessionController(_FakeIPC())
     reader._help_store.dispatch(
         HelpCommand.TOGGLE
     )  # the slice owns "open"; nothing else may set it
@@ -145,7 +145,7 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
     from saitenka.app.sub_picker import ListingResult
     from saitenka.runtime import events, picker
 
-    reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
+    reader = SessionController(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
     candidate = SubtitleCandidate(
         "provider", "name", 1, match=False, download=lambda: ("path", "ok")
     )
@@ -162,7 +162,7 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
 
 
 def test_scroll_command_routes_to_open_sidebar(monkeypatch):
-    reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
+    reader = SessionController(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
     reader._sidebar_store.dispatch(events.SidebarShown(active=0, capacity=10))
     reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
     reader.interaction.sidebar_panel.total = 100
@@ -176,7 +176,7 @@ def test_scroll_command_routes_to_open_sidebar(monkeypatch):
 def test_the_registry_reads_shown_ness_without_a_reader() -> None:
     """Occlusion is answerable from the INTERACTION context alone — no host anywhere in the chain.
 
-    `state_of` used to take the whole `Reader` to return one field, and because `SurfaceSpec` is one
+    `state_of` used to take the whole `SessionController` to return one field, and because `SurfaceSpec` is one
     shared signature, every accessor plus `captures` and `wants_mouse_capture` was a host-taking row
     for it. Gathering the five surface states onto `InteractionContext` converted all of them at once.
     Constructing the context directly is the proof: if any hook still reached past it, this cannot run.

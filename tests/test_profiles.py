@@ -5,7 +5,6 @@ active profile. Japanese stays the byte-identical default when nothing is config
 import pytest
 import util
 
-from saitenka.app.controller import Reader
 from saitenka.app.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, ReaderLanguages
 from saitenka.app.profiles import (
     DEFAULT_PROFILE,
@@ -16,6 +15,7 @@ from saitenka.app.profiles import (
     scope_config,
     validate_language_code,
 )
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.tokenizer import register_tokenizer
 
@@ -97,7 +97,7 @@ def test_unconfigured_resolves_to_the_japanese_default_profile():
 def test_reader_without_a_profile_is_japanese_unidic():
     """The construction default is today's JP profile — so an existing call site (and every golden)
     behaves exactly as before #254."""
-    reader = Reader(FakeIPC())
+    reader = SessionController(FakeIPC())
     assert reader.tokenizer.name == "unidic"
     assert reader.langs == ReaderLanguages(main="jp", second="en")
 
@@ -195,7 +195,7 @@ def test_reader_uses_the_active_profiles_tokenizer_and_languages():
     profile = resolve_profile(
         {"active_profile": "fr", "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}}}
     )
-    reader = Reader(FakeIPC(), profile=profile)
+    reader = SessionController(FakeIPC(), profile=profile)
     assert isinstance(reader.tokenizer, _FakeLatinTokenizer)  # selected, not unidic
     assert reader.langs.main == "fr" and reader.langs.second == "en"
     assert reader.profile is profile
@@ -210,7 +210,7 @@ def test_cycle_profile_rescopes_the_dict_set_live():
     fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
     jp_dicts, fr_dicts = object(), object()  # sentinels — cycle must select by profile
 
-    reader = Reader(FakeIPC(), profile=jp)
+    reader = SessionController(FakeIPC(), profile=jp)
     reader.dict_set = jp_dicts
     reader.set_profile_cycle([jp, fr], lambda p: fr_dicts if p.langs.main == "fr" else jp_dicts)
 
@@ -228,7 +228,7 @@ def test_cycle_profile_without_a_scoper_keeps_the_dict_set():
     register_tokenizer("latin", _FakeLatinTokenizer)
     jp = resolve_profile({})
     fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
-    reader = Reader(FakeIPC(), profile=jp)
+    reader = SessionController(FakeIPC(), profile=jp)
     sentinel = object()
     reader.dict_set = sentinel
     reader.set_profile_cycle([jp, fr])  # no dict_scoper

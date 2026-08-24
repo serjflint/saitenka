@@ -2,7 +2,6 @@ import pytest
 from util import FakeIPC, runtime_gateway
 
 from saitenka.app.bindings import SCROLL_UP_MSG
-from saitenka.app.reader_factory import ReaderServices, create_reader
 from saitenka.app.runtime import (
     COMMAND_SPECS,
     CommandExecutor,
@@ -12,6 +11,7 @@ from saitenka.app.runtime import (
     CommandSpec,
     CueCommandState,
 )
+from saitenka.app.session_factory import SessionServices, create_session_controller
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
 
@@ -136,7 +136,7 @@ def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request):
         raise RuntimeError
 
     ipc = FakeIPC()
-    reader = create_reader(ipc)
+    reader = create_session_controller(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     spec = CommandSpec("fail", Owner.SESSION, requires_cue=False)
     reader.commands = CommandExecutor(
@@ -153,7 +153,7 @@ def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request):
 
 def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request):
     ipc = FakeIPC()
-    reader = create_reader(ipc)
+    reader = create_session_controller(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     reader._help_store.dispatch(HelpCommand.TOGGLE)
     calls: list[int] = []
@@ -176,7 +176,7 @@ def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request
 def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = create_reader(ipc)
+    reader = create_session_controller(ipc)
     handled: list[str] = []
     spec = CommandSpec(SCROLL_UP_MSG, Owner.INTERACTION, requires_cue=False)
     reader.commands = CommandExecutor(
@@ -192,7 +192,7 @@ def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
         assert handled == ["scroll"]
         assert gateway.snapshot.command_outcomes == 2
     finally:
-        # Both own threads. Leaking a Reader and a gateway per run is survivable alone and is not
+        # Both own threads. Leaking a SessionController and a gateway per run is survivable alone and is not
         # survivable at `-n auto`, where the accumulated lanes exhaust the thread pool and this test
         # fails somewhere unrelated to what it asserts.
         reader.close()
@@ -200,11 +200,11 @@ def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
 
 
 def test_composition_threads_grouped_optional_services(request):
-    services = ReaderServices(
+    services = SessionServices(
         scorer="score", anki="anki", mining="mine", dictionaries="dict", tts=True
     )
 
-    reader = create_reader(FakeIPC(), services=services)
+    reader = create_session_controller(FakeIPC(), services=services)
 
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
 
@@ -218,13 +218,13 @@ def test_composition_threads_grouped_optional_services(request):
 
 
 def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() -> None:
-    """The Reader used to construct `LibassGeometryBackend` itself when none was passed, so it was
+    """The SessionController used to construct `LibassGeometryBackend` itself when none was passed, so it was
     not injectable in the case that mattered — the shipping one. A host that picks its own provider
     cannot be handed a different one, which is what makes the conformance contract testable.
     """
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-    from saitenka.app.controller import Reader
-    from saitenka.app.reader_factory import _geometry_backend
+    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session_factory import _geometry_backend
 
     assert _geometry_backend(SubtitleGeometryOptions(native_visible=False)) is None
     chosen = _geometry_backend(SubtitleGeometryOptions(native_visible=True))
@@ -234,9 +234,9 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() 
     options = ReaderOptions(
         subtitle_geometry=SubtitleGeometryOptions(native_visible=True), prefetch=False
     )
-    direct = Reader(FakeIPC(), options=options)
+    direct = SessionController(FakeIPC(), options=options)
 
-    # …and the Reader does not. A render attempt in native mode produces neither a result nor an
+    # …and the SessionController does not. A render attempt in native mode produces neither a result nor an
     # error, which is the signature of "no provider at all" — a self-selected one would leave one
     # or the other behind.
     assert direct.subtitle_pipeline.render(_probe_request(direct)) is None
@@ -277,10 +277,10 @@ def test_an_idle_session_blocks_instead_of_polling():
 
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
-    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
         started = time.monotonic()
         assert reader.pump(0.05) is True
@@ -300,11 +300,11 @@ def test_an_event_wakes_the_wait_early():
 
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     try:
         threading.Timer(
             0.02, lambda: ipc.emit({"event": "property-change", "name": "pause", "data": True})

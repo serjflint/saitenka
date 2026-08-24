@@ -2,7 +2,7 @@
 
 The regression: on a 2x Retina fullscreen panel the OSD is ~3024x1898, the subtitle and tooltip scale
 with ``osd_h/REF_H`` (so they grow), but the chrome overlays were sized by a flat ``ui_scale`` and stayed
-tiny beside them. ``Reader.chrome_scale`` folds the same display factor into ``ui_scale``, clamped so it
+tiny beside them. ``SessionController.chrome_scale`` folds the same display factor into ``ui_scale``, clamped so it
 only ever grows (an OSD at/under 1080p is unchanged — the goldens stay valid).
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import util
 
 from saitenka.app.config import PanelOptions, ReaderOptions
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 
 REF_H = 1080
 
@@ -20,8 +20,8 @@ class FakeIPC(util.FakeIPC):
     pass
 
 
-def _reader(scale: float) -> Reader:
-    return Reader(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=scale)))
+def _reader(scale: float) -> SessionController:
+    return SessionController(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=scale)))
 
 
 def test_chrome_scale_is_flat_ui_scale_at_or_below_1080p():

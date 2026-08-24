@@ -78,7 +78,7 @@ def test_to_bench_json_keeps_the_frame_sentinel_and_trends_live_latency():
 def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
     mod = _jank_module()
 
-    class Reader:
+    class SessionController:
         osd = (1920, 1080)
         tip_scale = SimpleNamespace(ref_h=1080)
 
@@ -91,7 +91,7 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
         def pump(self):
             return True
 
-    reader = Reader()
+    reader = SessionController()
     mod._scroll_four(reader)
     # Through the shared conversion, not a second copy of the arithmetic: a hard-coded fraction
     # here would keep passing after the wheel's step changed.
@@ -101,7 +101,7 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
 def test_scroll_workload_rejects_a_non_scrollable_tooltip():
     mod = _jank_module()
 
-    class Reader:
+    class SessionController:
         osd = (1920, 1080)
         tip_scale = SimpleNamespace(ref_h=1080)
 
@@ -115,7 +115,7 @@ def test_scroll_workload_rejects_a_non_scrollable_tooltip():
             return True
 
     with pytest.raises(RuntimeError, match="did not advance"):
-        mod._scroll_four(Reader())
+        mod._scroll_four(SessionController())
 
 
 def test_live_latency_boundary_repaints_the_overlay():
@@ -127,9 +127,9 @@ def test_live_latency_boundary_repaints_the_overlay():
         def repaint(self):
             self.repaints += 1
 
-    class Reader:
+    class SessionController:
         ov = Overlay()
 
-    reader = Reader()
+    reader = SessionController()
     mod._present_overlay(reader)
     assert reader.ov.repaints == 1

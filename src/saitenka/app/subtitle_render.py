@@ -1,8 +1,8 @@
 """The subtitle raster, behind an injectable strategy so tests can run the reader loop headless.
 
-``Reader.renderer`` holds a :class:`SubtitleRenderer` (the real blit); pass :class:`NullRenderer` to
+``SessionController.renderer`` holds a :class:`SubtitleRenderer` (the real blit); pass :class:`NullRenderer` to
 suppress the raster and assert state only — the public seam that replaces monkeypatching the private
-``draw_subtitle`` (#50). The strategy takes the ``Reader`` as its host, matching the collaborator
+``draw_subtitle`` (#50). The strategy takes the ``SessionController`` as its host, matching the collaborator
 pattern the other app modules use.
 """
 
@@ -101,7 +101,7 @@ def _send_visibility(ipc, identity: str, *, visible: bool, on_outcome=None) -> N
 class DrawRequest:
     """Everything the legacy draw path needs about the cue — the seam that stops it reading a host.
 
-    Built once per draw by :func:`build_draw_request`, so the values it used to pull off the Reader
+    Built once per draw by :func:`build_draw_request`, so the values it used to pull off the SessionController
     one at a time arrive together and cannot drift apart mid-render. Frozen: the raster can run off
     the main thread, and a request that changed under it would raster one cue's text with another's
     styles.

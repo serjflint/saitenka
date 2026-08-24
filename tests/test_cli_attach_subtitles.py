@@ -15,7 +15,7 @@ class IPC(util.FakeIPC):
         self.props["path"] = "/videos/Show - 01.mkv"
 
 
-class Reader:
+class SessionController:
     def __init__(self):
         self.fetch = None
         self.retry_factory = None
@@ -35,7 +35,7 @@ class Reader:
 
     @property
     def reslot_ports(self):
-        """The same shape `Reader.reslot_ports` builds — the seam these hooks are driven through."""
+        """The same shape `SessionController.reslot_ports` builds — the seam these hooks are driven through."""
         return ReslotPorts(
             ipc=None,
             finish_stats=lambda: None,
@@ -52,7 +52,7 @@ class Reader:
 
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):
-    reader, ipc = Reader(), IPC()
+    reader, ipc = SessionController(), IPC()
     calls = []
 
     def fetch(video, providers, **kwargs):
@@ -86,7 +86,7 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
 
 
 def test_attach_configures_retry_even_when_startup_fetch_is_unneeded():
-    reader, ipc = Reader(), IPC()
+    reader, ipc = SessionController(), IPC()
 
     attach_commands._finish_attach_subtitle_startup(
         reader.reslot_ports,
@@ -133,7 +133,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     the carried-over external, and — when the new file has no JP — defer a provider fetch so watching
     continues in Japanese. Reuses the run re-slot's contract (test_auto_advance) for attach."""
     from saitenka.app import session_stats
-    from saitenka.app.controller import Reader as RealReader
+    from saitenka.app.session_controller import SessionController as RealReader
 
     ipc = _TrackIPC()
     reader = RealReader(ipc)

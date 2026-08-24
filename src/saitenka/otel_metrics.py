@@ -130,7 +130,7 @@ subtitle_layout_drift_px: Histogram | None = None
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
     """Record one settle outcome to the counter, and to *span* when the settle earned one. Both
     writes live here so the count and the span can never disagree about what a settle decided —
-    and beside the instrument rather than on the Reader, which needs no member to hold a null check.
+    and beside the instrument rather than on the SessionController, which needs no member to hold a null check.
     """
     if span is not None:
         span.set("outcome", outcome)

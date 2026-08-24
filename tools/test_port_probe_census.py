@@ -35,7 +35,7 @@ def _resolve(source: str, receiver_of: str = "go") -> str | None:
 def test_a_self_attribute_resolves_through_the_constructor_parameter():
     """`self.ipc` is only a port because `__init__` took one — that link is the whole resolution."""
     source = (
-        "class Reader:\n"
+        "class Host:\n"
         "    def __init__(self, ipc: MpvIPC):\n"
         "        self.ipc = ipc\n"
         "    def go(self):\n"
@@ -47,7 +47,7 @@ def test_a_self_attribute_resolves_through_the_constructor_parameter():
 def test_an_optional_annotation_resolves_to_the_port_it_makes_optional():
     """`MpvIPC | None` is still a question about `MpvIPC`; resolving it to None would drop the row."""
     source = (
-        "class Reader:\n"
+        "class Host:\n"
         "    def __init__(self, ipc: MpvIPC | None):\n"
         "        self.ipc = ipc\n"
         "    def go(self):\n"

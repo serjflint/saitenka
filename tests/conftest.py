@@ -47,7 +47,7 @@ def _hermetic_cache_dir(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_primary_font():
-    """Reset the global font-chain lead after each test. A test that constructs a non-JP Reader sets
+    """Reset the global font-chain lead after each test. A test that constructs a non-JP SessionController sets
     ``fonts.set_primary_font('NotoSans.ttf')``; under pytest-randomly a later font/render test would then
     see NotoSans lead. Restore the JP-universal default so the chain can't leak across tests."""
     from saitenka import fonts
@@ -90,8 +90,8 @@ def anki_up(monkeypatch):
 def _tts_present(monkeypatch):
     """Default: pretend a Japanese TTS voice exists so the 🔊 button is drawn — existing geometry tests
     assume it, and this keeps them hermetic (no real `say`/PowerShell subprocess). Tests for the
-    hidden-button case patch ``saitenka.app.controller.tts_available`` to False explicitly."""
-    import saitenka.app.controller as ctrl
+    hidden-button case patches ``saitenka.app.session_controller.tts_available`` explicitly."""
+    import saitenka.app.session_controller as ctrl
 
     monkeypatch.setattr(ctrl, "tts_available", lambda: True)
 

@@ -203,7 +203,7 @@ hover) vs. **cold** (decoded synchronously, on hover), plus the worker's **lead 
 > **The 2026-07-26 baseline below is not comparable to a current run.** Prefetch moved onto a
 > registered runtime job lane, and the bench's `FakeIPC` inherits `NoSessionRuntime`, whose
 > `register_runtime_job_lane` returns `False` — so `start_prefetch` returned early and every run
-> between that migration and 2026-08-22 measured a Reader with **no prefetch at all**, reporting the
+> between that migration and 2026-08-22 measured a SessionController with **no prefetch at all**, reporting the
 > resulting synchronous decodes as "the worker fell behind". The harness now installs a real gateway
 > (`_runtime_ipc`); re-baseline before comparing.
 

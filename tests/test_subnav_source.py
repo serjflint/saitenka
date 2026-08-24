@@ -10,17 +10,17 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 
 CUE = "門前の小僧習わぬ経を読む"
 
 
-def _reader_showing_the_cue() -> Reader:
+def _reader_showing_the_cue() -> SessionController:
     """A session with the cue on screen, established the way mpv establishes it."""
     ipc = FakeIPC()
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader.refresh_osd()
     ipc.props["sub-text"] = CUE
     reader._observe_property("sub-text", CUE)

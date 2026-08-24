@@ -14,7 +14,7 @@ from util import FakeIPC
 
 from saitenka.app import nested_popup, tooltip
 from saitenka.app.config import ReaderOptions
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -64,7 +64,9 @@ def _fixture_ds(tmp_path):
 
 
 def _reader(tmp_path, *, worker: bool):
-    r = Reader(FakeIPC(), dict_set=_fixture_ds(tmp_path), options=ReaderOptions(prefetch=True))
+    r = SessionController(
+        FakeIPC(), dict_set=_fixture_ds(tmp_path), options=ReaderOptions(prefetch=True)
+    )
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [

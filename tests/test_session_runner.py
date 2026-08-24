@@ -194,13 +194,13 @@ def test_waking_publishes_nothing_and_does_not_close() -> None:
 
 
 def test_requesting_a_stop_wakes_the_transport(request) -> None:
-    """The Reader half: the flag alone leaves a blocked receiver blocked."""
-    from saitenka.app.controller import Reader
+    """The SessionController half: the flag alone leaves a blocked receiver blocked."""
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     request.addfinalizer(gateway.close)
-    reader = Reader(ipc, prefetch=False)
+    reader = SessionController(ipc, prefetch=False)
     woken: list[bool] = []
     reader.ipc.wake_session_runtime = lambda: woken.append(True) or True  # type: ignore[method-assign]
     try:
@@ -218,7 +218,7 @@ def test_the_claim_census_separates_what_the_reactor_owns_from_what_the_reader_s
     """The `session-loop` duty's meter, and the reason it needs one.
 
     The loop already receives from the mailbox and the reactor already sees every envelope, so
-    neither is what keeps the duty open — what is left is the Reader still *acting* on the
+    neither is what keeps the duty open — what is left is the SessionController still *acting* on the
     envelopes nothing claimed. That is invisible to the debt census, because an unclaimed envelope
     is not a debt symbol anywhere: it is a ratio, and the tail of it names the feature to migrate
     next.
@@ -238,7 +238,7 @@ def test_the_claim_census_separates_what_the_reactor_owns_from_what_the_reader_s
     census = gateway.claim_census()
     claimed, seen = census["RawMpvEvent"]
     assert seen == 1
-    assert claimed == 0, "an mpv observation is still the Reader's to act on"
+    assert claimed == 0, "an mpv observation is still the SessionController's to act on"
 
 
 def test_an_unrun_session_reports_an_empty_census_rather_than_a_clean_one(request) -> None:

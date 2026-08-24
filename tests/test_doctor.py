@@ -863,7 +863,7 @@ def test_stale_overlay_is_quiet_without_a_log(tmp_path, monkeypatch):
 
 
 def test_start_log_message_matches_the_doctor_regex():
-    # The producer/consumer contract: the message Reader.run() writes ("saitenka overlay <ver> starting")
+    # The producer/consumer contract: the message SessionController.run() writes ("saitenka overlay <ver> starting")
     # must stay parseable by the guard's regex.
     m = doc._OVERLAY_START_RE.search("saitenka overlay 1.3.0+gABC starting")
     assert m and m.group(1) == "1.3.0+gABC"

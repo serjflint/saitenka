@@ -1,8 +1,8 @@
 """The in-player shortcut reference: building its document, and rendering a page of it.
 
 Both are functions of the bindings and the screen, so they live here and can be checked at any size
-without a Reader. Whether the overlay is open and which page it shows is `Owner.INTERACTION`'s
-`help` slice (`runtime/help.py` decides, `interaction_slice` holds); drawing it is the Reader. The
+without a SessionController. Whether the overlay is open and which page it shows is `Owner.INTERACTION`'s
+`help` slice (`runtime/help.py` decides, `interaction_slice` holds); drawing it is the SessionController. The
 `SurfaceSpec` hooks take the registry's own ports, so nothing here holds the host.
 """
 

@@ -1145,19 +1145,19 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         if demo_word or screenshot:
             scorer, anki, mine_conf, dict_set = _build_deps()
             from saitenka.app.media import tts_available
-            from saitenka.app.reader_factory import ReaderServices, create_reader
+            from saitenka.app.session_factory import SessionServices, create_session_controller
 
-            reader = create_reader(
+            reader = create_session_controller(
                 ipc,
-                services=ReaderServices(scorer, anki, mine_conf, dict_set, tts_available()),
+                services=SessionServices(scorer, anki, mine_conf, dict_set, tts_available()),
                 options=opts,
                 profile=active_profile,
                 tokenizer_warm=tokenizer_warm,
             )
         else:
-            from saitenka.app.reader_factory import create_reader
+            from saitenka.app.session_factory import create_session_controller
 
-            reader = create_reader(
+            reader = create_session_controller(
                 ipc,
                 options=opts,
                 profile=active_profile,

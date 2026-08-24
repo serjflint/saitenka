@@ -8,7 +8,7 @@ import dicthelp
 from driver import Driver
 from util import FakeIPC, assert_golden, keybind_registry
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -164,10 +164,10 @@ def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path):
     from saitenka.app.config import ReaderOptions, TooltipOptions
 
     assert TooltipOptions().kanji_stroke_order is True  # on by default
-    r = Reader(FakeIPC(), dict_set=_fixture_ds(tmp_path))
+    r = SessionController(FakeIPC(), dict_set=_fixture_ds(tmp_path))
     assert r.kanji_stroke_order is True
     off_opts = replace(ReaderOptions(), tooltip=TooltipOptions(kanji_stroke_order=False))
-    off = Reader(FakeIPC(), dict_set=_fixture_ds(tmp_path), options=off_opts)
+    off = SessionController(FakeIPC(), dict_set=_fixture_ds(tmp_path), options=off_opts)
     assert off.kanji_stroke_order is False
 
 
@@ -176,7 +176,7 @@ def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path):
 
 def _kanji_reader(tmp_path):
     ds = _fixture_ds(tmp_path)
-    r = Reader(FakeIPC(), dict_set=ds)
+    r = SessionController(FakeIPC(), dict_set=ds)
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("読本", "読本", "とくほん", "名詞", 0, 2)]
@@ -199,7 +199,7 @@ def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
 
 def test_k_key_bound_globally():
     ipc = FakeIPC()
-    Reader(ipc)._register_keybinds()
+    SessionController(ipc)._register_keybinds()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert "k" in binds and binds["k"].startswith("script-message ")
 
@@ -224,7 +224,7 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     # the def body contains 本 (an ideograph that IS in the kanji bank but the tokenized cell has
     # no useful term context) — clicking its scan cell opens the KANJI entry in the nested popup.
     ds = _fixture_ds(tmp_path, terms=(("読む", "よむ", ["本のことだ。"]),))
-    r = Reader(FakeIPC(), dict_set=ds)
+    r = SessionController(FakeIPC(), dict_set=ds)
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]

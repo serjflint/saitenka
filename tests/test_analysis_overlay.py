@@ -7,9 +7,9 @@ from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka.app import analysis_overlay
 from saitenka.app.bindings import ANALYSIS_MSG
-from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
+from saitenka.app.session_controller import SessionController
 from saitenka.app.wordlists import KnownWords
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime.events import (
@@ -33,7 +33,7 @@ def _toggle_analysis(reader) -> None:
 def reader():
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc, scorer=Scorer(known=KnownWords.from_set(["本"])))
+    reader = SessionController(ipc, scorer=Scorer(known=KnownWords.from_set(["本"])))
     reader.declare_subtitle(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
     reader.episode.sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
     yield reader
@@ -41,7 +41,7 @@ def reader():
     gateway.close()
 
 
-def _finish(reader: Reader) -> None:
+def _finish(reader: SessionController) -> None:
     await_ready(
         lambda: reader.analysis.active_key is None,
         "analysis result was not published",

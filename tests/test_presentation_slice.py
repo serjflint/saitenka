@@ -82,11 +82,11 @@ def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None
 
 
 def test_the_readers_hold_is_the_slice_and_assigning_it_is_a_declaration() -> None:
-    """`Reader.translate_on` is a property over the slot now. Assigning it has to reach the same
+    """`SessionController.translate_on` is a property over the slot now. Assigning it has to reach the same
     place the toggle does, or a test establishing the precondition sets a copy nothing reads."""
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
-    reader = Reader(FakeIPC(), prefetch=False)
+    reader = SessionController(FakeIPC(), prefetch=False)
     try:
         reader.translate_on = True
 

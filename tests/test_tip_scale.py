@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import util
 
-from saitenka.app.controller import Reader
 from saitenka.app.prefetch import REF_H
+from saitenka.app.session_controller import SessionController
 
 
-def _reader(tip_scale: float, osd_h: int) -> Reader:
-    r = Reader(util.FakeIPC(), dict_set=None, tip_scale=tip_scale)
+def _reader(tip_scale: float, osd_h: int) -> SessionController:
+    r = SessionController(util.FakeIPC(), dict_set=None, tip_scale=tip_scale)
     r.osd = (round(osd_h * 16 / 9), osd_h)
     return r
 

@@ -161,7 +161,7 @@ def test_embedded_japanese_skips_startup_fetch_but_keeps_runtime_retry(tmp_path,
 def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monkeypatch):
     calls = []
 
-    class Reader:
+    class SessionController:
         retry_factory = None
         startup_fetch = None
         picker_lister = None
@@ -177,7 +177,7 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
 
         @property
         def reslot_ports(self):
-            """The shape `Reader.reslot_ports` builds — the seam the fetch is driven through."""
+            """The shape `SessionController.reslot_ports` builds — the seam the fetch is driven through."""
             return ReslotPorts(
                 ipc=None,
                 finish_stats=lambda: None,
@@ -197,7 +197,7 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
         return tmp_path / "episode.ja.srt", "tsukihime: added episode.ja.srt"
 
     monkeypatch.setattr(subselect, "fetch_provider_path", fetch)
-    reader = Reader()
+    reader = SessionController()
 
     cli_run._start_run_provider_fetch(
         reader.reslot_ports,

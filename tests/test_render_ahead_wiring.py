@@ -12,8 +12,8 @@ from util import ManualRenderAheadSubmitter
 from saitenka import otel_metrics
 from saitenka.app import prefetch, tooltip_panel, tooltip_raster
 from saitenka.app.config import ReaderOptions
-from saitenka.app.controller import Reader
 from saitenka.app.popups import Panel
+from saitenka.app.session_controller import SessionController
 from saitenka.panel import Definition, Entry, panel_rows
 from saitenka.render.banded import WindowedPanel
 from saitenka.runtime import EffectOutcome
@@ -42,8 +42,8 @@ class _RecordingPanel:
         return len(self.calls)
 
 
-def _reader() -> Reader:
-    r = Reader(_FakeIPC(), options=ReaderOptions(prefetch=True))
+def _reader() -> SessionController:
+    r = SessionController(_FakeIPC(), options=ReaderOptions(prefetch=True))
     r.tooltip_controller.render_ahead_submitter = ManualRenderAheadSubmitter()
     r.tip.view.view_h = 300
     r.tip.view.scroll = 120

@@ -41,10 +41,10 @@ class _RecOv:
 def test_draw_loading_paints_one_timer_authorized_frame():
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.app.session_controller import SessionController
 
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r._loading = True
     r._draw_loading()
     adds = [
@@ -135,11 +135,11 @@ def test_ready_startup_hint_empties_the_osd_text():
 def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     _install(ipc)
-    r = Reader(ipc)
+    r = SessionController(ipc)
     ipc.drain_events()
     r.ov = _RecOv()
     # plain path -> no dict/tokenize deps needed to raster a cue
@@ -157,11 +157,11 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
 def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
     _install(ipc)
-    r = Reader(ipc)
+    r = SessionController(ipc)
     ipc.drain_events()
     r._observing = True
     r._reduce_playback(PropertySeeded("osd-dimensions", unavailable))
@@ -289,10 +289,10 @@ def test_lost_clear_reply_is_retried_once_on_the_replacement_connection():
 def test_apply_deps_stops_the_spinner():
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.app.session_controller import SessionController
 
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r._loading = True
     r._apply_deps({})  # background load finished (even with nothing) → spinner off
     assert r._loading is False
@@ -305,9 +305,9 @@ def test_load_deps_async_uses_a_custom_build():
 
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.ov = _RecOv()
     called = {"n": 0}
 
@@ -336,7 +336,7 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
     from util import FakeIPC
 
     from saitenka.app import reader_deps as rd
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     built = {"n": 0}
 
@@ -345,7 +345,7 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
         return "SCORER", None, None, None
 
     fut = rd.begin_deps_build({}, _build)  # hoisted: runs before the reader exists
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.ov = _RecOv()
     r.load_deps_async({}, prebuilt=fut)  # consume the in-flight build, don't restart it
     await_ready(lambda: r._pending_deps is not None, "the build thread never published deps")

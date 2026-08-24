@@ -145,7 +145,7 @@ def test_the_pillow_provider_renders_both_styles() -> None:
     assert styled.image.width > 0
 
 
-# --- the surface: what a Reader publishes, under either provider -------------------------------
+# --- the surface: what a SessionController publishes, under either provider -------------------------------
 #
 # Every test below is parametrized over both providers, which is WP4.3's neutrality gate stated the
 # way it matters: not "each provider renders something" but "the same trace decides the same thing
@@ -173,10 +173,10 @@ class _ExistsDS:
 def _reader(recorder, *, dict_set=None):
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import SubtitleRenderer
 
-    reader = Reader(FakeIPC(), dict_set=dict_set)
+    reader = SessionController(FakeIPC(), dict_set=dict_set)
     reader.osd = (1920, 1080)
     reader.renderer = SubtitleRenderer(recorder)
     return reader

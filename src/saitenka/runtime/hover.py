@@ -7,7 +7,7 @@ two popups, and a policy per dwell for what happens when the timer cannot be arm
 
 That policy was spread across six functions that each read the host, armed a timer with a closure
 over it, and mutated four fields. Nothing could observe a decision without letting it happen — which
-is why the tests for it stubbed `Reader.set_hover`, the one function item 5 splits.
+is why the tests for it stubbed `SessionController.set_hover`, the one function item 5 splits.
 
 Here the turn is `observe -> decide -> apply`. :func:`decide` is total and host-free, and the two
 re-entries a dwell produces (:func:`elapsed`, :func:`refused`) are the same shape. The mutable

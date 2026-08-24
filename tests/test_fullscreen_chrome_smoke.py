@@ -1,6 +1,6 @@
 """Fullscreen / hi-dpi smoke for the chrome overlays (help · sidebar · stats).
 
-On a 2x Retina fullscreen panel the OSD is ~3024x1898; ``Reader.chrome_scale`` grows the chrome with it
+On a 2x Retina fullscreen panel the OSD is ~3024x1898; ``SessionController.chrome_scale`` grows the chrome with it
 (the subtitle/tooltip already track ``osd_h``). This drives each chrome overlay's real draw path through
 a capturing overlay and pins the two invariants the hi-dpi fix must hold — the overlay (1) stays fully
 on-screen (scaling up must never overflow the OSD) and (2) actually grows versus 1080p (the regression
@@ -16,8 +16,8 @@ import util
 
 from saitenka.app import sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
-from saitenka.app.controller import Reader
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+from saitenka.app.session_controller import SessionController
 from saitenka.runtime import events
 from saitenka.runtime.help import HelpCommand
 from saitenka.subtitles import Cue, CueIndex
@@ -74,8 +74,8 @@ class FakeOverlay:
         pass
 
 
-def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> Reader:
-    r = Reader(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=ui_scale)))
+def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> SessionController:
+    r = SessionController(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=ui_scale)))
     r.ov = FakeOverlay()
     r.lifecycle_surfaces = LifecycleSurfaces(r.ov)  # the fenced path the chrome presents through
     r.osd = osd
@@ -85,17 +85,17 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> Reader:
     return r
 
 
-def _draw_help(r: Reader) -> None:
+def _draw_help(r: SessionController) -> None:
     r._help_store.dispatch(HelpCommand.TOGGLE)
     r._redraw_help()
 
 
-def _draw_sidebar(r: Reader) -> None:
+def _draw_sidebar(r: SessionController) -> None:
     r._sidebar_store.dispatch(events.SidebarShown(r.sidebar_view.active, r.sidebar_view.capacity))
     sidebar.draw(r.sidebar_view)
 
 
-def _draw_stats(r: Reader) -> None:
+def _draw_stats(r: SessionController) -> None:
     r.analysis.open = (
         True  # current=None → the "Analyzing…" status panel; enough to size the overlay
     )

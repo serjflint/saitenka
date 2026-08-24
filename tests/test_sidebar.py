@@ -1,4 +1,4 @@
-"""Whole-episode subtitle sidebar behavior at the Reader seam."""
+"""Whole-episode subtitle sidebar behavior at the SessionController seam."""
 
 import dataclasses
 
@@ -9,9 +9,9 @@ from PIL import Image
 
 from saitenka.app import sidebar
 from saitenka.app.backlog import BacklogStore, Capture
-from saitenka.app.controller import Reader
 from saitenka.app.episode_analysis import analyze_cues
 from saitenka.app.scoring import Scorer
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitles import (
     SidebarAction,
     SidebarHitBox,
@@ -45,7 +45,7 @@ class FakeOverlay:
 
 def _reader(cue_count=20, *, active=0, props=None):
     ipc = FakeIPC(props)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.ov = FakeOverlay()
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(cue_count)]
     reader.episode.sub_index = CueIndex(cues)

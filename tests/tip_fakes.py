@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import util
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 
 
 class LinkingDS:
@@ -22,13 +22,13 @@ class LinkingDS:
         return util.cjk_links_entry(2)
 
 
-def hidpi_reader(scale: float) -> Reader:
+def hidpi_reader(scale: float) -> SessionController:
     """A headless reader whose OSD pins ``tip_scale.display`` to ~``scale`` (osd_h / REF_H(1080)),
     one content token shown, crisp enabled — the fixture the crisp/native path needs."""
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
 
-    r = Reader(util.FakeIPC(), dict_set=LinkingDS(), scan_delay=0.0)
+    r = SessionController(util.FakeIPC(), dict_set=LinkingDS(), scan_delay=0.0)
     r.osd = (round(1920 * scale), round(1080 * scale))
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]

@@ -8,7 +8,7 @@ popup's own state (``tip.nest``, a :class:`~saitenka.app.popups.PopupView`) live
 
 Builds and blits through :mod:`saitenka.app.tooltip_panel` — the leaf importing the panel
 machinery, which is the direction that does not cycle. Every one of those calls used to go back
-out through a one-line ``Reader`` delegation.
+out through a one-line ``SessionController`` delegation.
 """
 
 from __future__ import annotations

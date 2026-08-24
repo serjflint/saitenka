@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_routes import (
     ControlSink,
     install_session_reactor,
@@ -37,7 +37,7 @@ def test_a_live_session_records_what_its_reducers_reported() -> None:
     """
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     ledger = gateway.session_ledger
     assert ledger is not None
     try:
@@ -57,7 +57,7 @@ def test_an_event_no_owner_claims_is_counted_rather_than_dropped() -> None:
     and "migrated and silent" are the same observation."""
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     ledger = gateway.session_ledger
     assert ledger is not None
 

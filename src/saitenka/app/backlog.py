@@ -116,7 +116,7 @@ class MatchResult:
 
 
 class BacklogStore:
-    """One SQLite connection owned by the Reader thread."""
+    """One SQLite connection owned by the SessionController thread."""
 
     def __init__(self, path: str | Path | None = None, *, clock: Callable[[], float] = time.time):
         self.path = Path(path or db_path())

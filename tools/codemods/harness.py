@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 #: The declaration being retired lives here; rewriting the class body turns a descriptor into a
 #: nonsense assignment. A transform that renames host members excludes it.
-CONTROLLER = ROOT / "src" / "saitenka" / "app" / "controller.py"
+CONTROLLER = ROOT / "src" / "saitenka" / "app" / "session_controller.py"
 
 
 def worklist(members: Iterable[str]) -> list[Path]:

@@ -12,7 +12,7 @@ from util import FakeIPC
 
 from saitenka.app import miner_ui
 from saitenka.app.card_preview import PreviewData
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.runtime import events
 
 
@@ -36,7 +36,7 @@ def reader_with_clip(tmp_path, monkeypatch):
     monkeypatch.setattr(miner_ui, "play_audio", lambda _p: proc)
     clip = tmp_path / "clip.opus"
     clip.write_bytes(b"x")
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.interaction.preview_store.dispatch(events.PreviewShown(_preview_data(), clip))
     panel = r.interaction.preview_panel
     panel.rect = (0, 0, 200, 200)
@@ -62,19 +62,19 @@ def test_second_play_press_replaces_the_clip_never_stacks(reader_with_clip, monk
     assert first in killed and r.interaction.preview_panel.audio_proc is second
 
 
-def _close_button(r: Reader) -> None:
+def _close_button(r: SessionController) -> None:
     miner_ui.click_preview(r.preview_ports, 65, 15)  # ✕ → hide_preview
 
 
-def _esc(r: Reader) -> None:
+def _esc(r: SessionController) -> None:
     r._hide_preview()  # Esc → PREVIEW_CLOSE_MSG → _hide_preview
 
 
-def _new_cue(r: Reader) -> None:
+def _new_cue(r: SessionController) -> None:
     r.set_subtitle("次のセリフ")  # a cue change auto-dismisses the last preview
 
 
-def _replay(r: Reader) -> None:
+def _replay(r: SessionController) -> None:
     r.replay_preview()  # P → re-show, which silences the current clip
 
 

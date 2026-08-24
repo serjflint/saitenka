@@ -43,7 +43,7 @@ def _unused(*_a, **_k):
 
 
 class _FakeReader:
-    """Just enough Reader for the non-demo ``run`` branch: ``run()`` stands in for the blocking loop."""
+    """Just enough SessionController for the non-demo ``run`` branch: ``run()`` stands in for the blocking loop."""
 
     def __init__(self) -> None:
         self.ran = False
@@ -54,7 +54,7 @@ class _FakeReader:
 
     @property
     def session_entry(self):
-        """The shape `Reader.session_entry` builds — the seam the entry point is driven through."""
+        """The shape `SessionController.session_entry` builds — the seam the entry point is driven through."""
         return SessionEntry(runtime=SessionRuntime(_facts(), _acts(), self.ipc), run=self.run)
 
 
@@ -76,7 +76,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
     started = threading.Event()
     release = threading.Event()
 
-    class Reader:
+    class SessionController:
         osd = (1280, 720)
         ipc = None
 
@@ -131,7 +131,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
             assert self.tokens and self.hovered == 0
             self.ready = True
 
-    reader = Reader()
+    reader = SessionController()
     monkeypatch.setattr(cli_run.time, "sleep", lambda _seconds: None)
     thread = threading.Thread(
         target=cli_run._execute_reader_session,
@@ -181,7 +181,7 @@ def _geometry_acts(reader) -> SessionActs:
 def test_demo_waits_for_readiness_and_uses_the_owned_terminal_sequence():
     """A demo drives the session until mpv publishes its geometry rather than napping for it.
 
-    `Reader.osd` falls back to 720p, so a demo that composed before the real geometry landed would
+    `SessionController.osd` falls back to 720p, so a demo that composed before the real geometry landed would
     have produced a correct-looking panel sized for a window that does not exist — the failure a
     fixed sleep cannot rule out and a bounded wait on the fact can.
     """

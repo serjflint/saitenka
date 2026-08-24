@@ -36,9 +36,9 @@ local spawned = false
 local function spawn_overlay()
     if spawned then return end
     -- `saitenka run` launches its own mpv with `--script-opts=saitenka-managed=yes` and
-    -- already has a Reader attached over IPC — without this check we'd autoload here too (script
+    -- already has a SessionController attached over IPC — without this check we'd autoload here too (script
     -- autoload isn't affected by run mode's `--no-config`) and double-attach onto the same socket:
-    -- two independent Controller/Reader instances both drawing OSD and writing telemetry.
+    -- two independent Controller/SessionController instances both drawing OSD and writing telemetry.
     if mp.get_opt('saitenka-managed') then return end
     spawned = true
     local sock = ensure_socket()

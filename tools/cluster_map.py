@@ -8,7 +8,7 @@ members are not independent.
 `subtitle_slang`, `subtitle_tracks`, `_translation_secondary_sid`, `_last_announced_sid`) are
 properties over `self._subtitle_tracks.current` — ONE fact wearing seven names. Sixteen says "too
 big for a value"; ten says "a port, and here are its fields". Only the second is true, and reading
-`controller.py` to find that out is the expensive step this replaces.
+`session_controller.py` to find that out is the expensive step this replaces.
 
     uv run python tools/cluster_map.py <module.py> [...]   # the map, per module
     uv run python tools/cluster_map.py --json <module.py>  # the same, machine-readable
@@ -39,12 +39,12 @@ import host_arity
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "saitenka" / "app"
-CONTROLLER = APP / "controller.py"
+CONTROLLER = APP / "session_controller.py"
 
 
 @dataclass(frozen=True, slots=True)
 class Member:
-    """One name on the Reader, and what it resolves to underneath."""
+    """One name on the SessionController, and what it resolves to underneath."""
 
     name: str
     kind: str
@@ -81,17 +81,17 @@ def _decorated(node: ast.FunctionDef, name: str) -> bool:
 
 
 def classify_host() -> dict[str, Member]:
-    """Every name `reader.<x>` can resolve to, and what it is. Read once, from `controller.py`."""
+    """Every name `controller.<x>` can resolve to, read once from `session_controller.py`."""
     tree = ast.parse(CONTROLLER.read_text(encoding="utf-8"), filename=str(CONTROLLER))
-    reader = next(
-        (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Reader"),
+    controller = next(
+        (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionController"),
         None,
     )
-    if reader is None:
-        raise SystemExit("controller.py has no class Reader")
+    if controller is None:
+        raise SystemExit("session_controller.py has no class SessionController")
     members: dict[str, Member] = {}
 
-    for node in reader.body:
+    for node in controller.body:
         # `_sub_index = Delegated[CueIndex | None]("episode", "sub_index")` — the flat-name
         # compatibility layer. Its `fact` is the context field, so two names onto one field show up
         # as one fact even when neither looks like the other.
@@ -125,7 +125,7 @@ def classify_host() -> dict[str, Member]:
             else:
                 members[node.name] = Member(node.name, "derived", node.name)
 
-    for node in ast.walk(reader):
+    for node in ast.walk(controller):
         # `self.keys = o.keys` in `__init__` — a config group, and `self.osd = ...` a plain field.
         # Annotated (`self._geometry_cue_hint: Cue | None = None`) counts the same; missing that
         # form left real fields showing as unresolved.
@@ -217,7 +217,7 @@ _SWEPT = ("src", "tests", "tools", "examples", "install", ".agents")
 
 
 def _definition(name: str) -> tuple[str, list[str]]:
-    """The member's source on the Reader, and which other host members its body reads.
+    """The member's source on the SessionController, and which other host members its body reads.
 
     The second is the question a collapse turns on: a property reading nothing is a constant on the
     host, one reading three is a value waiting to be named, and a method whose body is one call
@@ -226,7 +226,7 @@ def _definition(name: str) -> tuple[str, list[str]]:
     tree = ast.parse(CONTROLLER.read_text(encoding="utf-8"), filename=str(CONTROLLER))
     lines = CONTROLLER.read_text(encoding="utf-8").splitlines()
     for reader in tree.body:
-        if not isinstance(reader, ast.ClassDef) or reader.name != "Reader":
+        if not isinstance(reader, ast.ClassDef) or reader.name != "SessionController":
             continue
         for node in reader.body:
             if not isinstance(node, ast.FunctionDef) or node.name != name:

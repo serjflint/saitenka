@@ -87,10 +87,10 @@
     },
     {
       "id": "runtime-ready",
-      "source": "src/saitenka/app/controller.py::Reader._mark_interactive_ready",
+      "source": "src/saitenka/app/session_controller.py::SessionController._mark_interactive_ready",
       "evidence": [
         "call:self.ipc.publish_runtime_event",
-        "src/saitenka/app/controller.py::Reader.pump|call:self._mark_interactive_ready"
+        "src/saitenka/app/session_controller.py::SessionController.pump|call:self._mark_interactive_ready"
       ],
       "target": "lifecycle-readiness",
       "work_package": "5",
@@ -100,7 +100,7 @@
     },
     {
       "id": "session-loop",
-      "source": "src/saitenka/app/controller.py::Reader.run",
+      "source": "src/saitenka/app/session_controller.py::SessionController.run",
       "evidence": [
         "ref:self.ipc.session_loop",
         "call:loop.run"

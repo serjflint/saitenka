@@ -15,8 +15,8 @@ import pytest
 import util
 
 from saitenka.app import subselect
-from saitenka.app.controller import Reader
 from saitenka.app.profiles import resolve_profile
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_providers import (
     ProviderContext,
     SubtitleProvider,
@@ -95,10 +95,12 @@ def _restore_tokenizer_registry():
 def _resolve_identity(cfg: dict) -> tuple[str, str, tuple[str, ...]]:
     """Reproduce how ``run``/``attach`` resolve the reading identity, through the REAL wiring, and
     return what each component OBSERVABLY selected: (active tokenizer name, main language code, the
-    enabled attach providers). ``resolve_profile`` → the real ``Reader`` construction line → the real
+    enabled attach providers). ``resolve_profile`` → the real ``SessionController`` construction line → the real
     ``prepare_attach_startup`` provider gate, all keyed on the one resolved ``langs.main``."""
     profile = resolve_profile(cfg)  # exactly what run_impl / attach do after load_config
-    reader = Reader(_FakeIPC(), profile=profile)  # the real Reader(ipc, options, profile=…) line
+    reader = SessionController(
+        _FakeIPC(), profile=profile
+    )  # the real SessionController(ipc, options, profile=…) line
     ipc = _FakeIPC(tracks=[EN], path="/v/Show - 01.mkv")  # no JP track → the provider gate fires
     _startup, _status, providers = subselect.prepare_attach_startup(
         ipc,

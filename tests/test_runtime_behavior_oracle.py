@@ -4,12 +4,12 @@ from concurrent.futures import Future
 from typing import cast
 
 import pytest
-from legacy_reader_behavior import LegacyReaderTrace
+from legacy_session_controller_behavior import LegacyReaderTrace
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
 from util import FakeIPC, runtime_gateway
 
 from saitenka.app.bindings import SUB_PICKER_MSG
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_routes import install_session_reactor
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
@@ -42,7 +42,7 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = Reader(ipc, renderer=NullRenderer())
+    reader = SessionController(ipc, renderer=NullRenderer())
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     dispatched: list[bool] = []
     monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
@@ -81,7 +81,7 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
 def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch) -> None:
     ipc = FakeIPC()
     ipc.props.update({"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader.start_observing()
     reader.set_subtitle("old")
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
@@ -147,7 +147,7 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
     ipc = _VisibilityIPC()
     ipc.props.update({"sid": 2, "sub-visibility": False})
     renderer = NativeVisibleRenderer()
-    reader = Reader(ipc, prefetch=False, renderer=renderer)
+    reader = SessionController(ipc, prefetch=False, renderer=renderer)
     reader.sub_text = "active"
     reader.subtitle_pipeline.cue_changed(reader.subtitle_target(), nonempty=True)
     trace = LegacyReaderTrace(reader)

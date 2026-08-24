@@ -28,7 +28,7 @@ from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, slic
 from saitenka.runtime.state import ReduceResult
 
 #: One stream that reaches every branch: a seed, a track selection, a split cue burst, an
-#: installed identity, the conflict that retires it, and both Reader-side declarations.
+#: installed identity, the conflict that retires it, and both SessionController-side declarations.
 STREAM = (
     PropertySeeded("osd-dimensions", {"w": 1920, "h": 1080}),
     PropertyObserved("sid", 1),
@@ -50,7 +50,7 @@ STREAM = (
 
 
 def _direct(projection: PlaybackProjection, state: PlaybackState, event: object) -> tuple:
-    """The call shape `Reader` used before the reducer existed, verbatim per event kind."""
+    """The call shape `SessionController` used before the reducer existed, verbatim per event kind."""
     match event:
         case PropertyObserved(name=name, data=data):
             projected = projection.observe(state, name, data)
@@ -119,20 +119,20 @@ def test_the_reducer_refuses_an_event_that_is_not_playbacks() -> None:
 def _reader_with_a_session_runtime(request):
     from util import FakeIPC, runtime_gateway
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.session_routes import install_session_reactor
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = Reader(ipc, renderer=NullRenderer())
+    reader = SessionController(ipc, renderer=NullRenderer())
     request.addfinalizer(reader.close)
     return reader, gateway
 
 
 def test_a_session_runtime_owns_the_slot_the_reader_observes_into(request) -> None:
-    """The whole point of item 13: with a runtime installed there is no Reader-side copy."""
+    """The whole point of item 13: with a runtime installed there is no SessionController-side copy."""
     reader, gateway = _reader_with_a_session_runtime(request)
     reader._observe_property("sub-text", "こんにちは")
 
@@ -144,10 +144,10 @@ def test_a_session_runtime_owns_the_slot_the_reader_observes_into(request) -> No
 def test_a_reader_with_no_runtime_still_observes_into_its_own_slice(request) -> None:
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
-    reader = Reader(FakeIPC(), renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), renderer=NullRenderer())
     request.addfinalizer(reader.close)
     reader._observe_property("sub-text", "ただいま")
 

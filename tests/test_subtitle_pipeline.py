@@ -223,10 +223,10 @@ def test_coordinator_delegates_current_renderer() -> None:
     """
     from util import FakeIPC
 
-    from saitenka.app.controller import Reader
+    from saitenka.app.session_controller import SessionController
 
     renderer = FakeCurrentRenderer()
-    reader = Reader(FakeIPC(), prefetch=False, renderer=renderer)
+    reader = SessionController(FakeIPC(), prefetch=False, renderer=renderer)
     coordinator = reader.subtitle_pipeline
     coordinator.renderer = renderer
 

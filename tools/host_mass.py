@@ -1,4 +1,4 @@
-"""Ratchet the mass of `class Reader` — the meter that fails when the host grows.
+"""Ratchet the mass of `class SessionController` — the meter that fails when the host grows.
 
     uv run --extra full python tools/host_mass.py            # markdown
     uv run --extra full python tools/host_mass.py json
@@ -14,9 +14,9 @@ naming, which a total alone cannot. `init_lines` closes the last escape the memb
 wiring a collaborator in `__init__` adds lines without adding a member, so a feature can move off
 the host and leave its construction behind with every other number still falling.
 
-**Members are discovered live, never by parsing one file.** A static parse of `controller.py` cannot
-follow a mixin base and cannot see `Reader.foo = foo` executed at import time at all — and that is
-exactly the escape the total exists to close. So `Reader` is imported and its MRO walked, the
+**Members are discovered live, never by parsing one file.** A static parse of `session_controller.py` cannot
+follow a mixin base and cannot see `SessionController.foo = foo` executed at import time at all — and that is
+exactly the escape the total exists to close. So `SessionController` is imported and its MRO walked, the
 `reducer_purity` idiom, with each member's source resolved back through `inspect`.
 
 **The classification ladder, in precedence order.** The rule "a delegator is a one-call body" is
@@ -74,10 +74,10 @@ def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def _reader() -> type:
-    from saitenka.app.controller import Reader
+def _session_controller() -> type:
+    from saitenka.app.session_controller import SessionController
 
-    return Reader
+    return SessionController
 
 
 def _members(host: type) -> dict[str, object]:
@@ -184,7 +184,7 @@ def _init_lines(host: type) -> int:
 
 
 def census() -> dict[str, int]:
-    return classify(_reader(), cluster_map.classify_host())
+    return classify(_session_controller(), cluster_map.classify_host())
 
 
 def _saved() -> tuple[dict[str, int], str]:

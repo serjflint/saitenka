@@ -9,7 +9,7 @@ what the eager import graph *touches*, not what's on disk. A regression that add
 taffylite`` to a module on any of these paths fails here.
 
 The entry points span the CLI surface AND the ``run`` / ``attach`` runtime graph — the payload the base
-wheel actually loads to play a video (the Reader, its dep builder, the run/attach impl), where a stray
+wheel actually loads to play a video (the SessionController, its dep builder, the run/attach impl), where a stray
 top-level ``import taffylite`` / ``import saitenka_deinflect`` in the render or deinflect stack would hide.
 
 Complements ``test_anki_optional.py``: that contract is the optional *service* (Anki down at runtime),
@@ -36,13 +36,13 @@ OPTIONAL_MODULES = [
 ]
 
 # The base install's eager import graph: the CLI surface plus what `run`/`attach` load to play a video.
-# cli imports launch.run at module top; run/attach then build a Reader via reader_deps and drive
+# cli imports launch.run at module top; run/attach then build a SessionController via reader_deps and drive
 # the render/tooltip stack — the modules where a top-level optional import would actually hide.
 ENTRY_POINTS = [
     "saitenka.app.cli",  # console-script surface: every command
     "saitenka.app.launch.run",  # the run command implementation
     "saitenka.app.reader_deps",  # dep builder (dictdb / scoring / wordlists / anki)
-    "saitenka.app.controller",  # the Reader — the run/attach runtime payload (tooltip + render stack)
+    "saitenka.app.session_controller",  # run/attach session payload (tooltip + render stack)
 ]
 
 

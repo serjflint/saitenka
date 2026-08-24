@@ -14,15 +14,15 @@ from util import FakeIPC, await_ready, drain_for, runtime_gateway
 from saitenka import otel_metrics
 from saitenka.app import mined_seed as mined_seed_lane
 from saitenka.app.bindings import SUB_PICKER_MSG
-from saitenka.app.controller import Reader
 from saitenka.app.logsetup import CONSOLE_LOGGER_NAME
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.mpvio.ipc import IPCRequest
 
 
 def test_reader_starts_without_deps():
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     assert r.scorer is None and r.dict_set is None and r.anki is None
 
 
@@ -30,7 +30,7 @@ def test_reader_starts_without_deps():
 def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     try:
         reader.prepare_subtitle_blocking("猫")
 
@@ -42,7 +42,7 @@ def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop() -> 
 
 def test_apply_deps_injects_and_stops_loading():
     ipc = FakeIPC()
-    r = Reader(ipc)
+    r = SessionController(ipc)
     r._loading = True
 
     class _Scorer:  # stand-in; not exercised here (no active subtitle)
@@ -59,7 +59,7 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", lambda _anki, _cfg: {"猫"})
-    r = Reader(ipc)
+    r = SessionController(ipc)
     r.anki = object()
     r.mine_cfg = object()
     try:
@@ -92,7 +92,7 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
         return {"新しい"}
 
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
-    r = Reader(ipc)
+    r = SessionController(ipc)
     r.anki = old_anki
     r.mine_cfg = object()
     try:
@@ -122,7 +122,7 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
 def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    r = Reader(ipc)
+    r = SessionController(ipc)
     r.anki = object()
     r.mine_cfg = object()
     attempts = 0
@@ -166,7 +166,7 @@ def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
         yield None
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.tip.jobs.begin("tooltip")
 
     r.close()
@@ -181,10 +181,10 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, monke
     once (a later re-inject must not re-announce).
 
     Read off the record, not the terminal: which stream a user-facing line reaches is logsetup's
-    (tests/test_logsetup.py), and a Reader built without `configure_logging` has no handler at all.
+    (tests/test_logsetup.py), and a SessionController built without `configure_logging` has no handler at all.
     """
     caplog.set_level(logging.INFO, logger=CONSOLE_LOGGER_NAME)
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     monkeypatch.setattr(r, "start_prefetch", lambda: setattr(r.prefetch_state, "workers", 3))
     r._apply_deps({"scorer": None, "dict_set": None, "anki": None, "mine_cfg": None})
     assert "3 prefetch worker(s)" in caplog.text  # real count, not 0
@@ -223,7 +223,7 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll(request):
     gateway = runtime_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
-    r = Reader(ipc)
+    r = SessionController(ipc)
     request.addfinalizer(r.close)  # LIFO: the reader goes down before its gateway
     assert ("show-text", "", 1) not in ipc.commands
 
@@ -243,7 +243,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     gateway = runtime_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     clear = ("show-text", "", 1)
     observed = []
@@ -279,7 +279,7 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
 
     assert reader.pump() is True
@@ -292,7 +292,7 @@ def test_load_deps_async_marks_loading(monkeypatch):
     import saitenka.app.reader_deps as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
-    r = Reader(FakeIPC())
+    r = SessionController(FakeIPC())
     r.load_deps_async({})
     assert r._loading is True  # spinner shows until the deps-ready deadline injects
 
@@ -304,7 +304,7 @@ def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()
-    r = Reader(ipc)
+    r = SessionController(ipc)
     applied = []
     monkeypatch.setattr(r, "_apply_deps", applied.append)
 
@@ -326,7 +326,7 @@ def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()
-    r = Reader(ipc)
+    r = SessionController(ipc)
     seen: list[object] = []
     original = r.arm_deps_ready
     monkeypatch.setattr(r, "arm_deps_ready", lambda: (seen.append(r._pending_deps), original())[1])
@@ -366,7 +366,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     ipc = FakeIPC()
     ipc.props.update({"sub-text": "猫", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
     gateway = runtime_gateway(ipc)
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.renderer = NullRenderer()
     reader.tokenizer = _Tokenizer()
     reader._enable_async_annotation()

@@ -6,7 +6,7 @@ from util import RecordingRasterProvider, keybind_registry
 
 from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
-from saitenka.app.controller import Reader
+from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.tooltip import update_hover_impl
 
@@ -33,14 +33,14 @@ class _SpyRenderer(NullRenderer):
 
 
 def test_full_annotations_remain_the_default():
-    reader = Reader(FakeIPC())
+    reader = SessionController(FakeIPC())
 
     assert reader.annotation_mode == "full"
     assert reader.keys.annotation_key == "Alt+a"
 
 
 def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
-    reader = Reader(
+    reader = SessionController(
         FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
     )
     reader.sub_text = "猫"
@@ -69,7 +69,7 @@ def test_hover_mode_still_scores_each_new_cue(monkeypatch):
         def score_line(self, tokens):
             return [f"score:{token.surface}" for token in tokens]
 
-    reader = Reader(
+    reader = SessionController(
         FakeIPC(),
         scorer=Scorer(),
         options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")),
@@ -83,7 +83,7 @@ def test_hover_mode_still_scores_each_new_cue(monkeypatch):
 
 def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
     ipc = FakeIPC({"mouse-pos": {"hover": True, "x": 50, "y": 50}})
-    reader = Reader(ipc, hover_switch_delay=10.0)
+    reader = SessionController(ipc, hover_switch_delay=10.0)
     reader.tokens = [object(), object()]
     reader.hover = 0
     calls = []
@@ -105,7 +105,7 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
 def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch):
     ipc = FakeIPC()
     options = ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover", pause_on_tooltip=False))
-    reader = Reader(ipc, options=options)
+    reader = SessionController(ipc, options=options)
     reader.tokens = [object()]
     redrawn = []
     monkeypatch.setattr(reader, "renderer", _SpyRenderer(lambda _rd: redrawn.append(True)))
@@ -119,7 +119,9 @@ def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatc
 
 def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
     ipc = FakeIPC({"mouse-pos": {"hover": False, "x": 50, "y": 50}})
-    reader = Reader(ipc, options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")))
+    reader = SessionController(
+        ipc, options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
+    )
     reader.tokens = [object()]
     reader.annotation_hover = True
     states = []
@@ -133,7 +135,7 @@ def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
 
 
 def test_cue_change_resets_hover_only_presentation(monkeypatch):
-    reader = Reader(
+    reader = SessionController(
         FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
     )
     reader.annotation_hover = True
@@ -149,7 +151,7 @@ def test_cue_change_resets_hover_only_presentation(monkeypatch):
 
 def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
     ipc = FakeIPC()
-    reader = Reader(ipc)
+    reader = SessionController(ipc)
     reader.sub_text = "猫"
     drawn = []
     toasts = []
@@ -169,7 +171,7 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
 
 
 def test_toggle_remains_available_while_cue_identity_is_retired():
-    reader = Reader(FakeIPC(), renderer=NullRenderer())
+    reader = SessionController(FakeIPC(), renderer=NullRenderer())
     reader._cue_identity_ever_installed = True
     reader._cue_retired = True
 
@@ -182,7 +184,7 @@ def test_annotation_key_is_configurable():
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(annotation_key="Ctrl+a"))
 
-    Reader(ipc, options=options)._register_keybinds()
+    SessionController(ipc, options=options)._register_keybinds()
 
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Ctrl+a"] == "script-message saitenka-toggle-annotations"
@@ -192,4 +194,4 @@ def test_unknown_initial_annotation_mode_is_rejected():
     options = ReaderOptions(tooltip=TooltipOptions(annotation_mode="invalid"))  # type: ignore[arg-type]
 
     with pytest.raises(ValueError, match="unknown annotation mode"):
-        Reader(FakeIPC(), options=options)
+        SessionController(FakeIPC(), options=options)

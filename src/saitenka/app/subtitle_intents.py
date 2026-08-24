@@ -1,7 +1,7 @@
 """Pure reducer for the subtitle-owned commands.
 
 The reducer receives an immutable snapshot of the facts a decision needs and returns typed
-effects. It performs no I/O, holds no state and never sees `Reader`; the executor in the
+effects. It performs no I/O, holds no state and never sees `SessionController`; the executor in the
 controller gathers the inputs and carries the effects out.
 """
 
