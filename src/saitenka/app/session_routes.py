@@ -605,11 +605,12 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
 class StatelessHost(
     HoverHost, InteractionHost, MineHost, PanelHost, SessionHost, SubtitleHost, Protocol
 ):
-    """Every stateless feature's host surface at once, one base class per registered feature.
+    """Every stateless feature's session-level host surface at once.
 
-    There is no intersection type, so this is how the composition root types the object it hands
-    each adapter. Adding a feature adds a base here — which is the registration cost being visible
-    rather than hidden behind a `SessionController` annotation.
+    Direct-host adapters contribute Protocol bases because Python has no intersection type. A
+    bounded-controller feature contributes one typed controller attribute instead; its adapter
+    protocol describes that controller. Both keep the registration cost visible rather than
+    hiding it behind a `SessionController` annotation.
     """
 
     profile_controller: ProfileController

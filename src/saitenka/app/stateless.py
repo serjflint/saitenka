@@ -7,8 +7,8 @@ stateless half had no equivalent — its policies are pure `reduce(command, inpu
 relocates impurity; absent a seam it relocates onto the object being retired, which is the growth
 `poe host-mass` measures.
 
-An adapter is where a feature's host coupling is *allowed* to be. Concentrating it in six named
-objects is the point: each one is small, countable, and belongs to its feature.
+An adapter is where a feature's host coupling is *allowed* to be. Concentrating it in named objects
+is the point: each one is small, countable, and belongs to its feature.
 """
 
 from __future__ import annotations
