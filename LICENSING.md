@@ -10,7 +10,7 @@ This repository is **mixed-license**. Read this before redistributing.
 | `tools/`, `install/` | **Apache-2.0** | Anki/FSRS engine + installers. |
 | `deinflect/` (`saitenka-deinflect`) | **GPL-3.0-or-later** | Derived from [Yomitan](https://github.com/yomidevs/yomitan) — see `deinflect/NOTICE`. |
 | `taffylite/` (`taffylite`) | **MIT OR Apache-2.0** | Optional layout engine — a PyO3 binding of [taffy](https://github.com/DioxusLabs/taffy) (MIT) + [pyo3](https://github.com/PyO3/pyo3) (Apache-2.0/MIT). Permissive, so the `layout-engine` extra keeps the install Apache-2.0-clean — unlike `deinflect`. See `taffylite/NOTICE`. |
-| `resvglite/` (`resvglite`) | **MIT OR Apache-2.0**, vendoring **MPL-2.0** | Optional SVG rasterizer — a PyO3 binding whose own code is MIT/Apache-2.0 and which vendors [resvg](https://github.com/linebender/resvg) (MPL-2.0) at build time. MPL is *file-level* copyleft: it covers the vendored resvg sources, not the wrapper or the larger work, so the `images` extra leaves the Apache-2.0 core clean — but the built `resvglite` wheel carries resvg's MPL obligations. See `resvglite/NOTICE`. |
+| `resvglite/` (`resvglite`) | **MIT OR Apache-2.0**, vendoring **MPL-2.0** | Retained in-tree but **no longer installed by any extra** — `images` now depends on the third-party `resvg-py` (below). A PyO3 binding whose own code is MIT/Apache-2.0 and which vendors [resvg](https://github.com/linebender/resvg) (MPL-2.0) at build time. MPL is *file-level* copyleft, so it covers the vendored resvg sources, not the wrapper or the larger work; the separately-published `resvglite` wheel carries resvg's MPL obligations. See `resvglite/NOTICE`. |
 | `libasslite/` (`libasslite`) | **MIT** | Experimental PyO3 binding that dynamically loads a user-supplied/system [libass](https://github.com/libass/libass) (ISC). It does not bundle libass or its shaping/font dependencies. See `libasslite/NOTICE`. |
 | `libasslite-bundle/` (`libasslite-bundle`) | **Mixed native notices** | Optional platform wheel containing dynamically linked libass and its runtime closure. The wheel carries the exact vcpkg port versions and verbatim notices; it is not part of the Apache-2.0 core wheel. |
 
@@ -18,12 +18,17 @@ The subtitle seam uses [pysubs2](https://github.com/tkarabela/pysubs2) (MIT) for
 ASS, and SSA parsing. Saitenka owns the `Cue`/`CueIndex` surface and navigation behavior.
 
 The top-level [`LICENSE`](LICENSE) is Apache-2.0. Independently licensed package directories carry
-their own license: `deinflect/` is GPL-3.0, `taffylite/` is MIT/Apache-2.0, `resvglite/` is MPL-2.0,
+their own license: `deinflect/` is GPL-3.0, and `taffylite/` and `resvglite/` are MIT/Apache-2.0,
 and `libasslite/` is MIT. The separate `libasslite-bundle/` distribution retains every native
 component's own terms and source metadata. `taffylite/` is permissively
-licensed (MIT/Apache-2.0), so it does not change that boundary. `resvglite/` vendors MPL-2.0 code, whose
-copyleft is *file-scoped* — combining it (the `images` extra) leaves the Apache-2.0 core unaffected; only
-the separately-published `resvglite` wheel must honour MPL (offer resvg's source, keep its notices).
+licensed (MIT/Apache-2.0), so it does not change that boundary.
+
+The `images` extra installs the third-party [`resvg-py`](https://github.com/baseplate-admin/resvg-py)
+(MIT wrapper, linking resvg under MPL-2.0), not the in-tree `resvglite`. MPL's copyleft is
+*file-scoped*, so depending on it leaves the Apache-2.0 core unaffected; only the `resvg-py` wheel
+itself must honour MPL (offer resvg's source, keep its notices). Note its published wheel metadata
+declares **no** licence field — the MIT grant is the `LICENSE` file in its repository, so a
+redistributor auditing by metadata alone will see `UNKNOWN`.
 `libasslite` is permissive and loads rather than redistributes the system installation. Installing
 `libasslite-bundle` instead adds its independently packaged libass/font/shaping runtime and obligations.
 
@@ -54,7 +59,7 @@ In short: **core alone = Apache-2.0; core + `deinflect` = GPL-3.0.**
 `images`, `subtitle-geometry`). All are GPL-3.0-compatible, so they don't change the combined licence;
 they add one thing for anyone **redistributing** a full install:
 
-- **`resvglite`** vendors resvg (MPL-2.0). MPL-2.0 §3.3 explicitly permits distributing the combination
+- **`resvg-py`** links resvg (MPL-2.0). MPL-2.0 §3.3 explicitly permits distributing the combination
   under a secondary licence such as GPL-3.0, provided the MPL-covered files stay available under MPL.
   So keep resvg's notices and be able to offer its source.
 - **`taffylite`** (MIT/Apache-2.0) and **`libasslite`** (MIT) add notice obligations only.

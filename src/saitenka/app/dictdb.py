@@ -17,6 +17,7 @@ land in ``entries`` / ``keys`` / ``kanji`` / ``tags``; frequency and pitch dicti
 from __future__ import annotations
 
 import functools
+import gzip
 import json
 import logging
 import re
@@ -39,37 +40,70 @@ log = logging.getLogger(__name__)
 DB_SCHEMA = 1  # bump to force a from-scratch re-import (the DB is dropped and rebuilt)
 
 # Inline structured-content media (#283). Extensions Yomitan img nodes reference; SVG is rasterized to
-# PNG at this base height (gaiji are tiny, so 64px is crisp at any tooltip scale — matches resvglite's
-# smoke default), everything else is stored as-is.
+# PNG at this base height (gaiji are tiny, so 64px is crisp at any tooltip scale), everything else is
+# stored as-is.
 _MEDIA_EXTS = frozenset({"svg", "png", "jpg", "jpeg", "gif", "webp"})
 _MEDIA_PX = 64
 
 # Overridable default DB path — tests point this at a tmp file (mirrors the old CACHE_DIR override).
 _DB_PATH_OVERRIDE: Path | None = None
 
-_SVG_FONTS: list[bytes] | None = None
+_SVG_FONT_FILES: list[str] | None = None
+
+#: resvg resolves a bundled face by family name, and with system fonts skipped a generic
+#: ``font-family: sans-serif`` matches nothing at all — so every generic maps onto the bundled face
+#: explicitly. Without this the badge glyph silently renders as the #283 tofu again.
+_SVG_FONT_FAMILY = "Noto Sans JP"
+_SVG_FONT_FAMILIES = {
+    "font_family": _SVG_FONT_FAMILY,
+    "serif_family": _SVG_FONT_FAMILY,
+    "sans_serif_family": _SVG_FONT_FAMILY,
+    "cursive_family": _SVG_FONT_FAMILY,
+    "fantasy_family": _SVG_FONT_FAMILY,
+    "monospace_family": _SVG_FONT_FAMILY,
+}
 
 
-def _svg_text_fonts() -> list[bytes]:
-    """Font bytes handed to resvglite so ``<text>`` gaiji render their glyph, not an empty box (#283).
-    The bundled NotoSansJP covers the badge kanji (漢/呉/…) plus Latin; loaded once, then reused."""
-    global _SVG_FONTS
-    if _SVG_FONTS is None:
+def _svg_text_font_files() -> list[str]:
+    """Font files handed to resvg-py so ``<text>`` gaiji render their glyph, not an empty box (#283).
+    The bundled NotoSansJP covers the badge kanji (漢/呉/…) plus Latin; resolved once, then reused.
+    Paths, not bytes — ``resvg_py`` loads faces by filename (``resources.asset`` is a real file)."""
+    global _SVG_FONT_FILES
+    if _SVG_FONT_FILES is None:
         from saitenka.resources import asset
 
-        _SVG_FONTS = [asset("fonts", "NotoSansJP.ttf").read_bytes()]
-    return _SVG_FONTS
+        _SVG_FONT_FILES = [str(asset("fonts", "NotoSansJP.ttf"))]
+    return _SVG_FONT_FILES
 
 
-def _rasterize_svg(resvglite, name: str, data: bytes) -> bytes | None:
+def _rasterize_svg(resvg_py, name: str, data: bytes) -> bytes | None:
     """One SVG gaiji → PNG bytes, or ``None`` if it failed to render (logged loudly, ▢ fallback kept).
     Only ``<text>`` SVGs get the font DB — loading a ~10 MB face for every path-only gaiji (大辞林 alone
-    has thousands) would be pure waste, so gate on the cheap byte check (#283)."""
-    fonts = _svg_text_fonts() if b"<text" in data else None
+    has thousands) would be pure waste, so gate on the cheap byte check (#283).
+
+    ``skip_system_fonts`` keeps the output a function of the bundled face alone, so a host with (or
+    without) a system Noto renders the same bytes."""
     try:
-        png, _w, _h = resvglite.render_svg(data, _MEDIA_PX, fonts)
+        if (
+            data[:2] == b"\x1f\x8b"
+        ):  # .svgz payload under a .svg name; usvg used to unwrap it for us
+            data = gzip.decompress(data)
+        # `log_information` surfaces usvg's "No match for '<family>' font-family" on stderr — the only
+        # signal that a text gaiji rendered as a bare box, since that render SUCCEEDS. Its absence is
+        # how #283 hid. Text SVGs only: it is the one diagnostic here that can be acted on.
+        fonts = (
+            {"font_files": _svg_text_font_files(), "log_information": True, **_SVG_FONT_FAMILIES}
+            if b"<text" in data
+            else {}
+        )
+        png = resvg_py.svg_to_bytes(
+            svg_string=data.decode(),
+            height=_MEDIA_PX,
+            skip_system_fonts=True,
+            **fonts,
+        )
     except Exception as e:  # noqa: BLE001  # incl. a pyo3 panic — one bad glyph must not abort the whole import
-        log.warning("resvglite failed on %s: %s — leaving ▢ fallback", name, e)
+        log.warning("resvg-py failed on %s: %s — leaving ▢ fallback", name, e)
         return None
     return png
 
@@ -103,7 +137,7 @@ CREATE TABLE IF NOT EXISTS term_meta(
 CREATE TABLE IF NOT EXISTS tags(
   dict_id INTEGER, code TEXT, name TEXT, ord INTEGER, category TEXT, notes TEXT);
 -- Inline structured-content images (Yomitan `img` nodes: SVG gaiji / labels), rasterized to PNG at
--- import via the optional resvglite extra (#283). Additive — no DB_SCHEMA bump, so it stays empty for
+-- import via the optional `images` extra (#283). Additive — no DB_SCHEMA bump, so it stays empty for
 -- existing DBs until the next re-import; the renderer falls back to ▢ when a path isn't present.
 CREATE TABLE IF NOT EXISTS media(dict_id INTEGER, path TEXT, png BLOB, PRIMARY KEY(dict_id, path));
 CREATE INDEX IF NOT EXISTS idx_keys ON keys(dict_id, key);
@@ -558,7 +592,7 @@ class DictionaryDb:
     def _load_media(self, conn: sqlite3.Connection, zf: zipfile.ZipFile, did: int) -> None:
         """Extract inline-image media referenced by structured content, keyed by zip path (#283).
 
-        Runs ONLY when the optional ``resvglite`` extra is installed — so a default (no-extra) import is
+        Runs ONLY when the optional ``images`` extra is installed — so a default (no-extra) import is
         byte-identical to before, and the renderer just keeps drawing ▢. SVG gaiji are rasterized to PNG
         once here (cold cost paid at import, not per hover); raster formats are stored as-is (PIL opens
         them directly). A malformed SVG is logged loudly and skipped, leaving its ▢ fallback.
@@ -567,7 +601,7 @@ class DictionaryDb:
         #283 tofu bug — so those get the bundled NotoSansJP; path-outlined gaiji skip the font (no cost).
         """
         try:
-            import resvglite  # noqa: TID251  # SVG-images chokepoint: this is the one sanctioned importer
+            import resvg_py  # noqa: TID251  # SVG-images chokepoint: this is the one sanctioned importer
         except ImportError:
             return
         rows: list[tuple[int, str, bytes]] = []
@@ -577,7 +611,7 @@ class DictionaryDb:
             if ext not in _MEDIA_EXTS:
                 continue
             data = zf.read(name)
-            png = _rasterize_svg(resvglite, name, data) if ext == "svg" else data
+            png = _rasterize_svg(resvg_py, name, data) if ext == "svg" else data
             if png is None:
                 failed += 1
                 continue

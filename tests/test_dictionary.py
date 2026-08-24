@@ -440,7 +440,7 @@ def test_stacked_entry_group_defs_preload_media(tmp_path):
     # #283 regression: the stacked-entry path (a word with ≥2 readings, like 鳥 = とり/ちょう) must
     # preload inline-img media just like the fused path — the two builders drifted and this one forgot,
     # so every gaiji in a multi-reading word rendered ▢ even though the fused Entry.defs had media.
-    pytest.importorskip("resvglite")  # media only populates when the rasterizer is installed
+    pytest.importorskip("resvg_py")  # media only populates when the rasterizer is installed
     svg = (
         b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
         b'<rect x="10" y="10" width="80" height="80" fill="black"/></svg>'
