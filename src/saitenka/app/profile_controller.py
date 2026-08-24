@@ -45,7 +45,6 @@ class ProfileAftermath:
 
 
 class ProfileSwitchStatus(StrEnum):
-    NOOP = "noop"
     REJECTED = "rejected"
     COMMITTED = "committed"
     DEGRADED = "degraded"
