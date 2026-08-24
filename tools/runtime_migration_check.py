@@ -254,7 +254,7 @@ class Scanner(ast.NodeVisitor):
             *([node.args.kwarg] if node.args.kwarg is not None else []),
         )
         annotations = [arg.annotation for arg in arguments]
-        if any(argument.arg == "reader" for argument in arguments) or any(
+        if any(argument.arg in {"reader", "session_controller"} for argument in arguments) or any(
             _names_the_host(annotation) for annotation in annotations
         ):
             self._debt.add(Debt("reader-parameter", self._source()))

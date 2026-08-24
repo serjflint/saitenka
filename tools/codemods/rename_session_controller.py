@@ -37,6 +37,7 @@ TEXT_EXCLUSIONS = {
     ".ledger.sharpen.jsonl",
     "CHANGELOG.md",
     "docs/why/comparisons.md",
+    "tools/codemods/rename_session_controller.py",
 }
 TEXT_RENAMES = (
     (re.compile(r"saitenka\.app\.controller"), "saitenka.app.session_controller"),

@@ -81,8 +81,8 @@ def feature(reader: SessionController):
 def keyword_feature(*, reader: SessionController):
     return reader
 
-def untyped_feature(reader):
-    return reader
+def untyped_feature(session_controller):
+    return session_controller
 
 def aliased_command(player):
     player.command("set_property", "pause", True)
