@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787553598363,
+  "lastUpdate": 1787556189598,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -8939,6 +8939,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.589523,
             "range": "3 replicas; min 1.50908; max 3.14687; MAD 0.080439; worst 3.14687",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5a4aba0fb881bff4e0da9efb952ccd2e7efb2e7f",
+          "message": "Merge pull request #423 from serjflint/fix/native-integration-tail-budget\n\nGive the interaction CPU delta the headroom a tail metric needs",
+          "timestamp": "2026-08-24T12:20:20+05:00",
+          "tree_id": "2beb7881db2e0ec799d4532b5ceb004a10737d6a",
+          "url": "https://github.com/serjflint/saitenka/commit/5a4aba0fb881bff4e0da9efb952ccd2e7efb2e7f"
+        },
+        "date": 1787556188521,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.383071,
+            "range": "3 replicas; min 6.37597; max 6.39618; MAD 0.007101",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.911967,
+            "range": "3 replicas; min 8.82115; max 11.8405; MAD 0.090818; worst 11.8405",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.527561,
+            "range": "3 replicas; min 18.6767; max 20.8824; MAD 0.354831",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.752063,
+            "range": "3 replicas; min 18.7858; max 21.1874; MAD 0.435294; worst 21.1874",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 19.689547,
+            "range": "3 replicas; min 15.968; max 20.9768; MAD 1.28725",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.17131,
+            "range": "3 replicas; min 0.131699; max 0.177232; MAD 0.005922; worst 0.177232",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.073398,
+            "range": "3 replicas; min 38.5268; max 44.2113; MAD 0.137886; worst 44.2113",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.556422,
+            "range": "3 replicas; min 2.50879; max 4.95937; MAD 1.04763; worst 4.95937",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.508797,
+            "range": "3 replicas; min 1.07736; max 2.21491; MAD 0.43144; worst 2.21491",
             "unit": "ms"
           }
         ]
