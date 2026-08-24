@@ -12,19 +12,23 @@ from hypothesis import strategies as st
 
 from saitenka.app import doctor as doc
 from saitenka.app.logsetup import (
+    CONSOLE_LOGGER_NAME,
     _add_session,
     _drop_session,
     _redact_event_dict,
     configure_logging,
+    user_facing_logger,
 )
 
 
 def _configure(tmp_path):
     """Fresh root logger per test — configure_logging is idempotent (returns early once handlers
-    are attached), so each test needs its own unhandled "saitenka" logger."""
-    root = logging.getLogger("saitenka")
-    for h in list(root.handlers):
-        root.removeHandler(h)
+    are attached), so each test needs its own unhandled "saitenka" logger. The user-facing child is
+    cleared too: its handler is attached separately and would otherwise stack across tests."""
+    for name in ("saitenka", CONSOLE_LOGGER_NAME):
+        logger = logging.getLogger(name)
+        for h in list(logger.handlers):
+            logger.removeHandler(h)
     log_path = tmp_path / "overlay.log"
     configure_logging(log_path)
     return log_path
@@ -80,6 +84,43 @@ def test_console_processor_drops_session_but_file_processor_keeps_it():
     assert stamped.get("session")
 
     assert "session" not in _drop_session(None, "warning", dict(stamped))
+
+
+def test_a_user_facing_line_reaches_the_terminal_and_the_file(tmp_path, capsys):
+    """The banner and the session summary were `print` calls precisely because the stderr handler is
+    WARNING. That made them invisible to `overlay.log`, so a report bundle never carried them."""
+    log_path = _configure(tmp_path)
+    user_facing_logger().info("runtime: %s · %d prefetch worker(s)", "GIL", 4)
+
+    assert capsys.readouterr().err.strip() == "[saitenka] runtime: GIL · 4 prefetch worker(s)"
+    (record,) = [d for d in _lines(log_path) if d["event"].startswith("runtime:")]
+    assert record["level"] == "info"
+
+
+def test_a_user_facing_line_is_printed_once(tmp_path, capsys):
+    """The record propagates to the root's file handler; the root's stderr handler must not take it
+    as well, or every banner appears twice — once plain, once log-rendered."""
+    _configure(tmp_path)
+    user_facing_logger().info("session: 12 cues")
+
+    assert capsys.readouterr().err.count("session: 12 cues") == 1
+
+
+def test_an_ordinary_info_line_stays_off_the_terminal(tmp_path, capsys):
+    """Negative control: this is a channel for the two lines addressed to the user, not a global
+    console level. Without it the same test passes for any change that just lowers `sh`."""
+    _configure(tmp_path)
+    logging.getLogger("saitenka.test").info("cache warmed")
+
+    assert "cache warmed" not in capsys.readouterr().err
+
+
+def test_a_user_facing_line_is_redacted(tmp_path, capsys):
+    """What the print bypassed. `no-print-in-lib` names this as the reason it exists."""
+    _configure(tmp_path)
+    user_facing_logger().info("session: token=%s", "abcdef0123456789")
+
+    assert "abcdef0123456789" not in capsys.readouterr().err
 
 
 def test_doctor_recent_errors_tails_json_log(tmp_path, monkeypatch):
