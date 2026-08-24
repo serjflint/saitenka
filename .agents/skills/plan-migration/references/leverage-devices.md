@@ -12,6 +12,11 @@ single rewrite fits them.
 The failure: the facade becomes permanent. A facade with no scheduled deletion is a second home for
 the same fact, which is the drift bug AGENTS.md "Documentation" names.
 
+For a responsibility migration, distinguish a **compatibility facade** from a **field-only extraction**.
+The old public entry point may legitimately remain, but authoritative state and transition decisions must
+terminate behind it. A new object that stores fields while the host still decides admission, completion,
+fallback, publication, and close has changed layout, not ownership; do not count it in the retirement meter.
+
 ## Shared port — one value carrying the facts several sites read separately
 
 Several names over one owner are one port with fields, not N parameters. The arithmetic is the whole

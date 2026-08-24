@@ -5,7 +5,8 @@ set -euo pipefail
 skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 repo_root="$(CDPATH='' cd -- "$skill_dir/../../.." && pwd)"
 
-python3 - "$skill_dir" "$repo_root" <<'PY'
+cd "$repo_root"
+uv run python - "$skill_dir" "$repo_root" <<'PY'
 import sys, pathlib, re
 
 skill, repo = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
@@ -27,12 +28,13 @@ if dm:
     desc = " ".join(line.strip() for line in dm.group(1).splitlines())
     need(len(desc) <= 1024, f"description too long: {len(desc)} > 1024")
     need("<" not in desc and ">" not in desc, "description must not contain angle brackets")
-    need(all(s in desc for s in ("repowise", "WebFetch", "contribute")),
-         "description lost the negative cut (repowise / WebFetch / contribute)")
+    need(all(s in desc for s in ("repowise", "WebFetch", "architecture-inquiry", "contribute")),
+         "description lost a neighboring-skill negative cut")
 
 for anchor in ("Assemble context", "Author + sharpen", "Handoff", "Verify — the gate",
                "Triage the signals", "Widen", "Deepen", "Sharpen", "open it in VS Code",
-               "Aggregate", "Caveats", "fact-check", "maintenance status"):
+               "Aggregate", "Caveats", "fact-check", "maintenance status", "guarantee supplied",
+               "product-policy decision", "ready to re-enfold"):
     need(anchor in text, f"SKILL.md lost anchor: {anchor!r}")
 need("**Do**" in text and "**Don't**" in text, "SKILL.md lost the dos/don'ts split")
 
@@ -46,6 +48,8 @@ if kit.is_file():
         need(tag in k, f"prompt-kit.md lost the {tag} skeleton marker")
     need("maintenance status" in k and "confirmed: link" in k and "gh search repos" in k,
          "prompt-kit.md lost the output contract / tagged-claim / grounded-discovery guidance")
+    need("guarantee supplied" in k and "guarantee absent" in k and "primitive" in k,
+         "prompt-kit.md lost the mechanism-primitive contract")
 
 need("AGENTS.md" in text and "Tooling" in text, "SKILL.md lost the AGENTS.md Tooling/searching pointer")
 need((repo / "AGENTS.md").is_file(), "AGENTS.md missing (SKILL.md links its Tooling rule)")

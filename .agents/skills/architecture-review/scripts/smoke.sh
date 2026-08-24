@@ -27,4 +27,6 @@ have .agents/architecture-review/SPEC.md     # where a run's report and the cens
 have .agents/architecture-review/census.json # the agenda §3.1 hands over
 have .agents/skills/plan-migration/SKILL.md  # handoff for a finding about a conversion
 have .agents/skills/contribute/SKILL.md      # handoff for a finding driven to a PR
+have .agents/skills/architecture-inquiry/SKILL.md # handoff for a multi-slice decision
+have tools/skill_check.py                         # discovery/frontmatter gate for all skills
 if [ "$fail" -eq 0 ]; then echo "architecture-review smoke OK"; else echo "architecture-review smoke FAILED"; exit 1; fi
