@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787601570672,
+  "lastUpdate": 1787604378837,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -9719,6 +9719,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 0.918814,
             "range": "3 replicas; min 0.868003; max 0.928461; MAD 0.009647; worst 0.928461",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2a38c97e941c629e7df97071131c6cc86f82d31e",
+          "message": "Merge pull request #432 from serjflint/chore/resvg-py-switch\n\nfeat(images): install resvg-py instead of the in-tree resvglite",
+          "timestamp": "2026-08-25T01:44:53+05:00",
+          "tree_id": "1fa532df57d5ec431ad15dcfac77bbf08fa72242",
+          "url": "https://github.com/serjflint/saitenka/commit/2a38c97e941c629e7df97071131c6cc86f82d31e"
+        },
+        "date": 1787604377486,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.290167,
+            "range": "3 replicas; min 4.96919; max 6.33555; MAD 0.045387",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.658319,
+            "range": "3 replicas; min 7.10842; max 8.85722; MAD 0.198902; worst 8.85722",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.405976,
+            "range": "3 replicas; min 14.411; max 20.4309; MAD 2.02497",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.607969,
+            "range": "3 replicas; min 14.5229; max 20.6622; MAD 2.05419; worst 20.6622",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 18.24566,
+            "range": "3 replicas; min 16.8947; max 23.5007; MAD 1.35097",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.127465,
+            "range": "3 replicas; min 0.102934; max 0.164968; MAD 0.024531; worst 0.164968",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.137534,
+            "range": "3 replicas; min 37.2597; max 45.5651; MAD 1.42759; worst 45.5651",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.128161,
+            "range": "3 replicas; min 2.64322; max 6.26132; MAD 0.484941; worst 6.26132",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.06721,
+            "range": "3 replicas; min 0.895478; max 1.20966; MAD 0.142447; worst 1.20966",
             "unit": "ms"
           }
         ]
