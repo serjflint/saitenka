@@ -422,7 +422,7 @@ jobs:
       - name: Tests
         env:
           PYTHON_GIL: "1"
-        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or integration or requires_display or e2e)"
+        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or integration or requires_display or e2e or live)"
 
   tests-ft:
     name: tests free-threaded (${{ matrix.python }})
@@ -462,4 +462,4 @@ jobs:
       - name: Tests (free-threaded)
         env:
           PYTHON_GIL: "0"
-        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not slow"
+        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or live)"
