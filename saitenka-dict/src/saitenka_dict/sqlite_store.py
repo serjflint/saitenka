@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
+import weakref
 from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
@@ -119,6 +121,12 @@ _KANJI_FREQUENCY_QUERY = (
 )
 
 
+def _close_all(connections: list[sqlite3.Connection]) -> None:
+    while connections:
+        with contextlib.suppress(sqlite3.Error):
+            connections.pop().close()
+
+
 class SqliteDictionaryStore:
     """Read-only adapter for Saitenka's schema-1 consolidated dictionary database."""
 
@@ -131,6 +139,12 @@ class SqliteDictionaryStore:
     ):
         self.path = Path(path)
         self._local = threading.local()
+        # `threading.local` can only reach the calling thread's connection, so a store that is simply
+        # dropped hands every OTHER thread's to the interpreter, which finalises them on an arbitrary
+        # later collection — one `ResourceWarning: unclosed database` each, naming no leak site. The
+        # roster gives the finalizer something it can close. (The list holds no reference to `self`.)
+        self._connections: list[sqlite3.Connection] = []
+        weakref.finalize(self, _close_all, self._connections)
         self._entry_cache_max = max(0, entry_cache_max)
         self._cache_observer = cache_observer
         self._entry_caches: dict[int, OrderedDict[int, TermRecord]] = {}
@@ -144,6 +158,8 @@ class SqliteDictionaryStore:
             uri = f"file:{self.path.resolve()}?mode=ro"
             connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
             self._local.connection = connection
+            # No lock: one open per thread, and list.append is atomic with and without the GIL.
+            self._connections.append(connection)
         return connection
 
     @staticmethod

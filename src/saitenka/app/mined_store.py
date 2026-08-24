@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app import paths
 from saitenka.app.continuity import episode_identity
+from saitenka.sqlite_pool import close_when_collected
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,6 +55,7 @@ class MinedCardStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._clock = clock
         self._con = sqlite3.connect(self.path)
+        close_when_collected(self, self._con)
         self._con.row_factory = sqlite3.Row
         self._create_schema()
 

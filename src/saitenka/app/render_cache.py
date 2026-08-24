@@ -32,6 +32,7 @@ worker write while readers read. Connections are per-thread (free-threading-safe
 
 from __future__ import annotations
 
+import functools
 import logging
 import sqlite3
 import threading
@@ -42,6 +43,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+from saitenka.sqlite_pool import ThreadLocalConnections, open_wal
 
 if TYPE_CHECKING:
     from collections.abc import Hashable, Sequence
@@ -154,7 +157,7 @@ class RenderCache:
     def __init__(self, path: str | Path, *, max_bytes: int):
         self.path = Path(path)
         self.max_bytes = max_bytes
-        self._local = threading.local()
+        self._conns = ThreadLocalConnections(self, functools.partial(open_wal, self.path))
         self._seq_lock = threading.Lock()
         self._seq = 0
         self._ensure_schema()
@@ -182,15 +185,7 @@ class RenderCache:
             conn.close()
 
     def _conn(self) -> sqlite3.Connection:
-        c = getattr(self._local, "conn", None)
-        if c is None:
-            c = sqlite3.connect(self.path, timeout=5, check_same_thread=False)
-            c.execute("PRAGMA journal_mode=WAL")
-            c.execute(
-                "PRAGMA synchronous=NORMAL"
-            )  # WAL + NORMAL: durable enough for a rebuildable cache
-            self._local.conn = c
-        return c
+        return self._conns.get()
 
     def _next_seq(self) -> int:
         with self._seq_lock:
@@ -360,10 +355,8 @@ class RenderCache:
             return 0, 0
 
     def close(self) -> None:
-        c = getattr(self._local, "conn", None)
-        if c is not None:
-            c.close()
-            self._local.conn = None
+        """Close EVERY thread's connection, not just the caller's — the prefetch workers each hold one."""
+        self._conns.close()
 
 
 class CompressedHeadCache:

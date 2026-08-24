@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from saitenka.app import paths
 from saitenka.app.continuity import episode_identity
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
+from saitenka.sqlite_pool import close_when_collected
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,6 +88,7 @@ class SessionStore:
         target = path or db_path()
         target.parent.mkdir(parents=True, exist_ok=True)
         self._con = sqlite3.connect(target)
+        close_when_collected(self, self._con)
         self._con.row_factory = sqlite3.Row
         self._con.execute(
             """

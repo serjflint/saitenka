@@ -21,6 +21,7 @@ pixel-for-pixel identically to a fresh ``getmask2`` — proven in ``tests/test_m
 
 from __future__ import annotations
 
+import functools
 import logging
 import sqlite3
 import threading
@@ -29,6 +30,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
+
+from saitenka.sqlite_pool import ThreadLocalConnections, open_wal
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -93,7 +96,7 @@ class MaskAtlas:
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self._local = threading.local()
+        self._conns = ThreadLocalConnections(self, functools.partial(open_wal, self.path))
         # Write-back accounting for the prewarm heartbeat: masks actually stored vs found already present
         # (``INSERT OR IGNORE`` no-ops). Lock-guarded — worker threads share one atlas; the critical
         # section is two int adds, dwarfed by the getmask2 that precedes every put.
@@ -121,13 +124,7 @@ class MaskAtlas:
             conn.close()
 
     def _conn(self) -> sqlite3.Connection:
-        c = getattr(self._local, "conn", None)
-        if c is None:
-            c = sqlite3.connect(self.path, timeout=5, check_same_thread=False)
-            c.execute("PRAGMA journal_mode=WAL")
-            c.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = c
-        return c
+        return self._conns.get()
 
     def put(self, font_id: str, text: str, mode: str, start: tuple[float, float], mask) -> None:
         """Persist one ``getmask2`` result (``mask`` = ``(core, (offx, offy))``). Idempotent —
@@ -296,10 +293,8 @@ class MaskAtlas:
             log.debug("mask atlas checkpoint failed", exc_info=True)
 
     def close(self) -> None:
-        c = getattr(self._local, "conn", None)
-        if c is not None:
-            c.close()
-            self._local.conn = None
+        """Close EVERY thread's connection, not just the caller's — prewarm's workers each hold one."""
+        self._conns.close()
 
 
 def mem_key(font_id: str, text: str, mode: str, start: tuple[float, float]) -> tuple:
