@@ -13,4 +13,5 @@ have AGENTS.md
 have .agents/skills
 have .agents/skills/agents-md      # the routing skill this one defers "where does it belong?" to
 have .agents/skills/write-test     # an exemplar skill to model structure on
+have tools/skill_check.py          # the repo-wide discovery/frontmatter contract
 if [ "$fail" -eq 0 ]; then echo "skill-creator smoke OK"; else echo "skill-creator smoke FAILED"; exit 1; fi

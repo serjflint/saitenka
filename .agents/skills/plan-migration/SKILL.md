@@ -1,16 +1,13 @@
 ---
 name: plan-migration
 description: >-
-  Price a migration before starting it — the four moves that decide whether a repo-wide conversion
-  finishes: enumerate the class, census and price the unit, choose a leverage device and record the
-  rejected ones, declare a retirement meter beside the debt meter, then batch the family and codemod
-  the mechanical part. Use when writing a migration or refactor plan, converting every X to Y,
-  retiring a god object or a host parameter, branching by abstraction, deprecating an API across many
-  call sites, or asking "how long will this refactor take" and "should I build a facade, a port, or a
-  codemod". Carries the arithmetic that says stop and look for a shared shape, and the tools this repo
-  already has for the census and the rewrite. NOT for a single-site change or one bug fix (just do
-  it); NOT for driving one change to a PR (use contribute); NOT for deciding where a convention lives
-  (use agents-md); NOT for writing a test (use write-test).
+  Price an already-chosen migration before it starts: enumerate the class, census and price the unit,
+  choose and reject leverage devices explicitly, declare retirement beside debt, then batch the family and
+  codemod the mechanical part. Use for a migration/refactor plan, converting every X to Y, retiring a god
+  object or host parameter, branching by abstraction, deprecating an API across many sites, “how long will
+  this refactor take”, or “facade, port, or codemod”. NOT for a single-site fix, one PR (contribute), choosing
+  ownership or architecture across operational slices (architecture-inquiry), deciding where a convention
+  lives (agents-md), or writing a test (write-test).
 metadata:
   project: saitenka
 ---
@@ -20,6 +17,9 @@ metadata:
 A migration is priced in *decisions per site*, and the price is knowable on day 1 from a census that
 usually already exists. The failure this skill exists to prevent is not a wrong estimate — it is
 never computing one, starting, and discovering the shape only after most of the budget is spent.
+
+The architecture must already be chosen. If the open question is where policy or state should live, return
+to `architecture-inquiry`; this skill begins when a multi-site conversion has a decided source and target.
 
 Work the four moves in order and write each answer into the plan. A plan missing move 2's rejected
 alternatives is a plan that never considered one.
@@ -67,6 +67,13 @@ A migration whose success condition is a *retirement* needs a meter that disting
 arrived" from "the old thing left". A debt count falling while the retired object keeps growing is
 the failure mode, and only two numbers side by side can see it. `poe host-mass` is the standing
 instance — declare yours on day 1, not after the first surprise.
+
+**Responsibility migrations need a policy meter.** Moving fields, adding a collaborator, reducing LOC, or
+turning methods into delegators does not prove that ownership moved. Census the authoritative writers and
+the substantive admission, completion, fallback, publication, and lifecycle decisions before the first
+batch. Retirement means those decisions terminate at the bounded owner; the old host may remain as the
+composition root or sole effect executor. Pair the meter with a one-writer proof so a facade cannot make the
+numbers fall while leaving two homes for the same fact.
 
 ## 4. Batch the class; codemod the mechanical part
 

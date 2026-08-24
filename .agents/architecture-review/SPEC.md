@@ -55,8 +55,11 @@ class 7 of the skill's own taxonomy, applied to the skill. A module absent from 
 **unknown**, and a report that reads "no argued claims" without saying over what denominator is
 overclaiming.
 
-**Scope, so the census stays a signal.** Do not census every docstring. Modules that own a **shared
-resource**: a lock, a thread, a cache, a socket, a file another process maps, a process lifetime.
+**Scope, so the census stays a signal.** Do not census every docstring. Census modules that own a
+**shared resource** (a lock, thread, cache, socket, mapped file, or process lifetime) and modules that own
+**cross-feature policy or composition** (the session controller, command/effect routing, lifecycle fan-out,
+or a feature registration boundary). Excluding policy-only composition modules makes “nothing argued” mean
+only that the place most likely to absorb new responsibilities was never inspected.
 
 **Ratchet direction.** `argued` in a censused module may fall freely and rises only with a stated
 reason, the way `poe host-mass` is blessed. There is no `poe` task enforcing this yet — it is a

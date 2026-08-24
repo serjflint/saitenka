@@ -1,16 +1,13 @@
 ---
 name: architecture-review
 description: >-
-  Judge whether the architecture is sound, efficient, and the right one for what this product is —
-  a fitness review run by an isolated reviewer against a set of axes, with every claim checked against
-  the code rather than against a document's claim about the code. Use when a large migration or refactor
-  lands, before committing to a feature that assumes the current shape, when the meters read green
-  but something feels wrong, when asking "did we pick the right principles", "is this over-engineered",
-  "what should we cut", or on a standing cadence so drift is caught by schedule instead of by
-  accident. Produces ranked findings, what to keep, what to delete, an argued answer to the
-  principles question, and an explicit list of what could not be verified. NOT for reviewing one
-  change or a PR (use contribute); NOT for planning a conversion (use plan-migration); NOT for style,
-  naming, or local bugs — those are code review and this skill will drown in them.
+  Judge whether the existing architecture is fit for this product through an isolated, code-grounded
+  reviewer and explicit quality axes. Use after a migration, before a feature that assumes the current
+  shape, when the meters are green but something feels wrong, for “did we pick the right principles”,
+  “is this over-engineered”, “what should we cut”, or on a standing cadence. Produces ranked findings,
+  what to keep/delete, an argued principles verdict, and unverifiable claims. NOT for one change or PR
+  (contribute), a collaborative multi-slice decision or re-enfolding (architecture-inquiry), a chosen
+  conversion plan (plan-migration), or style, naming, and local bugs.
 metadata:
   project: saitenka
 ---
@@ -26,6 +23,14 @@ the question; the value is in the delta between two runs and in catching the dri
 That delta needs somewhere to live: **`.agents/architecture-review/`** holds the run reports and the
 claim census, and [its `SPEC.md`](../../architecture-review/SPEC.md) owns the artifact contract. This
 file owns the judgement.
+
+## Boundary versus architecture-inquiry
+
+This skill judges the artifact as it exists. Its isolation rule is load-bearing: an independent reviewer
+must derive the product and design rather than inherit the author's framing. Use `architecture-inquiry`
+when the work instead requires collaborative analytical slices, verified prior art, constraint auditing,
+re-enfolding, and a human choice among arrangements. Do not pass a preferred architecture from an inquiry
+into this reviewer as context; that turns an independent gate into confirmation.
 
 ## 0. Isolate the reviewer
 
@@ -157,6 +162,10 @@ never drove the path it shipped*.
 
 Findings that survive become issues or a plan; findings about a *conversion* hand off to
 **plan-migration**, and a single change driven to a PR hands off to **contribute**.
+
+When several scoped findings imply a new whole-system direction, hand them to **architecture-inquiry**.
+A scoped review may establish local facts; it does not license a whole-system recommendation until those
+facts are re-enfolded with the other operational slices and audited for unasked constraints.
 
 ## Verify
 

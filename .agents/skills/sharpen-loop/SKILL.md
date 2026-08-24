@@ -1,6 +1,8 @@
 ---
 name: sharpen-loop
 description: 'Run or resume one Saitenka Sharpen audit: triage a module, measure its existing tests, propose a test-only improvement, apply the deterministic anti-lobotomization gate, obtain two isolated adversarial reviews, and record a dry-run or PR-ready result. Trigger on "run Sharpen", "sharpen the tests", "audit test quality", "mutation survivor heal", or requests to operate `.agents/sharpen`. Default to a ledger-only dry-run. Not for writing missing coverage or new feature tests; hand those to Grow or the `write-test` skill.'
+metadata:
+  project: saitenka
 ---
 
 # Sharpen Loop

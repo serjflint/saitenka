@@ -75,7 +75,8 @@ deterministic steps to `scripts/`. A long SKILL.md is the smell: split it, don't
 
 `bash scripts/smoke.sh` asserts the skill's own files plus the sibling surfaces it names still exist —
 paths and structure, **never** agent prose (behavior isn't smoke-checkable). Beyond the smoke, sanity-
-check the trigger with a couple of examples:
+check the trigger with a couple of examples. `poe skill-contract` is the repo-wide discovery gate: it
+checks name/path agreement, kebab-case, the description parser limits, and `metadata.project` for every skill.
 
 - **Should fire:** "create a skill that runs the release checklist."
 - **Should NOT fire:** "should this go in AGENTS.md or a hook?" → that's [[agents-md]].

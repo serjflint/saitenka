@@ -1,16 +1,13 @@
 ---
 name: research
 description: >-
-  Run grounded web-research the house way — prior-art / SOTA / competitor sweeps where an
-  external deep-research system *proposes* and WE *verify* against fetched sources and our own
-  repo/memory before trusting anything. Use when told to research prior art, survey the field,
-  do a SOTA or competitor sweep, compare tools/approaches, "is X state of the art", find what
-  already exists, or check a rival's recent releases. Assembles the shared project context,
-  authors and sharpens the prompts (wide first, an r2 when a run is over-filtered), then runs a
-  mandatory fact-check pass: every named tool/claim needs a fetched link plus maintenance
-  status, fabrications flagged, dissent over hype. Backend-agnostic — any web-search system.
-  NOT for a codebase-internal question (use repowise/LSP), reading one known URL (just
-  WebFetch), or the diagnosis→PR loop (use contribute).
+  Run grounded prior-art, SOTA, or competitor research where an external system proposes and we verify
+  against fetched sources and our repo/memory. Use for “research prior art”, “survey the field”, “compare
+  approaches”, “is X state of the art”, or a rival release audit. Builds and sharpens prompts, then requires
+  a fact-check: every surviving tool/claim has a source, maintenance status, mechanism as a composable
+  primitive, supplied/absent guarantees, exact local mismatch, and dissent over hype. Backend-agnostic.
+  NOT for an internal code question (repowise/LSP), one known URL (WebFetch), choosing architecture across
+  operational slices (architecture-inquiry), or the diagnosis-to-PR loop (contribute).
 metadata:
   project: saitenka
 ---
@@ -41,8 +38,9 @@ then hand a bounded tooling proposal to `contribute`.
    sections (`<context>` / `<known_tools>` / `<task>` / `<verification_rules>` / `<output_format>`)
    with per-claim `[confirmed: link]` / `[could not verify]` tags — skeleton in
    [`references/prompt-kit.md`](references/prompt-kit.md). Each carries the **output contract**: links,
-   maintenance status / last release, a one-line verdict *for this flow*, tradeoffs + dissent (not
-   hype), prefer current-year sources. Run wide first; write an
+   maintenance status / last release, a one-line verdict *for this flow*, mechanism, guarantee supplied,
+   guarantee absent, exact local mismatch, and strongest dissent (not hype). Treat patterns as primitives
+   to compose, not whole architectures to transplant. Prefer current-year sources. Run wide first; write an
    `-r2` with overriding constraints when a run comes back over-filtered or too shallow.
    **Run a grounded discovery pass in parallel** — `gh search repos --topic <t> --sort stars`
    (+ `gh api repos/<o>/<r>` for maintenance). It cannot fabricate, and catches what an LLM prompt
@@ -83,9 +81,11 @@ then hand a bounded tooling proposal to `contribute`.
      offline), add explicit exclusions, restate as *new constraints override*.
    **Carry failures forward** (Reflexion, Shinn 2023): the findings note is episodic memory — the next
    prompt lists what was already checked / fabricated / 404'd as *don't re-suggest*, never a silent re-run.
-   Stop when a round adds no new verified peer and no new gap.
+   Stop when a round adds no new verified peer, mechanism, or gap and the remaining questions require a
+   product-policy decision or local discriminator. Saturation means ready to re-enfold, not ready to recommend.
 6. **Aggregate.** A findings note (`<topic>-research-findings.md` in the maintainer's private notes) + GO
-   items / issues — delta-only, **every surviving claim cited**. Separate evidence from folklore.
+   items / issues — delta-only, **every surviving claim cited**. Preserve mechanisms as composable building
+   blocks rather than ranking shipping projects as wholesale architectures. Separate evidence from folklore.
    Filed-issue text goes through `pr-ticket-describe`; a claim that survived becomes a GO item with its
    citation attached.
 

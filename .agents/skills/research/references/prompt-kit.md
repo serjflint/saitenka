@@ -36,13 +36,16 @@ treat anything you can't link as UNVERIFIED.
 <output_format>
 - One-paragraph verdict up top.
 - Per-item table/list, each row tagged [confirmed: link] / [could not verify], with maintenance status.
+- For each surviving mechanism: guarantee supplied, guarantee absent, exact mismatch with my flow, and
+  strongest dissent. Treat it as a primitive to compose, not a whole architecture to copy.
 - A "Missing / under-specified" section.
 </output_format>
 ```
 
 **Output contract** (inside `<verification_rules>` / `<output_format>`): links, maintenance status /
-last release, a one-line verdict *for my flow*, dissent not hype, current-year sources, and the
-per-claim `[confirmed: link]` / `[could not verify]` tags. Sharpen to an `-r2` when a run is
+last release, a one-line verdict *for my flow*, mechanism-level supplied/absent guarantees, exact local
+mismatch, dissent not hype, current-year sources, and the per-claim `[confirmed: link]` /
+`[could not verify]` tags. Sharpen to an `-r2` when a run is
 over-filtered or shallow — restate as *"new constraints override where they differ"*.
 
 ## Grounded discovery (run alongside the prose sweep)
@@ -68,4 +71,6 @@ could not see.
 
 `<topic>-research-findings.md` in the maintainer's private notes: only claims that passed the gate, each with its
 citation and maintenance status; a "Missing / under-specified" section; and the GO items / issues to
-file. Round-1 consensus that failed verification is recorded as *rejected*, with why.
+file. Record mechanisms as primitives with their supplied/absent guarantees and local mismatch; do not rank
+whole projects as architectures to transplant. Round-1 consensus that failed verification is recorded as
+*rejected*, with why.

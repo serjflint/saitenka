@@ -47,6 +47,10 @@ Classify before counting: an annotation-only import cycle costs nothing under
 `from __future__ import annotations`, and reporting it as coupling is a false alarm that discredits
 the rest of the review.
 
+Make the responsibility claim falsifiable. “Own the session/application” is too broad if every future
+feature can fit inside it; name the independent reasons the owner may change and which ones belong elsewhere.
+One thread may remain the sole executor of visible effects without owning every feature's state and policy.
+
 ## 5. Extensibility
 
 Walk a concrete new feature through, twice — one with state, one without. Where must the host be
@@ -94,3 +98,7 @@ impossible. Then land somewhere, in terms of the product's goals rather than of 
 Split the answer. "The principles are right but the sizing is not" is a common and useful verdict:
 some invariants earn their cost several times over while others were adopted as a set. Say which are
 load-bearing and would be kept at any price, and which are ceremony that arrived with them.
+
+If a scoped answer would change the whole-system principles, stop at the finding. A collaborative
+whole-to-parts-to-whole decision belongs to `architecture-inquiry`; this isolated review supplies evidence,
+not the missing re-enfolding step.
