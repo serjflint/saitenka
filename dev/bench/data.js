@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787530750853,
+  "lastUpdate": 1787549172429,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -8783,6 +8783,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.644188,
             "range": "3 replicas; min 1.05087; max 2.17209; MAD 0.527902; worst 2.17209",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3a87dd0d7573e1bc581a7fc63fca260672b75afb",
+          "message": "Merge pull request #420 from serjflint/fix/install-editable-bakes-the-tool-binary\n\nfix(plugin): bake the saitenka that is asking, not the one on PATH",
+          "timestamp": "2026-08-24T10:25:00+05:00",
+          "tree_id": "a1ac4124a5fe0d29b834564eb70808adf7a839dc",
+          "url": "https://github.com/serjflint/saitenka/commit/3a87dd0d7573e1bc581a7fc63fca260672b75afb"
+        },
+        "date": 1787549171050,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.497344,
+            "range": "3 replicas; min 5.15459; max 6.79482; MAD 0.297477",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.250595,
+            "range": "3 replicas; min 7.67087; max 9.50061; MAD 0.250011; worst 9.50061",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.718662,
+            "range": "3 replicas; min 15.795; max 20.9035; MAD 0.184885",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.989617,
+            "range": "3 replicas; min 16.7725; max 21.2603; MAD 0.270699; worst 21.2603",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 22.177947,
+            "range": "3 replicas; min 20.4935; max 192.137; MAD 1.68445",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.173013,
+            "range": "3 replicas; min 0.106281; max 0.17607; MAD 0.003057; worst 0.17607",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.373755,
+            "range": "3 replicas; min 44.3318; max 121.912; MAD 0.041987; worst 121.912",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.993385,
+            "range": "3 replicas; min 3.42378; max 20.8071; MAD 0.569601; worst 20.8071",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.690888,
+            "range": "3 replicas; min 1.38437; max 29.4685; MAD 0.306514; worst 29.4685",
             "unit": "ms"
           }
         ]
