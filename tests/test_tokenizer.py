@@ -1,5 +1,4 @@
-"""The tokenizer-strategy seam (app/tokenizer.py): registry, UnidicTokenizer delegation parity, and the
-SessionController-owned swappable seam a profile switch (#254) flips."""
+"""The tokenizer-strategy seam: registry, delegation parity, and ProfileController ownership."""
 
 import pytest
 import util
@@ -122,7 +121,7 @@ def test_unidic_merge_dict_compounds_matches_module_function():
 
 def test_reader_owns_unidic_tokenizer_by_default():
     reader = SessionController(FakeIPC())
-    assert reader.tokenizer.name == "unidic"
+    assert reader.profile_controller.tokenizer.name == "unidic"
 
 
 class _SpyTokenizer(_FakeTokenizer):
@@ -156,7 +155,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
 
     reader = SessionController(FakeIPC(), dict_set=_DS())
     spy = _SpyTokenizer()
-    reader.use_tokenizer(spy)
+    reader.profile_controller.use_tokenizer(spy)
     reader.tokens = [Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
 
     tooltip.resolve_hover(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
@@ -172,7 +171,7 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
 
     reader = SessionController(FakeIPC(), dict_set=object())
     spy = _SpyTokenizer()
-    reader.use_tokenizer(spy)
+    reader.profile_controller.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
 
     nested_popup.open_link(reader.tip_ports, reader.panel_ports, lb, (0, 0), 0)
@@ -212,7 +211,7 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
     assert mine_target(jp.mine_cue) == 1  # unidic: the noun is the content word
 
     swapped = SessionController(FakeIPC())
-    swapped.use_tokenizer(_ParticleContentTokenizer())
+    swapped.profile_controller.use_tokenizer(_ParticleContentTokenizer())
     swapped.tokens = [particle, noun]
     assert mine_target(swapped.mine_cue) == 0  # swapped: the particle is now "content"
 
@@ -224,9 +223,9 @@ def test_use_tokenizer_swaps_strategy_and_clears_cache():
     assert len(reader.token_cache) == 1
 
     fake = _FakeTokenizer()
-    reader.use_tokenizer(fake)
+    reader.profile_controller.use_tokenizer(fake)
 
-    assert reader.tokenizer is fake
+    assert reader.profile_controller.tokenizer is fake
     assert (
         len(reader.token_cache) == 0
     )  # cached JP segmentation must not leak into the new strategy

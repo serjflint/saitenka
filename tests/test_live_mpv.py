@@ -101,7 +101,9 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
             return False
 
     with _live_reader() as (_tmp, reader, ipc):
-        reader.dict_set = _TallDS()  # rebuild the next hover's panel as a tall, scrolling tip
+        reader.profile_controller.replace_dictionary_set(
+            _TallDS()
+        )  # rebuild the next hover's panel as a tall, scrolling tip
         reader.tip.panel_cache.clear()
         i = next(k for k, t in enumerate(reader.tokens) if t.is_content)
         box = next(b for b in reader.boxes if b.index == i)

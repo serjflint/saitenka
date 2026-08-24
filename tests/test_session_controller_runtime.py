@@ -208,7 +208,7 @@ def test_composition_threads_grouped_optional_services(request):
 
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
 
-    assert (reader.scorer, reader.anki, reader.mine_cfg, reader.dict_set) == (
+    assert (reader.scorer, reader.anki, reader.mine_cfg, reader.profile_controller.dict_set) == (
         "score",
         "anki",
         "mine",

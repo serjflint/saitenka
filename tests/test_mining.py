@@ -690,7 +690,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
-        r.dict_set,
+        r.profile_controller.dict_set,
         r.interaction.hovered_word_meta.terms,
         r._mine_token,
         LinkBox("mine:1", 0, 0, 10, 10),
@@ -872,10 +872,10 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     r = SessionController(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
-        tooltip_panel.group_mined_of(tok, r.session.mined, r.dict_set) == ()
+        tooltip_panel.group_mined_of(tok, r.session.mined, r.profile_controller.dict_set) == ()
     )  # nothing mined yet → no per-group flags
     r.session.mined.add("退く")
-    assert tooltip_panel.group_mined_of(tok, r.session.mined, r.dict_set) == (
+    assert tooltip_panel.group_mined_of(tok, r.session.mined, r.profile_controller.dict_set) == (
         True,
         True,
     )  # both entries share expression 退く

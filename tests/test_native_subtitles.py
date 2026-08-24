@@ -890,8 +890,8 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result._geometry_observation())
-    original_tokenizer = result.tokenizer
-    result.use_tokenizer(_AllSkippableTokenizer())
+    original_tokenizer = result.profile_controller.tokenizer
+    result.profile_controller.use_tokenizer(_AllSkippableTokenizer())
     ipc.commands.clear()
 
     result.set_subtitle("猫を見る")
@@ -901,7 +901,7 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
     assert result.native_geometry.status.geometry_ready is False
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.use_tokenizer(original_tokenizer)
+    result.profile_controller.use_tokenizer(original_tokenizer)
     ipc.commands.clear()
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -1427,7 +1427,7 @@ def test_tokenizer_change_rebuilds_geometry_after_new_tokens_land(tmp_path: Path
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(result.boxes) > 1
 
-    result.use_tokenizer(_SingleTokenizer())
+    result.profile_controller.use_tokenizer(_SingleTokenizer())
     result._retokenize_current_cue()
 
     assert result.boxes == []
@@ -1439,7 +1439,7 @@ def test_tokenizer_change_rebuilds_geometry_after_new_tokens_land(tmp_path: Path
 
 def test_mismatched_token_annotation_fails_closed(tmp_path: Path) -> None:
     result, _ipc, backend = reader(tmp_path)
-    result.use_tokenizer(_MismatchedTokenizer())
+    result.profile_controller.use_tokenizer(_MismatchedTokenizer())
 
     result.set_subtitle("猫を見る")
 
@@ -1459,7 +1459,7 @@ def test_unpaintable_full_width_space_is_not_required_from_libass(tmp_path: Path
     ipc.props["sub-text/ass-full"] = (
         "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫　犬"
     )
-    result.use_tokenizer(_WhitespaceTokenizer())
+    result.profile_controller.use_tokenizer(_WhitespaceTokenizer())
 
     result.set_subtitle("猫　犬")
     assert result.native_geometry is not None
@@ -1482,7 +1482,7 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
     ipc.props["sub-text/ass-full"] = (
         "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫　犬"
     )
-    result.use_tokenizer(_WhitespaceTokenizer())
+    result.profile_controller.use_tokenizer(_WhitespaceTokenizer())
     result.set_subtitle("猫　犬")
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
@@ -1504,7 +1504,7 @@ def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: 
     result, _ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫")
     result.hover = 0
-    result.dict_set = object()
+    result.profile_controller.replace_dictionary_set(object())
 
     result._show_tooltip(0)
 

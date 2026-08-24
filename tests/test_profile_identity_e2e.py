@@ -106,7 +106,7 @@ def _resolve_identity(cfg: dict) -> tuple[str, str, tuple[str, ...]]:
         ipc,
         subselect.AttachSubtitleOptions(jimaku=True, tsukihime=True, language=profile.langs.main),
     )
-    return reader.tokenizer.name, reader.langs.main, providers
+    return reader.profile_controller.tokenizer.name, reader.profile_controller.langs.main, providers
 
 
 # --- 1. default scenario: the JP identity resolves consistently, byte-identical to today ----------

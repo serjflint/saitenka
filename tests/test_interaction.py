@@ -43,7 +43,7 @@ def _reader():
 
 
 def _content_word(r) -> int:
-    return next(i for i, t in enumerate(r.tokens) if r.tokenizer.is_content(t))
+    return next(i for i, t in enumerate(r.tokens) if r.profile_controller.tokenizer.is_content(t))
 
 
 class _RecSpan:
@@ -223,7 +223,7 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     clears it."""
     r = _reader()  # subtitle 本命を読む → 本命 / を / 読む
     # pretend 本命を is a dictionary term so the phrase probe fires over tokens 0..1
-    monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
+    monkeypatch.setattr(r.profile_controller.dict_set, "has_term", lambda *forms: "本命を" in forms)
     ui = Driver(r)
     ui.move_to_word(0)
     assert r.interaction.hovered_word_meta.terms == ("本命を",)
@@ -243,15 +243,15 @@ def test_phrase_reaches_panel_lookup(monkeypatch):
     r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
+    monkeypatch.setattr(r.profile_controller.dict_set, "has_term", lambda *forms: "本命を" in forms)
     seen: dict[str, tuple] = {}
-    real = r.dict_set.entry_for
+    real = r.profile_controller.dict_set.entry_for
 
     def record(tok, inflected=None, *, extra_terms=()):
         seen["extra"] = tuple(extra_terms)
         return real(tok, inflected, extra_terms=extra_terms)
 
-    monkeypatch.setattr(r.dict_set, "entry_for", record)
+    monkeypatch.setattr(r.profile_controller.dict_set, "entry_for", record)
     Driver(r).move_to_word(0)
     assert seen["extra"] == ("本命を",), "phrase must reach the panel lookup"
 

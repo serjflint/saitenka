@@ -198,7 +198,7 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     entry = entry_for_tok(
         tok,
         reader._inflected_surface(idx),
-        dict_set=reader.dict_set,
+        dict_set=reader.profile_controller.dict_set,
         scorer=reader.scorer,
         extra_terms=reader.interaction.hovered_word_meta.terms,
     )

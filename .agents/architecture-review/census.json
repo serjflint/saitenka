@@ -2,6 +2,8 @@
   "censused": [
     "src/saitenka/render/banded.py",
     "src/saitenka/app/tooltip_panel.py",
+    "src/saitenka/app/profile_controller.py",
+    "src/saitenka/app/session_controller.py",
     "src/saitenka/runtime/jobs.py"
   ],
   "claims": [
@@ -229,6 +231,24 @@
       "status": "tested",
       "evidence": "the docstring promised to grow and did not; tests/test_runtime_stand_in.py censuses the surface from the call sites, negative control demonstrated in 16e07012",
       "settles": null
+    },
+    {
+      "id": "P1",
+      "module": "src/saitenka/app/profile_controller.py",
+      "claim": "ProfileController is the sole writer of active profile, profile index, tokenizer, and dictionary-set facts",
+      "class": 1,
+      "status": "argued",
+      "evidence": "the current source census finds those writes only in ProfileController; tests/test_profile_switcher.py covers atomic preflight, track selection, cache generation, and late dependency behavior",
+      "settles": "a structural writer-census gate with a negative control over assignments and mutator exposure"
+    },
+    {
+      "id": "P2",
+      "module": "src/saitenka/app/session_controller.py",
+      "claim": "SessionController applies the profile transaction only through narrow owner-thread capabilities and carries no profile switch policy",
+      "class": 2,
+      "status": "argued",
+      "evidence": "profile command registration and adapter tests cover the current dispatch path but do not prove policy absence or owner-thread application",
+      "settles": "a structural census of SessionController profile-policy methods plus an owner-thread application oracle"
     }
   ]
 }

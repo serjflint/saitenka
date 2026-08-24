@@ -36,6 +36,11 @@ is stateful, and it creates it in a slice.
    `StatelessHost`'s bases. That function *is* the `StatelessRouter` table; there is no registry
    beside it.
 
+If the feature already has a bounded controller, its adapter protocol names that controller's
+surface instead. `StatelessHost` exposes one typed controller attribute and `stateless_features()`
+passes it to the adapter, as the profile row does. Do not re-expose the controller's facts and acts
+on `SessionController` merely to make the adapter protocol a `StatelessHost` base.
+
 **Yes — it needs a new place to remember.**
 
 1. `runtime/<feature>.py` — `reduce(state, event) -> ReduceResult` (`runtime/state.py`) and the
@@ -67,7 +72,9 @@ Four gates enforce the above:
 ## Production session
 
 `SessionController` owns owner-thread session lifetime, cross-feature ordering, and application.
-Bounded controllers own feature state and policy. `SessionController.run()` hands the thread to
+Bounded controllers own feature state and policy: `TooltipController` owns tooltip presentation and
+work protocols, while `ProfileController` owns the active reading environment and switch transaction.
+`SessionController.run()` hands the thread to
 `SessionLoop`, which blocks on the mailbox rather than waking at a cadence:
 
 ```text

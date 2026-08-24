@@ -21,6 +21,7 @@ from saitenka.app import (
     interaction_intents,
     mine_intents,
     panel_intents,
+    profile_intents,
     session_intents,
     subtitle_intents,
     telemetry,
@@ -29,6 +30,7 @@ from saitenka.app.hover_adapter import HoverAdapter, HoverHost
 from saitenka.app.interaction_adapter import InteractionAdapter, InteractionHost
 from saitenka.app.mine_adapter import MineAdapter, MineHost
 from saitenka.app.panel_adapter import PanelAdapter, PanelHost
+from saitenka.app.profile_adapter import ProfileAdapter
 from saitenka.app.session_adapter import SessionAdapter, SessionHost
 from saitenka.app.subtitle_adapter import SubtitleAdapter, SubtitleHost
 from saitenka.runtime.connection import ConnectionState, reduce_connection
@@ -125,6 +127,7 @@ from saitenka.runtime.user_command import COMMAND_FEATURE, CommandIntake, reduce
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.profile_controller import ProfileController
     from saitenka.app.stateless import StatelessFeature
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
@@ -602,12 +605,15 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
 class StatelessHost(
     HoverHost, InteractionHost, MineHost, PanelHost, SessionHost, SubtitleHost, Protocol
 ):
-    """Every stateless feature's host surface at once, one base class per registered feature.
+    """Every stateless feature's session-level host surface at once.
 
-    There is no intersection type, so this is how the composition root types the object it hands
-    each adapter. Adding a feature adds a base here — which is the registration cost being visible
-    rather than hidden behind a `SessionController` annotation.
+    Direct-host adapters contribute Protocol bases because Python has no intersection type. A
+    bounded-controller feature contributes one typed controller attribute instead; its adapter
+    protocol describes that controller. Both keep the registration cost visible rather than
+    hiding it behind a `SessionController` annotation.
     """
+
+    profile_controller: ProfileController
 
 
 def stateless_features(host: StatelessHost) -> dict[type, StatelessFeature]:
@@ -621,6 +627,10 @@ def stateless_features(host: StatelessHost) -> dict[type, StatelessFeature]:
         hover_intents.HoverCommand: (hover_intents.reduce, HoverAdapter(host)),
         mine_intents.MineCommand: (mine_intents.reduce, MineAdapter(host)),
         panel_intents.PanelCommand: (panel_intents.reduce, PanelAdapter(host)),
+        profile_intents.ProfileCommand: (
+            profile_intents.reduce,
+            ProfileAdapter(host.profile_controller),
+        ),
         session_intents.SessionCommand: (session_intents.reduce, SessionAdapter(host)),
         subtitle_intents.SubtitleCommand: (
             subtitle_intents.reduce,

@@ -39,6 +39,7 @@ from saitenka.subtitles.libass_backend import LibassGeometryBackend, extract_tok
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from saitenka.app.dictionary import DictionarySet
     from saitenka.mpvio.ipc import MpvIPC
 
 STYLE = """[Script Info]
@@ -535,8 +536,8 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         baseline, native = readers
         source_path = Path(raw_workspace) / "integration.ass"
         source_path.write_bytes(source)
-        baseline.dict_set = _TallDictionary()
-        native.dict_set = _TallDictionary()
+        baseline.profile_controller.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
+        native.profile_controller.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
         assert native.native_geometry is not None
         native.native_geometry.set_source(source_path, live=True)
         # A track load is where mpv's font set is read, and a frame measured against an unresolved
@@ -642,7 +643,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         stats = native.native_geometry.worker.stats
         last_error = native.subtitle_pipeline.last_error
         rss_retained = process.memory_info().rss
-        native.use_tokenizer(native.tokenizer)
+        native.profile_controller.use_tokenizer(native.profile_controller.tokenizer)
         profile_switch_cache_entries = sum(
             (
                 native.native_geometry.worker.stats.result_cache_entries,

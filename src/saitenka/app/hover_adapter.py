@@ -14,7 +14,7 @@ from saitenka.runtime import events
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from saitenka.app.dictionary import DictionarySet
+    from saitenka.app.profile_controller import ProfileController
     from saitenka.app.reader_context import InteractionContext
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
@@ -31,6 +31,7 @@ class HoverHost(Protocol):
     hover: int
     pause_on_tooltip: bool
     interaction: InteractionContext
+    profile_controller: ProfileController
 
     @property
     def tokens(self) -> Sequence[Token]: ...
@@ -40,9 +41,6 @@ class HoverHost(Protocol):
 
     @property
     def sub_origin(self) -> tuple[int, int]: ...
-
-    @property
-    def dict_set(self) -> DictionarySet | None: ...
 
     @property
     def word_store(self) -> HoveredWordStore: ...
@@ -78,7 +76,7 @@ class HoverAdapter:
             token_reading=token.reading,
             kanji=tuple(char for char in token.surface if is_ideograph(char)),
             kanji_index=host.word_store.current.kanji,
-            has_dictionaries=host.dict_set is not None,
+            has_dictionaries=host.profile_controller.dict_set is not None,
             anchored=box_for_token(host.boxes, host.hover) is not None,
             pause_on_tooltip=host.pause_on_tooltip,
             paused_by_tooltip=host.interaction.hover_pause.held,

@@ -352,7 +352,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         )
     from saitenka.app.reader_deps import make_dict_scoper
 
-    reader.set_profile_cycle(
+    reader.profile_controller.configure_cycle(
         profile_cycle,
         make_dict_scoper(cfg) if len(profile_cycle) > 1 else None,
         base_slang=ident.base_slang,

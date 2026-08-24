@@ -201,7 +201,9 @@ def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
     reader.declare_subtitle(SubtitleLanguageChanged("en"))
     reader.scorer = object()
     monkeypatch.setattr(
-        reader.tokenizer, "tokenize", lambda _text: (_ for _ in ()).throw(AssertionError)
+        reader.profile_controller.tokenizer,
+        "tokenize",
+        lambda _text: (_ for _ in ()).throw(AssertionError),
     )
 
     rows, total = sidebar._track_rows(_view(reader, active=0), 0, 1)
@@ -216,7 +218,7 @@ def test_rows_use_shared_episode_analysis_when_ready():
     reader.sub_text = "私は本を読む。"
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader.analysis.current = analyze_cues(
-        list(reader.episode.sub_index.cues), reader.scorer, reader.tokenizer
+        list(reader.episode.sub_index.cues), reader.scorer, reader.profile_controller.tokenizer
     )
 
     rows, _total = sidebar._track_rows(_view(reader, active=0), 0, 1)
@@ -230,7 +232,7 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
     reader.analysis.current = analyze_cues(
-        list(reader.episode.sub_index.cues), reader.scorer, reader.tokenizer
+        list(reader.episode.sub_index.cues), reader.scorer, reader.profile_controller.tokenizer
     )
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
