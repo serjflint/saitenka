@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787608635576,
+  "lastUpdate": 1787608654601,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10591,6 +10591,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 52.62871,
             "range": "3 replicas; min 47.2249; max 116.596; MAD 5.40386",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "id": "587f7ba99e96884a4e12fc4e46651a0d562048e1",
+          "message": "fix(ci): give the Linux e2e leg the CJK face libass measures against\n\nWith a libass to load, the three ASS-oracle tests run — and two of them then failed on geometry\n(`test_the_blur_refusal_is_measured_not_assumed`, `test_a_style_the_user_changed_moves_the_boxes_libass_paints`).\nlibass measures the text it is handed, so a leg with no CJK face measures something else entirely.\nBoth pass locally against the same bundled libass with fonts present, and the gate and tests-ft legs\nalready install `fonts-noto-cjk` for this reason; e2e was the one that did not.",
+          "timestamp": "2026-08-24T21:55:55Z",
+          "url": "https://github.com/serjflint/saitenka/commit/587f7ba99e96884a4e12fc4e46651a0d562048e1"
+        },
+        "date": 1787608653797,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 181.827778,
+            "range": "3 replicas; min 173.668; max 240.706; MAD 8.15994",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 92.537696,
+            "range": "3 replicas; min 89.064; max 92.8771; MAD 0.339367",
             "unit": "ms"
           }
         ]
