@@ -50,6 +50,12 @@ def _poe_tasks() -> dict:
     ]
 
 
+def _optional_dependencies() -> dict[str, list[str]]:
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]
+
+
 def _marker_expression(command: str) -> str | None:
     """The argument to `-m`, or None when the command selects no markers."""
     tokens = shlex.split(command)
@@ -86,6 +92,58 @@ def test_ci_leg_carries_its_poe_task_marker_expression(
 def test_gate_matrix_runs_every_leg_of_poe_all() -> None:
     matrix = _workflow()["jobs"]["gate"]["strategy"]["matrix"]["task"]
     assert set(matrix) == set(_poe_tasks()["all"])
+
+
+def test_free_threaded_split_uses_the_published_bundle_runtime() -> None:
+    install = _step_command("tests-ft", "Install MeCab (fugashi build dep) and CJK fonts")
+    assert shlex.split(install) == [
+        "sudo",
+        "apt-get",
+        "update",
+        "&&",
+        "sudo",
+        "apt-get",
+        "install",
+        "-y",
+        "libmecab-dev",
+        "fonts-noto-cjk",
+    ]
+
+    extras = _optional_dependencies()
+    assert "saitenka[subtitle-geometry]" in extras["full"]
+    assert any(
+        requirement.startswith("libasslite==") for requirement in extras["subtitle-geometry"]
+    )
+    bundle_requirement = next(
+        requirement
+        for requirement in extras["subtitle-geometry-bundle"]
+        if requirement.startswith("libasslite-bundle==")
+    )
+
+    sync_command = _step_command("tests-ft", "Sync (test group only)").replace("\\\n", " ")
+    sync = [
+        shlex.split(line, comments=True)
+        for line in sync_command.splitlines()
+        if shlex.split(line, comments=True)
+    ]
+    assert sync == [
+        ["uv", "python", "install"],
+        ["uv", "sync", "--locked", "--extra", "full", "--no-default-groups", "--group", "test"],
+        [
+            "uv",
+            "pip",
+            "install",
+            "--no-deps",
+            "--only-binary",
+            "libasslite-bundle",
+            "--no-sources-package",
+            "libasslite-bundle",
+            bundle_requirement,
+        ],
+    ]
+
+    tests = shlex.split(_step_command("tests-ft", "Tests (free-threaded)"))
+    assert tests[:3] == ["uv", "run", "--no-sync"]
 
 
 def test_the_bound_expressions_are_not_vacuous() -> None:

@@ -440,8 +440,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install MeCab (fugashi build dep)
-        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+      # Unlike the GIL-ON matrix, `test-ft` includes integration tests that render CJK subtitles.
+      - name: Install MeCab (fugashi build dep) and CJK fonts
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev fonts-noto-cjk
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -456,6 +457,12 @@ jobs:
         run: |
           uv python install
           uv sync --locked --extra full --no-default-groups --group test
+          # Exercise the published portable runtime instead of the checkout's unstaged editable bundle.
+          uv pip install \
+            --no-deps \
+            --only-binary libasslite-bundle \
+            --no-sources-package libasslite-bundle \
+            libasslite-bundle==0.1.3
 
       # The free-threaded (no-GIL) signal, run in parallel with the `tests` job's GIL-ON control instead
       # of sequentially after it — same command as before the split, just its own job.
