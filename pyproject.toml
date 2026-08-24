@@ -41,17 +41,19 @@ Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
 # core deps so the default install stays Apache-2.0-clean. See LICENSING.md.
 deinflect = ["saitenka-deinflect>=0.2.0"]  # >=0.2.0: French rule set + language= API (#254)
 # Optional layout engine: the taffy (CSS flexbox) row-stack solver behind the LayoutBackend seam
-# (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0), published to PyPI (0.1.0, #231) with
-# prebuilt abi3 (GIL 3.13+) + cp314t + abi3t (FT+GIL 3.15+) wheels — kept OUT of `full` so a default
-# install stays pure-Python. The pure-Python DefaultLayoutBackend is the always-available, byte-identical
-# fallback; this is additive and parity-gated. `saitenka[layout-engine]` resolves taffylite from PyPI. (For
-# hacking on the in-repo Rust crate, add a `[tool.uv.sources]` editable path override or `uv run --with-editable taffylite`.)
-layout-engine = ["taffylite>=0.1.0"]
+# (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0), published to PyPI with prebuilt
+# abi3 (GIL 3.13+) + cp314t + abi3t (FT+GIL 3.15+) wheels. The pure-Python DefaultLayoutBackend is the
+# always-available, byte-identical fallback; this is additive and parity-gated. `saitenka[layout-engine]`
+# resolves taffylite from PyPI. (For hacking on the in-repo Rust crate, add a `[tool.uv.sources]` editable
+# path override or `uv run --with-editable taffylite`.)
+# >=0.2.0: 0.1.0 shipped only cp313/cp314/cp314t wheels — no abi3t, so 3.15t would build from source.
+layout-engine = ["taffylite>=0.2.0"]
 # Optional SVG rasterizer: the resvg PyO3 binding that turns Yomitan inline `img` gaiji (SVG labels /
 # reference glyphs) into PNGs at import, so the panel draws the real glyph instead of a ▢ (#283). A Rust
-# extension vendoring resvg (MPL-2.0, contained to this separately-published optional wheel — see
-# LICENSING.md), kept OUT of `full` so the default install stays Apache-clean and pure-Python. Without
-# it, import stores no media and the renderer falls back to ▢ — fully additive.
+# extension whose own code is MIT/Apache-2.0 and which vendors resvg (MPL-2.0) at build time; MPL is
+# file-scoped, so it covers the vendored resvg sources, not the wrapper or anything combined with it
+# — see LICENSING.md. Without it, import stores no media and the renderer falls back to ▢ — fully
+# additive. The Apache-2.0-clean install is bare `saitenka` / `saitenka[minimal]`, not `full`.
 images = ["resvglite>=0.2.0"]
 # Native-visible ASS interaction. The wrapper stays separate from the Apache-2.0 core package and
 # runtime-loads either an explicit or system libass.
@@ -86,10 +88,28 @@ linux-keyring = ["keyring>=25.7.0; sys_platform == 'linux'"]
 # Convenience bundles. `minimal` is the bare install (no optional features — same as no extra); it
 # exists only so `saitenka[minimal]` reads as a deliberate choice. `full` pulls every portable feature
 # and is what the checkout installers install; Linux Secret Service remains an explicit platform
-# integration. Note `full` includes the GPL-3.0 `deinflect` add-on, so a `full` install is GPL-3.0,
-# not Apache-2.0 (see LICENSING.md).
+# integration.
+#
+# `full` is GPL-3.0, not Apache-2.0 — it includes the `deinflect` add-on (see LICENSING.md). The
+# Apache-2.0-clean install is bare `saitenka` / `saitenka[minimal]`. The native add-ons here are all
+# GPL-3.0-compatible (MIT / Apache-2.0 wrappers; resvglite's vendored resvg is MPL-2.0, which §3.3
+# permits combining under GPL), so they change what a redistributor must ship, not the combined
+# licence: honour resvg's MPL notices and source offer.
+#
+# `subtitle-geometry-bundle` is deliberately NOT here. It ships a native runtime closure (vcpkg libass
+# and its shaping/font dependencies) carrying its own notices and relinking obligations — and the
+# `licenses` gate is pip-licenses, which enumerates Python distributions only, so it cannot see any of
+# that. Plain `subtitle-geometry` redistributes nothing; it dlopens a user-supplied or system libass,
+# and no-ops when there isn't one.
 minimal = []
-full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
+full = [
+    "saitenka[deinflect]",
+    "saitenka[jmdict]",
+    "saitenka[telemetry]",
+    "saitenka[layout-engine]",
+    "saitenka[images]",
+    "saitenka[subtitle-geometry]",
+]
 
 [project.scripts]
 saitenka = "saitenka.app.cli:main"
@@ -639,7 +659,7 @@ install-smoke = { cmd = "uv run --no-project python tools/install_smoke.py" }
 # `uv run`, which puts the PROJECT environment first on PATH, so a bare name resolves to the uv
 # cache environment and bakes that instead of the tool install this line just made.
 # `--color never` because uv wraps the path in ANSI codes, which a command substitution keeps.
-install-editable = { shell = "uv tool install --force --python 3.14t --editable '.[full,layout-engine,images,subtitle-geometry]' && \"$(uv tool dir --bin --color never)/saitenka\" install-plugin", help = "Put this checkout on PATH as `saitenka` for live mpv testing (relaunch mpv after)" }
+install-editable = { shell = "uv tool install --force --python 3.14t --editable '.[full]' && \"$(uv tool dir --bin --color never)/saitenka\" install-plugin", help = "Put this checkout on PATH as `saitenka` for live mpv testing (relaunch mpv after)" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
