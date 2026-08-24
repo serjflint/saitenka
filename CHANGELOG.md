@@ -7,8 +7,54 @@ logs.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-08-24
+
+### Added
+
+- **mpv draws the subtitles; Saitenka colors them.** The native subtitle renderer stops replacing
+  mpv's subtitle layer and starts annotating it: the cue you see is mpv's own libass render, with its
+  authored typesetting, fonts and effects intact, and each word tinted by its reading state on top.
+  Scanning, hover, tooltips and mining work on those words exactly as before. Enable it with
+  `native_visible = true` under `[subtitle_geometry]`; `Ctrl+Shift+L` asks for the previous renderer
+  for an episode, and `saitenka doctor` reports whether a compatible libass can be initialized.
+- **SubRip tracks are interactive too.** mpv never renders a `.srt` — libavcodec converts it to ASS
+  and mpv renders that, through a branch of styling it applies to no authored track. Saitenka
+  reconstructs that conversion around the cue rows mpv reports, so a converted track gets the same
+  hit boxes as an authored one. `native_formats = "all"` takes them; the default stays authored-ASS.
+  Your `--sub-font`, `--sub-font-size`, margins, alignment, justification, blur and colors are read
+  from mpv and reproduced, so the boxes land on the words wherever your own settings put them.
+- **Cue lookahead on converted tracks**, by predicting the events libavcodec will produce for the
+  cues ahead. A wrong prediction cannot put a box in the wrong place — the cache is keyed on the
+  event rows, so a mispredicted cue simply misses and is measured on arrival.
+- **A color ladder, so a cue degrades instead of going dark.** Tokens mpv's OSD library can redraw
+  as text take that path; the rest are tinted as a raster over the glyphs already on screen; the JLPT
+  level keeps its own underline beside either. A cue that cannot be measured — karaoke, animation, a
+  vector drawing — keeps mpv's rendering and loses only its interaction, without the renderer
+  switching under you.
+- **`--blend-subtitles=yes` is reproduced** rather than refused, and Retina and letterboxed windows
+  are followed instead of rejected.
+- **`saitenka doctor` flags an `mpv.conf` that sets `sub-font` more than once.** mpv takes only the
+  last one; the earlier lines look like a fallback chain and are not one.
+
+### Changed
+
+- The subtitle renderer is now a choice rather than an implementation detail: the standard renderer
+  remains the default, `native_visible` opts into mpv's pixels, and both are compared at the level a
+  user sees. `subtitle-report` and `trace-report` name which one owns the frame and why.
+
 ### Fixed
 
+- **Every converted cue was measured against mpv's default style**, so a customized `--sub-margin-y`
+  or `--sub-font-size` put the boxes where somebody else's subtitles would have been.
+- **A geometry gate row refused native subtitles on every mpv that had the option it named**
+  (`sub-ass-vsfilter-aspect-compat`), and passed vacuously on the builds that removed it.
+- **Reading a container's font attachments transcoded the whole episode** — 42s on a 24-minute file
+  against 0.06s — which held up keybind registration for the whole of it.
+- **Global shortcuts were registered weakly** and lost to a user's own `input.conf`; F1 opened mpv's
+  OSD instead of Saitenka's help.
+- **`Alt+o` left the token colors and JLPT underlines on screen** until the next cue.
+- **Converted-track styles were fully transparent**, so no cue on a converted track had any boxes.
+- `native_formats` was never read out of `overlay.toml`.
 - **Exiting Saitenka reliably restores mpv's own subtitle visibility.** Teardown writes are flushed to
   the socket before the connection is dropped, so the setting a session found is the setting it leaves —
   previously the last write could still be queued when the transport went away.
@@ -48,6 +94,14 @@ logs.
 
 ### Development
 
+- **A renderer now outlives the cue it draws.** libass keeps the library, the renderer's glyph cache
+  and the track on three different lifetimes; building all three per cue meant a library init and a
+  font-directory rescan for every subtitle, and a renderer cache that could never hit. `libasslite`
+  grows `set_document`, and the geometry backend keys renderers on the font environment.
+- A live tier asks mpv what it actually does — which options exist, what the launch profile resolves
+  to, and whether our keybinds outrank the user's — instead of asserting our beliefs about it.
+- The gate declares the native extras it renders against, and its libass oracle now runs in CI rather
+  than silently skipping.
 - Extracted provider-neutral subtitle geometry and event identity seams, with generation/request
   ordering that rejects stale background results without discarding a freshly sought cue. Added the
   independently publishable experimental `libasslite` package for copied libass 0.17.x image layers;
