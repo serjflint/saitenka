@@ -16,11 +16,11 @@ land in ``entries`` / ``keys`` / ``kanji`` / ``tags``; frequency and pitch dicti
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
 import sqlite3
-import threading
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from saitenka.app import paths
 from saitenka.app.bankreader import _title_of, classify_zip, read_json_bank, zip_roles
 from saitenka.app.config import DictDbOptions, resolve_dictdb
+from saitenka.sqlite_pool import ThreadLocalConnections
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -324,6 +325,26 @@ def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int, str, str]]:
     return out
 
 
+def _open_read(path: Path, opts: DictDbOptions) -> sqlite3.Connection:
+    """One thread's read-only lookup connection.
+
+    mmap a MODEST window of the DB so cold lookups hit page-cache-backed memory instead of pread
+    syscalls. Kept small (256 MiB, was 1 GiB) because the DB is multi-GB and this runs on EACH
+    per-thread connection (main + prefetch workers); on Windows the mapped view counts toward the
+    process working set, so a 1 GiB window × N threads was inflating RAM by gigabytes. A benchmark
+    showed the mmap win over pread was mostly a page-cache artifact, so shrinking the window costs
+    ~nothing. 32 MiB page cache per connection (negative = KiB) — both tunable via ``[dictdb]`` in
+    overlay.toml (app/config.py: DictDbOptions).
+
+    A free function, not a method: :class:`~saitenka.sqlite_pool.ThreadLocalConnections` must not
+    close over its owner.
+    """
+    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
+    c.execute(f"PRAGMA mmap_size={opts.mmap_size}")
+    c.execute(f"PRAGMA cache_size=-{opts.cache_size_kib}")
+    return c
+
+
 class DictionaryDb:
     """Read/write handle to the consolidated dictionary DB.
 
@@ -333,8 +354,10 @@ class DictionaryDb:
 
     def __init__(self, path: str | Path, db_opts: DictDbOptions | None = None):
         self.path = Path(path)
-        self._local = threading.local()
         self._opts = db_opts if db_opts is not None else resolve_dictdb()
+        self._reads = ThreadLocalConnections(
+            self, functools.partial(_open_read, self.path, self._opts)
+        )
         self._media_present: bool | None = None  # cached once: is the media table non-empty? (#283)
 
     # --- lifecycle ----------------------------------------------------------------------------
@@ -385,20 +408,7 @@ class DictionaryDb:
 
     def _conn(self) -> sqlite3.Connection:
         """A per-thread read-only connection (mmap'd, roomy page cache) for lookups."""
-        c = getattr(self._local, "conn", None)
-        if c is None:
-            c = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, check_same_thread=False)
-            # mmap a MODEST window of the DB so cold lookups hit page-cache-backed memory instead of
-            # pread syscalls. Kept small (256 MiB, was 1 GiB) because the DB is multi-GB and this is
-            # set on EACH per-thread connection (main + prefetch workers); on Windows the mapped view
-            # counts toward the process working set, so a 1 GiB window × N threads was inflating RAM by
-            # gigabytes. A benchmark showed the mmap win over pread was mostly a page-cache artifact, so
-            # shrinking the window costs ~nothing. 32 MiB page cache per connection (negative = KiB) —
-            # both tunable via ``[dictdb]`` in overlay.toml (app/config.py: DictDbOptions).
-            c.execute(f"PRAGMA mmap_size={self._opts.mmap_size}")
-            c.execute(f"PRAGMA cache_size=-{self._opts.cache_size_kib}")
-            self._local.conn = c
-        return c
+        return self._reads.get()
 
     def meta_get(self, key: str) -> str | None:
         row = self._conn().execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()

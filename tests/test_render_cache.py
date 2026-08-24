@@ -582,29 +582,35 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
 def test_popular_terms_ranks_by_frequency_dedupes_and_caps():
     # The prewarm population is the top-N by freq rank, most-popular first, de-duped across freq dicts —
     # NOT the whole term dump. A term in two freq dicts takes its best (lowest) rank.
+    import contextlib
     import sqlite3
 
     from saitenka.app.prewarm import _popular_terms
 
-    def _freq_source(rows, dict_id):
-        conn = sqlite3.connect(":memory:", check_same_thread=False)
-        conn.execute(
-            "CREATE TABLE term_meta (dict_id INT, mode TEXT, term TEXT, reading TEXT, rank INT)"
-        )
-        conn.executemany(
-            "INSERT INTO term_meta VALUES (?,?,?,?,?)",
-            [(dict_id, "freq", t, r, rk) for t, r, rk in rows],
-        )
-        conn.commit()
-        return SimpleNamespace(dict_id=dict_id, db=SimpleNamespace(_conn=lambda: conn))
+    with contextlib.ExitStack() as closing:
 
-    ds = SimpleNamespace(
-        freqs=[
-            _freq_source([("見る", "みる", 5), ("手", "て", 1), ("鬱", "うつ", 900)], 1),
-            _freq_source([("手", "て", 3), ("気", "き", 2)], 2),  # 手 also here, worse rank
-        ]
-    )
-    out = _popular_terms(ds, limit=3)
+        def _freq_source(rows, dict_id):
+            # closing(), not the connection itself: sqlite3's context manager commits, never closes.
+            conn = closing.enter_context(
+                contextlib.closing(sqlite3.connect(":memory:", check_same_thread=False))
+            )
+            conn.execute(
+                "CREATE TABLE term_meta (dict_id INT, mode TEXT, term TEXT, reading TEXT, rank INT)"
+            )
+            conn.executemany(
+                "INSERT INTO term_meta VALUES (?,?,?,?,?)",
+                [(dict_id, "freq", t, r, rk) for t, r, rk in rows],
+            )
+            conn.commit()
+            return SimpleNamespace(dict_id=dict_id, db=SimpleNamespace(_conn=lambda: conn))
+
+        ds = SimpleNamespace(
+            freqs=[
+                _freq_source([("見る", "みる", 5), ("手", "て", 1), ("鬱", "うつ", 900)], 1),
+                _freq_source([("手", "て", 3), ("気", "き", 2)], 2),  # 手 also here, worse rank
+            ]
+        )
+        out = _popular_terms(ds, limit=3)
     assert out == [
         ("手", "て"),
         ("気", "き"),

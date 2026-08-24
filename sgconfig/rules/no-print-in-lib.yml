@@ -7,12 +7,21 @@ message: >-
 note: app/logsetup.py — structlog processors redact secrets/paths from every record.
 files:
   - "src/saitenka/**/*.py"
-# Allowed print() surfaces: CLI entrypoint, user-invoked subcommands (doctor/import), and pre-logging
-# bootstrap (reader_deps, crashlog). Core runtime must log.
+# Allowed print() surfaces: the CLI entrypoint and the subcommand packages it composes, the interactive
+# wizards/prompts, the pre-logging bootstrap (reader_deps, crashlog), and `console.py` — the runtime's
+# one sanctioned stdout line. Everything else must log.
+# Kept in step with pyproject's `[tool.ruff.lint.per-file-ignores]` "print" entries — that list is the
+# SSOT and `tests/test_print_surface_allowlist.py` fails when the two drift. A deliberate site inside a
+# non-CLI module goes through `console.announce`, not a widening of this list.
 ignores:
   - "src/saitenka/app/cli.py"
+  - "src/saitenka/app/console.py"
+  - "src/saitenka/app/commands/*.py"
+  - "src/saitenka/app/launch/run.py"
+  - "src/saitenka/app/config_editor.py"
   - "src/saitenka/app/profile_cli.py"
   - "src/saitenka/app/*wizard*.py"
+  - "src/saitenka/app/prompt.py"
   - "src/saitenka/app/doctor.py"
   - "src/saitenka/app/yomitan_import.py"
   - "src/saitenka/app/reader_deps.py"

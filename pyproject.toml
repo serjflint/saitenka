@@ -352,6 +352,9 @@ max-args = 8
 "src/saitenka/app/cli.py" = ["function-call-in-default-argument", "print"]
 "src/saitenka/app/commands/*.py" = ["print"]
 "src/saitenka/app/launch/run.py" = ["print"]
+# T201: the runtime's ONE sanctioned stdout surface — `console.announce` exists so the banner and the
+# session summary don't each carry a suppression inside controller.py.
+"src/saitenka/app/console.py" = ["print"]
 # T201: interactive first-run wizards — print() is the prompt UX, matches no-print-in-lib.yml.
 "src/saitenka/app/init_wizard.py" = ["print"]
 "src/saitenka/app/setup_wizard.py" = ["print"]
@@ -515,7 +518,10 @@ lint = { shell = "uv run ruff check --fix . && uv run ruff format ." }
 # see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
 # strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
 # scope for visibility, same posture as `ty` (never a hard gate here).
-types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src && (uv run --extra full pyrefly check examples tools install .agents || true) && (uv run --extra full ty check --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src examples tools install .agents || true)" }
+# Both advisory passes print one line per diagnostic (`min-text` / `concise`): their default renderers
+# quote source and draw carets, which cost 922 lines of a green gate for 78 findings nothing acts on in
+# that run. A finding still names its file:line, which is what a follow-up needs to re-run it in full.
+types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src && (uv run --extra full pyrefly check --output-format=min-text examples tools install .agents || true) && (uv run --extra full ty check --output-format concise --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src examples tools install .agents || true)" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
@@ -553,7 +559,10 @@ call-args-test = { shell = "ast-grep test -c sgconfig-call-args.yml --skip-snaps
 invariants-taint = { shell = "uvx --python 3.13 semgrep scan --config tools/semgrep/rules.yml src" }
 # Cognitive-complexity gate, ratcheted against complexipy-snapshot.json (config: root [tool.complexipy]).
 # Fails only on NEW complexity growth past max-complexity-allowed=15, not on pre-existing debt.
-complexity = { cmd = "uv run complexipy" }
+# `--failed` prints only breaches (threshold or snapshot watermark); the default emits a PASSED row per
+# function — 4122 lines, over half of a whole `poe all` log. The ratchet still bites: a raised complexity
+# exits 1 and names the function and both watermarks.
+complexity = { cmd = "uv run complexipy --failed" }
 # Regenerate the baseline after a DELIBERATE refactor changes function complexity on purpose (run,
 # review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
 complexity-baseline = { cmd = "uv run complexipy --snapshot-create" }
@@ -564,7 +573,7 @@ test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integra
 subtitle-test = { shell = "uv run --extra full pytest -q -n auto tests/test_sub_index.py tests/test_sub_index_properties.py tests/test_subtitle_metamorphic.py" }
 # Deterministic unit coverage for the Grow/Sharpen and reporting tools. Explicit path because pytest's
 # package testpaths intentionally stays on the shipped overlay suite.
-loop-tools-test = { shell = "uv run --extra full pytest -q -m 'not integration' tools" }
+loop-tools-test = { shell = "uv run --extra full pytest -q -n auto -m 'not integration' tools" }
 # Independent package surfaces stay runnable without the overlay dependency graph.
 package-test = { shell = "uv run --project saitenka-dict pytest -q -c saitenka-dict/pyproject.toml -m 'not integration' saitenka-dict/tests && uv run --project ankiconnect-client pytest -q -c ankiconnect-client/pyproject.toml ankiconnect-client/tests" }
 # Differential oracle: one Yomitan import and one batched query for all term modes plus kanji.
@@ -888,7 +897,12 @@ ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install 
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration", "host-arity", "host-mass", "port-probe", "reducer-purity"]
+# Every gate task EXCEPT the free-threaded suite pass. `all` appends it, so locally there is still one
+# name to type and one contract. CI splits the two halves across two jobs instead: the suite costs ~128s
+# of a 4-core runner, and running both passes in the same job made the gate the longest job in the run by
+# a wide margin. Both halves sync the same dev env, so the split changes wall-clock, not coverage.
+gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration", "host-arity", "host-mass", "port-probe", "reducer-purity"]
+all = ["gate-no-ft", "test-ft"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —
