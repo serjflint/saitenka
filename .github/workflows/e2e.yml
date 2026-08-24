@@ -49,7 +49,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
+        # macOS x86_64 is not covered: none of the native add-ons `full` now installs publishes an
+        # Intel wheel (libasslite, libasslite-bundle, taffylite are arm64 + manylinux + win_amd64), so
+        # the leg built Rust from source and then measured text against whatever faces Homebrew's
+        # libass dragged in — three rendering goldens moved for that reason alone.
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
       # e2e exercises real per-OS transport (named pipe / unix socket), not free-threading — so pin to
@@ -81,18 +85,9 @@ jobs:
       # runtime a `subtitle-geometry-bundle` user gets, as tests-ft does. libasslite prefers the bundle
       # over any system libass, so this also makes the leg independent of what the runner image ships.
       - name: Install the published libass runtime
-        if: matrix.os != 'macos-15-intel'
         run: >-
           uv pip install --no-deps --only-binary libasslite-bundle
           --no-sources-package libasslite-bundle libasslite-bundle==0.1.3
-
-      # The bundle publishes no macOS x86_64 wheel (its matrix is arm64 + manylinux + win_amd64), so
-      # the Intel runner takes libass from Homebrew — the same source libasslite-release.yml tests against.
-      - name: Install libass (macOS x86_64 — no bundle wheel)
-        if: matrix.os == 'macos-15-intel'
-        run: |
-          brew install libass
-          echo "LIBASSLITE_LIBRARY=$(brew --prefix libass)/lib/libass.dylib" >> "$GITHUB_ENV"
 
       # Real per-OS boundary, no GUI: integration (real socket/subprocess) + windows_sim executing on
       # the real kernel. This is the leg that catches the named-pipe / Scripts-vs-bin class Linux can't.

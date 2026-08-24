@@ -467,7 +467,7 @@ def test_the_artifacts_effect_carries_its_path_instead_of_looking_one_up() -> No
 
     dispatcher_source = (
         Path(__file__).resolve().parents[1] / "src/saitenka/app/session_routes.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     branch = dispatcher_source.split("if isinstance(effect, RemoveSessionArtifacts):")[1]
     body = branch.split("return True")[0]
     assert "session_resources" not in body, (

@@ -52,18 +52,18 @@ def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True, capture:
 
 
 def read_version() -> str:
-    m = VERSION_RE.search(PYPROJECT.read_text())
+    m = VERSION_RE.search(PYPROJECT.read_text(encoding="utf-8"))
     if not m:
         raise RuntimeError(f'couldn\'t find a `version = "X.Y.Z"` line in {PYPROJECT}')
     return f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
 
 
 def write_version(new_version: str) -> None:
-    text = PYPROJECT.read_text()
+    text = PYPROJECT.read_text(encoding="utf-8")
     new_text, n = VERSION_RE.subn(f'version = "{new_version}"', text, count=1)
     if n != 1:
         raise RuntimeError(f"expected exactly one version line in {PYPROJECT}, patched {n}")
-    PYPROJECT.write_text(new_text)
+    PYPROJECT.write_text(new_text, encoding="utf-8")
 
 
 def last_tag() -> str | None:
@@ -112,7 +112,7 @@ def insert_changelog_section(notes: str, version: str) -> None:
     """Replace the (possibly empty) `## [Unreleased]` section with the curated ``notes`` under a new
     `## [version] - date` heading, and open a fresh empty Unreleased above it — the same edit made
     by hand every release so far."""
-    text = CHANGELOG.read_text()
+    text = CHANGELOG.read_text(encoding="utf-8")
     marker = "## [Unreleased]"
     if marker not in text:
         raise RuntimeError(f"no `{marker}` heading found in {CHANGELOG}")
@@ -122,12 +122,12 @@ def insert_changelog_section(notes: str, version: str) -> None:
     _, _, tail = rest.partition("\n## [")
     today = date.today().isoformat()
     new_section = f"{marker}\n\n## [{version}] - {today}\n\n{notes.strip()}\n\n## [{tail}"
-    CHANGELOG.write_text(head + new_section)
+    CHANGELOG.write_text(head + new_section, encoding="utf-8")
 
 
 def changelog_section(version: str) -> str:
     """Extract the already-released `## [version] - ...` section (for release notes)."""
-    text = CHANGELOG.read_text()
+    text = CHANGELOG.read_text(encoding="utf-8")
     m = re.search(rf"(## \[{re.escape(version)}\][^\n]*\n.*?)(?=\n## \[|\Z)", text, re.DOTALL)
     if not m:
         raise RuntimeError(f"no changelog section found for {version} in {CHANGELOG}")
@@ -193,7 +193,7 @@ class PrepareArgs:
 
 
 def cmd_prepare(args: PrepareArgs) -> int:
-    if not args.notes.exists() or not args.notes.read_text().strip():
+    if not args.notes.exists() or not args.notes.read_text(encoding="utf-8").strip():
         raise RuntimeError(
             f"{args.notes} is missing or empty — write the curated changelog entry there first "
             "(bullet points, no heading; `poe changelog` drafts raw material to review against)."
@@ -207,7 +207,7 @@ def cmd_prepare(args: PrepareArgs) -> int:
         level = args.bump if args.bump != "auto" else detect_bump(last_tag())
         next_version = bump_version(current, level, allow_major=args.allow_major)
     print(f"{current} -> {next_version}")
-    notes_text = args.notes.read_text()
+    notes_text = args.notes.read_text(encoding="utf-8")
 
     if args.dry_run:
         print("--- would insert into CHANGELOG.md ---")

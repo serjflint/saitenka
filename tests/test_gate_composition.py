@@ -40,6 +40,10 @@ BOUND_STEPS = {
     ("tests-ft", "Tests (free-threaded)"): "test-ft",
 }
 
+#: Runners `libasslite-bundle` publishes a wheel for — its release matrix is arm64 macOS, manylinux
+#: x86_64/aarch64 and win_amd64. macOS x86_64 is absent, which is why e2e no longer runs there.
+_BUNDLE_WHEEL_RUNNERS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+
 
 def _workflow() -> dict:
     return yaml.safe_load(CI.read_text(encoding="utf-8"))
@@ -177,16 +181,11 @@ def test_e2e_installs_the_same_bundle_runtime_the_extra_pins() -> None:
         bundle_requirement,
     ]
 
-    # The bundle's wheel matrix has no macOS x86_64, so that one leg is covered by Homebrew instead.
-    # These two conditions must stay complements: an overlap double-installs, a gap silently returns
-    # the leg to the ERROR it started as.
-    excluded = "macos-15-intel"
-    assert install["if"] == f"matrix.os != '{excluded}'"
-    assert (
-        steps["Install libass (macOS x86_64 — no bundle wheel)"]["if"]
-        == f"matrix.os == '{excluded}'"
-    )
-    assert excluded in _e2e_workflow()["jobs"]["e2e"]["strategy"]["matrix"]["os"]
+    # Unconditional, which only holds while every leg is a platform the bundle publishes a wheel for.
+    # Adding one it doesn't (macOS x86_64 is the standing example) silently returns that leg to the
+    # ERROR this install exists to prevent.
+    assert "if" not in install
+    assert set(_e2e_workflow()["jobs"]["e2e"]["strategy"]["matrix"]["os"]) <= _BUNDLE_WHEEL_RUNNERS
 
     # The bundle is pip-installed on top of the locked env; a re-syncing `uv run` would prune it.
     assert shlex.split(steps["Real-boundary + per-OS suite"]["run"])[:3] == [

@@ -16,10 +16,12 @@ def _named_step(workflow: dict, job: str, name: str) -> dict:
 
 
 def test_libasslite_release_versions_stay_coherent() -> None:
-    wrapper = tomllib.loads((ROOT / "libasslite" / "pyproject.toml").read_text())
-    bundle = tomllib.loads((ROOT / "libasslite-bundle" / "pyproject.toml").read_text())
-    root = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    vcpkg = json.loads((ROOT / "libasslite-bundle" / "vcpkg.json").read_text())
+    wrapper = tomllib.loads((ROOT / "libasslite" / "pyproject.toml").read_text(encoding="utf-8"))
+    bundle = tomllib.loads(
+        (ROOT / "libasslite-bundle" / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    root = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    vcpkg = json.loads((ROOT / "libasslite-bundle" / "vcpkg.json").read_text(encoding="utf-8"))
     wrapper_version = wrapper["project"]["version"]
     bundle_version = bundle["project"]["version"]
 
