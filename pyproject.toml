@@ -352,6 +352,9 @@ max-args = 8
 "src/saitenka/app/cli.py" = ["function-call-in-default-argument", "print"]
 "src/saitenka/app/commands/*.py" = ["print"]
 "src/saitenka/app/launch/run.py" = ["print"]
+# T201: the runtime's ONE sanctioned stdout surface — `console.announce` exists so the banner and the
+# session summary don't each carry a suppression inside controller.py.
+"src/saitenka/app/console.py" = ["print"]
 # T201: interactive first-run wizards — print() is the prompt UX, matches no-print-in-lib.yml.
 "src/saitenka/app/init_wizard.py" = ["print"]
 "src/saitenka/app/setup_wizard.py" = ["print"]

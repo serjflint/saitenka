@@ -26,6 +26,7 @@ from saitenka.app import (
     analysis_overlay,
     backlog,
     card_preview,
+    console,
     cue_annotation,
     episode_reslot,
     geometry_refresh,
@@ -4199,9 +4200,7 @@ class Reader:
             return
         self._runtime_announced = True
         mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
-        print(  # noqa: T201  # user-facing banner; log.info alone won't show — console handler is WARNING-level (logsetup.py)
-            f"[saitenka] runtime: {mode} · {self.prefetch_state.workers} prefetch worker(s)"
-        )
+        console.announce(f"runtime: {mode} · {self.prefetch_state.workers} prefetch worker(s)")
         log.info("runtime: %s, %d prefetch worker(s)", mode, self.prefetch_state.workers)
 
     @property
@@ -4634,4 +4633,4 @@ class Reader:
 
     def _report_session(self, summary: str | None) -> None:
         if summary and self.options.stats.summary:
-            print(f"[saitenka] session: {summary}")  # noqa: T201  # close summary
+            console.announce(f"session: {summary}")
