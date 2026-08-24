@@ -98,15 +98,21 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
     assert reader.tip.view.scroll == 4 * surfaces.tip_wheel_pixels(1080, 1)
 
 
-def test_scroll_workload_rejects_a_non_scrollable_tooltip():
-    mod = _jank_module()
+def _stuck_controller(mod_state):
+    """A controller whose wheel does nothing, carrying the tooltip state `_why_stuck` reports."""
 
     class SessionController:
         osd = (1920, 1080)
         tip_scale = SimpleNamespace(ref_h=1080)
 
         def __init__(self):
-            self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
+            self.tip = SimpleNamespace(
+                view=SimpleNamespace(
+                    scroll=0, desired_scroll=0, rect=(0, 0, 400, 300), **mod_state
+                ),
+                nest=SimpleNamespace(rect=None, scroll=0),
+                last_mouse=(10.0, 20.0),
+            )
 
         def scroll_tip(self, _delta):
             pass
@@ -114,8 +120,34 @@ def test_scroll_workload_rejects_a_non_scrollable_tooltip():
         def pump(self):
             return True
 
+    return SessionController()
+
+
+def test_scroll_workload_rejects_a_non_scrollable_tooltip():
+    mod = _jank_module()
+    reader = _stuck_controller({"state": SimpleNamespace(full_height=1440), "view_h": 432})
     with pytest.raises(RuntimeError, match="did not advance"):
-        mod._scroll_four(SessionController())
+        mod._scroll_four(reader)
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        # The three ways scroll_view refuses, each needing a different fix — so the message has to
+        # tell them apart rather than say "did not advance" and leave the reader to guess.
+        ({"state": None, "view_h": 432}, "state=MISSING"),
+        ({"state": SimpleNamespace(full_height=200), "view_h": 432}, "scrollable=False"),
+        ({"state": SimpleNamespace(full_height=1440), "view_h": 432}, "scrollable=True"),
+    ],
+)
+def test_the_stuck_scroll_message_names_the_reason(state, expected):
+    mod = _jank_module()
+    with pytest.raises(RuntimeError, match="did not advance") as excinfo:
+        mod._scroll_four(_stuck_controller(state))
+    assert expected in str(excinfo.value)
+    # Routing is the third possibility and is invisible from the base view alone: report the nested
+    # popup too, or a wheel that landed on it reads identically to one that landed nowhere.
+    assert "nest_rect=" in str(excinfo.value)
 
 
 def test_live_latency_boundary_repaints_the_overlay():

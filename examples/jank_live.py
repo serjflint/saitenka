@@ -93,6 +93,25 @@ def _counter(ipc, prop: str) -> int:
     return int(data) if isinstance(data, (int, float)) else 0
 
 
+def _why_stuck(reader) -> str:
+    """The state that decides whether a wheel event can move the base viewport at all.
+
+    ``scroll_view`` refuses in three distinguishable ways — no rendered panel, a panel no taller than
+    its viewport, or the wheel routed to the nested popup instead — and they need different fixes. The
+    bare "did not advance" this replaces reports only that one of them happened, which is not enough to
+    act on from a CI log.
+    """
+    view, nest = reader.tip.view, reader.tip.nest
+    state = view.state
+    full_h = getattr(state, "full_height", None)
+    return (
+        f"state={'present' if state is not None else 'MISSING'} "
+        f"full_h={full_h} view_h={view.view_h} scrollable={full_h is not None and full_h > view.view_h} "
+        f"desired={view.desired_scroll} rect={view.rect} "
+        f"nest_rect={nest.rect} nest_scroll={nest.scroll} mouse={reader.tip.last_mouse}"
+    )
+
+
 def _scroll_four(reader) -> None:
     from saitenka.app import surfaces
 
@@ -101,7 +120,9 @@ def _scroll_four(reader) -> None:
         reader.scroll_tip(surfaces.tip_wheel_pixels(reader.tip_scale.ref_h, 1))
         reader.pump()
     if reader.tip.view.scroll == before:
-        raise RuntimeError("live scroll workload did not advance the tooltip viewport")
+        raise RuntimeError(
+            f"live scroll workload did not advance the tooltip viewport ({_why_stuck(reader)})"
+        )
 
 
 def _present_overlay(reader) -> None:
