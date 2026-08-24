@@ -52,14 +52,16 @@ internal modules with explicit dependency contracts, not independently published
 - **`app/`** — the application layer. `session_controller.py`'s `SessionController` is the production
   study-session controller: it owns mpv mutation and cross-feature ordering, while bounded
   collaborators own feature state and policy. `tooltip_controller.py`, for example, owns the
-  tooltip's mutable presentation state and three volatile work protocols. `app/runtime/` owns the
+  tooltip's mutable presentation state and three volatile work protocols; `profile_controller.py`
+  owns the active reading environment and its synchronous switch transaction. `app/runtime/` owns the
   closed command table; `session_factory.py` is the production `SessionController` construction seam.
   `cli.py` owns process setup and Cyclopts registration, `commands/` owns domain command surfaces and
   attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
-  strategy); `profiles.py`/`profile_cli.py`/`languages.py` (the second-language reading-profile engine
-  — a French profile ships today); `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
+  strategy); `profiles.py`/`profile_cli.py`/`languages.py` define reading-profile values and loading
+  (a French profile ships today), while `profile_intents.py` and `profile_adapter.py` own command
+  admission and application; `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
   dictionary DB); `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring);
   `anki.py`/`miner.py`/`word_audio.py` (mining + optional word-pronunciation audio);
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
@@ -150,8 +152,8 @@ half reaches the host — but only through members its protocol names.
 
 The `SessionController` node denotes the live session controller, distinct from the immutable reducer-state store
 shown beside it. SessionController still carries session assembly and mutable state that has not moved behind a
-bounded owner. Owners such as `TooltipController` retain feature state and operation protocols; SessionController
-assembles fresh per-turn ports and keeps cross-feature order explicit.
+bounded owner. Owners such as `TooltipController` and `ProfileController` retain feature state and
+operation protocols; SessionController assembles fresh per-turn ports and keeps cross-feature order explicit.
 
 The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
 feature's adapter has to touch the live session, so it declares the host members it needs as a
