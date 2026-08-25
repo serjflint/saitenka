@@ -97,7 +97,7 @@ def test_panel_precompose_head_warms_the_capped_first_viewport():
     # Panel.precompose_head maps the show's cap to view_h = min(full_height, cap) and precomposes; a
     # subsequent viewport at that cap is then a zero-raster cache hit (the prefetch-worker → warm-hover
     # contract). A tall entry caps at `cap`; the copy the show reads is isolated.
-    from saitenka.app.popups import Panel
+    from saitenka.app.features.tooltip.popups import Panel
 
     entry = _entry(20)
     panel = Panel.from_rows(panel_rows(entry, WIDTH), WIDTH, "かける")

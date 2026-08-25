@@ -12,8 +12,8 @@ from dataclasses import FrozenInstanceError
 import pytest
 from util import FakeIPC
 
-from saitenka.app.popups import NO_HOVER_METADATA, HoverMetadata
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip.popups import NO_HOVER_METADATA, HoverMetadata
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime import events
 

@@ -10,15 +10,15 @@ import sharpen_triage as st
 
 
 def _repo(tmp_path: Path) -> Path:
-    (tmp_path / "src/saitenka/app").mkdir(parents=True)
+    (tmp_path / "src/saitenka/app/session").mkdir(parents=True)
     (tmp_path / "tests").mkdir()
     (tmp_path / "src/saitenka/app/config.py").write_text("class Config: pass\n", encoding="utf-8")
-    (tmp_path / "src/saitenka/app/session_controller.py").write_text(
+    (tmp_path / "src/saitenka/app/session/controller.py").write_text(
         "class SessionController:\n    _state = 1\n", encoding="utf-8"
     )
     (tmp_path / "tests/test_shared.py").write_text(
         "from saitenka.app.config import Config\n"
-        "from saitenka.app.session_controller import SessionController\n\n"
+        "from saitenka.app.session.controller import SessionController\n\n"
         "def make_controller():\n    return SessionController()\n\n"
         "def test_controller_state():\n    assert make_controller()._state == 1\n",
         encoding="utf-8",
@@ -40,7 +40,7 @@ def test_actionable_hit_is_attributed_to_its_test_function_not_the_whole_file(
 
     result = st.conformance_by_module(root, sl.map_tests_to_modules(root))
 
-    assert result["app/session_controller.py"] == (1, 1, 0)
+    assert result["app/session/controller.py"] == (1, 1, 0)
     assert result["app/config.py"] == (0, 0, 0)
 
 
@@ -56,7 +56,7 @@ def test_sleep_polling_is_counted_but_not_actionable(monkeypatch, tmp_path):
 
     result = st.conformance_by_module(root, sl.map_tests_to_modules(root))
 
-    assert result["app/session_controller.py"] == (1, 0, 0)
+    assert result["app/session/controller.py"] == (1, 0, 0)
 
 
 def test_private_seam_metric_excludes_advisory_and_actionable_hits(monkeypatch, tmp_path):
@@ -78,7 +78,7 @@ def test_private_seam_metric_excludes_advisory_and_actionable_hits(monkeypatch, 
 
     result = st.conformance_by_module(root, sl.map_tests_to_modules(root))
 
-    assert result["app/session_controller.py"] == (3, 1, 1)
+    assert result["app/session/controller.py"] == (3, 1, 1)
 
 
 def _campaign(root: Path, module: str, outcomes: list[str | None]) -> None:

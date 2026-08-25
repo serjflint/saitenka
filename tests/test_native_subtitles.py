@@ -14,12 +14,12 @@ from util import record_spans
 from saitenka.app import native_subtitles, subtitle_fonts, subtitle_render
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.embedded_subs import resolve_track_fonts
+from saitenka.app.features.tooltip.nested_popup import kanji_current
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
-from saitenka.app.nested_popup import kanji_current
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
@@ -2471,7 +2471,7 @@ def test_every_gate_option_is_observed_and_counted_a_render_space_input() -> Non
     Four options landed on this branch reading the gate but neither list, which is why this exists.
     """
     from saitenka.app.native_subtitles import GATE_OPTIONS
-    from saitenka.app.session_controller import OBSERVED_PROPS
+    from saitenka.app.session.controller import OBSERVED_PROPS
     from saitenka.runtime.playback import RENDER_SPACE_PROPERTIES
 
     qualified = {f"options/{name}" for name in GATE_OPTIONS}

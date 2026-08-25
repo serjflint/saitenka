@@ -14,7 +14,7 @@ naming, which a total alone cannot. `init_lines` closes the last escape the memb
 wiring a collaborator in `__init__` adds lines without adding a member, so a feature can move off
 the host and leave its construction behind with every other number still falling.
 
-**Members are discovered live, never by parsing one file.** A static parse of `session_controller.py` cannot
+**Members are discovered live, never by parsing one file.** A static parse of `session/controller.py` cannot
 follow a mixin base and cannot see `SessionController.foo = foo` executed at import time at all — and that is
 exactly the escape the total exists to close. So `SessionController` is imported and its MRO walked, the
 `reducer_purity` idiom, with each member's source resolved back through `inspect`.
@@ -75,7 +75,7 @@ def _tree(path: Path) -> ast.Module:
 
 
 def _session_controller() -> type:
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     return SessionController
 

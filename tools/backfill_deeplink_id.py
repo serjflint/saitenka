@@ -235,10 +235,10 @@ def _apply_writes(
 def _run(args: argparse.Namespace) -> int:
     from saitenka.app.anki import ANKI_DOWN_ERRORS, Anki
     from saitenka.app.config import load_config
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
     cfg = load_config()
-    deck = args.deck or _mine_config_from(cfg.get("mine") or {}).deck
+    deck = args.deck or mine_config_from(cfg.get("mine") or {}).deck
     query = build_query(deck, args.model, args.query)
 
     anki = Anki()

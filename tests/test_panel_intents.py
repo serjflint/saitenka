@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app.panel_intents import (
+from saitenka.app.session.panel_intents import (
     ClosePanel,
     DismissHover,
     OpenPanel,

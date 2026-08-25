@@ -9,7 +9,7 @@ from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState, Interactio
 from saitenka.app.subtitle_render import SUB_ID
 
 if TYPE_CHECKING:
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
 
 def _visible_surfaces(commands: list[tuple]) -> set[object]:

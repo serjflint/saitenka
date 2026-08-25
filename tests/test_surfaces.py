@@ -1,4 +1,4 @@
-"""The installed OSD-surface router (saitenka.app.surfaces).
+"""The installed OSD-surface router (saitenka.app.session.surfaces).
 
 Two layers: the registry *contract* (short-circuit routing, no-op defaults, capture-from-``open``) tested
 with synthetic specs, and a guard that the production router keeps its documented z-order and that
@@ -11,11 +11,11 @@ from __future__ import annotations
 import pytest
 import util
 
-from saitenka.app import sidebar
 from saitenka.app.bindings import SCROLL_DOWN_MSG
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.sidebar import sidebar
+from saitenka.app.session.controller import SessionController
+from saitenka.app.session.surfaces import SurfaceRouter, SurfaceSpec
 from saitenka.app.subselect import SubtitleCandidate
-from saitenka.app.surfaces import SurfaceRouter, SurfaceSpec
 from saitenka.runtime import UserCommand, events
 from saitenka.runtime import sidebar as runtime_sidebar
 
@@ -148,7 +148,7 @@ def test_scroll_command_routes_to_open_help():
 
 
 def test_scroll_command_routes_to_open_picker(monkeypatch):
-    from saitenka.app.sub_picker import ListingResult
+    from saitenka.app.features.picker.sub_picker import ListingResult
     from saitenka.runtime import events, picker
 
     reader = SessionController(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))

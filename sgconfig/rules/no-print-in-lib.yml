@@ -8,7 +8,7 @@ note: app/logsetup.py — structlog processors redact secrets/paths from every r
 files:
   - "src/saitenka/**/*.py"
 # Allowed print() surfaces: the CLI entrypoint and the subcommand packages it composes, the interactive
-# wizards/prompts, and the pre-logging bootstrap (reader_deps, crashlog). Everything else must log —
+# wizards/prompts, and the pre-logging bootstrap (session deps, crashlog). Everything else must log —
 # a runtime line the user is meant to READ goes to `logsetup.user_facing_logger()`, not to stdout.
 # Kept in step with pyproject's `[tool.ruff.lint.per-file-ignores]` "print" entries — that list is the
 # SSOT and `tests/test_print_surface_allowlist.py` fails when the two drift.
@@ -17,12 +17,12 @@ ignores:
   - "src/saitenka/app/commands/*.py"
   - "src/saitenka/app/launch/run.py"
   - "src/saitenka/app/config_editor.py"
-  - "src/saitenka/app/profile_cli.py"
+  - "src/saitenka/app/features/profiles/profile_cli.py"
   - "src/saitenka/app/*wizard*.py"
   - "src/saitenka/app/prompt.py"
   - "src/saitenka/app/doctor.py"
   - "src/saitenka/app/yomitan_import.py"
-  - "src/saitenka/app/reader_deps.py"
+  - "src/saitenka/app/session/deps.py"
   - "src/saitenka/app/crashlog.py"
 rule:
   pattern: print($$$)

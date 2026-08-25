@@ -9,8 +9,8 @@ from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
 from util import FakeIPC, runtime_gateway
 
 from saitenka.app.bindings import SUB_PICKER_MSG
-from saitenka.app.session_controller import SessionController
-from saitenka.app.session_routes import install_session_reactor
+from saitenka.app.session.controller import SessionController
+from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.mpvio.ipc import IPCRequest

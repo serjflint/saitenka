@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session_controller import SessionController
-from saitenka.app.session_routes import install_session_reactor
+from saitenka.app.session.controller import SessionController
+from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.effects import STARTUP_EFFECTS
 from saitenka.runtime.events import ConnectionReplaced, SessionStarting, StartPhase
@@ -81,8 +81,8 @@ def test_a_step_that_fails_stops_the_phase_rather_than_reporting_it_up() -> None
     `_retire` isolates each close participant because teardown has to continue at all costs. The
     setup half deliberately does not — the phases behind a step depend on it.
     """
-    from saitenka.app.session_resources import Starting
-    from saitenka.app.session_routes import OBSERVERS_PARTICIPANT, _dispatcher
+    from saitenka.app.session.resources import Starting
+    from saitenka.app.session.routes import OBSERVERS_PARTICIPANT, _dispatcher
     from saitenka.runtime.diagnostics import RuntimeLedger
     from saitenka.runtime.effects import StartPropertyObservation
 
@@ -102,7 +102,7 @@ def test_a_step_that_fails_stops_the_phase_rather_than_reporting_it_up() -> None
 
 def test_an_unregistered_step_is_reported_rather_than_silently_skipped() -> None:
     """False, not an exception: a session whose owner never registered a step still runs its own."""
-    from saitenka.app.session_routes import _dispatcher
+    from saitenka.app.session.routes import _dispatcher
     from saitenka.runtime.diagnostics import RuntimeLedger
     from saitenka.runtime.effects import OpenSessionHistory
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from saitenka.app.intents import DismissHover
-from saitenka.app.interaction_intents import (
+from saitenka.app.session.interaction_intents import (
     CopyUnderCursor,
     InteractionCommand,
     InteractionInputs,

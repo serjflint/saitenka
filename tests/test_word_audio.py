@@ -2,7 +2,7 @@
 
 import json
 
-from saitenka.app.word_audio import load_index, resolve
+from saitenka.app.features.mining.word_audio import load_index, resolve
 
 
 def _write_pack(tmp_path, index: dict, *, files: tuple[str, ...] = ()):

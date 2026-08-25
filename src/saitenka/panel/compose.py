@@ -173,7 +173,7 @@ class LazyPanel:
         :func:`~saitenka.parallel.shared_executor` (see :meth:`_finish_parallel`) instead of
         rendering serially on the calling thread — the same pool
         :meth:`~saitenka.render.banded.WindowedPanel.render_ahead` already uses for scroll-ahead
-        blocks. This is what ``app/prefetch.py``'s engaged (``full=True``) worker jobs land in: a
+        blocks. This is what tooltip prefetch's engaged (``full=True``) worker jobs land in: a
         several-second multi-dict ``finish()`` no longer burns entirely on one prefetch thread."""
         with self._lock:
             pending = list(self._pending)

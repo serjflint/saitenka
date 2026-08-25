@@ -1,6 +1,6 @@
 [
   {
-    "path": "src/saitenka/app/card_preview.py",
+    "path": "src/saitenka/app/features/preview/card_preview.py",
     "file_name": "card_preview.py",
     "functions": [
       {

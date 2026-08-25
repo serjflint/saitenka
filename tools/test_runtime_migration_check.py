@@ -54,7 +54,7 @@ def test_a_terminal_row_whose_symbol_moved_is_a_failure() -> None:
     """
     checker = _module()
     actual, symbols, evidence = checker.scan()
-    source = "src/saitenka/app/session_factory.py::create_session_controller"
+    source = "src/saitenka/app/session/factory.py::create_session_controller"
     checker._TERMINAL_DEBT = {"synthetic": frozenset({("reader-parameter", source)})}
     manifest = {
         "debt": [[item.kind, item.source] for item in sorted(actual)],
@@ -268,14 +268,14 @@ def test_manifest_rejects_deleted_added_and_moved_lifecycle_duties() -> None:
 
     moved = copy.deepcopy(original)
     moved["entrypoints"][0]["source"] = (
-        "src/saitenka/app/session_controller.py::SessionController.run"
+        "src/saitenka/app/session/controller.py::SessionController.run"
     )
     problems = checker.failures(moved, actual, symbols, evidence)
     # The key names the SITE as well as the duty: a duty can be sourced at several entrypoints,
     # and "one of them still does it by hand" is exactly what this census exists to report.
     assert any(
         item.startswith(
-            "run-owned-player@src/saitenka/app/session_controller.py::SessionController.run:"
+            "run-owned-player@src/saitenka/app/session/controller.py::SessionController.run:"
         )
         for item in problems["missing_evidence"]
     )
@@ -312,7 +312,7 @@ def test_scanner_exempts_the_presentation_adapters_but_not_their_callers() -> No
     assert (
         checker.Debt(
             "direct-overlay-mutation",
-            "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra",
+            "src/saitenka/app/interaction/presentation.py::InteractionSurfaces.present_bgra",
         )
         not in actual
     )

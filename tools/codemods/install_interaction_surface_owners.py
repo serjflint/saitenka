@@ -14,7 +14,7 @@ import libcst as cst
 
 ROOT = Path(__file__).resolve().parents[2]
 PATHS = (
-    ROOT / "src/saitenka/app/session_controller.py",
+    ROOT / "src/saitenka/app/session/controller.py",
     *(ROOT / "examples").glob("*.py"),
     *(ROOT / "tests").glob("test_*.py"),
 )

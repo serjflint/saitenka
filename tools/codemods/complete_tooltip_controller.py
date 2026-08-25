@@ -16,7 +16,7 @@ from pathlib import Path
 import libcst as cst
 
 ROOT = Path(__file__).resolve().parents[2]
-SESSION_CONTROLLER = "src/saitenka/app/session_controller.py"
+SESSION_CONTROLLER = "src/saitenka/app/session/controller.py"
 
 _READS = {
     "hover": "selected",

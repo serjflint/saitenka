@@ -406,7 +406,7 @@ class CompressedHeadCache:
 
 
 def content_key(key: Sequence[object]) -> str:
-    """Stable string form of a :class:`~saitenka.app.tooltip_panel.PanelKey` (or any tuple) for the cache. The
+    """Stable string form of a tooltip ``PanelKey`` (or any tuple) for the cache. The
     key already carries everything that changes the head pixels — lemma/surface/reading/inflected, the
     ⊕-vs-✓ mined + anki-reachable header state, per-group mined flags, and stacked-phrase terms — so two
     renders sharing a content_key are byte-identical (width/cap/theme live in ``config_sig``)."""

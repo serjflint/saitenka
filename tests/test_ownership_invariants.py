@@ -18,7 +18,7 @@ import typing
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app import session_routes
+import saitenka.app.session.routes as session_routes
 from saitenka.runtime import Owner
 from saitenka.runtime import events as event_types
 from saitenka.runtime.state import SessionState
@@ -148,7 +148,7 @@ def test_no_arm_of_the_session_controllers_fallback_drain_is_still_live_work():
     import ast
     from pathlib import Path
 
-    session_controller = Path(session_routes.__file__).with_name("session_controller.py")
+    session_controller = Path(session_routes.__file__).with_name("controller.py")
     drain = next(
         node
         for node in ast.walk(ast.parse(session_controller.read_text(encoding="utf-8")))

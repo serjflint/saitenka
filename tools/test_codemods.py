@@ -121,7 +121,7 @@ def test_surface_router_rewrite_refuses_a_different_context_receiver():
 
     rewritten, count = install_surface_router.transformed(
         source,
-        "src/saitenka/app/session_controller.py",
+        "src/saitenka/app/session/controller.py",
     )
 
     assert rewritten == (

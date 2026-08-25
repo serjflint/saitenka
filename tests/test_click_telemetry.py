@@ -10,8 +10,9 @@ from __future__ import annotations
 import util
 from util import record_spans
 
-from saitenka.app import backlog, sidebar
-from saitenka.app.session_controller import SessionController
+from saitenka.app import backlog
+from saitenka.app.features.sidebar import sidebar
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitles import SidebarHitBox
 from saitenka.runtime import events
 
@@ -87,8 +88,8 @@ def test_mined_store_write_is_spanned(monkeypatch, tmp_path):
     # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
     from types import SimpleNamespace
 
-    from saitenka.app import mined_store, miner
     from saitenka.app.anki import MineConfig
+    from saitenka.app.features.mining import mined_store, miner
 
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")

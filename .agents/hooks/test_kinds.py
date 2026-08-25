@@ -34,7 +34,7 @@ SUBSYSTEMS: dict[str, tuple[list[str], list[str]]] = {
         ["metamorphic (sub-pixel / scale-invariance)", "golden-image", "property-based"],
     ),
     "panel / windowed / interaction": (
-        ["*/panel/*.py", "*/render/window.py", "*/app/session_controller.py"],
+        ["*/panel/*.py", "*/render/window.py", "*/app/session/controller.py"],
         ["agreement / hit-test round-trip", "stateful (RuleBasedStateMachine)", "golden-image"],
     ),
     "cache layers": (
@@ -42,7 +42,7 @@ SUBSYSTEMS: dict[str, tuple[list[str], list[str]]] = {
         ["warm==cold cache-equivalence", "concurrency (race gate)", "eviction / idempotence"],
     ),
     "cli assembly": (
-        ["*/app/cli.py", "*/app/commands/*.py", "*/app/launch/*.py", "*/app/session_controller.py"],
+        ["*/app/cli.py", "*/app/commands/*.py", "*/app/launch/*.py", "*/app/session/controller.py"],
         ["assembly / pipeline integration oracle"],
     ),
     "profiles": (

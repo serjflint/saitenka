@@ -71,13 +71,39 @@ source_modules =
     saitenka.app
 forbidden_modules =
     PIL
-# subtitles/toast/card_preview/controller migrate to the raster protocol opportunistically, later
+# subtitles/toast/preview migrate to the raster protocol opportunistically, later
 # (see tests/test_layering.py docstring, pre-existing allowlist).
 ignore_imports =
     saitenka.app.subtitles -> PIL
     saitenka.app.toast -> PIL
-    saitenka.app.card_preview -> PIL
-    saitenka.app.miner_ui -> PIL
+    saitenka.app.features.preview.card_preview -> PIL
+    saitenka.app.features.preview.miner_ui -> PIL
+    saitenka.app.features.mining.preview_access -> PIL
+
+[importlinter:contract:feature-packages-acyclic]
+name = Feature packages do not form runtime dependency cycles
+type = acyclic_siblings
+ancestors =
+    saitenka.app.features
+
+[importlinter:contract:features-do-not-own-session]
+name = Feature packages do not import the session composition root
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    saitenka.app.features
+forbidden_modules =
+    saitenka.app.session
+
+[importlinter:contract:interaction-is-lower-level]
+name = Shared interaction primitives do not import features or session composition
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    saitenka.app.interaction
+forbidden_modules =
+    saitenka.app.features
+    saitenka.app.session
 
 [importlinter:contract:gpl-chokepoint]
 name = only app.dictionary / app.doctor may import the GPL deinflect add-on

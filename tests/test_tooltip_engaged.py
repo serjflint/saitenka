@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from types import SimpleNamespace
 
-from saitenka.app import tooltip_engaged
+from saitenka.app.features.tooltip import tooltip_engaged
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
 

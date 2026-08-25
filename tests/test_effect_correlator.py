@@ -416,7 +416,7 @@ def test_a_completion_is_dispatched_at_its_place_in_the_sequence() -> None:
 def test_a_claimed_batch_still_completes_the_effect_it_carried() -> None:
     """The completion belongs to the correlator, so claiming the observations around it changes
     who sees the batch and not whether the effect finishes."""
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())

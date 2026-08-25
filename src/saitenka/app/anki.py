@@ -13,6 +13,7 @@ import importlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,11 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 ANKI_HOST = "http://127.0.0.1:8765"  # AnkiConnect stock default (webBindAddress:webBindPort)
+
+
+def strip_field_html(value: str) -> str:
+    """Return the plain text used to compare or display an Anki field value."""
+    return re.sub(r"<[^>]+>", "", value).strip()
 
 
 def _windows_anki_app_path() -> str | None:
@@ -289,7 +295,7 @@ class MineConfig:
     flags: dict = field(default_factory=dict)
     # Opt-in word-pronunciation audio from a local yomichan/yomitan audio pack (#93, offline/grounded) —
     # ADDITIVE to the mined sentence/scene clip above, never a replacement. `word_audio_pack` is the pack
-    # dir (None = feature off, resolved by reader_deps._mine_config_from from [mine].word_audio_*);
+    # dir (None = feature off, resolved by mining_config.mine_config_from from [mine].word_audio_*);
     # `word_audio_field` is the note field it's written to. See word_audio.resolve.
     word_audio_pack: Path | None = None
     word_audio_field: str = "WordAudio"
@@ -476,7 +482,11 @@ def _entity_values(card, content: CardContent) -> dict:
 def _card_format_fields(cfg, card, content: CardContent, tags, markers) -> dict:
     """Render ``cfg.card_format`` (field -> ``{marker}`` template). ``markers`` from the miner when it
     has one; otherwise a partial map from ``content`` (pitch/pos/title empty)."""
-    from saitenka.app.card_markers import MarkerContext, build_markers, render_card_format
+    from saitenka.app.card_markers import (
+        MarkerContext,
+        build_markers,
+        render_card_format,
+    )
 
     if markers is None:
         markers = build_markers(

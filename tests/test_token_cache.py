@@ -13,7 +13,7 @@ import threading
 import pytest
 from util import FakeIPC, RecordingRasterProvider
 
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token

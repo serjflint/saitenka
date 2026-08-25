@@ -1,6 +1,6 @@
 """Reading-profile command admission stays pure and feature-owned."""
 
-from saitenka.app.profile_intents import (
+from saitenka.app.features.profiles.profile_intents import (
     ProfileCommand,
     ProfileInputs,
     SwitchProfile,

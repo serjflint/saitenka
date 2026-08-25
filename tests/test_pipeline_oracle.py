@@ -19,11 +19,11 @@ import pytest
 from dicthelp import AT, db, term_zip
 from util import FakeIPC
 
+from saitenka.app.features.tooltip.tooltip import entry_for_tok, resolve_hover
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.launch.run import RunDepsRequest, _build_run_deps
 from saitenka.app.profiles import resolve_launch_identity
-from saitenka.app.session_controller import SessionController
-from saitenka.app.tooltip import entry_for_tok, resolve_hover
+from saitenka.app.session.controller import SessionController
 from saitenka.render.sc_adapter import _text_of
 from saitenka.runtime.events import SubtitleLanguageChanged
 

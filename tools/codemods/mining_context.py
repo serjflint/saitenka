@@ -10,7 +10,7 @@ from pathlib import Path
 
 import libcst as cst
 
-SOURCE = Path("src/saitenka/app/miner.py")
+SOURCE = Path("src/saitenka/app/features/mining/miner.py")
 ENCOUNTER = {"cue", "dict_set", "ipc", "media_path", "playhead", "sentence_html", "hovered_terms"}
 APPLY = {"toast", "mark_mined", "mined_here", "preview_existing", "preview_mined"}
 

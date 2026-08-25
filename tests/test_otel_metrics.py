@@ -286,7 +286,7 @@ def test_record_show_metrics_bumps_overshoot_only_for_a_cold_over_budget_show():
     """A cold show past the budget is a first-paint miss; a warm show over budget (or a cold show
     under it) is not — the counter must fire on exactly the first case so the signal isn't polluted."""
 
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     over = otel_metrics.COLD_FIRST_PAINT_BUDGET_MS + 1
     under = otel_metrics.COLD_FIRST_PAINT_BUDGET_MS - 1

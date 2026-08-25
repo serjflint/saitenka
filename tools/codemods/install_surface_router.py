@@ -15,8 +15,8 @@ import libcst as cst
 
 ROOT = Path(__file__).resolve().parents[2]
 PATHS = (
-    ROOT / "src/saitenka/app/session_controller.py",
-    ROOT / "src/saitenka/app/interaction_adapter.py",
+    ROOT / "src/saitenka/app/session/controller.py",
+    ROOT / "src/saitenka/app/session/interaction_adapter.py",
 )
 
 
@@ -36,14 +36,14 @@ class InstallSurfaceRouter(cst.CSTTransformer):
 
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
         name = _dotted(original_node.func)
-        if self._relative == "src/saitenka/app/session_controller.py":
+        if self._relative == "src/saitenka/app/session/controller.py":
             methods = {
                 "surfaces.suppress_hover": "suppress_hover",
                 "surfaces.route_click": "route_click",
                 "surfaces.wants_mouse_capture": "wants_mouse_capture",
             }
             receiver = cst.Name("self")
-        elif self._relative == "src/saitenka/app/interaction_adapter.py":
+        elif self._relative == "src/saitenka/app/session/interaction_adapter.py":
             methods = {"surfaces.route_scroll": "route_scroll"}
             receiver = cst.Name("host")
         else:
@@ -88,7 +88,7 @@ def _self_test() -> None:
         "self.surface_router.wants_mouse_capture()\n"
         "surfaces.wants_mouse_capture(other.interaction)\n"
     )
-    rewritten, count = transformed(source, "src/saitenka/app/session_controller.py")
+    rewritten, count = transformed(source, "src/saitenka/app/session/controller.py")
     if rewritten != expected or count != 2:
         raise AssertionError((rewritten, count))
 

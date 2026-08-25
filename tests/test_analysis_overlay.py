@@ -9,7 +9,7 @@ from saitenka.app import analysis_overlay
 from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.wordlists import KnownWords
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime.events import (

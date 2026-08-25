@@ -10,8 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "saitenka" / "app"
 
-_OWNER = "tooltip_controller.py"
-_COMPOSITION = "session_controller.py"
+_OWNER = "features/tooltip/tooltip_controller.py"
+_COMPOSITION = "session/controller.py"
 _CONSTRUCTORS = {
     "HoveredWordStore",
     "HoverPauseStore",

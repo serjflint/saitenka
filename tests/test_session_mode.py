@@ -14,7 +14,7 @@ import threading
 import pytest
 
 from saitenka.app.launch import run as cli_run
-from saitenka.app.session_runtime import (
+from saitenka.app.session.runtime import (
     SessionActs,
     SessionEntry,
     SessionFacts,
@@ -185,7 +185,7 @@ def test_demo_waits_for_readiness_and_uses_the_owned_terminal_sequence():
     have produced a correct-looking panel sized for a window that does not exist — the failure a
     fixed sleep cannot rule out and a bounded wait on the fact can.
     """
-    from saitenka.app.session_runtime import SessionRuntime
+    from saitenka.app.session.runtime import SessionRuntime
 
     reader = _GeometryReader(turns_until_geometry=3)
     runtime = SessionRuntime(_geometry_facts(reader), _geometry_acts(reader), ipc=None)
@@ -197,7 +197,7 @@ def test_demo_waits_for_readiness_and_uses_the_owned_terminal_sequence():
 
 def test_a_demo_that_never_gets_geometry_gives_up_on_its_deadline():
     """The negative control: without it the assertion above passes on a predicate stuck at True."""
-    from saitenka.app.session_runtime import SessionRuntime
+    from saitenka.app.session.runtime import SessionRuntime
 
     clock = iter([0.0, 0.0, 1.0, 9.0])
     reader = _GeometryReader(turns_until_geometry=10**6)

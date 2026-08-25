@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC
 
-from saitenka.app import miner_ui
-from saitenka.app.card_preview import PreviewData
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.preview import miner_ui
+from saitenka.app.features.preview.card_preview import PreviewData
+from saitenka.app.session.controller import SessionController
 from saitenka.runtime import events
 
 

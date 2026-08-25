@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC
 
-from saitenka.app.tooltip import _freeze_frame
-from saitenka.app.tooltip_panel import place_tip
+from saitenka.app.features.tooltip.tooltip import _freeze_frame
+from saitenka.app.features.tooltip.tooltip_panel import place_tip
 
 
 def _paused(ipc: FakeIPC) -> list[tuple]:
@@ -95,8 +95,8 @@ def test_a_panel_build_needs_no_host() -> None:
     changing underneath it — the same reason `DrawRequest` is frozen. That it constructs at all with
     no SessionController in scope is the assertion.
     """
+    from saitenka.app.features.tooltip.tooltip_panel import PanelKey, PanelStyle, _build_panel
     from saitenka.app.tokenize import Token
-    from saitenka.app.tooltip_panel import PanelKey, PanelStyle, _build_panel
     from saitenka.panel import Definition, Entry
 
     class _DictSet:
@@ -135,7 +135,7 @@ def test_a_panel_build_needs_no_host() -> None:
 def test_the_style_is_frozen_so_a_build_cannot_see_it_change() -> None:
     from dataclasses import FrozenInstanceError
 
-    from saitenka.app.tooltip_panel import PanelStyle
+    from saitenka.app.features.tooltip.tooltip_panel import PanelStyle
 
     style = PanelStyle(
         width=420,

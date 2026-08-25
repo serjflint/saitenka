@@ -153,7 +153,7 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
     """
     import util
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import SubtitleRenderer
 
     def origin_for(frac: float) -> tuple[int, int]:

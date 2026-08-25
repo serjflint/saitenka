@@ -173,7 +173,7 @@ class _ExistsDS:
 def _reader(recorder, *, dict_set=None):
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import SubtitleRenderer
 
     reader = SessionController(FakeIPC(), dict_set=dict_set)

@@ -14,10 +14,10 @@ from types import SimpleNamespace
 import pytest
 import util
 
-from saitenka.app import sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
-from saitenka.app.session_assembly import build_session_assembly
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.sidebar import sidebar
+from saitenka.app.session.assembly import build_session_assembly
+from saitenka.app.session.controller import SessionController
 from saitenka.runtime import events
 from saitenka.runtime.help import HelpCommand
 from saitenka.subtitles import Cue, CueIndex

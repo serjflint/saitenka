@@ -3,7 +3,7 @@ Also the #193 catalog invariants — one CATALOG feeds MARKERS, build_markers, a
 
 from pathlib import Path
 
-from saitenka.app import card_markers as cm
+import saitenka.app.card_markers as cm
 from saitenka.app.card_markers import (
     CATALOG,
     MARKERS,

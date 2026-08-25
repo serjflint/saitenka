@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session_routes import install_session_reactor
+from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import (
     CopyPulsed,
     CopyPulseExpired,
@@ -197,7 +197,7 @@ def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
     the machine armed, with no mirrored copy in between that can go stale."""
     from driver import Driver
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()

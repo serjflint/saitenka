@@ -8,7 +8,7 @@ members are not independent.
 `subtitle_slang`, `subtitle_tracks`, `_translation_secondary_sid`, `_last_announced_sid`) are
 properties over `self._subtitle_tracks.current` — ONE fact wearing seven names. Sixteen says "too
 big for a value"; ten says "a port, and here are its fields". Only the second is true, and reading
-`session_controller.py` to find that out is the expensive step this replaces.
+`session/controller.py` to find that out is the expensive step this replaces.
 
     uv run python tools/cluster_map.py <module.py> [...]   # the map, per module
     uv run python tools/cluster_map.py --json <module.py>  # the same, machine-readable
@@ -39,7 +39,7 @@ import host_arity
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "saitenka" / "app"
-CONTROLLER = APP / "session_controller.py"
+CONTROLLER = APP / "session" / "controller.py"
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,14 +81,14 @@ def _decorated(node: ast.FunctionDef, name: str) -> bool:
 
 
 def classify_host() -> dict[str, Member]:
-    """Every name `controller.<x>` can resolve to, read once from `session_controller.py`."""
+    """Every name `controller.<x>` can resolve to, read once from `session/controller.py`."""
     tree = ast.parse(CONTROLLER.read_text(encoding="utf-8"), filename=str(CONTROLLER))
     controller = next(
         (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionController"),
         None,
     )
     if controller is None:
-        raise SystemExit("session_controller.py has no class SessionController")
+        raise SystemExit("session/controller.py has no class SessionController")
     members: dict[str, Member] = {}
 
     for node in controller.body:

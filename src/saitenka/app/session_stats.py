@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.episode_analysis import EpisodeAnalysis
-    from saitenka.app.reader_context import EpisodeContext
+    from saitenka.app.session.context import EpisodeContext
 
 log = logging.getLogger(__name__)
 _DB_PATH_OVERRIDE: Path | None = None

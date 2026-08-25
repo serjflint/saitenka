@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from saitenka.app.reader_context import SubtitleSource
+    from saitenka.app.session.context import SubtitleSource
     from saitenka.runtime.events import SubtitleEvent
     from saitenka.runtime.subtitle import SubtitleTrackState
 

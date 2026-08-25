@@ -35,7 +35,7 @@ def _screenshot(ipc, path: Path) -> Image.Image:
 
 def _targets_for(reader, x, y):
     """The live check's view of `_hover_targets`, wired from the reader it is probing."""
-    from saitenka.app.tooltip import _hover_targets
+    from saitenka.app.features.tooltip.tooltip import _hover_targets
 
     return _hover_targets(
         x,

@@ -383,7 +383,7 @@ def _resolve_dispatch(
 _HOST_NAMES = {
     "SessionController",
     "session_controller.SessionController",
-    "saitenka.app.session_controller.SessionController",
+    "saitenka.app.session.controller.SessionController",
 }
 
 

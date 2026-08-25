@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from saitenka.app import prefetch
+from saitenka.app.features.tooltip import prefetch
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 

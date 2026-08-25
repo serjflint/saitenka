@@ -12,14 +12,17 @@ from hypothesis import strategies as st
 from util import FakeIPC as RuntimeFakeIPC
 from util import await_ready, keybind_registry, runtime_gateway
 
-import saitenka.app.session_controller as C
-from saitenka.app import bindings, miner, miner_ui, nested_popup, tooltip, tooltip_panel
+import saitenka.app.session.controller as C
+from saitenka.app import bindings
 from saitenka.app.anki import MineConfig
-from saitenka.app.mining_controller import MiningSpec, MiningTarget
+from saitenka.app.features.mining import miner
+from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
+from saitenka.app.features.preview import miner_ui
+from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
+from saitenka.app.features.tooltip.tooltip_panel import PanelKey
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.tooltip_panel import PanelKey
 
 
 class FakeIPC(RuntimeFakeIPC):
@@ -1970,7 +1973,7 @@ def _point_at_link(r) -> Driver:
 def test_click_cross_reference_navigates_base_in_place(monkeypatch):
     # Yomitan historyMode:new — a cross-reference click REPLACES the base tooltip content in place and
     # pushes the previous view for back, instead of spawning a fragile floating nested popup.
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     ipc = FakeIPC()
     r = _link_reader(ipc)
@@ -2295,7 +2298,7 @@ def test_closing_retires_a_pending_copy_flash(monkeypatch):
 def _preview_reader(ipc, *, with_audio=True, with_image=True):
     from PIL import Image as PILImage
 
-    from saitenka.app.card_preview import PreviewData
+    from saitenka.app.features.preview.card_preview import PreviewData
 
     r = SessionController(ipc)
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -2428,7 +2431,7 @@ def test_mined_seed_query_preloads_deck_expressions():
                 {"fields": {"Expression": {"value": "<b>通り</b>"}}},
             ]
 
-    from saitenka.app.mined_seed import mined_expressions
+    from saitenka.app.features.mining.mined_seed import mined_expressions
 
     assert mined_expressions(FakeAnki(), MineConfig()) == {"奉書", "通り"}
 
@@ -2724,8 +2727,8 @@ def test_capture_media_failure_shows_toast(monkeypatch):
     # A deck to mine into: capture runs off the mining value, which a session without one never builds.
     _enable_mining(r)
 
-    # Patch screenshot and clip_audio to always raise (capture lives in app/miner.py since 8d).
-    import saitenka.app.miner as _M
+    # Patch screenshot and clip_audio to always raise (capture lives in the mining feature).
+    import saitenka.app.features.mining.miner as _M
 
     monkeypatch.setattr(_M, "screenshot", lambda *_a: (_ for _ in ()).throw(OSError("snap failed")))
     monkeypatch.setattr(_M, "clip_audio", lambda *_a: (_ for _ in ()).throw(OSError("clip failed")))
@@ -3217,7 +3220,7 @@ def test_reader_kwargs_still_work_and_map_onto_groups():
 
 
 def test_prefetch_queue_items_are_typed_dataclasses():
-    from saitenka.app.prefetch import PrefetchItem
+    from saitenka.app.features.tooltip.prefetch import PrefetchItem
 
     ipc = FakeIPC()
     ipc.props["pause"] = True
@@ -3238,7 +3241,7 @@ def test_prefetch_queue_items_are_typed_dataclasses():
 
 
 def test_popups_module_unifies_popup_view_state():
-    from saitenka.app.popups import Panel, PopupView
+    from saitenka.app.features.tooltip.popups import Panel, PopupView
     from saitenka.panel import Definition, Entry, panel_rows
 
     pv = PopupView()
@@ -3256,7 +3259,7 @@ def test_popups_module_unifies_popup_view_state():
 
 
 def test_from_rows_band_cache_max_retains_more_of_a_tall_panel():
-    from saitenka.app.popups import Panel
+    from saitenka.app.features.tooltip.popups import Panel
     from saitenka.panel import Definition, Entry, panel_rows
 
     # A tall, polysemous entry whose blocks far exceed one viewport, so eviction actually bites.
@@ -3276,8 +3279,8 @@ def test_from_rows_band_cache_max_retains_more_of_a_tall_panel():
 
 
 def test_miner_module_owns_the_mining_flow(monkeypatch):
-    from saitenka.app import miner
-    from saitenka.app.miner import tag_slug
+    from saitenka.app.features.mining import miner
+    from saitenka.app.features.mining.miner import tag_slug
 
     assert tag_slug("Nippon Sangoku") == "Nippon_Sangoku"
     ipc = FakeIPC()
@@ -3298,7 +3301,7 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
 def test_a_reader_with_no_deck_has_no_active_mining_target(monkeypatch):
     """ "Is there anywhere to mine into" is decided once, by the property, instead of at every entry
     point — so an unconfigured session cannot reach the flow at all."""
-    from saitenka.app import miner
+    from saitenka.app.features.mining import miner
 
     r = _reader_with_word(FakeIPC())
     monkeypatch.setattr(miner, "mine_token", lambda *_a, **_k: pytest.fail("mined with no deck"))
@@ -3443,7 +3446,7 @@ def test_a_refused_seek_is_reported_rather_than_discarded(caplog):
 def test_anki_media_failures_are_absent_media_not_errors() -> None:
     """An optional integration being down is an ordinary state, not something to raise through a
     keypress — a preview missing its screenshot is still a preview."""
-    from saitenka.app.miner_ui import media_image, media_tempfile
+    from saitenka.app.features.mining.preview_access import media_image, media_tempfile
 
     class DownAnki:
         def retrieve_media(self, _name):
@@ -3456,7 +3459,7 @@ def test_anki_media_failures_are_absent_media_not_errors() -> None:
 
 
 def test_sentence_lines_rejoins_each_tokenized_line() -> None:
-    from saitenka.app.miner_ui import sentence_lines
+    from saitenka.app.features.preview.miner_ui import sentence_lines
     from saitenka.app.tokenize import Token
 
     def token(surface: str) -> Token:
@@ -3496,8 +3499,8 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
     fake missing the port silently took the other branch. Both triggers must now be indistinguishable
     at the wire.
     """
-    from saitenka.app import hover_intents
-    from saitenka.app.hover_adapter import HoverAdapter
+    from saitenka.app.features.tooltip import hover_intents
+    from saitenka.app.features.tooltip.hover_adapter import HoverAdapter
 
     def resume_via(act) -> list[tuple]:
         ipc = FakeIPC()

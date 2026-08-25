@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session_controller import SessionController
-from saitenka.app.session_routes import install_session_reactor
+from saitenka.app.session.controller import SessionController
+from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.connection import ConnectionState, ConnectionStore, reduce_connection
 from saitenka.runtime.effects import ReplaySubtitleSelection, RetireCueIdentity

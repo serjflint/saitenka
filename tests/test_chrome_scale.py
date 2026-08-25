@@ -11,7 +11,7 @@ from __future__ import annotations
 import util
 
 from saitenka.app.config import PanelOptions, ReaderOptions
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.runtime import events
 
 REF_H = 1080

@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 import util
 
-from saitenka.app.popups import PopupView, TooltipState
-from saitenka.app.reader_context import EpisodeContext
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip.popups import PopupView, TooltipState
+from saitenka.app.session.context import EpisodeContext
+from saitenka.app.session.controller import SessionController
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleStartupConfigured
 from saitenka.subtitles import Cue
 

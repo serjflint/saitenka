@@ -2,8 +2,12 @@
 
 from PIL import Image
 
-from saitenka.app.card_preview import PreviewData, PreviewPanel, render_card_preview
-from saitenka.app.miner_ui import _html_items, _html_lines, _media_name
+from saitenka.app.features.preview.card_preview import (
+    PreviewData,
+    PreviewPanel,
+    render_card_preview,
+)
+from saitenka.app.features.preview.miner_ui import _html_items, _html_lines, _media_name
 
 
 def test_preview_panel_clear_resets_every_rect_and_keeps_the_mined_media():

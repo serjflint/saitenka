@@ -1,12 +1,12 @@
 {
   "censused": [
     "src/saitenka/render/banded.py",
-    "src/saitenka/app/tooltip_panel.py",
-    "src/saitenka/app/profile_controller.py",
-    "src/saitenka/app/mining_controller.py",
-    "src/saitenka/app/tooltip_controller.py",
-    "src/saitenka/app/session_controller.py",
-    "src/saitenka/app/session_routes.py",
+    "src/saitenka/app/features/tooltip/tooltip_panel.py",
+    "src/saitenka/app/features/profiles/profile_controller.py",
+    "src/saitenka/app/features/mining/mining_controller.py",
+    "src/saitenka/app/features/tooltip/tooltip_controller.py",
+    "src/saitenka/app/session/controller.py",
+    "src/saitenka/app/session/routes.py",
     "src/saitenka/runtime/reactor.py",
     "src/saitenka/runtime/jobs.py",
     "src/saitenka/runtime/loop.py"
@@ -198,12 +198,12 @@
       "claim": "render_ahead warms one screen of overscan",
       "class": 4,
       "status": "argued",
-      "evidence": "falsified as prose — it defaults to overscan=0 and app/popups.py injects view_h. No production caller uses the default; only the prefetch tests do, so they exercise a threshold production never uses",
+      "evidence": "falsified as prose — it defaults to overscan=0 and the tooltip feature injects view_h. No production caller uses the default; only the prefetch tests do, so they exercise a threshold production never uses",
       "settles": "default it here, or state that the caller owns it and fix the prefetch tests' overscan"
     },
     {
       "id": "B21",
-      "module": "src/saitenka/app/tooltip_panel.py",
+      "module": "src/saitenka/app/features/tooltip/tooltip_panel.py",
       "claim": "apply_pending_crisp is a cheap warmth check per tick, never a re-blit-per-tick churn",
       "class": 6,
       "status": "tested",
@@ -248,7 +248,7 @@
     },
     {
       "id": "P1",
-      "module": "src/saitenka/app/profile_controller.py",
+      "module": "src/saitenka/app/features/profiles/profile_controller.py",
       "claim": "ProfileController is the sole writer of active profile, profile index, tokenizer, and dictionary-set facts",
       "class": 1,
       "status": "argued",
@@ -257,7 +257,7 @@
     },
     {
       "id": "P2",
-      "module": "src/saitenka/app/session_controller.py",
+      "module": "src/saitenka/app/session/controller.py",
       "claim": "SessionController applies the profile transaction only through narrow owner-thread capabilities and carries no profile switch policy",
       "class": 2,
       "status": "argued",
@@ -266,7 +266,7 @@
     },
     {
       "id": "P3",
-      "module": "src/saitenka/app/mining_controller.py",
+      "module": "src/saitenka/app/features/mining/mining_controller.py",
       "claim": "Selected profile identity qualifies the desired mining spec, prepared target, and mined index, so late dependency work cannot overwrite the selected profile",
       "class": 1,
       "status": "gated",
@@ -275,7 +275,7 @@
     },
     {
       "id": "M1",
-      "module": "src/saitenka/app/mining_controller.py",
+      "module": "src/saitenka/app/features/mining/mining_controller.py",
       "claim": "MiningController is the sole writer and construction boundary for the mining index, transaction, store, and scratch lifecycle",
       "class": 1,
       "status": "gated",
@@ -284,7 +284,7 @@
     },
     {
       "id": "P4",
-      "module": "src/saitenka/app/profile_controller.py",
+      "module": "src/saitenka/app/features/profiles/profile_controller.py",
       "claim": "Every production profile transaction is applied on the session owner thread",
       "class": 2,
       "status": "argued",
@@ -293,7 +293,7 @@
     },
     {
       "id": "T1",
-      "module": "src/saitenka/app/tooltip_controller.py",
+      "module": "src/saitenka/app/features/tooltip/tooltip_controller.py",
       "claim": "TooltipController and its delegated presentation helpers are the only writers of mutable tooltip state and volatile-work state",
       "class": 1,
       "status": "argued",
@@ -302,7 +302,7 @@
     },
     {
       "id": "R1",
-      "module": "src/saitenka/app/session_routes.py",
+      "module": "src/saitenka/app/session/routes.py",
       "claim": "A runtime-owned close phase is recorded successful only when every registered resource in that phase closed successfully",
       "class": 1,
       "status": "argued",
@@ -320,7 +320,7 @@
     },
     {
       "id": "S1",
-      "module": "src/saitenka/app/session_controller.py",
+      "module": "src/saitenka/app/session/controller.py",
       "claim": "The typed adapter and capability forwarding seams add no material latency to the interactive owner-thread path",
       "class": 3,
       "status": "argued",

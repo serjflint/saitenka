@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app.intents import Announce
-from saitenka.app.mine_intents import (
+from saitenka.app.features.mining.mine_intents import (
     MineCommand,
     MineEpisode,
     MineInputs,
     MineToken,
     reduce,
 )
+from saitenka.app.intents import Announce
 
 READY = MineInputs(configured=True, target=3)
 _WORD_COMMANDS = [MineCommand.WORD, MineCommand.WORD_VIDEO]
@@ -63,7 +63,7 @@ def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
 
 
 def test_bookmarking_needs_a_cue_on_screen() -> None:
-    from saitenka.app.mine_intents import BookmarkCue
+    from saitenka.app.features.mining.mine_intents import BookmarkCue
 
     assert reduce(MineCommand.BOOKMARK_CUE, MineInputs(has_active_cue=True)) == (BookmarkCue(),)
 
@@ -77,7 +77,7 @@ def test_bookmarking_without_a_cue_says_so() -> None:
 def test_bookmarking_does_not_need_anki() -> None:
     """It writes to the local backlog. Gating it on the mining configuration would refuse a request
     that has nothing to do with Anki."""
-    from saitenka.app.mine_intents import BookmarkCue
+    from saitenka.app.features.mining.mine_intents import BookmarkCue
 
     assert reduce(MineCommand.BOOKMARK_CUE, MineInputs(configured=False, has_active_cue=True)) == (
         BookmarkCue(),

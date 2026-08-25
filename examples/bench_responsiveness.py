@@ -28,9 +28,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from saitenka.app import nested_popup, tooltip, tooltip_panel
 from saitenka.app.config import load_config
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
+from saitenka.app.session.controller import SessionController
 from saitenka.app.tokenize import Token, tokenize
 from saitenka.mpvio.osd import to_bgra, to_bgra_array
 from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
@@ -553,7 +553,7 @@ def run_render_cache(
         f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_scale.width}   cap: {cap}px   "
         f"gate: full_h ≥ {reader._render_cache_min_height()}px   reps/word: {reps}"
     )
-    from saitenka.app import tooltip as _tt
+    import saitenka.app.features.tooltip.tooltip as _tt
 
     def perceived_paint(term: str, reading: str) -> float | None:
         """Time-to-pixels the user actually feels on a cold cache HIT: place + decorate + upload the
@@ -1175,9 +1175,11 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     import tempfile
     from types import SimpleNamespace
 
-    from saitenka.app import backlog, mined_store, sidebar
-    from saitenka.app import miner as miner_flow
+    import saitenka.app.features.mining.miner as miner_flow
+    from saitenka.app import backlog
     from saitenka.app.anki import MineConfig
+    from saitenka.app.features.mining import mined_store
+    from saitenka.app.features.sidebar import sidebar
     from saitenka.subtitles import Cue, CueIndex
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-clicks-"))

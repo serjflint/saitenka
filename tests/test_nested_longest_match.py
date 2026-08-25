@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app import nested_popup
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip import nested_popup
+from saitenka.app.session.controller import SessionController
 from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import get_tokenizer
 from saitenka.model import LinkBox, ScanBox
@@ -62,7 +62,7 @@ class _RecordingDS:
 def test_link_query_is_looked_up_whole_not_tokenized():
     # Regression (それにしては → その): a cross-reference link ``?query=それにしては`` must look up the WHOLE
     # compound, not tokenize it and take the first token (それ). Both nav paths build a whole-query token.
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
     from saitenka.app.tokenize import query_token
 
     assert query_token("それにしては").surface == "それにしては"

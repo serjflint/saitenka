@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
+import saitenka.app.session.deps as reader_deps
 from saitenka.app import anki as anki_mod
-from saitenka.app import reader_deps
 
 
 @pytest.fixture(autouse=True)

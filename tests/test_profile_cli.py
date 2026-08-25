@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app.profile_cli import (
+from saitenka.app.features.profiles.profile_cli import (
     add_proposal,
     build_profile_table,
     profile_app,

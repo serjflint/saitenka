@@ -379,7 +379,7 @@ max-args = 8
 "src/saitenka/app/prompt.py" = ["print"]  # shared prompt seam: the numbered fallback prints its choices
 # T201: the `saitenka config` editor + `saitenka profile` manager are user-invoked subcommands — print() is UX.
 "src/saitenka/app/config_editor.py" = ["print"]
-"src/saitenka/app/profile_cli.py" = ["print"]
+"src/saitenka/app/features/profiles/profile_cli.py" = ["print"]
 # Palette's defaults are pure constant color parses (_hex on literals) in a frozen dataclass —
 # hoisting five one-use constants would only add indirection.
 "src/saitenka/app/scoring.py" = ["function-call-in-dataclass-default-argument"]
@@ -393,7 +393,7 @@ max-args = 8
 "src/saitenka/app/yomitan_import.py" = ["print"]
 # T201: pre-logging bootstrap — runs before configure_logging() attaches handlers, so log.*
 # has nowhere to go yet; matches no-print-in-lib.yml.
-"src/saitenka/app/reader_deps.py" = ["print"]
+"src/saitenka/app/session/deps.py" = ["print"]
 "src/saitenka/app/crashlog.py" = ["print"]
 # media.py dispatches on sys.platform with a `return` per branch; the explicit `else` is a DELIBERATE
 # mypy platform-narrowing guard (without it, mypy flags the fall-through as unreachable on the build
@@ -810,6 +810,10 @@ corpus-lock = { shell = "uv run --extra full python tools/corpus_check.py check"
 # startup, close, and entrypoint duties additionally resolve to live source symbols.
 runtime-migration = { shell = "uv run --extra full python tools/runtime_migration_check.py check" }
 runtime-status = { shell = "uv run --extra full python tools/runtime_migration_check.py status", help = "Per-kind runtime-debt census — read counts from here, never retype them into a doc" }
+# GATE (in `all`) — feature packages are an explicit inventory, and their retired flat module names
+# cannot return. Dependency direction and feature-package cycles are enforced by `.importlinter`.
+# Planted controls: tools/test_app_package_layout.py.
+app-package-layout = { shell = "uv run python tools/app_package_layout.py" }
 # GATE (in `all`) — mining target/index/transaction/store have one writer. Unlike a line-count
 # ratchet, this rejects the old shadow fields and direct mutator/construction escape routes. Planted
 # controls: tools/test_mining_ownership_check.py.
@@ -933,7 +937,7 @@ hygiene = ["deadcode", "dup"]
 # name to type and one contract. CI splits the two halves across two jobs instead: the suite costs ~128s
 # of a 4-core runner, and running both passes in the same job made the gate the longest job in the run by
 # a wide margin. Both halves sync the same dev env, so the split changes wall-clock, not coverage.
-gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "runtime-migration", "mining-ownership", "tooltip-ownership", "host-arity", "host-mass", "port-probe", "reducer-purity"]
+gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "runtime-migration", "app-package-layout", "mining-ownership", "tooltip-ownership", "host-arity", "host-mass", "port-probe", "reducer-purity"]
 all = ["gate-no-ft", "test-ft"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not

@@ -75,8 +75,8 @@ def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None =
     ``config_dir`` replaces the default ``--no-config`` with a real mpv config directory, for the one
     question that cannot be asked without a user's own ``input.conf`` present. Everything else wants
     ``--no-config``: a developer's own ``mpv.conf`` would answer a different question."""
-    from saitenka.app.session_controller import SessionController
-    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.routes import install_session_runtime
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
 

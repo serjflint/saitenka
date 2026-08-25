@@ -936,7 +936,7 @@ def test_installing_a_session_runtime_keeps_the_reactor_reachable() -> None:
     """
     from util import FakeIPC
 
-    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.app.session.routes import install_session_runtime
 
     gateway = install_session_runtime(FakeIPC())
     try:

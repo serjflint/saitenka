@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from saitenka.panel.body import BodyRenderArgs
     from saitenka.render.layout_backend import LayoutBackend
 
-# The def-body renderer is injected by the caller (app/popups.py, which builds WindowedPanel) rather
+# The def-body renderer is injected by the tooltip feature (which builds WindowedPanel) rather
 # than imported here: panel.body depends on render.document, so a module-level import would cycle
 # back through .render at the package level. render_block_fn now only GATES the GIL-build process pool
 # (None → hermetic in-process warm); the actual band renders use Row.render_window (threads) or a

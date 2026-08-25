@@ -6,9 +6,14 @@ import time
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app import cue_annotation, hover_metadata, tooltip, tooltip_controller
-from saitenka.app.hover_metadata import HoverMetadata, HoverMetadataKey, HoverMetadataRequest
-from saitenka.app.session_controller import SessionController
+from saitenka.app import cue_annotation
+from saitenka.app.features.tooltip import hover_metadata, tooltip, tooltip_controller
+from saitenka.app.features.tooltip.hover_metadata import (
+    HoverMetadata,
+    HoverMetadataKey,
+    HoverMetadataRequest,
+)
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner

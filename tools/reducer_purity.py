@@ -74,7 +74,7 @@ def _registered() -> dict[str, object]:
     sys.path.insert(0, str(ROOT / "tests"))
     from util import FakeIPC, runtime_gateway  # a tool, not a library
 
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     gateway = runtime_gateway(FakeIPC())
     try:

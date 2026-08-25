@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from saitenka.app.intents import DismissHover
-from saitenka.app.session_intents import (
+from saitenka.app.session.intents import (
     ReleaseSecondarySubtitles,
     ResumeSubtitles,
     SessionCommand,

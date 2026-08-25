@@ -539,9 +539,9 @@ def _mining_field_problem(model: str) -> str | None:
     well, or the fields can't be read (skip rather than guess). Warn-level — an unknown field/marker just
     writes nothing (fields are dropped at build time), it doesn't crash mining. The effective field names
     are ``card_format``'s keys when it's set (it wins wholesale, #192), else the ``fields`` map values."""
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
-    mine_conf = _mine_config_from(load_config().get("mine") or {})
+    mine_conf = mine_config_from(load_config().get("mine") or {})
     if mine_conf.card_format and (problem := _card_format_marker_problem(mine_conf.card_format)):
         return problem  # marker names need no Anki call — report first
     field_names = (
@@ -842,12 +842,12 @@ def check_mine_mapping() -> Check:
     left unmapped (empty note → rejected). ``info`` when clean (shown by ``--verbose`` / kept in
     ``--json``), ``warn`` when a trap is present."""
     from saitenka.app.anki import KNOWN_ENTITIES
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
     raw = load_config().get("mine")
     if not isinstance(raw, dict) or not raw:
         return Check("mine-fields", "ok", "mining not configured", info=True)
-    mc = _mine_config_from(raw)
+    mc = mine_config_from(raw)
     if mc.card_format:  # card_format wins wholesale (#192) — dump templates, not the fields map
         lines = "\n    ".join(f"{name} = {tmpl!r}" for name, tmpl in mc.card_format.items())
         body = f"mining card_format for {mc.model!r} (field -> template):\n    {lines}"
@@ -935,14 +935,14 @@ def check_deeplink_id() -> Check:
     ``seq`` (opt-in ``[dictdb] persist_seq`` — #255). With neither, a ``minimal``/default install writes
     it **empty** with no feedback. Warn when the id is mapped but no source is available; either way,
     point at the one-time backfill for cards mined before a source existed."""
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
     backfill_hint = (
         "Pre-existing cards with an empty ID aren't touched retroactively — backfill a whole deck with "
         "`uv run --extra full python tools/backfill_deeplink_id.py --apply` (dry-run by default; reuses "
         "this config's id resolution), or `tools/anki_normalize_fields.py` for a JMdict-zip-driven fill."
     )
-    mc = _mine_config_from(load_config().get("mine") or {})
+    mc = mine_config_from(load_config().get("mine") or {})
     if not _mining_targets_id(mc):
         return Check("deeplink-id", "ok", "no ID / deep-link field mapped", info=True)
     if _jmdict_available():
@@ -1262,9 +1262,9 @@ def run_checks(deck: str | None = None, model: str | None = None) -> Report:
     # wizards pass nothing) — else the anki check validates the hardcoded Lapis default and mislabels
     # any other note type as missing.
     if deck is None or model is None:
-        from saitenka.app.reader_deps import _mine_config_from
+        from saitenka.app.mining_config import mine_config_from
 
-        mc = _mine_config_from(load_config().get("mine") or {})
+        mc = mine_config_from(load_config().get("mine") or {})
         deck = deck if deck is not None else mc.deck
         model = model if model is not None else mc.model
     checks: list[Check] = [

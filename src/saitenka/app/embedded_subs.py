@@ -1,6 +1,6 @@
 """Lookahead index for whatever subtitle track is CURRENTLY SELECTED in mpv — embedded or external.
 
-Prefetch (app/prefetch.py) needs ``reader._sub_index`` to know upcoming lines. An external/jimaku
+Prefetch (app/features/tooltip/prefetch.py) needs ``reader._sub_index`` to know upcoming lines. An external/jimaku
 file already has a path to feed ``sub_index.load_index``. An EMBEDDED track (baked into the video
 container, e.g. an .mkv's internal ass/srt) has none — extract it once via ffmpeg (mpv's track-list
 ``ff-index`` maps straight onto ffmpeg's ``-map 0:<n>``, confirmed against a real mpv 0.40 track-list)
@@ -120,7 +120,7 @@ def build_sub_index_for_current_track(
     disk — read the path straight off track-list's ``external-filename``. An embedded track is
     extracted once via ffmpeg and cached. Either way the result feeds the same
     ``sub_index.load_index`` parser that already powers Alt+←/→/↓ nav, so prefetch lookahead
-    (app/prefetch.py's ``upcoming_cue_texts``) gets real upcoming lines regardless of subtitle
+    (app/features/tooltip/prefetch.py's ``upcoming_cue_texts``) gets real upcoming lines regardless of subtitle
     source. Fail-soft throughout: no selected track / no video path / extraction failure just
     leaves the index unset."""
     track = _selected_sub_track(ipc)

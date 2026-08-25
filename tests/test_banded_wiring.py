@@ -10,8 +10,8 @@ from __future__ import annotations
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app import tooltip_panel
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip import tooltip_panel
+from saitenka.app.session.controller import SessionController
 from saitenka.panel import Definition, Entry
 
 

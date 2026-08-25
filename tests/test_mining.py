@@ -2,8 +2,8 @@
 
 import pytest
 
-from saitenka.app import miner
 from saitenka.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
+from saitenka.app.features.mining import miner
 from saitenka.app.lookup import card_for
 from saitenka.app.media import AnimatedClip, Timespan, clip_audio
 from saitenka.app.toast import render_toast
@@ -199,7 +199,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     # end-to-end: an already-mined word is detected under card_format (the both-KeyError/false-negative fix)
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
@@ -235,11 +235,11 @@ def test_mine_config_from_unknown_preset_warns_and_uses_lapis(caplog):
 
 
 def test_mine_config_from_wires_word_audio_pack_when_enabled(tmp_path):
-    """#93: `_mine_config_from` (the run/attach-shared seam) resolves [mine].word_audio_* into the
+    """#93: `mine_config_from` (the run/attach-shared seam) resolves [mine].word_audio_* into the
     runtime MineConfig it hands the miner."""
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
-    cfg = _mine_config_from(
+    cfg = mine_config_from(
         {
             "word_audio_enabled": True,
             "word_audio_pack_dir": str(tmp_path),
@@ -251,9 +251,9 @@ def test_mine_config_from_wires_word_audio_pack_when_enabled(tmp_path):
 
 
 def test_mine_config_from_leaves_word_audio_off_by_default():
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
-    cfg = _mine_config_from({"deck": "X"})
+    cfg = mine_config_from({"deck": "X"})
     assert cfg.word_audio_pack is None
     assert (
         cfg.word_audio_field == "WordAudio"
@@ -261,9 +261,9 @@ def test_mine_config_from_leaves_word_audio_off_by_default():
 
 
 def test_mine_config_from_ignores_pack_dir_when_word_audio_disabled(tmp_path):
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
-    cfg = _mine_config_from({"word_audio_pack_dir": str(tmp_path)})  # enabled defaults False
+    cfg = mine_config_from({"word_audio_pack_dir": str(tmp_path)})  # enabled defaults False
     assert cfg.word_audio_pack is None
 
 
@@ -384,7 +384,7 @@ class _FakeAnki:
 def test_mine_token_adds_note_with_fields(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     ipc.props["path"] = "/x/[Grp] Show - 03 [1080p].mkv"
@@ -411,7 +411,7 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
 def _capture_reader(*, animated_enabled: bool):
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     return SessionController(
         FakeIPC(),
@@ -423,7 +423,7 @@ def _capture_reader(*, animated_enabled: bool):
 def _stub_capture(monkeypatch, *, animated_result):
     """Stub the media boundary so capture_media runs without real mpv/ffmpeg. ``animated_result`` is
     what animated_screenshot returns (a Path = encode ok, None = no encoder)."""
-    import saitenka.app.miner as _M
+    import saitenka.app.features.mining.miner as _M
 
     monkeypatch.setattr(_M, "screenshot", lambda *_a: None)
     monkeypatch.setattr(_M, "current_timespan", lambda _ipc: Timespan(10, 12))
@@ -472,7 +472,7 @@ def test_capture_media_survives_a_timespan_read_error(monkeypatch):
     # A transient IPC error reading the cue timespan must NOT escape capture_media — in bulk_mine it would
     # propagate out of the session loop and tear the session down. The still is still captured
     # (image-only mine).
-    import saitenka.app.miner as _M
+    import saitenka.app.features.mining.miner as _M
 
     r = _capture_reader(animated_enabled=False)
     monkeypatch.setattr(_M, "screenshot", lambda *_a: None)
@@ -492,7 +492,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     from util import FakeIPC
 
     from saitenka.app.lookup import CardData
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
@@ -510,7 +510,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
 def test_mine_token_duplicate_shows_existing(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])
@@ -533,7 +533,7 @@ def test_preview_replay_key_is_tooltip_scoped():
     from util import FakeIPC
 
     from saitenka.app.bindings import PREVIEW_MSG, active_bindings
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     r = SessionController(FakeIPC(), anki=object(), mine_cfg=MineConfig())
     global_msgs = {b.spec.message for b in active_bindings(r.keys, "global")}
@@ -547,10 +547,10 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
     to a no-op when no tooltip is up."""
     from util import FakeIPC
 
-    from saitenka.app import miner_ui
     from saitenka.app.bindings import PREVIEW_CLOSE_MSG
-    from saitenka.app.card_preview import PreviewData
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.features.preview import miner_ui
+    from saitenka.app.features.preview.card_preview import PreviewData
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     r = SessionController(ipc, anki=object(), mine_cfg=MineConfig())
@@ -573,7 +573,7 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
@@ -603,7 +603,7 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     at max_bulk."""
     from types import SimpleNamespace
 
-    from saitenka.app.miner import _select_bulk_targets
+    from saitenka.app.features.mining.miner import _select_bulk_targets
     from saitenka.app.scoring import TokenStyle
     from saitenka.app.tokenize import Token
     from saitenka.app.tokenizer import UnidicTokenizer
@@ -635,8 +635,8 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
 def test_bulk_mine_counts_and_toasts(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app import mine_intents
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.features.mining import mine_intents
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
@@ -669,8 +669,8 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app import tooltip
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.features.tooltip import tooltip
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.tokenize import Token
     from saitenka.model import LinkBox
 
@@ -707,7 +707,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     d = _make_dict(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
     pz = dicthelp.meta_zip(
@@ -760,7 +760,7 @@ def _word_audio_pack(tmp_path, term: str, reading: str, filename: str):
 def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path):
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     pack = _word_audio_pack(tmp_path, "読む", "よむ", "yomu.opus")
     ipc = FakeIPC()
@@ -782,7 +782,7 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     """The pack has no entry for this word — the field must stay unset, not an empty [sound:] tag."""
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     pack = _word_audio_pack(tmp_path, "書く", "かく", "kaku.opus")  # different word
     ipc = FakeIPC()
@@ -807,7 +807,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
 
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     secret = tmp_path / "secret.txt"
     secret.write_bytes(b"top-secret")
@@ -838,7 +838,7 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
@@ -858,8 +858,8 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app import tooltip_panel
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.features.tooltip import tooltip_panel
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.tokenize import Token
 
     d = _make_dict(
@@ -891,7 +891,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
     ds = dicthelp.load_set([d])
@@ -918,7 +918,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
 
     from saitenka.app.config import DictDbOptions
     from saitenka.app.dictdb import DictionaryDb
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     d = _make_dict(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
     db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
@@ -970,6 +970,6 @@ def test_a_stacked_entry_mine_link_is_read_without_breaking_navigation(query, ex
     """The ⊕ rides the normal link hit-test, so this runs on EVERY link click. A malformed suffix
     has to read as "not a mine link" rather than raise, or one bad dictionary entry breaks
     navigation for every link in the panel."""
-    from saitenka.app.tooltip import mine_index
+    from saitenka.app.features.tooltip.tooltip import mine_index
 
     assert mine_index(query) == expected

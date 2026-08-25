@@ -23,7 +23,7 @@ import psutil
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.embedded_subs import resolve_track_fonts
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.panel import Definition, Entry
 from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import (
