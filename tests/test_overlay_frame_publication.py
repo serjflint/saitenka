@@ -67,10 +67,14 @@ def test_the_path_named_in_the_last_overlay_add_is_still_readable_after_the_next
 def _record_published_paths(overlay: Overlay) -> list[pathlib.Path]:
     """Every path production hands out for a frame, in order.
 
+    Covers the `show_bgra` route only: it hooks `_new_frame_path`, which `_write_frame` calls, while
+    `prepare_rgba` allocates its own tempfile inside `_prepare`. Both callers below publish that way;
+    a lifecycle publication would be invisible here rather than counted.
+
     Deliberately not `_frame_history`: `_sweep` truncates that list whether or not it deleted
     anything, so counting it cannot distinguish "retired" from "leaked". Deliberately not a glob of
-    the temp directory either — the suite runs `-n auto`, and another worker publishing to the same
-    overlay id writes files with the same name shape into the same directory.
+    the temp directory either — another worker publishing to the same overlay id writes files with
+    the same name shape into the same directory.
     """
     produced: list[pathlib.Path] = []
     issue = overlay._new_frame_path
@@ -105,6 +109,7 @@ def test_retirement_is_bounded_even_while_the_overlay_is_hidden():
     overlay.close()
 
 
+@pytest.mark.timeout(30)
 def test_a_committed_frame_is_not_retired_under_an_in_flight_repaint():
     """`commit_prepared` retires the frame it replaces — which is the one a concurrent `repaint` is
     most likely to be carrying, since `repaint` re-issues `_live`'s tail. Deleting it outright made
@@ -119,7 +124,10 @@ def test_a_committed_frame_is_not_retired_under_an_in_flight_repaint():
     class BlockingIPC(util.FakeIPC):
         def command(self, *args):
             if args[0] == "overlay-add" and threading.current_thread().name == "repaint":
-                released.wait(5)
+                # Unbounded: a bounded wait is a barrier, and if the main thread overran it the
+                # repaint would release, `commit_prepared` would legitimately retire the frame, and
+                # the test would fail on correct code. The timeout marker is the backstop.
+                released.wait()
                 observed.append(pathlib.Path(args[4]).exists())
             return super().command(*args)
 
@@ -130,7 +138,12 @@ def test_a_committed_frame_is_not_retired_under_an_in_flight_repaint():
     reader = threading.Thread(target=overlay.repaint, name="repaint")
     reader.start()
     try:
-        while first.path not in overlay._in_flight:  # wait until repaint is carrying it
+        # Deadlined, not open-ended: if the hold regresses the path never arrives, and an unbounded
+        # poll would wedge the run instead of reporting the regression it exists to catch.
+        deadline = time.monotonic() + 10
+        while first.path not in overlay._in_flight:
+            if time.monotonic() > deadline:
+                pytest.fail("repaint never registered a hold on the committed frame")
             time.sleep(0.01)
         second = overlay.prepare_rgba(_frame(2), 0, 0, oid=OverlayId.SUB, revision=2)
         overlay.commit_prepared(second)

@@ -300,9 +300,10 @@ def test_every_dashboard_publish_is_gated_on_the_store_input() -> None:
 
 def test_the_publish_census_is_not_empty() -> None:
     """Negative control: a renamed key or a restructured `with:` would make the census empty, and an
-    empty census makes the gate assertion above pass while binding nothing. Emptiness is the whole
-    claim — the gate test iterates whatever this finds, so a correctly-gated third step is fine."""
-    assert _auto_pushing_steps()
+    empty census makes the gate assertion above pass while binding nothing. A floor, not equality:
+    the gate test iterates whatever this finds, so a correctly-gated third step is fine — but
+    truthiness would let ONE of the two silently drop out and still pass."""
+    assert len(_auto_pushing_steps()) >= 2
 
 
 def test_the_bound_expressions_are_not_vacuous() -> None:
