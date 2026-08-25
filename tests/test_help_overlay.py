@@ -3,7 +3,6 @@
 from driver import Driver
 from util import FakeIPC, keybind_registry
 
-from saitenka.app import tooltip
 from saitenka.app.bindings import (
     BOOKMARK_MSG,
     HELP_CLOSE_MSG,
@@ -14,8 +13,9 @@ from saitenka.app.bindings import (
     active_bindings,
 )
 from saitenka.app.config import KeyOptions, PanelOptions, ReaderOptions
+from saitenka.app.features.tooltip import tooltip
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.render.help import render_page
 
 
@@ -186,7 +186,7 @@ def test_the_reference_lists_only_bindings_that_opt_in() -> None:
     of it no longer taking one."""
     from types import SimpleNamespace
 
-    from saitenka.app.help_overlay import help_entries
+    from saitenka.app.features.help.help_overlay import help_entries
 
     def binding(key: str, *, shown: bool):
         spec = SimpleNamespace(
@@ -201,6 +201,6 @@ def test_the_reference_lists_only_bindings_that_opt_in() -> None:
 
 def test_the_footer_names_the_configured_close_key() -> None:
     """The reference is the only place a user learns the key, so it must not hard-code one."""
-    from saitenka.app.help_overlay import help_footer
+    from saitenka.app.features.help.help_overlay import help_footer
 
     assert help_footer("Alt+/").startswith("Alt+/")

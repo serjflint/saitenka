@@ -8,7 +8,7 @@ import util
 
 from saitenka.app import session_stats, subselect
 from saitenka.app.launch import run as cli_run
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.events import SubtitleTracksDiscovered
 

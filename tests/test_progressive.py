@@ -11,14 +11,14 @@ from concurrent.futures import Future
 import pytest
 from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
+import saitenka.app.features.mining.mined_seed as mined_seed_lane
 from saitenka import otel_metrics
-from saitenka.app import mined_seed as mined_seed_lane
 from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import SUB_PICKER_MSG
+from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec, MiningTarget
 from saitenka.app.logsetup import CONSOLE_LOGGER_NAME
-from saitenka.app.mining_controller import MiningIdentity, MiningSpec, MiningTarget
-from saitenka.app.reader_deps import DependencyBundle
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
+from saitenka.app.session.deps import DependencyBundle
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.mpvio.ipc import IPCRequest
@@ -208,7 +208,7 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     """`[perf].prefetch_workers` > 0 pins the count on both builds (a RAM/coverage knob); 0 auto-sizes
     — min(8, cores-2) free-threaded (render parallelizes), 2 on a GIL build (extra workers only contend)."""
 
-    from saitenka.app import prefetch
+    from saitenka.app.features.tooltip import prefetch
     from saitenka.app.tokenizer import UnidicTokenizer
 
     def count(configured: int) -> int:
@@ -228,7 +228,7 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
 
 
 def test_owned_startup_hint_clears_after_the_first_completed_poll(request):
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -248,7 +248,7 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll(request):
 
 
 def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch, request):
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -271,7 +271,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
 
 
 def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     class _AsyncFakeIPC(FakeIPC):
         def __init__(self):
@@ -300,7 +300,7 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
 
 
 def test_load_deps_async_marks_loading(monkeypatch):
-    import saitenka.app.reader_deps as rd
+    import saitenka.app.session.deps as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     r = SessionController(FakeIPC())
@@ -311,7 +311,7 @@ def test_load_deps_async_marks_loading(monkeypatch):
 def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
     """The build thread hands the value over and *arms* the injection; a tick used to discover it by
     looking. The due event runs on the session turn, which is what makes the hand-off safe."""
-    import saitenka.app.reader_deps as rd
+    import saitenka.app.session.deps as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()
@@ -333,7 +333,7 @@ def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
 def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
     """Ordering, and the whole hand-off: arming first would let the due event fire against a
     dependency owner with no published bundle, and the session would sit loading forever."""
-    import saitenka.app.reader_deps as rd
+    import saitenka.app.session.deps as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()

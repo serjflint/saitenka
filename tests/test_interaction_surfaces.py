@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from saitenka.app.interaction_surfaces import InteractionSurfaces
+from saitenka.app.interaction.presentation import InteractionSurfaces
 from saitenka.runtime.surfaces import SurfaceStatus
 
 OID = 7

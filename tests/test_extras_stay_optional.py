@@ -41,8 +41,8 @@ OPTIONAL_MODULES = [
 ENTRY_POINTS = [
     "saitenka.app.cli",  # console-script surface: every command
     "saitenka.app.launch.run",  # the run command implementation
-    "saitenka.app.reader_deps",  # dep builder (dictdb / scoring / wordlists / anki)
-    "saitenka.app.session_controller",  # run/attach session payload (tooltip + render stack)
+    "saitenka.app.session.deps",  # dep builder (dictdb / scoring / wordlists / anki)
+    "saitenka.app.session.controller",  # run/attach session payload (tooltip + render stack)
 ]
 
 

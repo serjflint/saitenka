@@ -195,7 +195,7 @@ def test_waking_publishes_nothing_and_does_not_close() -> None:
 
 def test_requesting_a_stop_wakes_the_transport(request) -> None:
     """The SessionController half: the flag alone leaves a blocked receiver blocked."""
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)

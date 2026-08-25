@@ -14,7 +14,7 @@ import pytest
 
 from saitenka import fonts
 from saitenka.app import mask_atlas_startup
-from saitenka.app.reader_context import RenderCacheState
+from saitenka.app.session.context import RenderCacheState
 from saitenka.mask_atlas import MaskAtlas, deserialize_core, serialize_core
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 

@@ -12,9 +12,9 @@ from __future__ import annotations
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app import nested_popup
 from saitenka.app.config import TooltipOptions
-from saitenka.app.session_controller import NESTED_ID, TIP_ID, SessionController
+from saitenka.app.features.tooltip import nested_popup
+from saitenka.app.session.controller import NESTED_ID, TIP_ID, SessionController
 from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
 

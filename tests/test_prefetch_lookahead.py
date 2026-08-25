@@ -3,9 +3,9 @@ RSS gauges the telemetry interval sampler reports."""
 
 import util
 
-from saitenka.app import prefetch
 from saitenka.app.config import PerfOptions, ReaderOptions
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip import prefetch
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
@@ -247,7 +247,7 @@ def _style(tag):
 
 
 def test_lookahead_reads_the_cues_after_the_one_on_screen():
-    from saitenka.app.prefetch import upcoming_cue_texts
+    from saitenka.app.features.tooltip.prefetch import upcoming_cue_texts
     from saitenka.subtitles import CueIndex
 
     index = CueIndex(parse_srt(_srt(["one", "two", "three", "four"])))
@@ -256,7 +256,7 @@ def test_lookahead_reads_the_cues_after_the_one_on_screen():
 
 
 def test_lookahead_at_the_last_cue_has_nothing_to_warm():
-    from saitenka.app.prefetch import upcoming_cue_texts
+    from saitenka.app.features.tooltip.prefetch import upcoming_cue_texts
     from saitenka.subtitles import CueIndex
 
     index = CueIndex(parse_srt(_srt(["one", "two"])))
@@ -267,7 +267,7 @@ def test_lookahead_at_the_last_cue_has_nothing_to_warm():
 def test_lookahead_off_the_index_warms_nothing():
     """A cue mpv is showing from a track we never indexed. Warming from index position 0 would
     decode the start of the episode while the user is in the middle of it."""
-    from saitenka.app.prefetch import upcoming_cue_texts
+    from saitenka.app.features.tooltip.prefetch import upcoming_cue_texts
     from saitenka.subtitles import CueIndex
 
     assert upcoming_cue_texts(None, 2, text="one", preferred=-1) == []
@@ -279,7 +279,7 @@ def test_lookahead_off_the_index_warms_nothing():
 def test_warming_puts_the_next_new_words_first():
     """N+1 words are the likeliest hover and mine target, so they lead — everything else follows in
     line order."""
-    from saitenka.app.prefetch import _candidates
+    from saitenka.app.features.tooltip.prefetch import _candidates
 
     tokens = [_tok("既知"), _tok("新出"), _tok("既知2")]
     styles = [_style("known"), _style("n+1"), _style("known")]
@@ -290,7 +290,7 @@ def test_warming_puts_the_next_new_words_first():
 def test_warming_skips_repeats_of_a_lemma_already_queued():
     """The same word twice in one line is one warm — the cache is keyed by lemma, so the second
     would decode nothing new and displace a word that would."""
-    from saitenka.app.prefetch import _candidates
+    from saitenka.app.features.tooltip.prefetch import _candidates
 
     tokens = [_tok("見る", "見る"), _tok("見た", "見る"), _tok("猫")]
 
@@ -298,7 +298,7 @@ def test_warming_skips_repeats_of_a_lemma_already_queued():
 
 
 def test_warming_skips_what_the_tokenizer_calls_non_content():
-    from saitenka.app.prefetch import _candidates
+    from saitenka.app.features.tooltip.prefetch import _candidates
 
     tokens = [_tok("は"), _tok("猫")]
 
@@ -308,7 +308,7 @@ def test_warming_skips_what_the_tokenizer_calls_non_content():
 def test_warming_a_line_with_no_styles_yet_still_queues_its_words():
     """Scoring can lag the tokenization; treating a missing style row as "not N+1" keeps the warm
     running rather than dropping the line."""
-    from saitenka.app.prefetch import _candidates
+    from saitenka.app.features.tooltip.prefetch import _candidates
 
     assert len(_candidates([_tok("猫"), _tok("犬")], [], _Content())) == 2
 

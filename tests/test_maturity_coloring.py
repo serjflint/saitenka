@@ -4,11 +4,11 @@ import pytest
 import util
 from util import RecordingRasterProvider
 
-from saitenka.app import reader_deps
+import saitenka.app.session.deps as reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
 from saitenka.app.fsrs import KnownSnap
 from saitenka.app.scoring import Palette, Scorer
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.tokenize import Token
 from saitenka.app.wordlists import FreqDict, KnownWords

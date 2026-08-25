@@ -13,7 +13,7 @@ import dicthelp
 from util import FakeIPC
 
 from saitenka.app.scoring import Palette, Scorer
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token, merge_dict_compounds, tokenize
 from saitenka.app.wordlists import KnownWords

@@ -16,15 +16,15 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from saitenka.app import (
+from saitenka.app.features.tooltip import (
     nested_popup,
     tooltip,
     tooltip_engaged,
     tooltip_panel,
     tooltip_raster,
 )
+from saitenka.app.features.tooltip.popups import Panel
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import Panel
 from saitenka.app.render_cache import (
     RenderCache,
     config_signature,
@@ -307,7 +307,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
 
     from saitenka.app.config import ReaderOptions, TooltipOptions
     from saitenka.app.render_cache import content_key
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     r = SessionController(
@@ -343,7 +343,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     assert uploaded and np.array_equal(
         uploaded[0], sentinel
     )  # painted from disk, not a fresh raster
-    from saitenka.app.popups import Panel
+    from saitenka.app.features.tooltip.popups import Panel
 
     assert isinstance(
         r.tip.view.state, Panel
@@ -382,7 +382,7 @@ def _nested_reader(*, two_words: bool = False):
     from util import FakeIPC
 
     from saitenka.app.config import ReaderOptions
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
@@ -704,7 +704,7 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None):
     from util import FakeIPC
 
     from saitenka.app.config import ReaderOptions, TooltipOptions
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     r = SessionController(
@@ -767,7 +767,7 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
 def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
     # A cold miss (empty tier-2 + disk) must NOT build/raster on the main thread: no tooltip is shown,
     # and a top-priority worker compose is enqueued instead.
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -779,7 +779,7 @@ def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
 
 
 def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatch):
-    from saitenka.app import tooltip, tooltip_panel
+    from saitenka.app.features.tooltip import tooltip, tooltip_panel
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -809,7 +809,7 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
     import contextlib
 
     from saitenka import otel_metrics
-    from saitenka.app import tooltip_panel
+    from saitenka.app.features.tooltip import tooltip_panel
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     _i, tok, inflected, mined = _first_content(r)
@@ -836,7 +836,7 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
 
 
 def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkeypatch):
-    from saitenka.app import tooltip, tooltip_panel
+    from saitenka.app.features.tooltip import tooltip, tooltip_panel
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -864,7 +864,7 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
 def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     # Key guard (the analysis-overlay pattern): a composed head for a word the user left is dropped — no
     # tooltip flashes for the wrong word. (tier-2/disk stay warm for a later re-hover.)
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.tooltip_controller.retire_selection()
@@ -880,7 +880,7 @@ def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
 
 
 def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     i, _tok, _inflected, _mined = _first_content(r)
@@ -906,7 +906,7 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
 def test_nested_cold_miss_defers_and_enqueues_nested(tmp_path, monkeypatch):
     # A cold inner word (scan-hover) with a worker running defers: the getmask2 raster goes off the main
     # thread, no nested popup is shown yet, and a NESTED engaged request is queued.
-    from saitenka.app import nested_popup
+    from saitenka.app.features.tooltip import nested_popup
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -924,7 +924,7 @@ def test_nested_cold_miss_defers_and_enqueues_nested(tmp_path, monkeypatch):
 def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
     # defer=True but no worker to service it → the nested popup builds synchronously (never a dead defer
     # that shows nothing forever).
-    from saitenka.app import nested_popup
+    from saitenka.app.features.tooltip import nested_popup
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.prefetch = False
@@ -945,7 +945,7 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     # The nested worker compose WARMS the nested-cap viewport bands (so the re-show has no synchronous
     # raster) but does NOT persist to disk — the nested viewport is nested-cap-shaped, not the base head
     # the render-cache keys share, so a write would collide.
-    from saitenka.app import tooltip_panel
+    from saitenka.app.features.tooltip import tooltip_panel
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -976,7 +976,7 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     import time
     from types import SimpleNamespace
 
-    from saitenka.app import hover_metadata, nested_popup, tooltip
+    from saitenka.app.features.tooltip import hover_metadata, nested_popup, tooltip
     from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
@@ -1018,7 +1018,7 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
 
 
 def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monkeypatch):
-    from saitenka.app.hover_metadata import HoverMetadata
+    from saitenka.app.features.tooltip.hover_metadata import HoverMetadata
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     index, _tok, _inflected, _mined = _first_content(r)
@@ -1051,7 +1051,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
 def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
     # A composed nested head whose inner word the cursor has left is dropped — no stale nested flash. With
     # no base tooltip up, scan_hit finds nothing, so the guard drops it cleanly.
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.tip.view.state, r.tip.view.rect = None, None
@@ -1077,7 +1077,7 @@ def _base_tip_up(r):
 def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
     # A clicked cross-ref with a worker running enqueues an off-thread nav (build+raster off the click
     # tick) and does NOT swap synchronously — no getmask2 on the tick.
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -1089,7 +1089,7 @@ def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
 
 
 def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.prefetch = False
@@ -1100,7 +1100,7 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
 
 
 def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -1114,7 +1114,7 @@ def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
 
 
 def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, monkeypatch):
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -1152,7 +1152,7 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
 def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
     # origin guard: if the base tooltip changed (a word switch) in the defer window, the composed nav is
     # dropped — never hijacks the new tooltip into the clicked target.
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -1174,7 +1174,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
 
 
 def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
@@ -1197,7 +1197,7 @@ def test_the_panel_cache_evicts_the_least_recently_used_entry_at_the_cap():
     newest entry would thrash exactly the panel the user is looking at."""
     import threading
 
-    from saitenka.app.popups import PanelCache
+    from saitenka.app.features.tooltip.popups import PanelCache
 
     cache = PanelCache(3, threading.Lock())
     for key in ("a", "b", "c"):
@@ -1216,7 +1216,7 @@ def test_a_second_writer_for_the_same_key_loses_to_the_first():
     kept — returning the loser's would hand back an object the cache does not hold."""
     import threading
 
-    from saitenka.app.popups import PanelCache
+    from saitenka.app.features.tooltip.popups import PanelCache
 
     cache = PanelCache(8, threading.Lock())
     first = cache.setdefault("k", "winner")

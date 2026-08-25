@@ -82,7 +82,7 @@ class SessionController:
         self.hover = -1
         return self.pause_on_tooltip, self._hover_store
 """,
-        "src/saitenka/app/session_controller.py",
+        "src/saitenka/app/session/controller.py",
     ) == {"legacy-session-field"}
 
 
@@ -95,7 +95,7 @@ class SessionController:
         self.tip.tip_tok = None
         self.tip.panel_cache.setdefault(key, panel)
 """,
-        "src/saitenka/app/session_controller.py",
+        "src/saitenka/app/session/controller.py",
     ) == {"tooltip-cache-write", "tooltip-state-write"}
 
 
@@ -111,7 +111,7 @@ def own(self, ipc):
     self._hover_store = HoverStore(ipc)
     self._state.tip_keys_bound = True
 """,
-        Path("src/saitenka/app/tooltip_controller.py"),
+        Path("src/saitenka/app/features/tooltip/tooltip_controller.py"),
     )
     assert not tooltip_ownership_check.inspect_source(
         """
@@ -119,7 +119,7 @@ def paint(ports, panel):
     ports.tip.view.state = panel
     ports.tip.view.rect = (0, 0, 1, 1)
 """,
-        Path("src/saitenka/app/tooltip.py"),
+        Path("src/saitenka/app/features/tooltip/tooltip.py"),
     )
 
 

@@ -3,7 +3,7 @@
 import pytest
 import util
 
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.token_cache import TokenizedCue
 from saitenka.app.tokenize import (
     Token,
@@ -147,7 +147,7 @@ class _SpyTokenizer(_FakeTokenizer):
 def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
     """A profile swap (``use_tokenizer``) must reroute the base tooltip's hover phrase-probe through
     the NEW strategy, not the JP module functions directly — the core of #254 phase 3a.2."""
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     class _DS:
         def has_term(self, *_forms):
@@ -166,7 +166,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
 def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     """A profile swap must reroute a clicked cross-reference link's whole-query lookup through the
     NEW strategy, not ``tokenize.py``'s ``query_token`` directly."""
-    from saitenka.app import nested_popup
+    from saitenka.app.features.tooltip import nested_popup
     from saitenka.model import LinkBox
 
     reader = SessionController(FakeIPC(), dict_set=object())
@@ -201,7 +201,7 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
     """The word ``mine_target`` picks is decided by ``reader.tokenizer.is_content``, not baked JP POS.
     Same tokens, two strategies → two different mined tokens; the unidic case is the JP negative
     control (the 名詞, never the 助詞)."""
-    from saitenka.app.miner import MineCue, mine_target
+    from saitenka.app.features.mining.miner import MineCue, mine_target
 
     particle = Token("は", "は", "は", "助詞", 0, 1)
     noun = Token("本", "本", "ほん", "名詞", 1, 2)

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app.session_controller import SessionController
-from saitenka.app.session_routes import (
+from saitenka.app.session.controller import SessionController
+from saitenka.app.session.routes import (
     ControlSink,
     install_session_reactor,
     install_session_runtime,
 )
-from saitenka.app.session_runtime import SessionRuntime
+from saitenka.app.session.runtime import SessionRuntime
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (

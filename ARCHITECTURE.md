@@ -26,7 +26,7 @@ internal modules with explicit dependency contracts, not independently published
   (`WindowedPanel`): render only the blocks in the viewport±overscan, retain heights/hit-geometry past
   pixel eviction (each retained block zlib-compressed), composite O(viewport) — pixel-identical to a
   `render_panel` crop. It is the **sole tooltip compositor** — every popup (base / nested / kanji /
-  search) is a `Panel` (`app/popups.py`) wrapping one `WindowedPanel`.
+  search) is a `Panel` (`app/features/tooltip/popups.py`) wrapping one `WindowedPanel`.
 - **`draw/`** — rasterization primitives that paint the laid-out content.
 - **`raster/`** + **`panel/`** — define the one-shot raster contract and compose the final RGBA
   panel image. `app/render_backend.py` is the characterized Pillow implementation; the interactive
@@ -49,24 +49,23 @@ internal modules with explicit dependency contracts, not independently published
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `SessionController`.
-- **`app/`** — the application layer. `session_controller.py`'s `SessionController` is the production
-  study-session controller: it owns mpv mutation and cross-feature ordering, while bounded
-  collaborators own feature state and policy. `tooltip_controller.py`, for example, owns the
-  tooltip's mutable presentation state and three volatile work protocols; `profile_controller.py`
-  owns the active reading environment and its synchronous switch transaction; `mining_controller.py`
-  owns the selected mining target, deck-derived index, seed/probe lifecycle, scratch/store resources,
-  and operation admission. `app/runtime/` owns the
-  closed command table; `session_assembly.py` installs pre-controller feature owners and their
-  declarations; `session_factory.py` is the production `SessionController` construction seam.
+- **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
+  mpv mutation and cross-feature ordering, while `app/features/` packages own feature state and
+  policy. Tooltip, profile, and mining controllers live under their corresponding feature packages.
+  `app/interaction/` contains shared lower-level interaction contracts; it has no runtime dependency
+  on features or session composition. `app/session/` owns assembly, routing, lifecycle, and explicit cross-feature
+  conjunctions. These directions and the declared feature-package inventory are gated.
+  `app/runtime/` owns the closed command table; `app/session/assembly.py` installs pre-controller
+  feature owners and their declarations; `app/session/factory.py` is the production construction seam.
   `cli.py` owns process setup and Cyclopts registration, `commands/` owns domain command surfaces and
   attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
-  strategy); `profiles.py`/`profile_cli.py`/`languages.py` define reading-profile values and loading
-  (a French profile ships today), while `profile_intents.py` and `profile_adapter.py` own command
+  strategy); `profiles.py`/`features/profiles/profile_cli.py`/`languages.py` define reading-profile
+  values and loading (a French profile ships today), while the profile feature owns command
   admission and application; `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
   dictionary DB); `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring);
-  `anki.py`/`miner.py`/`word_audio.py` (mining + optional word-pronunciation audio);
+  `anki.py` plus `features/mining/` (mining + optional word-pronunciation audio);
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py` (subtitle fetching).
@@ -102,8 +101,8 @@ The process entry point does not construct the reader graph itself. The assembly
 ```
 cli.create_app
   -> app.commands.<domain>
-     -> run: app.launch.run -> session_factory.create_session_controller(...)
-     -> attach: app.commands.attach -> session_factory.create_session_controller(...)
+     -> run: app.launch.run -> app.session.factory.create_session_controller(...)
+     -> attach: app.commands.attach -> app.session.factory.create_session_controller(...)
         -> build_session_assembly(...)
         -> SessionController(assembly=...)
 ```
@@ -406,7 +405,7 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 | **Token** (the *term*) | `app/tokenize.py` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
 | **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`); the legacy `Dictionary` path remains a compatibility fallback. |
 | **`Entry`** | `panel/model.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
-| **Panel** | `app/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
+| **Panel** | `app/features/tooltip/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
 | **`Row`** | `panel/rows.py` | One horizontal slice of the panel (header, freq row, a def-name chip, or a **def body**), as a *deferred thunk* — building rows walks no content. Only def-body rows are expensive. |
 | **Block** | `render/document.py` | One block-level unit inside a def body (a paragraph or list item) after the SC-walk. Nested dictionary markup is flattened into a vertical block sequence. |
 | **Band** | `render/banded.py` | A ≤`_BAND_PX` (256px) horizontal slice of a **row** — the unit of raster, cache, and eviction. A row of height `H` has `ceil(H/256)` bands. |
@@ -423,7 +422,7 @@ render-side hierarchies; the **content model** is the input that `panel_rows()` 
 *Runtime panel — the outer shells (one per shown word, held in `panel_cache`):*
 
 ```
-┌─ Panel  (app/popups.py — the cached tooltip) ─────────────────────┐
+┌─ Panel  (app/features/tooltip/popups.py — the cached tooltip) ────┐
 │ reading + one WindowedPanel                                       │
 │ ┌─ WindowedPanel  (render/banded.py — banded compositor) ────────┐│
 │ │ rows: list[Row]          ← built once by panel_rows(Entry)     ││
@@ -478,7 +477,7 @@ Entry  (one hovered term's whole tooltip content)
        └─ TermRecord { term · reading · semantic definitions · tags }  (LRU 256/dict)
 ```
 
-### Stage 1 — speculative prefetch (before the hover) · `app/prefetch.py`
+### Stage 1 — speculative prefetch (before the hover) · `app/features/tooltip/prefetch.py`
 
 Every subtitle-line change enqueues background work on the persistent prefetch worker pool
 (`_AUTO_WORKERS_FREE_THREADED = 4` free-threaded, `_AUTO_WORKERS_GIL = 2`, or a pinned
@@ -573,14 +572,14 @@ the dated measurements and environment live in `BENCHMARKS.md`.
   The parallel path submits its selected bands together; cancellation drops queued futures when
   possible and ignores results after the view changes.
 
-### Stage 7 — blit to mpv · `mpvio/osd.py`, `app/popups.py`
+### Stage 7 — blit to mpv · `mpvio/osd.py`, `app/features/tooltip/popups.py`
 
 `Panel.viewport` converts the composited RGBA to a premultiplied BGRA array (`to_bgra_array`) and
 pushes it into mpv's own OSD surface via `overlay-add` — one surface, no second window (the load-bearing
 decision below). Scrolling re-runs Stage 6 for the new offset; a warm frame reuses cached BGRA bands
 (inflating only packed ones), composites, decorates, and uploads without `getmask2`.
 
-### Stage 8 — mine (optional) · `app/mining_controller.py`, `app/anki.py`, `app/miner.py`
+### Stage 8 — mine (optional) · `app/features/mining/`, `app/anki.py`
 
 One key mines the hovered subtitle token. Clicking a definition group's `mine:<card_index>` link
 selects that exact card, while the add button on a nested scan popup mines its inner token. Each path

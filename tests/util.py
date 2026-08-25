@@ -27,7 +27,7 @@ import pytest
 from PIL import Image
 
 from saitenka import otel_metrics
-from saitenka.app import tooltip_raster
+from saitenka.app.features.tooltip import tooltip_raster
 from saitenka.model import Theme
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest

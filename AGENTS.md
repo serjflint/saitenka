@@ -125,7 +125,7 @@ the floor for every change; 3–6 are escalations, not replacements.
   exact and far cheaper than grep-and-read. pyrefly here is the **nav backend only** — which type-checkers
   the gate runs is `poe types` (SSOT), separate from this. Register the LSP via the `pyrefly-lsp` skill.
 - **Mechanical edits go through a codemod.** For repo-wide renames/moves or splitting a big module
-  (`app/session_controller.py` is the standing example), author a **LibCST** or **ast-grep** codemod and apply it
+  (`app/session/controller.py` is the standing example), author a **LibCST** or **ast-grep** codemod and apply it
   rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched. LibCST
   lives in the opt-in `codemod` dependency group (its pyo3 build has no free-threaded 3.15t wheel, so it's
   kept out of the default `dev` env): run codemods with `uv run --group codemod <script>`.

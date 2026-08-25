@@ -66,7 +66,7 @@ def test_toast_expiry_removes_the_lifecycle_surface() -> None:
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     reader = SessionController(ipc)
@@ -83,7 +83,7 @@ def test_loading_frames_are_timer_driven_and_stop_when_loading_finishes() -> Non
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     reader = SessionController(ipc)
@@ -105,8 +105,8 @@ def test_completed_dependencies_suppress_a_pending_loading_frame() -> None:
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.reader_deps import DependencyBundle
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.deps import DependencyBundle
 
     ipc = FakeIPC()
     reader = SessionController(ipc)

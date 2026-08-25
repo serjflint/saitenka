@@ -8,7 +8,7 @@ import dicthelp
 from driver import Driver
 from util import FakeIPC, assert_golden, keybind_registry
 
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token

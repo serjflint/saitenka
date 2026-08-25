@@ -236,11 +236,11 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     """
     from saitenka.app.launch.run import setup_session_telemetry
     from saitenka.app.profiles import resolve_launch_identity
-    from saitenka.app.reader_deps import begin_tokenizer_warm
+    from saitenka.app.session.deps import begin_tokenizer_warm
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
-    # no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/model directly.
+    # no mining CLI flags, so `mine_config_from(cfg["mine"])` picks up the profile's deck/model directly.
     raw_cfg = load_config(config)
     ident = resolve_launch_identity(raw_cfg, profile_override=profile, slang=slang)
     cfg, active_profile, slang, profile_cycle = (
@@ -282,7 +282,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         except TimeoutError as e:
             print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
             return 2
-    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.app.session.routes import install_session_runtime
 
     # No startup hint: attach joins an mpv that is already playing, and the breadcrumb exists to
     # cover a file-load wait that has already happened.
@@ -342,7 +342,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
-    from saitenka.app.session_factory import create_session_controller
+    from saitenka.app.session.factory import create_session_controller
 
     with otel_metrics.traced("startup.reader_create"):
         reader = create_session_controller(
@@ -351,7 +351,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
             profile=active_profile,
             tokenizer_warm=tokenizer_warm,
         )
-    from saitenka.app import reader_deps
+    import saitenka.app.session.deps as reader_deps
     from saitenka.app.profiles import scope_config
 
     def scoped_for(selected):

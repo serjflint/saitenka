@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from saitenka.app.languages import Language
-    from saitenka.app.reader_context import EpisodeContext
+    from saitenka.app.session.context import EpisodeContext
     from saitenka.app.subtitle_fetch import SubtitleFetchRequest
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC

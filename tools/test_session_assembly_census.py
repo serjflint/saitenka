@@ -10,7 +10,7 @@ def test_census_classifies_each_assembly_family(tmp_path):
     (tmp_path / ".git" / "HEAD").write_text("abc123\n", encoding="utf-8")
     (source / "sample.py").write_text(
         """
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 BINDINGS = ()
 SURFACES = ()
 _RESOURCE_OF = {}

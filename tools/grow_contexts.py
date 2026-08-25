@@ -15,8 +15,8 @@ serial ``coverage run`` takes under free-threaded 3.14t. A one-off producer, NOT
 aggregation is injectable (like the gate arms) so it is unit-tested without a real coverage run.
 
     uv run python tools/grow_contexts.py --out ../.grow-contexts.json   # feeds grow_triage --contexts-json
-    uv run python tools/grow_contexts.py --inspect ../.grow-contexts.json --module app/session_controller.py
-    uv run python tools/grow_contexts.py --inspect ../.grow-contexts.json --module app/session_controller.py --show lines
+    uv run python tools/grow_contexts.py --inspect ../.grow-contexts.json --module app/session/controller.py
+    uv run python tools/grow_contexts.py --inspect ../.grow-contexts.json --module app/session/controller.py --show lines
 """
 
 from __future__ import annotations
@@ -177,7 +177,7 @@ def main() -> None:
         "--inspect", help="read an existing contexts JSON instead of rerunning coverage"
     )
     ap.add_argument(
-        "--module", help="module row to print with --inspect, e.g. app/session_controller.py"
+        "--module", help="module row to print with --inspect, e.g. app/session/controller.py"
     )
     ap.add_argument("--show", choices=("summary", "lines", "tests", "full"), default="summary")
     ap.add_argument("--limit", type=int, default=50, help="maximum line/test details to print")

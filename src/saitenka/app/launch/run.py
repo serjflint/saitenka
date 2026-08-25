@@ -21,8 +21,12 @@ from saitenka.app.continuity import resolve_sibling
 from saitenka.app.jimaku import parse_filename
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
-from saitenka.app.profiles import resolve_launch_identity, resolve_profile, scope_config
-from saitenka.app.session_runtime import SessionEntry, SessionRuntime, choose_demo_token
+from saitenka.app.profiles import (
+    resolve_launch_identity,
+    resolve_profile,
+    scope_config,
+)
+from saitenka.app.session.runtime import SessionEntry, SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
 from saitenka.runtime import Owner
@@ -40,7 +44,7 @@ DEMO_LINE = "門前の小僧習わぬ経を読む"
 def _dict_scoper_for(cfg: dict, profile_cycle):
     """The live dict re-scoper (#254 W3) for the profile switcher — only when there's more than one
     profile to cycle through (else a switch is inert, so no need to open a DB handle for it)."""
-    from saitenka.app.reader_deps import make_dict_scoper
+    from saitenka.app.session.deps import make_dict_scoper
 
     return make_dict_scoper(cfg) if len(profile_cycle) > 1 else None
 
@@ -465,7 +469,7 @@ def _launch_mpv_and_connect(
     # The hint is immediate feedback for the file-load wait: our overlay isn't built yet and the
     # next steps block the main thread on mpv, so mpv's own OSD is the only surface that can show
     # anything here. A screenshot capture must not carry the breadcrumb.
-    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.app.session.routes import install_session_runtime
 
     install_session_runtime(ipc, startup_hint=not opts.screenshot)
     return proc, ipc
@@ -828,7 +832,7 @@ def _build_run_deps(req: RunDepsRequest):
     here: the plain ``--known word1,word2`` fallback list and this command's console feedback
     lines, both threaded through as callbacks/post-processing rather than duplicating the logic
     that produces them."""
-    from saitenka.app import reader_deps
+    import saitenka.app.session.deps as reader_deps
 
     def _on_anki_unreachable(*, launched: bool) -> None:
         if launched:
@@ -1001,7 +1005,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     profile: str | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
-    from saitenka.app.reader_deps import begin_deps_build, begin_tokenizer_warm
+    from saitenka.app.session.deps import begin_deps_build, begin_tokenizer_warm
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift.
@@ -1087,7 +1091,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     # HERE overlaps mpv's launch/connect dead time (~0.2-0.9s measured) — the ~85ms build is fully hidden
     # and mpv's video is never delayed (separate process). load_deps_async consumes this once the reader
     # exists; without the hoist the build only started after connect, sitting idle through that whole window.
-    from saitenka.app.mining_controller import MiningIdentity
+    from saitenka.app.features.mining.mining_controller import MiningIdentity
 
     initial_identity = MiningIdentity(active_profile.name, 0)
     deps_future = (
@@ -1157,7 +1161,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         if demo_word or screenshot:
             scorer, anki, mine_conf, dict_set = _build_deps()
             from saitenka.app.media import tts_available
-            from saitenka.app.session_factory import SessionServices, create_session_controller
+            from saitenka.app.session.factory import SessionServices, create_session_controller
 
             reader = create_session_controller(
                 ipc,
@@ -1167,7 +1171,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 tokenizer_warm=tokenizer_warm,
             )
         else:
-            from saitenka.app.session_factory import create_session_controller
+            from saitenka.app.session.factory import create_session_controller
 
             reader = create_session_controller(
                 ipc,
@@ -1175,7 +1179,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 profile=active_profile,
                 tokenizer_warm=tokenizer_warm,
             )
-        from saitenka.app import reader_deps
+        import saitenka.app.session.deps as reader_deps
 
         def dependency_builder_for(selected, _identity):
             request = _request_for(selected)

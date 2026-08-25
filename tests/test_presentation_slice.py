@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session_routes import install_session_reactor
+from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import TranslationDrawn, TranslationHeld
 from saitenka.runtime.presentation import TranslationState
 from saitenka.runtime.presentation_slice import TranslationReducer, TranslationStore
@@ -84,7 +84,7 @@ def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None
 def test_the_readers_hold_is_the_slice_and_assigning_it_is_a_declaration() -> None:
     """`SessionController.translate_on` is a property over the slot now. Assigning it has to reach the same
     place the toggle does, or a test establishing the precondition sets a copy nothing reads."""
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     reader = SessionController(FakeIPC(), prefetch=False)
     try:

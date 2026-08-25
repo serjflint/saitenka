@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.native_subtitles import NativeSubtitleGeometry
-    from saitenka.app.reader_context import EpisodeContext
+    from saitenka.app.session.context import EpisodeContext
     from saitenka.subtitles import Cue
 
     PropertyGet = Callable[[str], object]

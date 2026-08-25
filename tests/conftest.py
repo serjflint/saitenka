@@ -13,6 +13,7 @@ import pytest  # noqa: E402  # must come after the sys.path setup above
 
 import saitenka.app.backlog as _backlog  # noqa: E402  # must come after the sys.path setup above
 import saitenka.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
+import saitenka.app.features.mining.mined_store as _mined_store  # noqa: E402
 
 # Opt-in CrossHair (symbolic-execution) backend for the Hypothesis property tests — `poe crosshair`.
 # Registered ONLY when hypothesis-crosshair is installed (the pinned-3.13 `poe crosshair` env), so default test
@@ -35,6 +36,7 @@ def _hermetic_dict_db(tmp_path, monkeypatch):
     ``test_compare`` opts back into the real DB by resetting the override."""
     monkeypatch.setattr(_dictdb, "_DB_PATH_OVERRIDE", tmp_path / "dictionaries.sqlite")
     monkeypatch.setattr(_backlog, "_DB_PATH_OVERRIDE", tmp_path / "backlog.sqlite")
+    monkeypatch.setattr(_mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
 
 
 @pytest.fixture(autouse=True)
@@ -91,8 +93,8 @@ def anki_up(monkeypatch):
 def _tts_present(monkeypatch):
     """Default: pretend a Japanese TTS voice exists so the 🔊 button is drawn — existing geometry tests
     assume it, and this keeps them hermetic (no real `say`/PowerShell subprocess). Tests for the
-    hidden-button case patches ``saitenka.app.session_controller.tts_available`` explicitly."""
-    import saitenka.app.session_controller as ctrl
+    hidden-button case patches ``saitenka.app.session.controller.tts_available`` explicitly."""
+    import saitenka.app.session.controller as ctrl
 
     monkeypatch.setattr(ctrl, "tts_available", lambda: True)
 

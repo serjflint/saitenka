@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app import prefetch
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip import prefetch
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.subtitles import CueIndex, parse_srt
 

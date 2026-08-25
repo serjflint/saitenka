@@ -11,8 +11,8 @@ from saitenka.app.runtime import (
     CommandSpec,
     CueCommandState,
 )
-from saitenka.app.session_controller import SessionController
-from saitenka.app.session_factory import SessionServices, create_session_controller
+from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices, create_session_controller
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
 
@@ -256,7 +256,7 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() 
     cannot be handed a different one, which is what makes the conformance contract testable.
     """
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-    from saitenka.app.session_factory import _geometry_backend
+    from saitenka.app.session.factory import _geometry_backend
 
     assert _geometry_backend(SubtitleGeometryOptions(native_visible=False)) is None
     chosen = _geometry_backend(SubtitleGeometryOptions(native_visible=True))

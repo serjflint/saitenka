@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app.mined_set import MinedSet
+from saitenka.app.features.mining.mined_set import MinedSet
 
 
 def test_a_new_expression_moves_the_generation() -> None:

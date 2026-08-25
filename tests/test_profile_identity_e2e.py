@@ -16,7 +16,7 @@ import util
 
 from saitenka.app import subselect
 from saitenka.app.profiles import resolve_profile
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_providers import (
     ProviderContext,
     SubtitleProvider,

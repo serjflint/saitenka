@@ -119,8 +119,8 @@ def test_the_reducer_refuses_an_event_that_is_not_playbacks() -> None:
 def _reader_with_a_session_runtime(request):
     from util import FakeIPC, runtime_gateway
 
-    from saitenka.app.session_controller import SessionController
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.routes import install_session_reactor
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()
@@ -144,7 +144,7 @@ def test_a_session_runtime_owns_the_slot_the_reader_observes_into(request) -> No
 def test_a_reader_with_no_runtime_still_observes_into_its_own_slice(request) -> None:
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     reader = SessionController(FakeIPC(), renderer=NullRenderer())

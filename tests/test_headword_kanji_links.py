@@ -13,7 +13,7 @@ import dicthelp
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -89,7 +89,7 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     # A navigated view is keyless — not a subtitle token, so scroll won't rebuild it from a token.
     assert r.tip.view.key is None and r.tip.tip_tok is None
     # Reversible: back restores the base 読む tooltip.
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     assert tooltip.tip_back(r.tip_ports) is True
     assert r.tip.view.state is base

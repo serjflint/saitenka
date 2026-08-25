@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 
 CUE = "門前の小僧習わぬ経を読む"

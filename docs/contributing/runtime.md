@@ -5,7 +5,7 @@ Saitenka has two runtime packages with different jobs:
 - `saitenka.app.runtime` holds the per-command policy `SessionController` consults before dispatch: who owns
   a command, whether it needs a current cue, whether it survives with the help overlay open.
 - `saitenka.runtime` holds the runtime itself — events, effects, mailbox admission, effect
-  lifecycle, timers, the owner slices and the session loop. `app/session_routes.py` composes it, and
+  lifecycle, timers, the owner slices and the session loop. `app/session/routes.py` composes it, and
   a session with a gateway is driven from it.
 
 This page describes both as they exist on `main`, and is the *how*: where to put a new feature and
@@ -18,7 +18,12 @@ its supported operating envelope are documented in
 ## Adding a feature
 
 Paths are relative to `src/saitenka/`. The host is `SessionController`, in
-`app/session_controller.py`.
+`app/session/controller.py`.
+
+Feature-owned policy, adapters, controllers, and presentation live together under
+`app/features/<feature>/`. Shared interaction contracts live under `app/interaction/`; session
+assembly and cross-feature conjunctions live under `app/session/`. A shared domain value stays in
+`app/` when application services outside one feature consume it.
 
 **Does it need a place to remember that does not exist yet?** Not "does it have state" — a toggle
 obviously does. An adapter may read *and write* the host members it declares, so a feature whose
@@ -27,12 +32,12 @@ is stateful, and it creates it in a slice.
 
 **No — every fact it needs already has a home.**
 
-1. `app/<feature>_intents.py` — the pure policy `reduce(command, inputs)`, a frozen
+1. `app/features/<feature>/<feature>_intents.py` — the pure policy `reduce(command, inputs)`, a frozen
    `<Feature>Inputs`, a closed `<Feature>Command` StrEnum, one dataclass per effect. Import nothing
    that touches mpv, the display, or the host.
-2. `app/<feature>_adapter.py` — a `<Feature>Host` `Protocol` naming exactly the members you touch,
+2. `app/features/<feature>/<feature>_adapter.py` — a `<Feature>Host` `Protocol` naming exactly the members you touch,
    and an adapter over it exposing `inputs()` and `apply(effect)`.
-3. `app/session_routes.py` — a typed row in `stateless_features()` and one explicit adapter argument.
+3. `app/session/routes.py` — a typed row in `stateless_features()` and one explicit adapter argument.
    `StatelessBinding` checks the command, input, and effect types before the heterogeneous
    `StatelessRouter` boundary.
 
@@ -46,7 +51,7 @@ surface instead, as the profile row does. Do not re-expose the controller's fact
    state dataclass, under the `Owner` (`runtime/effects.py`) whose slice it belongs to.
 2. `app/feature_bindings.py` — declare its reducer, initial-state and local-store factories plus
    the events it accepts, then place it in the owner's explicit order.
-3. `app/session_routes.py` — route the owner's declared event vocabulary. Runtime and no-runtime
+3. `app/session/routes.py` — route the owner's declared event vocabulary. Runtime and no-runtime
    construction consume the same feature bindings.
 
 **If a key triggers it**, three more edits, all required:
@@ -56,12 +61,12 @@ surface instead, as the profile row does. Do not re-expose the controller's fact
 - `app/runtime/commands.py` — a spec row. Not optional: `CommandExecutor` refuses at construction
   if a handler has no spec. Commands are cue-dependent by default; `_CUE_INDEPENDENT` opts out and
   `_HELP_COMMANDS` allows the command while help is open.
-- `app/session_controller.py` — one row in `SessionController._build_command_router`. Use
+- `app/session/controller.py` — one row in `SessionController._build_command_router`. Use
   `interaction(YourCommand.X)`, which routes through the stateless router;
   `action(SessionController.verb)` is the older form and costs a new `SessionController` member,
   which `poe host-mass` refuses.
 
-Four gates enforce the above:
+The following gates enforce the boundary:
 
 | gate | what tripped it |
 | --- | --- |
@@ -69,6 +74,8 @@ Four gates enforce the above:
 | `tests/test_session_controller_host_contract.py` | A function under `app/` takes a `SessionController` **parameter**. Declare a `Protocol`. |
 | `poe host-mass` | You added a **member** to `SessionController` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
 | `poe reducer-purity` | A **registered** stateful reducer branches on something outside `(state, event)`. Stateless policies are not in the route table and are not measured. |
+| `poe arch` | Feature packages import session composition, interaction primitives import upward, or feature packages form a runtime cycle. |
+| `poe app-package-layout` | A declared feature package disappears, an undeclared package appears, or a retired flat module/import returns. |
 
 ## Production session
 
@@ -178,7 +185,7 @@ withhold-list for facts a downstream owner has not taken yet, and it is empty.
 
 ## The runtime contracts
 
-`saitenka.runtime` drives the production session: `app/session_routes.py` installs the reactor and
+`saitenka.runtime` drives the production session: `app/session/routes.py` installs the reactor and
 registers the feature reducers it dispatches to (`poe arch-map` prints the live owner → feature →
 event table, which is the count rather than a figure kept here). What the package still *is* —
 definable and testable independently of `SessionController`, mpv, Pillow, libass, SQLite and Anki — is the

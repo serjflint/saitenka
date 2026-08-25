@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from saitenka.app import miner
 from saitenka.app.anki import MineConfig
-from saitenka.app.mining_controller import (
+from saitenka.app.features.mining import miner
+from saitenka.app.features.mining.mining_controller import (
     MiningController,
     MiningIdentity,
     MiningLifecycle,
@@ -72,7 +72,7 @@ def _apply() -> miner.MiningApply:
 
 
 def _controller(tmp_path, monkeypatch):
-    from saitenka.app import mined_store
+    from saitenka.app.features.mining import mined_store
 
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     seed = _Submitter()
@@ -179,7 +179,7 @@ def test_each_public_operation_samples_a_fresh_encounter(tmp_path, monkeypatch) 
 
 
 def test_rejected_seed_admission_releases_the_lane(tmp_path, monkeypatch) -> None:
-    from saitenka.app import mined_store
+    from saitenka.app.features.mining import mined_store
 
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     seed = _RejectingSubmitter()

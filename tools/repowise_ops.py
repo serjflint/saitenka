@@ -72,7 +72,7 @@ CORRECTIONS = (
     "onboarding:onboarding/getting_started",
     "onboarding:onboarding/how_it_works",
     "onboarding:onboarding/key_concepts",
-    "file_page:src/saitenka/app/session_controller.py",
+    "file_page:src/saitenka/app/session/controller.py",
 )
 
 

@@ -32,7 +32,7 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from tip_fakes import hidpi_reader
 
-from saitenka.app import nested_popup, tooltip, tooltip_panel
+from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token

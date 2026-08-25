@@ -132,7 +132,7 @@ def _make_session_controller(
     from saitenka.app.config import ReaderOptions, TooltipOptions
     from saitenka.app.dictdb import DictionaryDb
     from saitenka.app.dictionary import DictionarySet
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ds = DictionarySet.from_db(DictionaryDb.open(), dict_titles, freqs, pitches)
     reader = SessionController(

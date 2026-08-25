@@ -31,7 +31,7 @@ _OVERLAY_METHODS = {
 _TICK_METHODS: set[str] = set()
 _AUTONOMOUS_DRAINS = {
     "src/saitenka/app/otel_export.py::CTFSpanProcessor._flush",
-    "src/saitenka/app/prefetch.py::_try_head_prefetch_item",
+    "src/saitenka/app/features/tooltip/prefetch.py::_try_head_prefetch_item",
 }
 _AUTONOMOUS_DEADLINES = {
     "src/saitenka/app/anki.py::wait_until_anki_up",
@@ -43,8 +43,8 @@ _AUTONOMOUS_DEADLINES = {
 #: `_OVERLAY_METHODS`; that is an accident of naming, not a different status. Anything added here
 #: must be the sole owner of a presentation slot's transactions, not merely a frequent painter.
 _PRESENTATION_ADAPTERS = {
-    "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.present_bgra",
-    "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove",
+    "src/saitenka/app/interaction/presentation.py::InteractionSurfaces.present_bgra",
+    "src/saitenka/app/interaction/presentation.py::InteractionSurfaces.remove",
     # Whole-surface bulk operations: no per-slot transaction to fence, but presentation all the same.
     "src/saitenka/app/lifecycle_surfaces.py::LifecycleSurfaces.set_visible",
     "src/saitenka/app/lifecycle_surfaces.py::LifecycleSurfaces.repaint",
@@ -59,11 +59,11 @@ _NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
 _SYNCHRONOUS_BY_CONTRACT = {
     # Runs from `close`: a queued command is never drained, and the forced section would outlive us
     # still holding the mouse away from a detached mpv.
-    "src/saitenka/app/mouse_capture.py::MouseCapture.release",
+    "src/saitenka/app/interaction/mouse_capture.py::MouseCapture.release",
     # The caller reads the file mpv writes, so this one genuinely must be awaited.
     "src/saitenka/app/media.py::screenshot",
     # Same: the reply IS the capture's result, and the file must exist when it returns.
-    "src/saitenka/app/session_runtime.py::SessionRuntime.capture",
+    "src/saitenka/app/session/runtime.py::SessionRuntime.capture",
     # `quit`, issued while the reactor is stopping — the entrypoint's terminal sequence, which is a
     # declaration now rather than two hand-written `finally` blocks.
     "src/saitenka/app/player_supervisor.py::PlayerSupervisor._perform",
@@ -148,7 +148,7 @@ _DUTY_IDS = {
 _HOST_NAMES = {
     "SessionController",
     "session_controller.SessionController",
-    "saitenka.app.session_controller.SessionController",
+    "saitenka.app.session.controller.SessionController",
 }
 
 

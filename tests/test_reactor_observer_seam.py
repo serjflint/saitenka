@@ -126,8 +126,8 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     """
     from util import runtime_gateway
 
-    from saitenka.app.session_controller import SessionController
-    from saitenka.app.session_routes import (
+    from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.routes import (
         _CLAIMED,
         _PARTICIPANT_OF,
         _RESOURCE_OF,
@@ -171,7 +171,7 @@ def test_a_correlator_owned_completion_is_never_claimed_by_the_reactor() -> None
     """
     from util import runtime_gateway
 
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -272,7 +272,7 @@ def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None
     """
     from util import runtime_gateway
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     def commands_for(*, observing: bool) -> list[tuple]:

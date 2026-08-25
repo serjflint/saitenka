@@ -13,7 +13,7 @@ import pytest
 from util import FakeIPC, keybind_registry, press
 
 from saitenka.app.bindings import BINDINGS, active_bindings
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 
 # --- exhaustive registration: no binding may be gated on a dependency ------------------------------
@@ -161,7 +161,7 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
 def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypatch):
     """The #244 flagship at the firing level: register while anki=None (attach mode), then press the
     mine key — it must reach the mining command route without re-registering the binding."""
-    from saitenka.app.mine_intents import MineCommand
+    from saitenka.app.features.mining.mine_intents import MineCommand
 
     ipc = FakeIPC()
     r = SessionController(ipc, anki=None)

@@ -34,7 +34,7 @@ import pytest
 
 from saitenka.app.backlog import BacklogStore
 from saitenka.app.dictdb import DictionaryDb
-from saitenka.app.mined_store import MinedCardStore
+from saitenka.app.features.mining.mined_store import MinedCardStore
 from saitenka.app.render_cache import RenderCache
 from saitenka.app.session_stats import SessionStore
 from saitenka.mask_atlas import MaskAtlas

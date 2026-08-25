@@ -12,9 +12,9 @@ import dicthelp
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app import nested_popup, tooltip
 from saitenka.app.config import ReaderOptions
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip import nested_popup, tooltip
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session_routes import install_session_reactor
+from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import (
     EpisodeRetired,
     HoverConfigured,
@@ -109,7 +109,7 @@ def test_an_owner_with_no_per_episode_facts_is_not_counted_as_an_unrouted_gap(re
 def test_rebinding_the_episode_retires_the_slots_with_the_container() -> None:
     """Both halves move together or the slots keep the last episode's facts — silently, because
     nothing at the seam reads them until the next cue arrives."""
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     reader = SessionController(FakeIPC(), prefetch=False)
     try:

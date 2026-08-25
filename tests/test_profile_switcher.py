@@ -12,11 +12,11 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, keybind_registry, press, runtime_gateway
 
-from saitenka.app import prefetch
+from saitenka.app.features.profiles.profile_controller import ProfileSwitchStatus
+from saitenka.app.features.tooltip import prefetch
 from saitenka.app.languages import MAIN_LANG, ReaderLanguages
-from saitenka.app.profile_controller import ProfileSwitchStatus
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
@@ -341,8 +341,8 @@ def test_cycle_reverts_atomically_when_dictionary_rescope_fails(request):
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_late_dependency_result_cannot_overwrite_selected_profile(request):
-    from saitenka.app.mining_controller import MiningIdentity
-    from saitenka.app.reader_deps import DependencyBundle
+    from saitenka.app.features.mining.mining_controller import MiningIdentity
+    from saitenka.app.session.deps import DependencyBundle
 
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE)
@@ -362,11 +362,15 @@ def test_late_dependency_result_cannot_overwrite_selected_profile(request):
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_profile_environment_refuses_out_of_order_dependency_publication(request, monkeypatch):
-    from saitenka.app import miner
     from saitenka.app.anki import MineConfig
     from saitenka.app.bindings import MINE_MSG
-    from saitenka.app.mining_controller import MiningIdentity, MiningSpec, MiningTarget
-    from saitenka.app.reader_deps import DependencyBundle
+    from saitenka.app.features.mining import miner
+    from saitenka.app.features.mining.mining_controller import (
+        MiningIdentity,
+        MiningSpec,
+        MiningTarget,
+    )
+    from saitenka.app.session.deps import DependencyBundle
 
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE)
@@ -375,7 +379,7 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
     def load(_port, cfg, _build, *, identity, **_kwargs):
         submissions.append((identity, cfg))
 
-    monkeypatch.setattr("saitenka.app.reader_deps.load_deps_async", load)
+    monkeypatch.setattr("saitenka.app.session.deps.load_deps_async", load)
 
     def spec_for(profile, identity):
         return MiningSpec(
@@ -445,7 +449,7 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_invalid_profile_mining_spec_disables_the_old_target(request):
     from saitenka.app.anki import MineConfig
-    from saitenka.app.mining_controller import MiningSpec
+    from saitenka.app.features.mining.mining_controller import MiningSpec
 
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     config = MineConfig(deck="Deck::default")
@@ -483,8 +487,8 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
 
 def test_matching_failed_dependency_bundle_clears_the_active_mining_target(request):
     from saitenka.app.anki import MineConfig
-    from saitenka.app.mining_controller import SeedStatus
-    from saitenka.app.reader_deps import DependencyBundle
+    from saitenka.app.features.mining.mining_controller import SeedStatus
+    from saitenka.app.session.deps import DependencyBundle
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)

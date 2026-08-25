@@ -10,10 +10,10 @@ import util
 from util import ManualRenderAheadSubmitter
 
 from saitenka import otel_metrics
-from saitenka.app import prefetch, tooltip_panel, tooltip_raster
 from saitenka.app.config import ReaderOptions
-from saitenka.app.popups import Panel
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip import prefetch, tooltip_panel, tooltip_raster
+from saitenka.app.features.tooltip.popups import Panel
+from saitenka.app.session.controller import SessionController
 from saitenka.panel import Definition, Entry, panel_rows
 from saitenka.render.banded import WindowedPanel
 from saitenka.runtime import EffectOutcome
@@ -246,7 +246,7 @@ def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch
     viewport warm too. Sweeping only the view the job named would leave that one soft until some
     later scroll happened to ask again — which is exactly what the tick was covering.
     """
-    from saitenka.app import tooltip_panel
+    from saitenka.app.features.tooltip import tooltip_panel
 
     r = _reader()
     r.tip.view.state = _RecordingPanel()  # type: ignore[assignment]
@@ -264,7 +264,7 @@ def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch
 def test_a_failed_terminal_sweeps_nothing(monkeypatch):
     """Nothing warmed, so there is nothing to upgrade — and the failed job still has to report its
     own outcome rather than being swallowed by a sweep."""
-    from saitenka.app import tooltip_panel
+    from saitenka.app.features.tooltip import tooltip_panel
 
     r = _reader()
     r.tip.view.state = _RecordingPanel()  # type: ignore[assignment]

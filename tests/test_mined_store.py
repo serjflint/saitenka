@@ -2,7 +2,7 @@
 
 import pytest
 
-from saitenka.app.mined_store import MinedCard, MinedCardStore
+from saitenka.app.features.mining.mined_store import MinedCard, MinedCardStore
 
 
 def _store(tmp_path):

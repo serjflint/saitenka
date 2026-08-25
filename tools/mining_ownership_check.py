@@ -10,14 +10,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "saitenka" / "app"
 
-_OWNER = "mining_controller.py"
-_COMPOSITION = "session_controller.py"
+_OWNER = "features/mining/mining_controller.py"
+_COMPOSITION = "session/controller.py"
 _CONSTRUCTORS = {
     "MinedCardStore": {_OWNER},
     "MinedSet": {_OWNER},
     "MiningIndexState": {_OWNER},
-    "MiningSpec": {_OWNER, "reader_deps.py"},
-    "MiningTarget": {_OWNER, "reader_deps.py"},
+    "MiningSpec": {_OWNER, "session/deps.py"},
+    "MiningTarget": {_OWNER, "session/deps.py"},
     "MiningTransaction": {_OWNER},
 }
 _OWNER_MUTATORS = {

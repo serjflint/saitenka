@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.close_ledger import CloseLedger
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.close_ledger import CloseLedger
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
 
 
@@ -166,7 +166,7 @@ def test_closing_a_session_detaches_the_diagnostic_gauges_through_the_runtime() 
     from util import runtime_gateway
 
     from saitenka.app import telemetry
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -196,7 +196,7 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
     from util import runtime_gateway
 
     from saitenka.app import bindings
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -263,7 +263,7 @@ def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() ->
     """
     from util import runtime_gateway
 
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -306,7 +306,7 @@ def test_the_runtime_closes_the_surfaces_it_was_handed() -> None:
     must not also close them itself, or the migration is an extra call rather than a moved
     lifetime.
     """
-    from saitenka.app.session_routes import SURFACES_RESOURCE, install_session_runtime
+    from saitenka.app.session.routes import SURFACES_RESOURCE, install_session_runtime
 
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
@@ -375,7 +375,7 @@ def test_composing_a_session_runtime_leaves_its_close_duties_reachable(
     reactor.
     """
     from saitenka.app import telemetry
-    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.app.session.routes import install_session_runtime
 
     monkeypatch.setattr(telemetry, "_gauge_provider", lambda: {"cache": 1.0})
     ipc = FakeIPC()
@@ -397,7 +397,7 @@ def test_close_announces_every_phase_in_teardown_order() -> None:
     Order is asserted against the enum rather than a hand-written list — the enum is the
     declaration, so a reordering there that the table does not follow is the bug this catches.
     """
-    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.app.session.routes import install_session_runtime
     from saitenka.runtime.events import ClosePhase, SessionClosing
 
     seen: list[ClosePhase] = []
@@ -430,7 +430,7 @@ def test_a_closed_session_reactor_rejects_further_work() -> None:
     """
     from util import FakeIPC
 
-    from saitenka.app.session_routes import install_session_runtime
+    from saitenka.app.session.routes import install_session_runtime
     from saitenka.runtime import EventOrigin, MailboxFull, RawMpvEvent, TrafficClass
 
     ipc = FakeIPC()
@@ -466,7 +466,7 @@ def test_the_artifacts_effect_carries_its_path_instead_of_looking_one_up() -> No
     assert [f.name for f in fields(RemoveSessionArtifacts)] == ["path"]
 
     dispatcher_source = (
-        Path(__file__).resolve().parents[1] / "src/saitenka/app/session_routes.py"
+        Path(__file__).resolve().parents[1] / "src/saitenka/app/session/routes.py"
     ).read_text(encoding="utf-8")
     branch = dispatcher_source.split("if isinstance(effect, RemoveSessionArtifacts):")[1]
     body = branch.split("return True")[0]
@@ -505,7 +505,7 @@ def test_the_dispatcher_retires_the_input_capture_through_its_registered_resourc
     """The link the close run cannot show: the effect finds the capture, not the SessionController's step."""
     from util import runtime_gateway
 
-    from saitenka.app.session_routes import INPUT_CAPTURE_RESOURCE, _dispatcher
+    from saitenka.app.session.routes import INPUT_CAPTURE_RESOURCE, _dispatcher
     from saitenka.runtime.diagnostics import RuntimeLedger
     from saitenka.runtime.effects import ReleaseInputCapture
 
@@ -537,8 +537,8 @@ def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> Non
     """
     from util import runtime_gateway
 
-    from saitenka.app.session_resources import Retiring
-    from saitenka.app.session_routes import (
+    from saitenka.app.session.resources import Retiring
+    from saitenka.app.session.routes import (
         BACKLOG_RESOURCE,
         MINED_RESOURCE,
         SESSION_SUMMARY_RESOURCE,
@@ -571,7 +571,7 @@ def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
     """SessionController keeps the store steps as no-runtime fallbacks; both paths must not run."""
     from util import runtime_gateway
 
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -593,7 +593,7 @@ def test_a_runtime_owned_session_closes_the_subtitle_raster_exactly_once() -> No
     """The SessionController keeps the three steps as the no-runtime fallback; both paths must not run."""
     from util import runtime_gateway
 
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -617,7 +617,7 @@ def test_every_migrated_phase_retires_something_and_no_two_share_a_participant()
     Two phases naming the same resource would retire it twice — once early, against collaborators
     that are still live — and no single-duty test can see that.
     """
-    from saitenka.app.session_routes import _RESOURCE_OF
+    from saitenka.app.session.routes import _RESOURCE_OF
     from saitenka.runtime.events import ClosePhase, SessionClosing
     from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
@@ -664,7 +664,7 @@ def test_every_registered_participant_is_named_by_an_effect_and_the_reverse() ->
     table but never registered is the mirror: `_retire` answers False and the phase reports a
     failure nobody caused.
     """
-    from saitenka.app.session_routes import _PARTICIPANT_OF, _PERFORMER_OF, _RESOURCE_OF
+    from saitenka.app.session.routes import _PARTICIPANT_OF, _PERFORMER_OF, _RESOURCE_OF
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)

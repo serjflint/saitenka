@@ -3,7 +3,7 @@ on-screen element (subtitle, tooltip, toast, ...) from the others sharing mpv's 
 
 One shared enum so every module that draws or clears an overlay layer refers to the same slot
 numbers — previously bare ``int`` constants defined separately in each subsystem's module
-(``session_controller.py``, ``miner_ui.py``, ``nested_popup.py``), which only worked by accident
+(``session/controller.py``, preview, nested tooltip), which only worked by accident
 (nothing stopped two subsystems from picking the same number). A leaf module with zero ``saitenka.app.*``
 imports, so anything can depend on it with no cycle risk. :class:`OverlayId` is an
 :class:`~enum.IntEnum`, so it's a drop-in ``int`` everywhere an ``oid`` is expected (comparisons,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import util
 
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 
 
 class LinkingDS:

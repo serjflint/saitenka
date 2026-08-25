@@ -17,9 +17,10 @@ import util
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
-from saitenka.app import sub_picker, subtitle_modes
+from saitenka.app import subtitle_modes
+from saitenka.app.features.picker import sub_picker
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.runtime import (
     EffectOutcome,
@@ -395,7 +396,7 @@ def test_human_size(size, expected):
 def test_the_panel_is_bounded_by_the_screen_it_is_drawn_on() -> None:
     """Every dimension is derived from the OSD, which is exactly the arithmetic that stops tracking
     a resize unnoticed. Checkable at any size now that it takes no session."""
-    from saitenka.app.sub_picker import ListingResult, picker_panel
+    from saitenka.app.features.picker.sub_picker import ListingResult, picker_panel
     from saitenka.runtime.picker import PickerState
 
     state = PickerState(open=True, listing=ListingResult((_candidate("a.srt"),), ()))
@@ -409,7 +410,7 @@ def test_the_panel_is_bounded_by_the_screen_it_is_drawn_on() -> None:
 
 def test_the_footer_reports_the_visible_slice_of_a_scrolled_list() -> None:
     """The user's only cue that the list continues past the panel."""
-    from saitenka.app.sub_picker import _footer
+    from saitenka.app.features.picker.sub_picker import _footer
     from saitenka.runtime.picker import PickerState
 
     assert _footer(PickerState(scroll=4), "Alt+p", total=20, shown=6).startswith("5–10 / 20")
@@ -418,7 +419,7 @@ def test_the_footer_reports_the_visible_slice_of_a_scrolled_list() -> None:
 def test_provider_warnings_replace_the_position_readout() -> None:
     """A warning is the more useful thing to say in the same space, and losing it to a row count
     would leave a partial listing looking complete."""
-    from saitenka.app.sub_picker import ListingResult, _footer
+    from saitenka.app.features.picker.sub_picker import ListingResult, _footer
     from saitenka.runtime.picker import PickerState
 
     state = PickerState(listing=ListingResult((), ("jimaku timed out",)))

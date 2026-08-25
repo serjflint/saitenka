@@ -146,7 +146,7 @@ _LIST_SCOPED = ("dicts", "freq", "pitch")
 
 def scope_config(cfg: dict, override: str | None = None) -> dict:
     """Overlay the active profile's scoped tables onto the flat cfg (design D1-A), returning the cfg the
-    dep builders (``build_reader_deps`` / ``_mine_config_from``) should read. ``dicts``/``freq``/``pitch``
+    dep builders (``build_reader_deps`` / ``mine_config_from``) should read. ``dicts``/``freq``/``pitch``
     lists replace the top-level lists; a ``[profiles.<name>.mine]`` table merges key-wise OVER ``[mine]``
     (a profile can override just the deck and inherit the rest). Returns the SAME cfg object when the
     active profile scopes none of these — so the default profile (no ``[profiles.*]``) is byte-identical

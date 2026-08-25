@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import logging
 
+import saitenka.app.session.deps as reader_deps
 from saitenka.app import anki as anki_mod
-from saitenka.app import reader_deps
 from saitenka.app.anki import MineConfig
 
 # The conftest fixture patches the module attribute ``anki_reachable``; keep the REAL one so we can

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app.hover_intents import (
+from saitenka.app.features.tooltip.hover_intents import (
     CopyToken,
     HoverCommand,
     HoverInputs,

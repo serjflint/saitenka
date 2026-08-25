@@ -22,7 +22,7 @@ class Foreign:
         self.anki = object()
 """
     assert _rules(source) == set()
-    assert _rules(source, "src/saitenka/app/session_controller.py") == {"legacy-owner-field"}
+    assert _rules(source, "src/saitenka/app/session/controller.py") == {"legacy-owner-field"}
 
 
 def test_mining_state_construction_outside_the_owner_is_rejected() -> None:
@@ -92,7 +92,7 @@ def assemble(controller, identity, spec, target):
     controller.publish_mining_target(target)
     controller.clear_mining_target(identity)
 """,
-        Path("src/saitenka/app/session_controller.py"),
+        Path("src/saitenka/app/session/controller.py"),
     )
     assert not mining_ownership_check.inspect_source(
         """
@@ -105,7 +105,7 @@ def own(spec):
     controller.record_mined_expression("猫")
     return MiningTransaction()
 """,
-        Path("src/saitenka/app/mining_controller.py"),
+        Path("src/saitenka/app/features/mining/mining_controller.py"),
     )
 
 
@@ -116,7 +116,7 @@ class SessionController:
     def mine_current(self):
         pass
 """,
-        "src/saitenka/app/session_controller.py",
+        "src/saitenka/app/session/controller.py",
     ) == {"retired-facade"}
 
 

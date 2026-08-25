@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session_routes import install_session_reactor
+from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import (
     SubtitleLanguageChanged,
     SubtitlePrimaryAdopted,

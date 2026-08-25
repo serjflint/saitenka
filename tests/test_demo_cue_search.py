@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import util
 
 from saitenka.app.launch.run import DEMO_LINE, _demo_cue_text
-from saitenka.app.session_runtime import (
+from saitenka.app.session.runtime import (
     SessionActs,
     SessionFacts,
     SessionRuntime,

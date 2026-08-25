@@ -7,13 +7,14 @@ import util
 from driver import Driver
 from PIL import Image
 
-from saitenka.app import sidebar
 from saitenka.app.anki import MineConfig
 from saitenka.app.backlog import BacklogStore, Capture
 from saitenka.app.episode_analysis import analyze_cues
-from saitenka.app.mining_controller import MiningSpec, MiningTarget
+from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
+from saitenka.app.features.sidebar import sidebar
 from saitenka.app.scoring import Scorer
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session import sidebar_coordination
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitles import (
     SidebarAction,
     SidebarHitBox,
@@ -275,7 +276,7 @@ def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):
     )
     reader.sidebar_controller.panel.rect = (100, 100, 400, 500)
     monkeypatch.setattr(
-        "saitenka.app.tooltip.update_hover",
+        "saitenka.app.features.tooltip.tooltip.update_hover",
         lambda _reader: (_ for _ in ()).throw(AssertionError("tooltip reached")),
     )
 
@@ -338,7 +339,7 @@ def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, mo
 
 
 def test_mine_tab_lists_this_episodes_mined_cards(tmp_path, monkeypatch):
-    from saitenka.app import mined_store
+    from saitenka.app.features.mining import mined_store
 
     video = tmp_path / "Show - 03.mkv"
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
@@ -379,7 +380,7 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path, monkeypatch):
 
 
 def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
-    from saitenka.app import mined_store
+    from saitenka.app.features.mining import mined_store
 
     video = tmp_path / "Show - 03.mkv"
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
@@ -391,7 +392,7 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
 
 
 def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
-    from saitenka.app import mined_store
+    from saitenka.app.features.mining import mined_store
 
     video = tmp_path / "Show - 03.mkv"
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
@@ -419,7 +420,8 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
 
 
 def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, monkeypatch):
-    from saitenka.app import mined_store, miner_ui
+    from saitenka.app.features.mining import mined_store
+    from saitenka.app.features.preview import miner_ui
 
     video = tmp_path / "Show - 03.mkv"
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
@@ -441,7 +443,7 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
         lambda _ports, _src, nid, card, status: opened.append((nid, card.expression, status)),
     )
 
-    sidebar._open_mined(
+    sidebar_coordination.open_mined(
         reader.sidebar_view,
         reader.sidebar_actions,
         reader.preview_ports,
@@ -498,7 +500,7 @@ def test_ui_scale_increases_sidebar_rows_and_reduces_capacity():
 def test_row_capacity_follows_the_screen_and_the_chrome_scale() -> None:
     """A taller panel fits more rows; a larger chrome scale fits fewer of them in the same space.
     Both are needed, and checking it takes no session now."""
-    from saitenka.app.sidebar import _capacity
+    from saitenka.app.features.sidebar.sidebar import _capacity
 
     assert _capacity((1920, 1080), 1.0) > _capacity((1920, 720), 1.0)
     assert _capacity((1920, 1080), 2.0) < _capacity((1920, 1080), 1.0)
@@ -508,7 +510,7 @@ def test_row_capacity_follows_the_screen_and_the_chrome_scale() -> None:
 def test_cue_colours_are_recomputed_when_the_known_set_changes() -> None:
     """The cache key carries the scorer's identity, not just the text: the same line scores
     differently once the known-word set does, and a text-only key would serve the old colours."""
-    from saitenka.app.sidebar import _cue_parts
+    from saitenka.app.features.sidebar.sidebar import _cue_parts
 
     class Scorer:
         def __init__(self, colour):
@@ -532,7 +534,7 @@ def test_cue_colours_are_recomputed_when_the_known_set_changes() -> None:
 def test_a_bookmark_falls_back_to_the_other_language() -> None:
     """A capture may only have one side, and showing a blank row would read as a broken bookmark."""
     from saitenka.app.backlog import BacklogEntry
-    from saitenka.app.sidebar import _entry_text
+    from saitenka.app.features.sidebar.sidebar import _entry_text
 
     only_jp = BacklogEntry(
         id=1,

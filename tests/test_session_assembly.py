@@ -10,7 +10,7 @@ from saitenka.app.feature_bindings import (
     INTERACTION_OWNER_PLAN,
     ordered_stateful_bindings,
 )
-from saitenka.app.session_assembly import CommandRegistration, build_session_assembly
+from saitenka.app.session.assembly import CommandRegistration, build_session_assembly
 from saitenka.runtime import Owner
 
 

@@ -6,9 +6,9 @@ from util import RecordingRasterProvider, keybind_registry
 
 from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip.tooltip import update_hover_impl
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
-from saitenka.app.tooltip import update_hover_impl
 
 
 class FakeIPC(util.FakeIPC):

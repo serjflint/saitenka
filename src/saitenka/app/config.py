@@ -584,7 +584,7 @@ class WordAudioOptions:
     mined sentence/scene clip, resolved offline from the expression + reading mining already knows
     (grounded — never synthesized). Edited as ``[mine]`` table keys by ``saitenka config``; merged into
     :class:`~saitenka.app.anki.MineConfig` (``word_audio_pack``/``word_audio_field``) by
-    :func:`saitenka.app.reader_deps._mine_config_from`."""
+    :func:`saitenka.app.mining_config.mine_config_from`."""
 
     word_audio_enabled: bool = field(
         default=False,

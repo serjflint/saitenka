@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from saitenka.app import surfaces
+from saitenka.app.session import surfaces
 
 JANK_PATH = Path(__file__).resolve().parent.parent / "examples" / "jank_live.py"
 
@@ -162,7 +162,7 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
     from driver import Driver
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     mod = _jank_module()
     reader = SessionController(FakeIPC(), dict_set=mod.TallDS())

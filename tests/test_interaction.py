@@ -13,8 +13,8 @@ from util import FakeIPC
 
 from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import TIP_CLOSE_MSG
-from saitenka.app.mining_controller import MiningSpec, MiningTarget
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
+from saitenka.app.session.controller import SessionController
 from saitenka.panel import Definition, Entry
 
 
@@ -391,7 +391,7 @@ def test_golden_base_and_nested_render():
 def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     """A cross-reference click replaces the base tooltip's content in place (Yomitan historyMode:new)
     and pushes the previous view; back restores it. No fragile floating popup, no auto-hide race."""
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r = _reader()
     ui = Driver(r)
@@ -410,7 +410,7 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
 
 
 def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     r = _reader()
     ui = Driver(r)
@@ -428,7 +428,7 @@ def test_esc_steps_back_through_navigation_then_closes():
     r = _reader()
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    from saitenka.app import tooltip
+    from saitenka.app.features.tooltip import tooltip
 
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
@@ -443,7 +443,7 @@ def test_esc_steps_back_through_navigation_then_closes():
 
 
 def _targets(mx, my, *, inside=True, tip=None, nest=None, word=7):
-    from saitenka.app.tooltip import _hover_targets
+    from saitenka.app.features.tooltip.tooltip import _hover_targets
 
     return _hover_targets(
         mx, my, inside=inside, tip_rect=tip, nest_rect=nest, hit=lambda _x, _y: word

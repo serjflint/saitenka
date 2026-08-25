@@ -22,7 +22,7 @@ import util
 # oracle, so it asserts through exactly that check.
 from test_tooltip_statemachine import _NAV_QUERY, _assert_agrees, _fresh_reader
 
-from saitenka.app import nested_popup, tooltip, tooltip_panel
+from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
 
 Step = tuple[str, object]
 

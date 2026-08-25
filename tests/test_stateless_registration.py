@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from saitenka.app.hover_adapter import HoverAdapter
-from saitenka.app.interaction_adapter import InteractionAdapter
-from saitenka.app.mine_adapter import MineAdapter
-from saitenka.app.panel_adapter import PanelAdapter
-from saitenka.app.profile_adapter import ProfileAdapter
-from saitenka.app.session_adapter import SessionAdapter
-from saitenka.app.session_routes import stateless_features
+from saitenka.app.features.mining.mine_adapter import MineAdapter
+from saitenka.app.features.profiles.profile_adapter import ProfileAdapter
+from saitenka.app.features.tooltip.hover_adapter import HoverAdapter
+from saitenka.app.session.adapter import SessionAdapter
+from saitenka.app.session.interaction_adapter import InteractionAdapter
+from saitenka.app.session.panel_adapter import PanelAdapter
+from saitenka.app.session.routes import stateless_features
 from saitenka.app.subtitle_adapter import SubtitleAdapter
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,14 +68,14 @@ def test_every_stateless_policy_is_registered_or_named_as_residue() -> None:
 
 def test_the_router_refuses_a_command_no_feature_owns() -> None:
     """The negative control: registration is a real key, not a lookup that falls through."""
-    from saitenka.app.stateless import StatelessRouter
+    from saitenka.app.session.stateless import StatelessRouter
 
     with pytest.raises(KeyError, match="no stateless feature owns"):
         StatelessRouter(()).run("toggle-sidebar")
 
 
 def test_the_router_rejects_duplicate_command_types() -> None:
-    from saitenka.app.stateless import StatelessRouter
+    from saitenka.app.session.stateless import StatelessRouter
 
     binding = _bindings()[0]
     with pytest.raises(ValueError, match="already registered"):

@@ -1,0 +1,1 @@
+"""Shortcut-reference feature."""

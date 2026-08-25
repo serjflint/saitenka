@@ -1,7 +1,7 @@
 """The friend's #242/#243 class: a mining field map that builds a note Anki *rejects* (its first/sort
 field written empty), which doctor validated statically but nothing tied to the runtime note.
 
-Two oracles, both off the real production seam (``_mine_config_from`` builds the same MineConfig doctor
+Two oracles, both off the real production seam (``mine_config_from`` builds the same MineConfig doctor
 and the miner use):
 
 * **Positive core (property):** expression → the note type's first field ⇒ ``build_note`` writes it
@@ -22,7 +22,7 @@ from hypothesis import strategies as st
 from saitenka.app import doctor as doc
 from saitenka.app.anki import build_note
 from saitenka.app.lookup import CardData
-from saitenka.app.reader_deps import _mine_config_from
+from saitenka.app.mining_config import mine_config_from
 
 _CARD = CardData(expression="読む", reading="よむ", glossary_html="<ol><li>to read</li></ol>")
 
@@ -48,7 +48,7 @@ _FIELD = st.text("ABCDEFGabcdefg", min_size=1, max_size=6)
 def test_expression_mapped_to_first_field_is_always_addable(order):
     """Positive core: whatever the note type's field order, mapping expression to its first field yields
     a non-empty first field — the config that CAN'T trip the empty-note rejection."""
-    cfg = _mine_config_from({"model": "M", "fields": {"expression": order[0]}})
+    cfg = mine_config_from({"model": "M", "fields": {"expression": order[0]}})
     note = build_note(cfg, _CARD)
     assert _addable(note, order)
 
@@ -75,7 +75,7 @@ def test_every_unaddable_config_is_one_doctor_warns_about(monkeypatch):
     empty-note add. Reverse isn't required (doctor may warn on a non-fatal unknown entity), so only the
     unaddable ⇒ warn direction is asserted, plus a clean config staying ok+addable."""
     for fields, order, addable in _CASES:
-        cfg = _mine_config_from({"model": "M", "fields": fields})
+        cfg = mine_config_from({"model": "M", "fields": fields})
         assert _addable(build_note(cfg, _CARD), order) is addable, (fields, order)
         if not addable:
             assert _doctor_warns(monkeypatch, {"model": "M", "fields": fields}, order), fields
@@ -83,7 +83,7 @@ def test_every_unaddable_config_is_one_doctor_warns_about(monkeypatch):
 
 def test_clean_config_is_addable_and_doctor_does_not_warn(monkeypatch):
     fields, order = {"expression": "Front", "reading": "Reading"}, ["Front", "Reading"]
-    assert _addable(build_note(_mine_config_from({"model": "M", "fields": fields}), _CARD), order)
+    assert _addable(build_note(mine_config_from({"model": "M", "fields": fields}), _CARD), order)
     assert not _doctor_warns(monkeypatch, {"model": "M", "fields": fields}, order)
 
 
@@ -91,6 +91,6 @@ def test_friends_capitalized_keys_config_is_the_pinned_regression(monkeypatch):
     """#242 verbatim: capitalized logical keys match no entity, every field writes empty, Anki rejects
     the note. Pinned so this exact shape can never regress to a silent pass."""
     fields, order = {"Expression": "Graph", "Reading": "Reading"}, ["Front", "Reading", "Graph"]
-    note = build_note(_mine_config_from({"model": "Basic Yomi", "fields": fields}), _CARD)
+    note = build_note(mine_config_from({"model": "Basic Yomi", "fields": fields}), _CARD)
     assert not _addable(note, order)
     assert _doctor_warns(monkeypatch, {"model": "Basic Yomi", "fields": fields}, order)

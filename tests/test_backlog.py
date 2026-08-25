@@ -5,7 +5,7 @@ import util
 from util import keybind_registry
 
 from saitenka.app.backlog import BacklogStore, Capture, normalize_match_name
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
 
 

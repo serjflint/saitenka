@@ -133,7 +133,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     the carried-over external, and — when the new file has no JP — defer a provider fetch so watching
     continues in Japanese. Reuses the run re-slot's contract (test_auto_advance) for attach."""
     from saitenka.app import session_stats
-    from saitenka.app.session_controller import SessionController as RealReader
+    from saitenka.app.session.controller import SessionController as RealReader
 
     ipc = _TrackIPC()
     reader = RealReader(ipc)

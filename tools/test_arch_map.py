@@ -110,9 +110,7 @@ def test_every_stateless_policy_reports_a_registration_and_a_port():
     true, and a report that keeps saying so after the seam lands is worse than no report — it is a
     confident wrong answer to the one question a new contributor asks."""
     stateless = A.seams_view()["stateless"]
-    policies = {
-        p["module"].removeprefix("app/").removesuffix("_intents.py") for p in stateless["policies"]
-    }
+    policies = {p["feature"] for p in stateless["policies"]}
 
     assert stateless["seam"], "the seam exists; the view must name it"
     assert policies and policies == set(stateless["registered"])

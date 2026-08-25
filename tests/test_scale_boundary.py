@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from tip_fakes import hidpi_reader
 
-from saitenka.app import tooltip, tooltip_panel
+from saitenka.app.features.tooltip import tooltip, tooltip_panel
 from saitenka.app.subtitle_render import NullRenderer
 
 _SCALES = [1.5, 2.0]

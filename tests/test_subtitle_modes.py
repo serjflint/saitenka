@@ -11,7 +11,7 @@ from util import RecordingRasterProvider, runtime_gateway
 
 from saitenka.app import subtitle_modes, subtitle_selection
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleSecondaryLeased

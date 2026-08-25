@@ -76,7 +76,7 @@ def build(root: Path = ROOT) -> dict[str, object]:
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.ImportFrom)
-                and node.module == "saitenka.app.session_controller"
+                and node.module == "saitenka.app.session.controller"
             ):
                 constructor_names.update(
                     alias.asname or alias.name
@@ -87,9 +87,9 @@ def build(root: Path = ROOT) -> dict[str, object]:
                 constructor_names.update(
                     f"{alias.asname or alias.name}.SessionController"
                     for alias in node.names
-                    if alias.name == "saitenka.app.session_controller"
+                    if alias.name == "saitenka.app.session.controller"
                 )
-        if path == root / "src" / "saitenka" / "app" / "session_controller.py":
+        if path == root / "src" / "saitenka" / "app" / "session" / "controller.py":
             constructor_names.add("SessionController")
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):

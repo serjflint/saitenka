@@ -15,7 +15,7 @@ from saitenka.app.profiles import (
     scope_config,
     validate_language_code,
 )
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.tokenizer import register_tokenizer
 
@@ -372,7 +372,7 @@ def test_scoped_dicts_are_what_the_run_path_resolves():
 def test_profilemine_targets_its_own_deck_model_and_fields_in_a_built_mineconfig():
     """The end-to-end observable for D6: a MineConfig built from the profile-scoped [mine] targets the
     profile's deck/model/field-map — the deck a mined note lands in, and the fields it writes."""
-    from saitenka.app.reader_deps import _mine_config_from
+    from saitenka.app.mining_config import mine_config_from
 
     cfg = scope_config(
         {
@@ -391,7 +391,7 @@ def test_profilemine_targets_its_own_deck_model_and_fields_in_a_built_mineconfig
             },
         }
     )
-    mine_conf = _mine_config_from(cfg["mine"])
+    mine_conf = mine_config_from(cfg["mine"])
     assert mine_conf.deck == "French::Mining"
     assert mine_conf.model == "FrenchNote"
     assert mine_conf.fields == {"expression": "Mot", "sentence": "Phrase"}

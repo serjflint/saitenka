@@ -113,7 +113,7 @@ def _why_stuck(reader) -> str:
 
 
 def _scroll_four(reader) -> None:
-    from saitenka.app import surfaces
+    from saitenka.app.session import surfaces
 
     before = reader.tip.view.scroll
     for _ in range(4):

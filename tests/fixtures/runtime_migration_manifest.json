@@ -87,10 +87,10 @@
     },
     {
       "id": "runtime-ready",
-      "source": "src/saitenka/app/session_controller.py::SessionController._mark_interactive_ready",
+      "source": "src/saitenka/app/session/controller.py::SessionController._mark_interactive_ready",
       "evidence": [
         "call:self.ipc.publish_runtime_event",
-        "src/saitenka/app/session_controller.py::SessionController.pump|call:self._mark_interactive_ready"
+        "src/saitenka/app/session/controller.py::SessionController.pump|call:self._mark_interactive_ready"
       ],
       "target": "lifecycle-readiness",
       "work_package": "5",
@@ -100,7 +100,7 @@
     },
     {
       "id": "session-loop",
-      "source": "src/saitenka/app/session_controller.py::SessionController.run",
+      "source": "src/saitenka/app/session/controller.py::SessionController.run",
       "evidence": [
         "ref:self.ipc.session_loop",
         "call:loop.run"
@@ -271,7 +271,7 @@
         "call:runtime.mark_ready",
         "order:call:runtime.prepare_hover>call:runtime.mark_ready",
         "src/saitenka/app/launch/run.py::_demo_cue_text|call:runtime.await_render_space",
-        "src/saitenka/app/session_runtime.py::SessionRuntime.await_render_space|call:self.run_until"
+        "src/saitenka/app/session/runtime.py::SessionRuntime.await_render_space|call:self.run_until"
       ],
       "target": "owned-session-composition",
       "work_package": "7",
@@ -289,8 +289,8 @@
         "call:runtime.await_paint",
         "call:runtime.capture",
         "order:call:runtime.await_paint>call:runtime.capture",
-        "src/saitenka/app/session_runtime.py::SessionRuntime.await_paint|call:self.run_until",
-        "src/saitenka/app/session_runtime.py::SessionRuntime.capture|call:self._ipc.command:screenshot-to-file"
+        "src/saitenka/app/session/runtime.py::SessionRuntime.await_paint|call:self.run_until",
+        "src/saitenka/app/session/runtime.py::SessionRuntime.capture|call:self._ipc.command:screenshot-to-file"
       ],
       "target": "owned-session-composition",
       "work_package": "7",

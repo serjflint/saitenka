@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import util
 
-from saitenka.app.prefetch import REF_H
-from saitenka.app.session_controller import SessionController
+from saitenka.app.features.tooltip.prefetch import REF_H
+from saitenka.app.session.controller import SessionController
 
 
 def _reader(tip_scale: float, osd_h: int) -> SessionController:
@@ -51,7 +51,7 @@ def test_the_bucket_applies_to_a_hand_set_scale_too():
 def test_the_viewport_cap_is_reference_based_not_live_osd():
     """Same reason `TipScale.display` is a boundary value: a cap measured off the live OSD would
     make the render cache resolution-dependent, so 4K and 1080p would never share a band."""
-    from saitenka.app.prefetch import cap_for
+    from saitenka.app.features.tooltip.prefetch import cap_for
 
     assert cap_for(0.5) == cap_for(0.5)  # no session, no OSD — nothing else to vary
     assert cap_for(0.9) > cap_for(0.5)
@@ -61,7 +61,7 @@ def test_the_viewport_cap_is_reference_based_not_live_osd():
 
 def test_a_nested_popup_shrinks_only_when_the_room_above_is_worth_using():
     """Below `NEST_MIN_ABOVE` the popup would be a slit, so it drops below the word instead."""
-    from saitenka.app.nested_popup import NEST_MIN_ABOVE, TIP_GAP, nested_view_h
+    from saitenka.app.features.tooltip.nested_popup import NEST_MIN_ABOVE, TIP_GAP, nested_view_h
 
     margin = max(16, round(REF_H * 0.05))
     roomy = NEST_MIN_ABOVE + TIP_GAP + margin + 40
@@ -74,8 +74,8 @@ def test_a_nested_popup_shrinks_only_when_the_room_above_is_worth_using():
 
 
 def test_the_nested_cap_bounds_the_viewport_before_the_room_above_does():
-    from saitenka.app.nested_popup import nested_view_h
-    from saitenka.app.prefetch import cap_for
+    from saitenka.app.features.tooltip.nested_popup import nested_view_h
+    from saitenka.app.features.tooltip.prefetch import cap_for
 
     assert nested_view_h(10_000, 10_000, osd_h=REF_H, max_frac=0.5) == cap_for(0.5)
 
@@ -83,7 +83,7 @@ def test_the_nested_cap_bounds_the_viewport_before_the_room_above_does():
 def test_a_panel_prefers_the_space_above_the_word():
     """Above by default: the tooltip covers the cue's own line if it drops below, and the word being
     read is the one thing that must stay visible."""
-    from saitenka.app.tooltip_panel import TIP_GAP, place_panel
+    from saitenka.app.features.tooltip.tooltip_panel import TIP_GAP, place_panel
 
     _tx, ty = place_panel(300, 100, 600, 40, 200, scale=1.0, osd=(1920, REF_H))
 
@@ -91,7 +91,7 @@ def test_a_panel_prefers_the_space_above_the_word():
 
 
 def test_a_panel_with_no_room_above_drops_below_the_word():
-    from saitenka.app.tooltip_panel import place_panel
+    from saitenka.app.features.tooltip.tooltip_panel import place_panel
 
     _tx, ty = place_panel(300, 100, 40, 40, 400, scale=1.0, osd=(1920, REF_H))
 
@@ -101,7 +101,7 @@ def test_a_panel_with_no_room_above_drops_below_the_word():
 def test_a_panel_is_clamped_into_the_safe_area_on_every_side():
     """A word near a corner would anchor the panel off-screen, and mpv clips rather than scrolls —
     the part that ran off would simply never be readable."""
-    from saitenka.app.tooltip_panel import place_panel
+    from saitenka.app.features.tooltip.tooltip_panel import place_panel
 
     osd = (1920, REF_H)
     margin = max(16, round(REF_H * 0.05))
@@ -115,7 +115,7 @@ def test_a_panel_is_clamped_into_the_safe_area_on_every_side():
 def test_placement_uses_the_displayed_size_not_the_reference_size():
     """The panel is composited at reference size and upscaled at upload, so placing it by the
     reference size puts a 2x panel half off the bottom of a Retina panel."""
-    from saitenka.app.tooltip_panel import place_panel
+    from saitenka.app.features.tooltip.tooltip_panel import place_panel
 
     osd = (1920, REF_H)
     _tx, one = place_panel(300, 900, 900, 40, 300, scale=1.0, osd=osd)
@@ -130,7 +130,7 @@ def test_a_panel_too_tall_for_either_side_takes_the_roomier_one():
     more of it there, and the clamp then trims what is left — dropping it below would put the
     definition into the few pixels under the word.
     """
-    from saitenka.app.tooltip_panel import place_panel
+    from saitenka.app.features.tooltip.tooltip_panel import place_panel
 
     osd = (1920, REF_H)
     word_y, word_h, height = 560, 40, 520  # taller than the room above, but roomier there anyway

@@ -42,7 +42,7 @@ def test_draw_loading_paints_one_timer_authorized_frame():
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     r = SessionController(FakeIPC())
     r._loading = True
@@ -64,14 +64,14 @@ def test_draw_loading_paints_one_timer_authorized_frame():
 
 
 def _install(ipc):
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     gateway = runtime_gateway(ipc)
     return gateway, install_session_reactor(gateway)
 
 
 def _hint_state(reactor):
-    from saitenka.app.session_routes import STARTUP_HINT
+    from saitenka.app.session.routes import STARTUP_HINT
     from saitenka.runtime.startup_hint import StartupHintState
     from saitenka.runtime.state import OwnerSlice
 
@@ -112,7 +112,7 @@ def test_show_startup_hint_skipped_for_screenshot(request):
     # session still gets its reactor, which is not the hint's to withhold.
     from util import FakeIPC
 
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -135,7 +135,7 @@ def test_ready_startup_hint_empties_the_osd_text():
 def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     _install(ipc)
@@ -157,7 +157,7 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
 def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     _install(ipc)
@@ -290,8 +290,8 @@ def test_apply_deps_stops_the_spinner():
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.reader_deps import DependencyBundle
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.deps import DependencyBundle
 
     r = SessionController(FakeIPC())
     r._loading = True
@@ -306,7 +306,7 @@ def test_load_deps_async_uses_a_custom_build():
 
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     r = SessionController(FakeIPC())
     r.ov = _RecOv()
@@ -331,8 +331,8 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
 
     from util import FakeIPC
 
-    from saitenka.app import reader_deps as rd
-    from saitenka.app.session_controller import SessionController
+    import saitenka.app.session.deps as rd
+    from saitenka.app.session.controller import SessionController
 
     built = {"n": 0}
 

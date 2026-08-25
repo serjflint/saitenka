@@ -6,7 +6,7 @@ from util import keybind_registry
 
 from saitenka.app.config import KeyOptions, ReaderOptions
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session_controller import SessionController
+from saitenka.app.session.controller import SessionController
 from saitenka.mpvio.osd import Overlay
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleTracksDiscovered
 

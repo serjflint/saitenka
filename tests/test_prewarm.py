@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-from saitenka.app.prefetch import TipScale
+from saitenka.app.features.tooltip.prefetch import TipScale
 from saitenka.app.prewarm import PrewarmTuning, _popular_terms, _PrewarmJob, _startup_plan
 
 

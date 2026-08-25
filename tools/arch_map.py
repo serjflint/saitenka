@@ -202,7 +202,7 @@ def _session():
     sys.path.insert(0, str(ROOT / "tests"))
     from util import FakeIPC, runtime_gateway  # a tool, not a library
 
-    from saitenka.app.session_routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor
 
     gateway = runtime_gateway(FakeIPC())
     try:
@@ -215,7 +215,7 @@ def _session():
 def ownership_view() -> dict:
     import dataclasses
 
-    from saitenka.app import session_routes
+    import saitenka.app.session.routes as session_routes
     from saitenka.runtime.state import SessionState
 
     with _session() as gateway:
@@ -239,6 +239,14 @@ def ownership_view() -> dict:
     }
 
 
+def _app_module(path: pathlib.Path) -> str:
+    return f"app/{path.relative_to(SRC / 'app').as_posix()}"
+
+
+def _policy_name(path: pathlib.Path) -> str:
+    return path.parent.name if path.stem == "intents" else path.stem.removesuffix("_intents")
+
+
 def _adapter_ports() -> list[dict]:
     """Each stateless feature's declared host surface, and how much of it it writes.
 
@@ -247,7 +255,7 @@ def _adapter_ports() -> list[dict]:
     by hiding it, because a `SessionController` parameter is what the host inventory sits at zero to forbid.
     """
     ports = []
-    for path in sorted((SRC / "app").glob("*_adapter.py")):
+    for path in sorted((SRC / "app").rglob("*adapter.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in tree.body:
             if not isinstance(node, ast.ClassDef) or not node.name.endswith("Host"):
@@ -257,7 +265,7 @@ def _adapter_ports() -> list[dict]:
             ports.append(
                 {
                     "port": node.name,
-                    "module": f"app/{path.name}",
+                    "module": _app_module(path),
                     "members": len(written) + len(reads),
                     "written": len(written),
                 }
@@ -268,13 +276,13 @@ def _adapter_ports() -> list[dict]:
 def _registered_policies() -> list[str]:
     """Which policies the router actually owns. Built off a stub host: a registration needs no
     live session, which is the point of the ports."""
-    from saitenka.app.hover_adapter import HoverAdapter
-    from saitenka.app.interaction_adapter import InteractionAdapter
-    from saitenka.app.mine_adapter import MineAdapter
-    from saitenka.app.panel_adapter import PanelAdapter
-    from saitenka.app.profile_adapter import ProfileAdapter
-    from saitenka.app.session_adapter import SessionAdapter
-    from saitenka.app.session_routes import stateless_features
+    from saitenka.app.features.mining.mine_adapter import MineAdapter
+    from saitenka.app.features.profiles.profile_adapter import ProfileAdapter
+    from saitenka.app.features.tooltip.hover_adapter import HoverAdapter
+    from saitenka.app.session.adapter import SessionAdapter
+    from saitenka.app.session.interaction_adapter import InteractionAdapter
+    from saitenka.app.session.panel_adapter import PanelAdapter
+    from saitenka.app.session.routes import stateless_features
     from saitenka.app.subtitle_adapter import SubtitleAdapter
 
     class _Stub:
@@ -303,7 +311,7 @@ def _host_residue() -> dict[str, list[str]]:
     stateless feature's interpreter at all. A prefix names a shape, never a family — which is the
     error this whole migration kept making, so the report says so rather than implying a worklist.
     """
-    from saitenka.app.session_controller import SessionController
+    from saitenka.app.session.controller import SessionController
 
     roles = collections.defaultdict(list)
     for name, value in vars(SessionController).items():
@@ -321,7 +329,7 @@ def _host_residue() -> dict[str, list[str]]:
 def seams_view() -> dict:
     """Where a feature plugs in. Two layers, and only one of them has a seam."""
     policies = []
-    for path in sorted((SRC / "app").glob("*_intents.py")):
+    for path in sorted((SRC / "app").rglob("*intents.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         entry = next(
             (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "reduce"), None
@@ -334,7 +342,8 @@ def seams_view() -> dict:
         ]
         policies.append(
             {
-                "module": f"app/{path.name}",
+                "feature": _policy_name(path),
+                "module": _app_module(path),
                 "signature": f"reduce({', '.join(params)})",
                 # A reducer that threads state belongs in an owner slice; one that does not is a
                 # policy over a snapshot, and the mailbox would only add a hop.
@@ -378,7 +387,7 @@ def command_view() -> dict:
     """What a keypress reaches. The router is a table, so it reads statically — but the rows are
     `action(SessionController.verb)`, resolved by name at call time, which is why a verb reached only from
     here looks dead to every tool that follows symbols."""
-    source = (SRC / "app" / "session_controller.py").read_text(encoding="utf-8")
+    source = (SRC / "app" / "session" / "controller.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     controller = next(
         n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionController"
@@ -504,7 +513,7 @@ def markdown(state: dict) -> str:
     registered = set(seams["stateless"]["registered"])
     out += [
         f"| `{p['module']}` | `{p['signature']}` |"
-        f" {'yes' if p['module'].removeprefix('app/').removesuffix('_intents.py') in registered else 'NO'} |"
+        f" {'yes' if p['feature'] in registered else 'NO'} |"
         for p in seams["stateless"]["policies"]
     ]
     out += [

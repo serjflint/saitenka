@@ -35,7 +35,7 @@ def test_map_surfaces_kinds_for_a_touched_subsystem():
 
 def test_map_unions_kinds_when_a_path_matches_several_subsystems():
     tk = _load("test_kinds", "test_kinds.py")
-    names = {n for n, _ in tk.applicable(["src/saitenka/app/session_controller.py"])}
+    names = {n for n, _ in tk.applicable(["src/saitenka/app/session/controller.py"])}
     assert {"cli assembly", "panel / windowed / interaction"} <= names
 
 

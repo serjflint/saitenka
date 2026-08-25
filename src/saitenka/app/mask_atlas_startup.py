@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from saitenka.app.reader_context import RenderCacheState
+    from saitenka.app.session.context import RenderCacheState
     from saitenka.mask_atlas import MaskAtlas
 
 log = logging.getLogger(__name__)
