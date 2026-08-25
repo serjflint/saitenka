@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
-from util import requires_libass
+from util import PINNED_FAMILY, pinned_ass_renderer, requires_libass
 
 from saitenka.subtitles import (
     AnnotatedSubtitleEvent,
@@ -579,9 +579,10 @@ def test_the_blur_refusal_is_measured_not_assumed() -> None:
     which is a hover landing on the wrong word.
 
     `Spacing` is 10 because the precondition — that the sharp pair does NOT already overlap — was
-    otherwise decided by whatever the host calls `sans-serif`: the two glyphs abutted at exactly
-    0px against macOS's Hiragino and overlapped by 4px against Linux's Noto CJK. Spacing adds a
-    fixed advance whatever the face, so the gap survives the font instead of depending on it.
+    otherwise decided by whatever face was resolved: the two glyphs abutted at exactly 0px against
+    macOS's Hiragino and overlapped by 4px against Linux's Noto CJK. Spacing survives the face; the
+    host's choice of face did not survive CI, so the renderer is now pinned to the bundled one and
+    the style names it. Both together: a fixed advance, measured against a fixed font.
     """
     libasslite = requires_libass()
     header = (
@@ -589,7 +590,7 @@ def test_the_blur_refusal_is_measured_not_assumed() -> None:
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
         "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: D,sans-serif,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,10,0,"
+        f"Style: D,{PINNED_FAMILY},40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,10,0,"
         "1,0,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
     )
@@ -599,7 +600,7 @@ def test_the_blur_refusal_is_measured_not_assumed() -> None:
             rf"Dialogue: 0,0:00:01.00,0:00:03.00,D,,0,0,0,,{{\pos(40,40){tag}\1c&H0000FF&}}猫"
             r"{\1c&H00FF00&}犬" + "\n"
         )
-        renderer = libasslite.AssRenderer((header + event).encode())
+        renderer = pinned_ass_renderer(libasslite, (header + event).encode())
         try:
             result = renderer.render(2_000, (640, 360), (640, 360), pixel_aspect=1.0)
             return [
