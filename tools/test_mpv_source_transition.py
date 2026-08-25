@@ -321,9 +321,11 @@ class _FakeMpv:
     the state from before it. Against a fake that mutates synchronously, the phase's own events are
     always in the very first batch and every assertion below passes on broken code.
 
-    A `property-change` is emitted only when the value actually changes, and `query` is a barrier —
-    it applies anything outstanding, matching mpv, where a query reply arrives with the earlier
-    commands' notifications already queued.
+    A `property-change` is emitted only when the value actually changes, and `query` publishes what
+    is outstanding. That last part is modelled as absolute where mpv is merely near-certain (58/60
+    measured on 0.41 — mpv raises notifications from its playloop, so a reply can outrun one). The
+    fake is deliberately the stricter of the two: it makes the round-trip in `_discard_earlier_events`
+    load-bearing, so deleting it turns a test red instead of leaving the mechanism unasserted.
     """
 
     def __init__(self, *, sid: int, paused: bool) -> None:
@@ -389,9 +391,10 @@ def test_probe_phase_observes_its_own_switch_not_the_sampling_backlog() -> None:
     even processed the phase's own `set_property`.
 
     That is a green phase built on evidence it did not produce. It also un-serializes the two
-    switches, and mpv coalesces `sid` notifications issued inside one playloop iteration into a
-    single event (measured: `set sid=2; set sid=1` back-to-back emits `sid` once, with the final
-    value), so the second wait can be left with no event of its own to observe.
+    switches, and mpv can then collapse both `sid` notifications into one carrying only the final
+    value, leaving a wait with no event of its own — see
+    `tests/test_live_mpv_premises.py::test_unserialized_sid_writes_collapse_into_one_notification`
+    for the measured shape.
     """
     fake = _FakeMpv(sid=NATIVE_SID, paused=True)
     fake.seed_sampling_backlog()

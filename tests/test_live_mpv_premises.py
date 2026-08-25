@@ -206,3 +206,115 @@ def test_the_ranking_oracle_catches_a_section_that_does_not_outrank(tmp_path: Pa
         if b.get("section") == "default" and str(b.get("cmd", "")).startswith("show-text")
     )
     assert ours["priority"] <= theirs["priority"] or ours.get("is_weak")
+
+
+NATIVE_SID, GENERATED_SID = 1, 2
+
+
+def _two_track_mpv(tmp_path: Path):
+    """A paused clip carrying two external ASS tracks, and a drain that waits for quiet.
+
+    The Gate B probe's shape, reduced to what the premises below need: `sid` 1 is the track mpv
+    loads with the file, `sid` 2 the one added after.
+    """
+    fixtures = Path(__file__).parent / "fixtures" / "mpv_source_envelope"
+    clip = tmp_path / "clip.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=navy:s=320x180:d=8",
+            "-c:v",
+            "ffv1",
+            str(clip),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    proc, ipc = _bare_mpv(
+        "--keep-open=yes",
+        "--pause",
+        "--sub-auto=no",
+        f"--sub-file={fixtures / 'external.ass'}",
+        str(clip),
+    )
+    for index, name in enumerate(("sid", "sub-text"), start=1):
+        ipc.command("observe_property", index, name)
+    ipc.command("sub-add", str(fixtures / "generated.ass"), "auto", "generated", "jpn")
+    ipc.command("set_property", "time-pos", 1.0)
+    return proc, ipc
+
+
+def _drain_until_quiet(ipc, *, quiet: float = 0.4, limit: float = 5.0) -> list[dict]:
+    collected: list[dict] = []
+    deadline = time.monotonic() + limit
+    last = time.monotonic()
+    while time.monotonic() < deadline and time.monotonic() - last < quiet:
+        batch = ipc.drain_events()
+        if batch:
+            collected.extend(batch)
+            last = time.monotonic()
+        time.sleep(0.01)
+    return collected
+
+
+def _changes(events: list, name: str) -> list:
+    return [
+        event.get("data")
+        for event in events
+        if event.get("event") == "property-change" and event.get("name") == name
+    ]
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
+    """`tools/test_mpv_source_transition.py`'s `_FakeMpv` refreshes `sub-text` on every switch. The
+    plan that produced it assumed the opposite — that a paused mpv has no redraw and so no new
+    `sub-text` — and built a whole causal story on it before anyone asked the binary."""
+    proc, ipc = _two_track_mpv(tmp_path)
+    try:
+        _drain_until_quiet(ipc)
+        assert ipc.command("get_property", "pause").get("data") is True
+        ipc.command("set_property", "sid", GENERATED_SID)
+        events = _drain_until_quiet(ipc)
+    finally:
+        ipc.command("quit")
+        ipc.close()
+        proc.terminate()
+
+    assert _changes(events, "sid") == [GENERATED_SID]
+    assert any("生成した字幕" in (text or "") for text in _changes(events, "sub-text"))
+
+
+# Not pinned here, on purpose: how many `sid` notifications mpv raises for N writes is timing, not
+# semantics. It raises them from the playloop rather than the command handler, so writes that reach
+# one iteration collapse into a single event carrying the final value. Measured on 0.41 in a settled
+# loop: 60/60 collapse through `command_async`, 18/60 through the blocking `command` — and the 60/60
+# stops holding right after startup, when ticks are frequent. Every rate here is environment-
+# dependent, and an assertion on one is a flake generator. Consumers must not require a
+# notification per write; `tools/mpv_source_transition.py` serializes instead.
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_a_deselected_sid_reads_back_as_false(tmp_path: Path) -> None:
+    """A confirm written against the literal `"no"` would never fire, turning a probe's 3 s flake
+    into a deterministic 3 s red. `tools/mpv_source_transition.py` already accepts the three-way
+    `{None, "no", False}`; this says which one mpv actually sends."""
+    proc, ipc = _two_track_mpv(tmp_path)
+    try:
+        _drain_until_quiet(ipc)
+        ipc.command("set_property", "sid", "no")
+        events = _drain_until_quiet(ipc)
+        queried = ipc.command("get_property", "sid").get("data")
+    finally:
+        ipc.command("quit")
+        ipc.close()
+        proc.terminate()
+
+    assert queried is False
+    assert _changes(events, "sid") == [False]

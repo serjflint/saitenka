@@ -235,3 +235,56 @@ GIL/native/alloc bound". `py-spy --native` and `viztracer` are great for GIL-on 
 free-threaded support is **unconfirmed** (both read/monitor interpreter internals that no-GIL changes) —
 check their trackers before relying. `pytest-benchmark` auto-disables under `pytest-xdist`, so any
 micro-suite must run serially, separate from the `-n auto` gate — the custom harness stays primary.
+
+## Gating a noisy metric — quantile, sample count, bound (2026-08-25)
+
+The repo runs four benchmark gates. Two arrived at the right policy independently, one had to be
+fixed after five CI failures in forty runs, and none of them stated the policy anywhere a reader of
+the other three would find it. This is that statement.
+
+### A percentile is a rank, so it is only as stable as `n`
+
+A nearest-rank percentile picks sample number `round(n * (1 - q))` from the worst end. That rank is
+the whole story:
+
+| quantile | n | rank from worst | usable as a gate? |
+| --- | --- | --- | --- |
+| p99 | 303 | 3rd | **no** — an outlier picker, moves with one scheduler hiccup |
+| p99 | 1000 | 10th | yes |
+| p95 | 30 | 2nd | **no** |
+| p95 | 200 | 10th | yes |
+
+**Rank of ~10 or more, or it is not a gate.** `interaction_cpu_delta_p99_ms` failed CI five times in
+forty runs at rank 3; the threshold had already been doubled once, which is what makes the estimator
+rather than the bound the suspect (AGENTS.md **Perf claims**).
+
+### The order to decide in
+
+1. **Quantile from meaning.** p99 is the tail a viewer feels as a dropped frame. Do **not** drop to
+   p95 to buy stability — that measures something easier, not something truer, and hides exactly the
+   events the gate exists to catch.
+2. **`n` from the quantile.** Enough samples that the chosen quantile has a stable rank.
+3. **When `n` cannot reach it, add measurements — never lower the quantile.** Pool across repeats
+   (`perf_gate.py --loops`) or take the median across trials
+   (`native_subtitle_integration_benchmark.py`). Both estimate the same quantity from more evidence.
+4. **Bound from an anchor or from measured noise.** An anchor is physical and does not move:
+   `interaction_wall_p99_ms` is `1000/60`, a frame interval. Everything else comes from the observed
+   CV — `perf_gate.py` carries `median CV ~1%`, `p99 CV ~25%`, and sets per-metric tolerances from
+   exactly that.
+
+Tightening a bound "to be safe" manufactures flakes. A bound moves when its anchor or its measured
+noise moves.
+
+### Where each gate stands
+
+| gate | estimator | rank | verdict |
+| --- | --- | --- | --- |
+| `tools/perf_gate.py` | p99 pooled across `--loops` | — | conforms; per-metric tolerance from measured CV |
+| `tools/libass_prototype_benchmark.py` | p99 over 1000 warm samples | 10th | conforms |
+| `tools/libass_prototype_benchmark.py` (cold) | p95 over 30 process starts | ~2nd | thin, but the 100 ms bound sits far above observed cold latency and it has never flaked — left alone deliberately |
+| `tools/native_subtitle_integration_benchmark.py` | median across trials of each per-trial p99, single-trial breach capped at 2x | 3rd per trial | was the defect; fixed by adding measurements, not by moving bounds |
+
+A trial that reports a *validity* failure (a missed presentation cadence) is discarded, not counted
+as a performance failure — otherwise the noisiest thing the harness can observe becomes the clause
+most likely to fail. Leak meters (`retained_rss_growth_mib`) stay conjunctive across trials: a median
+lets the other trials vote a leak away.

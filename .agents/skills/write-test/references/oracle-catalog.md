@@ -115,6 +115,41 @@ never a near-duplicate new file. Curate the profiles (representative, not the fu
 parametrise-outer / `given`-inner to avoid combinatorial explosion. *Adding* an assertion is a growth move;
 *changing* an existing one is Sharpen's job — keep them separate, or a change-detector slips in.
 
+## A fake must model the dimension the bug lives in
+
+A negative control proves the oracle can fire. It does **not** prove the *fake* can produce the
+condition the bug needs — and a fake confirms whatever it was built to confirm. Three instances, all
+from one session:
+
+- An IPC fake that returned instantly scored **0 failures** against publication code that retired a
+  frame under an in-flight `overlay-add`. Giving the fake the real call's width (a 0.5 ms read inside
+  the command) scored **292**.
+- A `_FakeMpv` that applied `set_property` synchronously made a probe reproduction **pass on unfixed
+  code**: the phase's own events always landed in the first drained batch, so they always beat the
+  stale ones the bug feeds on. Deferring command effects by one drain reproduced it deterministically.
+- The same fake published events immediately, so deleting the round-trip in front of a drain left the
+  whole suite green — the fix's stated mechanism was asserted by prose only.
+
+So: **name the dimension the failure lives in — time, ordering, delivery latency, width, concurrency —
+and give the fake that dimension.** A fake faster or more synchronous than production cannot exhibit
+an ordering bug, and every test written against it reads green for the wrong reason.
+
+Corollary when the fake encodes an external tool's behaviour: **ask the tool, don't assert it**, then
+pin what you measured in the live tier (`tests/test_live_mpv_premises.py`) so the fake cannot drift
+silently. Pin only the *deterministic* half — an assertion on a 30%-or-97% outcome is a flake
+generator, and the honest place for a near-certainty is a comment carrying the measured rate.
+
+## Delete the fix, not just the assertion
+
+`poe test-live` negates a **test's** asserts. That is a different check from negating the **fix**:
+
+> For each line of the change you would describe as load-bearing, delete it and confirm a test goes
+> red.
+
+A fix whose mechanism no test can distinguish from its absence is a fix supported by prose. This
+caught a real gap — a drain's round-trip could be removed with the suite still green, because the
+fake modelled command latency but not event-delivery latency.
+
 ## Prove an oracle is load-bearing
 
 A green oracle test proves nothing on its own.
