@@ -73,7 +73,7 @@ class PanelAdapter:
             open_panels=frozenset(panel for panel, is_open in states.items() if is_open)
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: panel_intents.PanelEffect, /) -> None:
         if isinstance(effect, DismissHover):
             self._host.retire_hover()
         elif isinstance(effect, panel_intents.ReplayCardPreview):

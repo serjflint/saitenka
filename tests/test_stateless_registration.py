@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from saitenka.app.hover_adapter import HoverAdapter
+from saitenka.app.interaction_adapter import InteractionAdapter
+from saitenka.app.mine_adapter import MineAdapter
+from saitenka.app.panel_adapter import PanelAdapter
+from saitenka.app.profile_adapter import ProfileAdapter
+from saitenka.app.session_adapter import SessionAdapter
 from saitenka.app.session_routes import stateless_features
+from saitenka.app.subtitle_adapter import SubtitleAdapter
 
 ROOT = Path(__file__).resolve().parent.parent
 INTENTS = ROOT / "src/saitenka/app"
@@ -33,6 +40,19 @@ class _Host:
         return None
 
 
+def _bindings():
+    host = _Host()
+    return stateless_features(
+        HoverAdapter(host),  # type: ignore[arg-type]
+        MineAdapter(host),  # type: ignore[arg-type]
+        PanelAdapter(host),  # type: ignore[arg-type]
+        ProfileAdapter(host),  # type: ignore[arg-type]
+        SessionAdapter(host),  # type: ignore[arg-type]
+        SubtitleAdapter(host),  # type: ignore[arg-type]
+        InteractionAdapter(host),  # type: ignore[arg-type]
+    )
+
+
 def test_every_stateless_policy_is_registered_or_named_as_residue() -> None:
     """The seam only exists if the next feature has to use it.
 
@@ -41,10 +61,7 @@ def test_every_stateless_policy_is_registered_or_named_as_residue() -> None:
     the implementation: an unregistered policy is a failure unless it is on a list that only
     shrinks.
     """
-    registered = {
-        entry[1].__class__.__name__.removesuffix("Adapter").lower()
-        for entry in stateless_features(_Host()).values()  # type: ignore[arg-type]
-    }
+    registered = {binding.feature for binding in _bindings()}
 
     assert _policies() - registered - NOT_YET_REGISTERED == set()
 
@@ -54,4 +71,12 @@ def test_the_router_refuses_a_command_no_feature_owns() -> None:
     from saitenka.app.stateless import StatelessRouter
 
     with pytest.raises(KeyError, match="no stateless feature owns"):
-        StatelessRouter({}).run("toggle-sidebar")
+        StatelessRouter(()).run("toggle-sidebar")
+
+
+def test_the_router_rejects_duplicate_command_types() -> None:
+    from saitenka.app.stateless import StatelessRouter
+
+    binding = _bindings()[0]
+    with pytest.raises(ValueError, match="already registered"):
+        StatelessRouter((binding, binding))

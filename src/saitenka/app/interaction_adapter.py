@@ -50,7 +50,7 @@ class InteractionAdapter:
             tooltip_view_height=self._host.tip_scale.ref_h,
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: interaction_intents.InteractionEffect, /) -> None:
         host = self._host
         if isinstance(effect, interaction_intents.RouteWheel):
             host.surface_router.route_scroll(host.wheel_step, effect.steps)

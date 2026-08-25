@@ -42,7 +42,7 @@ class MineAdapter:
             target=mining.mine_target() if mining.configured else None,
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: mine_intents.MineEffect, /) -> None:
         if isinstance(effect, mine_intents.MineToken):
             log.info("mine: token-index=%d animated=%s", effect.index, effect.animated)
             with otel_metrics.traced("anki_mine", source="base") as span:

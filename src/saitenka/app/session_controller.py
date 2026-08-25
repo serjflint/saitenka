@@ -110,6 +110,8 @@ from saitenka.app.bindings import (
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.config import ReaderOptions
+from saitenka.app.hover_adapter import HoverAdapter
+from saitenka.app.interaction_adapter import InteractionAdapter
 from saitenka.app.interaction_intents import InteractionCommand
 from saitenka.app.interaction_surfaces import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
@@ -117,6 +119,7 @@ from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 from saitenka.app.media import (
     tts_available,
 )
+from saitenka.app.mine_adapter import MineAdapter
 from saitenka.app.miner import MineCue
 from saitenka.app.mining_controller import (
     ForceDuplicate,
@@ -126,6 +129,7 @@ from saitenka.app.mining_controller import (
 )
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.panel_adapter import PanelAdapter
 from saitenka.app.paths import cache_dir
 from saitenka.app.perf import gil_disabled
 from saitenka.app.popups import (
@@ -139,6 +143,7 @@ from saitenka.app.popups import (
     TooltipState,
     WordLookup,
 )
+from saitenka.app.profile_adapter import ProfileAdapter
 from saitenka.app.profile_controller import (
     ProfileAftermath,
     ProfileController,
@@ -160,6 +165,7 @@ from saitenka.app.runtime import (
     CommandPolicy,
     CueCommandState,
 )
+from saitenka.app.session_adapter import SessionAdapter
 from saitenka.app.session_routes import (
     BACKLOG_RESOURCE,
     CAPABILITY_PARTICIPANTS,
@@ -189,6 +195,7 @@ from saitenka.app.session_routes import (
 )
 from saitenka.app.session_runtime import SessionEntry, SessionRuntime
 from saitenka.app.stateless import StatelessRouter
+from saitenka.app.subtitle_adapter import SubtitleAdapter
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
@@ -2656,7 +2663,17 @@ class SessionController:
         hold, so nothing here depends on how far construction has got, and the composition root does
         not grow a row per feature.
         """
-        return StatelessRouter(stateless_features(self))
+        return StatelessRouter(
+            stateless_features(
+                HoverAdapter(self),
+                MineAdapter(self),
+                PanelAdapter(self),
+                ProfileAdapter(self.profile_controller),
+                SessionAdapter(self),
+                SubtitleAdapter(self),
+                InteractionAdapter(self),
+            )
+        )
 
     def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
         """The (cached) panel for a clicked/keyed nested open — the shared builder the engaged-tooltip

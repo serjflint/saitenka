@@ -116,7 +116,7 @@ class SubtitleAdapter:
             cue_revision=host.cue_revision,
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: subtitle_intents.SubtitleEffect, /) -> None:
         host = self._host
         if isinstance(effect, subtitle_intents.SelectTrack):
             subtitle_modes.select_track(host.track_ports, effect.sid, effect.target)

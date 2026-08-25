@@ -23,6 +23,7 @@ import install_interaction_surface_owners
 import install_surface_router
 import move_member
 import rename_session_controller
+import type_stateless_adapter_effects
 
 
 def test_a_rewrite_preserves_the_formatting_around_it(tmp_path):
@@ -147,4 +148,18 @@ def test_surface_owner_rewrite_refuses_unknown_receivers():
     rewritten, count = install_interaction_surface_owners.transformed(source)
 
     assert rewritten == "reader.sidebar_controller.store\nother._sidebar_store\n"
+    assert count == 1
+
+
+def test_stateless_effect_rewrite_is_adapter_exact():
+    source = (
+        "class HoverAdapter:\n"
+        "    def apply(self, effect: object, /) -> None: ...\n"
+        "class OtherAdapter:\n"
+        "    def apply(self, effect: object, /) -> None: ...\n"
+    )
+
+    rewritten, count = type_stateless_adapter_effects.transformed(source)
+
+    assert rewritten == source.replace("effect: object", "effect: hover_intents.HoverEffect", 1)
     assert count == 1
