@@ -44,7 +44,7 @@ def test_help_panel_is_larger_on_a_hi_dpi_osd_than_at_1080p():
     than at 1080p, instead of staying at the flat-ui_scale size that read as 'small'."""
     r = _reader(1.2)
     r.osd = (1920, 1080)
-    base = r._help_document()
+    base = r.help_controller.document()
     r.osd = (3024, 1898)
-    hidpi = r._help_document()
+    hidpi = r.help_controller.document()
     assert hidpi.width > base.width and hidpi.height > base.height

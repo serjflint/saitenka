@@ -139,9 +139,15 @@ class InteractionContext:
     def sub_picker(self) -> PickerState:
         return self.picker_store.current
 
+    def sub_picker_surface_state(self) -> PickerState:
+        return self.sub_picker
+
     @property
     def sidebar(self) -> SidebarState:
         return self.sidebar_store.current
+
+    def sidebar_surface_state(self) -> SidebarState:
+        return self.sidebar
 
     @property
     def tip_nav(self) -> TipNavState:
@@ -151,6 +157,9 @@ class InteractionContext:
     def tip(self) -> TooltipState:
         """Read-only surface projection of the tooltip feature's owned state."""
         return self.tooltip.state
+
+    def tooltip_surface_state(self) -> TooltipState:
+        return self.tip
 
     @property
     def nav_store(self) -> TipNavStore:
@@ -187,6 +196,9 @@ class InteractionContext:
     @property
     def preview(self) -> CardPreview:
         return self.preview_store.current
+
+    def preview_surface_state(self) -> CardPreview:
+        return self.preview
 
 
 class RenderCacheState:

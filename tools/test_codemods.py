@@ -15,8 +15,10 @@ pytest.importorskip("libcst")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "codemods"))
 
+import complete_help_controller
 import complete_tooltip_controller
 import harness
+import install_surface_router
 import move_member
 import rename_session_controller
 
@@ -87,3 +89,40 @@ def test_tooltip_rewrite_is_receiver_exact_and_preserves_assignment_intent():
         "ports.word_store\n"
     )
     assert count == 5
+
+
+def test_help_rewrite_is_receiver_exact_and_leaves_string_lookup_alone():
+    source = (
+        "reader._help_store.dispatch(command)\n"
+        "reader._help_document()\n"
+        "other._help_document()\n"
+        'setattr(reader, "_run_help_command", callback)\n'
+    )
+
+    rewritten, count = complete_help_controller.transformed(source, "tests/test_surfaces.py")
+
+    assert rewritten == (
+        "reader.help_controller.store.dispatch(command)\n"
+        "reader.help_controller.document()\n"
+        "other._help_document()\n"
+        'setattr(reader, "_run_help_command", callback)\n'
+    )
+    assert count == 2
+
+
+def test_surface_router_rewrite_refuses_a_different_context_receiver():
+    source = (
+        "surfaces.wants_mouse_capture(self.interaction)\n"
+        "surfaces.wants_mouse_capture(other.interaction)\n"
+    )
+
+    rewritten, count = install_surface_router.transformed(
+        source,
+        "src/saitenka/app/session_controller.py",
+    )
+
+    assert rewritten == (
+        "self.surface_router.wants_mouse_capture()\n"
+        "surfaces.wants_mouse_capture(other.interaction)\n"
+    )
+    assert count == 1

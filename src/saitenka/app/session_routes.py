@@ -26,6 +26,7 @@ from saitenka.app import (
     subtitle_intents,
     telemetry,
 )
+from saitenka.app.feature_bindings import HELP_STATEFUL_BINDING
 from saitenka.app.hover_adapter import HoverAdapter, HoverHost
 from saitenka.app.interaction_adapter import InteractionAdapter, InteractionHost
 from saitenka.app.mine_adapter import MineAdapter, MineHost
@@ -93,7 +94,6 @@ from saitenka.runtime.interaction_slice import (
     PULSE_FEATURE,
     SIDEBAR_FEATURE,
     TIP_NAV_FEATURE,
-    HelpFeature,
     HoveredWordFeature,
     HoverFeature,
     HoverPauseFeature,
@@ -504,7 +504,9 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     )
     playback = playback_slice_reducer()
     subtitle = subtitle_slice_reducer()
-    interaction = interaction_slice_reducer()
+    interaction = interaction_slice_reducer(
+        help_reducer=HELP_STATEFUL_BINDING.reducer_factory(),
+    )
     presentation = presentation_slice_reducer()
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
@@ -557,7 +559,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             interaction=interaction.initial(
                 {
                     INTERACTION_FEATURE: HoverFeature(),
-                    HELP_FEATURE: HelpFeature(),
+                    HELP_FEATURE: HELP_STATEFUL_BINDING.initial_factory(),
                     PICKER_FEATURE: PickerFeature(),
                     SIDEBAR_FEATURE: SidebarFeature(),
                     TIP_NAV_FEATURE: TipNavFeature(),

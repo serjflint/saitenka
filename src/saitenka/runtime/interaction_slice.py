@@ -405,11 +405,11 @@ HOVERED_WORD_FEATURE = "hovered-word"
 PREVIEW_FEATURE = "card-preview"
 
 
-def interaction_slice_reducer() -> SliceReducer:
+def interaction_slice_reducer(*, help_reducer: HelpReducer | None = None) -> SliceReducer:
     return SliceReducer(
         {
             INTERACTION_FEATURE: HoverReducer(),
-            HELP_FEATURE: HelpReducer(),
+            HELP_FEATURE: help_reducer or HelpReducer(),
             PICKER_FEATURE: PickerReducer(),
             SIDEBAR_FEATURE: SidebarReducer(),
             TIP_NAV_FEATURE: TipNavReducer(),

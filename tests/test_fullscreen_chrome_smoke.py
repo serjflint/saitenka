@@ -16,7 +16,7 @@ import util
 
 from saitenka.app import sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
-from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+from saitenka.app.session_assembly import build_session_assembly
 from saitenka.app.session_controller import SessionController
 from saitenka.runtime import events
 from saitenka.runtime.help import HelpCommand
@@ -75,9 +75,11 @@ class FakeOverlay:
 
 
 def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> SessionController:
-    r = SessionController(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=ui_scale)))
-    r.ov = FakeOverlay()
-    r.lifecycle_surfaces = LifecycleSurfaces(r.ov)  # the fenced path the chrome presents through
+    ipc = FakeIPC()
+    options = ReaderOptions(panels=PanelOptions(scale=ui_scale))
+    overlay = FakeOverlay()
+    assembly = build_session_assembly(ipc, options, runtime_submit=None, overlay=overlay)
+    r = SessionController(ipc, options=options, assembly=assembly)
     r.osd = osd
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(12)]
     r.episode.sub_index = CueIndex(cues)
@@ -86,8 +88,8 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> SessionController
 
 
 def _draw_help(r: SessionController) -> None:
-    r._help_store.dispatch(HelpCommand.TOGGLE)
-    r._redraw_help()
+    r.help_controller.store.dispatch(HelpCommand.TOGGLE)
+    r.help_controller.redraw()
 
 
 def _draw_sidebar(r: SessionController) -> None:

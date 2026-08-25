@@ -26,6 +26,9 @@ class InteractionHost(Protocol):
     def wheel_step(self) -> WheelStep: ...
 
     @property
+    def surface_router(self) -> surfaces.SurfaceRouter: ...
+
+    @property
     def tip_ports(self) -> TipPorts: ...
 
     def scroll_tip(self, delta: int) -> None: ...
@@ -50,7 +53,7 @@ class InteractionAdapter:
     def apply(self, effect: object, /) -> None:
         host = self._host
         if isinstance(effect, interaction_intents.RouteWheel):
-            surfaces.route_scroll(host.wheel_step, effect.steps)
+            host.surface_router.route_scroll(host.wheel_step, effect.steps)
         elif isinstance(effect, interaction_intents.ScrollTooltip):
             host.scroll_tip(effect.pixels)
         elif isinstance(effect, interaction_intents.NavigateBack):

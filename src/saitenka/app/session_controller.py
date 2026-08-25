@@ -19,7 +19,9 @@ if TYPE_CHECKING:
     from saitenka.app.anki import Anki, MineConfig
     from saitenka.app.profiles import Profile
     from saitenka.app.scoring import Scorer
+    from saitenka.app.session_assembly import SessionAssembly
     from saitenka.runtime.card_preview import CardPreview
+    from saitenka.runtime.help import HelpState
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
 
@@ -77,10 +79,6 @@ from saitenka.app.bindings import (
     COPY_LINE_MSG,
     COPY_MSG,
     GLOBAL_SECTION,
-    HELP_CLOSE_MSG,
-    HELP_NEXT_MSG,
-    HELP_PREV_MSG,
-    HELP_TOGGLE_MSG,
     HOVER_PAUSE_MSG,
     KANJI_MSG,
     LEGACY_RENDERER_MSG,
@@ -116,7 +114,6 @@ from saitenka.app.config import ReaderOptions
 from saitenka.app.interaction_intents import InteractionCommand
 from saitenka.app.interaction_surfaces import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
-from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
 from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 from saitenka.app.media import (
     tts_available,
@@ -157,9 +154,11 @@ from saitenka.app.reader_context import (
     SessionContext,
 )
 from saitenka.app.runtime import (
+    COMMAND_SPECS,
     CommandExecution,
     CommandExecutor,
     CommandOutcome,
+    CommandPolicy,
     CueCommandState,
 )
 from saitenka.app.session_routes import (
@@ -206,7 +205,6 @@ from saitenka.app.subtitle_render import (
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
 from saitenka.mpvio.gateway import register_observer_set
-from saitenka.mpvio.osd import Overlay
 from saitenka.render.layout_backend import backend_label, resolve_backend
 from saitenka.runtime import (
     ClosePhase,
@@ -224,14 +222,11 @@ from saitenka.runtime import (
     events,
     playback,
 )
-from saitenka.runtime import help as help_machine
 from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.connection import ConnectionStore
 from saitenka.runtime.effects import ApplyPlaybackDeltas, RunUserCommand
-from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import (
-    HelpStore,
     PickerStore,
     PreviewStore,
     SidebarStore,
@@ -358,6 +353,14 @@ class SessionController:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
     @property
+    def osd(self) -> tuple[int, int]:
+        return self.screen.osd
+
+    @osd.setter
+    def osd(self, value: tuple[int, int]) -> None:
+        self.screen.osd = value
+
+    @property
     def tip(self) -> TooltipState:
         """Read-only compatibility projection of the tooltip feature's owned state."""
         return self.tooltip_controller.state
@@ -376,6 +379,7 @@ class SessionController:
         tokenizer_warm: Future[None] | None = None,
         tts_ok: bool | None = None,  # noqa: FBT001 -- tri-state capability snapshot
         runtime_submit=None,
+        assembly: SessionAssembly | None = None,
         **legacy_kw,
     ):
         """``options`` is the canonical grouped-knobs object (see app/config.py; a new knob is one
@@ -385,6 +389,11 @@ class SessionController:
         o = options or ReaderOptions()
         if legacy_kw:
             o = o.with_overrides(**legacy_kw)
+        if assembly is None:
+            from saitenka.app.session_assembly import build_session_assembly
+
+            assembly = build_session_assembly(ipc, o, runtime_submit=runtime_submit)
+        self._assembly = assembly
         self.options = o
         # Episode-lifetime state, addressed directly as ``episode.<field>`` — no shim stands in
         # front of it. A file change rebinds this in one move (#100 re-slot), which is what makes
@@ -397,9 +406,10 @@ class SessionController:
         self._connection = ConnectionStore(ipc)
         # Supplied by composition (`create_session_controller`), never probed off `ipc`: which egress the
         # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
-        self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
-
-        self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
+        self.ov = assembly.overlay
+        self.lifecycle_surfaces = assembly.surfaces
+        self.screen = assembly.screen
+        self.help_controller = assembly.help
         # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
         # whoever owns it rather than to a line in a teardown table far away. We keep *using* it;
         # what moves is when it closes. False means no runtime owns this session, and the close
@@ -563,6 +573,7 @@ class SessionController:
                 switch=o.tooltip.hover_switch_delay,
             ),
             flash_seconds=o.tooltip.flash_secs,
+            key_context=assembly.tooltip_keys,
         )
         self.interaction.tooltip = self.tooltip_controller
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
@@ -725,10 +736,8 @@ class SessionController:
         # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
         # whose event resets the whole state.
         self._subtitle_tracks = SubtitleTrackStore(self.ipc)
-        # The same slot's second feature: the shortcut overlay. A registration, not a rewrite —
-        # `hover` did not change to make room for it.
-        self._help_store = HelpStore(self.ipc)
-        self.interaction.help_store = self._help_store
+        # Runtime and no-runtime Help stores share the assembly's registered reducer factory.
+        self.interaction.help_store = self.help_controller.store
         # …and its third: the subtitle picker. Its drawn geometry stays beside the slice rather than
         # in it — one paint on one screen is not what a session-lived slot holds.
         self._picker_store = PickerStore(self.ipc)
@@ -743,6 +752,10 @@ class SessionController:
         # panel beside it — a reducer can hold neither one paint's geometry nor a process.
         self._preview_store = PreviewStore(self.ipc)
         self.interaction.preview_store = self._preview_store
+        self.surface_router = surfaces.build_surface_router(
+            self.help_controller,
+            self.interaction,
+        )
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self.translation_store = TranslationStore(self.ipc)
@@ -1786,7 +1799,9 @@ class SessionController:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
-        if not getattr(self.ov, "visible", True) or surfaces.suppress_hover(self.hover_suppression):
+        if not getattr(self.ov, "visible", True) or self.surface_router.suppress_hover(
+            self.hover_suppression
+        ):
             return
         tooltip.update_hover(self.tip_ports, self.hover_actions, self.hover_inputs)
 
@@ -1848,7 +1863,7 @@ class SessionController:
         if not self.ov.visible:
             return
         mp = self._get_mapping("mouse-pos")
-        surfaces.route_click(self.click_target, mp.get("x", -1), mp.get("y", -1))
+        self.surface_router.route_click(self.click_target, mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
         self,
@@ -1958,7 +1973,7 @@ class SessionController:
         return surfaces.WheelStep(
             self.interaction,
             self.observed_property("mouse-pos"),
-            lambda steps: self._run_help_command(self.help_page_command(steps)),
+            self.help_controller.page,
             self.redraw_sub_picker,
             self.sidebar_view,
             self.hold_sidebar_scroll,
@@ -2580,7 +2595,7 @@ class SessionController:
         self._mouse.define(active_bindings(self.keys, "mouse"))
 
     def _wants_mouse_capture(self) -> bool:
-        return surfaces.wants_mouse_capture(self.interaction)
+        return self.surface_router.wants_mouse_capture()
 
     def _sync_mouse_capture(self) -> None:
         self._mouse.sync()
@@ -2982,98 +2997,8 @@ class SessionController:
     # --- help overlay: the slice decides, this performs ----------------------------------------
     @property
     def help(self) -> HelpState:
-        """What the shortcut overlay shows. Read-only: the slice owns it, so writing is an event.
-
-        Reached through the interaction context rather than the store so that the host and a surface
-        hook read one thing — the flat name is the last user of it, not a second path to it.
-        """
-        return self.interaction.help
-
-    def help_page_command(self, steps: int) -> HelpCommand:
-        return HelpCommand.NEXT if steps > 0 else HelpCommand.PREVIOUS
-
-    def _help_document(self):
-        from saitenka.app import help_overlay
-        from saitenka.app.bindings import active_bindings
-
-        return help_overlay.help_document(
-            active_bindings(self.keys, "global", "tooltip", "mpv"),
-            osd=self.osd,
-            close_key=self.keys.help_key,
-            scale=self.chrome_scale,
-        )
-
-    def _redraw_help(self) -> None:
-        from saitenka.app import help_overlay
-
-        if not self.help.open:
-            return
-        document = self._help_document()
-        self._help_store.repaginate(len(document.pages))
-        image = help_overlay.page_image(document, self.help.page)
-        x = (self.osd[0] - document.width) // 2
-        y = (self.osd[1] - document.height) // 2
-        self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.HELP)
-
-    def _bind_help_keys(self) -> None:
-        from saitenka.app.bindings import active_bindings
-
-        for binding in active_bindings(self.keys, "help"):
-            message = binding.spec.message
-            if message is not None:
-                send_correlated(
-                    self.ipc,
-                    f"help-keybind:{binding.key}",
-                    "keybind",
-                    binding.key,
-                    f"script-message {message}",
-                    owner=Owner.INTERACTION,
-                )
-
-    def _restore_help_context_keys(self) -> None:
-        """Give the help keys back to whatever owned them, or unbind them.
-
-        The tooltip only gets its keys back when it still has them bound — restoring blind would
-        re-point a key at a tooltip that has since gone away.
-        """
-        from saitenka.app.bindings import active_bindings
-
-        tooltip_by_key = {
-            binding.key: binding.spec.message for binding in active_bindings(self.keys, "tooltip")
-        }
-        for binding in active_bindings(self.keys, "help"):
-            message = (
-                tooltip_by_key.get(binding.key)
-                if self.tooltip_controller.keybindings_bound
-                else None
-            )
-            command = f"script-message {message}" if message else "ignore"
-            send_correlated(
-                self.ipc,
-                f"help-keybind-restore:{binding.key}",
-                "keybind",
-                binding.key,
-                command,
-                owner=Owner.INTERACTION,
-            )
-
-    def _run_help_command(self, command: HelpCommand) -> None:
-        # The page count means rendering the document, so only the open case pays for it: a
-        # keypress the closed arm discards should not build a document to be told so.
-        pages = len(self._help_document().pages) if self.help.open else 0
-        for decision in self._help_store.dispatch(command, page_count=pages):
-            self._apply_help_effect(decision)
-
-    def _apply_help_effect(self, effect: help_machine.HelpEffect) -> None:
-        """Perform one decision. The state already moved — what is left is keys and pixels."""
-        if isinstance(effect, help_machine.OpenHelp):
-            self._bind_help_keys()
-            self._redraw_help()
-        elif isinstance(effect, help_machine.CloseHelp):
-            self.lifecycle_surfaces.remove(OverlayId.HELP)
-            self._restore_help_context_keys()
-        elif isinstance(effect, help_machine.ShowHelpPage):
-            self._redraw_help()
+        """Read-only public projection of the Help owner's state."""
+        return self.help_controller.state
 
     def toggle_subtitle_language(self) -> None:
         self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_LANGUAGE)
@@ -3154,9 +3079,6 @@ class SessionController:
 
     def toggle_annotation_mode(self) -> None:
         self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
-
-    def toggle_help(self) -> None:
-        self._run_help_command(HelpCommand.TOGGLE)
 
     def _register_keybinds(self) -> None:
         """Install the "global"-scoped bindings as ONE mpv input section.
@@ -3244,6 +3166,7 @@ class SessionController:
         # `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
         # `interaction_intents`. The verb below only carries the intent to one of them.
         handlers: dict[str, Callable[[], None]] = {
+            **self._assembly.command_handlers(),
             SUBTITLE_LANGUAGE_MSG: action(SessionController.toggle_subtitle_language),
             SUBTITLE_MARK_JP_MSG: action(SessionController.mark_current_subtitle_japanese),
             SUBTITLE_RETRY_MSG: action(SessionController.retry_japanese_subtitles),
@@ -3255,10 +3178,6 @@ class SessionController:
             SUB_NEXT_MSG: action(SessionController._navigate_next),
             SUB_REPLAY_MSG: action(SessionController._replay_cue),
             SUB_ANCHOR_MSG: action(SessionController._anchor_subtitles),
-            HELP_TOGGLE_MSG: action(SessionController.toggle_help),
-            HELP_PREV_MSG: lambda: self._run_help_command(HelpCommand.PREVIOUS),
-            HELP_NEXT_MSG: lambda: self._run_help_command(HelpCommand.NEXT),
-            HELP_CLOSE_MSG: lambda: self._run_help_command(HelpCommand.CLOSE),
             SPEAK_MSG: action(SessionController.speak_hovered),
             COPY_MSG: action(SessionController.copy_hovered),
             KANJI_MSG: action(SessionController.kanji_current),
@@ -3282,7 +3201,10 @@ class SessionController:
             COPY_CLICK_MSG: interaction(InteractionCommand.COPY_UNDER_CURSOR),
             OVERLAY_TOGGLE_MSG: action(SessionController.toggle_overlay),
         }
-        return CommandExecutor(handlers)
+        contributed = self._assembly.command_specs()
+        contributed_names = {spec.name for spec in contributed}
+        legacy = tuple(spec for spec in COMMAND_SPECS if spec.name not in contributed_names)
+        return CommandExecutor(handlers, policy=CommandPolicy((*legacy, *contributed)))
 
     def _command_cue_state(self) -> CueCommandState:
         if not self._cue_retired:
@@ -3324,7 +3246,7 @@ class SessionController:
         if self.refresh_osd():
             if self.sub_text.strip():
                 self.draw_subtitle()
-            self._redraw_help()
+            self.help_controller.redraw()
             self._draw_analysis()
             # row capacity changed, so the active row may need re-centring
             sidebar.follow(self.sidebar_view)

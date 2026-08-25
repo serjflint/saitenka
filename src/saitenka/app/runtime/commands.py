@@ -14,10 +14,6 @@ from saitenka.app.bindings import (
     COPY_CLICK_MSG,
     COPY_LINE_MSG,
     COPY_MSG,
-    HELP_CLOSE_MSG,
-    HELP_NEXT_MSG,
-    HELP_PREV_MSG,
-    HELP_TOGGLE_MSG,
     HOVER_PAUSE_MSG,
     KANJI_MSG,
     LEGACY_RENDERER_MSG,
@@ -137,10 +133,6 @@ class CommandExecution:
 
 _CUE_INDEPENDENT = frozenset(
     {
-        HELP_TOGGLE_MSG,
-        HELP_PREV_MSG,
-        HELP_NEXT_MSG,
-        HELP_CLOSE_MSG,
         OVERLAY_TOGGLE_MSG,
         SUBTITLE_LANGUAGE_MSG,
         SUBTITLE_MARK_JP_MSG,
@@ -161,9 +153,7 @@ _CUE_INDEPENDENT = frozenset(
         SUB_ANCHOR_MSG,
     }
 )
-_HELP_COMMANDS = frozenset(
-    {HELP_TOGGLE_MSG, HELP_PREV_MSG, HELP_NEXT_MSG, HELP_CLOSE_MSG, SCROLL_UP_MSG, SCROLL_DOWN_MSG}
-)
+_HELP_COMMANDS = frozenset({SCROLL_UP_MSG, SCROLL_DOWN_MSG})
 
 _OWNER_COMMANDS: tuple[tuple[Owner, tuple[str, ...]], ...] = (
     (
@@ -173,10 +163,6 @@ _OWNER_COMMANDS: tuple[tuple[Owner, tuple[str, ...]], ...] = (
             PROFILE_CYCLE_MSG,
             HOVER_PAUSE_MSG,
             LEGACY_RENDERER_MSG,
-            HELP_TOGGLE_MSG,
-            HELP_PREV_MSG,
-            HELP_NEXT_MSG,
-            HELP_CLOSE_MSG,
         ),
     ),
     (

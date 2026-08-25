@@ -1,7 +1,7 @@
 """Pure reducer for the pointer and tooltip-navigation commands.
 
 Most of what these commands "decide" is really routing — which surface claims a wheel step, which
-popup a click lands in — and that already lives in `surfaces.SURFACES`, a topmost-first table. What
+popup a click lands in — and that already lives in the installed topmost-first surface router. What
 is left over, and what this reducer owns, is the part that is genuinely a decision: how far a step
 scrolls, and whether Escape walks back through link history or closes the tooltip.
 """

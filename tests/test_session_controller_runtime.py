@@ -11,6 +11,7 @@ from saitenka.app.runtime import (
     CommandSpec,
     CueCommandState,
 )
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_factory import SessionServices, create_session_controller
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
@@ -104,7 +105,7 @@ def test_command_policy_rejects_non_help_command_while_help_is_open():
 
 
 def test_command_policy_accepts_help_navigation_while_help_is_open():
-    decision = CommandPolicy().decide(
+    decision = SessionController(FakeIPC()).commands.policy.decide(
         UserCommand("saitenka-help-next"),
         cue_state=CueCommandState.RETIRED_AFTER_ACTIVE,
         help_open=True,
@@ -155,10 +156,12 @@ def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request
     ipc = FakeIPC()
     reader = create_session_controller(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
-    reader._help_store.dispatch(HelpCommand.TOGGLE)
+    reader.help_controller.store.dispatch(HelpCommand.TOGGLE)
     calls: list[int] = []
     monkeypatch.setattr(
-        "saitenka.app.surfaces.route_scroll", lambda _reader, steps: calls.append(steps)
+        reader.surface_router,
+        "route_scroll",
+        lambda _wheel, steps: calls.append(steps),
     )
 
     reader._handle(UserCommand(SCROLL_UP_MSG))

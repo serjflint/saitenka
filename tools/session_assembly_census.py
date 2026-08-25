@@ -99,17 +99,23 @@ def build(root: Path = ROOT) -> dict[str, object]:
                     families["direct_construction"].append(
                         _site(root, path, node, "constructor", called)
                     )
-                if leaf in {"CommandExecutor", "CommandPolicy", "CommandSpec", "BindingSpec"}:
+                if leaf in {
+                    "BindingSpec",
+                    "CommandExecutor",
+                    "CommandPolicy",
+                    "CommandRegistration",
+                    "CommandSpec",
+                }:
                     families["input_and_commands"].append(
                         _site(root, path, node, "catalog-row", leaf)
                     )
                 if leaf.endswith("Adapter") or leaf == "StatelessRouter":
                     families["stateless_policy"].append(_site(root, path, node, "adapter", leaf))
-                if leaf in {"SliceReducer", "RouteKey", *_SESSION_STORES}:
+                if leaf in {"SliceReducer", "StatefulBinding", "RouteKey", *_SESSION_STORES}:
                     families["stateful_policy"].append(
                         _site(root, path, node, "state-install", leaf)
                     )
-                if leaf == "SurfaceSpec":
+                if leaf in {"SurfaceRouter", "SurfaceSpec"}:
                     families["surfaces"].append(_site(root, path, node, "surface-row", leaf))
                 if leaf == "register_session_resource":
                     families["lifecycle"].append(
@@ -132,7 +138,7 @@ def build(root: Path = ROOT) -> dict[str, object]:
                         families["input_and_commands"].append(
                             _site(root, path, node, "catalog", leaf)
                         )
-                    if leaf == "SURFACES":
+                    if leaf in {"SURFACES", "SURFACE_ORDER"}:
                         families["surfaces"].append(_site(root, path, node, "z-order", leaf))
                     if leaf in {"_RESOURCE_OF", "_PARTICIPANT_OF"}:
                         families["lifecycle"].append(

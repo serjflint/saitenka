@@ -29,6 +29,7 @@ from saitenka.runtime.interaction_slice import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from saitenka.app.help_controller import TooltipKeyContext
     from saitenka.app.popups import Panel, WordLookup
     from saitenka.app.tooltip_panel import PanelKey, PanelPorts
     from saitenka.runtime import EffectFinished
@@ -63,6 +64,7 @@ class TooltipController:
         pause_enabled: bool,
         delays: HoverDelays,
         flash_seconds: float,
+        key_context: TooltipKeyContext,
     ) -> None:
         self._cache_lock = threading.Lock()
         self._state = TooltipState(
@@ -73,6 +75,7 @@ class TooltipController:
         self._pause_enabled = pause_enabled
         self._delays = delays
         self._flash_seconds = flash_seconds
+        self._key_context = key_context
         self._hover_store = HoverStore(ipc)
         self._nav_store = TipNavStore(ipc)
         self._pulse_store = PulseStore(ipc)
@@ -165,19 +168,13 @@ class TooltipController:
 
     @property
     def keybindings_bound(self) -> bool:
-        return self._state.tip_keys_bound
+        return self._key_context.bound
 
     def claim_keybindings(self) -> bool:
-        if self._state.tip_keys_bound:
-            return False
-        self._state.tip_keys_bound = True
-        return True
+        return self._key_context.claim()
 
     def release_keybindings(self) -> bool:
-        if not self._state.tip_keys_bound:
-            return False
-        self._state.tip_keys_bound = False
-        return True
+        return self._key_context.release()
 
     def retire_state(self) -> None:
         """Clear mutable tooltip facts after their physical surfaces and keys retire."""
