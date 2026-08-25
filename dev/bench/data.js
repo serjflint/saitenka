@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787658773176,
+  "lastUpdate": 1787668332368,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10187,6 +10187,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.146668,
             "range": "3 replicas; min 1.13144; max 1.19026; MAD 0.015232; worst 1.19026",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "93b42c4f9c0de84ab8dbbdb2c7ec7c902e5cdb3c",
+          "message": "Merge pull request #438 from serjflint/docs/uplift-benchmark-and-fake-fidelity\n\nfix(live): fail on missing tooling, and land the standing rules behind it",
+          "timestamp": "2026-08-25T19:30:39+05:00",
+          "tree_id": "831cfb0c55d730b4745134ffb2d5ca26b89ee719",
+          "url": "https://github.com/serjflint/saitenka/commit/93b42c4f9c0de84ab8dbbdb2c7ec7c902e5cdb3c"
+        },
+        "date": 1787668330901,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.382741,
+            "range": "3 replicas; min 6.31045; max 6.38641; MAD 0.003668",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.891797,
+            "range": "3 replicas; min 8.80343; max 10.3237; MAD 0.088372; worst 10.3237",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.669276,
+            "range": "3 replicas; min 18.659; max 20.4808; MAD 0.010243",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.939536,
+            "range": "3 replicas; min 18.7753; max 20.686; MAD 0.164211; worst 20.686",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.880994,
+            "range": "3 replicas; min 14.9761; max 19.7192; MAD 0.904871",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.130316,
+            "range": "3 replicas; min 0.130246; max 0.171232; MAD 7e-05; worst 0.171232",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.186103,
+            "range": "3 replicas; min 39.1169; max 43.8904; MAD 0.069193; worst 43.8904",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.465862,
+            "range": "3 replicas; min 2.43222; max 2.90952; MAD 0.033642; worst 2.90952",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.033628,
+            "range": "3 replicas; min 0.951037; max 1.14314; MAD 0.082591; worst 1.14314",
             "unit": "ms"
           }
         ]
