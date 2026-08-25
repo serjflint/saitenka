@@ -103,16 +103,114 @@ jobs:
       - name: Real-boundary + per-OS suite
         run: uv run --no-sync pytest -q -m "not (slow or requires_display or e2e or live)"
 
-      # Linux only: real mpv window under Xvfb — the L3 live smoke (mouse-pos → OSD coord mapping).
-      - name: Install mpv + Xvfb (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mpv xvfb
+      # The GUI tier moved to `e2e-gui` below, which runs it against several mpv versions rather than
+      # against whatever the runner image happens to ship.
 
-      # `poe smoke-live` exercises the real mpv interaction and ASS-decoding differential tests.
-      # The live test is selected by that env-gated skipif + path, not a marker, so target it the same
-      # way the local task does rather than a `-m` expression (which would match zero tests).
-      - name: GUI tier (Linux/Xvfb, real mpv)
-        if: runner.os == 'Linux'
+  # The live tier, once per mpv version we make a claim about. Two floors, because a regression that
+  # breaks a declared minimum would otherwise ship green against a later mpv; plus current, because
+  # only that catches upstream changing under us (`sub-border-size` -> `sub-outline-size` reached a
+  # tag exactly this way). Tests whose subject postdates the leg's mpv skip themselves on the
+  # `mpv_min` marker, so every leg runs the identical command.
+  e2e-gui:
+    if: github.event_name != 'pull_request' && inputs.revision == ''
+    name: e2e-gui (mpv ${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # noble ships exactly 0.37.0-1ubuntu4 — the declared `MPV_MIN`, with no snapshot drift.
+          # Pinned to 24.04 rather than `ubuntu-latest`: when the label moves to 26.04 it would bring
+          # 0.41 with it and this leg would silently stop testing the minimum. There is no second
+          # source for 0.37 (the AppImage archive starts at 0.39-based, Debian jumps 0.35 -> 0.40), so
+          # when noble leaves the fleet this becomes a container or a raised `MPV_MIN`.
+          - label: "0.37 floor"
+            runs-on: ubuntu-24.04
+            expect: "0.37"
+            appimage: ""
+          # `NATIVE_GEOMETRY_MPV_MIN`. No distribution ever shipped an 0.39, so 0.40 is the earliest
+          # release this floor can be pinned at; 30 commits past the tag is the closest build there is.
+          - label: "0.40 floor"
+            runs-on: ubuntu-24.04
+            expect: "0.40"
+            appimage: https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.40.0-30-g5ba7ee513/mpv-v0.40.0-30-g5ba7ee513-anylinux-x86_64.AppImage
+            sha256: e7691d61e961507a282cbce56560168b99773647ab05189931abf24e71c4820e
+          # Deliberately floating: a pinned "latest" only detects drift when someone remembers to bump
+          # the pin, which is the failure this leg exists to catch. Safe to float because `e2e` is
+          # skipped on pull_request — an upstream release can never redden someone else's PR.
+          - label: current
+            runs-on: ubuntu-24.04
+            expect: ""
+            appimage: latest
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Install CJK fonts and Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb fonts-noto-cjk
+
+      - name: Install mpv from apt
+        if: matrix.appimage == ''
+        run: sudo apt-get install -y mpv
+
+      # AppImage rather than apt, for the versions apt cannot supply. FUSE is absent on the runners,
+      # so extract instead of mounting. `--appimage-extract` writes ./squashfs-root.
+      - name: Install mpv from an AppImage
+        if: matrix.appimage != ''
+        env:
+          APPIMAGE: ${{ matrix.appimage }}
+          EXPECTED_SHA: ${{ matrix.sha256 }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # `gh release view`, for the floating leg
+        run: |
+          set -euo pipefail
+          if [[ "$APPIMAGE" == latest ]]; then
+            APPIMAGE=$(gh release view --repo pkgforge-dev/mpv-AppImage \
+              --json assets --jq '.assets[] | select(.name | test("anylinux-x86_64\\.AppImage$")) | .url' | head -1)
+            echo "resolved latest to $APPIMAGE"
+          fi
+          curl -fsSL -o mpv.AppImage "$APPIMAGE"
+          if [[ -n "$EXPECTED_SHA" ]]; then
+            echo "$EXPECTED_SHA  mpv.AppImage" | sha256sum -c -
+          fi
+          chmod +x mpv.AppImage
+          ./mpv.AppImage --appimage-extract >/dev/null
+          sudo ln -sf "$PWD/squashfs-root/AppRun" /usr/local/bin/mpv
+
+      # A leg that silently received the wrong mpv would pass vacuously — every version-specific test
+      # skips itself, so green would mean nothing. Assert the version, and record it either way.
+      - name: Confirm the mpv version under test
+        env:
+          EXPECT: ${{ matrix.expect }}
+        run: |
+          set -euo pipefail
+          mpv --version | head -1 | tee /tmp/mpv-version
+          VERSION=$(sed -n 's/^mpv v\?\([0-9]*\.[0-9]*\).*/\1/p' /tmp/mpv-version)
+          echo "### mpv \`$VERSION\` (${{ matrix.label }})" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "$EXPECT" && "$VERSION" != "$EXPECT" ]]; then
+            echo "expected mpv $EXPECT, got $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Sync
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      - name: Install the published libass runtime
+        run: >-
+          uv pip install --no-deps --only-binary libasslite-bundle
+          --no-sources-package libasslite-bundle libasslite-bundle==0.1.3
+
+      # `poe smoke-live` selects by path, not by marker: the live tests are gated by an env skipif, so
+      # a `-m` expression would match zero tests. Every leg runs this identical command — which tests
+      # execute is decided per test by `mpv_min`, not per leg by a selection expression.
+      - name: GUI tier (Xvfb, real mpv)
         run: xvfb-run -a uv run --no-sync poe smoke-live
 
 

@@ -155,21 +155,32 @@ def test_free_threaded_split_uses_the_published_bundle_runtime() -> None:
     assert tests[:3] == ["uv", "run", "--no-sync"]
 
 
-def test_e2e_installs_the_same_bundle_runtime_the_extra_pins() -> None:
-    """The `full` sync installs libasslite, whose ASS-oracle tests error rather than skip when no
-    libass can be dlopened. Every e2e leg must therefore reach one, and the version must track the
-    extra's pin — a bumped pin with a stale workflow tests a runtime nobody ships."""
-    steps = {
-        step["name"]: step for step in _e2e_workflow()["jobs"]["e2e"]["steps"] if "name" in step
+def _jobs_selecting_tests_broadly() -> dict[str, dict]:
+    """Jobs that run whatever a marker expression or `smoke-live` selects, rather than an enumerated
+    list of test files. Only these can reach an ASS-oracle test, so only these need the libass
+    runtime; `windows-regressions` names its files and `*-measure` run a script, not pytest."""
+
+    def broad(step: dict) -> bool:
+        run = str(step.get("run", ""))
+        return "smoke-live" in run or ("pytest" in run and " -m " in run)
+
+    return {
+        name: job
+        for name, job in _e2e_workflow()["jobs"].items()
+        if any(broad(step) for step in job["steps"])
     }
 
+
+def test_e2e_installs_the_same_bundle_runtime_the_extra_pins() -> None:
+    """The `full` sync installs libasslite, whose ASS-oracle tests error rather than skip when no
+    libass can be dlopened. Every leg that syncs it must therefore reach one, and the version must
+    track the extra's pin — a bumped pin with a stale workflow tests a runtime nobody ships."""
     bundle_requirement = next(
         requirement
         for requirement in _optional_dependencies()["subtitle-geometry-bundle"]
         if requirement.startswith("libasslite-bundle==")
     )
-    install = steps["Install the published libass runtime"]
-    assert shlex.split(install["run"]) == [
+    expected = [
         "uv",
         "pip",
         "install",
@@ -181,19 +192,68 @@ def test_e2e_installs_the_same_bundle_runtime_the_extra_pins() -> None:
         bundle_requirement,
     ]
 
-    # Unconditional, which only holds while every leg is a platform the bundle publishes a wheel for.
-    # Adding one it doesn't (macOS x86_64 is the standing example) silently returns that leg to the
-    # ERROR this install exists to prevent.
-    assert "if" not in install
+    # Censused rather than named: the GUI tier moved to its own job once it ran per mpv version, and
+    # a third broadly-selecting job would otherwise reach the ERROR this install exists to prevent.
+    assert len(_jobs_selecting_tests_broadly()) == 2
+    for name, job in _jobs_selecting_tests_broadly().items():
+        steps = {step["name"]: step for step in job["steps"] if "name" in step}
+        install = steps["Install the published libass runtime"]
+        assert shlex.split(install["run"]) == expected, name
+        # Unconditional, which only holds while every leg is a platform the bundle publishes a wheel
+        # for. Adding one it doesn't (macOS x86_64 is the standing example) silently returns that leg
+        # to the same ERROR.
+        assert "if" not in install, name
+        # The bundle is pip-installed on top of the locked env; a re-syncing `uv run` would prune it.
+        for step in job["steps"]:
+            run = str(step.get("run", ""))
+            if run.startswith(("uv run", "xvfb-run")):
+                assert "--no-sync" in shlex.split(run), f"{name}: {step.get('name')}"
+
     assert set(_e2e_workflow()["jobs"]["e2e"]["strategy"]["matrix"]["os"]) <= _BUNDLE_WHEEL_RUNNERS
 
-    # The bundle is pip-installed on top of the locked env; a re-syncing `uv run` would prune it.
-    assert shlex.split(steps["Real-boundary + per-OS suite"]["run"])[:3] == [
-        "uv",
-        "run",
-        "--no-sync",
-    ]
-    assert "--no-sync" in shlex.split(steps["GUI tier (Linux/Xvfb, real mpv)"]["run"])
+
+def _gui_legs() -> list[dict]:
+    return _e2e_workflow()["jobs"]["e2e-gui"]["strategy"]["matrix"]["include"]
+
+
+def test_the_gui_tier_runs_against_every_mpv_floor_the_package_declares() -> None:
+    """A floor nothing runs at is a claim nothing checks — a regression breaking the declared minimum
+    would ship green against a later mpv, which is the shape this whole tier exists to catch. Bound to
+    the constants, so raising a floor without adding a leg fails here rather than silently."""
+    from saitenka.app.doctor import MPV_MIN
+    from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
+
+    covered = {leg["expect"] for leg in _gui_legs()}
+    for floor in (MPV_MIN, NATIVE_GEOMETRY_MPV_MIN):
+        assert ".".join(str(part) for part in floor) in covered
+
+    # One leg deliberately floats, to catch upstream changing under us rather than us breaking a
+    # floor. It is the only one allowed to assert no version.
+    assert sorted(covered).count("") == 1
+
+
+def test_every_downloaded_mpv_is_pinned_by_hash_or_resolved_through_the_release_api() -> None:
+    """A URL fetched over the wire and executed is a supply-chain input. A pinned one carries its
+    SHA256; the floating one names no URL to pin, so it must resolve through `gh` rather than a
+    hand-built link — which also spares us percent-encoding the `@` in those tags."""
+    for leg in _gui_legs():
+        source = leg["appimage"]
+        if not source:
+            continue  # apt
+        if source == "latest":
+            assert "sha256" not in leg
+            continue
+        assert source.startswith("https://github.com/")
+        assert len(leg["sha256"]) == 64
+
+
+def test_every_gui_leg_runs_the_identical_suite() -> None:
+    """The split is per test (the `mpv_min` marker), not per leg. If a leg ran its own selection the
+    floors would drift apart silently, which is what a marker expression per leg would have cost."""
+    steps = _e2e_workflow()["jobs"]["e2e-gui"]["steps"]
+    gui = [step for step in steps if str(step.get("name", "")).startswith("GUI tier")]
+    assert len(gui) == 1
+    assert "smoke-live" in gui[0]["run"]
 
 
 def _triggers(workflow: dict) -> dict:
