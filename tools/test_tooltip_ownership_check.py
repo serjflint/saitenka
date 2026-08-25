@@ -25,16 +25,53 @@ def build(ipc, lock):
     ) == {"owned-constructor"}
 
 
-def test_private_owner_state_writes_outside_the_owner_are_rejected() -> None:
+def test_direct_private_owner_state_writes_outside_the_owner_are_rejected() -> None:
     assert _rules(
         """
-def replace(owner, delays):
+def replace(host):
+    host.tooltip_controller._selected = 2
+"""
+    ) == {"owned-state-write"}
+
+
+def test_private_owner_state_writes_through_an_alias_are_rejected() -> None:
+    assert _rules(
+        """
+def replace(host):
+    owner = host.tooltip_controller
     owner._selected = 2
-    owner._pause_enabled = False
-    owner._delays = delays
     del owner._word_store
 """
     ) == {"owned-state-write"}
+
+
+def test_private_owner_state_writes_through_a_typed_parameter_are_rejected() -> None:
+    assert _rules(
+        """
+def replace(owner: TooltipController, delays):
+    owner._pause_enabled = False
+    owner._delays = delays
+"""
+    ) == {"owned-state-write"}
+
+
+def test_unrelated_private_state_names_remain_available_to_other_owners() -> None:
+    assert (
+        _rules(
+            """
+class PickerController:
+    def configure(self, delays):
+        self._selected = 2
+        self._delays = delays
+        self._flash_seconds = 0.5
+
+def configure(owner: PickerController):
+    alias = owner
+    alias._selected = 3
+"""
+        )
+        == set()
+    )
 
 
 def test_retired_session_fields_are_rejected_on_read_or_write() -> None:
