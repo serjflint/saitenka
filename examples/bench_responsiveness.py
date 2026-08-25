@@ -390,8 +390,12 @@ def _cold_reader(ds, *, prefetch: bool = False, panel_cache_max: int | None = No
     """A fresh SessionController on a fake IPC, head-path forced (as a live run with workers would). With
     ``prefetch=True`` the real background workers run (``start_prefetch``), so scroll-ahead warms the
     next blocks off the main thread exactly as a live session does — the realistic scroll path."""
-    overrides = {} if panel_cache_max is None else {"panel_cache_max": panel_cache_max}
-    reader = SessionController(_fake_ipc(), dict_set=ds, prefetch=prefetch, **overrides)
+    if panel_cache_max is None:
+        reader = SessionController(_fake_ipc(), dict_set=ds, prefetch=prefetch)
+    else:
+        reader = SessionController(
+            _fake_ipc(), dict_set=ds, prefetch=prefetch, panel_cache_max=panel_cache_max
+        )
     reader.osd = OSD
     if prefetch:
         reader.start_prefetch()
