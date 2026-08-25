@@ -47,6 +47,19 @@ class MinedSet:
             self._generation += int(changed)
             return changed
 
+    def replace(self, expressions: Iterable[str]) -> bool:
+        """Replace membership for a new authoritative target.
+
+        The generation always advances: an equal expression set from another deck is still a
+        different mining fact, and in-flight hover metadata must be refused.
+        """
+        with self._lock:
+            replacement = set(expressions)
+            changed = replacement != self._expressions
+            self._expressions = replacement
+            self._generation += 1
+            return changed
+
     def snapshot(self) -> frozenset[str]:
         """Membership as a value, copied under the lock — what a reader should hold, not the set."""
         with self._lock:

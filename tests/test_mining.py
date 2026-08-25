@@ -207,8 +207,8 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     r.set_subtitle("本を読む")
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
-    assert anki.added == [] and "読む" in r.session.mined  # deduped, not added; ⊕→✓ flipped
+    r.mining_controller.mine_token(tok)
+    assert anki.added == [] and "読む" in r.mining_controller.index_snapshot()
 
 
 def test_build_note_card_format_uses_passed_markers():
@@ -351,8 +351,8 @@ def test_dedupe_escapes_special_chars_in_query():
 
 
 def _ports(reader):
-    """The mining value for the reader's current cue — what production builds per operation."""
-    ports = reader.miner_ports
+    """One transaction assembled by the production mining owner."""
+    ports = reader.mining_controller._operation()
     assert ports is not None, "reader has no deck to mine into"
     return ports
 
@@ -399,7 +399,7 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
         r, "_preview_mined", lambda card, _tok, _video, _st="mined": shown.append(card.expression)
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     note = anki.added[0]
     assert note["fields"]["Expression"] == "読む"
@@ -408,18 +408,16 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     assert shown == ["読む"]
 
 
-def _capture_reader(tmp_path, *, animated_enabled: bool):
+def _capture_reader(*, animated_enabled: bool):
     from util import FakeIPC
 
     from saitenka.app.session_controller import SessionController
 
-    r = SessionController(
+    return SessionController(
         FakeIPC(),
         anki=_FakeAnki(),
         mine_cfg=MineConfig(animated=AnimatedClip(enabled=animated_enabled)),
     )
-    r._tmp = tmp_path
-    return r
 
 
 def _stub_capture(monkeypatch, *, animated_result):
@@ -438,7 +436,7 @@ def _stub_capture(monkeypatch, *, animated_result):
 
 
 def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
-    r = _capture_reader(tmp_path, animated_enabled=True)
+    r = _capture_reader(animated_enabled=True)
     _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".webp")  # the animated clip becomes the card image
@@ -448,8 +446,8 @@ def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
     )  # still kept for preview/fallback
 
 
-def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch, tmp_path):
-    r = _capture_reader(tmp_path, animated_enabled=True)
+def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch):
+    r = _capture_reader(animated_enabled=True)
     _stub_capture(monkeypatch, animated_result=None)  # no animated encoder present
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".jpg")  # falls back to the mpv still
@@ -457,26 +455,26 @@ def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch, tmp_
 
 def test_capture_media_animated_override_forces_clip_over_config_default(monkeypatch, tmp_path):
     # config default is OFF, but the per-mine override (the video-mine shortcut) forces the clip
-    r = _capture_reader(tmp_path, animated_enabled=False)
+    r = _capture_reader(animated_enabled=False)
     calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv", animated=True)
     assert calls and pic.endswith(".webp")  # the encode ran despite the config default being off
 
 
 def test_capture_media_still_only_when_animated_disabled(monkeypatch, tmp_path):
-    r = _capture_reader(tmp_path, animated_enabled=False)
+    r = _capture_reader(animated_enabled=False)
     calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert calls == [] and pic.endswith(".jpg")  # animated off + no override → never encodes
 
 
-def test_capture_media_survives_a_timespan_read_error(monkeypatch, tmp_path):
+def test_capture_media_survives_a_timespan_read_error(monkeypatch):
     # A transient IPC error reading the cue timespan must NOT escape capture_media — in bulk_mine it would
     # propagate out of the session loop and tear the session down. The still is still captured
     # (image-only mine).
     import saitenka.app.miner as _M
 
-    r = _capture_reader(tmp_path, animated_enabled=False)
+    r = _capture_reader(animated_enabled=False)
     monkeypatch.setattr(_M, "screenshot", lambda *_a: None)
     monkeypatch.setattr(_M, "clip_audio", lambda *_a, **_k: None)
 
@@ -504,7 +502,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok, card=chosen)
+    r.mining_controller.mine_token(tok, card=chosen)
     assert anki.added[0]["fields"]["Expression"] == "退く"
     assert anki.added[0]["fields"]["ExpressionReading"] == "しりぞく"
 
@@ -523,10 +521,10 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
         r, "_preview_existing", lambda nid, _card, status: previewed.append((nid, status))
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert anki.added == []  # dedupe: nothing added
     assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r.session.mined  # ⊕ flips to ✓
+    assert "読む" in r.mining_controller.index_snapshot()
 
 
 def test_preview_replay_key_is_tooltip_scoped():
@@ -589,11 +587,11 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
 
-    r._mine_token(tok)  # already in deck → nothing added, token remembered
+    r.mining_controller.mine_token(tok)  # already in deck → nothing added, token remembered
     assert anki.added == []
     assert r.interaction.preview_panel.dup_tok is tok
 
-    r._add_duplicate()  # ＋ add anyway
+    r.preview_ports.add_duplicate()
     assert len(anki.added) == 1
     assert anki.added[0]["options"]["allowDuplicate"] is True
     assert dup_status == ["duplicate"]  # the new card's preview says "• duplicate" (accurate now)
@@ -637,6 +635,7 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
 def test_bulk_mine_counts_and_toasts(monkeypatch):
     from util import FakeIPC
 
+    from saitenka.app import mine_intents
     from saitenka.app.session_controller import SessionController
 
     ipc = FakeIPC()
@@ -647,7 +646,7 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     toasts = []
     monkeypatch.setattr(r, "toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
     monkeypatch.setattr(r, "_mark_mined", lambda _expr: None)  # skip the view refresh
-    r.bulk_mine()
+    r._stateless.run(mine_intents.MineCommand.EPISODE)
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
     assert any("mined" in t for t in toasts)
 
@@ -692,7 +691,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
         r.profile_controller.dict_set,
         r.interaction.hovered_word_meta.terms,
-        r._mine_token,
+        r.mining_controller.mine_token,
         LinkBox("mine:1", 0, 0, 10, 10),
         tok,
     )
@@ -735,7 +734,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     f = anki.added[0]["fields"]
     assert f["Word"] == "読む" and f["Furigana"] == "読[よ]む"
     assert "よむ" in f["Pitch"] and "[1]" in f["Pitch"]  # pitch from the dict, not fabricated
@@ -772,7 +771,7 @@ def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     note = anki.added[0]
     assert note["fields"]["WordAudio"] == "[sound:yomu.opus]"
@@ -794,7 +793,7 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     assert "WordAudio" not in anki.added[0]["fields"]
     assert anki.stored == []  # never stores media for a miss
@@ -829,7 +828,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     assert "WordAudio" not in anki.added[0]["fields"]  # out-of-pack entry → field unset
     assert not any("secret" in name for name in anki.stored)  # never uploaded the escaping file
@@ -848,7 +847,7 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert "WordAudio" not in anki.added[0]["fields"]
     assert anki.stored == []
 
@@ -872,10 +871,15 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     r = SessionController(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
-        tooltip_panel.group_mined_of(tok, r.session.mined, r.profile_controller.dict_set) == ()
+        tooltip_panel.group_mined_of(
+            tok, r.mining_controller.index_snapshot(), r.profile_controller.dict_set
+        )
+        == ()
     )  # nothing mined yet → no per-group flags
-    r.session.mined.add("退く")
-    assert tooltip_panel.group_mined_of(tok, r.session.mined, r.profile_controller.dict_set) == (
+    r.mining_controller.record_mined_expression("退く")
+    assert tooltip_panel.group_mined_of(
+        tok, r.mining_controller.index_snapshot(), r.profile_controller.dict_set
+    ) == (
         True,
         True,
     )  # both entries share expression 退く
@@ -899,7 +903,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     f = anki.added[0]["fields"]
     assert f["Expression"] == "読む"
@@ -927,7 +931,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
-    r._mine_token(tok)
+    r.mining_controller.mine_token(tok)
     assert anki.added[0]["fields"]["ID"] == "1"
 
 

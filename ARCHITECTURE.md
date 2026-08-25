@@ -53,7 +53,9 @@ internal modules with explicit dependency contracts, not independently published
   study-session controller: it owns mpv mutation and cross-feature ordering, while bounded
   collaborators own feature state and policy. `tooltip_controller.py`, for example, owns the
   tooltip's mutable presentation state and three volatile work protocols; `profile_controller.py`
-  owns the active reading environment and its synchronous switch transaction. `app/runtime/` owns the
+  owns the active reading environment and its synchronous switch transaction; `mining_controller.py`
+  owns the selected mining target, deck-derived index, seed/probe lifecycle, scratch/store resources,
+  and operation admission. `app/runtime/` owns the
   closed command table; `session_factory.py` is the production `SessionController` construction seam.
   `cli.py` owns process setup and Cyclopts registration, `commands/` owns domain command surfaces and
   attach orchestration, and
@@ -144,6 +146,7 @@ flowchart TB
     slice --> L2
     gather -. "host protocol" .-> host["SessionController<br/>session controller"]
     perform -. "host protocol" .-> host
+    host --> mining["MiningController<br/>target + index + transactions"]
     reduce --- state[(SessionState)]
 ```
 
@@ -152,7 +155,7 @@ half reaches the host — but only through members its protocol names.
 
 The `SessionController` node denotes the live session controller, distinct from the immutable reducer-state store
 shown beside it. SessionController still carries session assembly and mutable state that has not moved behind a
-bounded owner. Owners such as `TooltipController` and `ProfileController` retain feature state and
+bounded owner. Owners such as `TooltipController`, `ProfileController`, and `MiningController` retain feature state and
 operation protocols; SessionController assembles fresh per-turn ports and keeps cross-feature order explicit.
 
 The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
@@ -374,9 +377,10 @@ handled as misses on every read path.
    premultiplied-BGRA viewport, and uploads it to mpv's OSD.
 6. Scanning inside a tooltip maps screen coordinates back into retained panel geometry. It can open one
    depth-1 popup, which reuses the same lookup, panel, cache, scroll, and blit path as the base tooltip.
-7. Optionally, mining builds a note through `ankiconnect-client`; `anki.py`/`miner.py` own sentence,
-   screenshot, audio, provenance, launch behavior, and telemetry. Network and media work is outside the
-   hover-to-paint path.
+7. Optionally, `MiningController` admits one operation against the selected profile-qualified target
+   and a fresh encounter snapshot. `miner.py` runs the synchronous note/media transaction;
+   `anki.py` owns note construction and Anki policy. Confirmed membership and local card linkage return
+   through the mining owner; preview, backlog, and session statistics remain named projections.
 
 Background workers never read the mpv socket or mutate displayed state directly. Cache warmers operate
 through the shared `SessionController` and mutate thread-safe dictionary, token, panel, and raster caches. Jobs
@@ -572,11 +576,15 @@ pushes it into mpv's own OSD surface via `overlay-add` — one surface, no secon
 decision below). Scrolling re-runs Stage 6 for the new offset; a warm frame reuses cached BGRA bands
 (inflating only packed ones), composites, decorates, and uploads without `getmask2`.
 
-### Stage 8 — mine (optional) · `app/anki.py`, `app/miner.py`
+### Stage 8 — mine (optional) · `app/mining_controller.py`, `app/anki.py`, `app/miner.py`
 
 One key mines the hovered subtitle token. Clicking a definition group's `mine:<card_index>` link
 selects that exact card, while the add button on a nested scan popup mines its inner token. Each path
 builds an Anki note over AnkiConnect with sentence, screenshot, audio, and provenance.
+The selected target, seed/probe state, mined-expression index, local store, and scratch lifetime have
+one writer: `MiningController`. `SessionController` samples mpv/cue facts and applies UI projections on
+the owner thread; it does not retain shadow deck or mined-set fields. `poe mining-ownership` rejects
+those old fields and direct construction or mutation outside the declared owner/composition sites.
 
 ## Why the interactive path stays responsive
 

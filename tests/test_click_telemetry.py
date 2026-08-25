@@ -83,22 +83,23 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     assert attrs["op"] == "toggle"
 
 
-def test_mined_store_write_is_spanned(monkeypatch):
+def test_mined_store_write_is_spanned(monkeypatch, tmp_path):
     # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
     from types import SimpleNamespace
 
-    from saitenka.app import miner
+    from saitenka.app import mined_store, miner
+    from saitenka.app.anki import MineConfig
 
     spans = record_spans(monkeypatch)
-    reader = SessionController(_FakeIPC({"sub-start": 1.0, "sub-end": 3.0}))
-    # Seed the store through the field the property initialises, rather than stubbing a seam: the
-    # property returns whatever is already there, so this is the same state a real open produces.
-    reader.session.mined_store = SimpleNamespace(record=lambda **_kw: None)  # type: ignore[assignment]  # local fake
-    reader.mine_cfg = SimpleNamespace(deck="Mining")
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
+    reader = SessionController(
+        _FakeIPC({"sub-start": 1.0, "sub-end": 3.0}),
+        anki=SimpleNamespace(),
+        mine_cfg=MineConfig(deck="Mining"),
+    )
     card = SimpleNamespace(expression="猫", reading="ねこ")
 
-    reader.anki = SimpleNamespace()  # `miner_ports` refuses to build without a deck to mine into
-    ports = reader.miner_ports
+    ports = reader.mining_controller._operation()  # transaction write under test
     assert ports is not None
     miner._persist_mined(ports, note_id=42, card=card, video="/x/Show - 01.mkv")
     assert len(_named(spans, "mined_store_write")) == 1

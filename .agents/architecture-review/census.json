@@ -3,6 +3,7 @@
     "src/saitenka/render/banded.py",
     "src/saitenka/app/tooltip_panel.py",
     "src/saitenka/app/profile_controller.py",
+    "src/saitenka/app/mining_controller.py",
     "src/saitenka/app/tooltip_controller.py",
     "src/saitenka/app/session_controller.py",
     "src/saitenka/app/session_routes.py",
@@ -265,12 +266,21 @@
     },
     {
       "id": "P3",
-      "module": "src/saitenka/app/profile_controller.py",
-      "claim": "ProfileController owns the complete profile-scoped runtime environment, including mining configuration and dictionary dependency identity",
+      "module": "src/saitenka/app/mining_controller.py",
+      "claim": "Selected profile identity qualifies the desired mining spec, prepared target, and mined index, so late dependency work cannot overwrite the selected profile",
       "class": 1,
-      "status": "argued",
-      "evidence": "falsified on the reviewed tree: a live switch retains SessionController.mine_cfg, and tests/test_profile_switcher.py explicitly accepts a late launch-profile dictionary result after switching",
-      "settles": "an observable live-cycle-to-mine oracle plus a planted stale dependency result that cannot overwrite the selected profile"
+      "status": "gated",
+      "evidence": "poe mining-ownership (in all) plus tests/test_profile_switcher.py::test_profile_environment_refuses_out_of_order_dependency_publication and tests/test_mining_controller.py",
+      "settles": null
+    },
+    {
+      "id": "M1",
+      "module": "src/saitenka/app/mining_controller.py",
+      "claim": "MiningController is the sole writer and construction boundary for the mining index, transaction, store, and scratch lifecycle",
+      "class": 1,
+      "status": "gated",
+      "evidence": "poe mining-ownership (in all); planted negative controls in tools/test_mining_ownership_check.py",
+      "settles": null
     },
     {
       "id": "P4",

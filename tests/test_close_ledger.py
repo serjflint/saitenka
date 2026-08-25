@@ -104,7 +104,7 @@ def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
 @pytest.mark.parametrize("attribute", ["lifecycle_timers", "lifecycle_surfaces"])
 def test_a_late_participant_failing_does_not_lose_the_scratch_directory(attribute: str) -> None:
     reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
-    scratch = reader._tmp
+    scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
 
     class Wedged:
         def close(self) -> None:
@@ -269,7 +269,7 @@ def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() ->
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
-    scratch = reader._tmp
+    scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
     assert scratch.exists()  # negative control
     try:
         ledger = reader.close()
@@ -568,7 +568,7 @@ def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> Non
 
 
 def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
-    """The SessionController keeps the three steps as the no-runtime fallback; both paths must not run."""
+    """SessionController keeps the store steps as no-runtime fallbacks; both paths must not run."""
     from util import runtime_gateway
 
     from saitenka.app.session_routes import install_session_reactor
@@ -579,7 +579,7 @@ def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     closed: list[str] = []
     reader._close_backlog_store = lambda: closed.append("backlog")  # type: ignore[method-assign]
-    reader._close_mined_store = lambda: closed.append("mined")  # type: ignore[method-assign]
+    reader.mining_controller.close_store = lambda: closed.append("mined")  # type: ignore[method-assign]
     try:
         ledger = reader.close()
     finally:

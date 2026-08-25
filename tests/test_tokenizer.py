@@ -201,19 +201,22 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
     """The word ``mine_target`` picks is decided by ``reader.tokenizer.is_content``, not baked JP POS.
     Same tokens, two strategies → two different mined tokens; the unidic case is the JP negative
     control (the 名詞, never the 助詞)."""
-    from saitenka.app.miner import mine_target
+    from saitenka.app.miner import MineCue, mine_target
 
     particle = Token("は", "は", "は", "助詞", 0, 1)
     noun = Token("本", "本", "ほん", "名詞", 1, 2)
 
     jp = SessionController(FakeIPC())
     jp.tokens = [particle, noun]
-    assert mine_target(jp.mine_cue) == 1  # unidic: the noun is the content word
+    assert mine_target(MineCue(jp.tokens, None, -1, jp.profile_controller.tokenizer, 20)) == 1
 
     swapped = SessionController(FakeIPC())
     swapped.profile_controller.use_tokenizer(_ParticleContentTokenizer())
     swapped.tokens = [particle, noun]
-    assert mine_target(swapped.mine_cue) == 0  # swapped: the particle is now "content"
+    assert (
+        mine_target(MineCue(swapped.tokens, None, -1, swapped.profile_controller.tokenizer, 20))
+        == 0
+    )
 
 
 def test_use_tokenizer_swaps_strategy_and_clears_cache():

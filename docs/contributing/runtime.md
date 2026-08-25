@@ -218,6 +218,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Invariant | Current contract |
 | --- | --- |
 | One live state owner | The `SessionController` thread applies production session and presentation mutations. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
+| One mining writer | `MiningController` alone owns the selected target, deck-derived index, seed/probe lifecycle, local store, scratch resources, and operation admission. `poe mining-ownership` rejects shadow fields and direct mutator/construction escape routes. |
 | Ordered input | mpv events are drained in arrival order. Conflicting cue observations retire cue-dependent interaction before a later command is dispatched. |
 | One observation interpreter | `PlaybackProjection` alone turns raw mpv properties into typed facts, explicit revisions, and deltas. A transport burst has no semantic meaning: split and joined delivery of the same ordered observations converge to the same state. |
 | Identity-qualified publication | Annotation, geometry, tooltip, and related background results publish only when their semantic identity is still current. |
@@ -243,5 +244,7 @@ The executable sources of truth are:
   for `SessionController`-accepting function counts;
 - [`tests/test_session_runtime.py`](https://github.com/serjflint/saitenka/blob/main/tests/test_session_runtime.py)
   for mailbox, lifecycle, reconnect, overload, timer, and close contracts;
+- [`tools/mining_ownership_check.py`](https://github.com/serjflint/saitenka/blob/main/tools/mining_ownership_check.py)
+  for the mining writer boundary and its planted controls;
 - [`.importlinter`](https://github.com/serjflint/saitenka/blob/main/.importlinter) for package dependency
   direction.

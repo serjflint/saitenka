@@ -14,6 +14,8 @@ from util import await_ready, keybind_registry, runtime_gateway
 
 import saitenka.app.session_controller as C
 from saitenka.app import bindings, miner, miner_ui, nested_popup, tooltip, tooltip_panel
+from saitenka.app.anki import MineConfig
+from saitenka.app.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
@@ -33,6 +35,18 @@ class FakeIPC(RuntimeFakeIPC):
 
     def receive_session(self, _timeout, _handle) -> None:
         return None
+
+
+def _enable_mining(r: SessionController, anki=None, config: MineConfig | None = None) -> None:
+    target_config = config or MineConfig()
+    identity = r.mining_controller.desired_spec.identity
+    r.mining_controller.select_mining_spec(
+        MiningSpec(identity, {"deck": target_config.deck, "model": target_config.model})
+    )
+    assert r.mining_controller.publish_mining_target(
+        MiningTarget(identity, anki or object(), target_config)
+    )
+    r.mining_controller.close_capability()
 
 
 def test_hover_view_snapshots_the_hover_stack():
@@ -418,10 +432,12 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
 
 def test_mine_current_video_forces_the_animated_clip(monkeypatch):
     ipc = FakeIPC()
-    r = SessionController(ipc)
+    r = _reader_with_word(ipc)
+    _enable_mining(r)
+    r.hover = 0
     captured: dict = {}
-    monkeypatch.setattr(r, "mine_current", lambda **k: captured.update(k))
-    r.mine_current_video()
+    monkeypatch.setattr(r.mining_controller, "mine_index", lambda _index, **k: captured.update(k))
+    r._handle(C.MINE_VIDEO_MSG)
     assert captured == {
         "animated": True
     }  # the video-mine shortcut forces a motion clip for this mine
@@ -447,14 +463,20 @@ def test_mine_video_key_registers_and_routes_to_the_video_mine(monkeypatch):
     from saitenka.app.bindings import MINE_VIDEO_MSG
 
     ipc = FakeIPC()
-    reader = SessionController(ipc, anki=object())
+    reader = _reader_with_word(ipc)
+    _enable_mining(reader)
+    reader.hover = 0
     reader._register_keybinds()  # mine bindings require anki
     assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG  # default shortcut is bound
     # and the message routes to the video-mine action (not the still mine)
     calls: list = []
-    monkeypatch.setattr(reader, "mine_current_video", lambda: calls.append("video"))
+    monkeypatch.setattr(
+        reader.mining_controller,
+        "mine_index",
+        lambda _index, **kwargs: calls.append(kwargs),
+    )
     reader._handle(MINE_VIDEO_MSG)
-    assert calls == ["video"]
+    assert calls == [{"animated": True}]
 
 
 def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
@@ -1534,14 +1556,15 @@ def _point_at_add_button(r) -> Driver:
 def test_header_add_button_click_mines_hovered_word(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)
-    r.anki = object()  # mining available → ⊕ drawn and hit-testable
-    r._anki_capability = SimpleNamespace(value=True, request=lambda: False)
+    _enable_mining(r)
     r._tts_ok = True
     r.hover = 0
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
-    monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
+    monkeypatch.setattr(
+        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_add_button(r).click()
     assert events == ["mine"]  # ⊕ mined; did not fall through to TTS
@@ -1551,12 +1574,14 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     # clicking an empty area of the card must NOT play audio (the 🔊 button is the only play affordance)
     ipc = FakeIPC()
     r = _tall_reader(ipc)
-    r.anki = object()
+    _enable_mining(r)
     r.hover = 0
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
-    monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
+    monkeypatch.setattr(
+        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     tx, ty, tw, th = r.tip.view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + th - 5).click()  # low in the body
@@ -1879,8 +1904,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
 
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.anki = object()
-    r._anki_capability = SimpleNamespace(value=True, request=lambda: False)
+    _enable_mining(r)
     r._tts_ok = True
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
@@ -1888,7 +1912,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.token is not None
     mined = []
-    monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
+    monkeypatch.setattr(r.mining_controller, "mine_token", lambda tok: mined.append(tok.surface))
     px, py, pw, ph = header_add_rect(r.tip_scale.width)
     nx, ny = r.tip.nest.xy
     Driver(r, instant=False).move(nx + px + pw / 2, ny + (py - r.tip.nest.scroll) + ph / 2).click()
@@ -2134,11 +2158,13 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     # a link click must open the target, not fall through to mining / TTS
     ipc = FakeIPC()
     r = _link_reader(ipc)
-    r.anki = object()
+    _enable_mining(r)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     events = []
-    monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
+    monkeypatch.setattr(
+        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_link(r).click()
     assert (
@@ -2295,7 +2321,6 @@ def test_preview_does_not_autoplay(monkeypatch):
 
 
 def test_no_mine_preview_suppresses_panel_and_toasts_instead(monkeypatch):
-    from types import SimpleNamespace
 
     from saitenka.app.config import MiningOptions, ReaderOptions
 
@@ -2315,7 +2340,6 @@ def test_no_mine_preview_suppresses_panel_and_toasts_instead(monkeypatch):
 
 
 def test_mine_preview_default_pops_the_panel(monkeypatch):
-    from types import SimpleNamespace
 
     r = SessionController(FakeIPC())  # default options → show_preview True
     calls = []
@@ -2374,15 +2398,17 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
 
     ipc = FakeIPC()
     r = _scan_reader(ipc)  # dict_set present
-    r.anki = object()
+    _enable_mining(r)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     assert r.hover_view().tip.key.mined is False  # not mined yet → ⊕
-    r._mark_mined(card_for(r.tokens[0]).expression)
+    expression = card_for(r.tokens[0]).expression
+    r.mining_controller.record_mined_expression(expression)
+    r._mark_mined(expression)
     assert r.hover_view().tip.key.mined is True  # tooltip rebuilt with ✓
 
 
-def test_seed_mined_preloads_deck_expressions():
+def test_mined_seed_query_preloads_deck_expressions():
     # a word mined in a past session (already in the deck) should be pre-marked so ⊕ shows ✓
     class FakeAnki:
         def find_notes(self, _query):
@@ -2394,11 +2420,9 @@ def test_seed_mined_preloads_deck_expressions():
                 {"fields": {"Expression": {"value": "<b>通り</b>"}}},
             ]
 
-    from saitenka.app.anki import MineConfig
+    from saitenka.app.mined_seed import mined_expressions
 
-    r = SessionController(FakeIPC(), anki=FakeAnki(), mine_cfg=MineConfig())
-    r._seed_mined()
-    assert r.session.mined == {"奉書", "通り"}  # HTML stripped; both pre-marked
+    assert mined_expressions(FakeAnki(), MineConfig()) == {"奉書", "通り"}
 
 
 # --- N4: auto-reveal the translation on hover (opt-in) ---------------------------------------------
@@ -2616,13 +2640,6 @@ def test_jlpt_pill_suppressed_when_disabled():
 VIDEO = "/x/[Erai-raws] Nippon Sangoku - 10 [1080p AMZN WEBRip HEVC EAC3][MultiSub][189B848D].mkv"
 
 
-def test_tag_slug_is_anki_safe():
-    assert (
-        SessionController._tag_slug("Nippon Sangoku") == "Nippon_Sangoku"
-    )  # no spaces in Anki tags
-    assert SessionController._tag_slug("  a b  c ") == "a_b_c"
-
-
 def test_mine_tags_carry_source_and_episode():
     # No SessionController: `mine_tags` reads nothing but the path. It only needed one while a delegation stood
     # in front of it.
@@ -2685,21 +2702,19 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
 def test_close_cleans_up_tmp_dir():
     """SessionController.close() must remove the mkdtemp directory it created."""
     r = SessionController(FakeIPC())
-    tmp = r._tmp
+    tmp = r.mining_controller._scratch_dir  # lifecycle artifact under test
     assert tmp.exists()
     r.close()
     assert not tmp.exists(), f"tmp dir {tmp} not cleaned up by close()"
 
 
 def test_capture_media_failure_shows_toast(monkeypatch):
-    """If both screenshot and audio fail, _capture_media must show a warn toast, not be silent."""
-    from saitenka.app.anki import MineConfig
-
+    """If both screenshot and audio fail, the mining transaction warns instead of failing silently."""
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
     r.sub_text = "本命"
     # A deck to mine into: capture runs off the mining value, which a session without one never builds.
-    r.anki, r.mine_cfg = object(), MineConfig()
+    _enable_mining(r)
 
     # Patch screenshot and clip_audio to always raise (capture lives in app/miner.py since 8d).
     import saitenka.app.miner as _M
@@ -2711,7 +2726,9 @@ def test_capture_media_failure_shows_toast(monkeypatch):
         r, "toast", lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind))
     )
 
-    pic, audio = r._capture_media("test_base", "/fake/video.mkv")
+    operation = r.mining_controller._operation()  # transaction seam under test
+    assert operation is not None
+    pic, audio = miner.capture_media(operation, "test_base", "/fake/video.mkv")
     assert pic == "" and audio == ""
     assert any(kind == "warn" for _, kind in toasts), f"no warn toast shown; got {toasts}"
 
@@ -3260,26 +3277,26 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
     # SessionController's mining API delegates to the module, handing it the cue it built (behaviour preserved)
     mined = []
     monkeypatch.setattr(
-        miner, "mine_token", lambda p, tok, **_k: mined.append((p.cue.hover, tok.surface))
+        miner,
+        "mine_token",
+        lambda p, tok, **_k: mined.append((p.encounter.cue.hover, tok.surface)),
     )
-    r.anki = object()
-    r.mine_cfg = object()
+    _enable_mining(r)
     r.hover = 0
-    r.mine_current()
+    r._handle(C.MINE_MSG)
     assert mined == [(0, "本命")]
 
 
-def test_a_reader_with_no_deck_builds_no_mining_value(monkeypatch):
+def test_a_reader_with_no_deck_has_no_active_mining_target(monkeypatch):
     """ "Is there anywhere to mine into" is decided once, by the property, instead of at every entry
     point — so an unconfigured session cannot reach the flow at all."""
     from saitenka.app import miner
 
     r = _reader_with_word(FakeIPC())
-    r.anki = None
     monkeypatch.setattr(miner, "mine_token", lambda *_a, **_k: pytest.fail("mined with no deck"))
 
-    assert r.miner_ports is None
-    r.mine_current()  # must be a no-op, not an AttributeError on the missing client
+    assert r.mining_controller.active_target is None
+    r._handle(C.MINE_MSG)  # must be a no-op, not an AttributeError on the missing client
 
 
 def _accrual_reader(ipc, monkeypatch) -> tuple[SessionController, list]:

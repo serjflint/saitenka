@@ -8,8 +8,7 @@ handling clicks on it (dismiss / zoom / play). The ⊕→✓ feedback is
 surface is not one of.
 
 Two ports: `PreviewPorts` is the surface (what it draws on and what a click can do), `CardSource`
-is where a preview's content comes from. They are separate because the second is Anki and the cue,
-neither of which the surface has any business reaching.
+is immutable target metadata plus named retrieval acts and cue facts.
 """
 
 from __future__ import annotations
@@ -35,9 +34,9 @@ from saitenka.runtime import Owner, events
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path as PathType
 
-    from saitenka.app.anki import Anki, MineConfig
+    from PIL.Image import Image as PILImage
+
     from saitenka.app.card_preview import PreviewPanel
     from saitenka.app.config import KeyOptions
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
@@ -72,14 +71,22 @@ class CardSource:
     without any of this, and the surface must not be able to reach Anki to do it.
     """
 
-    anki: Anki | None
-    mine_cfg: MineConfig | None
+    deck: str | None
+    model: str | None
+    fields: tuple[tuple[str, str], ...]
+    note_info: Callable[[int], dict | None]
+    fetch_image: Callable[[str], PILImage | None]
+    fetch_media: Callable[[str], Path | None]
     #: The cue's tokenized lines — `sentence_lines` rejoins them for the card's sentence field.
     lines: list[list[Token]]
     provenance: Callable[[object], str]
     video_path: Callable[[], object]
-    tmp: PathType
     toast: Callable[..., None]
+
+
+def duplicate_token(panel: PreviewPanel) -> Token | None:
+    """Expose the preview-owned token selected by the duplicate affordance."""
+    return panel.dup_tok
 
 
 def _strip_tags(s: str) -> str:
@@ -105,10 +112,10 @@ def sentence_lines(lines) -> list[str]:
     return ["".join(token.surface for token in line) for line in lines]
 
 
-def footer(mine_cfg, provenance: str) -> str:
+def footer(deck: str | None, model: str | None, provenance: str) -> str:
     """Where the card went and where its media came from — the preview's one line of provenance."""
-    assert mine_cfg is not None  # previews only exist after a mine
-    return f"{mine_cfg.deck} · {mine_cfg.model} · {provenance}"
+    assert deck is not None and model is not None  # previews only exist after a mine
+    return f"{deck} · {model} · {provenance}"
 
 
 def preview_mined(
@@ -128,7 +135,7 @@ def preview_mined(
         list(card.glosses),
         img,
         secs,
-        footer(source.mine_cfg, source.provenance(video)),
+        footer(source.deck, source.model, source.provenance(video)),
     )
     show_preview(ports, pv, panel.last_audio)
 
@@ -136,23 +143,17 @@ def preview_mined(
 def preview_existing(
     ports: PreviewPorts, source: CardSource, note_id: int, card, status: str
 ) -> None:
-    from saitenka.app.anki import AnkiError
-
-    assert source.anki is not None and source.mine_cfg is not None  # duplicate path = mining on
-    try:
-        info = source.anki.notes_info([note_id])
-    except AnkiError:
-        info = []
-    if not info:
+    info = source.note_info(note_id)
+    if info is None:
         source.toast(f"already have {card.expression}", "warn")
         return
-    f, fld = info[0]["fields"], source.mine_cfg.fields
+    f, fld = info["fields"], dict(source.fields)
 
     def val(logical):
         return f.get(fld.get(logical, ""), {}).get("value", "")
 
-    img = media_image(source.anki, _media_name(val("picture"), r'src="([^"]+)"'))
-    mp3 = media_tempfile(source.anki, _media_name(val("audio"), r"\[sound:([^\]]+)\]"), source.tmp)
+    img = source.fetch_image(_media_name(val("picture"), r'src="([^"]+)"'))
+    mp3 = source.fetch_media(_media_name(val("audio"), r"\[sound:([^\]]+)\]"))
     secs = audio_duration(mp3) if mp3 else None
     pv = PreviewData(
         status,
@@ -163,7 +164,7 @@ def preview_existing(
         _html_items(val("glossary")) or list(card.glosses),
         img,
         secs,
-        footer(source.mine_cfg, source.provenance(source.video_path())),
+        footer(source.deck, source.model, source.provenance(source.video_path())),
     )
     show_preview(ports, pv, mp3)
 

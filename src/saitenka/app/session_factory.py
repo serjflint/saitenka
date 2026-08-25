@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
     from saitenka.app.profiles import Profile
+    from saitenka.app.scoring import Scorer
     from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
     from saitenka.mpvio.ipc import MpvIPC
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class SessionServices:
-    scorer: object | None = None
+    scorer: Scorer | None = None
     anki: object | None = None
     mining: object | None = None
     dictionaries: object | None = None

@@ -1024,7 +1024,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     r.tip.view.job_id = r.tip.jobs.begin("tooltip")
     tooltip._request_hover_metadata(r.tip_ports, r.word_lookup, r.hover_inputs, index)
     original = requests[-1]
-    r.session.mined.add("__newly-mined__")  # bumps the generation because membership actually moved
+    r.mining_controller.record_mined_expression("__newly-mined__")
     tooltip.apply_hover_metadata(
         r.tip_ports,
         r.panel_ports,
@@ -1040,7 +1040,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
         ),
     )
 
-    assert requests[-1].key.mined_generation == r.session.mined.generation
+    assert requests[-1].key.mined_generation == r.mining_controller.index_snapshot().generation
     assert requests[-1].key.job_id == r.tip.view.job_id
 
 

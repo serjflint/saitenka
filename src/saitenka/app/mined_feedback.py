@@ -1,8 +1,7 @@
-"""The ⊕→✓ feedback: recording a word as in-deck, and refreshing whatever is showing it.
+"""The ⊕→✓ feedback: refreshing whatever is showing a newly mined word.
 
 Split out of `miner_ui`, which is the card-*preview* surface — a different owner and a different
-lifetime. This module writes one SESSION fact (the mined set) and asks the INTERACTION surfaces
-currently on screen to redraw; the preview panel is not one of them and never was.
+lifetime. The mining owner writes membership before asking this INTERACTION projection to redraw.
 """
 
 from __future__ import annotations
@@ -15,27 +14,20 @@ from saitenka.app.popups import hovered_meta
 from saitenka.runtime import events
 
 if TYPE_CHECKING:
-    from saitenka.app.popups import HoverInputs, ShowActions, TipPorts, WordLookup
+    from saitenka.app.popups import HoverInputs, ShowActions, TipPorts
     from saitenka.app.tooltip_panel import PanelPorts
 
 
 def mark_mined(
     ports: TipPorts,
     panel: PanelPorts,
-    lookup: WordLookup,
     inputs: HoverInputs,
     show: ShowActions,
     expression: str,
 ) -> None:
-    """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately.
-
-    The rebuild is unconditional; the generation bump is `MinedSet`'s call. Re-mining a word already
-    in the deck moves no membership, so the cached panels stay valid — but the user still pressed a
-    key and still expects the panel in front of them to redraw.
-    """
+    """Refresh the shown popups after mining membership has committed."""
     if not expression:
         return
-    lookup.mined.add(expression)
     hovered = inputs.hover()
     if hovered >= 0 and ports.tip.view.state is not None:
         token = inputs.tokens[hovered]

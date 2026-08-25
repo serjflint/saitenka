@@ -340,18 +340,171 @@ def test_cycle_reverts_atomically_when_dictionary_rescope_fails(request):
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_late_dependency_result_keeps_the_existing_last_arrival_dictionary_policy(request):
+def test_late_dependency_result_cannot_overwrite_selected_profile(request):
+    from saitenka.app.mining_controller import MiningIdentity
+    from saitenka.app.reader_deps import DependencyBundle
+
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE)
     active_dicts = object()
     late_launch_dicts = object()
     reader.profile_controller.configure_cycle([DEFAULT_PROFILE, _FR], lambda _p: active_dicts)
     reader.cycle_profile()
+    reader.profile_dependencies.select(_FR)
 
-    reader._install_collaborators({"dict_set": late_launch_dicts})
+    reader._apply_deps(
+        DependencyBundle(MiningIdentity(DEFAULT_PROFILE.name, 0), dictionaries=late_launch_dicts)
+    )
 
     assert reader.profile_controller.profile is _FR
-    assert reader.profile_controller.dict_set is late_launch_dicts
+    assert reader.profile_controller.dict_set is active_dicts
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_profile_environment_refuses_out_of_order_dependency_publication(request, monkeypatch):
+    from saitenka.app import miner
+    from saitenka.app.anki import MineConfig
+    from saitenka.app.bindings import MINE_MSG
+    from saitenka.app.mining_controller import MiningIdentity, MiningSpec, MiningTarget
+    from saitenka.app.reader_deps import DependencyBundle
+
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE)
+    submissions: list[tuple[object, object]] = []
+
+    def load(_port, cfg, _build, *, identity, **_kwargs):
+        submissions.append((identity, cfg))
+
+    monkeypatch.setattr("saitenka.app.reader_deps.load_deps_async", load)
+
+    def spec_for(profile, identity):
+        return MiningSpec(
+            identity,
+            {"deck": f"Deck::{profile.name}", "model": "Lapis"},
+        )
+
+    reader.configure_profiles(
+        [DEFAULT_PROFILE, _FR],
+        dependency_builder_for=lambda profile, _identity: (
+            {"profile": profile.name},
+            lambda: (),
+        ),
+        mining_spec_for=spec_for,
+    )
+
+    reader.cycle_profile()
+
+    selected = reader.mining_controller.desired_spec.identity
+    assert selected.profile == _FR.name
+    assert reader.mining_controller.active_target is None
+    assert submissions == [(selected, {"profile": _FR.name})]
+
+    stale = MiningTarget(
+        MiningIdentity(DEFAULT_PROFILE.name, 0),
+        object(),
+        MineConfig(deck=f"Deck::{DEFAULT_PROFILE.name}"),
+    )
+    reader._apply_deps(DependencyBundle(stale.identity, mining=stale))
+
+    assert submissions == [(selected, {"profile": _FR.name})]
+    assert reader.mining_controller.active_target is None
+
+    class Anki:
+        def __init__(self) -> None:
+            self.added: list[dict] = []
+
+        def find_notes(self, _query):
+            return []
+
+        def can_add(self, _note):
+            return True
+
+        def add_note(self, note):
+            self.added.append(note)
+            return 41
+
+        def store_media(self, name, _path):
+            return name
+
+    anki = Anki()
+    target = MiningTarget(selected, anki, MineConfig(deck=f"Deck::{_FR.name}"))
+    reader._apply_deps(DependencyBundle(selected, mining=target))
+
+    assert reader.mining_controller.active_target is target
+    reader._apply_deps(DependencyBundle(stale.identity, mining=stale))
+    assert submissions == [(selected, {"profile": _FR.name})]
+    assert reader.mining_controller.active_target is target
+    monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
+    reader.set_subtitle("chat")
+
+    reader._handle(MINE_MSG)
+
+    assert anki.added[0]["deckName"] == f"Deck::{_FR.name}"
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_invalid_profile_mining_spec_disables_the_old_target(request):
+    from saitenka.app.anki import MineConfig
+    from saitenka.app.mining_controller import MiningSpec
+
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    config = MineConfig(deck="Deck::default")
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    reader = SessionController(
+        ipc,
+        profile=DEFAULT_PROFILE,
+        renderer=NullRenderer(),
+        anki=object(),
+        mine_cfg=config,
+    )
+    request.addfinalizer(reader.close)
+
+    def spec_for(profile, identity):
+        if profile is _FR:
+            raise ValueError("invalid profile mining config")
+        return MiningSpec(identity, {"deck": config.deck, "model": config.model})
+
+    reader.configure_profiles(
+        [DEFAULT_PROFILE, _FR],
+        dependency_builder_for=lambda _profile, _identity: ({}, lambda: ()),
+        mining_spec_for=spec_for,
+    )
+    assert reader.mining_controller.active_target is not None
+
+    reader.cycle_profile()
+
+    assert reader.profile_controller.profile is _FR
+    assert reader.mining_controller.desired_spec.enabled is False
+    assert reader.mining_controller.active_target is None
+    assert reader.mining_controller.index_snapshot().values == set()
+
+
+def test_matching_failed_dependency_bundle_clears_the_active_mining_target(request):
+    from saitenka.app.anki import MineConfig
+    from saitenka.app.mining_controller import SeedStatus
+    from saitenka.app.reader_deps import DependencyBundle
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    reader = SessionController(
+        ipc,
+        renderer=NullRenderer(),
+        anki=object(),
+        mine_cfg=MineConfig(deck="Deck::default"),
+    )
+    request.addfinalizer(reader.close)
+    identity = reader.mining_controller.desired_spec.identity
+    reader.mining_controller.record_mined_expression("old")
+
+    reader._apply_deps(DependencyBundle(identity, failed=True))
+
+    snapshot = reader.mining_controller.index_snapshot()
+    assert reader.mining_controller.active_target is None
+    assert snapshot.values == set()
+    assert snapshot.seed_status is SeedStatus.DEGRADED
 
 
 # --- the cache-clear vs episode-warm race (the carried P2) -----------------------------------------

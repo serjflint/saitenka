@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from saitenka.app.scoring import TokenStyle
     from saitenka.app.tokenize import Token
-    from saitenka.model import Style
 
 
 def cue_key(text: str) -> str:
@@ -42,7 +42,7 @@ class TokenizedCue:
 
     lines: list[list[Token]]
     tokens: list[Token]
-    styles: list[Style] | None
+    styles: list[TokenStyle] | None
 
 
 class TokenCache:

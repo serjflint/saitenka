@@ -8,8 +8,10 @@ from driver import Driver
 from PIL import Image
 
 from saitenka.app import sidebar
+from saitenka.app.anki import MineConfig
 from saitenka.app.backlog import BacklogStore, Capture
 from saitenka.app.episode_analysis import analyze_cues
+from saitenka.app.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.scoring import Scorer
 from saitenka.app.session_controller import SessionController
 from saitenka.app.subtitles import (
@@ -51,6 +53,16 @@ def _reader(cue_count=20, *, active=0, props=None):
     reader.episode.sub_index = CueIndex(cues)
     reader.sub_text = f"cue {active}"
     return reader, ipc
+
+
+def _enable_mining(reader: SessionController) -> None:
+    config = MineConfig()
+    identity = reader.mining_controller.desired_spec.identity
+    reader.mining_controller.select_mining_spec(
+        MiningSpec(identity, {"deck": config.deck, "model": config.model})
+    )
+    assert reader.mining_controller.publish_mining_target(MiningTarget(identity, object(), config))
+    reader.mining_controller.close_capability()
 
 
 def _view(reader, **overrides):
@@ -139,7 +151,10 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
     reader, _ipc = _reader(active=3)
     _capture_render(monkeypatch)
     invoked = []
-    monkeypatch.setattr(reader, method, lambda: invoked.append(method))
+    if kind == "mine":
+        monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
+    else:
+        monkeypatch.setattr(reader, method, lambda: invoked.append(method))
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
@@ -161,7 +176,10 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method,
     reader, _ipc = _reader(active=9)  # the live cue has moved on since the row was drawn
     _capture_render(monkeypatch)
     invoked = []
-    monkeypatch.setattr(reader, method, lambda: invoked.append(method))
+    if kind == "mine":
+        monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
+    else:
+        monkeypatch.setattr(reader, method, lambda: invoked.append(method))
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
@@ -323,12 +341,13 @@ def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, mo
     assert store.entry(entry.id).status == "mined"
 
 
-def test_mine_tab_lists_this_episodes_mined_cards(tmp_path):
-    from saitenka.app.mined_store import MinedCardStore
+def test_mine_tab_lists_this_episodes_mined_cards(tmp_path, monkeypatch):
+    from saitenka.app import mined_store
 
     video = tmp_path / "Show - 03.mkv"
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    store = MinedCardStore(tmp_path / "mined.sqlite")
+    store = reader.mining_controller.store
     store.record(
         note_id=111,
         video_path=str(video),
@@ -353,8 +372,6 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path):
         expression="犬",
         reading="いぬ",
     )
-    reader.session.mined_store = store
-
     rows = sidebar._mine_rows(reader.sidebar_view)
 
     assert [(row.value, row.click_kind, row.status) for row in rows] == [
@@ -373,16 +390,17 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "absent.sqlite")
 
     assert sidebar._mine_rows(reader.sidebar_view) == []
-    assert reader.session.mined_store is None
+    assert reader.mining_controller.store_exists is False
     assert not (tmp_path / "absent.sqlite").exists()
 
 
 def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
-    from saitenka.app.mined_store import MinedCardStore
+    from saitenka.app import mined_store
 
     video = tmp_path / "Show - 03.mkv"
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     reader, ipc = _reader(cue_count=1, props={"path": str(video)})
-    store = MinedCardStore(tmp_path / "mined.sqlite")
+    store = reader.mining_controller.store
     store.record(
         note_id=111,
         video_path=str(video),
@@ -391,7 +409,6 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
         expression="本",
         reading="ほん",
     )
-    reader.session.mined_store = store
     _capture_render(monkeypatch)
     reader._sidebar_store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
@@ -406,12 +423,12 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
 
 
 def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, monkeypatch):
-    from saitenka.app import miner_ui
-    from saitenka.app.mined_store import MinedCardStore
+    from saitenka.app import mined_store, miner_ui
 
     video = tmp_path / "Show - 03.mkv"
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    store = MinedCardStore(tmp_path / "mined.sqlite")
+    store = reader.mining_controller.store
     store.record(
         note_id=111,
         video_path=str(video),
@@ -420,9 +437,7 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
         expression="本",
         reading="ほん",
     )
-    reader.session.mined_store = store
-    reader.anki = object()
-    reader.mine_cfg = object()
+    _enable_mining(reader)
     opened = []
     monkeypatch.setattr(
         miner_ui,
