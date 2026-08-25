@@ -330,21 +330,31 @@ class _FakeMpv:
         self._tracks = {NATIVE_SID: NATIVE_TEXT, GENERATED_SID: GENERATED_TEXT}
         self._props: dict = {"sid": sid, "pause": paused, "sub-text": self._tracks[sid]}
         self._events: list[dict] = []
+        self._unpublished: list[dict] = []
         self._pending: list[tuple[str, Any]] = []
 
     def seed_sampling_backlog(self) -> None:
-        """What `_sample_frame_controls` leaves queued: it switches sid six times, never drains,
-        and ends back on the native track."""
+        """What `_sample_frame_controls` leaves behind: it switches sid six times, never drains,
+        and ends back on the native track.
+
+        Seeded as *unpublished* — mpv has emitted these, but the reader thread has not handed them
+        over yet. That is the state a bare `drain_events` cannot clear, and the reason the discard
+        needs a round-trip in front of it.
+        """
         for sid in (GENERATED_SID, NATIVE_SID):
             for name, data in (("sid", sid), ("sub-text", self._tracks[sid])):
-                self._events.append(
+                self._unpublished.append(
                     {"event": "property-change", "name": name, "data": data, "stale": True}
                 )
+
+    def _publish(self) -> None:
+        self._events.extend(self._unpublished)
+        self._unpublished.clear()
 
     def _change(self, name: str, value: object) -> None:
         if self._props.get(name) != value:
             self._props[name] = value
-            self._events.append({"event": "property-change", "name": name, "data": value})
+            self._unpublished.append({"event": "property-change", "name": name, "data": value})
 
     def _settle(self) -> None:
         pending, self._pending = self._pending, []
@@ -359,12 +369,17 @@ class _FakeMpv:
         return {"error": "success"}
 
     def query(self, name: str):
+        # The barrier: a reply arrives with everything outstanding applied AND published, so a
+        # drain behind it sees the lot. Without that, a bare drain would look like a barrier here
+        # and the round-trip in `_discard_earlier_events` could be deleted unnoticed.
         self._settle()
+        self._publish()
         return self._props.get(name)
 
     def drain_events(self) -> list[dict]:
         events, self._events = self._events, []
         self._settle()
+        self._publish()
         return events
 
 
@@ -389,6 +404,18 @@ def test_probe_phase_observes_its_own_switch_not_the_sampling_backlog() -> None:
         if isinstance(value, dict) and value.get("stale") is True
     ]
     assert reused == [], f"phase reported sampling-backlog events as its own: {reused}"
+
+
+def test_probe_phase_observes_its_own_switch_while_playing_too() -> None:
+    """The second phase runs unpaused, and its discard sits right in front of the `pause` wait —
+    close enough that a discard placed one line later would eat the event that wait needs."""
+    fake = _FakeMpv(sid=NATIVE_SID, paused=True)
+    fake.seed_sampling_backlog()
+
+    phase = _probe_phase(fake, GENERATED_SID, NATIVE_SID, paused=False)
+
+    assert phase["pause_observation"]["data"] is False
+    assert phase["native_sub_text_event"]["data"] == NATIVE_TEXT
 
 
 def test_probe_phase_still_reports_the_events_it_observed() -> None:

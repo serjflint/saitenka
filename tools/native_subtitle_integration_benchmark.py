@@ -176,7 +176,7 @@ class _Budget(NamedTuple):
 #: A p99 taken over one trial's ~300 samples is the third-worst sample, so it moves with a
 #: scheduler hiccup rather than with our code. The latency clauses therefore judge the MEDIAN of
 #: the per-trial p99s — the same thresholds, estimated from three measurements instead of one.
-#: Replayed over 52 archived macOS runs that cut the failures from 4 to 2 with none newly failing.
+#: Replayed over 52 archived macOS runs: 4 failures become 3, with none newly failing.
 #: `retained_rss_growth_mib` is a leak meter, not a noise-symmetric percentile, so one bad trial is
 #: a leak and it stays conjunctive.
 BUDGET_CLAUSES = {
@@ -218,37 +218,70 @@ def _performance_passes(report: dict, manifest: dict) -> bool:
     return all(_performance_checks(report, manifest).values())
 
 
+#: How far past its budget one trial may sit while the others vote it down. The worst single-trial
+#: breach across the 52 archived runs this rule accepts is 1.59x, so 2.0 clears real runner noise
+#: with room to spare while still refusing an outlier no scheduler hiccup explains. Without it,
+#: "the median absorbs one bad trial" has no upper bound and a 4x breach reads the same as a 1.1x.
+OUTLIER_TOLERANCE = 2.0
+
+
+def _within_tolerance(value: float, budget: float, clause: _Budget) -> bool:
+    limit = (
+        budget * OUTLIER_TOLERANCE if clause.compare is operator.le else budget / OUTLIER_TOLERANCE
+    )
+    return clause.compare(value, limit)
+
+
+def _representative(values: list[float], clause: _Budget) -> float:
+    """The middle measurement — never an interpolation between two.
+
+    `statistics.median` averages the two middle values at even counts, and discarding a
+    cadence-stalled trial makes an even count routine: 32.0 and 0.5 would average to 16.25 and pass
+    a 16.67 budget that one of the two trials missed by 92%. Taking the worse side keeps this an
+    order statistic, and at odd counts all three medians agree.
+    """
+    return (
+        statistics.median_high(values)
+        if clause.compare is operator.le
+        else statistics.median_low(values)
+    )
+
+
 def performance_verdict(reports: list[dict], manifest: dict) -> dict:
     """The run-level performance verdict over every completed trial.
 
     Judging each clause on the median is a **relaxation** of the per-trial quorum it replaces — a
-    run the quorum passes always passes this, never the reverse — so it carries a floor the median
-    alone does not: at least one valid trial must pass every clause. Without that, three trials
-    each failing a different clause (nothing clean anywhere, the shape of a broad regression) would
-    aggregate to green.
+    run the quorum passes always passes this, never the reverse — so it carries two floors the
+    median alone does not:
+
+    * at least one valid trial passes every clause, or three trials each breaching a different
+      clause would aggregate to green with nothing clean anywhere;
+    * no single trial breaches a clause by more than :data:`OUTLIER_TOLERANCE`, which bounds what
+      "one bad trial" is allowed to mean.
     """
     budgets = manifest["budgets"]
+    required_valid = manifest["trials"] // 2 + 1
     valid = [report for report in reports if trial_is_valid(report)]
     clauses: dict[str, bool] = {}
     for name, clause in BUDGET_CLAUSES.items():
         values = [report[clause.metric] for report in valid]
         if not values:
             clauses[name] = False
-        elif clause.across_trials == "median":
-            clauses[name] = clause.compare(statistics.median(values), budgets[name])
+            continue
+        within = all(_within_tolerance(value, budgets[name], clause) for value in values)
+        if clause.across_trials == "median":
+            clauses[name] = within and clause.compare(
+                _representative(values, clause), budgets[name]
+            )
         else:
             clauses[name] = all(clause.compare(value, budgets[name]) for value in values)
     clean_trials = sum(all(_performance_checks(report, manifest).values()) for report in valid)
     return {
         "valid_trials": len(valid),
-        "required_valid_trials": manifest["trials"] // 2 + 1,
+        "required_valid_trials": required_valid,
         "clean_trials": clean_trials,
         "clauses": clauses,
-        "passed": (
-            len(valid) >= manifest["trials"] // 2 + 1
-            and clean_trials >= 1
-            and all(clauses.values())
-        ),
+        "passed": len(valid) >= required_valid and clean_trials >= 1 and all(clauses.values()),
     }
 
 
@@ -824,6 +857,10 @@ def _summarize(report: dict, manifest: dict, output: Path) -> str:
         # The run-level clause, not a trial's: a median over budget is the regression signal, while
         # a single trial over it is the noise this rule exists to absorb.
         lines.append(f"  over budget across trials: {', '.join(over)}")
+    if performance["valid_trials"] < performance["required_valid_trials"]:
+        lines.append("  too few trials held their cadence to judge performance")
+    elif not performance["clean_trials"]:
+        lines.append("  no trial passed every budget")
     for trial in report["trials"]:
         index = trial["index"]
         if trial.get("status") != "completed":

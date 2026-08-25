@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import operator
 import os
 from pathlib import Path
 
@@ -279,6 +280,43 @@ def test_a_run_without_enough_valid_trials_fails_rather_than_passing_on_one() ->
     summary = summarize_trials([stalled, report(), stalled], manifest())
 
     assert summary["performance"]["valid_trials"] == 1
+    assert summary["integration_budgets_passed"] is False
+
+
+def test_a_discarded_trial_leaves_an_even_count_that_must_not_be_interpolated() -> None:
+    """`statistics.median` averages the two middle values at even counts, and discarding a
+    cadence-stalled trial makes an even count routine — so a trial 92% over budget would be
+    averaged with a fast one into a pass."""
+    stalled = report()
+    stalled["cadence_misses"] = 1
+    slow, fast = report(), report()
+    slow["interaction_cpu_p99_ms"] = 32.0
+    fast["interaction_cpu_p99_ms"] = 0.5
+
+    summary = summarize_trials([stalled, slow, fast], manifest())
+
+    assert summary["performance"]["valid_trials"] == 2
+    assert summary["integration_budgets_passed"] is False
+
+
+@pytest.mark.parametrize("budget", sorted(benchmark.BUDGET_CLAUSES))
+def test_one_trial_may_be_noisy_but_not_arbitrarily_far_past_a_budget(budget: str) -> None:
+    """ "The median absorbs one bad trial" needs an upper bound, or a 4x breach reads the same as a
+    1.1x one. The worst single-trial breach across the archived runs this rule accepts is 1.59x."""
+    if benchmark.BUDGET_CLAUSES[budget].across_trials != "median":
+        pytest.skip(f"{budget} is conjunctive across trials by design")
+    clause = benchmark.BUDGET_CLAUSES[budget]
+    limit = manifest()["budgets"][budget]
+    wild = report()
+    wild[clause.metric] = (
+        limit * (benchmark.OUTLIER_TOLERANCE + 1)
+        if clause.compare is operator.le
+        else limit / (benchmark.OUTLIER_TOLERANCE + 1)
+    )
+
+    summary = summarize_trials([report(), wild, report()], manifest())
+
+    assert summary["performance"]["clauses"][budget] is False
     assert summary["integration_budgets_passed"] is False
 
 
