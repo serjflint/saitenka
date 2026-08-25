@@ -285,7 +285,7 @@ def hide_preview(ports: PreviewPorts) -> None:
         ports.ipc,
         active_bindings(ports.keys, "preview"),
         help_open=ports.interaction.help.open,
-        tip_keys_bound=ports.interaction.tip.tip_keys_bound,
+        tip_keys_bound=ports.interaction.tooltip_keys_bound,
     )
 
 

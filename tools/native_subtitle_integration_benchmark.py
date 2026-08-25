@@ -488,7 +488,7 @@ def _open_tooltip(reader: SessionController, ipc: _IPC, *, native: bool) -> tupl
     ox, oy = reader.sub_origin
     hit = reader._hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
     before = len(ipc.commands)
-    reader.hover = box.index
+    reader.tooltip_controller.select(box.index)
     reader.draw_subtitle()
     commands = ipc.commands[before:]
     focus = (
@@ -511,7 +511,7 @@ def _scroll_and_close_tooltip(reader: SessionController) -> bool:
         and reader.tip.view.scroll > 0
     )
     reader.teardown_tip()
-    reader.hover = -1
+    reader.tooltip_controller.select(-1)
     return scrolled
 
 

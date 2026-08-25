@@ -22,7 +22,7 @@ _SCALES = [1.5, 2.0]
 def _reader(scale: float, monkeypatch):
     r = hidpi_reader(scale)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._show_tooltip(0)
     return r
 
@@ -84,7 +84,7 @@ def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
     # When the bands are already warm (worker ran ahead), the show composites crisp on the first paint.
     r = hidpi_reader(scale)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._show_tooltip(0)  # first paint (soft) also measures the panel
     st = r.tip.view.state
     vh = min(r.tip.view.view_h, st.full_height)

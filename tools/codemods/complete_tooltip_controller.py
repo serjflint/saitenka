@@ -34,7 +34,7 @@ _DELAYS = {
 }
 _SETTERS = {
     "hover": ("select", None),
-    "pause_on_tooltip": ("set_pause_enabled", None),
+    "pause_on_tooltip": ("set_pause_enabled", "enabled"),
     "scan_delay": ("configure_delays", "scan"),
     "hide_delay": ("configure_delays", "hide"),
     "hover_switch_delay": ("configure_delays", "switch"),
@@ -112,7 +112,18 @@ class CompleteTooltipController(cst.CSTTransformer):
             return updated_node
         method, keyword = setter
         self.count += 1
-        argument = cst.Arg(updated_node.value, keyword=cst.Name(keyword) if keyword else None)
+        argument = cst.Arg(
+            updated_node.value,
+            keyword=cst.Name(keyword) if keyword else None,
+            equal=(
+                cst.AssignEqual(
+                    whitespace_before=cst.SimpleWhitespace(""),
+                    whitespace_after=cst.SimpleWhitespace(""),
+                )
+                if keyword
+                else cst.MaybeSentinel.DEFAULT
+            ),
+        )
         return cst.Expr(
             cst.Call(
                 func=cst.Attribute(value=_controller(target.value), attr=cst.Name(method)),
@@ -140,7 +151,7 @@ def _self_test() -> None:
     expected = (
         "r.tooltip_controller.select(2)\n"
         "reader.tooltip_controller.pause_enabled\n"
-        "reader.tooltip_controller.configure_delays(scan = 0.1)\n"
+        "reader.tooltip_controller.configure_delays(scan=0.1)\n"
         "result.tooltip_controller.pause_store.dispatch(event)\n"
         "inputs.hover\n"
         "ports.word_store\n"

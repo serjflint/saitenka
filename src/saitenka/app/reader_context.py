@@ -63,10 +63,25 @@ class SubtitleSource:
 
 
 class TooltipStateOwner(Protocol):
-    """The interaction context needs only the tooltip surface state."""
+    """The interaction context reads tooltip facts through their bounded owner."""
 
     @property
     def state(self) -> TooltipState: ...
+
+    @property
+    def nav_store(self) -> TipNavStore: ...
+
+    @property
+    def pulse_store(self) -> PulseStore: ...
+
+    @property
+    def pause_store(self) -> HoverPauseStore: ...
+
+    @property
+    def word_store(self) -> HoveredWordStore: ...
+
+    @property
+    def keybindings_bound(self) -> bool: ...
 
 
 class EpisodeContext:
@@ -109,13 +124,6 @@ class InteractionContext:
     help_store: HelpStore
     picker_store: PickerStore
     sidebar_store: SidebarStore
-    #: The tooltip's back-stack is a slice feature while the rest of `tip` is not, so this store
-    #: sits beside `tip` rather than on it — a mutable container holding a frozen fact would read
-    #: as writable at every call site that already writes its neighbours.
-    nav_store: TipNavStore
-    pulse_store: PulseStore
-    pause_store: HoverPauseStore
-    word_store: HoveredWordStore
     preview_store: PreviewStore
     preview_panel: PreviewPanel
     #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
@@ -137,7 +145,7 @@ class InteractionContext:
 
     @property
     def tip_nav(self) -> TipNavState:
-        return self.nav_store.current
+        return self.tooltip.nav_store.current
 
     @property
     def tip(self) -> TooltipState:
@@ -145,16 +153,36 @@ class InteractionContext:
         return self.tooltip.state
 
     @property
+    def nav_store(self) -> TipNavStore:
+        return self.tooltip.nav_store
+
+    @property
+    def pulse_store(self) -> PulseStore:
+        return self.tooltip.pulse_store
+
+    @property
+    def pause_store(self) -> HoverPauseStore:
+        return self.tooltip.pause_store
+
+    @property
+    def word_store(self) -> HoveredWordStore:
+        return self.tooltip.word_store
+
+    @property
+    def tooltip_keys_bound(self) -> bool:
+        return self.tooltip.keybindings_bound
+
+    @property
     def copy_pulse(self) -> PulseState:
-        return self.pulse_store.current
+        return self.tooltip.pulse_store.current
 
     @property
     def hover_pause(self) -> PauseClaim:
-        return self.pause_store.current
+        return self.tooltip.pause_store.current
 
     @property
     def hovered_word_meta(self) -> HoverMetadata:
-        return hovered_meta(self.word_store)
+        return hovered_meta(self.tooltip.word_store)
 
     @property
     def preview(self) -> CardPreview:

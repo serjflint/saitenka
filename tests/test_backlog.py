@@ -186,7 +186,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     reader.sub_text = "日本語"
     reader.declare_subtitle(SubtitleTracksDiscovered(3, 4))
     reader.tokens = [SimpleNamespace(surface="日本", lemma="日本")]
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     store = BacklogStore(tmp_path / "reader.sqlite", clock=lambda: 10.0)
     reader.session.backlog_store = store
     captures = []

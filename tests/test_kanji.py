@@ -187,7 +187,7 @@ def _kanji_reader(tmp_path):
 def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._handle("saitenka-kanji")
     assert r.hover_view().nested.state is not None
     assert r.hover_view().nested.word == "読"  # first kanji of the hovered word
@@ -212,7 +212,7 @@ def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
     r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
     assert r.hover_view().nested.state is None
     r.tokens = [Token("よむ", "よむ", "よむ", "動詞", 0, 2)]
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._handle("saitenka-kanji")  # kana-only word → warn toast
     assert r.hover_view().nested.state is None and toasts
 

@@ -81,7 +81,7 @@ def test_tooltip_rewrite_is_receiver_exact_and_preserves_assignment_intent():
 
     assert rewritten == (
         "r.tooltip_controller.select(index)\n"
-        "r.tooltip_controller.configure_delays(scan = delay)\n"
+        "r.tooltip_controller.configure_delays(scan=delay)\n"
         "result.tooltip_controller.pause_store.dispatch(event)\n"
         "inputs.hover\n"
         "ports.word_store\n"

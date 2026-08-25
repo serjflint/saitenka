@@ -13,15 +13,16 @@ if TYPE_CHECKING:
     from saitenka.app.subtitle_modes import TrackPorts
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.subtitle_render import SubtitleTarget
+    from saitenka.app.tooltip_controller import TooltipController
 
 
 class SessionHost(Protocol):
     """This feature's whole host coupling. See `PanelHost` for why it is spelled out."""
 
-    hover: int
     ov: Overlay
     lifecycle_surfaces: LifecycleSurfaces
     subtitle_pipeline: SubtitleModeCoordinator
+    tooltip_controller: TooltipController
 
     @property
     def track_ports(self) -> TrackPorts: ...
@@ -51,7 +52,7 @@ class SessionAdapter:
     def apply(self, effect: object, /) -> None:
         host = self._host
         if isinstance(effect, DismissHover):
-            host.hover = -1
+            host.tooltip_controller.retire_selection()
             host.teardown_tip()
         elif isinstance(effect, session_intents.SetSurfacesVisible):
             host.lifecycle_surfaces.set_visible(visible=effect.visible)

@@ -20,8 +20,8 @@ class Driver:
         self.ipc = reader.ipc
         self._instant = instant
         if instant:  # deterministic tests: no hover-switch or scan dwell to wait out
-            self.r.hover_switch_delay = 0.0
-            self.r.scan_delay = 0.0
+            self.r.tooltip_controller.configure_delays(switch=0.0)
+            self.r.tooltip_controller.configure_delays(scan=0.0)
 
     # --- moves (mouse-pos property → _update_hover) ------------------------------------------------
     def move(self, x: float, y: float, *, hover: bool = True) -> Driver:
@@ -81,7 +81,7 @@ class Driver:
     # --- observed state ---------------------------------------------------------------------------
     @property
     def hover(self) -> int:
-        return self.r.hover
+        return self.r.tooltip_controller.selected
 
     @property
     def tip_shown(self) -> bool:

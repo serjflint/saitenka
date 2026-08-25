@@ -455,7 +455,7 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
 
     assert backend.requests
     assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
-    result.hover = 0
+    result.tooltip_controller.select(0)
     result.draw_subtitle()
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
@@ -680,12 +680,14 @@ def test_navigation_lands_on_the_target_cue_under_either_renderer(
     result.episode.sub_index = CueIndex([Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")])
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    result.hover = 0
+    result.tooltip_controller.select(0)
 
     assert result.seek_cue(SeekCue(1, result.cue_revision))
 
     assert result.sub_text == "犬も見る"  # the target cue, drawn from the index without waiting
-    assert result.hover == -1  # …with the previous cue's interaction state gone
+    assert (
+        result.tooltip_controller.selected == -1
+    )  # …with the previous cue's interaction state gone
     assert [token.surface for token in result.tokens] == ["犬", "も", "見る"]
     assert ("sub-seek", "1") in [command[:2] for command in ipc.commands if len(command) >= 2]
     result.close()
@@ -782,8 +784,8 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
-    result.hover = 0
-    result._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
+    result.tooltip_controller.select(0)
+    result.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     ipc.commands.clear()
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
@@ -794,11 +796,11 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert not result.native_geometry.apply(result._geometry_observation())
 
     assert ("set_property", "pause", False) not in ipc.commands
-    assert result.hover == 0
+    assert result.tooltip_controller.selected == 0
     assert result.boxes == []
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result._pause_store.dispatch(events.HoverPauseReleased())
+    result.tooltip_controller.pause_store.dispatch(events.HoverPauseReleased())
     result.close()
 
 
@@ -816,8 +818,8 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready
     result._sub_pending = None
-    result.hover = 0
-    result._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
+    result.tooltip_controller.select(0)
+    result.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     ipc.commands.clear()
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
@@ -828,11 +830,11 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
 
     assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
     assert result.boxes == []
-    assert result.hover == 0
+    assert result.tooltip_controller.selected == 0
     assert ("set_property", "pause", False) not in ipc.commands
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result._pause_store.dispatch(events.HoverPauseReleased())
+    result.tooltip_controller.pause_store.dispatch(events.HoverPauseReleased())
     result.close()
 
 
@@ -1490,7 +1492,7 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
 
     Driver(result).move_to_word(2)
 
-    assert result.hover == 2
+    assert result.tooltip_controller.selected == 2
     assert result.tip.view.state is not None
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
@@ -1503,14 +1505,14 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
 def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: Path) -> None:
     result, _ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫")
-    result.hover = 0
+    result.tooltip_controller.select(0)
     result.profile_controller.replace_dictionary_set(object())
 
     result._show_tooltip(0)
 
-    assert result.hover == -1
+    assert result.tooltip_controller.selected == -1
     assert result.tip.view.state is None
-    result.hover = 0
+    result.tooltip_controller.select(0)
     kanji_current(result.tip_ports, result.panel_ports, result.hover_inputs)
     assert result.interaction.word_store.current.kanji == 0
     result.close()
@@ -1612,7 +1614,7 @@ def test_invalid_result_identity_removes_visible_native_focus(tmp_path: Path) ->
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.hover = 0
+    result.tooltip_controller.select(0)
     result.draw_subtitle()
     focus_index = len(ipc.commands)
 
@@ -1634,7 +1636,7 @@ def test_empty_cue_removes_visible_native_focus(tmp_path: Path) -> None:
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.hover = 0
+    result.tooltip_controller.select(0)
     result.draw_subtitle()
 
     result.set_subtitle("")
@@ -1650,7 +1652,7 @@ def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.hover = 0
+    result.tooltip_controller.select(0)
     result.draw_subtitle()
 
     result.close()

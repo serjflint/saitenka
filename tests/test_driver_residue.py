@@ -59,7 +59,7 @@ _ARGUED: dict[tuple[str, str], str] = {
 }
 
 
-def _residue_class(node: ast.Call, *, hover_written: bool) -> str | None:
+def _residue_class(node: ast.Call, *, hover_established: bool) -> str | None:
     """Which seam a call reaches past, or None when it does not reach past one."""
     attribute = node.func.attr
     if attribute == "scroll_tip":
@@ -74,7 +74,7 @@ def _residue_class(node: ast.Call, *, hover_written: bool) -> str | None:
     if attribute == "_show_tooltip":
         # A `_show_tooltip` in a body that writes `hover` itself is a paint isolated from hover on
         # purpose (raster, cache, scale) — one side of a cut seam, which AGENTS.md sanctions.
-        return None if hover_written else "tooltip-without-a-hover"
+        return None if hover_established else "tooltip-without-a-hover"
     if attribute == "set_hover":
         return (
             "hover-without-a-cursor"
@@ -99,21 +99,23 @@ def _residue() -> list[tuple[str, str, int, str]]:
         # method inside a state-machine class is the name an argument is written against, not the
         # class body enclosing it.
         enclosing: dict[int, str] = {}
-        wrote_hover: dict[int, bool] = {}
+        established_hover: dict[int, bool] = {}
         for fn in scopes:
-            writes_hover = any(
-                isinstance(t, ast.Attribute) and t.attr == "hover"
-                for assign in ast.walk(fn)
-                if isinstance(assign, ast.Assign)
-                for t in assign.targets
+            selects_hover = any(
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "select"
+                and isinstance(call.func.value, ast.Attribute)
+                and call.func.value.attr == "tooltip_controller"
+                for call in ast.walk(fn)
             )
             for inner in ast.walk(fn):
                 enclosing[id(inner)] = fn.name
-                wrote_hover[id(inner)] = writes_hover
+                established_hover[id(inner)] = selects_hover
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
-            klass = _residue_class(node, hover_written=wrote_hover.get(id(node), False))
+            klass = _residue_class(node, hover_established=established_hover.get(id(node), False))
             if klass is not None:
                 found.append((path.name, enclosing.get(id(node), ""), node.lineno, klass))
     return found
