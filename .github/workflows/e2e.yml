@@ -99,7 +99,9 @@ jobs:
 
       # Real per-OS boundary, no GUI: integration (real socket/subprocess) + windows_sim executing on
       # the real kernel. This is the leg that catches the named-pipe / Scripts-vs-bin class Linux can't.
-      # `--no-sync`: the bundle is pip-installed on top of the locked env, and a re-sync would prune it.
+      # `--no-sync`: the bundle is pip-installed on top of the locked env. Today's uv syncs
+      # inexactly and would leave it, so this pins that rather than relying on it — only an exact
+      # `uv sync` prunes. Note `poe smoke-live` runs its own nested `uv run`, which this does not reach.
       - name: Real-boundary + per-OS suite
         run: uv run --no-sync pytest -q -m "not (slow or requires_display or e2e or live)"
 

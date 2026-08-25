@@ -203,7 +203,8 @@ def test_e2e_installs_the_same_bundle_runtime_the_extra_pins() -> None:
         # for. Adding one it doesn't (macOS x86_64 is the standing example) silently returns that leg
         # to the same ERROR.
         assert "if" not in install, name
-        # The bundle is pip-installed on top of the locked env; a re-syncing `uv run` would prune it.
+        # The bundle is pip-installed on top of the locked env. `uv run` syncs inexactly today, so
+        # this pins the behaviour rather than depending on it; only an exact `uv sync` prunes.
         for step in job["steps"]:
             run = str(step.get("run", ""))
             if run.startswith(("uv run", "xvfb-run")):
@@ -223,13 +224,13 @@ def test_the_gui_tier_runs_against_every_mpv_floor_the_package_declares() -> Non
     from saitenka.app.doctor import MPV_MIN
     from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
 
-    covered = {leg["expect"] for leg in _gui_legs()}
+    covered = [leg["expect"] for leg in _gui_legs()]
     for floor in (MPV_MIN, NATIVE_GEOMETRY_MPV_MIN):
         assert ".".join(str(part) for part in floor) in covered
 
-    # One leg deliberately floats, to catch upstream changing under us rather than us breaking a
-    # floor. It is the only one allowed to assert no version.
-    assert sorted(covered).count("") == 1
+    # Counted over the list, not a set: a set makes this structurally 0-or-1 and the assertion
+    # degenerates into "at least one floats", which a second floating leg would satisfy.
+    assert covered.count("") == 1
 
 
 def test_every_downloaded_mpv_is_pinned_by_hash_or_resolved_through_the_release_api() -> None:
@@ -253,7 +254,19 @@ def test_every_gui_leg_runs_the_identical_suite() -> None:
     steps = _e2e_workflow()["jobs"]["e2e-gui"]["steps"]
     gui = [step for step in steps if str(step.get("name", "")).startswith("GUI tier")]
     assert len(gui) == 1
-    assert "smoke-live" in gui[0]["run"]
+    # Compared verbatim, and required unconditional. Asserting only that the `run` mentions
+    # `smoke-live` admits both drift shapes this exists to stop: a `${{ matrix… }}` selection
+    # appended to the command, and an `if:` that quietly drops a leg from the tier entirely.
+    assert "if" not in gui[0], "a conditional GUI step silently drops a leg"
+    assert shlex.split(gui[0]["run"]) == [
+        "xvfb-run",
+        "-a",
+        "uv",
+        "run",
+        "--no-sync",
+        "poe",
+        "smoke-live",
+    ]
 
 
 def _triggers(workflow: dict) -> dict:
@@ -287,8 +300,9 @@ def test_every_dashboard_publish_is_gated_on_the_store_input() -> None:
 
 def test_the_publish_census_is_not_empty() -> None:
     """Negative control: a renamed key or a restructured `with:` would make the census empty, and an
-    empty census makes the gate assertion above pass while binding nothing."""
-    assert len(_auto_pushing_steps()) == 2
+    empty census makes the gate assertion above pass while binding nothing. Emptiness is the whole
+    claim — the gate test iterates whatever this finds, so a correctly-gated third step is fine."""
+    assert _auto_pushing_steps()
 
 
 def test_the_bound_expressions_are_not_vacuous() -> None:
