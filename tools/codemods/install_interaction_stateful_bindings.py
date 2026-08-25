@@ -15,8 +15,8 @@ import libcst as cst
 
 ROOT = Path(__file__).resolve().parents[2]
 PATHS = (
-    ROOT / "src/saitenka/app/session_controller.py",
-    ROOT / "src/saitenka/app/tooltip_controller.py",
+    ROOT / "src/saitenka/app/session/controller.py",
+    ROOT / "src/saitenka/app/features/tooltip/tooltip_controller.py",
 )
 STORE_BINDINGS = {
     "HoverStore": "HOVER_STATEFUL_BINDING",

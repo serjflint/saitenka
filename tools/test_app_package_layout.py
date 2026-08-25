@@ -32,6 +32,28 @@ def test_retired_flat_module_and_import_are_rejected(tmp_path) -> None:
     ]
 
 
+def test_retired_from_app_import_is_rejected(tmp_path) -> None:
+    app = _layout(tmp_path)
+    (app / "consumer.py").write_text("from saitenka.app import miner\n", encoding="utf-8")
+
+    findings = app_package_layout.inspect_tree(app)
+
+    assert [(finding.rule, finding.detail) for finding in findings] == [
+        ("retired-flat-import", "saitenka.app.miner")
+    ]
+
+
+def test_retired_dynamic_target_is_rejected(tmp_path) -> None:
+    app = _layout(tmp_path)
+    (app / "consumer.py").write_text("TARGET = 'saitenka.app.miner.bulk_mine'\n", encoding="utf-8")
+
+    findings = app_package_layout.inspect_tree(app)
+
+    assert [(finding.rule, finding.detail) for finding in findings] == [
+        ("retired-flat-import", "saitenka.app.miner")
+    ]
+
+
 def test_package_inventory_rejects_missing_and_undeclared_features(tmp_path) -> None:
     app = _layout(tmp_path)
     (app / "features" / "help" / "__init__.py").unlink()

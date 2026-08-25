@@ -87,8 +87,12 @@ def _imported_modules(tree: ast.AST) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
             modules.append((node.lineno, node.module))
+            if node.module == "saitenka.app":
+                modules.extend((node.lineno, f"{node.module}.{alias.name}") for alias in node.names)
         elif isinstance(node, ast.Import):
             modules.extend((node.lineno, alias.name) for alias in node.names)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            modules.append((node.lineno, node.value))
     return modules
 
 
@@ -114,8 +118,12 @@ def inspect_tree(app: Path = APP) -> list[Finding]:
     for path in sorted(app.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for line, module in _imported_modules(tree):
-            if module in retired_paths:
-                findings.append(Finding(path, line, "retired-flat-import", module))
+            retired = next(
+                (name for name in retired_paths if module == name or module.startswith(f"{name}.")),
+                None,
+            )
+            if retired is not None:
+                findings.append(Finding(path, line, "retired-flat-import", retired))
     return sorted(findings, key=lambda item: (str(item.path), item.line, item.rule))
 
 

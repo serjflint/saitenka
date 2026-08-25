@@ -101,7 +101,7 @@ def _paths() -> list[Path]:
 def _rewrite(path: Path, source: str) -> tuple[str, int]:
     relative = path.relative_to(ROOT).as_posix()
     transformer = ExtractProfileController(
-        session_module=path == ROOT / "src/saitenka/app/session_controller.py",
+        session_module=path == ROOT / "src/saitenka/app/session/controller.py",
         session_names=SESSION_NAMES | PATH_SESSION_NAMES.get(relative, frozenset()),
     )
     tree = cst.parse_module(source).visit(transformer)
@@ -109,7 +109,7 @@ def _rewrite(path: Path, source: str) -> tuple[str, int]:
 
 
 def _self_test() -> None:
-    session_path = ROOT / "src/saitenka/app/session_controller.py"
+    session_path = ROOT / "src/saitenka/app/session/controller.py"
     source = (
         "self.tokenizer\n"
         "reader.dict_set\n"

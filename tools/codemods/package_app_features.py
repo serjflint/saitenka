@@ -211,7 +211,7 @@ class PackageAppFeatures(cst.CSTTransformer):
         return cst.FlattenSentinel(lines)
 
 
-def _paths() -> list[Path]:
+def _tracked_python_paths() -> list[Path]:
     result = subprocess.run(
         ["git", "ls-files", "*.py"],
         cwd=ROOT,
@@ -219,10 +219,18 @@ def _paths() -> list[Path]:
         capture_output=True,
         text=True,
     )
+    return [ROOT / line for line in result.stdout.splitlines() if line]
+
+
+def _import_paths() -> list[Path]:
+    skipped = {
+        ROOT / "tools/codemods/package_app_features.py",
+        ROOT / "tools/test_app_package_layout.py",
+    }
     return [
-        ROOT / line
-        for line in result.stdout.splitlines()
-        if line and not line.startswith("tools/codemods/")
+        path
+        for path in _tracked_python_paths()
+        if path not in skipped and path.parent != ROOT / "tools/codemods"
     ]
 
 
@@ -267,7 +275,7 @@ def main(argv: list[str]) -> int:
     check = "--check" in argv
     total = 0
     touched = 0
-    for path in _paths():
+    for path in _import_paths():
         source = path.read_text(encoding="utf-8")
         rewritten, count = _rewrite(source)
         if not count:
@@ -276,10 +284,18 @@ def main(argv: list[str]) -> int:
         touched += 1
         if not check:
             path.write_text(rewritten, encoding="utf-8")
-    for path in (
-        ROOT / "complexipy-snapshot.json",
-        ROOT / ".agents/architecture-review/census.json",
-    ):
+    path_reference_files = [
+        path
+        for path in _tracked_python_paths()
+        if path != ROOT / "tools/codemods/package_app_features.py"
+    ]
+    path_reference_files.extend(
+        (
+            ROOT / "complexipy-snapshot.json",
+            ROOT / ".agents/architecture-review/census.json",
+        )
+    )
+    for path in path_reference_files:
         source = path.read_text(encoding="utf-8")
         rewritten, count = _rewrite_path_references(source)
         if not count:
