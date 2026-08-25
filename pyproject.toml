@@ -835,6 +835,7 @@ arch-map = { shell = "uv run --extra full python tools/arch_map.py", help = "The
 # progress. Members are discovered live (mixins, import-time attachment), never by parsing one file.
 host-mass = { shell = "uv run --extra full python tools/host_mass.py check" }
 host-mass-census = { shell = "uv run --extra full python tools/host_mass.py", help = "Members on the SessionController by kind — substantive, delegator, property, field" }
+session-assembly-census = { cmd = "uv run --extra full python tools/session_assembly_census.py", help = "Live SessionController assembly sites by migration family" }
 # GATE (in `all`) — `getattr(port, "method", fallback)` where the port ALWAYS has the method, so the
 # fallback is unreachable and the probe's only live effect is making a rename silent (a renamed timer
 # method disarms every lifecycle deadline, with nothing red). Resolves the receiver's type and asks

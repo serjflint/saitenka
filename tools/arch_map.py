@@ -268,15 +268,31 @@ def _adapter_ports() -> list[dict]:
 def _registered_policies() -> list[str]:
     """Which policies the router actually owns. Built off a stub host: a registration needs no
     live session, which is the point of the ports."""
+    from saitenka.app.hover_adapter import HoverAdapter
+    from saitenka.app.interaction_adapter import InteractionAdapter
+    from saitenka.app.mine_adapter import MineAdapter
+    from saitenka.app.panel_adapter import PanelAdapter
+    from saitenka.app.profile_adapter import ProfileAdapter
+    from saitenka.app.session_adapter import SessionAdapter
     from saitenka.app.session_routes import stateless_features
+    from saitenka.app.subtitle_adapter import SubtitleAdapter
 
     class _Stub:
         def __getattr__(self, name: str) -> object:
             return None
 
+    host = _Stub()
     return sorted(
-        entry[1].__class__.__name__.removesuffix("Adapter").lower()
-        for entry in stateless_features(_Stub()).values()  # type: ignore[arg-type]
+        binding.feature
+        for binding in stateless_features(
+            HoverAdapter(host),  # type: ignore[arg-type]
+            MineAdapter(host),  # type: ignore[arg-type]
+            PanelAdapter(host),  # type: ignore[arg-type]
+            ProfileAdapter(host),  # type: ignore[arg-type]
+            SessionAdapter(host),  # type: ignore[arg-type]
+            SubtitleAdapter(host),  # type: ignore[arg-type]
+            InteractionAdapter(host),  # type: ignore[arg-type]
+        )
     )
 
 
@@ -378,6 +394,9 @@ def command_view() -> dict:
     rows = []
     for key, value in zip(table.keys, table.values, strict=True):
         text = ast.unparse(value)
+        if key is None:
+            rows.append({"message": "**registered", "target": text, "kind": "registration"})
+            continue
         kind = "policy" if "_run_" in text else "verb"
         rows.append({"message": ast.unparse(key), "target": text, "kind": kind})
     return {"rows": rows, "verbs": sum(r["kind"] == "verb" for r in rows)}

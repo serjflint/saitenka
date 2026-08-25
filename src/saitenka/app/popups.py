@@ -581,7 +581,6 @@ class TooltipState:
         #: Samples the OTel hit-test histogram every `_HIT_TEST_SAMPLE_EVERY` poll ticks. Feature
         #: -private: nothing outside the hover path has ever read it.
         self.hit_test_tick = 0
-        self.tip_keys_bound = False
         self.tip_tok: Token | None = None  # base tooltip's source token (for the crisp re-render)
         self.tip_inflected: str | None = (
             None  # its inflected surface (re-rendered on show AND scroll)

@@ -440,7 +440,7 @@ def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
     _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".webp")  # the animated clip becomes the card image
-    captured = r.interaction.preview_panel.last_jpg
+    captured = r.preview_controller.panel.last_jpg
     assert captured is not None and str(captured).endswith(
         ".jpg"
     )  # still kept for preview/fallback
@@ -564,7 +564,7 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
     assert ("keybind", "ESC", f"script-message {PREVIEW_CLOSE_MSG}") in ipc.commands
 
     r._handle(PREVIEW_CLOSE_MSG)
-    assert not r.interaction.preview.open  # Esc dismissed it
+    assert not r.preview_controller.state.open  # Esc dismissed it
     assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
 
 
@@ -589,7 +589,7 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
 
     r.mining_controller.mine_token(tok)  # already in deck → nothing added, token remembered
     assert anki.added == []
-    assert r.interaction.preview_panel.dup_tok is tok
+    assert r.preview_controller.panel.dup_tok is tok
 
     r.preview_ports.add_duplicate()
     assert len(anki.added) == 1

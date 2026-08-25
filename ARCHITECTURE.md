@@ -56,7 +56,8 @@ internal modules with explicit dependency contracts, not independently published
   owns the active reading environment and its synchronous switch transaction; `mining_controller.py`
   owns the selected mining target, deck-derived index, seed/probe lifecycle, scratch/store resources,
   and operation admission. `app/runtime/` owns the
-  closed command table; `session_factory.py` is the production `SessionController` construction seam.
+  closed command table; `session_assembly.py` installs pre-controller feature owners and their
+  declarations; `session_factory.py` is the production `SessionController` construction seam.
   `cli.py` owns process setup and Cyclopts registration, `commands/` owns domain command surfaces and
   attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
@@ -103,13 +104,15 @@ cli.create_app
   -> app.commands.<domain>
      -> run: app.launch.run -> session_factory.create_session_controller(...)
      -> attach: app.commands.attach -> session_factory.create_session_controller(...)
-        -> SessionController
+        -> build_session_assembly(...)
+        -> SessionController(assembly=...)
 ```
 
-Inside a `SessionController`, mpv script messages go through a closed `CommandExecutor`: a declared spec per
-command (owner, whether it needs a current cue) separate from the bound handler, so ordering and
-ownership are testable without a session. `SessionController` assembles the handler half, which makes this an
-explicit internal composition seam rather than an open third-party plugin API.
+mpv script messages go through a closed `CommandExecutor`: a declared spec per command (owner,
+whether it needs a current cue) separate from the bound handler, so ordering and ownership are
+testable without a session. `SessionAssembly` contributes handlers whose owners can exist before
+the controller; `SessionController` still binds commands whose adapters depend on its live facts.
+This is an explicit internal composition seam, not an open third-party plugin API.
 
 A feature joins the session on one of two layers, and which one follows from whether it needs a
 place to remember that does not exist yet.
@@ -119,8 +122,9 @@ place to remember that does not exist yet.
 - **Stateless** — it is a pure policy over a snapshot, `reduce(command, inputs)`. Routing that
   through the mailbox would add sequencing to a decision with nothing to sequence.
 
-Both join by registration rather than by a rewrite of the host, which is what makes the session
-extensible at all. Which files, and in what order, is
+Both join through typed registration rows. The current stateless composition still supplies its
+adapters from `SessionController`; moving an adapter behind a bounded owner removes that host
+coupling, while merely renaming the row does not. Which files, and in what order, is
 [Adding a feature](docs/contributing/runtime.md#adding-a-feature).
 
 ```mermaid
@@ -150,8 +154,8 @@ flowchart TB
     reduce --- state[(SessionState)]
 ```
 
-The dotted edges are the whole asymmetry: the stateful half reaches its own slice, the stateless
-half reaches the host — but only through members its protocol names.
+The dotted edges are the whole asymmetry: the stateful half reaches its own slice, while the
+remaining stateless adapters reach the host only through the members their protocols name.
 
 The `SessionController` node denotes the live session controller, distinct from the immutable reducer-state store
 shown beside it. SessionController still carries session assembly and mutable state that has not moved behind a
@@ -180,9 +184,9 @@ protocol-shaped class from being mistaken for production swappability.
 | Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
-| SessionController commands | `CommandExecutor` | Explicit and unit-testable; the spec table is closed, the handler table is assembled inside `SessionController`, and neither is externally injected. |
-| Stateful features | `SliceReducer` + `RouteKey` | Live: a reducer registers against the `(event, owner)` pairs it owns, and is pure by gate. |
-| Stateless features | `StatelessRouter` | Live: a policy registers by command type; its adapter's host protocol is the coupling, and its width is not gated. |
+| Session commands | `CommandRegistration` + `CommandExecutor` | Explicit and unit-testable; feature-owned endpoints may be assembled before `SessionController`, while controller-dependent handlers remain visibly bound there. |
+| Stateful features | `StatefulBinding` + owner plan | Live for `Owner.INTERACTION`: one declaration supplies runtime reducers, no-runtime stores, accepted events, and explicit feature order; the reducer remains pure by gate. |
+| Stateless features | `StatelessBinding` + `StatelessRouter` | Live: a typed policy registers by command type; any remaining adapter host protocol is visible coupling, and its width is not gated. |
 | Session events and effects | `saitenka.runtime` | Live: the mailbox is the session's ingress, `SessionLoop` drives it, and effects return as correlated terminals. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |

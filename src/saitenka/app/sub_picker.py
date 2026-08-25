@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarRow, render_picker
-from saitenka.model import claims_pointer, in_rect
+from saitenka.model import in_rect
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner, events
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 from saitenka.runtime.picker import ListingAdopted, PickerRetired, PickerState
@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 
     from saitenka.app.subselect import SubtitleCandidate
     from saitenka.app.subtitle_modes import FetchSubmitter
-    from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
     from saitenka.runtime.interaction_slice import PickerStore
 
 log = logging.getLogger(__name__)
@@ -299,31 +298,6 @@ def contains(state: PickerState, panel: PickerPanel, x: float, y: float) -> bool
     return in_rect(panel.rect, x, y)
 
 
-def suppress_hover(suppression: HoverSuppression) -> bool:
-    state = suppression.interaction.sub_picker
-    if not state.open:
-        return False
-    if not claims_pointer(
-        suppression.interaction.picker_panel.rect, suppression.pointer, open_=state.open
-    ):
-        return False
-    suppression.release_hover()
-    return True
-
-
-def scroll(wheel: WheelStep, steps: int) -> bool:
-    state = wheel.interaction.sub_picker
-    if not state.open:
-        return False
-    if not claims_pointer(wheel.interaction.picker_panel.rect, wheel.pointer, open_=state.open):
-        return False
-    wheel.interaction.picker_store.dispatch(
-        events.PickerScrolled(steps, len(listing_of(state).candidates))
-    )
-    wheel.redraw_picker()
-    return True
-
-
 @dataclass(frozen=True, slots=True)
 class DownloadPorts:
     """What fetching a chosen subtitle needs from the session: how to say so, how to submit the
@@ -335,13 +309,19 @@ class DownloadPorts:
     surfaces: object
 
 
-def _download(target: ClickTarget, index: int, ports: DownloadPorts) -> None:
+def download_candidate(
+    state: PickerState,
+    store: PickerStore,
+    panel: PickerPanel,
+    index: int,
+    ports: DownloadPorts,
+) -> None:
     """Fetch the chosen candidate and close the panel.
 
     Everything this needs is already a value or a port — `start_fetch` and `close_picker` both take
     facts, so the host was only being carried through to reach them.
     """
-    candidates = listing_of(target.interaction.sub_picker).candidates
+    candidates = listing_of(state).candidates
     if not (0 <= index < len(candidates)):
         return
     candidate = candidates[index]
@@ -358,16 +338,4 @@ def _download(target: ClickTarget, index: int, ports: DownloadPorts) -> None:
         force_select=True,
     )
     # panel closes; the swap lands from the broker completion when the file arrives
-    close_picker(target.interaction.picker_store, target.interaction.picker_panel, ports.surfaces)
-
-
-def on_click(target: ClickTarget, x: float, y: float) -> bool:
-    state = target.interaction.sub_picker
-    panel = target.interaction.picker_panel
-    if not contains(state, panel, x, y) or panel.rect is None:
-        return False
-    local_x, local_y = x - panel.rect[0], y - panel.rect[1]
-    hit = next((box for box in panel.hits if box.contains(local_x, local_y)), None)
-    if hit is not None and hit.kind == "picker-download":
-        _download(target, hit.value, target.download)
-    return True
+    close_picker(store, panel, ports.surfaces)

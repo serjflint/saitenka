@@ -75,7 +75,7 @@ class HoverAdapter:
             paused_by_tooltip=host.interaction.hover_pause.held,
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: hover_intents.HoverEffect, /) -> None:
         host = self._host
         owner = host.tooltip_controller
         if isinstance(effect, hover_intents.SpeakText):

@@ -32,21 +32,22 @@ is stateful, and it creates it in a slice.
    that touches mpv, the display, or the host.
 2. `app/<feature>_adapter.py` — a `<Feature>Host` `Protocol` naming exactly the members you touch,
    and an adapter over it exposing `inputs()` and `apply(effect)`.
-3. `app/session_routes.py` — a row in `stateless_features()`, and `<Feature>Host` on
-   `StatelessHost`'s bases. That function *is* the `StatelessRouter` table; there is no registry
-   beside it.
+3. `app/session_routes.py` — a typed row in `stateless_features()` and one explicit adapter argument.
+   `StatelessBinding` checks the command, input, and effect types before the heterogeneous
+   `StatelessRouter` boundary.
 
 If the feature already has a bounded controller, its adapter protocol names that controller's
-surface instead. `StatelessHost` exposes one typed controller attribute and `stateless_features()`
-passes it to the adapter, as the profile row does. Do not re-expose the controller's facts and acts
-on `SessionController` merely to make the adapter protocol a `StatelessHost` base.
+surface instead, as the profile row does. Do not re-expose the controller's facts and acts on
+`SessionController` merely to satisfy an adapter protocol.
 
 **Yes — it needs a new place to remember.**
 
 1. `runtime/<feature>.py` — `reduce(state, event) -> ReduceResult` (`runtime/state.py`) and the
    state dataclass, under the `Owner` (`runtime/effects.py`) whose slice it belongs to.
-2. `app/session_routes.py` — name it in that owner's `SliceReducer({...})` and add the
-   `RouteKey(EventType, Owner.X)` pairs that should reach it.
+2. `app/feature_bindings.py` — declare its reducer, initial-state and local-store factories plus
+   the events it accepts, then place it in the owner's explicit order.
+3. `app/session_routes.py` — route the owner's declared event vocabulary. Runtime and no-runtime
+   construction consume the same feature bindings.
 
 **If a key triggers it**, three more edits, all required:
 

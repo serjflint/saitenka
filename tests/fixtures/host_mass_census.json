@@ -1,14 +1,13 @@
 {
   "counts": {
-    "alias": 1,
     "delegator": 98,
-    "derived": 44,
-    "init_lines": 408,
-    "self_delegator": 4,
-    "slice": 11,
-    "substantive": 168,
-    "substantive_lines": 2061,
-    "total": 326
+    "derived": 41,
+    "init_lines": 404,
+    "self_delegator": 3,
+    "slice": 15,
+    "substantive": 160,
+    "substantive_lines": 1981,
+    "total": 317
   },
   "reason": ""
 }

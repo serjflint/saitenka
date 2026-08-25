@@ -137,10 +137,6 @@ class CommandExecution:
 
 _CUE_INDEPENDENT = frozenset(
     {
-        HELP_TOGGLE_MSG,
-        HELP_PREV_MSG,
-        HELP_NEXT_MSG,
-        HELP_CLOSE_MSG,
         OVERLAY_TOGGLE_MSG,
         SUBTITLE_LANGUAGE_MSG,
         SUBTITLE_MARK_JP_MSG,
@@ -159,10 +155,21 @@ _CUE_INDEPENDENT = frozenset(
         TIP_UP_MSG,
         TIP_DOWN_MSG,
         SUB_ANCHOR_MSG,
+        HELP_TOGGLE_MSG,
+        HELP_PREV_MSG,
+        HELP_NEXT_MSG,
+        HELP_CLOSE_MSG,
     }
 )
 _HELP_COMMANDS = frozenset(
-    {HELP_TOGGLE_MSG, HELP_PREV_MSG, HELP_NEXT_MSG, HELP_CLOSE_MSG, SCROLL_UP_MSG, SCROLL_DOWN_MSG}
+    {
+        HELP_TOGGLE_MSG,
+        HELP_PREV_MSG,
+        HELP_NEXT_MSG,
+        HELP_CLOSE_MSG,
+        SCROLL_UP_MSG,
+        SCROLL_DOWN_MSG,
+    }
 )
 
 _OWNER_COMMANDS: tuple[tuple[Owner, tuple[str, ...]], ...] = (

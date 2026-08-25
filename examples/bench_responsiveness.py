@@ -1208,7 +1208,7 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     # measure those separately below).
     sidebar.show(reader.sidebar_view)
     sidebar.draw(reader.sidebar_view)
-    panel = reader.interaction.sidebar_panel
+    panel = reader.sidebar_controller.panel
     hits = panel.hits
     tab = next((h for h in hits if h.kind.startswith("view:")), hits[0] if hits else None)
     note_id = {"n": 0}
@@ -1216,7 +1216,7 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     def click_sidebar() -> None:
         if tab is None or panel.rect is None:
             return
-        sidebar.on_click(
+        reader.sidebar_controller.on_click(
             reader.click_target,
             panel.rect[0] + tab.x + 1,
             panel.rect[1] + tab.y + 1,

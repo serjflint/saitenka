@@ -13,22 +13,55 @@ is the point: each one is small, countable, and belongs to its feature.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class StatelessAdapter(Protocol):
+class StatelessAdapter[InputsT, EffectT](Protocol):
     """A feature's two impure ends; the pure `reduce` between them stays in `<f>_intents.py`."""
 
-    def inputs(self) -> object: ...
+    def inputs(self) -> InputsT: ...
 
-    def apply(self, effect: object, /) -> None: ...
+    def apply(self, effect: EffectT, /) -> None: ...
 
 
-#: What one feature registers: its pure policy, and the adapter that feeds and performs it.
-type StatelessFeature = tuple[Callable[..., tuple[object, ...]], StatelessAdapter]
+@dataclass(frozen=True, slots=True)
+class StatelessBinding[CommandT, InputsT, EffectT]:
+    """One type-checked command policy and its impure feature endpoint."""
+
+    feature: str
+    command_type: type[CommandT]
+    reduce: Callable[[CommandT, InputsT], tuple[EffectT, ...]]
+    adapter: StatelessAdapter[InputsT, EffectT]
+
+    def run(self, command: object) -> None:
+        if not isinstance(command, self.command_type):
+            raise TypeError(f"{self.feature} does not accept {type(command).__name__}")
+        for effect in self.reduce(command, self.adapter.inputs()):
+            self.adapter.apply(effect)
+
+
+class InstalledStatelessBinding(Protocol):
+    @property
+    def feature(self) -> str: ...
+
+    @property
+    def command_type(self) -> type: ...
+
+    def run(self, command: object) -> None: ...
+
+
+def bind_stateless[CommandT, InputsT, EffectT](
+    feature: str,
+    command_type: type[CommandT],
+    reduce: Callable[[CommandT, InputsT], tuple[EffectT, ...]],
+    adapter: StatelessAdapter[InputsT, EffectT],
+) -> StatelessBinding[CommandT, InputsT, EffectT]:
+    """Preserve reducer/adapter agreement until the heterogeneous registry boundary."""
+    return StatelessBinding(feature, command_type, reduce, adapter)
 
 
 class StatelessRouter:
@@ -39,8 +72,14 @@ class StatelessRouter:
     never registered. The stateful half keys on `(event type, owner)` for the same reason.
     """
 
-    def __init__(self, features: dict[type, StatelessFeature]) -> None:
-        self._features = dict(features)
+    def __init__(self, features: tuple[InstalledStatelessBinding, ...]) -> None:
+        self._features: dict[type, InstalledStatelessBinding] = {}
+        for binding in features:
+            if binding.command_type in self._features:
+                raise ValueError(
+                    f"stateless command type already registered: {binding.command_type.__name__}"
+                )
+            self._features[binding.command_type] = binding
 
     @property
     def commands(self) -> frozenset[type]:
@@ -50,6 +89,4 @@ class StatelessRouter:
         entry = self._features.get(type(command))
         if entry is None:
             raise KeyError(f"no stateless feature owns {type(command).__name__}")
-        reduce, adapter = entry
-        for effect in reduce(command, adapter.inputs()):
-            adapter.apply(effect)
+        entry.run(command)

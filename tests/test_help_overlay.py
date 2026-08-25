@@ -22,7 +22,7 @@ from saitenka.render.help import render_page
 def _entries(reader: SessionController):
     return [
         (section.title, entry)
-        for page in reader._help_document().pages
+        for page in reader.help_controller.document().pages
         for section in page.sections
         for entry in section.entries
     ]
@@ -86,7 +86,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
 def test_small_osd_pages_and_repeats_navigation_hints():
     reader = SessionController(FakeIPC(), anki=object())
     reader.osd = (480, 220)
-    document = reader._help_document()
+    document = reader.help_controller.document()
 
     assert len(document.pages) > 1
     assert all(page.footer == "F1 / Esc close  ·  PgUp/PgDn or wheel" for page in document.pages)
@@ -108,8 +108,8 @@ def test_ui_scale_enlarges_help_document():
     enlarged = SessionController(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
     normal.osd = enlarged.osd = (1920, 1080)
 
-    normal_document = normal._help_document()
-    enlarged_document = enlarged._help_document()
+    normal_document = normal.help_controller.document()
+    enlarged_document = enlarged.help_controller.document()
 
     assert enlarged_document.width > normal_document.width
     assert enlarged_document.height > normal_document.height

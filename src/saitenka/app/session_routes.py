@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import shutil
 import time
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from saitenka.app import (
     hover_intents,
@@ -26,13 +26,12 @@ from saitenka.app import (
     subtitle_intents,
     telemetry,
 )
-from saitenka.app.hover_adapter import HoverAdapter, HoverHost
-from saitenka.app.interaction_adapter import InteractionAdapter, InteractionHost
-from saitenka.app.mine_adapter import MineAdapter, MineHost
-from saitenka.app.panel_adapter import PanelAdapter, PanelHost
-from saitenka.app.profile_adapter import ProfileAdapter
-from saitenka.app.session_adapter import SessionAdapter, SessionHost
-from saitenka.app.subtitle_adapter import SubtitleAdapter, SubtitleHost
+from saitenka.app.feature_bindings import (
+    INTERACTION_OWNER_PLAN,
+    INTERACTION_STATEFUL_BINDINGS,
+    ordered_stateful_bindings,
+)
+from saitenka.app.stateless import bind_stateless
 from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
@@ -83,27 +82,7 @@ from saitenka.runtime.events import (
     StartupReady,
     UserCommand,
 )
-from saitenka.runtime.interaction_slice import (
-    HELP_FEATURE,
-    HOVER_PAUSE_FEATURE,
-    HOVERED_WORD_FEATURE,
-    INTERACTION_FEATURE,
-    PICKER_FEATURE,
-    PREVIEW_FEATURE,
-    PULSE_FEATURE,
-    SIDEBAR_FEATURE,
-    TIP_NAV_FEATURE,
-    HelpFeature,
-    HoveredWordFeature,
-    HoverFeature,
-    HoverPauseFeature,
-    PickerFeature,
-    PreviewFeature,
-    PulseFeature,
-    SidebarFeature,
-    TipNavFeature,
-    interaction_slice_reducer,
-)
+from saitenka.runtime.interaction_slice import interaction_slice_reducer
 from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.runtime.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.runtime.playback_slice import (
@@ -127,9 +106,14 @@ from saitenka.runtime.user_command import COMMAND_FEATURE, CommandIntake, reduce
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.mining_controller import MiningController
-    from saitenka.app.profile_controller import ProfileController
-    from saitenka.app.stateless import StatelessFeature
+    from saitenka.app.hover_adapter import HoverAdapter
+    from saitenka.app.interaction_adapter import InteractionAdapter
+    from saitenka.app.mine_adapter import MineAdapter
+    from saitenka.app.panel_adapter import PanelAdapter
+    from saitenka.app.profile_adapter import ProfileAdapter
+    from saitenka.app.session_adapter import SessionAdapter
+    from saitenka.app.stateless import InstalledStatelessBinding
+    from saitenka.app.subtitle_adapter import SubtitleAdapter
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.effects import CoreControl, Effect
@@ -504,7 +488,13 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     )
     playback = playback_slice_reducer()
     subtitle = subtitle_slice_reducer()
-    interaction = interaction_slice_reducer()
+    interaction_bindings = ordered_stateful_bindings(
+        INTERACTION_OWNER_PLAN,
+        INTERACTION_STATEFUL_BINDINGS,
+    )
+    interaction = interaction_slice_reducer(
+        {binding.key: binding.build_reducer() for binding in interaction_bindings}
+    )
     presentation = presentation_slice_reducer()
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
@@ -555,17 +545,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
             subtitle=subtitle.initial({SUBTITLE_FEATURE: SubtitleTrackState()}),
             interaction=interaction.initial(
-                {
-                    INTERACTION_FEATURE: HoverFeature(),
-                    HELP_FEATURE: HelpFeature(),
-                    PICKER_FEATURE: PickerFeature(),
-                    SIDEBAR_FEATURE: SidebarFeature(),
-                    TIP_NAV_FEATURE: TipNavFeature(),
-                    PULSE_FEATURE: PulseFeature(),
-                    HOVER_PAUSE_FEATURE: HoverPauseFeature(),
-                    HOVERED_WORD_FEATURE: HoveredWordFeature(),
-                    PREVIEW_FEATURE: PreviewFeature(),
-                }
+                {binding.key: binding.initial() for binding in interaction_bindings}
             ),
             presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),
         ),
@@ -603,43 +583,34 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     return reactor
 
 
-class StatelessHost(
-    HoverHost, InteractionHost, MineHost, PanelHost, SessionHost, SubtitleHost, Protocol
-):
-    """Every stateless feature's session-level host surface at once.
-
-    Direct-host adapters contribute Protocol bases because Python has no intersection type. A
-    bounded-controller feature contributes one typed controller attribute instead; its adapter
-    protocol describes that controller. Both keep the registration cost visible rather than
-    hiding it behind a `SessionController` annotation.
-    """
-
-    profile_controller: ProfileController
-    mining_controller: MiningController
-
-
-def stateless_features(host: StatelessHost) -> dict[type, StatelessFeature]:
+def stateless_features(
+    hover: HoverAdapter,
+    mine: MineAdapter,
+    panel: PanelAdapter,
+    profile: ProfileAdapter,
+    session: SessionAdapter,
+    subtitle: SubtitleAdapter,
+    interaction: InteractionAdapter,
+) -> tuple[InstalledStatelessBinding, ...]:
     """The stateless half's route table — the counterpart to the reducer routes above.
 
     Same shape, different key: a stateful feature is reached by the event it owns, a stateless one
     by the command vocabulary it owns. Both are a registration, which is the point — neither half
     should require editing the host to add a feature.
     """
-    return {
-        hover_intents.HoverCommand: (hover_intents.reduce, HoverAdapter(host)),
-        mine_intents.MineCommand: (mine_intents.reduce, MineAdapter(host)),
-        panel_intents.PanelCommand: (panel_intents.reduce, PanelAdapter(host)),
-        profile_intents.ProfileCommand: (
-            profile_intents.reduce,
-            ProfileAdapter(host.profile_controller),
+    return (
+        bind_stateless("hover", hover_intents.HoverCommand, hover_intents.reduce, hover),
+        bind_stateless("mine", mine_intents.MineCommand, mine_intents.reduce, mine),
+        bind_stateless("panel", panel_intents.PanelCommand, panel_intents.reduce, panel),
+        bind_stateless("profile", profile_intents.ProfileCommand, profile_intents.reduce, profile),
+        bind_stateless("session", session_intents.SessionCommand, session_intents.reduce, session),
+        bind_stateless(
+            "subtitle", subtitle_intents.SubtitleCommand, subtitle_intents.reduce, subtitle
         ),
-        session_intents.SessionCommand: (session_intents.reduce, SessionAdapter(host)),
-        subtitle_intents.SubtitleCommand: (
-            subtitle_intents.reduce,
-            SubtitleAdapter(host),
-        ),
-        interaction_intents.InteractionCommand: (
+        bind_stateless(
+            "interaction",
+            interaction_intents.InteractionCommand,
             interaction_intents.reduce,
-            InteractionAdapter(host),
+            interaction,
         ),
-    }
+    )

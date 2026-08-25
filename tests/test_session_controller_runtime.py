@@ -11,6 +11,7 @@ from saitenka.app.runtime import (
     CommandSpec,
     CueCommandState,
 )
+from saitenka.app.session_controller import SessionController
 from saitenka.app.session_factory import SessionServices, create_session_controller
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
@@ -155,10 +156,12 @@ def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request
     ipc = FakeIPC()
     reader = create_session_controller(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
-    reader._help_store.dispatch(HelpCommand.TOGGLE)
+    reader.help_controller.store.dispatch(HelpCommand.TOGGLE)
     calls: list[int] = []
     monkeypatch.setattr(
-        "saitenka.app.surfaces.route_scroll", lambda _reader, steps: calls.append(steps)
+        reader.surface_router,
+        "route_scroll",
+        lambda _wheel, steps: calls.append(steps),
     )
 
     reader._handle(UserCommand(SCROLL_UP_MSG))
@@ -253,7 +256,6 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() 
     cannot be handed a different one, which is what makes the conformance contract testable.
     """
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-    from saitenka.app.session_controller import SessionController
     from saitenka.app.session_factory import _geometry_backend
 
     assert _geometry_backend(SubtitleGeometryOptions(native_visible=False)) is None
@@ -307,7 +309,6 @@ def test_an_idle_session_blocks_instead_of_polling():
 
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
@@ -330,7 +331,6 @@ def test_an_event_wakes_the_wait_early():
 
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()

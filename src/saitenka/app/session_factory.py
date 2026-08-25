@@ -36,9 +36,16 @@ def create_session_controller(
     tokenizer_warm: Future[None] | None = None,
 ) -> SessionController:
     from saitenka.app.config import ReaderOptions
+    from saitenka.app.session_assembly import build_session_assembly
     from saitenka.app.session_controller import SessionController
 
     resolved = services or SessionServices()
+    resolved_options = options or ReaderOptions()
+    assembly = build_session_assembly(
+        ipc,
+        resolved_options,
+        runtime_submit=ipc.submit_runtime_mpv,
+    )
     return SessionController(
         ipc,
         scorer=resolved.scorer,
@@ -46,7 +53,7 @@ def create_session_controller(
         mine_cfg=resolved.mining,
         dict_set=resolved.dictionaries,
         tts_ok=resolved.tts,
-        options=options,
+        options=resolved_options,
         renderer=renderer,
         profile=profile,
         tokenizer_warm=tokenizer_warm,
@@ -56,6 +63,7 @@ def create_session_controller(
         # port is on every `MpvIPC`, so a probe here could only ever answer "renamed" as "absent",
         # and absent silently moves every overlay write back onto the direct path.
         runtime_submit=ipc.submit_runtime_mpv,
+        assembly=assembly,
         # Same reasoning for the geometry provider: which implementation runs is composition's
         # call, not the SessionController's. A SessionController built directly gets whatever its caller injects.
         geometry_backend=_geometry_backend((options or ReaderOptions()).subtitle_geometry),

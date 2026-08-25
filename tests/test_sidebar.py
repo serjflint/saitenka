@@ -115,9 +115,9 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
     calls = _capture_render(monkeypatch)
     (sidebar.hide if reader.sidebar.open else sidebar.show)(reader.sidebar_view)
-    reader.interaction.sidebar_panel.rect = (900, 50, 360, 600)
+    reader.sidebar_controller.panel.rect = (900, 50, 360, 600)
 
-    assert sidebar.scroll(reader.wheel_step, -3) is True
+    assert reader.sidebar_controller.scroll(reader.wheel_step, -3) is True
     held_scroll = reader.sidebar.scroll
     reader.sub_text = "cue 18"
     sidebar.follow(reader.sidebar_view)
@@ -133,13 +133,13 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
 def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
     reader, ipc = _reader(active=3)
     _capture_render(monkeypatch)
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
-    reader.interaction.sidebar_panel.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
+    reader.sidebar_controller.panel.rect = (100, 100, 400, 500)
+    reader.sidebar_controller.panel.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
 
-    assert sidebar.on_click(reader.click_target, 110, 110) is True
+    assert reader.sidebar_controller.on_click(reader.click_target, 110, 110) is True
     assert ("set_property", "time-pos", 7.0) in ipc.commands
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
@@ -155,13 +155,13 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
         monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
     else:
         monkeypatch.setattr(reader, method, lambda: invoked.append(method))
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
-    reader.interaction.sidebar_panel.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
+    reader.sidebar_controller.panel.rect = (100, 100, 400, 500)
+    reader.sidebar_controller.panel.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
 
-    sidebar.on_click(reader.click_target, 110, 110)
+    reader.sidebar_controller.on_click(reader.click_target, 110, 110)
 
     assert invoked == [method]
 
@@ -180,15 +180,15 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method,
         monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
     else:
         monkeypatch.setattr(reader, method, lambda: invoked.append(method))
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
-    reader.interaction.sidebar_panel.hits = (
+    reader.sidebar_controller.panel.rect = (100, 100, 400, 500)
+    reader.sidebar_controller.panel.hits = (
         SidebarHitBox(kind, 3, 0, 0, 40, 40),
     )  # row 3, no longer active
 
-    sidebar.on_click(reader.click_target, 110, 110)
+    reader.sidebar_controller.on_click(reader.click_target, 110, 110)
 
     assert invoked == [method]  # not the old silent no-op
 
@@ -204,12 +204,12 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
     monkeypatch.setattr(reader, "toggle_bookmark", lambda: invoked.append("toggle"))
 
     reader._handle(BOOKMARK_MSG)  # the Alt+b path
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
-    reader.interaction.sidebar_panel.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
-    sidebar.on_click(reader.click_target, 110, 110)  # the sidebar-button path
+    reader.sidebar_controller.panel.rect = (100, 100, 400, 500)
+    reader.sidebar_controller.panel.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
+    reader.sidebar_controller.on_click(reader.click_target, 110, 110)  # the sidebar-button path
 
     assert invoked == ["toggle", "toggle"]  # one flow, two entry points
 
@@ -252,7 +252,7 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader.analysis.current = analyze_cues(
         list(reader.episode.sub_index.cues), reader.scorer, reader.profile_controller.tokenizer
     )
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
     reader._loading = True
@@ -270,10 +270,10 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
 
 def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):
     reader, ipc = _reader(props={"mouse-pos": {"x": 110, "y": 110}})
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (100, 100, 400, 500)
+    reader.sidebar_controller.panel.rect = (100, 100, 400, 500)
     monkeypatch.setattr(
         "saitenka.app.tooltip.update_hover",
         lambda _reader: (_ for _ in ()).throw(AssertionError("tooltip reached")),
@@ -302,14 +302,12 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     assert store.entries_for_path(renamed) == []
 
     _capture_render(monkeypatch)
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (0, 0, 400, 500)
-    reader.interaction.sidebar_panel.hits = (
-        SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),
-    )
-    sidebar.on_click(reader.click_target, 10, 10)
+    reader.sidebar_controller.panel.rect = (0, 0, 400, 500)
+    reader.sidebar_controller.panel.hits = (SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),)
+    reader.sidebar_controller.on_click(reader.click_target, 10, 10)
 
     assert store.entries_for_path(renamed) == [entry]
     assert store.media(entry.media_id).original_basename == original.name
@@ -317,18 +315,16 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     expanded = next(row for row in matched_rows if row.click_kind == "backlog-seek")
     assert (expanded.text, expanded.status) == ("秘密の字幕", "open")
 
-    reader.interaction.sidebar_panel.rect = (0, 0, 400, 500)
-    reader.interaction.sidebar_panel.hits = (
-        SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),
-    )
-    sidebar.on_click(reader.click_target, 10, 10)
+    reader.sidebar_controller.panel.rect = (0, 0, 400, 500)
+    reader.sidebar_controller.panel.hits = (SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),)
+    reader.sidebar_controller.on_click(reader.click_target, 10, 10)
     assert ("set_property", "time-pos", 0.0) in reader.ipc.commands
 
 
 def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, monkeypatch):
     video = tmp_path / "Show - 01.mkv"
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
     store = BacklogStore(tmp_path / "backlog.sqlite")
@@ -410,14 +406,14 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
         reading="ほん",
     )
     _capture_render(monkeypatch)
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader._sidebar_store.dispatch(events.SidebarViewSelected("mine"))
-    reader.interaction.sidebar_panel.rect = (0, 0, 400, 500)
-    reader.interaction.sidebar_panel.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
+    reader.sidebar_controller.store.dispatch(events.SidebarViewSelected("mine"))
+    reader.sidebar_controller.panel.rect = (0, 0, 400, 500)
+    reader.sidebar_controller.panel.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
 
-    sidebar.on_click(reader.click_target, 10, 10)
+    reader.sidebar_controller.on_click(reader.click_target, 10, 10)
 
     assert ("set_property", "time-pos", 0.0) in ipc.commands  # seeks even with Anki down
 
@@ -566,7 +562,7 @@ def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> 
     statuses come back empty either way, and only the on-disk side effect differs.
     """
     reader, _ipc = _reader(props={"path": ""})
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
 

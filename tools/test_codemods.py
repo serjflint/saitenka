@@ -15,10 +15,15 @@ pytest.importorskip("libcst")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "codemods"))
 
+import complete_help_controller
 import complete_tooltip_controller
 import harness
+import install_interaction_stateful_bindings
+import install_interaction_surface_owners
+import install_surface_router
 import move_member
 import rename_session_controller
+import type_stateless_adapter_effects
 
 
 def test_a_rewrite_preserves_the_formatting_around_it(tmp_path):
@@ -87,3 +92,74 @@ def test_tooltip_rewrite_is_receiver_exact_and_preserves_assignment_intent():
         "ports.word_store\n"
     )
     assert count == 5
+
+
+def test_help_rewrite_is_receiver_exact_and_leaves_string_lookup_alone():
+    source = (
+        "reader._help_store.dispatch(command)\n"
+        "reader._help_document()\n"
+        "other._help_document()\n"
+        'setattr(reader, "_run_help_command", callback)\n'
+    )
+
+    rewritten, count = complete_help_controller.transformed(source, "tests/test_surfaces.py")
+
+    assert rewritten == (
+        "reader.help_controller.store.dispatch(command)\n"
+        "reader.help_controller.document()\n"
+        "other._help_document()\n"
+        'setattr(reader, "_run_help_command", callback)\n'
+    )
+    assert count == 2
+
+
+def test_surface_router_rewrite_refuses_a_different_context_receiver():
+    source = (
+        "surfaces.wants_mouse_capture(self.interaction)\n"
+        "surfaces.wants_mouse_capture(other.interaction)\n"
+    )
+
+    rewritten, count = install_surface_router.transformed(
+        source,
+        "src/saitenka/app/session_controller.py",
+    )
+
+    assert rewritten == (
+        "self.surface_router.wants_mouse_capture()\n"
+        "surfaces.wants_mouse_capture(other.interaction)\n"
+    )
+    assert count == 1
+
+
+def test_stateful_binding_rewrite_matches_only_direct_store_constructors():
+    source = "HoverStore(ipc)\nmodule.HoverStore(ipc)\nHoverStoreFake(ipc)\n"
+
+    rewritten, count = install_interaction_stateful_bindings.transformed(source)
+
+    assert rewritten == (
+        "HOVER_STATEFUL_BINDING.store(ipc)\nmodule.HoverStore(ipc)\nHoverStoreFake(ipc)\n"
+    )
+    assert count == 1
+
+
+def test_surface_owner_rewrite_refuses_unknown_receivers():
+    source = "reader._sidebar_store\nother._sidebar_store\n"
+
+    rewritten, count = install_interaction_surface_owners.transformed(source)
+
+    assert rewritten == "reader.sidebar_controller.store\nother._sidebar_store\n"
+    assert count == 1
+
+
+def test_stateless_effect_rewrite_is_adapter_exact():
+    source = (
+        "class HoverAdapter:\n"
+        "    def apply(self, effect: object, /) -> None: ...\n"
+        "class OtherAdapter:\n"
+        "    def apply(self, effect: object, /) -> None: ...\n"
+    )
+
+    rewritten, count = type_stateless_adapter_effects.transformed(source)
+
+    assert rewritten == source.replace("effect: object", "effect: hover_intents.HoverEffect", 1)
+    assert count == 1

@@ -34,6 +34,6 @@ class ProfileAdapter:
             profile_index=controller.profile_index,
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: profile_intents.ProfileEffect, /) -> None:
         if isinstance(effect, profile_intents.SwitchProfile):
             self._controller.switch_to(effect.index)

@@ -16,23 +16,32 @@ from saitenka.app import (
     tooltip_panel,
     tooltip_raster,
 )
+from saitenka.app.feature_bindings import (
+    HOVER_PAUSE_STATEFUL_BINDING,
+    HOVER_STATEFUL_BINDING,
+    HOVERED_WORD_STATEFUL_BINDING,
+    PULSE_STATEFUL_BINDING,
+    TIP_NAV_STATEFUL_BINDING,
+)
 from saitenka.app.popups import HoverInputs, ShowActions, TipPorts, TooltipState
 from saitenka.runtime import events
-from saitenka.runtime.interaction_slice import (
-    HoveredWordStore,
-    HoverPauseStore,
-    HoverStore,
-    PulseStore,
-    TipNavStore,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from saitenka.app.help_controller import TooltipKeyContext
     from saitenka.app.popups import Panel, WordLookup
+    from saitenka.app.surfaces import SurfaceSpec
     from saitenka.app.tooltip_panel import PanelKey, PanelPorts
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
+    from saitenka.runtime.interaction_slice import (
+        HoveredWordStore,
+        HoverPauseStore,
+        HoverStore,
+        PulseStore,
+        TipNavStore,
+    )
     from saitenka.runtime.jobs import JobSubmitter
     from saitenka.runtime.pulse import Repaint
 
@@ -63,6 +72,7 @@ class TooltipController:
         pause_enabled: bool,
         delays: HoverDelays,
         flash_seconds: float,
+        key_context: TooltipKeyContext,
     ) -> None:
         self._cache_lock = threading.Lock()
         self._state = TooltipState(
@@ -73,11 +83,12 @@ class TooltipController:
         self._pause_enabled = pause_enabled
         self._delays = delays
         self._flash_seconds = flash_seconds
-        self._hover_store = HoverStore(ipc)
-        self._nav_store = TipNavStore(ipc)
-        self._pulse_store = PulseStore(ipc)
-        self._pause_store = HoverPauseStore(ipc)
-        self._word_store = HoveredWordStore(ipc)
+        self._key_context = key_context
+        self._hover_store = HOVER_STATEFUL_BINDING.store(ipc)
+        self._nav_store = TIP_NAV_STATEFUL_BINDING.store(ipc)
+        self._pulse_store = PULSE_STATEFUL_BINDING.store(ipc)
+        self._pause_store = HOVER_PAUSE_STATEFUL_BINDING.store(ipc)
+        self._word_store = HOVERED_WORD_STATEFUL_BINDING.store(ipc)
         self._hover_store.dispatch(events.HoverConfigured(delays))
         self._metadata = hover_metadata.InteractionMetadataState()
         self._metadata_submitter = hover_metadata.configure_runtime_job(ipc)
@@ -90,6 +101,19 @@ class TooltipController:
     @property
     def state(self) -> TooltipState:
         return self._state
+
+    def surface_state(self) -> TooltipState:
+        return self.state
+
+    def surface_binding(self) -> SurfaceSpec:
+        from saitenka.app.surfaces import SurfaceSpec, _tip_click, _tip_scroll
+
+        return SurfaceSpec(
+            "tooltip",
+            state_of=self.surface_state,
+            on_click=_tip_click,
+            scroll=_tip_scroll,
+        )
 
     @property
     def metadata(self) -> hover_metadata.InteractionMetadataState:
@@ -165,19 +189,13 @@ class TooltipController:
 
     @property
     def keybindings_bound(self) -> bool:
-        return self._state.tip_keys_bound
+        return self._key_context.bound
 
     def claim_keybindings(self) -> bool:
-        if self._state.tip_keys_bound:
-            return False
-        self._state.tip_keys_bound = True
-        return True
+        return self._key_context.claim()
 
     def release_keybindings(self) -> bool:
-        if not self._state.tip_keys_bound:
-            return False
-        self._state.tip_keys_bound = False
-        return True
+        return self._key_context.release()
 
     def retire_state(self) -> None:
         """Clear mutable tooltip facts after their physical surfaces and keys retire."""

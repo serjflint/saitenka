@@ -15,10 +15,9 @@ if TYPE_CHECKING:
     from saitenka.app import analysis_overlay
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.miner_ui import PreviewPorts
-    from saitenka.app.reader_context import InteractionContext
+    from saitenka.app.picker_controller import PickerController
     from saitenka.app.sidebar import SidebarView
     from saitenka.app.sub_picker import ListingPorts
-    from saitenka.runtime.interaction_slice import PickerStore
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
 
@@ -33,8 +32,8 @@ class PanelHost(Protocol):
     """
 
     analysis: analysis_overlay.AnalysisState
-    interaction: InteractionContext
     lifecycle_surfaces: LifecycleSurfaces
+    picker_controller: PickerController
 
     def retire_hover(self) -> None: ...
 
@@ -52,9 +51,6 @@ class PanelHost(Protocol):
 
     @property
     def preview_ports(self) -> PreviewPorts: ...
-
-    @property
-    def picker_store(self) -> PickerStore: ...
 
     def set_analysis_open(self, *, open: bool) -> None:  # noqa: A002 — matches the host's signature
         ...
@@ -77,7 +73,7 @@ class PanelAdapter:
             open_panels=frozenset(panel for panel, is_open in states.items() if is_open)
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: panel_intents.PanelEffect, /) -> None:
         if isinstance(effect, DismissHover):
             self._host.retire_hover()
         elif isinstance(effect, panel_intents.ReplayCardPreview):
@@ -101,9 +97,7 @@ class PanelAdapter:
                     retire_hover=host.retire_hover,
                 )
                 if opening
-                else sub_picker.close_picker(
-                    host.picker_store, host.interaction.picker_panel, host.lifecycle_surfaces
-                )
+                else host.picker_controller.close()
             )
         elif panel is panel_intents.Panel.CARD_PREVIEW:
             miner_ui.hide_preview(host.preview_ports)

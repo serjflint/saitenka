@@ -49,7 +49,7 @@ class SessionAdapter:
             translation_wanted=host.translation_wanted(),
         )
 
-    def apply(self, effect: object, /) -> None:
+    def apply(self, effect: session_intents.SessionEffect, /) -> None:
         host = self._host
         if isinstance(effect, DismissHover):
             host.tooltip_controller.retire_selection()
