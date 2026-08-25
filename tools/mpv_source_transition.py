@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,14 +356,17 @@ def build_embedded_delivery(
     )
 
 
-def _wait_for(predicate, *, timeout: float, message: str):
+def _wait_for(predicate, *, timeout: float, message: str | Callable[[], str]):
+    """`message` may be a callable so a wait can report which part of a compound condition was
+    still missing — the state that explains a timeout lives in the predicate's closure and is
+    otherwise discarded at the raise."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = predicate()
         if value:
             return value
         time.sleep(0.01)
-    raise TimeoutError(message)
+    raise TimeoutError(message() if callable(message) else message)
 
 
 def _track_for_path(ipc, path: Path) -> dict[str, Any] | None:
@@ -428,7 +431,16 @@ def _wait_subtitle_state_events(
                     seen["sub-text"] = event
         return (seen["sid"], seen["sub-text"]) if len(seen) == 2 else None
 
-    return _wait_for(observed, timeout=timeout, message=f"no sid/sub-text events for {sid}")
+    return _wait_for(
+        observed,
+        timeout=timeout,
+        # Which half starved is the whole diagnosis: a missing `sid` means mpv never switched, a
+        # missing `sub-text` means it switched without re-rendering.
+        message=lambda: (
+            f"no {', '.join(sorted({'sid', 'sub-text'} - seen.keys()))} event(s) for sid {sid}"
+            f" (wanted sub-text {'containing' if text_contains else '=='} {text!r})"
+        ),
+    )
 
 
 def _event_has_track(event: dict[str, Any], path: Path) -> bool:
@@ -455,7 +467,26 @@ def _wait_track_event(ipc, path: Path, *, present: bool) -> dict[str, Any]:
     return _wait_for(observed, timeout=3.0, message=f"no track-list event with present={present}")
 
 
+def _discard_earlier_events(ipc) -> None:
+    """Drop events the previous step produced, so a wait can only be satisfied by its own.
+
+    The round-trip is what makes this a barrier: `drain_events` alone is a non-blocking snapshot of
+    the reader thread's buffer, and an event mpv had already emitted can still land after it. mpv
+    executes IPC commands in order and has the earlier ones' notifications queued by the time a
+    later query replies (measured on 0.41: the drain right after a `sid` query already carries that
+    switch's `sid` and `sub-text`).
+    """
+    ipc.query("sid")
+    ipc.drain_events()
+
+
 def _probe_phase(ipc, generated_sid: int, native_sid: int, *, paused: bool) -> dict[str, Any]:
+    # `_sample_frame_controls` switches sid six times and never drains, so without this the first
+    # wait below matches the sampling backlog and returns before mpv has processed the phase's own
+    # `set_property`. That is a phase reporting evidence it did not produce — and it un-serializes
+    # the two switches, which matters because mpv coalesces `sid` notifications issued within one
+    # playloop iteration into a single event carrying only the final value.
+    _discard_earlier_events(ipc)
     current_pause = ipc.query("pause")
     if current_pause == paused:
         pause_observation = {"kind": "current-value", "data": current_pause}
