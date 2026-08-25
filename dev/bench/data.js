@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787647240566,
+  "lastUpdate": 1787658773176,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10109,6 +10109,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.379737,
             "range": "3 replicas; min 0.960575; max 64.0885; MAD 0.419162; worst 64.0885",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "683685c6b22868f36dd3a451f2194e6dcf367131",
+          "message": "Merge pull request #437 from serjflint/fix/libasslite-ci-flakes\n\nfix(ci): stop the libasslite perf gate and Gate B probe going red on noise",
+          "timestamp": "2026-08-25T16:51:26+05:00",
+          "tree_id": "3fa57da41cc289211ef9cbb245e56154b4427614",
+          "url": "https://github.com/serjflint/saitenka/commit/683685c6b22868f36dd3a451f2194e6dcf367131"
+        },
+        "date": 1787658772080,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.306059,
+            "range": "3 replicas; min 6.30051; max 6.39263; MAD 0.005551",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.193289,
+            "range": "3 replicas; min 8.59239; max 9.26089; MAD 0.067606; worst 9.26089",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.273127,
+            "range": "3 replicas; min 18.4541; max 20.4532; MAD 0.180086",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.485462,
+            "range": "3 replicas; min 18.6704; max 21.3436; MAD 0.858125; worst 21.3436",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 17.390345,
+            "range": "3 replicas; min 16.7226; max 18.7754; MAD 0.667725",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.165588,
+            "range": "3 replicas; min 0.131486; max 0.167301; MAD 0.001713; worst 0.167301",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 42.608009,
+            "range": "3 replicas; min 39.6661; max 43.2092; MAD 0.601152; worst 43.2092",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.58437,
+            "range": "3 replicas; min 2.53823; max 2.73448; MAD 0.046139; worst 2.73448",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.146668,
+            "range": "3 replicas; min 1.13144; max 1.19026; MAD 0.015232; worst 1.19026",
             "unit": "ms"
           }
         ]
