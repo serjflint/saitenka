@@ -423,22 +423,16 @@ def _launch_mpv_and_connect(
         )
         return None, None, None
     if opts.native_visible:
-        from saitenka.mpvio.launch import supports_native_geometry_profile
+        from saitenka.mpvio.launch import (
+            NATIVE_GEOMETRY_MPV_MIN,
+            mpv_version_output,
+            supports_native_geometry_profile,
+        )
 
-        try:
-            version = subprocess.run(
-                [mpv_bin, "--version"],
-                check=False,
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=5,
-            ).stdout
-        except (OSError, subprocess.TimeoutExpired):
-            version = ""
-        if not supports_native_geometry_profile(version):
+        if not supports_native_geometry_profile(mpv_version_output(mpv_bin)):
+            floor = ".".join(str(part) for part in NATIVE_GEOMETRY_MPV_MIN)
             print(
-                "native subtitle geometry needs mpv ≥ 0.39; disable "
+                f"native subtitle geometry needs mpv ≥ {floor}; disable "
                 "subtitle_geometry.native_visible or upgrade mpv",
                 file=sys.stderr,
             )

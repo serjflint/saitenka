@@ -36,8 +36,11 @@ def _hermetic(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("MPV_HOME", str(tmp_path / "mpvhome"))
     # `_collect_player_crashes` reads under the home dir, so leaving HOME real would make every
-    # assertion here depend on whether mpv had crashed on the machine running the suite.
+    # assertion here depend on whether mpv had crashed on the machine running the suite. `USERPROFILE`
+    # as well because `Path.home()` reads that one on Windows and ignores HOME — setting only HOME left
+    # the isolation silently not applied there, which is worse than the assertion that then failed.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
 
     class _Rep:

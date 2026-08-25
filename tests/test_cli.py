@@ -227,7 +227,9 @@ def test_mpv_reader_is_thin_wrapper():
     """examples/mpv_reader.py must delegate to saitenka.app.cli (no argparse of its own)."""
     from pathlib import Path
 
-    src = (Path(__file__).resolve().parent.parent / "examples" / "mpv_reader.py").read_text()
+    src = (Path(__file__).resolve().parent.parent / "examples" / "mpv_reader.py").read_text(
+        encoding="utf-8"
+    )
     assert "saitenka.app.cli" in src
     assert "argparse" not in src
 

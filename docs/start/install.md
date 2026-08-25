@@ -19,7 +19,7 @@ requirement. Everything else — the Python interpreter, ffmpeg, the mpv plugin 
     Both install paths fetch the published PyPI package — no `git clone`, no build step. Cloning is only
     for contributors (see the [Architecture](../contributing/architecture.md) docs).
 
-The experimental native-visible subtitle geometry mode requires mpv ≥ 0.39; the regular overlay
+The experimental native-visible subtitle geometry mode requires mpv ≥ 0.40; the regular overlay
 continues to support mpv ≥ 0.37.
 
 ## Install

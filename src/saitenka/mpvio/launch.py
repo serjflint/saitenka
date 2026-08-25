@@ -12,12 +12,38 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import os
 
-NATIVE_GEOMETRY_MPV_MIN = (0, 39)
+#: The lowest mpv the native-geometry profile is verified against. Not 0.39: no distribution ever
+#: shipped one (Ubuntu 0.37 → 0.40, Debian 0.35 → 0.40), so that floor could not be tested at all.
+NATIVE_GEOMETRY_MPV_MIN = (0, 40)
+
+
+def mpv_version_output(mpv_bin: str | os.PathLike[str]) -> str:
+    """`mpv --version` stdout, or "" if it cannot be asked. The full text, since that is what
+    :func:`supports_native_geometry_profile` parses."""
+    import subprocess
+
+    try:
+        return subprocess.run(
+            [str(mpv_bin), "--version"],
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def parse_mpv_version(version_output: str) -> tuple[int, int] | None:
+    """`(major, minor)` out of `mpv --version` stdout, or None if it names no mpv."""
+    match = re.search(r"mpv\s+v?(\d+)\.(\d+)", version_output)
+    return (int(match[1]), int(match[2])) if match else None
 
 
 def supports_native_geometry_profile(version_output: str) -> bool:
-    match = re.search(r"mpv\s+v?(\d+)\.(\d+)", version_output)
-    return bool(match and tuple(map(int, match.groups())) >= NATIVE_GEOMETRY_MPV_MIN)
+    version = parse_mpv_version(version_output)
+    return version is not None and version >= NATIVE_GEOMETRY_MPV_MIN
 
 
 @dataclass(frozen=True)

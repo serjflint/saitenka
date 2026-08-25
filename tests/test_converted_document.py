@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
-from util import requires_libass
+from util import PINNED_FAMILY, pinned_face, pinned_font_setup, requires_libass
 
 from saitenka.subtitles import converted
+from saitenka.subtitles.converted import SubStyle
 from saitenka.subtitles.geometry import RendererState
 
 EVENTS = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Hello world"
@@ -243,7 +246,9 @@ def _render_cue(backend: object, style: converted.SubStyle | None = None) -> lis
     scale = converted.font_scale(HD)
     track = SubtitleTrackId("converted-render")
     prepared = prepare_ass_hit_map_frame(
-        converted.document(ROW, HD, style=style, scale=scale),
+        converted.document(
+            ROW, HD, style=replace(style or SubStyle(), font=PINNED_FAMILY), scale=scale
+        ),
         track,
         active_rows=ROW,
         text=CUE,
@@ -266,6 +271,8 @@ def _render_cue(backend: object, style: converted.SubStyle | None = None) -> lis
             ),
             reserved_rgb=prepared.reserved_rgb,
             renderer_state=RendererState(font_scale=scale),
+            attachments=(pinned_face(),),
+            font_setup=pinned_font_setup(),
         )
     )
     return list(snapshot.tokens)
@@ -311,10 +318,17 @@ MOVING_STYLE_FIELDS = (
     ("font_size", converted.SubStyle(font_size=60.0)),
     ("margin_y", converted.SubStyle(margin_y=120)),
     ("spacing", converted.SubStyle(spacing=6.0)),
-    ("bold", converted.SubStyle(bold=True)),
     ("align_y", converted.SubStyle(align_y=-1)),
     ("margin_x", converted.SubStyle(margin_x=200, align_x=-1)),
 )
+
+#: `bold` is absent from the set above, and that is a measurement rather than an omission: libass
+#: selects an embedded font by name alone, so under the pinned setup these tests use it honours no
+#: weight request. Attaching a real wght=700 instance alongside the regular one changes nothing —
+#: both render the identical span. It still reaches the style
+#: (`test_every_style_option_mpv_reports_reaches_the_style`); what is no longer proved is that libass
+#: acts on it, which is the price of not letting the host decide the face.
+STYLE_FIELD_WITHOUT_A_PINNED_ORACLE = "bold"
 
 
 @pytest.mark.integration
@@ -367,7 +381,7 @@ def test_a_reused_renderer_measures_each_cue_against_its_own_document() -> None:
         row = f"Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,{cue}"
         track = SubtitleTrackId("swap")
         prepared = prepare_ass_hit_map_frame(
-            converted.document(row, HD, scale=1.0),
+            converted.document(row, HD, style=SubStyle(font=PINNED_FAMILY), scale=1.0),
             track,
             active_rows=row,
             text=cue,
@@ -390,6 +404,8 @@ def test_a_reused_renderer_measures_each_cue_against_its_own_document() -> None:
                 ),
                 reserved_rgb=prepared.reserved_rgb,
                 renderer_state=RendererState(font_scale=1.0),
+                attachments=(pinned_face(),),
+                font_setup=pinned_font_setup(),
             )
         )
         return [(t.bounds.x, t.bounds.y, t.bounds.width, t.bounds.height) for t in snapshot.tokens]
@@ -440,7 +456,7 @@ def test_justify_reaches_libass_even_though_a_style_row_cannot_state_it() -> Non
     frame = (HD.width, HD.height)
     track = SubtitleTrackId("converted-justify")
     prepared = prepare_ass_hit_map_frame(
-        converted.document(WRAPPED_ROW, HD, scale=1.0),
+        converted.document(WRAPPED_ROW, HD, style=SubStyle(font=PINNED_FAMILY), scale=1.0),
         track,
         active_rows=WRAPPED_ROW,
         text=WRAPPED,
@@ -465,6 +481,8 @@ def test_justify_reaches_libass_even_though_a_style_row_cannot_state_it() -> Non
                 ),
                 reserved_rgb=prepared.reserved_rgb,
                 renderer_state=RendererState(font_scale=1.0, justify=justify),
+                attachments=(pinned_face(),),
+                font_setup=pinned_font_setup(),
             )
         )
         return next(token.bounds.x for token in snapshot.tokens if token.token_index == 1)

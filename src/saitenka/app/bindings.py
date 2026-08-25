@@ -57,10 +57,11 @@ MOUSE_SECTION = "saitenka-mouse"
 # `keybind` per key: the batch runs before the reactor drains, and one correlated command carries one
 # terminal instead of ~24 competing for the mailbox's reservations.
 #
-# Forced because `keybind` writes into mpv's OWN `default` section — it REPLACES the input.conf entry
-# for that key (priority 16, not weak), so every shortcut used to win outright. A `"default"` section
-# is weak at priority 15 instead, which silently handed F1 back to a user's `input.conf`. `"force"`
-# lands at 31 and leaves their binding in the table, overridden rather than overwritten.
+# Forced because `keybind` writes into mpv's OWN `default` section, REPLACING the user's input.conf
+# entry for that key; a `"default"` section instead registers weak and silently handed F1 back to
+# their binding. `"force"` outranks it while leaving it in the table — overridden, not overwritten.
+# The priority numbers are mpv's to choose (section index + active-section count, so they move with
+# the release); `test_every_shortcut_we_register_outranks_the_user_s_own_binding` asks mpv.
 GLOBAL_SECTION = "saitenka-global"
 
 

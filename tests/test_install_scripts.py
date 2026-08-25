@@ -23,8 +23,8 @@ CHECKOUT_PS1 = INSTALL_DIR / "install-windows.ps1"
 
 def test_stub_files_exist_and_reference_setup():
     assert SH_STUB.exists() and PS1_STUB.exists()
-    sh = SH_STUB.read_text()
-    ps1 = PS1_STUB.read_text()
+    sh = SH_STUB.read_text(encoding="utf-8")
+    ps1 = PS1_STUB.read_text(encoding="utf-8")
     # both bootstrap uv, install saitenka[full] from PyPI, and hand off to the Python wizard
     assert "uv tool install" in sh and "saitenka setup" in sh
     assert "uv tool install" in ps1 and "saitenka setup" in ps1

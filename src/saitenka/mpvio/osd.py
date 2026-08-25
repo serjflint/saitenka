@@ -103,6 +103,32 @@ class _InteractionPresenter:
             return oid, sequence, operation
 
 
+#: Frames kept per overlay id. An optimisation, not the guarantee — :meth:`Overlay._sweep` owns that.
+RETAINED_FRAMES = 2
+
+
+def _tail_path(tail: tuple) -> Path:
+    """The frame path inside an ``overlay-add`` tail — ``(x, y, path, ...)``."""
+    return Path(str(tail[2]))
+
+
+def _discard(path: Path) -> bool:
+    """Delete a frame we are done with; report whether it is gone.
+
+    Windows refuses to delete a file mpv still holds open. That is a `PermissionError`, which
+    `missing_ok=True` does NOT cover — it only suppresses `FileNotFoundError` — and it is a file to
+    retry rather than an error to raise at whoever published next.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except (
+        OSError
+    ):  # PermissionError on Windows; a full-disk/EBUSY unlink is equally not fatal here
+        log.debug("could not retire overlay frame %s", path, exc_info=True)
+        return False
+    return True
+
+
 def _warn_overlay_add(oid: int, w: int, h: int, res: dict) -> None:
     """Log (once per overlay id) when mpv rejects an ``overlay-add`` — a NON-empty ``error`` other than
     ``success``. This separates 'mpv refused to draw' (bad format/size, unsupported on this build) from
@@ -149,9 +175,13 @@ class Overlay:
         self.id_base = id_base
         self._runtime_submit = runtime_submit
         self._files: dict[int, Path] = {}
-        #: One stable path per oid, only ever published onto by rename — see :meth:`_write_frame`.
-        self._frame_paths: dict[int, Path] = {}
-        self._frame_lock = threading.Lock()
+        #: Every frame published for an oid, oldest first — see :meth:`_write_frame` / :meth:`_sweep`.
+        self._frame_history: dict[int, list[Path]] = {}
+        #: Paths some command is currently naming; retirement must not delete these.
+        self._in_flight: dict[Path, int] = {}
+        #: Frames a sweep could not delete (Windows holds them open) — retried on the next sweep.
+        self._pending_deletion: set[Path] = set()
+
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
         self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
@@ -160,7 +190,8 @@ class Overlay:
         self._interaction_oids: set[int] = set()
         self.lifecycle_oids: set[int] = set()
         self._staged_lifecycle_paths: set[Path] = set()
-        self._lifecycle_lock = threading.Lock()
+        #: Guards the path maps below plus `_live`. NOT `visible`/`ops` — no retirement reads them.
+        self._state_lock = threading.Lock()
         self._compat_effect_id = 1_000_000
 
     def next_compat_effect_id(self):
@@ -242,7 +273,7 @@ class Overlay:
             path.unlink(missing_ok=True)
             raise
         tail: tuple[object, ...] = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
-        with self._lifecycle_lock:
+        with self._state_lock:
             self.lifecycle_oids.add(oid)
             self._staged_lifecycle_paths.add(path)
         return PreparedOverlay(
@@ -253,32 +284,31 @@ class Overlay:
         )
 
     def commit_prepared(self, prepared: PreparedOverlay) -> None:
-        with self._lifecycle_lock:
+        with self._state_lock:
             previous = self._files.get(prepared.oid)
             self._files[prepared.oid] = prepared.path
             self._staged_lifecycle_paths.discard(prepared.path)
             self._live[prepared.oid] = prepared.tail
             self.ops += 1
-        if previous is not None and previous != prepared.path:
-            previous.unlink(missing_ok=True)
+        if previous != prepared.path:
+            self._retire(prepared.oid, previous)
 
     def discard_prepared(self, prepared: PreparedOverlay) -> None:
-        with self._lifecycle_lock:
+        with self._state_lock:
             if self._files.get(prepared.oid) == prepared.path:
                 return
             self._staged_lifecycle_paths.discard(prepared.path)
-        prepared.path.unlink(missing_ok=True)
+        _discard(prepared.path)
 
     def commit_remove(self, oid: int) -> None:
         physical_oid = self._oid(oid)
-        with self._lifecycle_lock:
+        with self._state_lock:
             self._live.pop(physical_oid, None)
             self.ops += 1
             path = self._files.pop(physical_oid, None)
             self.lifecycle_oids.discard(oid)
         self._retire_frame_path(physical_oid)
-        if path is not None and path.exists():
-            path.unlink()
+        self._retire(physical_oid, path)
 
     def remove_lifecycle_now(self, oid: int) -> dict:
         """Synchronously place a final remove behind any queued add before detaching from mpv."""
@@ -291,33 +321,32 @@ class Overlay:
 
     def _add(self, oid: int, tail: tuple) -> dict:
         if self.visible:
-            return self.ipc.command("overlay-add", oid, *tail)
+            return self._issue("overlay-add", oid, tail)
         return {"error": "success"}
 
     def _write_frame(self, oid: int, data: bytes) -> Path:
-        """Publish ``data`` at this oid's stable path by ``os.replace``, never by rewriting it.
+        """Publish ``data`` at a FRESH path, so nothing is written over a file mpv may be reading.
 
         mpv reads the named file **inside** `overlay-add` (`cmd_overlay_add` → `_platform_memmove`,
-        the frame both SIGBUS reports fault in). Any in-place rewrite therefore races that read, and
-        a pagein against a file being truncated is a bus error inside mpv rather than an error we can
-        observe. A rename never mutates the inode mpv opened, so the race has no window left to hit —
-        which an alternating pair of slots could only ever narrow, since it cannot know when the read
-        happens. Two writers is what made the narrowed window reachable: `repaint` re-issues
-        `_live`'s tail from the reader thread, and it names the very slot the upload thread picks next.
+        the frame both SIGBUS reports fault in). Neither a rewrite nor a rename onto that path is
+        safe: the first truncates under mpv's pagein, the second is refused while mpv holds the file.
 
-        Cost is not why the old form was in place: interleaved, replace and in-place rewrite are both
-        ~0.7 ms p50 for a 2.5 MB frame here. The 0.8-vs-3.2 ms gap that chose in-place came from
-        timing each strategy in its own sequential block, which measures the page cache.
+        The cost is that frames must then be retired deliberately — :meth:`_sweep`.
         """
-        with self._frame_lock:
-            path = self._frame_paths.get(oid)
-            if path is None:
-                path = self._frame_paths[oid] = self._new_frame_path(oid)
-            staging = path.with_name(path.name + ".staging")
-            staging.write_bytes(data)
-            Path(staging).replace(path)
+        path = self._new_frame_path(oid)
+        try:
+            path.write_bytes(data)  # outside the lock: no other thread can name this path yet
+        except Exception:
+            path.unlink(missing_ok=True)  # nothing has named it yet, so a plain unlink is safe
+            raise
+        with self._state_lock:
+            self._frame_history.setdefault(oid, []).append(path)
             self._files[oid] = path
-            return path
+            # Held for the caller, who releases in a `finally` once it has assigned `_live` — a
+            # hold ending with `overlay-add` leaves that assignment unprotected.
+            self._hold([path])
+        self._sweep(oid)
+        return path
 
     def _new_frame_path(self, oid: int) -> Path:
         with tempfile.NamedTemporaryFile(
@@ -325,11 +354,99 @@ class Overlay:
         ) as staged:
             return Path(staged.name)
 
+    def _sweep(self, oid: int, retain: int | None = None) -> None:
+        """Delete this oid's retired frames, plus anything an earlier sweep could not.
+
+        A frame goes only when nothing names it: not `_live`, and not an in-flight command. Both are
+        needed. `_live[oid]` is assigned only after `overlay-add` returns, so with two publishers on
+        one oid it lags the newest frame without bound — a retention count cannot cover that. And a
+        hold taken when a command starts cannot save a path already deleted before it, which is why
+        `_in_flight` registration happens under the same lock acquisition that reads `_live`.
+        """
+        # Not a default argument, which would bind the constant at import. `max(1, …)` because
+        # `history[:-0]` is empty: a literal zero would retain everything.
+        retain = max(1, RETAINED_FRAMES if retain is None else retain)
+        with self._state_lock:
+            history = self._frame_history.get(oid)
+            stale = set(self._pending_deletion)
+            if history is not None:
+                stale |= set(history[:-retain])
+                self._frame_history[oid] = history[-retain:]
+            held = {path for path in stale if path in self._in_flight} | {
+                path for path in stale if path in self._live_paths()
+            }
+            self._pending_deletion = held
+            stale -= held
+        failed = {path for path in stale if not _discard(path)}
+        if failed:
+            with self._state_lock:
+                self._pending_deletion |= failed
+
+    def _live_paths(self) -> set[Path]:
+        """Paths the current `_live` tails name. Caller must hold ``_state_lock``."""
+        return {_tail_path(tail) for tail in self._live.values()}
+
+    def _publish_live(self, oid: int, tail: tuple) -> None:
+        with self._state_lock:
+            self._live[oid] = tail
+            self.ops += 1
+
+    def _hold(self, paths: list[Path]) -> list[Path]:
+        """Register ``paths`` against retirement. Caller must hold ``_state_lock``."""
+        for path in paths:
+            self._in_flight[path] = self._in_flight.get(path, 0) + 1
+        return paths
+
+    def _release(self, paths: list[Path]) -> None:
+        with self._state_lock:
+            for path in paths:
+                remaining = self._in_flight.get(path, 0) - 1
+                if remaining > 0:
+                    self._in_flight[path] = remaining
+                else:
+                    self._in_flight.pop(path, None)
+
+    def _issue(self, command: str, oid: int, tail: tuple) -> dict:
+        """Send a command naming a frame path, holding that path for the duration of the call."""
+        with self._state_lock:
+            paths = self._hold([_tail_path(tail)])
+        try:
+            return self.ipc.command(command, oid, *tail)
+        finally:
+            self._release(paths)
+
+    def _reissue_live(self) -> int:
+        """Re-send every live tail; returns how many went out.
+
+        Snapshot and hold take ONE lock acquisition: reading first and registering second reopens the
+        window :meth:`_sweep` closes.
+        """
+        with self._state_lock:
+            pending = list(self._live.items())
+            paths = self._hold([_tail_path(tail) for _, tail in pending])
+        try:
+            for oid, tail in pending:
+                self.ipc.command("overlay-add", oid, *tail)
+        finally:
+            self._release(paths)
+        return len(pending)
+
     def _retire_frame_path(self, oid: int) -> None:
-        with self._frame_lock:
-            path = self._frame_paths.pop(oid, None)
-        if path is not None:
-            path.with_name(path.name + ".staging").unlink(missing_ok=True)
+        with self._state_lock:
+            self._pending_deletion |= set(self._frame_history.pop(oid, ()))
+        self._sweep(oid)
+
+    def _retire(self, oid: int, path: Path | None) -> None:
+        """Queue one frame for retirement, so it goes through :meth:`_sweep`'s guards.
+
+        The frame a caller drops is the last published one — the path a concurrent `repaint` is most
+        likely to be carrying — so deleting it directly is never safe.
+        """
+        if path is None:
+            return
+        with self._state_lock:
+            self._pending_deletion.add(path)
+        self._sweep(oid)
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         label = _oid_label(oid)
@@ -339,10 +456,13 @@ class Overlay:
         ) as span:
             data, w, h, stride = to_bgra(img)
             path = self._write_frame(oid, data)
-            tail = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
-            res = self._add(oid, tail)
-            _set_draw_geometry(span, x, y, w, h)
-        self._live[oid], self.ops = tail, self.ops + 1
+            try:
+                tail = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
+                res = self._add(oid, tail)
+                _set_draw_geometry(span, x, y, w, h)
+                self._publish_live(oid, tail)
+            finally:
+                self._release([path])
         _warn_overlay_add(oid, w, h, res)
         return res
 
@@ -356,10 +476,13 @@ class Overlay:
             buf = np.ascontiguousarray(bgra)
             h, w = buf.shape[:2]
             path = self._write_frame(oid, buf.tobytes())
-            tail = (int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
-            res = self._add(oid, tail)
-            _set_draw_geometry(span, x, y, w, h)
-        self._live[oid], self.ops = tail, self.ops + 1
+            try:
+                tail = (int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
+                res = self._add(oid, tail)
+                _set_draw_geometry(span, x, y, w, h)
+                self._publish_live(oid, tail)
+            finally:
+                self._release([path])
         _warn_overlay_add(oid, w, h, res)
         return res
 
@@ -408,16 +531,20 @@ class Overlay:
         return {"error": "deferred"}
 
     def hide(self, oid: int = 0) -> dict:
-        oid = self._oid(oid)
+        return self._hide_physical(self._oid(oid))
+
+    def _hide_physical(self, oid: int) -> dict:
+        """``hide`` for an id that is ALREADY physical — `_files`/`_live` are keyed that way, so a
+        caller iterating them must not send it back through the `id_base` shift a second time."""
         # Removal is idempotent.  Always send it: an in-flight deferred add can finish after visibility
         # was turned off, and skipping this command would leave those pixels stuck in mpv.
         res = self.ipc.command("overlay-remove", oid)
-        self._live.pop(oid, None)
-        self.ops += 1
-        p = self._files.pop(oid, None)
+        with self._state_lock:
+            self._live.pop(oid, None)
+            self.ops += 1
+            p = self._files.pop(oid, None)
         self._retire_frame_path(oid)
-        if p is not None and p.exists():
-            p.unlink()
+        self._retire(oid, p)
         return res
 
     def set_visible(self, *, visible: bool) -> None:
@@ -425,10 +552,12 @@ class Overlay:
         if visible == self.visible:
             return
         self.visible = visible
-        command = "overlay-add" if visible else "overlay-remove"
-        for oid, tail in list(self._live.items()):
-            self.ipc.command(command, oid, *tail) if visible else self.ipc.command(command, oid)
-            self.ops += 1
+        if visible:
+            self.ops += self._reissue_live()
+        else:
+            for oid in [oid for oid, _ in list(self._live.items())]:
+                self.ipc.command("overlay-remove", oid)
+                self.ops += 1
         if not visible:
             for oid in tuple(self._interaction_oids):
                 self.hide_interactive(oid)
@@ -440,17 +569,21 @@ class Overlay:
         mouse" bug). Re-adding the same overlays is that poke. Does NOT bump ``ops`` (it's the reaction
         to a change, not a new one), so it can't feed back into another nudge."""
         if self.visible:
-            for oid, tail in list(self._live.items()):
-                self.ipc.command("overlay-add", oid, *tail)
+            self._reissue_live()
 
     def close(self) -> None:
         self._interaction_presenter.close()
-        for oid in list(self._files):
+        for oid in list(self._files):  # physical ids — see `_hide_physical`
             try:
-                self.hide(oid)
+                self._hide_physical(oid)
             except Exception:
                 log.debug("overlay hide on close failed", exc_info=True)
-        with self._lifecycle_lock:
+        with self._state_lock:
             staged, self._staged_lifecycle_paths = self._staged_lifecycle_paths, set()
+            staged |= self._pending_deletion | {
+                path for history in self._frame_history.values() for path in history
+            }
+            self._pending_deletion, self._frame_history = set(), {}
+            self._in_flight.clear()  # nothing can be in flight once the presenter is closed
         for path in staged:
-            path.unlink(missing_ok=True)
+            _discard(path)

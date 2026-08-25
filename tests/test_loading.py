@@ -368,7 +368,7 @@ def test_each_entrypoint_declares_its_own_startup_hint() -> None:
     root = Path(__file__).resolve().parents[1]
 
     def hint_argument(relative: str) -> str:
-        tree = ast.parse((root / relative).read_text())
+        tree = ast.parse((root / relative).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)

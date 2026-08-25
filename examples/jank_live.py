@@ -93,6 +93,25 @@ def _counter(ipc, prop: str) -> int:
     return int(data) if isinstance(data, (int, float)) else 0
 
 
+def _why_stuck(reader) -> str:
+    """The state that decides whether a wheel event can move the base viewport at all.
+
+    ``scroll_view`` refuses in three distinguishable ways — no rendered panel, a panel no taller than
+    its viewport, or the wheel routed to the nested popup instead — and they need different fixes. The
+    bare "did not advance" this replaces reports only that one of them happened, which is not enough to
+    act on from a CI log.
+    """
+    view, nest = reader.tip.view, reader.tip.nest
+    state = view.state
+    full_h = getattr(state, "full_height", None)
+    return (
+        f"state={'present' if state is not None else 'MISSING'} "
+        f"full_h={full_h} view_h={view.view_h} scrollable={full_h is not None and full_h > view.view_h} "
+        f"desired={view.desired_scroll} rect={view.rect} "
+        f"nest_rect={nest.rect} nest_scroll={nest.scroll} mouse={reader.tip.last_mouse}"
+    )
+
+
 def _scroll_four(reader) -> None:
     from saitenka.app import surfaces
 
@@ -101,7 +120,9 @@ def _scroll_four(reader) -> None:
         reader.scroll_tip(surfaces.tip_wheel_pixels(reader.tip_scale.ref_h, 1))
         reader.pump()
     if reader.tip.view.scroll == before:
-        raise RuntimeError("live scroll workload did not advance the tooltip viewport")
+        raise RuntimeError(
+            f"live scroll workload did not advance the tooltip viewport ({_why_stuck(reader)})"
+        )
 
 
 def _present_overlay(reader) -> None:
@@ -109,33 +130,40 @@ def _present_overlay(reader) -> None:
     reader.ov.repaint()
 
 
+class TallDS:
+    """Entries tall enough that the tooltip has somewhere to scroll — the scroll step's precondition.
+
+    Handed to the harness at construction, not swapped in afterwards. A post-hoc
+    ``replace_dictionary_set`` is the async-arrival installer and carries no invalidation (only
+    ``switch_to`` pairs it with one), so the cue's already-resolved entries keep the harness's own
+    one-line dictionary: the panel comes out exactly its viewport's height and the wheel has nothing to
+    move. That is what the four live-jank replicas were failing on.
+    """
+
+    dicts = ()
+    freqs = ()
+    pitches = ()
+
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # match DictionarySet
+        from saitenka.panel import Definition, Entry
+
+        paragraph = "とても長い定義の本文で" * 8
+        return Entry(
+            headword=[tok.surface],
+            reading=getattr(tok, "reading", "") or tok.surface,
+            defs=[Definition(f"辞書{i}", [paragraph]) for i in range(6)],
+        )
+
+    def has_term(self, *_forms):
+        return False
+
+
 def run(*, settle_s: float = 0.4) -> dict:
     """Drive the scripted workload against a live, PLAYING mpv and return the reduced jank report."""
     from live_harness import live_reader, poll_until
 
-    with live_reader(paused=False) as (_tmp, reader, ipc):
+    with live_reader(paused=False, dict_set=TallDS()) as (_tmp, reader, ipc):
         samples: list[dict] = []
-
-        class TallDS:
-            dicts = ()
-            freqs = ()
-            pitches = ()
-
-            def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002
-                from saitenka.panel import Definition, Entry
-
-                paragraph = "とても長い定義の本文で" * 8
-                return Entry(
-                    headword=[tok.surface],
-                    reading=getattr(tok, "reading", "") or tok.surface,
-                    defs=[Definition(f"辞書{i}", [paragraph]) for i in range(6)],
-                )
-
-            def has_term(self, *_forms):
-                return False
-
-        reader.profile_controller.replace_dictionary_set(TallDS())
-        reader.tip.panel_cache.clear()
 
         def sample(step: str, interaction_ms: float = 0.0) -> None:
             # let playback advance so any overlay-induced VO delay accrues before we read the counters

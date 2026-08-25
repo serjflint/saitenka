@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 from saitenka.mpvio.discover import find_mpv
+from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
 from saitenka.subtitles import (
     GeometryPaletteEntry,
     GeometryRequest,
@@ -35,6 +36,8 @@ from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
 
 pytestmark = [
     pytest.mark.live,
+    # PARITY below IS the native-geometry profile, so this file's floor is that profile's floor.
+    pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN),
     pytest.mark.skipif(
         not os.environ.get("SAITENKA_LIVE"),
         reason="live real-mpv test — set SAITENKA_LIVE=1; run `uv run poe smoke-live`",
@@ -127,7 +130,10 @@ def mpv_ink(directory: Path, ass: Path) -> tuple[int, int, int, int]:
     so this asks the same renderer without needing a display to ask it on.
     """
     shot = directory / "frame.png"
-    subprocess.run(
+    # `check=True` alone reports an exit code and swallows the reason — a refused option or a missing
+    # codec reads as a bare CalledProcessError, undiagnosable from a CI log. Raise with mpv's stderr,
+    # the same way `test_live_ass_document._properties` does.
+    result = subprocess.run(
         [
             find_mpv() or "mpv",
             "--no-config",
@@ -140,9 +146,14 @@ def mpv_ink(directory: Path, ass: Path) -> tuple[int, int, int, int]:
             "--ovc=png",
             str(clip_at(directory)),
         ],
-        check=True,
+        check=False,
         capture_output=True,
     )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"mpv failed to render (returncode={result.returncode}): "
+            f"{result.stderr.decode(errors='replace')}"
+        )
     return ink_bounds(np.array(_open(shot)).astype(int))
 
 

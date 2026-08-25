@@ -7,6 +7,24 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Overlay publication could fail on Windows with `PermissionError` (WinError 5).** Each frame was
+  published by renaming onto one stable path per overlay, and Windows refuses to replace a file
+  another process still holds open — which mpv does, since it reads the frame *inside* `overlay-add`.
+  Frames are now published at a fresh path and retired once nothing names them, so no rename ever
+  lands on a live file. The same oversight affected deletion: retiring a frame mpv still held raised
+  rather than being retried. Measured at 0.3 ms per publish for a 1.1 MB frame, against 0.5 ms for
+  the path it replaces.
+
+### Changed
+
+- **Native-visible subtitle geometry now requires mpv ≥ 0.40, up from ≥ 0.39.** The old floor was a
+  claim nothing could check: no distribution ever shipped an mpv 0.39 (Ubuntu went 0.37 → 0.40,
+  Debian 0.35 → 0.40), so there was no binary to test the declared minimum against. 0.40 is the
+  earliest release CI can pin and prove. The regular overlay path is unaffected and still supports
+  mpv ≥ 0.37.
+
 ## [4.1.0] - 2026-08-24
 
 ### Changed

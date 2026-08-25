@@ -997,3 +997,48 @@ def requires_libass():
     except RuntimeError as error:  # no libass on this host
         pytest.skip(f"libass runtime unavailable: {error}")
     return libasslite
+
+
+#: The family an ASS `Fontname` must name to select the pinned face — and it is the *style-qualified*
+#: name because libass matches on nameID 1, which the bundled variable font sets to its default
+#: instance (wght=100). `"Noto Sans JP"` is nameID 16 and selects nothing: measured, `NONE` +
+#: that name renders zero layers, while this one renders two. Same trap the SVG rasterizer hit (#283).
+PINNED_FAMILY = "Noto Sans JP Thin"
+
+
+def pinned_face() -> tuple[str, bytes]:
+    """The one face every libass measurement here is allowed to see.
+
+    Text extents are a function of the font, so a renderer left to ask the host resolves a different
+    face per platform and the same document measures differently on each — which is what
+    `test_the_blur_refusal_is_measured_not_assumed`'s `Spacing: 10` was already working around, and
+    what failed on the macOS runner anyway. The bundled Noto Sans JP ships in the wheel (OFL 1.1) and
+    covers kana, JIS kanji and the punctuation/symbol range subtitles actually use.
+    """
+    from saitenka.resources import asset
+
+    path = asset("fonts", "NotoSansJP.ttf")
+    return (path.name, path.read_bytes())
+
+
+def pinned_font_setup():
+    """`FontSetup` confining a geometry backend to :func:`pinned_face`.
+
+    `NONE` is the point: with any provider left on, libass falls back to a host face for a glyph the
+    pinned one lacks, and the platform dependence comes straight back for exactly the documents that
+    would otherwise expose it.
+    """
+    from saitenka.subtitles import FontProvider, FontSetup
+
+    return FontSetup(default_family=PINNED_FAMILY, font_provider=FontProvider.NONE)
+
+
+def pinned_ass_renderer(libasslite, ass: bytes, **kwargs):
+    """An `AssRenderer` measuring against :func:`pinned_face` alone, whatever the host has installed."""
+    return libasslite.AssRenderer(
+        ass,
+        [pinned_face()],
+        font_provider=libasslite.FontProvider.NONE,
+        default_family=PINNED_FAMILY,
+        **kwargs,
+    )
