@@ -83,21 +83,23 @@ def test_retirement_is_bounded_even_while_the_overlay_is_hidden():
 
 def test_the_oracle_catches_retirement_one_step_too_early():
     """Negative control. Retention of 1 — retiring the previous frame the moment a new one is
-    published — is the failure the two tests above exist to catch, so they must be able to see it."""
+    published — is the failure the two tests above exist to catch, so they must be able to see it.
+
+    Deliberately holds no descriptor on the frame it expects to disappear. An earlier version did,
+    to show POSIX still reads an unlinked-but-open fd, and it failed on Windows for exactly the
+    reason this whole change exists: a delete is refused while anyone holds the file open, so the
+    test's own handle kept the file alive and the control could not see its own failure mode.
+    """
     overlay = Overlay(util.FakeIPC())
     overlay.show_bgra(_frame(1), oid=OverlayId.TIP)
     previous = _published_path(overlay, OverlayId.TIP)
+    overlay.show_bgra(_frame(2), oid=OverlayId.TIP)
+    assert previous.exists()  # the retention window still covers it
 
-    with previous.open("rb") as held:
-        overlay.show_bgra(_frame(2), oid=OverlayId.TIP)
-        # The production sweep, asked to keep one — what a one-deep scheme would have done.
-        overlay._sweep(overlay.physical_oid(OverlayId.TIP), retain=1)
+    # The production sweep, asked to keep one — what a one-deep scheme would have done.
+    overlay._sweep(overlay.physical_oid(OverlayId.TIP), retain=1)
 
-        assert not previous.exists()
-        # POSIX keeps an unlinked-but-open fd readable, and Windows just refuses the delete — so a
-        # bytes assertion would pass either way. Existence of the NAME is what mpv resolves.
-        assert held.read() == _frame(1).tobytes()
-
+    assert not previous.exists()
     overlay.close()
 
 
