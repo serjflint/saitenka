@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from saitenka.app import (
@@ -17,14 +17,24 @@ from saitenka.app import (
     tooltip_raster,
 )
 from saitenka.app.popups import HoverInputs, ShowActions, TipPorts, TooltipState
+from saitenka.runtime import events
+from saitenka.runtime.interaction_slice import (
+    HoveredWordStore,
+    HoverPauseStore,
+    HoverStore,
+    PulseStore,
+    TipNavStore,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from saitenka.app.popups import WordLookup
-    from saitenka.app.tooltip_panel import PanelPorts
+    from saitenka.app.popups import Panel, WordLookup
+    from saitenka.app.tooltip_panel import PanelKey, PanelPorts
     from saitenka.runtime import EffectFinished
+    from saitenka.runtime.hover import HoverDelays
     from saitenka.runtime.jobs import JobSubmitter
+    from saitenka.runtime.pulse import Repaint
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +60,25 @@ class TooltipController:
         build: tooltip_engaged.EngagedBuildPorts,
         *,
         panel_cache_max: int,
-        cache_lock,
+        pause_enabled: bool,
+        delays: HoverDelays,
+        flash_seconds: float,
     ) -> None:
-        self._state = TooltipState(panel_cache_max=panel_cache_max, cache_lock=cache_lock)
+        self._cache_lock = threading.Lock()
+        self._state = TooltipState(
+            panel_cache_max=panel_cache_max,
+            cache_lock=self._cache_lock,
+        )
+        self._selected = -1
+        self._pause_enabled = pause_enabled
+        self._delays = delays
+        self._flash_seconds = flash_seconds
+        self._hover_store = HoverStore(ipc)
+        self._nav_store = TipNavStore(ipc)
+        self._pulse_store = PulseStore(ipc)
+        self._pause_store = HoverPauseStore(ipc)
+        self._word_store = HoveredWordStore(ipc)
+        self._hover_store.dispatch(events.HoverConfigured(delays))
         self._metadata = hover_metadata.InteractionMetadataState()
         self._metadata_submitter = hover_metadata.configure_runtime_job(ipc)
         self._engaged = tooltip_engaged.EngagedState()
@@ -76,6 +102,114 @@ class TooltipController:
     @property
     def render_ahead(self) -> tooltip_raster.RenderAheadState:
         return self._raster
+
+    @property
+    def selected(self) -> int:
+        return self._selected
+
+    def select(self, index: int) -> None:
+        self._selected = index
+
+    def retire_selection(self) -> None:
+        self.select(-1)
+
+    @property
+    def pause_enabled(self) -> bool:
+        return self._pause_enabled
+
+    def set_pause_enabled(self, *, enabled: bool) -> None:
+        self._pause_enabled = enabled
+
+    @property
+    def delays(self) -> HoverDelays:
+        return self._delays
+
+    def configure_delays(
+        self,
+        *,
+        scan: float | None = None,
+        hide: float | None = None,
+        switch: float | None = None,
+    ) -> None:
+        self._delays = replace(
+            self._delays,
+            scan=self._delays.scan if scan is None else scan,
+            hide=self._delays.hide if hide is None else hide,
+            switch=self._delays.switch if switch is None else switch,
+        )
+        self._hover_store.dispatch(events.HoverConfigured(self._delays))
+
+    @property
+    def flash_seconds(self) -> float:
+        return self._flash_seconds
+
+    @property
+    def hover_store(self) -> HoverStore:
+        return self._hover_store
+
+    @property
+    def nav_store(self) -> TipNavStore:
+        return self._nav_store
+
+    @property
+    def pulse_store(self) -> PulseStore:
+        return self._pulse_store
+
+    @property
+    def pause_store(self) -> HoverPauseStore:
+        return self._pause_store
+
+    @property
+    def word_store(self) -> HoveredWordStore:
+        return self._word_store
+
+    @property
+    def keybindings_bound(self) -> bool:
+        return self._state.tip_keys_bound
+
+    def claim_keybindings(self) -> bool:
+        if self._state.tip_keys_bound:
+            return False
+        self._state.tip_keys_bound = True
+        return True
+
+    def release_keybindings(self) -> bool:
+        if not self._state.tip_keys_bound:
+            return False
+        self._state.tip_keys_bound = False
+        return True
+
+    def retire_state(self) -> None:
+        """Clear mutable tooltip facts after their physical surfaces and keys retire."""
+        self._state.view.rect = None
+        self._state.view.state = None
+        self._state.view.key = None
+        self._state.tip_tok = self._state.tip_inflected = None
+        self._nav_store.dispatch(events.TipNavCleared())
+        self._word_store.dispatch(events.HoverWordForgotten())
+
+    def retire_episode(self) -> None:
+        self._hover_store.dispatch(events.EpisodeRetired())
+
+    def expire_pulse(self) -> tuple[Repaint, ...]:
+        return self._pulse_store.dispatch(events.CopyPulseExpired())
+
+    def release_pause_claim(self) -> bool:
+        return tooltip.release_frame(self._pause_store)
+
+    def cache_setdefault(self, key: PanelKey, panel: Panel) -> Panel:
+        return self._state.panel_cache.setdefault(key, panel)
+
+    @property
+    def cache_limit(self) -> int:
+        return self._state.panel_cache.limit
+
+    def cache_totals(self) -> tuple[int, int]:
+        with self._cache_lock:
+            return (
+                len(self._state.panel_cache),
+                sum(panel.retained_nbytes for panel in self._state.panel_cache.values()),
+            )
 
     @property
     def metadata_submitter(self) -> JobSubmitter | None:

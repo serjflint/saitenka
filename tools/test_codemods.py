@@ -15,6 +15,7 @@ pytest.importorskip("libcst")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "codemods"))
 
+import complete_tooltip_controller
 import harness
 import move_member
 import rename_session_controller
@@ -63,3 +64,26 @@ def test_an_unrelated_attribute_of_the_same_name_tail_is_left_alone(tmp_path):
 
 def test_the_session_controller_rename_is_idempotent():
     assert rename_session_controller.main(["--check"]) == 0
+
+
+def test_tooltip_rewrite_is_receiver_exact_and_preserves_assignment_intent():
+    source = (
+        "r.hover = index\n"
+        "r.scan_delay = delay\n"
+        "result._pause_store.dispatch(event)\n"
+        "inputs.hover\n"
+        "ports.word_store\n"
+    )
+
+    rewritten, count = complete_tooltip_controller.transformed(
+        source, "tests/test_native_subtitles.py"
+    )
+
+    assert rewritten == (
+        "r.tooltip_controller.select(index)\n"
+        "r.tooltip_controller.configure_delays(scan=delay)\n"
+        "result.tooltip_controller.pause_store.dispatch(event)\n"
+        "inputs.hover\n"
+        "ports.word_store\n"
+    )
+    assert count == 5

@@ -53,14 +53,14 @@ def test_hover_view_snapshots_the_hover_stack():
     from saitenka.runtime import events
 
     r = SessionController(FakeIPC())
-    r._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
+    r.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     r.episode.nav_idx = 4
     r.tip.nest.word = "読"
     view = r.hover_view()
     assert (view.paused, view.nav_idx) == (True, 4)
     assert view.nested.word == "読"
     # a frozen point-in-time copy: later mutation of the reader must not leak into a taken snapshot
-    r._pause_store.dispatch(events.HoverPauseReleased())
+    r.tooltip_controller.pause_store.dispatch(events.HoverPauseReleased())
     assert view.paused is True
 
 
@@ -166,14 +166,14 @@ def test_hover_reacts_to_the_pointer_observation_not_to_a_tick():
     r.tokens = [Token("猫", "猫", "ねこ", "名詞", 0, 1)]
     r.boxes = [WordBox(0, 0, 0, 40, 40)]
     r.start_observing()
-    assert r.hover == -1
+    assert r.tooltip_controller.selected == -1
 
     ipc.emit(
         {"event": "property-change", "name": "mouse-pos", "data": {"hover": True, "x": 20, "y": 20}}
     )
     r._drain_events()
 
-    assert r.hover == 0  # the observation alone moved it
+    assert r.tooltip_controller.selected == 0  # the observation alone moved it
     r.close()
 
 
@@ -434,7 +434,7 @@ def test_mine_current_video_forces_the_animated_clip(monkeypatch):
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
     _enable_mining(r)
-    r.hover = 0
+    r.tooltip_controller.select(0)
     captured: dict = {}
     monkeypatch.setattr(r.mining_controller, "mine_index", lambda _index, **k: captured.update(k))
     r._handle(C.MINE_VIDEO_MSG)
@@ -465,7 +465,7 @@ def test_mine_video_key_registers_and_routes_to_the_video_mine(monkeypatch):
     ipc = FakeIPC()
     reader = _reader_with_word(ipc)
     _enable_mining(reader)
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     reader._register_keybinds()  # mine bindings require anki
     assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG  # default shortcut is bound
     # and the message routes to the video-mine action (not the still mine)
@@ -992,7 +992,7 @@ def test_navigation_stays_instant_without_a_filter():
 
 def test_reader_has_subtitle_state_before_any_cue():
     r = SessionController(FakeIPC())
-    assert r.sub_text == "" and r.tokens == [] and r.hover == -1
+    assert r.sub_text == "" and r.tokens == [] and r.tooltip_controller.selected == -1
 
 
 def test_pump_before_subtitle_does_not_raise():
@@ -1138,7 +1138,7 @@ def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
     r = SessionController(ipc)
     r.tokens = ["a", "b"]
     seen = []
-    monkeypatch.setattr(r, "set_hover", lambda i: (seen.append(i), setattr(r, "hover", i)))
+    monkeypatch.setattr(r, "set_hover", lambda i: (seen.append(i), r.tooltip_controller.select(i)))
     # word 0 near (5,5), word 1 near (5,50); tooltip is off elsewhere
     monkeypatch.setattr(r, "_hit", lambda _x, y: 0 if y < 10 else (1 if y < 60 else -1))
     clock = [1000.0]
@@ -1148,13 +1148,15 @@ def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
         Driver(r, instant=False).move(x, y)
 
     mouse(5, 5)  # first hover → opens INSTANTLY (no dwell)
-    assert seen == [0] and r.hover == 0
+    assert seen == [0] and r.tooltip_controller.selected == 0
     mouse(5, 50)  # transit onto word 1 en route to the tooltip
-    assert r.hover == 0  # …does NOT switch yet: the dwell is armed, not elapsed
+    assert (
+        r.tooltip_controller.selected == 0
+    )  # …does NOT switch yet: the dwell is armed, not elapsed
     mouse(5, 50)  # still resting there — re-arming the same word must not re-fire
-    assert r.hover == 0
+    assert r.tooltip_controller.selected == 0
     assert _fire_dwell(ipc, "hover-switch")  # rested long enough on word 1
-    assert r.hover == 1  # …now it switches
+    assert r.tooltip_controller.selected == 1  # …now it switches
 
 
 def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
@@ -1171,7 +1173,7 @@ def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.scan_delay = 0.25
+    r.tooltip_controller.configure_delays(scan=0.25)
     _hover_base_word(r)
     _hover_first_scan_cell(r)  # arms the scan dwell
 
@@ -1193,7 +1195,7 @@ def test_transit_over_word_does_not_switch(monkeypatch):
     r = SessionController(ipc)
     r.tokens = ["a", "b"]
     r.tip.view.rect = (100, 100, 80, 60)
-    monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
+    monkeypatch.setattr(r, "set_hover", r.tooltip_controller.select)
     monkeypatch.setattr(r, "_hit", lambda _x, y: 0 if y < 10 else (1 if y < 60 else -1))
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
@@ -1207,7 +1209,9 @@ def test_transit_over_word_does_not_switch(monkeypatch):
 
     assert _fire_dwell(ipc, "hover-switch")  # the dwell for the brushed word lands late…
 
-    assert r.hover == 0 and not r.hover_view().tip.hide_pending  # …and is ignored
+    assert (
+        r.tooltip_controller.selected == 0 and not r.hover_view().tip.hide_pending
+    )  # …and is ignored
 
 
 def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
@@ -1217,8 +1221,8 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
     r.tip.view.rect = (100, 100, 60, 40)
     # Both halves of the hover fact are stubbed: this test is about the DWELL, not about what a
     # build or a teardown does — the panel build needs a dictionary this SessionController has no use for.
-    monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
-    monkeypatch.setattr(r, "retire_hover", lambda: setattr(r, "hover", -1))
+    monkeypatch.setattr(r, "set_hover", r.tooltip_controller.select)
+    monkeypatch.setattr(r, "retire_hover", r.tooltip_controller.retire_selection)
     monkeypatch.setattr(r, "_hit", lambda x, y: 0 if (x < 10 and y < 10) else -1)
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
@@ -1227,18 +1231,18 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
         Driver(r, instant=False).move(x, y)
 
     mouse(5, 5)  # on the word → hovered, no pending hide
-    assert r.hover == 0 and not r.hover_view().tip.hide_pending
+    assert r.tooltip_controller.selected == 0 and not r.hover_view().tip.hide_pending
 
     mouse(300, 300)  # left the word → schedule hide, still shown
-    assert r.hover == 0 and r.hover_view().tip.hide_pending
+    assert r.tooltip_controller.selected == 0 and r.hover_view().tip.hide_pending
 
     mouse(120, 120)  # reached the tooltip in time → stays alive
-    assert not r.hover_view().tip.hide_pending and r.hover == 0
+    assert not r.hover_view().tip.hide_pending and r.tooltip_controller.selected == 0
 
     mouse(300, 300)  # leave everything → reschedule hide
     assert r.hover_view().tip.hide_pending
     assert _fire_dwell(ipc, "tooltip-hide")  # …and let it elapse
-    assert r.hover == -1  # hidden only after the delay
+    assert r.tooltip_controller.selected == -1  # hidden only after the delay
 
 
 def test_tooltip_capped_and_inside_safe_area():
@@ -1356,7 +1360,7 @@ def test_pause_on_tooltip_pauses_then_resumes(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())  # keep our boxes
     r._show_tooltip(0)  # tooltip shown → pause
     assert ("set_property", "pause", True) in ipc.commands
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r.retire_hover()  # tooltip hidden → resume
     assert ("set_property", "pause", False) in ipc.commands
 
@@ -1369,7 +1373,7 @@ def test_set_hover_refuses_the_nothing_hovered_sentinel():
     next caller re-introduce it.
     """
     r = _reader_with_word(FakeIPC())
-    r.hover = 0
+    r.tooltip_controller.select(0)
     with pytest.raises(ValueError, match="retire_hover"):
         r.set_hover(-1)
 
@@ -1387,7 +1391,7 @@ def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
 
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
-    r._pause_store.dispatch(events.HoverPauseClaimed(paused=True))
+    r.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     monkeypatch.setattr(r, "toast", lambda *_args: None)
     r.toggle_hover_pause()
     assert ("set_property", "pause", False) in ipc.commands
@@ -1398,9 +1402,9 @@ def test_hover_pause_toggle_changes_state_and_reports_it(monkeypatch):
     messages = []
     monkeypatch.setattr(r, "toast", lambda text, _kind="ok": messages.append(text))
     r.toggle_hover_pause()
-    assert (r.pause_on_tooltip, messages) == (False, ["hover auto-pause: off"])
+    assert (r.tooltip_controller.pause_enabled, messages) == (False, ["hover auto-pause: off"])
     r.toggle_hover_pause()
-    assert (r.pause_on_tooltip, messages) == (
+    assert (r.tooltip_controller.pause_enabled, messages) == (
         True,
         ["hover auto-pause: off", "hover auto-pause: on"],
     )
@@ -1486,10 +1490,12 @@ def test_hover_off_window_still_lingers(monkeypatch):
     ipc = FakeIPC()
     r = SessionController(ipc)
     r.tokens = ["x"]
-    r.hover = 0
-    monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
+    r.tooltip_controller.select(0)
+    monkeypatch.setattr(r, "set_hover", r.tooltip_controller.select)
     Driver(r, instant=False).leave()  # cursor left the window
-    assert r.hover == 0 and r.hover_view().tip.hide_pending  # scheduled, not instant
+    assert (
+        r.tooltip_controller.selected == 0 and r.hover_view().tip.hide_pending
+    )  # scheduled, not instant
 
 
 class _TallDS:
@@ -1558,7 +1564,7 @@ def test_header_add_button_click_mines_hovered_word(monkeypatch):
     r = _tall_reader(ipc)
     _enable_mining(r)
     r._tts_ok = True
-    r.hover = 0
+    r.tooltip_controller.select(0)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
@@ -1575,7 +1581,7 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)
     _enable_mining(r)
-    r.hover = 0
+    r.tooltip_controller.select(0)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
@@ -1594,7 +1600,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)
     r._tts_ok = True
-    r.hover = 0
+    r.tooltip_controller.select(0)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
@@ -1608,7 +1614,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
 def test_header_add_button_absent_without_anki(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)  # no anki
-    r.hover = 0
+    r.tooltip_controller.select(0)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     cx, cy = _add_button_center(r)
@@ -1682,7 +1688,7 @@ def _hover_first_scan_cell(r):
 def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     r = _scan_reader(FakeIPC())
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._show_tooltip(0)
     boxes = r.tip.view.state.windowed.scan_boxes()
     assert boxes
@@ -1788,7 +1794,7 @@ def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
     r = _scan_reader(FakeIPC())
     r.osd = (3840, 2160)  # scale 2.0
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._show_tooltip(0)
     boxes = r.tip.view.state.windowed.scan_boxes()
     assert boxes
@@ -1822,7 +1828,7 @@ def test_nested_scan_waits_for_dwell(monkeypatch):
     same cell must not re-arm, or a cursor jittering inside one cell would never settle."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.scan_delay = 0.25  # require the cursor to settle before opening
+    r.tooltip_controller.configure_delays(scan=0.25)  # require the cursor to settle before opening
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
@@ -1838,7 +1844,7 @@ def test_nested_scan_waits_for_dwell(monkeypatch):
 def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.scan_delay = 0.25
+    r.tooltip_controller.configure_delays(scan=0.25)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     boxes = r.tip.view.state.windowed.scan_boxes()
@@ -1891,7 +1897,9 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None
     Driver(r, instant=False).move(5, 5)  # leave the whole stack
-    assert r._hover_store.current.hysteresis.nest_hide_pending  # scheduled, not instant
+    assert (
+        r.tooltip_controller.hover_store.current.hysteresis.nest_hide_pending
+    )  # scheduled, not instant
 
     assert _fire_dwell(ipc, "nested-hide")
 
@@ -2131,7 +2139,7 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     # links are click-to-open, not hover-scan → scrolling/reading over a cross-ref doesn't clutter
     ipc = FakeIPC()
     r = _link_reader(ipc)
-    r.scan_delay = 0.0  # would fire immediately if not suppressed
+    r.tooltip_controller.configure_delays(scan=0.0)  # would fire immediately if not suppressed
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     ui = _point_at_link(r)  # cursor on the link cell
@@ -2143,7 +2151,7 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
 def test_scroll_resets_scan_dwell(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.scan_delay = 0.25
+    r.tooltip_controller.configure_delays(scan=0.25)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
@@ -2686,14 +2694,14 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
     # We'll manually insert sentinel keys to test LRU behaviour. Fill exactly to the cap so the next
     # insert (the real tooltip below) triggers a single eviction of the oldest.
     sentinel = object()
-    for i in range(r.panel_cache_max):
+    for i in range(r.tooltip_controller.cache_limit):
         r.tip.panel_cache.setdefault(f"key_{i}", sentinel)
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
     r.tokens = [tok]
     Driver(r).move_to_word(0)
     # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
-    assert f"key_{r.panel_cache_max - 1}" in r.tip.panel_cache, (
+    assert f"key_{r.tooltip_controller.cache_limit - 1}" in r.tip.panel_cache, (
         "LRU eviction removed recently-used entry"
     )
     assert "key_0" not in r.tip.panel_cache, "LRU eviction should have removed oldest entry"
@@ -2752,7 +2760,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)  # open a tooltip on the first subtitle
     assert r.hover_view().tip.rect is not None  # tooltip is shown
-    assert r.hover == 0
+    assert r.tooltip_controller.selected == 0
 
     # simulate a cue change while the tooltip is visible
     hidden = []
@@ -2766,7 +2774,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     assert r.hover_view().tip.rect is None  # _tip_rect reset
     assert r.hover_view().tip.state is None  # _tip_state reset
     assert r.hover_view().tip.key is None  # _tip_key reset
-    assert r.hover == -1  # hover index reset
+    assert r.tooltip_controller.selected == -1  # hover index reset
 
 
 def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
@@ -3170,7 +3178,7 @@ def test_property_change_event_drives_hover(monkeypatch):
     r = SessionController(ipc, prefetch=False)
     r.tokens = ["x"]
     seen = []
-    monkeypatch.setattr(r, "set_hover", lambda i: (seen.append(i), setattr(r, "hover", i)))
+    monkeypatch.setattr(r, "set_hover", lambda i: (seen.append(i), r.tooltip_controller.select(i)))
     monkeypatch.setattr(r, "_hit", lambda x, y: 0 if (x < 10 and y < 10) else -1)
     r.start_observing()
     ipc.set_prop("mouse-pos", {"hover": True, "x": 5, "y": 5})
@@ -3196,7 +3204,7 @@ def test_reader_accepts_grouped_options_object():
     assert r.keys.mine_key == "Ctrl+x"
     assert r.keys.sub_prev_key == "Alt+a"
     assert r.tip_max_frac == 0.5
-    assert r.pause_on_tooltip is True
+    assert r.tooltip_controller.pause_enabled is True
     assert r.prefetch is False
 
 
@@ -3282,7 +3290,7 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
         lambda p, tok, **_k: mined.append((p.encounter.cue.hover, tok.surface)),
     )
     _enable_mining(r)
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._handle(C.MINE_MSG)
     assert mined == [(0, "本命")]
 

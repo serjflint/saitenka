@@ -24,7 +24,7 @@ from saitenka.app import (
     tooltip_raster,
 )
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.popups import NO_HOVER_METADATA, Panel
+from saitenka.app.popups import Panel
 from saitenka.app.render_cache import (
     RenderCache,
     config_signature,
@@ -317,8 +317,8 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    r.tip.hover = NO_HOVER_METADATA
     i = next(i for i, t in enumerate(r.tokens) if t.is_content)
+    r.tooltip_controller.select(i)
     tok = r.tokens[i]
     cap, w = r.tip_scale.cap, r.tip_scale.width
     key = r._panel_key(tok, r._inflected_surface(i), mined=r._is_mined(tok))
@@ -518,7 +518,7 @@ def test_render_ahead_warms_raw_bands_ahead_on_hidpi(monkeypatch):
     # overscan — synchronously on the flick tick. The worker must now warm the raw (scale=1.0) bands ahead
     # in ADDITION to the native ones, so a fast flick finds them cached instead of rastering on-thread.
     r = _nested_reader()
-    r.hover = 0
+    r.tooltip_controller.select(0)
     monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
     r._show_tooltip(0)
     scales = _render_ahead_scales(r, r.tip.view, monkeypatch)
@@ -532,7 +532,7 @@ def test_render_ahead_warms_raw_once_on_lodpi(monkeypatch):
     # once — the fix must not add a redundant second 1.0 warm when there are no separate native bands.
     r = _nested_reader()
     r.osd = (1920, 1080)  # lo-dpi → tip_scale.raster 1.0
-    r.hover = 0
+    r.tooltip_controller.select(0)
     monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
     r._show_tooltip(0)
     scales = _render_ahead_scales(r, r.tip.view, monkeypatch)
@@ -545,7 +545,7 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     # soft paint flipped the BASE's crisp_pending — apply_pending_crisp then re-blit the base and cleared
     # it, and the nested popup NEVER upgraded to crisp. Per-view flags fix it: each popup owns its own.
     r = _nested_reader(two_words=True)  # distinct base/nested words → distinct panels
-    r.hover = 0
+    r.tooltip_controller.select(0)
     r._show_tooltip(0)  # base tooltip up, cold → its own crisp_pending
     assert r.tip.view.crisp_pending
     tok = r.tokens[1]  # nested on a DIFFERENT word, so warming it can't warm the base
@@ -714,7 +714,6 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None):
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    r.tip.hover = NO_HOVER_METADATA
     r.session.render_cache.cache_min_height_px = 0  # store every head (no cost gate) for the test
     cache = _cache(tmp_path)
     r.session.render_cache.obj, r.session.render_cache.built = cache, True
@@ -786,14 +785,18 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
     key = tooltip_panel.panel_key(
-        r.panel_ports, tok, inflected, mined=mined, phrase=r.tip.hover.terms
+        r.panel_ports,
+        tok,
+        inflected,
+        mined=mined,
+        phrase=r.interaction.hovered_word_meta.terms,
     )
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
     r.tip.panel_cache.clear()
     tooltip.show_tooltip(r.tip_ports, r.panel_ports, r.hover_inputs, r.show_actions, i)
     assert r.tip.view.state is None and submitter.calls
-    r.hover = i
+    r.tooltip_controller.select(i)
     submitter.finish()
     assert cache.stats()[0] == 1 and len(r.session.render_cache.mem) == 1
 
@@ -847,7 +850,7 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
     )
 
     r._tts_ok = not r._tts_ok
-    r.hover = i
+    r.tooltip_controller.select(i)
     monkeypatch.setattr(tooltip, "_paint_from_cache", lambda *_args: False)
     submitter.finish()
 
@@ -864,7 +867,8 @@ def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.hover, r.tip.view.state = -1, None  # not hovering that word anymore
+    r.tooltip_controller.retire_selection()
+    r.tip.view.state = None  # not hovering that word anymore
     tooltip.apply_engaged_hover(
         r.tip_ports,
         r.panel_ports,
@@ -881,7 +885,7 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     i, _tok, _inflected, _mined = _first_content(r)
     old_job = r.tip.jobs.begin("tooltip")
-    r.hover = i
+    r.tooltip_controller.select(i)
     r.tip.view.job_id = r.tip.jobs.begin("tooltip")
 
     tooltip.apply_engaged_hover(
@@ -1020,7 +1024,7 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     index, _tok, _inflected, _mined = _first_content(r)
     requests = []
     monkeypatch.setattr(r, "_request_interaction_metadata", requests.append)
-    r.hover = index
+    r.tooltip_controller.select(index)
     r.tip.view.job_id = r.tip.jobs.begin("tooltip")
     tooltip._request_hover_metadata(r.tip_ports, r.word_lookup, r.hover_inputs, index)
     original = requests[-1]

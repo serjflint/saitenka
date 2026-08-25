@@ -107,7 +107,7 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
     reader.tokens = [_token()]
     reader.lines = [[object()]]
     reader.styles = scorer.score_line(reader.tokens)
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     monkeypatch.setattr(reader.ov, "show", lambda *_args, **_kwargs: None)
     provider = RecordingRasterProvider(size=(10, 10))
     reader.renderer = SubtitleRenderer(provider)

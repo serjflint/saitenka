@@ -44,10 +44,8 @@ if TYPE_CHECKING:
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
 OSD = (1920, 1080)
-_STRESS_CACHE_CAP = (
-    24  # --stress forces reader.panel_cache_max to this — a test control, independent
-)
-# of the user's own [tooltip].panel_cache_max — so eviction thrash is exercised deterministically
+# --stress uses a fixed cache cap so eviction pressure is independent of the user's configuration.
+_STRESS_CACHE_CAP = 24
 _SCROLL_JANK_STEPS = (
     40  # --scroll-jank: wheel steps DOWN into each entry (bounds tall-entry render time)
 )
@@ -388,11 +386,16 @@ def _timeline_scorer(words: list[list[str]]):
     )
 
 
-def _cold_reader(ds, *, prefetch: bool = False):
+def _cold_reader(ds, *, prefetch: bool = False, panel_cache_max: int | None = None):
     """A fresh SessionController on a fake IPC, head-path forced (as a live run with workers would). With
     ``prefetch=True`` the real background workers run (``start_prefetch``), so scroll-ahead warms the
     next blocks off the main thread exactly as a live session does — the realistic scroll path."""
-    reader = SessionController(_fake_ipc(), dict_set=ds, prefetch=prefetch)
+    if panel_cache_max is None:
+        reader = SessionController(_fake_ipc(), dict_set=ds, prefetch=prefetch)
+    else:
+        reader = SessionController(
+            _fake_ipc(), dict_set=ds, prefetch=prefetch, panel_cache_max=panel_cache_max
+        )
     reader.osd = OSD
     if prefetch:
         reader.start_prefetch()
@@ -411,7 +414,7 @@ def _bench_word(reader, term: str, reading: str, reps: int) -> dict:
     def cold():
         reader.tip.panel_cache.clear()
         reader.tip.view.state = None
-        reader.hover = 0
+        reader.tooltip_controller.select(0)
         reader._show_tooltip(0)
 
     return measure(cold, reps, warmup=1)
@@ -443,7 +446,7 @@ def run_pathological(
     fresh_reader.tokens = [ftok]
     fresh_reader.boxes = [WordBox(0, 400, 800, 60, 60)]
     fresh_reader.sub_origin = (0, 0)
-    fresh_reader.hover = 0
+    fresh_reader.tooltip_controller.select(0)
     fresh_reader._show_tooltip(0)
     first_hover_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -770,12 +773,11 @@ def run_stress(
     ds, tag = _load_dict_set()
     if ds is None:
         ds = _SyntheticDS()
-    reader = _cold_reader(ds)
+    reader = _cold_reader(ds, panel_cache_max=_STRESS_CACHE_CAP)
     # The cache cap is a TEST CONTROL, not the user's live [tooltip].panel_cache_max — fix it small
     # and deterministic so eviction is exercised the same way regardless of how many dicts are
     # configured or what the user's own cap is. Scaling the corpus to chase a large live cap instead
     # blows up wall time / memory for reasons unrelated to what's being measured.
-    reader.panel_cache_max = _STRESS_CACHE_CAP
     if isinstance(ds, DictionarySet) and ds.dicts:
         # A fixed corpus comfortably larger than the fixed cap — forces real eviction thrash without
         # depending on the live config.
@@ -796,7 +798,7 @@ def run_stress(
         reader.tokens = [tok]
         reader.boxes = [WordBox(0, 400, 800, 60, 60)]
         reader.sub_origin = (0, 0)
-        reader.hover = 0
+        reader.tooltip_controller.select(0)
         timed(lambda: reader._show_tooltip(0))
         for _ in range(4):  # scroll toward the bottom of a tall entry
             timed(lambda: reader.scroll_tip(step))
@@ -844,7 +846,7 @@ def run_stress(
         f"MAX {m['max']:.1f} ms  (cv {m['cv']:.2f})"
     )
     print(
-        f"panel cache: {cache_len}/{reader.panel_cache_max} entries "
+        f"panel cache: {cache_len}/{reader.tooltip_controller.cache_limit} entries "
         "(LRU-capped — steady state means eviction is working)"
     )
     print(
@@ -874,7 +876,7 @@ def run_stress(
         "corpus_size": len(corpus),
         "frame_latency_ms": m,
         "panel_cache_len": cache_len,
-        "panel_cache_max": reader.panel_cache_max,
+        "panel_cache_max": reader.tooltip_controller.cache_limit,
         "rss_peak_mb": rss_peak,
         "rss_growth_mb": growth,
         "rss_by_round_mb": rss_by_round,
@@ -905,7 +907,7 @@ def _scroll_span_live(reader, subset, step: int, span_px: int, speed: float) -> 
         reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
         reader.boxes = [WordBox(0, 400, 800, 60, 60)]
         reader.sub_origin = (0, 0)
-        reader.hover = 0
+        reader.tooltip_controller.select(0)
         reader._show_tooltip(0)
         if reader.tip.view.state is None:
             continue
@@ -938,7 +940,7 @@ def _block_profile(reader, term: str, reading: str, span_px: int) -> tuple[list[
     reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
     reader.boxes = [WordBox(0, 400, 800, 60, 60)]
     reader.sub_origin = (0, 0)
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     reader._show_tooltip(0)
     st = reader.tip.view.state
     if st is None:
@@ -1024,7 +1026,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
         reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
         reader.boxes = [WordBox(0, 400, 800, 60, 60)]
         reader.sub_origin = (0, 0)
-        reader.hover = 0
+        reader.tooltip_controller.select(0)
         reader._show_tooltip(0)
 
     def traverse(bucket: list[float], word: str | None) -> None:
@@ -1540,9 +1542,11 @@ def _timeline_interact(reader) -> None:
     time.sleep(0.02)
     reader._drain_events()  # pump the typed completion and warm placement
     reader._hide_nested()
-    if 0 <= reader.hover < len(reader.tokens):
+    if 0 <= reader.tooltip_controller.selected < len(reader.tokens):
         tooltip.navigate_tip(
-            reader.tip_ports, reader.panel_ports, reader.tokens[reader.hover].surface
+            reader.tip_ports,
+            reader.panel_ports,
+            reader.tokens[reader.tooltip_controller.selected].surface,
         )  # in-place nav → kind="clicked"
         time.sleep(0.02)
         reader._drain_events()  # pump the typed completion and warm swap
@@ -2412,11 +2416,13 @@ def main() -> int:
     assert reader.tip.view.rect is not None
     tx, ty, tw, th = reader.tip.view.rect
     fake_ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + th - 8}
-    reader.scan_delay = 1e9  # isolate the hit-test; don't actually open a nested popup
+    reader.tooltip_controller.configure_delays(
+        scan=1e9
+    )  # isolate the hit-test; don't actually open a nested popup
     rows.append(
         ("poll tick hover hit-test  (_update_hover)", measure(reader._update_hover, args.reps * 5))
     )
-    reader.scan_delay = 0.25
+    reader.tooltip_controller.configure_delays(scan=0.25)
 
     # 7) horizontal sweep across the line — cold vs warm (shows what prefetch buys you)
     sweep_cold = measure(lambda: [show_cold(i) for i in idxs], max(4, args.reps // 2))

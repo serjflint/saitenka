@@ -67,9 +67,9 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
 
         # R1: the hovered word must be the one we aimed at — this is the mouse-pos→OSD alignment the
         # headless tests can't check. A mismatch here is the HiDPI scaling bug.
-        assert reader.hover == i, (
+        assert reader.tooltip_controller.selected == i, (
             f"hover misaligned: aimed word {i} ({reader.tokens[i].surface!r}), "
-            f"got {reader.hover} — mouse-pos→OSD mapping (HiDPI/R1)? screenshot: {tmp / 'live_hover.png'}"
+            f"got {reader.tooltip_controller.selected} — mouse-pos→OSD mapping (HiDPI/R1)? screenshot: {tmp / 'live_hover.png'}"
         )
 
         # a real keypress must reach the reader (mine key is bound) — drive it and drain
@@ -129,8 +129,8 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         for _ in range(5):
             reader.pump()
             time.sleep(0.02)
-        assert reader.hover == i, (
-            f"resting on the tooltip must keep its lease; hover={reader.hover} aimed={i} "
+        assert reader.tooltip_controller.selected == i, (
+            f"resting on the tooltip must keep its lease; hover={reader.tooltip_controller.selected} aimed={i} "
             f"(_tip_rect={reader.tip.view.rect})"
         )
 

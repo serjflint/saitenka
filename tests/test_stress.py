@@ -94,7 +94,7 @@ def test_sustained_churn_evicts_and_stays_clean():
     # after the final retire_hover() the whole hover stack must be torn down
     assert r.hover_view().tip.state is None
     assert r.hover_view().nested.state is None  # nested popup cleared
-    assert r.hover == -1
+    assert r.tooltip_controller.selected == -1
 
 
 def test_churn_removes_both_overlays_no_ghost():

@@ -130,7 +130,7 @@ def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
 def test_metadata_completion_refuses_facts_that_changed_after_submission():
     reader = SessionController(FakeIPC())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     reader.tip.view.job_id = reader.tip.jobs.begin("tooltip")
     submitted = []
 

@@ -469,6 +469,10 @@ class PanelCache:
     def __len__(self) -> int:
         return len(self._entries)
 
+    @property
+    def limit(self) -> int:
+        return self._limit
+
     def get(self, key):
         """The entry without an LRU touch — for a caller only asking whether it is warm."""
         return self._entries.get(key)
@@ -567,7 +571,6 @@ class TooltipState:
     Owned by ``TooltipController``; ``SessionController.tip`` is a read-only projection."""
 
     def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
-        """`cache_lock` is shared with the SessionController's other cache accounting, so it is injected."""
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
         # PopupView type + blit machinery as the nested popup.
         self.view = PopupView(OverlayId.TIP)

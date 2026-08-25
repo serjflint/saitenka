@@ -155,7 +155,7 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
 
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
     renderer.use_native(reader.subtitle_target())
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     reader.subtitle_pipeline.draw_current(reader.subtitle_target())
     trace.observe("geometry-ready", outcome="interaction-ready")
     reader.boxes = []

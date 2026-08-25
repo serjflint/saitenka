@@ -232,14 +232,9 @@ from saitenka.runtime.help import HelpCommand, HelpState
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.interaction_slice import (
     HelpStore,
-    HoveredWordStore,
-    HoverPauseStore,
-    HoverStore,
     PickerStore,
     PreviewStore,
-    PulseStore,
     SidebarStore,
-    TipNavStore,
 )
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.presentation_slice import TranslationStore
@@ -498,7 +493,6 @@ class SessionController:
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
         self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
-        self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
         if o.tooltip.annotation_mode not in {"full", "hover"}:
             raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
         self.annotation_mode: subtitle_intents.AnnotationMode = o.tooltip.annotation_mode
@@ -507,11 +501,6 @@ class SessionController:
         # (the shared SessionController init) so both the run and attach seams get it from one place; a pure render
         # flag threaded onto the kanji Entry, never gating what's looked up or the panel-cache identity.
         self.kanji_stroke_order = o.tooltip.kanji_stroke_order
-        self.hide_delay = o.tooltip.hide_delay  # tooltip linger after the cursor leaves the word
-        self.flash_secs = o.tooltip.flash_secs  # "copied" highlight border pulse duration
-        self.panel_cache_max = (
-            o.tooltip.panel_cache_max
-        )  # LRU cap on cached rendered tooltip panels
         self.band_cache_max = o.tooltip.band_cache_max  # LRU cap on retained render bands per panel
         self.raw_band_ceiling = (
             o.tooltip.raw_band_ceiling_mb * 1024 * 1024
@@ -537,12 +526,6 @@ class SessionController:
         # (native glyph masks over 1× geometry). ``crisp_upscale`` off → soft-only (never native).
         self._crisp_on = o.tooltip.crisp_upscale
         self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes TipScale.display (see config)
-        # The tooltip owner is assembled after the cache/build capabilities it needs. The lock is
-        # created here because telemetry also reads the cache under it.
-        self._cache_lock = (
-            threading.Lock()
-        )  # tiny lock: only the cache dict mutation (build is lock-free)
-
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
         # import chokepoint; missing → default). Threaded to every Panel.from_rows so all popups agree.
         self.layout_backend = resolve_backend(o.tooltip.layout_engine)
@@ -572,8 +555,14 @@ class SessionController:
         self.tooltip_controller = tooltip_controller.TooltipController(
             ipc,
             self.engaged_build_ports,
-            panel_cache_max=self.panel_cache_max,
-            cache_lock=self._cache_lock,
+            panel_cache_max=o.tooltip.panel_cache_max,
+            pause_enabled=o.tooltip.pause_on_tooltip,
+            delays=HoverDelays(
+                scan=o.tooltip.scan_delay,
+                hide=o.tooltip.hide_delay,
+                switch=o.tooltip.hover_switch_delay,
+            ),
+            flash_seconds=o.tooltip.flash_secs,
         )
         self.interaction.tooltip = self.tooltip_controller
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
@@ -723,9 +712,6 @@ class SessionController:
             (SUBTITLE_CLOSE_RESOURCE, lambda: self._close_subtitle_raster()),
         ):
             ipc.register_session_resource(name, session_resources.Retiring(retire))
-        # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
-        self.scan_delay = o.tooltip.scan_delay
-        self.hover_switch_delay = o.tooltip.hover_switch_delay
         # Event-driven property state (observe_property); empty + off until run() calls
         # start_observing(), so direct get_property keeps working for tests / pre-run paths.
         self._observing = False
@@ -739,10 +725,6 @@ class SessionController:
         # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
         # whose event resets the whole state.
         self._subtitle_tracks = SubtitleTrackStore(self.ipc)
-        # `Owner.INTERACTION`'s slice: the hover hysteresis. Its dwell lengths are configuration,
-        # so they arrive as a declaration rather than being read in the turn — a reducer that read
-        # them off the host would not be pure.
-        self._hover_store = HoverStore(self.ipc)
         # The same slot's second feature: the shortcut overlay. A registration, not a rewrite —
         # `hover` did not change to make room for it.
         self._help_store = HelpStore(self.ipc)
@@ -757,23 +739,6 @@ class SessionController:
         self._sidebar_store = SidebarStore(self.ipc)
         self.interaction.sidebar_store = self._sidebar_store
         self.interaction.sidebar_panel = sidebar.SidebarPanel()
-        # …and its fifth: the tooltip's link-navigation back-stack. What it stacks are captured
-        # views the slice never looks inside — it decides only whether there is a step to pop.
-        self._nav_store = TipNavStore(self.ipc)
-        self.interaction.nav_store = self._nav_store
-        # …and its sixth and seventh: the copy-flash pulse and the tooltip's claim on the playback
-        # pause. Both used to be a flag written beside the act that earned it, so the refusal each
-        # carries — an expiry that would not arm, a pause that was never ours — was resolved at the
-        # call site and unreachable from a test.
-        self._pulse_store = PulseStore(self.ipc)
-        self.interaction.pulse_store = self._pulse_store
-        self._pause_store = HoverPauseStore(self.ipc)
-        self.interaction.pause_store = self._pause_store
-        # …and its eighth: what a lookup resolved about the hovered word, plus the `k` cycle over
-        # its kanji. The cycle restarting on a new word was three `= 0` writes at three sites; a
-        # new answer is the restart now, so a site that forgets cannot exist.
-        self.word_store = HoveredWordStore(self.ipc)
-        self.interaction.word_store = self.word_store
         # …and its ninth: the mined-card preview. Its rects and the clip's live `Popen` stay on the
         # panel beside it — a reducer can hold neither one paint's geometry nor a process.
         self._preview_store = PreviewStore(self.ipc)
@@ -781,13 +746,6 @@ class SessionController:
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
         self.translation_store = TranslationStore(self.ipc)
-        self._hover_store.dispatch(
-            events.HoverConfigured(
-                HoverDelays(
-                    scan=self.scan_delay, hide=self.hide_delay, switch=self.hover_switch_delay
-                )
-            )
-        )
         self._geometry_refresh = geometry_refresh.RefreshWindow()
         #: Latest cue identity observed this drain, reconciled once at the batch boundary.
         self._pending_cue: playback.ObservedCue | None = None
@@ -817,7 +775,6 @@ class SessionController:
         )
         self.boxes: list = []
         self.sub_origin: tuple[int, int] = (0, 0)
-        self.hover = -1
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
@@ -837,7 +794,7 @@ class SessionController:
     def hover_view(self) -> hover_snapshot.HoverView:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
         the public seam tests observe instead of the private ``_nest`` / ``_tip_*`` fields (#43)."""
-        hysteresis = self._hover_store.current.hysteresis
+        hysteresis = self.tooltip_controller.hover_store.current.hysteresis
         return hover_snapshot.snapshot(
             self.tip.nest,
             hover_snapshot.TipView(
@@ -1120,7 +1077,7 @@ class SessionController:
             annotation_visible=subtitle_raster.annotation_visible(
                 mode=self.annotation_mode, hover_annotation=self.annotation_hover
             ),
-            hover=self.hover,
+            hover=self.tooltip_controller.selected,
             hover_span=self.interaction.hovered_word_meta.span,
             styles=self.styles,
             boxes=self.boxes,
@@ -1337,7 +1294,7 @@ class SessionController:
         log.debug("cue interaction retired: %s", reason)
         self._clear_cue_identity()
         self.teardown_tip()
-        self.hover = -1
+        self.tooltip_controller.retire_selection()
         self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
 
     def refresh_osd(self) -> bool:
@@ -1395,13 +1352,8 @@ class SessionController:
         hide = getattr(self.ov, "hide_interactive", self.ov.hide)
         hide(TIP_ID)
         self._hide_nested()
-        self.tip.view.rect = None
-        self.tip.view.state = None
-        self.tip.view.key = None
-        self.tip.tip_tok = self.tip.tip_inflected = None
-        self._nav_store.dispatch(events.TipNavCleared())
-        self.word_store.dispatch(events.HoverWordForgotten())
         self._unbind_tip_keys()
+        self.tooltip_controller.retire_state()
         self.resume_after_hover_pause()
         self._sync_auto_translation()
 
@@ -1448,7 +1400,7 @@ class SessionController:
         # without a hover).
         with otel_metrics.traced("teardown_tip"):
             self.teardown_tip()
-        self.hover = -1
+        self.tooltip_controller.retire_selection()
         self.annotation_hover = False
         self.sub_text = text
         # Invariant 13: the projection owns which cue is current, so a SessionController-side decision about
@@ -1617,7 +1569,7 @@ class SessionController:
         if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
             return
         self.teardown_tip()
-        self.hover = -1
+        self.tooltip_controller.retire_selection()
         self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
         norm = cue_key(self.sub_text)
         self._sub_pending = norm
@@ -1795,8 +1747,7 @@ class SessionController:
 
     def _clear_native_interaction(self) -> None:
         self.teardown_tip()
-        self.hover = -1
-        self.word_store.dispatch(events.HoverWordForgotten())
+        self.tooltip_controller.retire_selection()
         self.boxes = []
         self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
 
@@ -2080,7 +2031,7 @@ class SessionController:
         return HoverInputs(
             mouse_pos=lambda: self.observed_property("mouse-pos"),
             hit=self._hit,
-            hover=lambda: self.hover,
+            hover=lambda: self.tooltip_controller.selected,
             cue_state=self._cue_state,
             tokens=self.tokens,
             boxes=self.boxes,
@@ -2121,7 +2072,7 @@ class SessionController:
     def show_actions(self) -> ShowActions:
         """What showing a hovered word does, bound. Paired with `tip_ports` and `panel_ports`."""
         return ShowActions(
-            select=lambda index: setattr(self, "hover", index),
+            select=self.tooltip_controller.select,
             draw_cue=self.draw_subtitle,
             teardown=self.teardown_tip,
             bind_keys=self._bind_tip_keys,
@@ -2129,7 +2080,7 @@ class SessionController:
             freeze=lambda *, already_paused: tooltip._freeze_frame(
                 self.ipc,
                 self.observed_property,
-                enabled=self.pause_on_tooltip,
+                enabled=self.tooltip_controller.pause_enabled,
                 already_paused=already_paused,
             ),
             inflected=self._inflected_surface,
@@ -2262,7 +2213,7 @@ class SessionController:
             secondary_text=self._secondary_text(),
             language=self.subtitle_language,
             tokens=self.tokens,
-            hover=self.hover,
+            hover=self.tooltip_controller.selected,
             jp_sid=self.jp_sid,
             en_sid=self.en_sid,
             tracks=self._get_sequence("track-list"),
@@ -2312,13 +2263,13 @@ class SessionController:
         """
         return TipPorts(
             tip=self.tip,
-            pulse_store=self._pulse_store,
-            pause_store=self._pause_store,
-            word_store=self.word_store,
+            pulse_store=self.tooltip_controller.pulse_store,
+            pause_store=self.tooltip_controller.pause_store,
+            word_store=self.tooltip_controller.word_store,
             scale=self.tip_scale,
             surfaces=self.interaction_surfaces,
-            hover_store=self._hover_store,
-            nav_store=self._nav_store,
+            hover_store=self.tooltip_controller.hover_store,
+            nav_store=self.tooltip_controller.nav_store,
             request_render_ahead=self._request_render_ahead,
             osd=self.osd,
             nested_max_frac=self.nested_max_frac,
@@ -2389,7 +2340,7 @@ class SessionController:
         )
 
     def _panel_cache_setdefault(self, key, st) -> Panel:
-        return self.tip.panel_cache.setdefault(key, st)
+        return self.tooltip_controller.cache_setdefault(key, st)
 
     # --- persistent render cache (#149): seed a cold hover's first viewport from disk ----------
     def _render_cache(self) -> RenderCache | None:
@@ -2562,11 +2513,9 @@ class SessionController:
     def _telemetry_gauges(self) -> dict[str, float]:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
         the hot path). ``panel_cache.bytes`` is the retained (compressed) on-heap footprint;
-        ``dict_cache.size`` the decoded-entry count across every dictionary. Read under ``_cache_lock``
-        so a concurrent prefetch job mutating the panel cache can't fault the iteration."""
-        with self._cache_lock:
-            panel_n = len(self.tip.panel_cache)
-            panel_bytes = sum(st.retained_nbytes for st in self.tip.panel_cache.values())
+        ``dict_cache.size`` the decoded-entry count across every dictionary. The tooltip owner reads
+        its cache under the lock it owns, so a concurrent prefetch mutation cannot fault iteration."""
+        panel_n, panel_bytes = self.tooltip_controller.cache_totals()
         dict_n = (
             self.profile_controller.dict_set.decoded_entry_count()
             if self.profile_controller.dict_set is not None
@@ -2607,9 +2556,8 @@ class SessionController:
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
-        if self.tip.tip_keys_bound:
+        if not self.tooltip_controller.claim_keybindings():
             return
-        self.tip.tip_keys_bound = True
         if self.help.open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
@@ -2621,9 +2569,8 @@ class SessionController:
         ``[input] Command name missing`` / ``Invalid command for key binding 'LEFT': ''`` triple (visible
         on the Windows console; silently on the mac log). Rebind to the valid no-op ``ignore`` instead:
         no error, and the key stops doing tooltip work while the popup is gone."""
-        if not self.tip.tip_keys_bound:
+        if not self.tooltip_controller.release_keybindings():
             return
-        self.tip.tip_keys_bound = False
         if self.help.open:
             return
         for binding in active_bindings(self.keys, "tooltip"):
@@ -2763,7 +2710,7 @@ class SessionController:
             cue=MineCue(
                 self.tokens,
                 self.styles,
-                self.hover,
+                self.tooltip_controller.selected,
                 self.profile_controller.tokenizer,
                 self.options.mining.max_bulk,
             ),
@@ -2894,7 +2841,7 @@ class SessionController:
         `toggle_overlay` decides what to do *after* the surfaces return, so it must not ask
         `translation_visible` — that answers False precisely because the overlay is still hidden.
         """
-        return self.translate_on or (self.auto_translate and self.hover >= 0)
+        return self.translate_on or (self.auto_translate and self.tooltip_controller.selected >= 0)
 
     def _sync_auto_translation(self) -> None:
         if not self.auto_translate:
@@ -2937,7 +2884,7 @@ class SessionController:
 
         Whether anything is owed is the slice's answer, not a flag read here: both callers used to
         ask and then act, and the clearing happened at a third site."""
-        if not tooltip.release_frame(self._pause_store):
+        if not self.tooltip_controller.release_pause_claim():
             return
         send_correlated(
             self.ipc,
@@ -3095,7 +3042,11 @@ class SessionController:
             binding.key: binding.spec.message for binding in active_bindings(self.keys, "tooltip")
         }
         for binding in active_bindings(self.keys, "help"):
-            message = tooltip_by_key.get(binding.key) if self.tip.tip_keys_bound else None
+            message = (
+                tooltip_by_key.get(binding.key)
+                if self.tooltip_controller.keybindings_bound
+                else None
+            )
             command = f"script-message {message}" if message else "ignore"
             send_correlated(
                 self.ipc,
@@ -3499,17 +3450,13 @@ class SessionController:
         it reaches every slice at once — the atomicity `EpisodeContext` gets from being one object.
         Without a reactor there is no turn to be atomic in, so each store reduces it in turn.
         """
-        retired = events.EpisodeRetired()
         if self._playback_store.routed:
-            self._playback_store.dispatch(retired)
+            self._playback_store.dispatch(events.EpisodeRetired())
             return
-        for store in (
-            self._playback_store,
-            self._subtitle_tracks,
-            self._hover_store,
-            self.translation_store,
-        ):
-            store.dispatch(retired)
+        self._playback_store.dispatch(events.EpisodeRetired())
+        self._subtitle_tracks.dispatch(events.EpisodeRetired())
+        self.tooltip_controller.retire_episode()
+        self.translation_store.dispatch(events.EpisodeRetired())
 
     # --- run loop -----------------------------------------------------------------------------
     def current_media_path(self) -> Path | None:
@@ -3792,11 +3739,13 @@ class SessionController:
         which `LifecycleTimers` fences by revision so only the latest due event lands."""
 
         return self.lifecycle_timers.schedule(
-            LifecycleTimerKind.FLASH_EXPIRY, self.flash_secs, self._flash_expired
+            LifecycleTimerKind.FLASH_EXPIRY,
+            self.tooltip_controller.flash_seconds,
+            self._flash_expired,
         )
 
     def _flash_expired(self) -> None:
-        for decision in self._pulse_store.dispatch(events.CopyPulseExpired()):
+        for decision in self.tooltip_controller.expire_pulse():
             if decision.overlay == NESTED_ID:
                 self._render_nested_view()  # redraw without the highlight border
             elif decision.overlay == TIP_ID:

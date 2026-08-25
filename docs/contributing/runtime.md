@@ -72,8 +72,9 @@ Four gates enforce the above:
 ## Production session
 
 `SessionController` owns owner-thread session lifetime, cross-feature ordering, and application.
-Bounded controllers own feature state and policy: `TooltipController` owns tooltip presentation and
-work protocols, while `ProfileController` owns the active reading environment and switch transaction.
+Bounded controllers own feature state and policy: `TooltipController` owns tooltip interaction facts,
+presentation state, and work protocols, while `ProfileController` owns the active reading environment
+and switch transaction.
 `SessionController.run()` hands the thread to
 `SessionLoop`, which blocks on the mailbox rather than waking at a cadence:
 

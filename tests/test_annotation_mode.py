@@ -47,7 +47,7 @@ def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
     reader.lines = [[object()]]
     reader.tokens = [object()]
     reader.styles = ["scored"]
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     monkeypatch.setattr(reader.ov, "show", lambda *_args, **_kwargs: None)
     provider = RecordingRasterProvider(size=(10, 10))
     reader.renderer = SubtitleRenderer(provider)
@@ -85,7 +85,7 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
     ipc = FakeIPC({"mouse-pos": {"hover": True, "x": 50, "y": 50}})
     reader = SessionController(ipc, hover_switch_delay=10.0)
     reader.tokens = [object(), object()]
-    reader.hover = 0
+    reader.tooltip_controller.select(0)
     calls = []
     monkeypatch.setattr(reader, "_hit", lambda *_args: 1)
     monkeypatch.setattr(
@@ -98,8 +98,8 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
     assert calls == [("style", True)]
     # The switch is a decision the dwell has not made yet: the target is armed, the tooltip has not
     # moved. No stub stands in for the build — nothing calls it.
-    assert reader._hover_store.current.hysteresis.word_target == 1
-    assert reader.hover == 0
+    assert reader.tooltip_controller.hover_store.current.hysteresis.word_target == 1
+    assert reader.tooltip_controller.selected == 0
 
 
 def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch):
@@ -112,7 +112,7 @@ def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatc
 
     reader.set_annotation_hover(revealed=True)
 
-    assert reader.hover == -1
+    assert reader.tooltip_controller.selected == -1
     assert redrawn == [True]
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
