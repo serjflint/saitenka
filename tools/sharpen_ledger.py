@@ -86,7 +86,7 @@ def test_attributions(root: Path) -> list[Attribution]:
     module's actionable Conformance debt.
     """
     out: list[Attribution] = []
-    for tf in sorted((root / TESTS).glob("test_*.py")):
+    for tf in sorted((root / TESTS).rglob("test_*.py")):
         try:
             tree = ast.parse(tf.read_text(encoding="utf-8"))
         except (OSError, SyntaxError):

@@ -83,9 +83,33 @@ def test_tools_edit_routes_to_full() -> None:
     assert not overlay_py
 
 
+def test_tool_test_edit_selects_the_changed_test() -> None:
+    a = _mod()
+    full, overlay_py, changed_tests = a.classify(["tool_tests/test_example.py"])
+
+    assert full == []
+    assert overlay_py == {"tool_tests/test_example.py"}
+    assert changed_tests == {"tool_tests/test_example.py"}
+
+
 def test_closure_excludes_conftest() -> None:
     # conftest sits in nearly every module's closure (it imports the god-objects); including it would
     # collapse every selection to a full run and it isn't a runnable test anyway.
     a = _mod()
     graph = {"src/saitenka/app/x.py": ["tests/test_x.py", "tests/conftest.py"]}
     assert a.closure_tests({"src/saitenka/app/x.py"}, graph) == {"tests/test_x.py"}
+
+
+def test_closure_includes_nested_application_and_tool_tests() -> None:
+    a = _mod()
+    graph = {
+        "tools/x.py": [
+            "tests/features/mining/test_x.py",
+            "tool_tests/test_x.py",
+        ]
+    }
+
+    assert a.closure_tests({"tools/x.py"}, graph) == {
+        "tests/features/mining/test_x.py",
+        "tool_tests/test_x.py",
+    }

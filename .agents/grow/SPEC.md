@@ -43,7 +43,7 @@ gaps are only **seed + ROI evidence + a held-out backtest corpus**, never the ta
 The mirror of Sharpen's anti-lobotomization gate, reversed: it proves an ADDITION adds power. A green new
 test proves nothing. An ordinary scenario/config gap clears arm 2 plus either arm 1 or arm 3; arm 4
 replaces that composition for a concurrency gap. No LLM decides the disposition. Each arm is a pure
-function over an injected primitive, unit-tested in `tools/test_grow_gate.py`.
+function over an injected primitive, unit-tested in `tool_tests/test_grow_gate.py`.
 
 | # | Arm | Proves | Mechanism |
 |---|-----|--------|-----------|
@@ -187,7 +187,7 @@ gap until the issue closes or the target symbol changes.
 
 Durable across cron runs. The gap key is **semantic**, not positional, or line-drift from unrelated edits
 would spuriously reopen a closed gap and the loop would never terminate (proven in
-`tools/grow_ledger.py`, locked by `tools/test_grow_ledger.py`):
+`tools/grow_ledger.py`, locked by `tool_tests/test_grow_ledger.py`):
 
 ```jsonc
 { "gap_id": "<hash(source, target_symbol, dimension)>",

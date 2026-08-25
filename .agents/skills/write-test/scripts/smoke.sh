@@ -9,8 +9,8 @@ fail=0
 need() { grep -rq "$1" "$ROOT/$2" || { echo "MISSING: $1  (in $2)"; fail=1; }; }
 
 # Canonical example tests referenced by the skill
-need "def test_card_data_from_token" tests/test_mining.py
-need "def test_build_note_maps_lapis_fields" tests/test_mining.py
+need "def test_card_data_from_token" tests/features/mining/test_mining.py
+need "def test_build_note_maps_lapis_fields" tests/features/mining/test_mining.py
 need "_FlakyWriteTransport" tests/test_ipc_chaos.py
 need "def test_gil_stays_disabled_after_all_imports" tests/test_ft_gil.py
 

@@ -231,7 +231,7 @@ jobs:
           uv python install ${{ matrix.py }}
           cargo test --locked
           cargo clippy --all-targets -- -D warnings
-          uv run --python ${{ matrix.py }} --with-editable . --with pytest pytest -q -m 'not integration' tests ../tools/test_libass_token_matrix.py ../tools/test_mpv_shadow_geometry.py
+          uv run --python ${{ matrix.py }} --with-editable . --with pytest pytest -q -m 'not integration' tests ../tool_tests/test_libass_token_matrix.py ../tool_tests/test_mpv_shadow_geometry.py
       - name: Run token-ID matrix
         id: token-matrix
         working-directory: libasslite
@@ -267,7 +267,7 @@ jobs:
             2>&1 | tee source-transition.log
           uv run --python ${{ matrix.py }} --with-editable . \
             --with pytest --with pytest-timeout --with pillow --with fonttools \
-            pytest -q -m integration ../tools/test_mpv_source_transition.py
+            pytest -q -m integration ../tool_tests/test_mpv_source_transition.py
       - name: Upload source/transition evidence
         if: always() && matrix.py == '3.13'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -312,7 +312,7 @@ jobs:
           set -o pipefail
           uv run --python ${{ matrix.py }} --with-editable . --with-editable .. \
             --with pytest \
-            pytest -q ../tools/test_libass_prototype_benchmark.py
+            pytest -q ../tool_tests/test_libass_prototype_benchmark.py
           uv run --python ${{ matrix.py }} --with-editable . --with-editable .. \
             python ../tools/libass_prototype_benchmark.py \
             --manifest ../tests/fixtures/libass_prototype_benchmark.json \
@@ -320,7 +320,7 @@ jobs:
             2>&1 | tee prototype-benchmark.log
           uv run --python ${{ matrix.py }} --with-editable . --with-editable .. \
             --with pytest \
-            pytest -q ../tools/test_native_subtitle_integration_benchmark.py
+            pytest -q ../tool_tests/test_native_subtitle_integration_benchmark.py
           uv run --python ${{ matrix.py }} --with-editable . --with-editable .. \
             python ../tools/native_subtitle_integration_benchmark.py \
             --manifest ../tests/fixtures/native_subtitle_integration.json \

@@ -280,7 +280,7 @@ def _changes(events: list, name: str) -> list:
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
-    """`tools/test_mpv_source_transition.py`'s `_FakeMpv` refreshes `sub-text` on every switch. The
+    """`tool_tests/test_mpv_source_transition.py`'s `_FakeMpv` refreshes `sub-text` on every switch. The
     plan that produced it assumed the opposite — that a paused mpv has no redraw and so no new
     `sub-text` — and built a whole causal story on it before anyone asked the binary."""
     proc, ipc = _two_track_mpv(tmp_path)

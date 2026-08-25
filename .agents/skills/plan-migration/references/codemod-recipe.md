@@ -46,6 +46,10 @@ The family converts together or the ratchets read the half-converted state as pr
 any census in the same commit (`poe host-arity`, `poe host-mass` auto-tighten), and let the gate's
 diff be the review of the conversion's completeness.
 
+After the zero-residue check and permanent forward contract pass, remove a one-shot transform from the
+final tree. The PR history preserves the migration; `harness.py`, `move_member.py`, and another genuinely
+reusable transform remain only when they lower a future migration's unit price.
+
 ## Soundness, before anything runs
 
 `move_member` rewrites the attribute wherever it appears, which is sound **only** when every
