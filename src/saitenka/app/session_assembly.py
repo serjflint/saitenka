@@ -65,6 +65,43 @@ class CommandRegistration:
         )
 
 
+def _validate_command_registrations(
+    commands: tuple[CommandRegistration, ...],
+    help_owner: HelpController,
+) -> None:
+    messages: set[str] = set()
+    features: dict[str, tuple[Owner, object]] = {}
+    for row in commands:
+        if not row.message:
+            raise ValueError("command message must not be empty")
+        if row.message in messages:
+            raise ValueError(f"command already registered: {row.message}")
+        messages.add(row.message)
+        identity = (row.runtime_owner, row.endpoint.owner)
+        previous = features.setdefault(row.feature, identity)
+        if previous[0] is not row.runtime_owner or previous[1] is not row.endpoint.owner:
+            raise ValueError(f"feature ownership disagrees across rows: {row.feature}")
+    help_identity = features.get("help")
+    if help_identity is None or help_identity[1] is not help_owner:
+        raise ValueError("help commands must terminate at the installed help owner")
+
+
+def _validate_stateful_registrations(
+    stateful: tuple[InstalledStatefulBinding, ...],
+    owner_plans: tuple[OwnerPlan, ...],
+) -> None:
+    plans: dict[Owner, OwnerPlan] = {}
+    for plan in owner_plans:
+        if plan.owner in plans:
+            raise ValueError(f"owner plan already registered: {plan.owner.value}")
+        plans[plan.owner] = plan
+    if {row.runtime_owner for row in stateful} != set(plans):
+        raise ValueError("owner plans and stateful bindings disagree")
+    for plan in plans.values():
+        owned = tuple(row for row in stateful if row.runtime_owner is plan.owner)
+        ordered_stateful_bindings(plan, owned)
+
+
 @dataclass(frozen=True, slots=True)
 class SessionAssembly:
     overlay: Overlay
@@ -80,32 +117,8 @@ class SessionAssembly:
     owner_plans: tuple[OwnerPlan, ...]
 
     def __post_init__(self) -> None:
-        messages: set[str] = set()
-        features: dict[str, tuple[Owner, object]] = {}
-        for row in self.commands:
-            if not row.message:
-                raise ValueError("command message must not be empty")
-            if row.message in messages:
-                raise ValueError(f"command already registered: {row.message}")
-            messages.add(row.message)
-            identity = (row.runtime_owner, row.endpoint.owner)
-            previous = features.setdefault(row.feature, identity)
-            if previous[0] is not row.runtime_owner or previous[1] is not row.endpoint.owner:
-                raise ValueError(f"feature ownership disagrees across rows: {row.feature}")
-        help_identity = features.get("help")
-        if help_identity is None or help_identity[1] is not self.help:
-            raise ValueError("help commands must terminate at the installed help owner")
-        plans: dict[Owner, OwnerPlan] = {}
-        for plan in self.owner_plans:
-            if plan.owner in plans:
-                raise ValueError(f"owner plan already registered: {plan.owner.value}")
-            plans[plan.owner] = plan
-        stateful_owners = {row.runtime_owner for row in self.stateful}
-        if stateful_owners != set(plans):
-            raise ValueError("owner plans and stateful bindings disagree")
-        for plan in plans.values():
-            owned = tuple(row for row in self.stateful if row.runtime_owner is plan.owner)
-            ordered_stateful_bindings(plan, owned)
+        _validate_command_registrations(self.commands, self.help)
+        _validate_stateful_registrations(self.stateful, self.owner_plans)
 
     @property
     def features(self) -> frozenset[str]:
