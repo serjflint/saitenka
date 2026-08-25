@@ -116,6 +116,7 @@ def test_decode_ass_matches_mpv_sub_text_for_supported_static_event() -> None:
 
 
 @pytest.mark.live
+@pytest.mark.mpv_min("0.38")  # sub-text/ass-full
 @pytest.mark.timeout(30)
 def test_mpv_ass_full_preserves_simultaneous_event_order_and_metadata() -> None:
     mpv = find_mpv(None)
@@ -139,6 +140,7 @@ def test_mpv_ass_full_preserves_simultaneous_event_order_and_metadata() -> None:
 
 @pytest.mark.parametrize(("start", "sub_delay"), [(1.5, 0.5), (0.5, -0.5)])
 @pytest.mark.live
+@pytest.mark.mpv_min("0.38")  # sub-text/ass-full
 @pytest.mark.timeout(30)
 def test_mpv_selects_active_ass_rows_on_the_delay_adjusted_subtitle_clock(
     start: float, sub_delay: float

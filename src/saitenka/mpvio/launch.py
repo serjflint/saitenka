@@ -36,9 +36,15 @@ def mpv_version_output(mpv_bin: str | os.PathLike[str]) -> str:
         return ""
 
 
-def supports_native_geometry_profile(version_output: str) -> bool:
+def parse_mpv_version(version_output: str) -> tuple[int, int] | None:
+    """`(major, minor)` out of `mpv --version` stdout, or None if it names no mpv."""
     match = re.search(r"mpv\s+v?(\d+)\.(\d+)", version_output)
-    return bool(match and tuple(map(int, match.groups())) >= NATIVE_GEOMETRY_MPV_MIN)
+    return (int(match[1]), int(match[2])) if match else None
+
+
+def supports_native_geometry_profile(version_output: str) -> bool:
+    version = parse_mpv_version(version_output)
+    return version is not None and version >= NATIVE_GEOMETRY_MPV_MIN
 
 
 @dataclass(frozen=True)

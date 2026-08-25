@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 from saitenka.mpvio.discover import find_mpv
+from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
 from saitenka.subtitles import (
     GeometryPaletteEntry,
     GeometryRequest,
@@ -35,6 +36,8 @@ from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
 
 pytestmark = [
     pytest.mark.live,
+    # PARITY below IS the native-geometry profile, so this file's floor is that profile's floor.
+    pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN),
     pytest.mark.skipif(
         not os.environ.get("SAITENKA_LIVE"),
         reason="live real-mpv test — set SAITENKA_LIVE=1; run `uv run poe smoke-live`",

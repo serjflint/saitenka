@@ -209,6 +209,7 @@ markers = [
     "integration: crosses a real boundary (subprocess / socket / filesystem); excluded from `poe test`.",
     "requires_display: needs a real GUI/display; excluded from `poe test`.",
     "e2e: full-stack end-to-end; excluded from `poe test`.",
+    "mpv_min(version): lowest mpv this test's subject exists in; skipped below it (see conftest).",
 ]
 
 # Ruff, complexipy, and the type-checkers are configured once here for all first-party Python.

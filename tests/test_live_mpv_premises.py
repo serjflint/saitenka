@@ -25,6 +25,8 @@ from pathlib import Path
 import pytest
 from live_harness import live_reader as _live_reader
 
+from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("SAITENKA_LIVE"),
     reason="live real-mpv test — set SAITENKA_LIVE=1; run `uv run poe smoke-live`",
@@ -65,6 +67,7 @@ def _bare_mpv(*args: str):
 
 
 @pytest.mark.live
+@pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
 @pytest.mark.timeout(30)
 def test_mpv_reports_every_option_the_geometry_gate_reads() -> None:
     """An option the gate names and mpv does not have reads `None`, which no row should accept and
@@ -88,6 +91,7 @@ def test_mpv_reports_every_option_the_geometry_gate_reads() -> None:
 
 
 @pytest.mark.live
+@pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
 @pytest.mark.timeout(30)
 def test_the_launch_profile_lands_on_values_the_gate_accepts() -> None:
     """`saitenka run` and the geometry gate are written by different hands against the same mpv. A

@@ -1,6 +1,7 @@
 """Make ``tests/util.py`` importable as ``util``, put ``src/`` on the path, and keep the consolidated
 dictionary DB HERMETIC: tests must never write into the user's real ``data_dir()/dictionaries.sqlite``."""
 
+import functools
 import sys
 from pathlib import Path
 
@@ -114,6 +115,41 @@ def _isolate_keyring(tmp_path, monkeypatch):
         yield
     finally:
         keyring.set_keyring(prev)
+
+
+@functools.cache
+def _running_mpv_version() -> tuple[int, int] | None:
+    """`(major, minor)` of the mpv on PATH, or None when there is none to ask."""
+    from saitenka.mpvio.discover import find_mpv
+    from saitenka.mpvio.launch import mpv_version_output, parse_mpv_version
+
+    mpv = find_mpv(None)
+    return parse_mpv_version(mpv_version_output(mpv)) if mpv else None
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Skip a live test whose mpv floor the running mpv does not meet.
+
+    CI runs the live tier against several mpv versions on purpose — the declared minimum, so a
+    regression breaking it cannot ship green against a later build, and current, so an upstream rename
+    (`sub-border-size` → `sub-outline-size` reached a tag this way) is caught. The floors are not
+    uniform: `sub-text/ass-full` arrived in 0.38, the native-geometry profile needs 0.40. Carrying the
+    version on the marker keeps each test's real requirement next to the test, so no leg needs a marker
+    expression and none of them can drift from each other.
+
+    An absent mpv is left alone — the live tier's own module-level skips own that case.
+    """
+    marker = item.get_closest_marker("mpv_min")
+    if marker is None:
+        return
+    # A tuple so a test gated by a floor the package declares can pass that constant instead of
+    # restating its digits, which would go stale the next time the floor moves.
+    floor = marker.args[0]
+    required = floor if isinstance(floor, tuple) else tuple(int(p) for p in str(floor).split("."))
+    running = _running_mpv_version()
+    if running is not None and running < required:
+        wanted = ".".join(str(part) for part in required)
+        pytest.skip(f"needs mpv >= {wanted}, running {running[0]}.{running[1]}")
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
