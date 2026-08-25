@@ -63,14 +63,18 @@ def make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
 
 
 @contextmanager
-def live_reader(*, paused: bool = True, dict_set=None):
+def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None = None):
     """A live mpv window with the demo cue loaded and a :class:`SessionController` observing it. ``paused=False``
     lets playback run so mpv's VO advances frames — required for the jank harness to see real
     ``frame-drop-count`` / ``vo-delayed-frame-count`` movement (the smoke tests keep it paused).
 
     ``dict_set`` is taken at construction, before the cue is driven, because a swap afterwards does not
     reach the cue's already-resolved entries: `replace_dictionary_set` is the async-arrival installer,
-    and only `switch_to` pairs it with the invalidation that clears them."""
+    and only `switch_to` pairs it with the invalidation that clears them.
+
+    ``config_dir`` replaces the default ``--no-config`` with a real mpv config directory, for the one
+    question that cannot be asked without a user's own ``input.conf`` present. Everything else wants
+    ``--no-config``: a developer's own ``mpv.conf`` would answer a different question."""
     from saitenka.app.session_controller import SessionController
     from saitenka.app.session_routes import install_session_runtime
     from saitenka.mpvio.discover import find_mpv
@@ -92,7 +96,7 @@ def live_reader(*, paused: bool = True, dict_set=None):
             "--sub-visibility=no",
             "--osd-level=1",
             "--pause" if paused else "--loop-file=inf",
-            "--no-config",
+            f"--config-dir={config_dir}" if config_dir else "--no-config",
             f"--sub-file={srt}",
             str(clip),
         ]

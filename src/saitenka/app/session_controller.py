@@ -3241,9 +3241,9 @@ class SessionController:
         dropped with only a log line, i.e. a dead shortcut, and the inline-completing fake cannot
         reproduce it. One section is one command with one outcome.
 
-        Default (not forced) priority, which is what mpv's own `keybind` gives, so a user's
-        input.conf or a rival script shadows these exactly as before. The "mouse" scope stays
-        separate and FORCED — it has to outrank other scripts, and it is enabled on demand.
+        FORCED, so a user's input.conf does not shadow these — see `bindings.GLOBAL_SECTION` for why
+        `keybind`'s own priority was the F1 regression. The "mouse" scope stays a separate forced
+        section because it is enabled on demand rather than for the whole session.
         """
         # active_bindings no longer gates on `requires` — bind the anki/tts actions even when the dep
         # isn't up YET (attach mode loads Anki async, after this runs, and we never re-register). The
