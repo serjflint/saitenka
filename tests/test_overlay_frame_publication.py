@@ -1,16 +1,12 @@
-"""A frame handed to ``overlay-add`` must be immutable for as long as mpv can still read it.
+"""A frame handed to ``overlay-add`` must stay readable, and unchanged, while mpv may read it.
 
-mpv reads the named file *inside* `cmd_overlay_add`, so anything that mutates a published path races
-that read, and a pagein against a file mid-rewrite is a SIGBUS inside mpv — not an error we can see.
-Two shipped crashes faulted in exactly that frame.
+mpv reads the named file *inside* `cmd_overlay_add`, and a pagein against a file mid-rewrite is a
+SIGBUS inside mpv — not an error we can see. Two shipped crashes faulted in that frame.
 
-Each frame is published at a *fresh* path, so nothing is ever written over a file mpv may hold. That
-buys the immutability outright, and it is also what makes publication work on Windows, where
-`os.replace` onto a file another process holds open raises `PermissionError` (WinError 5). The cost
-is that old frames must be retired on a schedule instead of implicitly — so the oracles here are
-about *when* a path stops existing, which is the only way this design can break.
+Publishing to a fresh path each time buys immutability outright, so what these oracles test is *when*
+a path stops existing: retirement is the only way the design can now break.
 
-`Path.open()` below is the subject, not a way to read a file: the assertion is about what a
+`Path.open()` below is the subject, not a way to read a file — the assertion is about what a
 descriptor opened *before* the later writes still yields, which `read_bytes` (FURB101) cannot express.
 """
 
@@ -67,14 +63,12 @@ def test_the_path_named_in_the_last_overlay_add_is_still_readable_after_the_next
 def _record_published_paths(overlay: Overlay) -> list[pathlib.Path]:
     """Every path production hands out for a frame, in order.
 
-    Covers the `show_bgra` route only: it hooks `_new_frame_path`, which `_write_frame` calls, while
-    `prepare_rgba` allocates its own tempfile inside `_prepare`. Both callers below publish that way;
-    a lifecycle publication would be invisible here rather than counted.
+    Hooks `_new_frame_path`, so it sees the `show_bgra` route only — `prepare_rgba` allocates its
+    own tempfile and would be invisible here rather than counted.
 
-    Deliberately not `_frame_history`: `_sweep` truncates that list whether or not it deleted
-    anything, so counting it cannot distinguish "retired" from "leaked". Deliberately not a glob of
-    the temp directory either — another worker publishing to the same overlay id writes files with
-    the same name shape into the same directory.
+    Not `_frame_history`: `_sweep` truncates that list whether or not it deleted anything, so it
+    cannot distinguish "retired" from "leaked". Not a temp-directory glob either — a parallel worker
+    publishing to the same overlay id writes the same name shape into the same directory.
     """
     produced: list[pathlib.Path] = []
     issue = overlay._new_frame_path
@@ -111,12 +105,11 @@ def test_retirement_is_bounded_even_while_the_overlay_is_hidden():
 
 @pytest.mark.timeout(30)
 def test_a_committed_frame_is_not_retired_under_an_in_flight_repaint():
-    """`commit_prepared` retires the frame it replaces — which is the one a concurrent `repaint` is
-    most likely to be carrying, since `repaint` re-issues `_live`'s tail. Deleting it outright made
-    the in-flight `overlay-add` name a file that no longer existed.
+    """`commit_prepared` retires the frame it replaces, which is the one a concurrent `repaint` is
+    most likely to be carrying.
 
-    Drives the lifecycle path (`prepare_rgba`/`commit_prepared`), not `show_bgra`: they are separate
-    publication routes and only the latter was covered.
+    Drives the lifecycle route (`prepare_rgba`/`commit_prepared`); the rest of this file drives
+    `show_bgra`, and the two publish differently.
     """
     released = threading.Event()
     observed: list[bool] = []
@@ -158,13 +151,11 @@ def test_a_committed_frame_is_not_retired_under_an_in_flight_repaint():
 
 
 def test_the_oracle_catches_retirement_one_step_too_early():
-    """Negative control. Retention of 1 — retiring the previous frame the moment a new one is
-    published — is the failure the two tests above exist to catch, so they must be able to see it.
+    """Negative control: retiring the previous frame the moment a new one is published is the failure
+    the two tests above exist to catch, so they must be able to see it.
 
-    Deliberately holds no descriptor on the frame it expects to disappear. An earlier version did,
-    to show POSIX still reads an unlinked-but-open fd, and it failed on Windows for exactly the
-    reason this whole change exists: a delete is refused while anyone holds the file open, so the
-    test's own handle kept the file alive and the control could not see its own failure mode.
+    Holds no descriptor on the frame it expects to disappear — on Windows a delete is refused while
+    anyone holds the file open, so the test's own handle would keep it alive.
     """
     overlay = Overlay(util.FakeIPC())
     overlay.show_bgra(_frame(1), oid=OverlayId.TIP)
@@ -180,10 +171,9 @@ def test_the_oracle_catches_retirement_one_step_too_early():
 
 
 def test_closing_a_shifted_overlay_removes_the_ids_it_actually_drew():
-    """`close` iterates `_files`, which is keyed by PHYSICAL id, so passing each back through `hide`
-    shifted it a second time: with `overlay_id_base = 10` Saitenka asked mpv to remove 19 and 20
-    while its own overlays sat at 10 and 11 — they stay drawn after detach, and their frames stay on
-    disk. Invisible at the default base, where the shift is a no-op."""
+    """`_files` is keyed by PHYSICAL id, so a `close` that sends each back through `hide` shifts it
+    twice: at `overlay_id_base = 10` it removes 19 and 20 while the overlays sit at 10 and 11, leaving
+    them drawn after detach and their frames on disk. Invisible at the default base."""
     removed: list[int] = []
 
     class RecordingIPC(util.FakeIPC):
@@ -245,13 +235,12 @@ def _publish_concurrently(overlay: Overlay, frame: np.ndarray, *, publishers: in
 
 
 class _ReadingIPC(util.FakeIPC):
-    """Reads the named frame from *inside* `overlay-add`, the way mpv does, and records every add
-    that named a file it could not read or whose bytes were wrong.
+    """Reads the named frame from *inside* `overlay-add`, the way mpv does, recording every add that
+    named a file it could not read or whose bytes were wrong.
 
-    The sleep is the point, not padding: mpv's read happens inside a command that takes an IPC
-    round-trip, and with an instant fake the window a publication has to survive never opens. The
-    same assertions against an instant fake score zero failures on an implementation that retires
-    frames out from under an in-flight add.
+    The sleep is the subject, not padding: mpv's read sits inside an IPC round-trip, and against an
+    instant fake these assertions score zero failures on an implementation that retires a frame under
+    an in-flight add.
     """
 
     delay = 0.0005
@@ -276,9 +265,8 @@ class _ReadingIPC(util.FakeIPC):
 
 @pytest.mark.timeout(30)
 def test_no_overlay_add_ever_names_a_frame_that_was_retired():
-    """Two upload threads on one oid plus a repainting reader — the shape that makes retirement
-    racy. `_live[oid]` is assigned only after `overlay-add` returns, so with two publishers it lags
-    the history head by an unbounded number of frames; a retention count alone cannot cover that."""
+    """Two upload threads on one oid plus a repainting reader — the shape that makes retirement racy,
+    and the one a single publisher cannot reach."""
     frame = _frame(4, size=32)
     ipc = _ReadingIPC(frame.nbytes)
     overlay = Overlay(ipc)

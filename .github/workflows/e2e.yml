@@ -99,20 +99,16 @@ jobs:
 
       # Real per-OS boundary, no GUI: integration (real socket/subprocess) + windows_sim executing on
       # the real kernel. This is the leg that catches the named-pipe / Scripts-vs-bin class Linux can't.
-      # `--no-sync`: the bundle is pip-installed on top of the locked env. Today's uv syncs
-      # inexactly and would leave it, so this pins that rather than relying on it — only an exact
-      # `uv sync` prunes. Note `poe smoke-live` runs its own nested `uv run`, which this does not reach.
+      # `--no-sync` pins the pip-installed bundle rather than relying on `uv run` syncing inexactly.
+      # Does not reach `poe smoke-live`'s own nested `uv run`.
       - name: Real-boundary + per-OS suite
         run: uv run --no-sync pytest -q -m "not (slow or requires_display or e2e or live)"
 
-      # The GUI tier moved to `e2e-gui` below, which runs it against several mpv versions rather than
-      # against whatever the runner image happens to ship.
+      # The GUI tier is `e2e-gui` below, per mpv version.
 
-  # The live tier, once per mpv version we make a claim about. Two floors, because a regression that
-  # breaks a declared minimum would otherwise ship green against a later mpv; plus current, because
-  # only that catches upstream changing under us (`sub-border-size` -> `sub-outline-size` reached a
-  # tag exactly this way). Tests whose subject postdates the leg's mpv skip themselves on the
-  # `mpv_min` marker, so every leg runs the identical command.
+  # The live tier, once per mpv version we claim to support: a regression breaking a declared floor
+  # would otherwise ship green against a later mpv, and only a current leg catches upstream changing
+  # under us (`sub-border-size` -> `sub-outline-size` reached a tag that way).
   e2e-gui:
     if: github.event_name != 'pull_request' && inputs.revision == ''
     name: e2e-gui (mpv ${{ matrix.label }})
@@ -129,8 +125,7 @@ jobs:
             runs-on: ubuntu-24.04
             expect: "0.37"
             appimage: ""
-          # `NATIVE_GEOMETRY_MPV_MIN`. No distribution ever shipped an 0.39, so 0.40 is the earliest
-          # release this floor can be pinned at; 30 commits past the tag is the closest build there is.
+          # `NATIVE_GEOMETRY_MPV_MIN`; 30 commits past the tag is the closest published build.
           - label: "0.40 floor"
             runs-on: ubuntu-24.04
             expect: "0.40"
@@ -187,8 +182,7 @@ jobs:
           ./mpv.AppImage --appimage-extract >/dev/null
           sudo ln -sf "$PWD/squashfs-root/AppRun" /usr/local/bin/mpv
 
-      # A leg that silently received the wrong mpv would pass vacuously — every version-specific test
-      # skips itself, so green would mean nothing. Assert the version, and record it either way.
+      # Every version-specific test skips itself, so a leg handed the wrong mpv would pass vacuously.
       - name: Confirm the mpv version under test
         env:
           EXPECT: ${{ matrix.expect }}
@@ -212,9 +206,8 @@ jobs:
           uv pip install --no-deps --only-binary libasslite-bundle
           --no-sources-package libasslite-bundle libasslite-bundle==0.1.3
 
-      # `poe smoke-live` selects by path, not by marker: the live tests are gated by an env skipif, so
-      # a `-m` expression would match zero tests. Every leg runs this identical command — which tests
-      # execute is decided per test by `mpv_min`, not per leg by a selection expression.
+      # Identical on every leg: which tests run is decided per test by `mpv_min`, not by selection
+      # here. (`smoke-live` selects by path — the live tests are env-gated, so `-m` matches nothing.)
       - name: GUI tier (Xvfb, real mpv)
         run: xvfb-run -a uv run --no-sync poe smoke-live
 

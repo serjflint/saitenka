@@ -12,9 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import os
 
-#: The lowest mpv the native-geometry profile is verified against. 0.39 was the declared floor but no
-#: distribution ever shipped it (noble 0.37, plucky/questing 0.40, Debian 0.35 → 0.40), so nothing
-#: could test the claim; 0.40 is the earliest release CI can actually pin and prove.
+#: The lowest mpv the native-geometry profile is verified against. Not 0.39: no distribution ever
+#: shipped one (Ubuntu 0.37 → 0.40, Debian 0.35 → 0.40), so that floor could not be tested at all.
 NATIVE_GEOMETRY_MPV_MIN = (0, 40)
 
 

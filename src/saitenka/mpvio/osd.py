@@ -103,9 +103,7 @@ class _InteractionPresenter:
             return oid, sequence, operation
 
 
-#: Frames kept per overlay id. Two — the one just published and the one `_live` still names until
-#: `overlay-add` returns. The correctness comes from `_in_flight` (see :meth:`Overlay._sweep`), not
-#: from this number; it only spares the common case a needless hold.
+#: Frames kept per overlay id. An optimisation, not the guarantee — :meth:`Overlay._sweep` owns that.
 RETAINED_FRAMES = 2
 
 
@@ -117,10 +115,9 @@ def _tail_path(tail: tuple) -> Path:
 def _discard(path: Path) -> bool:
     """Delete a frame we are done with; report whether it is gone.
 
-    Windows refuses to delete a file another process still holds open, and mpv holds a frame open
-    across `overlay-add`. That is a `PermissionError` — which `missing_ok=True` does NOT cover, since
-    it only suppresses `FileNotFoundError`. A frame we cannot delete yet is a file to retry, not an
-    error to raise at whoever happened to publish next.
+    Windows refuses to delete a file mpv still holds open. That is a `PermissionError`, which
+    `missing_ok=True` does NOT cover — it only suppresses `FileNotFoundError` — and it is a file to
+    retry rather than an error to raise at whoever published next.
     """
     try:
         path.unlink(missing_ok=True)
@@ -193,11 +190,7 @@ class Overlay:
         self._interaction_oids: set[int] = set()
         self.lifecycle_oids: set[int] = set()
         self._staged_lifecycle_paths: set[Path] = set()
-        #: One lock over the path maps — `_files`, `_frame_history`, `_in_flight`,
-        #: `_pending_deletion`, `_live`. `_files` used to be written under `_frame_lock` in
-        #: `_write_frame`, under `_lifecycle_lock` in the commit/remove paths, and unlocked in `hide`.
-        #: `visible` and `ops` are deliberately NOT covered: they are a flag and a counter no
-        #: retirement decision reads.
+        #: Guards the path maps below plus `_live`. NOT `visible`/`ops` — no retirement reads them.
         self._state_lock = threading.Lock()
         self._compat_effect_id = 1_000_000
 
@@ -332,21 +325,13 @@ class Overlay:
         return {"error": "success"}
 
     def _write_frame(self, oid: int, data: bytes) -> Path:
-        """Publish ``data`` at a FRESH path. Nothing is ever written over a file mpv may be reading.
+        """Publish ``data`` at a FRESH path, so nothing is written over a file mpv may be reading.
 
         mpv reads the named file **inside** `overlay-add` (`cmd_overlay_add` → `_platform_memmove`,
-        the frame both SIGBUS reports fault in). An in-place rewrite races that read, and a pagein
-        against a file being truncated is a bus error inside mpv rather than an error we can observe.
-        Publishing by `os.replace` onto one stable path per oid fixed that on POSIX but not on
-        Windows, where replacing a file another process holds open without FILE_SHARE_DELETE raises
-        `PermissionError` — and the share mode belongs to mpv, so we cannot ask for it.
+        the frame both SIGBUS reports fault in). Neither a rewrite nor a rename onto that path is
+        safe: the first truncates under mpv's pagein, the second is refused while mpv holds the file.
 
-        A new path per frame has neither problem: the old inode is never touched, and no rename lands
-        on a live file. What it costs is that frames must now be retired deliberately — see
-        :meth:`_sweep`, which is where this design can actually break.
-
-        Cost is not a reason to prefer the old form: a fresh inode per frame measured at 0.4 ms
-        against 0.5 ms for reusing one, for a 1.1 MB payload.
+        The cost is that frames must then be retired deliberately — :meth:`_sweep`.
         """
         path = self._new_frame_path(oid)
         try:
@@ -357,10 +342,8 @@ class Overlay:
         with self._state_lock:
             self._frame_history.setdefault(oid, []).append(path)
             self._files[oid] = path
-            # Held on the CALLER's behalf, released once it has assigned `_live`. A hold that lasted
-            # only for `overlay-add` leaves a gap: `_live` is written after the command returns, so a
-            # second publisher on this oid can sweep the path in between and leave `_live` naming a
-            # file that is gone. `show`/`show_bgra` release it in a `finally`.
+            # Held for the caller, who releases in a `finally` once it has assigned `_live` — a
+            # hold ending with `overlay-add` leaves that assignment unprotected.
             self._hold([path])
         self._sweep(oid)
         return path
@@ -372,20 +355,16 @@ class Overlay:
             return Path(staged.name)
 
     def _sweep(self, oid: int, retain: int | None = None) -> None:
-        """Delete this oid's frames beyond the retention window, plus anything a previous sweep could
-        not delete.
+        """Delete this oid's retired frames, plus anything an earlier sweep could not.
 
-        A path is kept while some command still names it. A count alone would only *narrow* the
-        window — the same objection that rejected an alternating pair of slots — because `repaint`
-        re-issues `_live`'s tail from another thread and `_live` is assigned only after `overlay-add`
-        returns. `_in_flight` closes it: every issuer registers the path it is about to name under the
-        same lock acquisition that reads it, so retirement can never pull a path out from under a
-        command already carrying it.
+        A frame goes only when nothing names it: not `_live`, and not an in-flight command. Both are
+        needed. `_live[oid]` is assigned only after `overlay-add` returns, so with two publishers on
+        one oid it lags the newest frame without bound — a retention count cannot cover that. And a
+        hold taken when a command starts cannot save a path already deleted before it, which is why
+        `_in_flight` registration happens under the same lock acquisition that reads `_live`.
         """
-        # Resolved per call, not as a default argument: a default binds RETAINED_FRAMES at import, so
-        # anything varying the constant would silently keep sweeping at the original depth.
-        # `max(1, ...)`: `history[:-0]` is empty and `history[-0:]` is the whole list, so a literal
-        # zero would retain everything — the opposite of what asking for none means.
+        # Not a default argument, which would bind the constant at import. `max(1, …)` because
+        # `history[:-0]` is empty: a literal zero would retain everything.
         retain = max(1, RETAINED_FRAMES if retain is None else retain)
         with self._state_lock:
             history = self._frame_history.get(oid)
@@ -393,10 +372,6 @@ class Overlay:
             if history is not None:
                 stale |= set(history[:-retain])
                 self._frame_history[oid] = history[-retain:]
-            # Spared: paths a command is currently carrying, and paths `_live` still names. The
-            # second is not redundant — `_live[oid]` is assigned only after `overlay-add` returns, so
-            # with two publishers on one oid it can lag several frames behind the history head. A
-            # hold taken at repaint time cannot save a path that was already deleted before it.
             held = {path for path in stale if path in self._in_flight} | {
                 path for path in stale if path in self._live_paths()
             }
@@ -443,9 +418,8 @@ class Overlay:
     def _reissue_live(self) -> int:
         """Re-send every live tail; returns how many went out.
 
-        The snapshot of ``_live`` and the hold on the paths it names happen under ONE lock
-        acquisition. Reading first and registering second would leave exactly the window this is
-        meant to close.
+        Snapshot and hold take ONE lock acquisition: reading first and registering second reopens the
+        window :meth:`_sweep` closes.
         """
         with self._state_lock:
             pending = list(self._live.items())
@@ -463,12 +437,10 @@ class Overlay:
         self._sweep(oid)
 
     def _retire(self, oid: int, path: Path | None) -> None:
-        """Retire one frame through the same guards a swept frame gets.
+        """Queue one frame for retirement, so it goes through :meth:`_sweep`'s guards.
 
-        Deleting it outright is what `commit_prepared` / `commit_remove` / `hide` used to do, and it
-        made `_sweep`'s guarantee false: the path they drop is the LAST published one, which is
-        exactly the path a concurrent `repaint` is most likely to be carrying. Queue it instead, so
-        it goes when nothing names it.
+        The frame a caller drops is the last published one — the path a concurrent `repaint` is most
+        likely to be carrying — so deleting it directly is never safe.
         """
         if path is None:
             return
