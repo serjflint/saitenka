@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787643272424,
+  "lastUpdate": 1787647240566,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10031,6 +10031,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.471658,
             "range": "3 replicas; min 1.09891; max 1.52868; MAD 0.05702; worst 1.52868",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bf4f28271f3670f46224d3abb5bd13663232ad13",
+          "message": "Merge pull request #436 from serjflint/fix/e2e-libass-runtime\n\nfix(ci): green E2E, with a leg per declared mpv floor",
+          "timestamp": "2026-08-25T13:39:15+05:00",
+          "tree_id": "fb7db7d30331b83f7c4d2e80735336d51e0d3c91",
+          "url": "https://github.com/serjflint/saitenka/commit/bf4f28271f3670f46224d3abb5bd13663232ad13"
+        },
+        "date": 1787647239594,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.359901,
+            "range": "3 replicas; min 4.19892; max 6.61952; MAD 0.259616",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.767313,
+            "range": "3 replicas; min 5.80103; max 10.0756; MAD 1.30828; worst 10.0756",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.476743,
+            "range": "3 replicas; min 12.8653; max 20.4379; MAD 1.96112",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.911607,
+            "range": "3 replicas; min 15.0017; max 20.5771; MAD 1.66553; worst 20.5771",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 22.186194,
+            "range": "3 replicas; min 15.5529; max 36.1627; MAD 6.63326",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.13293,
+            "range": "3 replicas; min 0.081801; max 0.168997; MAD 0.036067; worst 0.168997",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.022738,
+            "range": "3 replicas; min 39.8414; max 129.68; MAD 4.18133; worst 129.68",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.63825,
+            "range": "3 replicas; min 2.90668; max 146.238; MAD 0.731568; worst 146.238",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.379737,
+            "range": "3 replicas; min 0.960575; max 64.0885; MAD 0.419162; worst 64.0885",
             "unit": "ms"
           }
         ]
