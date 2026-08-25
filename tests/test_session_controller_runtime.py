@@ -173,30 +173,51 @@ def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request
     ]
 
 
-def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
+def test_gateway_translates_adjacent_scroll_messages_into_one_command():
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
+    commands: list[object] = []
+
+    try:
+        ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
+        ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
+
+        ipc.receive_session(0.0, commands.append)
+
+        assert commands == [UserCommand(SCROLL_UP_MSG, command_id=1, coalesced_ids=(0,))]
+    finally:
+        gateway.close()
+
+
+def test_reader_finishes_every_command_folded_into_a_scroll(request):
+    ipc = FakeIPC()
     reader = create_session_controller(ipc)
+    request.addfinalizer(reader.close)
     handled: list[str] = []
     spec = CommandSpec(SCROLL_UP_MSG, Owner.INTERACTION, requires_cue=False)
     reader.commands = CommandExecutor(
         {SCROLL_UP_MSG: lambda: handled.append("scroll")},
         policy=CommandPolicy((spec,)),
     )
-    try:
-        ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
-        ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
 
-        reader._drain_events()
+    reader._handle(UserCommand(SCROLL_UP_MSG, command_id=1, coalesced_ids=(0,)))
 
-        assert handled == ["scroll"]
-        assert gateway.snapshot.command_outcomes == 2
-    finally:
-        # Both own threads. Leaking a SessionController and a gateway per run is survivable alone and is not
-        # survivable at `-n auto`, where the accumulated lanes exhaust the thread pool and this test
-        # fails somewhere unrelated to what it asserts.
-        reader.close()
-        gateway.close()
+    assert handled == ["scroll"]
+    assert ipc.runtime_outcomes == [
+        CommandHandled(
+            SCROLL_UP_MSG,
+            Owner.INTERACTION,
+            CommandOutcome.EXECUTED,
+            command_id=1,
+        ),
+        CommandHandled(
+            SCROLL_UP_MSG,
+            Owner.INTERACTION,
+            CommandOutcome.SUPPRESSED,
+            command_id=0,
+            reason=CommandReason.COALESCED,
+        ),
+    ]
 
 
 def test_composition_threads_grouped_optional_services(request):
