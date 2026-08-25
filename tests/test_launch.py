@@ -97,8 +97,10 @@ def test_native_visible_launch_locks_the_proved_mpv_profile_before_user_override
 
 
 def test_native_geometry_mpv_version_floor() -> None:
-    assert supports_native_geometry_profile("mpv v0.39.0")
+    assert supports_native_geometry_profile("mpv v0.40.0")
     assert supports_native_geometry_profile("mpv 0.41.0")
+    # 0.39 was the declared floor until nothing could test it — no distribution ever shipped it.
+    assert not supports_native_geometry_profile("mpv v0.39.0")
     assert not supports_native_geometry_profile("mpv v0.38.0")
     assert not supports_native_geometry_profile("mpv.net")
 

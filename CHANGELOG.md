@@ -7,6 +7,14 @@ logs.
 
 ## [Unreleased]
 
+### Changed
+
+- **Native-visible subtitle geometry now requires mpv ≥ 0.40, up from ≥ 0.39.** The old floor was a
+  claim nothing could check: no distribution ever shipped an mpv 0.39 (Ubuntu went 0.37 → 0.40,
+  Debian 0.35 → 0.40), so there was no binary to test the declared minimum against. 0.40 is the
+  earliest release CI can pin and prove. The regular overlay path is unaffected and still supports
+  mpv ≥ 0.37.
+
 ## [4.1.0] - 2026-08-24
 
 ### Changed

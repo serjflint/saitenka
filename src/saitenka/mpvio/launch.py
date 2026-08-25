@@ -12,7 +12,28 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import os
 
-NATIVE_GEOMETRY_MPV_MIN = (0, 39)
+#: The lowest mpv the native-geometry profile is verified against. 0.39 was the declared floor but no
+#: distribution ever shipped it (noble 0.37, plucky/questing 0.40, Debian 0.35 → 0.40), so nothing
+#: could test the claim; 0.40 is the earliest release CI can actually pin and prove.
+NATIVE_GEOMETRY_MPV_MIN = (0, 40)
+
+
+def mpv_version_output(mpv_bin: str | os.PathLike[str]) -> str:
+    """`mpv --version` stdout, or "" if it cannot be asked. The full text, since that is what
+    :func:`supports_native_geometry_profile` parses."""
+    import subprocess
+
+    try:
+        return subprocess.run(
+            [str(mpv_bin), "--version"],
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 
 def supports_native_geometry_profile(version_output: str) -> bool:
