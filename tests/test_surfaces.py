@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 import util
 
-from saitenka.app import sidebar, surfaces
+from saitenka.app import sidebar
 from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.session_controller import SessionController
 from saitenka.app.subselect import SubtitleCandidate
@@ -155,12 +155,12 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
     candidate = SubtitleCandidate(
         "provider", "name", 1, match=False, download=lambda: ("path", "ok")
     )
-    reader._picker_store.dispatch(events.PickerOpened())
-    reader._picker_store.dispatch(
+    reader.picker_controller.store.dispatch(events.PickerOpened())
+    reader.picker_controller.store.dispatch(
         events.PickerListed(reader.sub_picker.generation, ListingResult((candidate,) * 20, ()))
     )
-    reader.interaction.picker_panel.rect = (0, 0, 100, 100)
-    monkeypatch.setattr(reader, "redraw_sub_picker", lambda: None)
+    reader.picker_controller.panel.rect = (0, 0, 100, 100)
+    monkeypatch.setattr(reader.picker_controller, "redraw", lambda: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
@@ -169,9 +169,9 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
 
 def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     reader = SessionController(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
-    reader._sidebar_store.dispatch(events.SidebarShown(active=0, capacity=10))
-    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
-    reader.interaction.sidebar_panel.total = 100
+    reader.sidebar_controller.store.dispatch(events.SidebarShown(active=0, capacity=10))
+    reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
+    reader.sidebar_controller.panel.total = 100
     monkeypatch.setattr(sidebar, "draw", lambda _view: None)
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
@@ -179,47 +179,10 @@ def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     assert reader.sidebar.scroll == runtime_sidebar.ROWS_PER_WHEEL_STEP
 
 
-def test_the_registry_reads_shown_ness_without_a_reader() -> None:
-    """Occlusion is answerable from the INTERACTION context alone — no host anywhere in the chain.
-
-    `state_of` used to take the whole `SessionController` to return one field, and because `SurfaceSpec` is one
-    shared signature, every accessor plus `captures` and `wants_mouse_capture` was a host-taking row
-    for it. Gathering the five surface states onto `InteractionContext` converted all of them at once.
-    Constructing the context directly is the proof: if any hook still reached past it, this cannot run.
-    """
-    from saitenka.app.card_preview import PreviewPanel
-    from saitenka.app.popups import TooltipState
-    from saitenka.app.reader_context import InteractionContext
-    from saitenka.app.sidebar import SidebarPanel
-    from saitenka.app.sub_picker import PickerPanel
-    from saitenka.runtime.interaction_slice import (
-        HelpStore,
-        PickerStore,
-        PreviewStore,
-        SidebarStore,
-    )
-    from saitenka.runtime.jobs import NoSessionRuntime
-
-    class TooltipOwner:
-        def __init__(self) -> None:
-            self.state = TooltipState()
-
-    interaction = InteractionContext()
-    # Two of the five are slice features now, so the context is given their stores rather than
-    # their states — and `NoSessionRuntime` is how a transport-less stand-in says "no reactor here".
-    interaction.help_store = HelpStore(NoSessionRuntime())
-    interaction.picker_store = PickerStore(NoSessionRuntime())
-    interaction.picker_panel = PickerPanel()
-    interaction.sidebar_store = SidebarStore(NoSessionRuntime())
-    interaction.sidebar_panel = SidebarPanel()
-    interaction.preview_store = PreviewStore(NoSessionRuntime())
-    interaction.preview_panel = PreviewPanel()
-    interaction.tooltip = TooltipOwner()
-
+def test_the_registry_reads_shown_ness_from_feature_owners() -> None:
     reader = SessionController(_FakeIPC())
-    reader.interaction = interaction
-    router = surfaces.build_surface_router(reader.help_controller, interaction)
+    router = reader.surface_router
     assert router.wants_mouse_capture() is False
 
-    interaction.sidebar_store.dispatch(events.SidebarShown(active=0, capacity=10))
+    reader.sidebar_controller.store.dispatch(events.SidebarShown(active=0, capacity=10))
     assert router.wants_mouse_capture() is True

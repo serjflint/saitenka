@@ -41,6 +41,18 @@ def test_assembly_derives_help_inventory_from_installed_command_rows():
     )
 
 
+def test_assembly_constructs_surface_owners_from_registered_state_factories():
+    assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
+    bindings = {binding.feature: binding for binding in assembly.stateful}
+
+    assert assembly.picker.store.current == bindings["subtitle-picker"].initial().picker
+    assert assembly.sidebar.store.current == bindings["sidebar"].initial().sidebar
+    assert assembly.preview.store.current == bindings["card-preview"].initial().preview
+    assert assembly.picker.surface_binding().state_of() is assembly.picker.state
+    assert assembly.sidebar.surface_binding().state_of() is assembly.sidebar.state
+    assert assembly.preview.surface_binding().state_of() is assembly.preview.state
+
+
 def test_assembly_rejects_duplicate_command_messages():
     assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
 

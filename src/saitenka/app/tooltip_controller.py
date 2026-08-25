@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.help_controller import TooltipKeyContext
     from saitenka.app.popups import Panel, WordLookup
+    from saitenka.app.surfaces import SurfaceSpec
     from saitenka.app.tooltip_panel import PanelKey, PanelPorts
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
@@ -100,6 +101,19 @@ class TooltipController:
     @property
     def state(self) -> TooltipState:
         return self._state
+
+    def surface_state(self) -> TooltipState:
+        return self.state
+
+    def surface_binding(self) -> SurfaceSpec:
+        from saitenka.app.surfaces import SurfaceSpec, _tip_click, _tip_scroll
+
+        return SurfaceSpec(
+            "tooltip",
+            state_of=self.surface_state,
+            on_click=_tip_click,
+            scroll=_tip_scroll,
+        )
 
     @property
     def metadata(self) -> hover_metadata.InteractionMetadataState:

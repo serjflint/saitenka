@@ -1,9 +1,8 @@
 """Card preview UI: verify a mined (or already-in-deck) card's expression/reading/image/audio/glosses
 before or after mining.
 
-Mining itself (Anki note creation, media capture, provenance/tags) lives in :class:`~saitenka.app.miner.Miner`
-— this module is the SessionController-side glue for one INTERACTION surface: rendering the preview panel and
-handling clicks on it (dismiss / zoom / play). The ⊕→✓ feedback is
+Mining itself (Anki note creation, media capture, provenance/tags) lives in :class:`~saitenka.app.miner.Miner`.
+This module renders the preview owner's panel and handles its clicks (dismiss / zoom / play). The ⊕→✓ feedback is
 :mod:`~saitenka.app.mined_feedback`; it writes a session fact and redraws the popups, which this
 surface is not one of.
 
@@ -40,20 +39,17 @@ if TYPE_CHECKING:
     from saitenka.app.card_preview import PreviewPanel
     from saitenka.app.config import KeyOptions
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
-    from saitenka.app.reader_context import InteractionContext
+    from saitenka.app.preview_controller import PreviewController
     from saitenka.app.tokenize import Token
 
 
 @dataclass(frozen=True, slots=True)
 class PreviewPorts:
-    """What the card-preview surface draws on, and what a click on it can do.
+    """The preview owner, physical sinks, and per-turn facts used by its UI operations."""
 
-    Cut by owner like the surface registry's ports: the INTERACTION state (the preview itself, and
-    the help/tooltip whose key ownership a dismiss has to respect), the display it blits to, and
-    the one act a button performs.
-    """
-
-    interaction: InteractionContext
+    preview: PreviewController
+    help_open: bool
+    tip_keys_bound: bool
     surfaces: LifecycleSurfaces
     osd: tuple[int, int]
     #: The tooltip's width, which the preview matches so the two read as one card at one size.
@@ -121,7 +117,7 @@ def footer(deck: str | None, model: str | None, provenance: str) -> str:
 def preview_mined(
     ports: PreviewPorts, source: CardSource, card, tok, video, status: str = "mined"
 ) -> None:
-    panel = ports.interaction.preview_panel
+    panel = ports.preview.panel
     img = None
     if panel.last_jpg and Path(panel.last_jpg).exists():
         img = Image.open(panel.last_jpg)
@@ -242,25 +238,25 @@ def _stop_preview_audio(preview: PreviewPanel) -> None:
 def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:
     # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
     # replay (P) / a new mine silences any clip still playing
-    _stop_preview_audio(ports.interaction.preview_panel)
-    ports.interaction.preview_store.dispatch(events.PreviewShown(pv, audio_path))
-    render_preview(ports.interaction, ports.surfaces, ports.osd, ports.tip_width)
+    _stop_preview_audio(ports.preview.panel)
+    ports.preview.store.dispatch(events.PreviewShown(pv, audio_path))
+    render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width)
     _grab_preview_keys(ports.ipc, active_bindings(ports.keys, "preview"))
 
 
 def render_preview(
-    interaction: InteractionContext, surfaces, osd: tuple[int, int], tip_width: int
+    preview: PreviewController, surfaces, osd: tuple[int, int], tip_width: int
 ) -> None:
     """Blit the card preview and record where each of its buttons landed.
 
     The slice says what to draw and at what magnification; the panel is where the answer goes, and
     it is the object rather than a snapshot because the rects have to survive the call.
     """
-    shown = interaction.preview
+    shown = preview.state
     if shown.content is None:
         return
     pv = cast("PreviewData", shown.content)
-    panel = interaction.preview_panel
+    panel = preview.panel
     pr = render_card_preview(pv, width=max(440, tip_width), zoom=shown.zoom)
     px, py = round(osd[0] * 0.03), round(osd[1] * 0.06)
     surfaces.present(pr.image, px, py, oid=OverlayId.PREVIEW)
@@ -277,22 +273,22 @@ def render_preview(
 
 def hide_preview(ports: PreviewPorts) -> None:
     # every dismiss path (✕ / Esc / new-cue) funnels here
-    _stop_preview_audio(ports.interaction.preview_panel)
+    _stop_preview_audio(ports.preview.panel)
     ports.surfaces.remove(OverlayId.PREVIEW)
-    ports.interaction.preview_store.dispatch(events.PreviewDismissed())
-    ports.interaction.preview_panel.clear()
+    ports.preview.store.dispatch(events.PreviewDismissed())
+    ports.preview.panel.clear()
     _release_preview_keys(
         ports.ipc,
         active_bindings(ports.keys, "preview"),
-        help_open=ports.interaction.help.open,
-        tip_keys_bound=ports.interaction.tooltip_keys_bound,
+        help_open=ports.help_open,
+        tip_keys_bound=ports.tip_keys_bound,
     )
 
 
 def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:
     """Handle a click on the card preview: ✕ dismiss, screenshot → toggle enlarge, ▶ → play audio.
     An empty click does nothing. Returns True if the click landed on the preview."""
-    panel = ports.interaction.preview_panel
+    panel = ports.preview.panel
     if panel.rect is None or not in_rect(panel.rect, x, y):
         return False
     if panel.close_rect and in_rect(panel.close_rect, x, y):
@@ -301,21 +297,21 @@ def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:
         ports.add_duplicate()  # ＋ add anyway → mine a second card for this scene
     elif panel.image_rect and in_rect(panel.image_rect, x, y):
         # enlarge to verify the frame / shrink back
-        ports.interaction.preview_store.dispatch(events.PreviewZoomToggled())
-        render_preview(ports.interaction, ports.surfaces, ports.osd, ports.tip_width)
+        ports.preview.store.dispatch(events.PreviewZoomToggled())
+        render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width)
     elif (
         panel.audio_rect
         and in_rect(panel.audio_rect, x, y)
         and ports.play_audio
-        and ports.interaction.preview.audio
+        and ports.preview.state.audio
     ):
         _stop_preview_audio(panel)  # a second ▶ press replaces the clip, never stacks two
-        clip = cast("str | Path", ports.interaction.preview.audio)
+        clip = cast("str | Path", ports.preview.state.audio)
         panel.audio_proc = play_audio(clip)  # ▶ → play on demand
     return True
 
 
 def replay_preview(ports: PreviewPorts) -> None:
-    shown = ports.interaction.preview
+    shown = ports.preview.state
     if shown.content is not None:
         show_preview(ports, cast("PreviewData", shown.content), shown.audio)

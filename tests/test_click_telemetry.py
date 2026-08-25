@@ -31,11 +31,11 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
     reader = SessionController(_FakeIPC({}))
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
-    reader.interaction.sidebar_panel.hits = (
+    reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
+    reader.sidebar_controller.panel.hits = (
         SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),
     )
     # Inert actions instead of a stubbed internal: the port is the seam, so isolating the span
@@ -53,16 +53,16 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
     spans = record_spans(monkeypatch)
     reader = SessionController(_FakeIPC({}))
-    reader._sidebar_store.dispatch(
+    reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
-    reader.interaction.sidebar_panel.rect = (0, 0, 100, 100)
-    reader.interaction.sidebar_panel.hits = (
+    reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
+    reader.sidebar_controller.panel.hits = (
         SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),
     )
 
     assert (
-        sidebar.on_click(reader.click_target, 50, 50) is True
+        reader.sidebar_controller.on_click(reader.click_target, 50, 50) is True
     )  # inside the panel, off every hitbox
     assert _named(spans, "sidebar_click") == []
 

@@ -5,23 +5,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app import sidebar, sub_picker, tooltip
+from saitenka.app import tooltip
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.help_controller import HelpController
+    from saitenka.app.picker_controller import PickerController
     from saitenka.app.popups import ClickPorts, HoverInputs, TipPorts
-    from saitenka.app.reader_context import InteractionContext
+    from saitenka.app.preview_controller import PreviewController
     from saitenka.app.sidebar import SidebarActions, SidebarView
+    from saitenka.app.sidebar_controller import SidebarController
+    from saitenka.app.sub_picker import DownloadPorts
+    from saitenka.app.tooltip_controller import TooltipController
     from saitenka.app.tooltip_panel import PanelPorts
 
 
 class SurfaceState(Protocol):
-    """What every surface's state object exposes to the registry: ``open`` — is it shown right now.
-    Every surface's state is now a slice feature reached through `InteractionContext`, and each
-    answers this the same way — as a field or as a derived property — so mouse-capture reads one
-    uniform predicate and cannot tell them apart."""
+    """The one fact every feature-owned surface exposes to input arbitration."""
 
     @property
     def open(self) -> bool:
@@ -46,15 +47,8 @@ def tip_wheel_pixels(ref_h: int, steps: int) -> int:
 
 @dataclass(frozen=True, slots=True)
 class HoverSuppression:
-    """What a surface needs to decide whether it swallows the hover under the cursor.
+    """Pointer facts and acts available to a surface that suppresses hover."""
 
-    Four members, cut by owner rather than assembled by call chain: the INTERACTION state the surface
-    reads, the pointer it hit-tests against, and the two teardowns it performs when it claims the
-    pointer. In the target `release_hover` is an event the tooltip feature reduces — this is the port
-    that lets the hook stop taking the host before that exists.
-    """
-
-    interaction: InteractionContext
     pointer: object
     release_hover: Callable[[], None]
     hide_annotation: Callable[[], None]
@@ -62,18 +56,9 @@ class HoverSuppression:
 
 @dataclass(frozen=True, slots=True)
 class WheelStep:
-    """What a surface needs to decide whether it claims a coalesced wheel step.
+    """Per-turn facts and acts available to a surface that claims wheel input."""
 
-    Cut by owner, like `HoverSuppression`: the INTERACTION state the surfaces read, the pointer they
-    hit-test against, and the one act each performs once it claims the step. A surface that pages on
-    the wheel (help) carries the page act, not the command that builds it — which page a step means
-    is the surface's own arithmetic, not the router's.
-    """
-
-    interaction: InteractionContext
     pointer: object
-    page_help: Callable[[int], None]
-    redraw_picker: Callable[[], None]
     sidebar: SidebarView
     hold_sidebar: Callable[[float], bool]
     scroll_tip: Callable[[int], None]
@@ -90,8 +75,7 @@ class ClickTarget:
     the tooltip's features instead of a router's port.
     """
 
-    interaction: InteractionContext
-    download: sub_picker.DownloadPorts
+    download: DownloadPorts
     sidebar: SidebarView
     sidebar_acts: SidebarActions
     tip: TipPorts
@@ -174,32 +158,18 @@ class SurfaceRouter:
 
 def build_surface_router(
     help_controller: HelpController,
-    interaction: InteractionContext,
+    picker_controller: PickerController,
+    sidebar_controller: SidebarController,
+    preview_controller: PreviewController,
+    tooltip_controller: TooltipController,
 ) -> SurfaceRouter:
-    """Combine one feature-owned row with the explicit legacy surface residue."""
+    """Assemble feature-owned rows under the explicit global z-order."""
     return SurfaceRouter(
         (
             help_controller.surface_binding(),
-            SurfaceSpec(
-                "sub_picker",
-                state_of=interaction.sub_picker_surface_state,
-                suppress_hover=sub_picker.suppress_hover,
-                scroll=sub_picker.scroll,
-                on_click=sub_picker.on_click,
-            ),
-            SurfaceSpec(
-                "sidebar",
-                state_of=interaction.sidebar_surface_state,
-                suppress_hover=sidebar.suppress_hover,
-                scroll=sidebar.scroll,
-                on_click=sidebar.on_click,
-            ),
-            SurfaceSpec("preview", state_of=interaction.preview_surface_state),
-            SurfaceSpec(
-                "tooltip",
-                state_of=interaction.tooltip_surface_state,
-                on_click=_tip_click,
-                scroll=_tip_scroll,
-            ),
+            picker_controller.surface_binding(),
+            sidebar_controller.surface_binding(),
+            preview_controller.surface_binding(),
+            tooltip_controller.surface_binding(),
         )
     )

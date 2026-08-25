@@ -22,30 +22,19 @@ _MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
 
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
-    from saitenka.app.card_preview import PreviewPanel
     from saitenka.app.popups import HoverMetadata, TooltipState
     from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
-    from saitenka.app.sidebar import SidebarPanel
-    from saitenka.app.sub_picker import PickerPanel
     from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.mask_atlas import MaskAtlas
-    from saitenka.runtime.card_preview import CardPreview
-    from saitenka.runtime.help import HelpState
     from saitenka.runtime.hover_pause import PauseClaim
     from saitenka.runtime.interaction_slice import (
-        HelpStore,
         HoveredWordStore,
         HoverPauseStore,
-        PickerStore,
-        PreviewStore,
         PulseStore,
-        SidebarStore,
         TipNavStore,
     )
-    from saitenka.runtime.picker import PickerState
     from saitenka.runtime.pulse import PulseState
-    from saitenka.runtime.sidebar import SidebarState
     from saitenka.runtime.tipnav import TipNavState
     from saitenka.subtitles import Cue, CueIndex
 
@@ -80,9 +69,6 @@ class TooltipStateOwner(Protocol):
     @property
     def word_store(self) -> HoveredWordStore: ...
 
-    @property
-    def keybindings_bound(self) -> bool: ...
-
 
 class EpisodeContext:
     """State scoped to one played file. Rebuilt on every file change (#100 re-slot) — nothing here may
@@ -109,45 +95,13 @@ class EpisodeContext:
 class InteractionContext:
     """State scoped to the current on-screen interaction (hover/tooltip).
 
-    Gathers the five OSD surface states — help, sub_picker, sidebar, preview, tip — that
-    `app/surfaces.py` keeps a registry over. They are the INTERACTION owner's state; gathering them
-    here is what lets a surface hook stop taking the whole host to reach one of them.
+    Holds the tooltip collaborator whose state shares this volatile interaction lifetime. Other OSD
+    surfaces are owned directly by their feature controllers.
     """
 
     #: Assigned by `SessionController.__init__`; the owner needs runtime/build collaborators this lifetime
     #: container has no business constructing.
     tooltip: TooltipStateOwner
-
-    #: The surfaces that have become slice features ask for their state rather than holding it.
-    #: Reached the same way as the others — `interaction.help`, `interaction.sub_picker` — so
-    #: nothing downstream can tell which of the five have moved yet.
-    help_store: HelpStore
-    picker_store: PickerStore
-    sidebar_store: SidebarStore
-    preview_store: PreviewStore
-    preview_panel: PreviewPanel
-    #: Where the picker's last paint landed. Not in its slice: it describes one paint on one screen,
-    #: which is the same cut `GeometryObservation` makes against the SUBTITLE slot.
-    picker_panel: PickerPanel
-    sidebar_panel: SidebarPanel
-
-    @property
-    def help(self) -> HelpState:
-        return self.help_store.current
-
-    @property
-    def sub_picker(self) -> PickerState:
-        return self.picker_store.current
-
-    def sub_picker_surface_state(self) -> PickerState:
-        return self.sub_picker
-
-    @property
-    def sidebar(self) -> SidebarState:
-        return self.sidebar_store.current
-
-    def sidebar_surface_state(self) -> SidebarState:
-        return self.sidebar
 
     @property
     def tip_nav(self) -> TipNavState:
@@ -157,9 +111,6 @@ class InteractionContext:
     def tip(self) -> TooltipState:
         """Read-only surface projection of the tooltip feature's owned state."""
         return self.tooltip.state
-
-    def tooltip_surface_state(self) -> TooltipState:
-        return self.tip
 
     @property
     def nav_store(self) -> TipNavStore:
@@ -178,10 +129,6 @@ class InteractionContext:
         return self.tooltip.word_store
 
     @property
-    def tooltip_keys_bound(self) -> bool:
-        return self.tooltip.keybindings_bound
-
-    @property
     def copy_pulse(self) -> PulseState:
         return self.tooltip.pulse_store.current
 
@@ -192,13 +139,6 @@ class InteractionContext:
     @property
     def hovered_word_meta(self) -> HoverMetadata:
         return hovered_meta(self.tooltip.word_store)
-
-    @property
-    def preview(self) -> CardPreview:
-        return self.preview_store.current
-
-    def preview_surface_state(self) -> CardPreview:
-        return self.preview
 
 
 class RenderCacheState:

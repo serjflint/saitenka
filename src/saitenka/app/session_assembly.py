@@ -16,7 +16,10 @@ from saitenka.app.feature_bindings import (
 )
 from saitenka.app.help_controller import HelpController, ScreenState, TooltipKeyContext
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+from saitenka.app.picker_controller import PickerController
+from saitenka.app.preview_controller import PreviewController
 from saitenka.app.runtime import CommandSpec
+from saitenka.app.sidebar_controller import SidebarController
 from saitenka.mpvio.osd import Overlay
 from saitenka.runtime.effects import Owner
 from saitenka.runtime.help import HelpCommand
@@ -69,6 +72,9 @@ class SessionAssembly:
     screen: ScreenState
     tooltip_keys: TooltipKeyContext
     help: HelpController
+    picker: PickerController
+    sidebar: SidebarController
+    preview: PreviewController
     commands: tuple[CommandRegistration, ...]
     stateful: tuple[InstalledStatefulBinding, ...]
     owner_plans: tuple[OwnerPlan, ...]
@@ -131,6 +137,15 @@ def build_session_assembly(
         HELP_STATEFUL_BINDING.store(ipc),
         ui_scale=ui_scale,
     )
+    picker_owner = PickerController(
+        ipc,
+        surfaces,
+        screen,
+        options.keys,
+        scale=ui_scale,
+    )
+    sidebar_owner = SidebarController(ipc)
+    preview_owner = PreviewController(ipc)
     commands = tuple(
         CommandRegistration(
             "help",
@@ -153,6 +168,9 @@ def build_session_assembly(
         screen,
         tooltip_keys,
         help_owner,
+        picker_owner,
+        sidebar_owner,
+        preview_owner,
         commands,
         INTERACTION_STATEFUL_BINDINGS,
         (INTERACTION_OWNER_PLAN,),

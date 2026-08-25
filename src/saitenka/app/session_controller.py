@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from saitenka.app.session_assembly import SessionAssembly
     from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.help import HelpState
-    from saitenka.runtime.interaction_slice import PickerStore
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
 
@@ -30,7 +29,6 @@ from saitenka import otel_metrics
 from saitenka.app import (
     analysis_overlay,
     backlog,
-    card_preview,
     cue_annotation,
     episode_reslot,
     geometry_refresh,
@@ -112,11 +110,6 @@ from saitenka.app.bindings import (
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.config import ReaderOptions
-from saitenka.app.feature_bindings import (
-    PICKER_STATEFUL_BINDING,
-    PREVIEW_STATEFUL_BINDING,
-    SIDEBAR_STATEFUL_BINDING,
-)
 from saitenka.app.interaction_intents import InteractionCommand
 from saitenka.app.interaction_surfaces import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
@@ -411,6 +404,9 @@ class SessionController:
         self.lifecycle_surfaces = assembly.surfaces
         self.screen = assembly.screen
         self.help_controller = assembly.help
+        self.picker_controller = assembly.picker
+        self.sidebar_controller = assembly.sidebar
+        self.preview_controller = assembly.preview
         # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
         # whoever owns it rather than to a line in a teardown table far away. We keep *using* it;
         # what moves is when it closes. False means no runtime owns this session, and the close
@@ -628,9 +624,6 @@ class SessionController:
         self.auto_translate = o.translation.auto_translate
         self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
-        # Where the preview's last paint landed, plus the media the mine captured for it
-        # (app/card_preview.py PreviewPanel). What is composed is the slice's.
-        self.interaction.preview_panel = card_preview.PreviewPanel()
         self.mining_controller = self._assemble_mining_controller(mining_identity, anki, mine_cfg)
         self.profile_dependencies = reader_deps.ProfileDependencies(
             mining_identity,
@@ -737,25 +730,12 @@ class SessionController:
         # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
         # whose event resets the whole state.
         self._subtitle_tracks = SubtitleTrackStore(self.ipc)
-        # Runtime and no-runtime Help stores share the assembly's registered reducer factory.
-        self.interaction.help_store = self.help_controller.store
-        # …and its third: the subtitle picker. Its drawn geometry stays beside the slice rather than
-        # in it — one paint on one screen is not what a session-lived slot holds.
-        self._picker_store = PICKER_STATEFUL_BINDING.store(self.ipc)
-        self.interaction.picker_store = self._picker_store
-        self.interaction.picker_panel = sub_picker.PickerPanel()
-        # …and its fourth: the sidebar, cut the same way — the slice decides, the panel remembers
-        # what one paint put on screen.
-        self._sidebar_store = SIDEBAR_STATEFUL_BINDING.store(self.ipc)
-        self.interaction.sidebar_store = self._sidebar_store
-        self.interaction.sidebar_panel = sidebar.SidebarPanel()
-        # …and its ninth: the mined-card preview. Its rects and the clip's live `Popen` stay on the
-        # panel beside it — a reducer can hold neither one paint's geometry nor a process.
-        self._preview_store = PREVIEW_STATEFUL_BINDING.store(self.ipc)
-        self.interaction.preview_store = self._preview_store
         self.surface_router = surfaces.build_surface_router(
             self.help_controller,
-            self.interaction,
+            self.picker_controller,
+            self.sidebar_controller,
+            self.preview_controller,
+            self.tooltip_controller,
         )
         # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
         # already drawn or already gone by the time one arrives.
@@ -1910,8 +1890,8 @@ class SessionController:
         — the precondition for the surface owning its own state.
         """
         return sidebar_module.SidebarView(
-            store=self._sidebar_store,
-            panel=self.interaction.sidebar_panel,
+            store=self.sidebar_controller.store,
+            panel=self.sidebar_controller.panel,
             active=sidebar_module._active_index(
                 self.episode.sub_index,
                 self.sub_text,
@@ -1962,7 +1942,6 @@ class SessionController:
         definition of it that drifts from this one. Same for its two twins below.
         """
         return surfaces.HoverSuppression(
-            self.interaction,
             self.observed_property("mouse-pos"),
             self.retire_hover,
             lambda: self.set_annotation_hover(revealed=False),
@@ -1972,10 +1951,7 @@ class SessionController:
     def wheel_step(self) -> surfaces.WheelStep:
         """What a surface needs to decide whether it claims a coalesced wheel step."""
         return surfaces.WheelStep(
-            self.interaction,
             self.observed_property("mouse-pos"),
-            self.help_controller.page,
-            self.redraw_sub_picker,
             self.sidebar_view,
             self.hold_sidebar_scroll,
             self.scroll_tip,
@@ -1986,7 +1962,6 @@ class SessionController:
     def click_target(self) -> surfaces.ClickTarget:
         """What a surface needs to decide whether it claims a left-click."""
         return surfaces.ClickTarget(
-            self.interaction,
             sub_picker.DownloadPorts(
                 self.toast,
                 self.submit_subtitle_fetch,
@@ -2120,14 +2095,16 @@ class SessionController:
     def preview_ports(self) -> miner_ui.PreviewPorts:
         """What the card-preview surface draws on and what a click on it does."""
         return miner_ui.PreviewPorts(
-            interaction=self.interaction,
+            preview=self.preview_controller,
+            help_open=self.help_controller.state.open,
+            tip_keys_bound=self.tooltip_controller.keybindings_bound,
             surfaces=self.lifecycle_surfaces,
             osd=self.osd,
             tip_width=self.tip_scale.width,
             ipc=self.ipc,
             keys=self.keys,
             add_duplicate=lambda: self.mining_controller.force_duplicate(
-                ForceDuplicate(miner_ui.duplicate_token(self.interaction.preview_panel))
+                ForceDuplicate(miner_ui.duplicate_token(self.preview_controller.panel))
             ),
             play_audio=self.play_audio,
         )
@@ -2210,8 +2187,8 @@ class SessionController:
         """What one subtitle listing needs to run and to publish itself back."""
         return sub_picker_module.ListingPorts(
             lister=self._sub_picker_lister,
-            store=self._picker_store,
-            redraw=self.redraw_sub_picker,
+            store=self.picker_controller.store,
+            redraw=self.picker_controller.redraw,
             submit=self._sub_picker_submit,
             stop=self._stop,
             current_episode=lambda: self.episode,
@@ -2739,7 +2716,7 @@ class SessionController:
         )
 
     def _mining_apply(self) -> miner.MiningApply:
-        preview = self.interaction.preview_panel
+        preview = self.preview_controller.panel
 
         def reset_capture() -> None:
             preview.last_jpg = preview.last_audio = None
@@ -2811,7 +2788,7 @@ class SessionController:
 
     def _render_preview(self) -> None:
         miner_ui.render_preview(
-            self.interaction, self.lifecycle_surfaces, self.osd, self.tip_scale.width
+            self.preview_controller, self.lifecycle_surfaces, self.osd, self.tip_scale.width
         )
 
     def _hide_preview(self) -> None:
@@ -2911,15 +2888,6 @@ class SessionController:
             owner=Owner.PLAYBACK,
         )
 
-    @property
-    def picker_store(self) -> PickerStore:
-        """The picker's store, for a feature adapter that must not reach into `_get`-style names.
-
-        An adapter declares its host surface as a protocol, so every member it names has to be part
-        of the public one — a private in a port is a coupling nothing outside can honour.
-        """
-        return self._picker_store
-
     def property_value(self, name: str) -> object | None:
         """One mpv property as last observed. `_get` under a name a port can declare."""
         return self._get(name)
@@ -2927,32 +2895,17 @@ class SessionController:
     @property
     def sidebar(self) -> SidebarState:
         """Where the sidebar is. Read-only for the same reason `help` and `sub_picker` are."""
-        return self.interaction.sidebar
+        return self.sidebar_controller.state
 
     @property
     def sub_picker(self) -> PickerState:
         """What the picker is showing. Read-only for the same reason `help` is: the slice owns it."""
-        return self.interaction.sub_picker
+        return self.picker_controller.state
 
     @property
     def preview(self) -> CardPreview:
         """What the card preview is showing. Read-only, like the other three."""
-        return self.interaction.preview
-
-    def redraw_sub_picker(self) -> None:
-        """Lay the picker out for this screen and present it, storing the geometry hit-testing uses."""
-        from saitenka.app import sub_picker
-
-        state = self.sub_picker
-        if not state.open:
-            return
-        rendered, x, y, width, height = sub_picker.picker_panel(
-            state, osd=self.osd, scale=self.chrome_scale, close_key=self.keys.sub_picker_key
-        )
-        panel = self.interaction.picker_panel
-        panel.rect = (x, y, width, height)
-        panel.hits = rendered.hitboxes
-        self.lifecycle_surfaces.present(rendered.image, x, y, oid=OverlayId.PICKER)
+        return self.preview_controller.state
 
     # --- episode analysis: state module, executed here ------------------------------------------
     def _draw_analysis(self) -> None:
@@ -3358,9 +3311,7 @@ class SessionController:
         )
 
     def rebind_episode(self) -> None:
-        sub_picker.close_picker(
-            self._picker_store, self.interaction.picker_panel, self.lifecycle_surfaces
-        )
+        self.picker_controller.close()
         self._subtitle_force_select_revision += 1
         self._retire_episode()
         self.episode = EpisodeContext()
@@ -3650,7 +3601,7 @@ class SessionController:
         """
 
         def released() -> None:
-            self._sidebar_store.dispatch(events.SidebarHoldReleased())
+            self.sidebar_controller.store.dispatch(events.SidebarHoldReleased())
             sidebar.follow(self.sidebar_view)
 
         return self.lifecycle_timers.schedule(

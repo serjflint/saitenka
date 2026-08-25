@@ -93,7 +93,9 @@ def _draw_help(r: SessionController) -> None:
 
 
 def _draw_sidebar(r: SessionController) -> None:
-    r._sidebar_store.dispatch(events.SidebarShown(r.sidebar_view.active, r.sidebar_view.capacity))
+    r.sidebar_controller.store.dispatch(
+        events.SidebarShown(r.sidebar_view.active, r.sidebar_view.capacity)
+    )
     sidebar.draw(r.sidebar_view)
 
 

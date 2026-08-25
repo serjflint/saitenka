@@ -13,7 +13,7 @@ from saitenka.app.backlog import BacklogEntry, BacklogStore, MediaRecord
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
-from saitenka.model import claims_pointer, in_rect
+from saitenka.model import in_rect
 from saitenka.runtime import events
 from saitenka.runtime.sidebar import MANUAL_SCROLL_HOLD, SidebarState
 
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from saitenka.app.mined_store import MinedCard
     from saitenka.app.miner_ui import CardSource, PreviewPorts
     from saitenka.app.reader_context import SessionContext
-    from saitenka.app.surfaces import ClickTarget, HoverSuppression, WheelStep
     from saitenka.runtime.interaction_slice import SidebarStore
     from saitenka.subtitles import Cue, CueIndex
 
@@ -471,18 +470,6 @@ def contains(state: SidebarState, panel: SidebarPanel, x: float, y: float) -> bo
     return in_rect(panel.rect, x, y)
 
 
-def suppress_hover(suppression: HoverSuppression) -> bool:
-    state = suppression.interaction.sidebar
-    if not state.open:
-        return False
-    rect = suppression.interaction.sidebar_panel.rect
-    if not claims_pointer(rect, suppression.pointer, open_=state.open):
-        return False
-    suppression.hide_annotation()  # the sidebar overlaps the cue, so the reveal goes with the hover
-    suppression.release_hover()
-    return True
-
-
 def wheel(view: SidebarView, steps: int, pointer, *, hold: Callable[[float], bool]) -> bool:
     if not view.state.open:
         return False
@@ -499,10 +486,6 @@ def wheel(view: SidebarView, steps: int, pointer, *, hold: Callable[[float], boo
         ),
     )
     return True
-
-
-def scroll(step: WheelStep, steps: int) -> bool:
-    return wheel(step.sidebar, steps, step.pointer, hold=step.hold_sidebar)
 
 
 def follow(view: SidebarView) -> None:
@@ -575,10 +558,6 @@ def click(view: SidebarView, actions: SidebarActions, x: float, y: float) -> boo
         activate_hit(view, actions, hit)
         draw(view)
     return True
-
-
-def on_click(target: ClickTarget, x: float, y: float) -> bool:
-    return click(target.sidebar, target.sidebar_acts, x, y)
 
 
 def mine_active(view: SidebarView) -> None:

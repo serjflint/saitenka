@@ -2,8 +2,7 @@
 
 Both are functions of the bindings and the screen, so they live here and can be checked at any size
 without a SessionController. Whether the overlay is open and which page it shows is `Owner.INTERACTION`'s
-`help` slice (`runtime/help.py` decides, `interaction_slice` holds); drawing it is the SessionController. The
-`SurfaceSpec` hooks take the registry's own ports, so nothing here holds the host.
+`help` slice (`runtime/help.py` decides, `interaction_slice` holds); `HelpController` owns presentation.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from saitenka.app.bindings import ActiveBinding
-    from saitenka.app.surfaces import HoverSuppression, WheelStep
 
 
 def help_entries(bindings: Iterable[ActiveBinding]) -> tuple[HelpEntry, ...]:
@@ -57,19 +55,3 @@ def page_image(document, index: int):
         total=len(document.pages),
         scale=document.scale,
     )
-
-
-# --- SurfaceSpec hooks: the surface registry calls these with the host, positionally ------------
-
-
-def scroll(wheel: WheelStep, steps: int) -> bool:
-    """Help captures the wheel whenever it is open, whether or not it pages."""
-    if not wheel.interaction.help.open:
-        return False
-    if steps:
-        wheel.page_help(steps)
-    return True
-
-
-def suppress_hover(suppression: HoverSuppression) -> bool:
-    return suppression.interaction.help.open

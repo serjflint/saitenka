@@ -64,14 +64,14 @@ def _lister(candidates, warnings=()):
 
 def _open(reader: SessionController) -> None:
     """Put the picker up the way production does: through the slice that owns "open"."""
-    reader._picker_store.dispatch(events.PickerOpened())
+    reader.picker_controller.store.dispatch(events.PickerOpened())
 
 
 def _adopt(reader: SessionController, *, candidates=(), warnings=(), error=None) -> None:
     """Land a listing on the picker's current generation."""
     sub_picker.apply_listing(
-        reader._picker_store,
-        reader.redraw_sub_picker,
+        reader.picker_controller.store,
+        reader.picker_controller.redraw,
         reader.sub_picker.generation,
         sub_picker.ListingResult(tuple(candidates), tuple(warnings), error),
     )
@@ -83,7 +83,7 @@ def _listed(reader: SessionController) -> sub_picker.ListingResult:
 
 def _close(reader: SessionController) -> None:
     sub_picker.close_picker(
-        reader._picker_store, reader.interaction.picker_panel, reader.lifecycle_surfaces
+        reader.picker_controller.store, reader.picker_controller.panel, reader.lifecycle_surfaces
     )
 
 
@@ -292,20 +292,20 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     )
     _open(reader)
     _adopt(reader, candidates=(_candidate("other.ass"), chosen))
-    reader.redraw_sub_picker()  # populates rect + per-row hitboxes
+    reader.picker_controller.redraw()  # populates rect + per-row hitboxes
 
     fetches: list[tuple] = []
     monkeypatch.setattr(
         subtitle_modes, "start_fetch", lambda _submit, _get, do, **kw: fetches.append((do, kw))
     )
 
-    panel = reader.interaction.picker_panel
+    panel = reader.picker_controller.panel
     rect = panel.rect
     assert rect is not None
     hit = next(h for h in panel.hits if h.kind == "picker-download" and h.value == 1)
     gx, gy = rect[0] + hit.x + hit.w / 2, rect[1] + hit.y + hit.h / 2
 
-    assert sub_picker.on_click(reader.click_target, gx, gy) is True
+    assert reader.picker_controller.on_click(reader.click_target, gx, gy) is True
     assert reader.sub_picker.open is False  # panel closes; the swap lands from broker completion
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
     assert len(fetches) == 1
@@ -322,9 +322,9 @@ def test_click_outside_the_panel_is_not_captured():
     reader.configure_sub_picker(_lister([]))
     _open(reader)
     _adopt(reader, candidates=(_candidate("a.srt"),))
-    reader.redraw_sub_picker()
+    reader.picker_controller.redraw()
 
-    assert sub_picker.on_click(reader.click_target, 0, 0) is False
+    assert reader.picker_controller.on_click(reader.click_target, 0, 0) is False
 
 
 def test_scroll_only_fires_with_the_pointer_over_the_panel():
@@ -332,16 +332,16 @@ def test_scroll_only_fires_with_the_pointer_over_the_panel():
     reader.configure_sub_picker(_lister([]))
     _open(reader)
     _adopt(reader, candidates=tuple(_candidate(f"{i}.srt") for i in range(20)))
-    reader.redraw_sub_picker()
-    rect = reader.interaction.picker_panel.rect
+    reader.picker_controller.redraw()
+    rect = reader.picker_controller.panel.rect
     assert rect is not None
 
     ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
-    assert sub_picker.scroll(reader.wheel_step, 1) is False
+    assert reader.picker_controller.scroll(reader.wheel_step, 1) is False
     assert reader.sub_picker.scroll == 0
 
     ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
-    assert sub_picker.scroll(reader.wheel_step, 1) is True
+    assert reader.picker_controller.scroll(reader.wheel_step, 1) is True
     assert reader.sub_picker.scroll == picker.ROWS_PER_WHEEL_STEP
 
 
@@ -350,15 +350,15 @@ def test_suppress_hover_only_over_the_panel():
     reader.configure_sub_picker(_lister([]))
     _open(reader)
     _adopt(reader, candidates=(_candidate("a.srt"),))
-    reader.redraw_sub_picker()
-    rect = reader.interaction.picker_panel.rect
+    reader.picker_controller.redraw()
+    rect = reader.picker_controller.panel.rect
     assert rect is not None
 
     ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
-    assert sub_picker.suppress_hover(reader.hover_suppression) is True
+    assert reader.picker_controller.suppress_hover(reader.hover_suppression) is True
 
     ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
-    assert sub_picker.suppress_hover(reader.hover_suppression) is False
+    assert reader.picker_controller.suppress_hover(reader.hover_suppression) is False
 
 
 def test_open_picker_wants_the_forced_mouse_section():
