@@ -2437,20 +2437,24 @@ def main() -> int:
         to_bgra_array(_tall_head)  # isolate the RGBA→premultiplied-BGRA conversion
 
     # Isolate the temp-file UPLOAD write (the last hop before mpv reads the bitmap) from the render.
-    # Two variants expose the OS page-cache trap that hides the suspected ~55 ms floor: reusing ONE
-    # path — mpv's real per-overlay-id behaviour, inode stays hot — vs a FRESH file each iteration
-    # with fsync, which forces inode creation + a real device write (the true cold cost). If warm≈cold
-    # the floor was a page-cache artifact; if cold ≫ warm, moving to mmap/shared memory is justified.
+    # The real publish, not a model of it: `Overlay._write_frame` creates a fresh inode per frame,
+    # records it, and sweeps the retired ones — so the sweep's unlink is inside the measurement, which
+    # a hand-rolled `write_bytes` would leave out. The fsync row is the pessimistic bound (a forced
+    # device write); production never fsyncs, so a gap between them is page cache doing its job, not
+    # a cost we pay.
     import shutil
     import tempfile
 
+    from saitenka.mpvio.osd import Overlay
+
     _up_data, _up_w, _up_h, _up_stride = to_bgra(_tall_head)
     _up_dir = Path(tempfile.mkdtemp(prefix="saitenka-bench-upload-"))
-    _up_path = _up_dir / "reuse.bgra"
     _up_cold = {"i": 0}
 
-    def comp_upload_warm():
-        _up_path.write_bytes(_up_data)  # overwrite one inode (no fsync — matches osd.Overlay.show)
+    _up_overlay = Overlay(cast("MpvIPC", FakeIPC()))
+
+    def comp_upload_publish():
+        _up_overlay._write_frame(1, _up_data)
 
     def comp_upload_cold():
         p = _up_dir / f"cold-{_up_cold['i']}.bgra"  # a new inode each time → not page-cached
@@ -2497,14 +2501,15 @@ def main() -> int:
         (f"component: dict lookup, {n} words", comp_lookup),
         (f"component: head render, {n} words", comp_headrender),
         ("component: BGRA convert, tallest", comp_bgra),
-        ("component: upload write, warm (reuse inode)", comp_upload_warm),
+        ("component: upload write, publish (fresh)", comp_upload_publish),
         ("component: upload write, cold (fresh+fsync)", comp_upload_cold),
     ]:
         prow(label, measure(fn, args.reps))
+    _up_overlay.close()
     shutil.rmtree(_up_dir, ignore_errors=True)
     print(
-        f"\nupload payload: {_up_w}x{_up_h} BGRA ≈ {len(_up_data) / 1e6:.1f} MB. cold≈warm ⇒ the "
-        "~55 ms floor was a page-cache artifact; cold ≫ warm ⇒ mmap/shared-mem is worth it."
+        f"\nupload payload: {_up_w}x{_up_h} BGRA ≈ {len(_up_data) / 1e6:.1f} MB. publish is the "
+        "production path (fresh inode per frame, no fsync); the fsync row is the pessimistic bound."
     )
     print(
         "note: excludes mpv's own compositing + IPC round-trip (a small, ~constant add). "
