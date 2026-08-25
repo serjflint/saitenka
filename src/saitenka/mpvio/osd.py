@@ -193,9 +193,11 @@ class Overlay:
         self._interaction_oids: set[int] = set()
         self.lifecycle_oids: set[int] = set()
         self._staged_lifecycle_paths: set[Path] = set()
-        #: One lock over every mutable overlay map. `_files` used to be written under `_frame_lock`
-        #: in `_write_frame`, under `_lifecycle_lock` in the commit/remove paths, and unlocked in
-        #: `hide` — three views of one piece of state.
+        #: One lock over the path maps — `_files`, `_frame_history`, `_in_flight`,
+        #: `_pending_deletion`, `_live`. `_files` used to be written under `_frame_lock` in
+        #: `_write_frame`, under `_lifecycle_lock` in the commit/remove paths, and unlocked in `hide`.
+        #: `visible` and `ops` are deliberately NOT covered: they are a flag and a counter no
+        #: retirement decision reads.
         self._state_lock = threading.Lock()
         self._compat_effect_id = 1_000_000
 
@@ -295,8 +297,8 @@ class Overlay:
             self._staged_lifecycle_paths.discard(prepared.path)
             self._live[prepared.oid] = prepared.tail
             self.ops += 1
-        if previous is not None and previous != prepared.path:
-            _discard(previous)
+        if previous != prepared.path:
+            self._retire(prepared.oid, previous)
 
     def discard_prepared(self, prepared: PreparedOverlay) -> None:
         with self._state_lock:
@@ -313,8 +315,7 @@ class Overlay:
             path = self._files.pop(physical_oid, None)
             self.lifecycle_oids.discard(oid)
         self._retire_frame_path(physical_oid)
-        if path is not None:
-            _discard(path)
+        self._retire(physical_oid, path)
 
     def remove_lifecycle_now(self, oid: int) -> dict:
         """Synchronously place a final remove behind any queued add before detaching from mpv."""
@@ -348,7 +349,11 @@ class Overlay:
         against 0.5 ms for reusing one, for a 1.1 MB payload.
         """
         path = self._new_frame_path(oid)
-        path.write_bytes(data)  # outside the lock: no other thread can name this path yet
+        try:
+            path.write_bytes(data)  # outside the lock: no other thread can name this path yet
+        except Exception:
+            path.unlink(missing_ok=True)  # nothing has named it yet, so a plain unlink is safe
+            raise
         with self._state_lock:
             self._frame_history.setdefault(oid, []).append(path)
             self._files[oid] = path
@@ -379,7 +384,9 @@ class Overlay:
         """
         # Resolved per call, not as a default argument: a default binds RETAINED_FRAMES at import, so
         # anything varying the constant would silently keep sweeping at the original depth.
-        retain = RETAINED_FRAMES if retain is None else retain
+        # `max(1, ...)`: `history[:-0]` is empty and `history[-0:]` is the whole list, so a literal
+        # zero would retain everything — the opposite of what asking for none means.
+        retain = max(1, RETAINED_FRAMES if retain is None else retain)
         with self._state_lock:
             history = self._frame_history.get(oid)
             stale = set(self._pending_deletion)
@@ -453,6 +460,20 @@ class Overlay:
     def _retire_frame_path(self, oid: int) -> None:
         with self._state_lock:
             self._pending_deletion |= set(self._frame_history.pop(oid, ()))
+        self._sweep(oid)
+
+    def _retire(self, oid: int, path: Path | None) -> None:
+        """Retire one frame through the same guards a swept frame gets.
+
+        Deleting it outright is what `commit_prepared` / `commit_remove` / `hide` used to do, and it
+        made `_sweep`'s guarantee false: the path they drop is the LAST published one, which is
+        exactly the path a concurrent `repaint` is most likely to be carrying. Queue it instead, so
+        it goes when nothing names it.
+        """
+        if path is None:
+            return
+        with self._state_lock:
+            self._pending_deletion.add(path)
         self._sweep(oid)
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
@@ -538,7 +559,11 @@ class Overlay:
         return {"error": "deferred"}
 
     def hide(self, oid: int = 0) -> dict:
-        oid = self._oid(oid)
+        return self._hide_physical(self._oid(oid))
+
+    def _hide_physical(self, oid: int) -> dict:
+        """``hide`` for an id that is ALREADY physical — `_files`/`_live` are keyed that way, so a
+        caller iterating them must not send it back through the `id_base` shift a second time."""
         # Removal is idempotent.  Always send it: an in-flight deferred add can finish after visibility
         # was turned off, and skipping this command would leave those pixels stuck in mpv.
         res = self.ipc.command("overlay-remove", oid)
@@ -547,8 +572,7 @@ class Overlay:
             self.ops += 1
             p = self._files.pop(oid, None)
         self._retire_frame_path(oid)
-        if p is not None:
-            _discard(p)
+        self._retire(oid, p)
         return res
 
     def set_visible(self, *, visible: bool) -> None:
@@ -577,9 +601,9 @@ class Overlay:
 
     def close(self) -> None:
         self._interaction_presenter.close()
-        for oid in list(self._files):
+        for oid in list(self._files):  # physical ids — see `_hide_physical`
             try:
-                self.hide(oid)
+                self._hide_physical(oid)
             except Exception:
                 log.debug("overlay hide on close failed", exc_info=True)
         with self._state_lock:

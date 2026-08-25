@@ -64,20 +64,83 @@ def test_the_path_named_in_the_last_overlay_add_is_still_readable_after_the_next
     overlay.close()
 
 
+def _record_published_paths(overlay: Overlay) -> list[pathlib.Path]:
+    """Every path production hands out for a frame, in order.
+
+    Deliberately not `_frame_history`: `_sweep` truncates that list whether or not it deleted
+    anything, so counting it cannot distinguish "retired" from "leaked". Deliberately not a glob of
+    the temp directory either — the suite runs `-n auto`, and another worker publishing to the same
+    overlay id writes files with the same name shape into the same directory.
+    """
+    produced: list[pathlib.Path] = []
+    issue = overlay._new_frame_path
+
+    def recording(oid: int) -> pathlib.Path:
+        path = issue(oid)
+        produced.append(path)
+        return path
+
+    overlay._new_frame_path = recording
+    return produced
+
+
 def test_retirement_is_bounded_even_while_the_overlay_is_hidden():
     """A fresh path per frame is a leak unless something retires them, and `_add` short-circuits when
     `visible` is False — so a scheme that retires "after the next add lands" stops draining exactly
-    when nothing is drawing. Bound it on publication instead."""
+    when nothing is drawing. Bound it on publication instead.
+
+    Counted over what production actually published, not over `_frame_history` — see
+    :func:`_record_published_paths` for why that list cannot answer this.
+    """
     overlay = Overlay(util.FakeIPC())
+    published = _record_published_paths(overlay)
     overlay.set_visible(visible=False)
 
     for value in range(30):
         overlay.show_bgra(_frame(value % 250), oid=OverlayId.TIP)
 
-    physical = overlay.physical_oid(OverlayId.TIP)
-    live = [path for path in overlay._frame_history[physical] if path.exists()]
-    assert len(live) <= RETAINED_FRAMES
+    assert len(published) == 30, "the recorder missed publications"
+    assert len([path for path in published if path.exists()]) <= RETAINED_FRAMES
 
+    overlay.close()
+
+
+def test_a_committed_frame_is_not_retired_under_an_in_flight_repaint():
+    """`commit_prepared` retires the frame it replaces — which is the one a concurrent `repaint` is
+    most likely to be carrying, since `repaint` re-issues `_live`'s tail. Deleting it outright made
+    the in-flight `overlay-add` name a file that no longer existed.
+
+    Drives the lifecycle path (`prepare_rgba`/`commit_prepared`), not `show_bgra`: they are separate
+    publication routes and only the latter was covered.
+    """
+    released = threading.Event()
+    observed: list[bool] = []
+
+    class BlockingIPC(util.FakeIPC):
+        def command(self, *args):
+            if args[0] == "overlay-add" and threading.current_thread().name == "repaint":
+                released.wait(5)
+                observed.append(pathlib.Path(args[4]).exists())
+            return super().command(*args)
+
+    overlay = Overlay(BlockingIPC())
+    first = overlay.prepare_rgba(_frame(1), 0, 0, oid=OverlayId.SUB, revision=1)
+    overlay.commit_prepared(first)
+
+    reader = threading.Thread(target=overlay.repaint, name="repaint")
+    reader.start()
+    try:
+        while first.path not in overlay._in_flight:  # wait until repaint is carrying it
+            time.sleep(0.01)
+        second = overlay.prepare_rgba(_frame(2), 0, 0, oid=OverlayId.SUB, revision=2)
+        overlay.commit_prepared(second)
+
+        assert first.path.exists(), "retired a frame an in-flight overlay-add still names"
+    finally:
+        released.set()
+        reader.join()
+
+    assert observed == [True]
     overlay.close()
 
 
@@ -103,14 +166,43 @@ def test_the_oracle_catches_retirement_one_step_too_early():
     overlay.close()
 
 
-def test_closing_retires_every_frame_it_published():
-    overlay = Overlay(util.FakeIPC())
-    for value in range(5):
-        overlay.show_bgra(_frame(value), oid=OverlayId.TIP)
-    published = list(overlay._frame_history[overlay.physical_oid(OverlayId.TIP)])
+def test_closing_a_shifted_overlay_removes_the_ids_it_actually_drew():
+    """`close` iterates `_files`, which is keyed by PHYSICAL id, so passing each back through `hide`
+    shifted it a second time: with `overlay_id_base = 10` Saitenka asked mpv to remove 19 and 20
+    while its own overlays sat at 10 and 11 — they stay drawn after detach, and their frames stay on
+    disk. Invisible at the default base, where the shift is a no-op."""
+    removed: list[int] = []
+
+    class RecordingIPC(util.FakeIPC):
+        def command(self, *args):
+            if args[0] == "overlay-remove":
+                removed.append(args[1])
+            return super().command(*args)
+
+    overlay = Overlay(RecordingIPC(), id_base=10)
+    prepared = overlay.prepare_rgba(_frame(1), 0, 0, oid=OverlayId.SUB, revision=1)
+    overlay.commit_prepared(prepared)
+    overlay.show_bgra(_frame(2), oid=OverlayId.TIP)
+    published = list(overlay._files.values())
 
     overlay.close()
 
+    assert sorted(removed) == [
+        overlay.physical_oid(OverlayId.SUB),
+        overlay.physical_oid(OverlayId.TIP),
+    ]
+    assert [path for path in published if path.exists()] == []
+
+
+def test_closing_retires_every_frame_it_published():
+    overlay = Overlay(util.FakeIPC())
+    published = _record_published_paths(overlay)
+    for value in range(5):
+        overlay.show_bgra(_frame(value), oid=OverlayId.TIP)
+
+    overlay.close()
+
+    assert published
     assert [path for path in published if path.exists()] == []
 
 
