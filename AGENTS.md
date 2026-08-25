@@ -128,7 +128,9 @@ the floor for every change; 3–6 are escalations, not replacements.
   (`app/session/controller.py` is the standing example), author a **LibCST** or **ast-grep** codemod and apply it
   rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched. LibCST
   lives in the opt-in `codemod` dependency group (its pyo3 build has no free-threaded 3.15t wheel, so it's
-  kept out of the default `dev` env): run codemods with `uv run --group codemod <script>`.
+  kept out of the default `dev` env): run codemods with `uv run --group codemod <script>`. Keep reusable
+  transforms; retire one-shot transforms after their forward contract is gated—the PR history preserves
+  the migration.
 - **Price a migration before starting it.** A conversion spanning many call sites gets its unit price,
   its leverage device (and the rejected ones), and a retirement meter beside its debt meter, on day 1
   — the **`plan-migration`** skill (`.agents/skills/plan-migration/`) is the procedure.

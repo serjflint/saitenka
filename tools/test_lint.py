@@ -1,6 +1,6 @@
 """Inspect test-lint findings without dumping the repository-wide ast-grep payload.
 
-uv run python tools/test_lint.py --file tests/test_session_controller.py
+uv run python tools/test_lint.py --file tests/session/test_session_controller.py
 uv run python tools/test_lint.py --rule test-sleep-polling --summary
 """
 

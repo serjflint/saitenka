@@ -438,6 +438,7 @@ max-args = 8
 # tools/visual_compare/ is the yomitan visual-comparison harness (dev bench, not shipped) — same posture.
 "tools/visual_compare/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "N"]
 "**/tools/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "FBT", "N", "raise-without-from-inside-except", "DTZ", "shebang-not-executable", "subprocess-run-without-check", "too-many-arguments", "too-many-positional-arguments"]
+"tool_tests/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "FBT", "N", "raise-without-from-inside-except", "DTZ", "shebang-not-executable", "subprocess-run-without-check", "too-many-arguments", "too-many-positional-arguments", "private-member-access", "magic-value-comparison", "pytest-raises-too-broad", "pytest-assert-in-except", "pytest-composite-assertion", "mutable-argument-default", "class-as-data-structure"]
 ".agents/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "shebang-not-executable"]
 "install/**" = ["print", "implicit-namespace-package", "S", "DTZ", "shebang-not-executable"]
 # vulture's whitelist file is intentionally "dead": bare attribute/name expressions that only exist to
@@ -592,7 +593,7 @@ test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integra
 subtitle-test = { shell = "uv run --extra full pytest -q -n auto tests/test_sub_index.py tests/test_sub_index_properties.py tests/test_subtitle_metamorphic.py" }
 # Deterministic unit coverage for the Grow/Sharpen and reporting tools. Explicit path because pytest's
 # package testpaths intentionally stays on the shipped overlay suite.
-loop-tools-test = { shell = "uv run --extra full pytest -q -n auto -m 'not integration' tools" }
+loop-tools-test = { shell = "uv run --extra full pytest -q -n auto -m 'not integration' tool_tests" }
 # Independent package surfaces stay runnable without the overlay dependency graph.
 package-test = { shell = "uv run --project saitenka-dict pytest -q -c saitenka-dict/pyproject.toml -m 'not integration' saitenka-dict/tests && uv run --project ankiconnect-client pytest -q -c ankiconnect-client/pyproject.toml ankiconnect-client/tests" }
 # Differential oracle: one Yomitan import and one batched query for all term modes plus kanji.
@@ -797,7 +798,7 @@ docs-refs = { shell = "uv run --extra full python tools/docs_check.py refs" }
 docs-consts = { shell = "uv run --extra full python tools/docs_check.py consts" }
 # GATE (in `all`) — skill discovery frontmatter. A per-skill smoke sees the files a procedure names,
 # but not whether the loader can discover it: name/path agreement, kebab-case, description parser limits,
-# and the repo metadata marker are one repo-wide contract. Planted controls: tools/test_skill_check.py.
+# and the repo metadata marker are one repo-wide contract. Planted controls: tool_tests/test_skill_check.py.
 skill-contract = { shell = "uv run python tools/skill_check.py" }
 # GATE (in `all`) — census-lock the vendored external-oracle corpora (UAX #14, deinflect, subtitle). Each
 # corpus's case census (count + a hash over the sorted key-list) must equal a committed manifest, so a
@@ -812,15 +813,15 @@ runtime-migration = { shell = "uv run --extra full python tools/runtime_migratio
 runtime-status = { shell = "uv run --extra full python tools/runtime_migration_check.py status", help = "Per-kind runtime-debt census — read counts from here, never retype them into a doc" }
 # GATE (in `all`) — feature packages are an explicit inventory, and their retired flat module names
 # cannot return. Dependency direction and feature-package cycles are enforced by `.importlinter`.
-# Planted controls: tools/test_app_package_layout.py.
+# Planted controls: tool_tests/test_app_package_layout.py.
 app-package-layout = { shell = "uv run python tools/app_package_layout.py" }
 # GATE (in `all`) — mining target/index/transaction/store have one writer. Unlike a line-count
 # ratchet, this rejects the old shadow fields and direct mutator/construction escape routes. Planted
-# controls: tools/test_mining_ownership_check.py.
+# controls: tool_tests/test_mining_ownership_check.py.
 mining-ownership = { shell = "uv run python tools/mining_ownership_check.py" }
 # GATE (in `all`) — the completed tooltip migration keeps policy, store construction, and mutable
 # lifecycle writes behind TooltipController while preserving the existing TipPorts paint helpers.
-# Planted controls: tools/test_tooltip_ownership_check.py.
+# Planted controls: tool_tests/test_tooltip_ownership_check.py.
 tooltip-ownership = { shell = "uv run python tools/tooltip_ownership_check.py" }
 # GATE (in `all`) — the runtime debt's *shape*, which its row count cannot see. Splits the
 # host-taking functions by the arity each would have once the host parameter is gone, counted

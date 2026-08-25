@@ -61,7 +61,7 @@ Sharpen owns edits to existing assertions; adequacy coordinates still enter thro
 
 ## Recipes (canonical tests in-tree — read them, don't reinvent)
 
-- **Pure core** → `tests/test_mining.py::test_card_data_from_token`: construct via
+- **Pure core** → `tests/features/mining/test_mining.py::test_card_data_from_token`: construct via
   `tokenize(...)`, `card_for(...)`, plain `assert` on observable fields.
 - **Payload with volatile/uninteresting keys** → prefer `dirty_equals` over N sequential
   asserts:

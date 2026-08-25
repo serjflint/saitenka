@@ -70,8 +70,8 @@ The following gates enforce the boundary:
 
 | gate | what tripped it |
 | --- | --- |
-| `tests/test_stateless_registration.py` | An `app/*_intents.py` exposing `reduce` that nothing registers. |
-| `tests/test_session_controller_host_contract.py` | A function under `app/` takes a `SessionController` **parameter**. Declare a `Protocol`. |
+| `tests/session/test_stateless_registration.py` | An `app/*_intents.py` exposing `reduce` that nothing registers. |
+| `tests/session/test_session_controller_host_contract.py` | A function under `app/` takes a `SessionController` **parameter**. Declare a `Protocol`. |
 | `poe host-mass` | You added a **member** to `SessionController` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
 | `poe reducer-purity` | A **registered** stateful reducer branches on something outside `(state, event)`. Stateless policies are not in the route table and are not measured. |
 | `poe arch` | Feature packages import session composition, interaction primitives import upward, or feature packages form a runtime cycle. |
@@ -244,14 +244,14 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 
 The executable sources of truth are:
 
-- [`tests/test_runtime_behavior_oracle.py`](https://github.com/serjflint/saitenka/blob/main/tests/test_runtime_behavior_oracle.py)
+- [`tests/session/test_runtime_behavior_oracle.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_runtime_behavior_oracle.py)
   for ordered production behavior;
 - [`tests/runtime_behavior.py`](https://github.com/serjflint/saitenka/blob/main/tests/runtime_behavior.py)
   for the closed behavior-record vocabulary;
-- [`tests/test_session_controller_host_contract.py`](https://github.com/serjflint/saitenka/blob/main/tests/test_session_controller_host_contract.py)
+- [`tests/session/test_session_controller_host_contract.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_controller_host_contract.py)
   and its [inventory](https://github.com/serjflint/saitenka/blob/main/tests/fixtures/session_controller_host_allowlist.json)
   for `SessionController`-accepting function counts;
-- [`tests/test_session_runtime.py`](https://github.com/serjflint/saitenka/blob/main/tests/test_session_runtime.py)
+- [`tests/session/test_session_runtime.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_runtime.py)
   for mailbox, lifecycle, reconnect, overload, timer, and close contracts;
 - [`tools/mining_ownership_check.py`](https://github.com/serjflint/saitenka/blob/main/tools/mining_ownership_check.py)
   for the mining writer boundary and its planted controls;

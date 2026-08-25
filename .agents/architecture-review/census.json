@@ -18,7 +18,7 @@
       "claim": "SessionLoop hands accepted payloads to the application in mailbox sequence",
       "class": 1,
       "status": "tested",
-      "evidence": "tests/test_session_runner.py::test_the_loop_hands_each_payload_over_in_mailbox_sequence",
+      "evidence": "tests/session/test_session_runner.py::test_the_loop_hands_each_payload_over_in_mailbox_sequence",
       "settles": null
     },
     {
@@ -27,7 +27,7 @@
       "claim": "_render_band touches no shared state; the caller stores the result under the lock",
       "class": 1,
       "status": "gated",
-      "evidence": "sgconfig/rules/no-raster-under-panel-lock.yml (poe invariants, in all) + tests/test_windowed_prefetch.py::test_the_panel_lock_is_not_held_across_a_raster",
+      "evidence": "sgconfig/rules/no-raster-under-panel-lock.yml (poe invariants, in all) + tests/features/tooltip/test_windowed_prefetch.py::test_the_panel_lock_is_not_held_across_a_raster",
       "settles": null
     },
     {
@@ -180,7 +180,7 @@
       "claim": "deriving the pool dispatch from the executor in hand makes a mismatch structurally impossible",
       "class": null,
       "status": "tested",
-      "evidence": "tests/test_windowed_prefetch.py::test_parallel_and_sequential_render_ahead_agree",
+      "evidence": "tests/features/tooltip/test_windowed_prefetch.py::test_parallel_and_sequential_render_ahead_agree",
       "settles": null
     },
     {
@@ -189,7 +189,7 @@
       "claim": "precompose is idempotent; a differing view_h/overscan recomputes",
       "class": null,
       "status": "tested",
-      "evidence": "tests/test_windowed_prefetch.py",
+      "evidence": "tests/features/tooltip/test_windowed_prefetch.py",
       "settles": null
     },
     {
@@ -252,7 +252,7 @@
       "claim": "ProfileController is the sole writer of active profile, profile index, tokenizer, and dictionary-set facts",
       "class": 1,
       "status": "argued",
-      "evidence": "the current source census finds those writes only in ProfileController; tests/test_profile_switcher.py covers atomic preflight, track selection, cache generation, and late dependency behavior",
+      "evidence": "the current source census finds those writes only in ProfileController; tests/features/profiles/test_profile_switcher.py covers atomic preflight, track selection, cache generation, and late dependency behavior",
       "settles": "a structural writer-census gate with a negative control over assignments and mutator exposure"
     },
     {
@@ -270,7 +270,7 @@
       "claim": "Selected profile identity qualifies the desired mining spec, prepared target, and mined index, so late dependency work cannot overwrite the selected profile",
       "class": 1,
       "status": "gated",
-      "evidence": "poe mining-ownership (in all) plus tests/test_profile_switcher.py::test_profile_environment_refuses_out_of_order_dependency_publication and tests/test_mining_controller.py",
+      "evidence": "poe mining-ownership (in all) plus tests/features/profiles/test_profile_switcher.py::test_profile_environment_refuses_out_of_order_dependency_publication and tests/features/mining/test_mining_controller.py",
       "settles": null
     },
     {
@@ -279,7 +279,7 @@
       "claim": "MiningController is the sole writer and construction boundary for the mining index, transaction, store, and scratch lifecycle",
       "class": 1,
       "status": "gated",
-      "evidence": "poe mining-ownership (in all); planted negative controls in tools/test_mining_ownership_check.py",
+      "evidence": "poe mining-ownership (in all); planted negative controls in tool_tests/test_mining_ownership_check.py",
       "settles": null
     },
     {

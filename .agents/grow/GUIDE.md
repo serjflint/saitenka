@@ -48,7 +48,7 @@ saw it. Grow reasons about scenarios and their *sequences*, not lines.
 
 ## Example — the worked output
 
-The canonical Grow artifact in this repo is `tests/test_tooltip_statemachine.py`. A single-action
+The canonical Grow artifact in this repo is `tests/features/tooltip/test_tooltip_statemachine.py`. A single-action
 test (`test_scale_boundary.py`) already proves the render↔hit-test **agreement oracle** for one action:
 every drawn element's displayed centre round-trips back to that element through the real hit path. Grow
 made it **stateful** — a `RuleBasedStateMachine` drives the real controller through arbitrary
@@ -70,7 +70,7 @@ A grown scenario test must clear liveness plus at least one genuine-growth proof
 context-delta. Run both proofs when they honestly apply; a covered branch can bounce line-level context
 while its scenario mutant still proves growth. Concurrency uses its own pair plus control liveness. Each
 arm is a pure function over an injected primitive, so the gate logic is unit-tested without a real
-subprocess (`tools/test_grow_gate.py`).
+subprocess (`tool_tests/test_grow_gate.py`).
 
 - **Arm 1 — property-mutant (load-bearing + genuine growth).** We plant a small mutation that *encodes the
   scenario's violation* (e.g. "the crisp path silently degrades to soft"). The grown test must KILL it —
@@ -120,7 +120,7 @@ when its own target actually changes. A naive line-number key drifts on any edit
 re-opens closed gaps forever. So the gap identity is `hash(source, target_symbol, dimension)` plus a
 content-hash of the **target symbol's AST source** — not the whole module. Unrelated edits leave it closed;
 a real change to the target reopens it. This is implemented in `tools/grow_ledger.py` and locked by
-`tools/test_grow_ledger.py`.
+`tool_tests/test_grow_ledger.py`.
 
 ## Anti-bloat — Grow's characteristic hazard
 

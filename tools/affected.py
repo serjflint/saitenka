@@ -77,7 +77,7 @@ def classify(changed: list[str]) -> tuple[list[str], set[str], set[str]]:
         name = f.rsplit("/", 1)[-1]
         if f.startswith("deinflect/") or name in {"pyproject.toml", "uv.lock"}:
             full.append(f)  # code dep overlay imports, or a config/lock change
-        elif not f.startswith(("src/", "tests/", "tools/")):
+        elif not f.startswith(("src/", "tests/", "tools/", "tool_tests/")):
             continue  # docs / install / .github — irrelevant to the application suite
         elif (
             name == "conftest.py"
@@ -90,7 +90,7 @@ def classify(changed: list[str]) -> tuple[list[str], set[str], set[str]]:
                 full.append(f)
             else:
                 overlay_py.add(f)
-                if f.startswith("tests/"):
+                if f.startswith(("tests/", "tool_tests/")):
                     changed_tests.add(f)
     return full, overlay_py, changed_tests
 
@@ -122,7 +122,9 @@ def closure_tests(seeds: set[str], graph: dict[str, list[str]]) -> set[str]:
     return {
         f
         for f in seen
-        if f.startswith("tests/") and f.endswith(".py") and not f.endswith("conftest.py")
+        if f.startswith(("tests/", "tool_tests/"))
+        and f.endswith(".py")
+        and not f.endswith("conftest.py")
     }
 
 

@@ -235,7 +235,7 @@ The production path then confirms the consequence:
 
 ## Late dependency evidence
 
-`tests/test_profile_switcher.py::test_late_dependency_result_keeps_the_existing_last_arrival_dictionary_policy` performs:
+`tests/features/profiles/test_profile_switcher.py::test_late_dependency_result_keeps_the_existing_last_arrival_dictionary_policy` performs:
 
 1. configure a profile cycle whose French scope returns `active_dicts`;
 2. cycle to French;
@@ -313,7 +313,7 @@ No P3 findings were promoted.
 
 - **Axis:** Failure modes and resilience; soundness of invariants; testability.
 - **Failure scenario:** Interactive startup begins building dependencies for the launch profile. Before that build completes—especially plausible in attach/plugin mode or a first dictionary build—the user cycles to another profile. `ProfileController.switch_to()` installs the new profile-scoped dictionary set. When the old build lands, `_install_collaborators()` unconditionally calls `profile_controller.replace_dictionary_set(deps["dict_set"])`; the active profile remains new while its dictionary set becomes the launch profile’s. Hover can then miss, show the wrong language’s definitions, or mine with a mismatched source.
-- **Discriminator:** `tests/test_profile_switcher.py:343-354` constructs exactly this sequence and asserts that the late launch dictionary replaces the active profile’s dictionary. That rules out the innocent explanation that dependency completion is identity-qualified or re-scoped at publication. `reader_deps.DepsLoad` carries only an unqualified `dict`, and `_install_collaborators()` performs last-arrival-wins.
+- **Discriminator:** `tests/features/profiles/test_profile_switcher.py:343-354` constructs exactly this sequence and asserts that the late launch dictionary replaces the active profile’s dictionary. That rules out the innocent explanation that dependency completion is identity-qualified or re-scoped at publication. `reader_deps.DepsLoad` carries only an unqualified `dict`, and `_install_collaborators()` performs last-arrival-wins.
 - **Age:** The unconditional collaborator installation predates the pilot; its current host-owned form dates to `a2e83da8` on 2026-08-21. The profile pilot in `944ed1ea` added a test that codifies the overwrite instead of rejecting it.
 - **Remedy:** Stamp dependency results with the profile identity or generation captured when building. On the owner thread, either discard a result whose identity is stale or re-scope its dictionary set for the currently active profile before publication. Replace the current characterization with a negative control proving an old-profile result cannot overwrite a newer selection.
 
