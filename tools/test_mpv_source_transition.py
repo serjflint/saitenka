@@ -6,12 +6,14 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from mpv_source_transition import (
     FrameSample,
     _duplicate_layers_visible,
     _mask_coverage,
+    _probe_phase,
     _shadow_render,
     _wait_subtitle_state_events,
     ass_hashes,
@@ -305,6 +307,101 @@ def test_subtitle_state_timeout_names_the_half_that_starved(
     assert f"no {missing} event(s) for sid 1" in message
     if present is not None:
         assert f"no {present}" not in message
+
+
+NATIVE_SID, GENERATED_SID = 1, 2
+NATIVE_TEXT, GENERATED_TEXT = "原稿の字幕\n門前", "生成した字幕"
+
+
+class _FakeMpv:
+    """The mpv behaviours the transition phase depends on, as measured against mpv 0.41.
+
+    Commands take effect **one drain late**. That lag is the subject, not padding: mpv processes
+    IPC commands on its playloop, so a `drain_events` issued straight after a `set_property` sees
+    the state from before it. Against a fake that mutates synchronously, the phase's own events are
+    always in the very first batch and every assertion below passes on broken code.
+
+    A `property-change` is emitted only when the value actually changes, and `query` is a barrier —
+    it applies anything outstanding, matching mpv, where a query reply arrives with the earlier
+    commands' notifications already queued.
+    """
+
+    def __init__(self, *, sid: int, paused: bool) -> None:
+        self._tracks = {NATIVE_SID: NATIVE_TEXT, GENERATED_SID: GENERATED_TEXT}
+        self._props: dict = {"sid": sid, "pause": paused, "sub-text": self._tracks[sid]}
+        self._events: list[dict] = []
+        self._pending: list[tuple[str, Any]] = []
+
+    def seed_sampling_backlog(self) -> None:
+        """What `_sample_frame_controls` leaves queued: it switches sid six times, never drains,
+        and ends back on the native track."""
+        for sid in (GENERATED_SID, NATIVE_SID):
+            for name, data in (("sid", sid), ("sub-text", self._tracks[sid])):
+                self._events.append(
+                    {"event": "property-change", "name": name, "data": data, "stale": True}
+                )
+
+    def _change(self, name: str, value: object) -> None:
+        if self._props.get(name) != value:
+            self._props[name] = value
+            self._events.append({"event": "property-change", "name": name, "data": value})
+
+    def _settle(self) -> None:
+        pending, self._pending = self._pending, []
+        for name, value in pending:
+            self._change(name, value)
+            if name == "sid":
+                self._change("sub-text", self._tracks.get(value))
+
+    def command(self, *args, **_kwargs) -> dict:
+        if args[0] == "set_property":
+            self._pending.append((args[1], args[2]))
+        return {"error": "success"}
+
+    def query(self, name: str):
+        self._settle()
+        return self._props.get(name)
+
+    def drain_events(self) -> list[dict]:
+        events, self._events = self._events, []
+        self._settle()
+        return events
+
+
+def test_probe_phase_observes_its_own_switch_not_the_sampling_backlog() -> None:
+    """The phase runs straight after six undrained screenshot samples, and its matcher accepts any
+    buffered event with the right value — so the sampling backlog can satisfy it before mpv has
+    even processed the phase's own `set_property`.
+
+    That is a green phase built on evidence it did not produce. It also un-serializes the two
+    switches, and mpv coalesces `sid` notifications issued inside one playloop iteration into a
+    single event (measured: `set sid=2; set sid=1` back-to-back emits `sid` once, with the final
+    value), so the second wait can be left with no event of its own to observe.
+    """
+    fake = _FakeMpv(sid=NATIVE_SID, paused=True)
+    fake.seed_sampling_backlog()
+
+    phase = _probe_phase(fake, GENERATED_SID, NATIVE_SID, paused=True)
+
+    reused = [
+        key
+        for key, value in phase.items()
+        if isinstance(value, dict) and value.get("stale") is True
+    ]
+    assert reused == [], f"phase reported sampling-backlog events as its own: {reused}"
+
+
+def test_probe_phase_still_reports_the_events_it_observed() -> None:
+    """Negative control for the drain: clearing the backlog must not clear the phase's own
+    evidence, which is the whole artifact the probe exists to record."""
+    fake = _FakeMpv(sid=NATIVE_SID, paused=True)
+
+    phase = _probe_phase(fake, GENERATED_SID, NATIVE_SID, paused=True)
+
+    assert phase["generated_sid_event"]["data"] == GENERATED_SID
+    assert phase["generated_sub_text_event"]["data"] == GENERATED_TEXT
+    assert phase["native_sid_event"]["data"] == NATIVE_SID
+    assert phase["native_sub_text_event"]["data"] == NATIVE_TEXT
 
 
 @pytest.mark.integration

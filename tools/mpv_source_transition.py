@@ -467,7 +467,26 @@ def _wait_track_event(ipc, path: Path, *, present: bool) -> dict[str, Any]:
     return _wait_for(observed, timeout=3.0, message=f"no track-list event with present={present}")
 
 
+def _discard_earlier_events(ipc) -> None:
+    """Drop events the previous step produced, so a wait can only be satisfied by its own.
+
+    The round-trip is what makes this a barrier: `drain_events` alone is a non-blocking snapshot of
+    the reader thread's buffer, and an event mpv had already emitted can still land after it. mpv
+    executes IPC commands in order and has the earlier ones' notifications queued by the time a
+    later query replies (measured on 0.41: the drain right after a `sid` query already carries that
+    switch's `sid` and `sub-text`).
+    """
+    ipc.query("sid")
+    ipc.drain_events()
+
+
 def _probe_phase(ipc, generated_sid: int, native_sid: int, *, paused: bool) -> dict[str, Any]:
+    # `_sample_frame_controls` switches sid six times and never drains, so without this the first
+    # wait below matches the sampling backlog and returns before mpv has processed the phase's own
+    # `set_property`. That is a phase reporting evidence it did not produce — and it un-serializes
+    # the two switches, which matters because mpv coalesces `sid` notifications issued within one
+    # playloop iteration into a single event carrying only the final value.
+    _discard_earlier_events(ipc)
     current_pause = ipc.query("pause")
     if current_pause == paused:
         pause_observation = {"kind": "current-value", "data": current_pause}
