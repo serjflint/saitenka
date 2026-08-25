@@ -152,8 +152,11 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install CJK fonts and Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb fonts-noto-cjk
+      # ffmpeg explicitly: the harness builds its clip by shelling out to it, and only the apt leg
+      # would get it for free (as an mpv dependency). The AppImage is self-contained, so the legs
+      # that use one had no system ffmpeg at all.
+      - name: Install CJK fonts, Xvfb and ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y xvfb fonts-noto-cjk ffmpeg
 
       - name: Install mpv from apt
         if: matrix.appimage == ''
