@@ -34,6 +34,20 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _require(binary: str, path: str | None) -> str:
+    """A binary this tier needs and cannot find is an environment defect, not a reason to pass.
+
+    Nothing here runs unless someone opted in (`SAITENKA_LIVE=1`, or `poe smoke-live`), and the CI
+    job that runs it apt-installs both `mpv` and `ffmpeg` — so "not installed" can only mean the
+    environment drifted from what the gate assumes. Skipping is how a tier goes green while testing
+    nothing: the libass oracles silently skipped for weeks because their package sat in an extra
+    nothing declared, and the e2e tier was red from its first release without anyone seeing it.
+    """
+    if not path:
+        pytest.fail(f"the live tier needs {binary} and it is not installed")
+    return path
+
+
 def _bare_mpv(*args: str):
     """A headless mpv carrying `args`, and a `get(name)` that asks it for a property.
 
@@ -43,9 +57,7 @@ def _bare_mpv(*args: str):
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
 
-    mpv = find_mpv(None)
-    if not mpv:
-        pytest.skip("mpv not found")
+    mpv = _require("mpv", find_mpv(None))
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-premise-"))
     sock = default_ipc_path(tmp.name)
     proc = subprocess.Popen(
@@ -218,10 +230,7 @@ def _two_track_mpv(tmp_path: Path):
     The Gate B probe's shape, reduced to what the premises below need: `sid` 1 is the track mpv
     loads with the file, `sid` 2 the one added after.
     """
-    if not shutil.which("ffmpeg"):
-        # `_bare_mpv` skips on a missing mpv; a missing ffmpeg has to do the same, or one absent
-        # binary in this file skips and the other raises FileNotFoundError as a test ERROR.
-        pytest.skip("ffmpeg not found")
+    _require("ffmpeg", shutil.which("ffmpeg"))
     fixtures = Path(__file__).parent / "fixtures" / "mpv_source_envelope"
     clip = tmp_path / "clip.mkv"
     subprocess.run(
