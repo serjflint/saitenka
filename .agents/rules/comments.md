@@ -18,11 +18,22 @@ Treat comment bloat the way you treat cognitive complexity — something to cut,
   `poe host-mass`, `poe runtime-status`), point at the generator; if none does and the number
   matters, that is an argument for a meter, not for a comment.
 
+- **Anything the code already is.** If a value, a rule or a list is stated in code, a test, a
+  manifest or a generator, the comment points at it — it does not restate it. Two copies of a fact
+  drift independently and one goes stale silently, and the prose copy is always the one nobody
+  updates. Prefer the code as the source of truth and let the comment carry only what the code
+  cannot: why it is that way.
+
 ## Keep
 
 The *why*, a gotcha, a constraint, a refuted alternative, a bug/PR reference. A number that is
 **evidence inside an argument** stays, because it stops being true only when the argument does
 ("reads eight fields to snapshot one object"). A number **reporting the state of the tree** goes.
+
+The sharpest test of a surviving comment is Ousterhout's (*A Philosophy of Software Design*, ch. 13):
+a comment must sit at a **different level of detail** than the code it sits on — higher (the intent,
+the contract) or lower (units, bounds, a constraint the types cannot express). A comment at the
+*same* level is a restatement, and that is the whole of the "information delta" rule in one test.
 
 ## Distil what survives
 

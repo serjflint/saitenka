@@ -35,13 +35,11 @@ pytestmark = pytest.mark.skipif(
 
 
 def _require(binary: str, path: str | None) -> str:
-    """A binary this tier needs and cannot find is an environment defect, not a reason to pass.
+    """A missing binary is an environment defect, not a reason to pass.
 
-    Nothing here runs unless someone opted in (`SAITENKA_LIVE=1`, or `poe smoke-live`), and the CI
-    job that runs it apt-installs both `mpv` and `ffmpeg` — so "not installed" can only mean the
-    environment drifted from what the gate assumes. Skipping is how a tier goes green while testing
-    nothing: the libass oracles silently skipped for weeks because their package sat in an extra
-    nothing declared, and the e2e tier was red from its first release without anyone seeing it.
+    This tier is opt-in and its CI job installs `mpv` and `ffmpeg`, so absent means drifted. A skip
+    here is how a tier goes green while testing nothing — twice already, in the libass oracles and
+    the e2e tier.
     """
     if not path:
         pytest.fail(f"the live tier needs {binary} and it is not installed")
@@ -225,11 +223,7 @@ NATIVE_SID, GENERATED_SID = 1, 2
 
 
 def _two_track_mpv(tmp_path: Path):
-    """A paused clip carrying two external ASS tracks, and a drain that waits for quiet.
-
-    The Gate B probe's shape, reduced to what the premises below need: `sid` 1 is the track mpv
-    loads with the file, `sid` 2 the one added after.
-    """
+    """A paused clip carrying two external ASS tracks: `sid` 1 loads with the file, `sid` 2 after."""
     _require("ffmpeg", shutil.which("ffmpeg"))
     fixtures = Path(__file__).parent / "fixtures" / "mpv_source_envelope"
     clip = tmp_path / "clip.mkv"
@@ -306,21 +300,17 @@ def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
     assert any("生成した字幕" in (text or "") for text in _changes(events, "sub-text"))
 
 
-# Not pinned here, on purpose: how many `sid` notifications mpv raises for N writes is timing, not
-# semantics. It raises them from the playloop rather than the command handler, so writes that reach
-# one iteration collapse into a single event carrying the final value. Measured on 0.41 in a settled
-# loop: 60/60 collapse through `command_async`, 18/60 through the blocking `command` — and the 60/60
-# stops holding right after startup, when ticks are frequent. Every rate here is environment-
-# dependent, and an assertion on one is a flake generator. Consumers must not require a
-# notification per write; `tools/mpv_source_transition.py` serializes instead.
+# Deliberately unpinned: mpv raises property-changes from the playloop, so writes reaching one
+# iteration collapse into a single event carrying the final value. How often is timing — measured on
+# 0.41, 60/60 through `command_async` against 18/60 through the blocking `command`, and even the
+# 60/60 lapses right after startup. Require a notification per write and you are asserting a rate.
 
 
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_a_deselected_sid_reads_back_as_false(tmp_path: Path) -> None:
-    """A confirm written against the literal `"no"` would never fire, turning a probe's 3 s flake
-    into a deterministic 3 s red. `tools/mpv_source_transition.py` already accepts the three-way
-    `{None, "no", False}`; this says which one mpv actually sends."""
+    """A confirm written against the literal `"no"` would never fire. `mpv_source_transition.py`
+    accepts `{None, "no", False}`; this says which one mpv sends."""
     proc, ipc = _two_track_mpv(tmp_path)
     try:
         _drain_until_quiet(ipc)
@@ -333,4 +323,4 @@ def test_a_deselected_sid_reads_back_as_false(tmp_path: Path) -> None:
         proc.terminate()
 
     assert queried is False
-    assert _changes(events, "sid") == [False]
+    assert _changes(events, "sid")[-1] is False  # last value, not the count — see the note above
