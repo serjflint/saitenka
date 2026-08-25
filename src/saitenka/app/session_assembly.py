@@ -95,7 +95,15 @@ class SessionAssembly:
         help_identity = features.get("help")
         if help_identity is None or help_identity[1] is not self.help:
             raise ValueError("help commands must terminate at the installed help owner")
+        plans: dict[Owner, OwnerPlan] = {}
         for plan in self.owner_plans:
+            if plan.owner in plans:
+                raise ValueError(f"owner plan already registered: {plan.owner.value}")
+            plans[plan.owner] = plan
+        stateful_owners = {row.runtime_owner for row in self.stateful}
+        if stateful_owners != set(plans):
+            raise ValueError("owner plans and stateful bindings disagree")
+        for plan in plans.values():
             owned = tuple(row for row in self.stateful if row.runtime_owner is plan.owner)
             ordered_stateful_bindings(plan, owned)
 
@@ -142,7 +150,7 @@ def build_session_assembly(
         surfaces,
         screen,
         options.keys,
-        scale=ui_scale,
+        ui_scale=ui_scale,
     )
     sidebar_owner = SidebarController(ipc)
     preview_owner = PreviewController(ipc)

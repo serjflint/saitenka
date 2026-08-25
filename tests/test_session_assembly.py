@@ -95,6 +95,26 @@ def test_owner_plan_rejects_a_missing_stateful_binding():
         replace(assembly, stateful=assembly.stateful[:-1])
 
 
+def test_assembly_rejects_stateful_binding_without_an_owner_plan():
+    assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
+    ghost = replace(
+        assembly.stateful[0],
+        feature="ghost",
+        runtime_owner=Owner.PLAYBACK,
+        key="ghost",
+    )
+
+    with pytest.raises(ValueError, match="owner plans and stateful bindings disagree"):
+        replace(assembly, stateful=(*assembly.stateful, ghost))
+
+
+def test_assembly_rejects_duplicate_owner_plans():
+    assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
+
+    with pytest.raises(ValueError, match="owner plan already registered"):
+        replace(assembly, owner_plans=(*assembly.owner_plans, assembly.owner_plans[0]))
+
+
 def test_owner_plan_rejects_an_event_without_a_declared_consumer():
     assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
     first = assembly.stateful[0]

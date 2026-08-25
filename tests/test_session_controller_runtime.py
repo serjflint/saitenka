@@ -105,7 +105,7 @@ def test_command_policy_rejects_non_help_command_while_help_is_open():
 
 
 def test_command_policy_accepts_help_navigation_while_help_is_open():
-    decision = SessionController(FakeIPC()).commands.policy.decide(
+    decision = CommandPolicy().decide(
         UserCommand("saitenka-help-next"),
         cue_state=CueCommandState.RETIRED_AFTER_ACTIVE,
         help_open=True,
@@ -256,7 +256,6 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() 
     cannot be handed a different one, which is what makes the conformance contract testable.
     """
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-    from saitenka.app.session_controller import SessionController
     from saitenka.app.session_factory import _geometry_backend
 
     assert _geometry_backend(SubtitleGeometryOptions(native_visible=False)) is None
@@ -310,7 +309,6 @@ def test_an_idle_session_blocks_instead_of_polling():
 
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
@@ -333,7 +331,6 @@ def test_an_event_wakes_the_wait_early():
 
     from util import FakeIPC
 
-    from saitenka.app.session_controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()

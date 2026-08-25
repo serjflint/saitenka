@@ -12,6 +12,7 @@ import util
 
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.session_controller import SessionController
+from saitenka.runtime import events
 
 REF_H = 1080
 
@@ -48,3 +49,17 @@ def test_help_panel_is_larger_on_a_hi_dpi_osd_than_at_1080p():
     r.osd = (3024, 1898)
     hidpi = r.help_controller.document()
     assert hidpi.width > base.width and hidpi.height > base.height
+
+
+def test_subtitle_picker_is_larger_on_a_hi_dpi_osd_than_at_1080p():
+    r = _reader(1.0)
+    r.picker_controller.store.dispatch(events.PickerOpened())
+    r.osd = (1920, 1080)
+    r.picker_controller.redraw()
+    assert r.picker_controller.panel.rect is not None
+    base_width = r.picker_controller.panel.rect[2]
+
+    r.osd = (3840, 2160)
+    r.picker_controller.redraw()
+    assert r.picker_controller.panel.rect is not None
+    assert r.picker_controller.panel.rect[2] == base_width * 2

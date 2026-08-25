@@ -27,14 +27,14 @@ class PickerController:
         screen: ScreenState,
         keys: KeyOptions,
         *,
-        scale: float,
+        ui_scale: float,
     ) -> None:
         self.store: PickerStore = PICKER_STATEFUL_BINDING.store(ipc)
         self.panel = sub_picker.PickerPanel()
         self._surfaces = surfaces
         self._screen = screen
         self._keys = keys
-        self._scale = scale
+        self._ui_scale = ui_scale
 
     @property
     def state(self) -> PickerState:
@@ -47,10 +47,12 @@ class PickerController:
         state = self.state
         if not state.open:
             return
+        osd = self._screen.osd
+        scale = self._ui_scale * max(1.0, osd[1] / 1080)
         rendered, x, y, width, height = sub_picker.picker_panel(
             state,
-            osd=self._screen.osd,
-            scale=self._scale,
+            osd=osd,
+            scale=scale,
             close_key=self._keys.sub_picker_key,
         )
         self.panel.rect = (x, y, width, height)
