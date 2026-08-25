@@ -127,9 +127,6 @@ from one session:
 - A `_FakeMpv` that applied `set_property` synchronously made a probe reproduction **pass on unfixed
   code**: the phase's own events always landed in the first drained batch, so they always beat the
   stale ones the bug feeds on. Deferring command effects by one drain reproduced it deterministically.
-- The same fake published events immediately, so deleting the round-trip in front of a drain left the
-  whole suite green — the fix's stated mechanism was asserted by prose only.
-
 So: **name the dimension the failure lives in — time, ordering, delivery latency, width, concurrency —
 and give the fake that dimension.** A fake faster or more synchronous than production cannot exhibit
 an ordering bug, and every test written against it reads green for the wrong reason.

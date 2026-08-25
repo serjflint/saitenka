@@ -371,9 +371,10 @@ class _FakeMpv:
         return {"error": "success"}
 
     def query(self, name: str):
-        # The barrier: a reply arrives with everything outstanding applied AND published, so a
-        # drain behind it sees the lot. Without that, a bare drain would look like a barrier here
-        # and the round-trip in `_discard_earlier_events` could be deleted unnoticed.
+        # The fake makes a query absolute: everything outstanding is applied AND published, so a
+        # drain behind it sees the lot. Real mpv is only near-certain here (58/60). Modelling the
+        # strict form is deliberate — it makes the round-trip in `_discard_earlier_events`
+        # load-bearing, so deleting it turns a test red instead of going unnoticed.
         self._settle()
         self._publish()
         return self._props.get(name)
@@ -392,9 +393,9 @@ def test_probe_phase_observes_its_own_switch_not_the_sampling_backlog() -> None:
 
     That is a green phase built on evidence it did not produce. It also un-serializes the two
     switches, and mpv can then collapse both `sid` notifications into one carrying only the final
-    value, leaving a wait with no event of its own — see
-    `tests/test_live_mpv_premises.py::test_unserialized_sid_writes_collapse_into_one_notification`
-    for the measured shape.
+    value, leaving a wait with no event of its own. The measured rates are recorded beside the live
+    premises in `tests/test_live_mpv_premises.py`; they are rates, not an invariant, which is why
+    nothing asserts them.
     """
     fake = _FakeMpv(sid=NATIVE_SID, paused=True)
     fake.seed_sampling_backlog()

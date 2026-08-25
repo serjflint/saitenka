@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -217,6 +218,10 @@ def _two_track_mpv(tmp_path: Path):
     The Gate B probe's shape, reduced to what the premises below need: `sid` 1 is the track mpv
     loads with the file, `sid` 2 the one added after.
     """
+    if not shutil.which("ffmpeg"):
+        # `_bare_mpv` skips on a missing mpv; a missing ffmpeg has to do the same, or one absent
+        # binary in this file skips and the other raises FileNotFoundError as a test ERROR.
+        pytest.skip("ffmpeg not found")
     fixtures = Path(__file__).parent / "fixtures" / "mpv_source_envelope"
     clip = tmp_path / "clip.mkv"
     subprocess.run(
@@ -286,7 +291,9 @@ def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
         ipc.close()
         proc.terminate()
 
-    assert _changes(events, "sid") == [GENERATED_SID]
+    # The last value, not the whole list: how many notifications mpv raises is timing (see the note
+    # below), and the premise here is the `sub-text` refresh, not the count.
+    assert _changes(events, "sid")[-1] == GENERATED_SID
     assert any("生成した字幕" in (text or "") for text in _changes(events, "sub-text"))
 
 
