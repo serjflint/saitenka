@@ -13,6 +13,7 @@ from mpv_source_transition import (
     _duplicate_layers_visible,
     _mask_coverage,
     _shadow_render,
+    _wait_subtitle_state_events,
     ass_hashes,
     assess_frames,
     build_embedded_delivery,
@@ -264,6 +265,46 @@ def test_duplicate_layer_oracle_requires_independent_regions() -> None:
 def test_sampled_public_ipc_without_exact_frame_callback_selects_native_visible_contract() -> None:
     assert select_transition_contract(presented_frames_observed=False) == "native-visible"
     assert select_transition_contract(presented_frames_observed=True) == "paused-only-switch"
+
+
+class _ReplayIPC:
+    """Serves a fixed batch of property-change events, once, then nothing."""
+
+    def __init__(self, events: list[dict]) -> None:
+        self._events = events
+
+    def drain_events(self) -> list[dict]:
+        events, self._events = self._events, []
+        return events
+
+
+def _property_change(name: str, data: object) -> dict:
+    return {"event": "property-change", "name": name, "data": data}
+
+
+@pytest.mark.parametrize(
+    ("delivered", "missing", "present"),
+    [
+        ([_property_change("sid", 1)], "sub-text", "sid"),
+        ([_property_change("sub-text", "原稿の字幕")], "sid", "sub-text"),
+        ([], "sid, sub-text", None),
+    ],
+)
+def test_subtitle_state_timeout_names_the_half_that_starved(
+    delivered: list[dict], missing: str, present: str | None
+) -> None:
+    """Which half is missing is the diagnosis — a missing `sid` means mpv never switched, a missing
+    `sub-text` means it switched without re-rendering. The two have different causes and different
+    fixes, and a CI timeout is the only artifact anyone gets to read."""
+    with pytest.raises(TimeoutError) as raised:
+        _wait_subtitle_state_events(
+            _ReplayIPC(delivered), 1, "原稿の字幕", text_contains=True, timeout=0.02
+        )
+
+    message = str(raised.value)
+    assert f"no {missing} event(s) for sid 1" in message
+    if present is not None:
+        assert f"no {present}" not in message
 
 
 @pytest.mark.integration

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,14 +356,17 @@ def build_embedded_delivery(
     )
 
 
-def _wait_for(predicate, *, timeout: float, message: str):
+def _wait_for(predicate, *, timeout: float, message: str | Callable[[], str]):
+    """`message` may be a callable so a wait can report which part of a compound condition was
+    still missing — the state that explains a timeout lives in the predicate's closure and is
+    otherwise discarded at the raise."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = predicate()
         if value:
             return value
         time.sleep(0.01)
-    raise TimeoutError(message)
+    raise TimeoutError(message() if callable(message) else message)
 
 
 def _track_for_path(ipc, path: Path) -> dict[str, Any] | None:
@@ -428,7 +431,16 @@ def _wait_subtitle_state_events(
                     seen["sub-text"] = event
         return (seen["sid"], seen["sub-text"]) if len(seen) == 2 else None
 
-    return _wait_for(observed, timeout=timeout, message=f"no sid/sub-text events for {sid}")
+    return _wait_for(
+        observed,
+        timeout=timeout,
+        # Which half starved is the whole diagnosis: a missing `sid` means mpv never switched, a
+        # missing `sub-text` means it switched without re-rendering.
+        message=lambda: (
+            f"no {', '.join(sorted({'sid', 'sub-text'} - seen.keys()))} event(s) for sid {sid}"
+            f" (wanted sub-text {'containing' if text_contains else '=='} {text!r})"
+        ),
+    )
 
 
 def _event_has_track(event: dict[str, Any], path: Path) -> bool:
