@@ -52,6 +52,24 @@ def replace(controller):
     assert rules == {"owned-index-mutation", "owned-seed-mutation", "owned-state-write"}
 
 
+def test_nested_owner_state_assignments_are_rejected() -> None:
+    findings = mining_ownership_check.inspect_source(
+        """
+def replace(controller):
+    controller._mined_index.revision += 1
+    controller._mined_index.seed_status = value
+    controller._mined_seed.inflight = True
+""",
+        Path("src/saitenka/app/foreign.py"),
+    )
+
+    assert [(finding.rule, finding.detail) for finding in findings] == [
+        ("owned-state-write", "_mined_index"),
+        ("owned-state-write", "_mined_index"),
+        ("owned-state-write", "_mined_seed"),
+    ]
+
+
 def test_owner_thread_install_acts_are_not_public_mutators() -> None:
     rules = _rules(
         """

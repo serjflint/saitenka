@@ -32,6 +32,12 @@ class _Submitter:
         return True
 
 
+class _RejectingSubmitter(_Submitter):
+    def __call__(self, **kwargs) -> bool:
+        self.calls.append(kwargs)
+        return False
+
+
 @dataclass
 class _EncounterSource:
     samples: int = 0
@@ -169,4 +175,31 @@ def test_each_public_operation_samples_a_fresh_encounter(tmp_path, monkeypatch) 
 
     assert observed == [1.0, 2.0]
     assert encounters.samples == 2
+    controller.close()
+
+
+def test_rejected_seed_admission_releases_the_lane(tmp_path, monkeypatch) -> None:
+    from saitenka.app import mined_store
+
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
+    seed = _RejectingSubmitter()
+    identity = MiningIdentity("a", 0)
+    controller = MiningController(
+        MiningSpec(identity, {"deck": "Deck A", "model": "Lapis"}),
+        MiningLifecycle(seed, _Submitter(), lambda _delay, _due: True, lambda: None, lambda: False),
+        max_bulk=20,
+        anki_ok_ttl=5,
+        anki_ping_timeout=0.1,
+        encounter=_EncounterSource(),
+        apply=_apply,
+    )
+    assert controller.publish_mining_target(
+        MiningTarget(identity, object(), MineConfig(deck="Deck A"))
+    )
+
+    controller.request_seed()
+
+    assert len(seed.calls) == 1
+    assert controller.seed_lane.inflight is False
+    assert controller.index_snapshot().seed_status is SeedStatus.DEGRADED
     controller.close()

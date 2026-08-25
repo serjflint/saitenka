@@ -203,4 +203,5 @@ class SessionContext:
 
     def __init__(self, render_cache: RenderCacheState) -> None:
         self.render_cache = render_cache
+        self.anki_cache: tuple[float, bool] = (0.0, False)
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle

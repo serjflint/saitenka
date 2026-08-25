@@ -359,13 +359,15 @@ class MiningController:
             return
         self._mined_seed.inflight = True
         identity = (target.identity, self._mined_seed.generation, self._mined_index.revision)
-        submit(
+        accepted = submit(
             owner=Owner.SESSION,
             identity=identity,
             lane="mined-seed",
             request=mined_seed.MinedSeedRequest(target.anki, target.config),
             on_finished=self._finish_seed,
         )
+        if not accepted:
+            self._seed_failed()
 
     def _finish_seed(self, completion: EffectFinished) -> None:
         target = self.active_target
@@ -379,14 +381,18 @@ class MiningController:
         self._mined_seed.inflight = False
         values = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
         if not isinstance(values, set):
-            self._mined_seed.failures += 1
-            self._mined_index.seed_status = SeedStatus.DEGRADED
-            self._arm_seed_retry(self._mined_seed.backoff_delay())
+            self._seed_failed()
             return
         self._mined_seed.done = True
         self._mined_seed.failures = 0
         self._mined_index.seed_status = SeedStatus.READY
         self._mined_index.values.update(values)
+
+    def _seed_failed(self) -> None:
+        self._mined_seed.inflight = False
+        self._mined_seed.failures += 1
+        self._mined_index.seed_status = SeedStatus.DEGRADED
+        self._arm_seed_retry(self._mined_seed.backoff_delay())
 
     def _arm_seed_retry(self, delay: float) -> None:
         def due() -> None:

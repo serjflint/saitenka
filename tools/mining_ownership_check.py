@@ -71,7 +71,7 @@ def _call_name(node: ast.Call) -> str | None:
 
 def _attributes(node: ast.AST) -> list[ast.Attribute]:
     if isinstance(node, ast.Attribute):
-        return [node]
+        return [node, *_attributes(node.value)]
     if isinstance(node, ast.Starred):
         return _attributes(node.value)
     if isinstance(node, ast.List | ast.Tuple):

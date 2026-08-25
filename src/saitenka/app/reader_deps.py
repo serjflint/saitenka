@@ -595,6 +595,7 @@ class ProfileDependencies:
         ) = None
         self._spec_for: Callable[[object, MiningIdentity], MiningSpec] | None = None
         self._inflight: set[MiningIdentity] = set()
+        self._settled_identity: MiningIdentity | None = None
         self._pending: list[DependencyBundle] = []
         self._pending_lock = threading.Lock()
 
@@ -621,6 +622,7 @@ class ProfileDependencies:
 
     def select(self, profile) -> None:
         self._identity = MiningIdentity(profile.name, self._identity.generation + 1)
+        self._settled_identity = None
         if self._spec_for is not None:
             self._apply.select_mining(self._resolve_spec(profile, self._identity))
         self._apply.retire_current()
@@ -668,12 +670,13 @@ class ProfileDependencies:
         if bundle.identity != self._identity:
             if self._builder_for is None:
                 self._apply.stop_loading()
-            else:
+            elif self._settled_identity != self._identity:
                 self._submit(self._apply.selected_profile(), self._identity)
             return False
         self._apply.stop_loading()
         self._apply.install(bundle)
         self._apply.arrived()
+        self._settled_identity = bundle.identity
         return True
 
 

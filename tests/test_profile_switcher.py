@@ -431,6 +431,9 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
     reader._apply_deps(DependencyBundle(selected, mining=target))
 
     assert reader.mining_controller.active_target is target
+    reader._apply_deps(DependencyBundle(stale.identity, mining=stale))
+    assert submissions == [(selected, {"profile": _FR.name})]
+    assert reader.mining_controller.active_target is target
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
     reader.set_subtitle("chat")
 
