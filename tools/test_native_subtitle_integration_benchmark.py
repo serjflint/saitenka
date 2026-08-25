@@ -204,21 +204,91 @@ def test_frame_workload_oracle_rejects_denominator_and_geometry_loss(mutation: s
     assert not evaluate(measured, manifest())
 
 
-def test_trial_oracle_tolerates_one_performance_outlier() -> None:
+@pytest.mark.parametrize("budget", sorted(benchmark.BUDGET_CLAUSES))
+def test_trial_oracle_tolerates_one_outlier_in_any_latency_budget(budget: str) -> None:
+    """One trial over a budget is a scheduler hiccup: a p99 taken over ~300 samples is the
+    third-worst sample, so it moves with the runner. Parametrized over every clause because a
+    median implementation that reads the comparator off one budget silently inverts the others."""
+    if benchmark.BUDGET_CLAUSES[budget].across_trials != "median":
+        pytest.skip(f"{budget} is conjunctive across trials by design")
     noisy = report()
-    noisy["interaction_p99_ms"] = 16.68
+    noisy[benchmark.BUDGET_CLAUSES[budget].metric] = _breaching(budget)
 
     summary = summarize_trials([report(), noisy, report()], manifest())
 
     assert summary["integration_budgets_passed"] is True
-    assert summary["performance_passes"] == 2
 
 
-def test_trial_oracle_rejects_two_performance_outliers() -> None:
+@pytest.mark.parametrize("budget", sorted(benchmark.BUDGET_CLAUSES))
+def test_trial_oracle_rejects_a_budget_breached_in_the_majority(budget: str) -> None:
+    """The direction that must still bite: a clause over budget in two of three trials moves the
+    median, which is what a regression looks like."""
     noisy = report()
-    noisy["interaction_p99_ms"] = 16.68
+    noisy[benchmark.BUDGET_CLAUSES[budget].metric] = _breaching(budget)
 
     summary = summarize_trials([noisy, report(), noisy], manifest())
+
+    assert summary["integration_budgets_passed"] is False
+
+
+def _breaching(budget: str) -> float:
+    """A value just the wrong side of `budget`, in whichever direction that clause compares."""
+    limit = manifest()["budgets"][budget]
+    return (
+        limit * 0.5
+        if benchmark.BUDGET_CLAUSES[budget].compare(0.0, limit) is False
+        else limit + 0.01
+    )
+
+
+def test_trial_oracle_rejects_a_run_where_no_trial_was_ever_clean() -> None:
+    """The relaxation's floor. Judging each clause on its median is weaker than the per-trial
+    quorum it replaces — never stronger — so three trials each breaching a *different* clause have
+    three passing medians and nothing clean anywhere. That is the shape of a broad regression, and
+    without the clean-trial clause it aggregates to green."""
+    first, second, third = report(), report(), report()
+    first["interaction_p99_ms"] = 16.68
+    second["interaction_cpu_delta_p99_ms"] = 2.01
+    third["ready_before_presentation_ratio"] = 0.5
+
+    summary = summarize_trials([first, second, third], manifest())
+
+    assert summary["performance"]["clean_trials"] == 0
+    assert summary["integration_budgets_passed"] is False
+
+
+def test_a_cadence_miss_discards_the_trial_rather_than_failing_the_run() -> None:
+    """A missed presentation cadence says the runner stalled, so that trial's latencies describe
+    the stall. Counting it as a performance failure made the noisiest thing the harness can observe
+    into the clause most likely to fail."""
+    stalled = report()
+    stalled["cadence_misses"] = 1
+    stalled["interaction_p99_ms"] = 999.0
+
+    summary = summarize_trials([report(), stalled, report()], manifest())
+
+    assert summary["performance"]["valid_trials"] == 2
+    assert summary["integration_budgets_passed"] is True
+
+
+def test_a_run_without_enough_valid_trials_fails_rather_than_passing_on_one() -> None:
+    """Discarding a stalled trial must not become a way to pass on a single measurement."""
+    stalled = report()
+    stalled["cadence_misses"] = 1
+
+    summary = summarize_trials([stalled, report(), stalled], manifest())
+
+    assert summary["performance"]["valid_trials"] == 1
+    assert summary["integration_budgets_passed"] is False
+
+
+def test_a_leak_in_one_trial_still_fails_the_run() -> None:
+    """`retained_rss_growth_mib` is a leak meter, not a noise-symmetric percentile — a median over
+    it would let every other trial vote a leak away."""
+    leaked = report()
+    leaked["retained_rss_growth_mib"] = 512.0
+
+    summary = summarize_trials([report(), leaked, report()], manifest())
 
     assert summary["integration_budgets_passed"] is False
 
@@ -340,6 +410,35 @@ def test_manifest_lock_rejects_budget_weakening(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="re-locking"):
         load_manifest(path)
+
+
+def test_the_shipped_budgets_are_the_ones_under_review() -> None:
+    """The SHA lock only proves the file is the one that was locked — recomputing the hash is part
+    of any edit, so on its own it cannot tell a justified re-bless from a quiet weakening. Spelling
+    the shipped numbers out here makes a re-lock produce a test diff someone has to approve.
+
+    The hand-built `manifest()` above is a fixture for the oracle tests and deliberately differs
+    (a tighter delta makes the boundary cases readable, and a zero interval keeps them instant), so
+    it cannot serve this purpose.
+
+    `interaction_wall_p99_ms` is 1000/60: the 60 Hz frame interval, not a fitted number. It is a
+    floor tied to something a viewer perceives, so it does not move to accommodate a noisy runner —
+    the estimator absorbs noise instead (`BUDGET_CLAUSES`).
+    """
+    shipped = load_manifest(
+        Path(__file__).parents[1] / "tests/fixtures/native_subtitle_integration.json"
+    )
+
+    assert shipped["trials"] == 3
+    assert shipped["budgets"] == {
+        "interaction_cpu_p99_ms": 16.67,
+        "interaction_wall_p99_ms": 16.67,
+        "interaction_cpu_delta_p99_ms": 4.0,
+        "interaction_wall_delta_p99_ms": 16.67,
+        "ready_before_presentation_ratio": 0.99,
+        "retained_rss_growth_mib": 256.0,
+    }
+    assert set(shipped["budgets"]) == set(benchmark.BUDGET_CLAUSES)
 
 
 def test_the_harness_answers_every_option_the_geometry_gate_reads() -> None:
