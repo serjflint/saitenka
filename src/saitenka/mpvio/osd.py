@@ -103,6 +103,24 @@ class _InteractionPresenter:
             return oid, sequence, operation
 
 
+def _discard(path: Path) -> bool:
+    """Delete a frame we are done with; report whether it is gone.
+
+    Windows refuses to delete a file another process still holds open, and mpv holds a frame open
+    across `overlay-add`. That is a `PermissionError` — which `missing_ok=True` does NOT cover, since
+    it only suppresses `FileNotFoundError`. A frame we cannot delete yet is a file to retry, not an
+    error to raise at whoever happened to publish next.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except (
+        OSError
+    ):  # PermissionError on Windows; a full-disk/EBUSY unlink is equally not fatal here
+        log.debug("could not retire overlay frame %s", path, exc_info=True)
+        return False
+    return True
+
+
 def _warn_overlay_add(oid: int, w: int, h: int, res: dict) -> None:
     """Log (once per overlay id) when mpv rejects an ``overlay-add`` — a NON-empty ``error`` other than
     ``success``. This separates 'mpv refused to draw' (bad format/size, unsupported on this build) from
@@ -151,7 +169,7 @@ class Overlay:
         self._files: dict[int, Path] = {}
         #: One stable path per oid, only ever published onto by rename — see :meth:`_write_frame`.
         self._frame_paths: dict[int, Path] = {}
-        self._frame_lock = threading.Lock()
+
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
         self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
@@ -160,7 +178,10 @@ class Overlay:
         self._interaction_oids: set[int] = set()
         self.lifecycle_oids: set[int] = set()
         self._staged_lifecycle_paths: set[Path] = set()
-        self._lifecycle_lock = threading.Lock()
+        #: One lock over every mutable overlay map. `_files` used to be written under `_frame_lock`
+        #: in `_write_frame`, under `_lifecycle_lock` in the commit/remove paths, and unlocked in
+        #: `hide` — three views of one piece of state.
+        self._state_lock = threading.Lock()
         self._compat_effect_id = 1_000_000
 
     def next_compat_effect_id(self):
@@ -242,7 +263,7 @@ class Overlay:
             path.unlink(missing_ok=True)
             raise
         tail: tuple[object, ...] = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
-        with self._lifecycle_lock:
+        with self._state_lock:
             self.lifecycle_oids.add(oid)
             self._staged_lifecycle_paths.add(path)
         return PreparedOverlay(
@@ -253,32 +274,32 @@ class Overlay:
         )
 
     def commit_prepared(self, prepared: PreparedOverlay) -> None:
-        with self._lifecycle_lock:
+        with self._state_lock:
             previous = self._files.get(prepared.oid)
             self._files[prepared.oid] = prepared.path
             self._staged_lifecycle_paths.discard(prepared.path)
             self._live[prepared.oid] = prepared.tail
             self.ops += 1
         if previous is not None and previous != prepared.path:
-            previous.unlink(missing_ok=True)
+            _discard(previous)
 
     def discard_prepared(self, prepared: PreparedOverlay) -> None:
-        with self._lifecycle_lock:
+        with self._state_lock:
             if self._files.get(prepared.oid) == prepared.path:
                 return
             self._staged_lifecycle_paths.discard(prepared.path)
-        prepared.path.unlink(missing_ok=True)
+        _discard(prepared.path)
 
     def commit_remove(self, oid: int) -> None:
         physical_oid = self._oid(oid)
-        with self._lifecycle_lock:
+        with self._state_lock:
             self._live.pop(physical_oid, None)
             self.ops += 1
             path = self._files.pop(physical_oid, None)
             self.lifecycle_oids.discard(oid)
         self._retire_frame_path(physical_oid)
-        if path is not None and path.exists():
-            path.unlink()
+        if path is not None:
+            _discard(path)
 
     def remove_lifecycle_now(self, oid: int) -> dict:
         """Synchronously place a final remove behind any queued add before detaching from mpv."""
@@ -309,7 +330,7 @@ class Overlay:
         ~0.7 ms p50 for a 2.5 MB frame here. The 0.8-vs-3.2 ms gap that chose in-place came from
         timing each strategy in its own sequential block, which measures the page cache.
         """
-        with self._frame_lock:
+        with self._state_lock:
             path = self._frame_paths.get(oid)
             if path is None:
                 path = self._frame_paths[oid] = self._new_frame_path(oid)
@@ -326,7 +347,7 @@ class Overlay:
             return Path(staged.name)
 
     def _retire_frame_path(self, oid: int) -> None:
-        with self._frame_lock:
+        with self._state_lock:
             path = self._frame_paths.pop(oid, None)
         if path is not None:
             path.with_name(path.name + ".staging").unlink(missing_ok=True)
@@ -412,12 +433,13 @@ class Overlay:
         # Removal is idempotent.  Always send it: an in-flight deferred add can finish after visibility
         # was turned off, and skipping this command would leave those pixels stuck in mpv.
         res = self.ipc.command("overlay-remove", oid)
-        self._live.pop(oid, None)
-        self.ops += 1
-        p = self._files.pop(oid, None)
+        with self._state_lock:
+            self._live.pop(oid, None)
+            self.ops += 1
+            p = self._files.pop(oid, None)
         self._retire_frame_path(oid)
-        if p is not None and p.exists():
-            p.unlink()
+        if p is not None:
+            _discard(p)
         return res
 
     def set_visible(self, *, visible: bool) -> None:
@@ -450,7 +472,7 @@ class Overlay:
                 self.hide(oid)
             except Exception:
                 log.debug("overlay hide on close failed", exc_info=True)
-        with self._lifecycle_lock:
+        with self._state_lock:
             staged, self._staged_lifecycle_paths = self._staged_lifecycle_paths, set()
         for path in staged:
-            path.unlink(missing_ok=True)
+            _discard(path)
