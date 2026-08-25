@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787632766709,
+  "lastUpdate": 1787632863388,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10683,6 +10683,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 53.794789,
             "range": "3 replicas; min 38.8073; max 84.2373; MAD 14.9875",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "id": "530fbb94056e3d64f796c93a7326dc7a565ae73d",
+          "message": "test(libass): measure against the bundled face, not whatever the host resolves\n\nThe ASS-oracle tests asked libass for `sans-serif` and let the host answer. The answer differs per\nplatform, so the same document measures differently on each — `test_the_blur_refusal_is_measured_not_assumed`\nalready carried a `Spacing: 10` workaround for exactly this, and it failed on the macOS runner anyway.\n\nPin the face: the bundled Noto Sans JP (already in the wheel, OFL 1.1) as an in-memory attachment with\n`FontProvider.NONE`, so no provider can substitute one. Measured, the pinning bites — the same cue spans\n78px against the pinned face and 83px against the host's.\n\nThe family must be spelled `Noto Sans JP Thin`. libass matches nameID 1, which the variable face sets\nto its default instance (wght=100); `Noto Sans JP` is nameID 16 and renders zero layers. Same trap the\nSVG rasterizer hit in #283, from the other side.\n\nCoverage checked before pinning rather than assumed: the face carries 16,732 codepoints and covers every\ngroup subtitles use — kana, JIS kanji, 「」『』【】《》, ♪★※〆ヶ⁉‼, fullwidth latin and arrows.\n\nOne casualty, recorded where it happened: `bold` leaves `MOVING_STYLE_FIELDS`. libass selects an\nembedded font by name alone, so it honours no weight request under this setup — attaching a real\nwght=700 instance beside the regular one renders the identical span. The field still reaches the style;\nwhat is no longer proved is that libass acts on it.",
+          "timestamp": "2026-08-25T04:36:09Z",
+          "url": "https://github.com/serjflint/saitenka/commit/530fbb94056e3d64f796c93a7326dc7a565ae73d"
+        },
+        "date": 1787632861221,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 203.321884,
+            "range": "3 replicas; min 161.134; max 226.172; MAD 22.8498",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 87.998138,
+            "range": "3 replicas; min 81.1957; max 89.2026; MAD 1.20447",
             "unit": "ms"
           }
         ]
