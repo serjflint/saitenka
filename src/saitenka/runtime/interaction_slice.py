@@ -103,6 +103,36 @@ type PickerDecision = PickerRetired | ListingAdopted
 #: default that changes behaviour rather than deferring it.
 DEFAULT_DELAYS = HoverDelays(scan=0.25, hide=0.35, switch=0.25)
 
+HOVER_ACCEPTS = (
+    HoverConfigured,
+    HoverObserved,
+    HoverDwellElapsed,
+    HoverScrolled,
+    HoverDwellRefused,
+    EpisodeRetired,
+)
+HELP_ACCEPTS = (HelpCommanded, HelpRepaginated)
+PICKER_ACCEPTS = (PickerOpened, PickerClosed, PickerListed, PickerScrolled)
+SIDEBAR_ACCEPTS = (
+    SidebarShown,
+    SidebarHidden,
+    SidebarReindexed,
+    SidebarViewSelected,
+    SidebarScrolled,
+    SidebarFollowed,
+    SidebarHoldReleased,
+)
+TIP_NAV_ACCEPTS = (TipNavPushed, TipNavPopped, TipNavCleared)
+PULSE_ACCEPTS = (CopyPulsed, CopyPulseExpired)
+HOVER_PAUSE_ACCEPTS = (HoverPauseClaimed, HoverPauseReleased)
+HOVERED_WORD_ACCEPTS = (
+    HoverWordResolved,
+    HoverWordRead,
+    HoverWordForgotten,
+    HoverKanjiAdvanced,
+)
+PREVIEW_ACCEPTS = (PreviewShown, PreviewDismissed, PreviewZoomToggled)
+
 
 @dataclass(frozen=True, slots=True)
 class HoverFeature:
@@ -141,7 +171,7 @@ class HoverReducer:
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, HoverFeature)
         assert isinstance(event, (*INTERACTION_EVENTS, EpisodeRetired))
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(self.reduce(state, event), handled=isinstance(event, HOVER_ACCEPTS))
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +200,7 @@ class HelpReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, HelpFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(self.reduce(state, event), handled=isinstance(event, HELP_ACCEPTS))
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +234,7 @@ class PickerReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, PickerFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(self.reduce(state, event), handled=isinstance(event, PICKER_ACCEPTS))
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,7 +273,7 @@ class SidebarReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, SidebarFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(self.reduce(state, event), handled=isinstance(event, SIDEBAR_ACCEPTS))
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,7 +304,7 @@ class TipNavReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, TipNavFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(self.reduce(state, event), handled=isinstance(event, TIP_NAV_ACCEPTS))
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,7 +330,7 @@ class PulseReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, PulseFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(self.reduce(state, event), handled=isinstance(event, PULSE_ACCEPTS))
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,7 +359,9 @@ class HoverPauseReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, HoverPauseFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(
+            self.reduce(state, event), handled=isinstance(event, HOVER_PAUSE_ACCEPTS)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,7 +396,9 @@ class HoveredWordReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, HoveredWordFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(
+            self.reduce(state, event), handled=isinstance(event, HOVERED_WORD_ACCEPTS)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,7 +425,7 @@ class PreviewReducer:
 
     def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
         assert isinstance(state, PreviewFeature)
-        return ReduceResult(self.reduce(state, event))
+        return ReduceResult(self.reduce(state, event), handled=isinstance(event, PREVIEW_ACCEPTS))
 
 
 #: `Owner.INTERACTION`'s features, named once so a reader of the slot never spells a key itself.

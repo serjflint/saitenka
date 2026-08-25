@@ -93,3 +93,11 @@ def test_owner_plan_rejects_a_missing_stateful_binding():
 
     with pytest.raises(ValueError, match="disagree"):
         replace(assembly, stateful=assembly.stateful[:-1])
+
+
+def test_owner_plan_rejects_an_event_without_a_declared_consumer():
+    assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
+    first = assembly.stateful[0]
+
+    with pytest.raises(ValueError, match="accepted event vocabulary"):
+        replace(assembly, stateful=(replace(first, accepted_events=()), *assembly.stateful[1:]))

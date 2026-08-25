@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, replace
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -878,7 +879,7 @@ def test_a_feature_that_ignores_an_event_does_not_lose_the_others_state() -> Non
     """The failure this exists to catch: threading the slot wrong drops the untouched feature."""
 
     def indifferent(state: object, _event: RuntimeEvent, /) -> ReduceResult:
-        return ReduceResult(state)
+        return ReduceResult(state, handled=False)
 
     slice_reducer = SliceReducer({"active": _counter("active"), "idle": indifferent})
     state = slice_reducer.initial({"active": (), "idle": ("untouched",)})
@@ -888,6 +889,19 @@ def test_a_feature_that_ignores_an_event_does_not_lose_the_others_state() -> Non
     assert isinstance(result.state, OwnerSlice)
     assert result.state.get("idle") == ("untouched",)
     assert len(result.state.get("active")) == 1
+
+
+def test_a_routed_event_no_feature_handles_is_refused() -> None:
+    def indifferent(state: object, _event: RuntimeEvent, /) -> ReduceResult:
+        return ReduceResult(state, handled=False)
+
+    slice_reducer = SliceReducer({"idle": indifferent})
+    initial = slice_reducer.initial({"idle": ()})
+    state = SessionState(initial, (), (), (), ())
+    reducer = SessionReducer({RouteKey(RawMpvEvent, Owner.SESSION): slice_reducer})
+
+    with pytest.raises(RouteError, match="no feature handled session:RawMpvEvent"):
+        reducer.reduce_turn(state, RoutedEvent(Owner.SESSION, RawMpvEvent("stop")))
 
 
 def test_dispatch_order_follows_registration_not_the_initial_states() -> None:

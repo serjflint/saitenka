@@ -21,6 +21,7 @@ class ReduceResult:
     state: object
     internal_events: tuple[RoutedEvent, ...] = ()
     effects: tuple[Effect, ...] = ()
+    handled: bool = True
 
 
 class FeatureReducer(Protocol):
@@ -88,12 +89,14 @@ class SliceReducer:
         assert isinstance(state, OwnerSlice)
         internal: list[RoutedEvent] = []
         effects: list[Effect] = []
+        handled = False
         for key, reducer in self._features.items():
             result = reducer(state.get(key), event)
             state = state.replacing(key, result.state)
             internal.extend(result.internal_events)
             effects.extend(result.effects)
-        return ReduceResult(state, tuple(internal), tuple(effects))
+            handled = handled or result.handled
+        return ReduceResult(state, tuple(internal), tuple(effects), handled)
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +156,10 @@ class SessionReducer:
                     f"no reducer for {current.owner.value}:{type(current.payload).__name__}"
                 )
             result = reducer(next_state.for_owner(current.owner), current.payload)
+            if not result.handled:
+                raise RouteError(
+                    f"no feature handled {current.owner.value}:{type(current.payload).__name__}"
+                )
             next_state = next_state.with_owner(current.owner, result.state)
             pending.extend(result.internal_events)
             effects.extend(result.effects)

@@ -6,15 +6,25 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime import Owner
+from saitenka.runtime.events import INTERACTION_EVENTS, EpisodeRetired
 from saitenka.runtime.interaction_slice import (
+    HELP_ACCEPTS,
     HELP_FEATURE,
+    HOVER_ACCEPTS,
+    HOVER_PAUSE_ACCEPTS,
     HOVER_PAUSE_FEATURE,
+    HOVERED_WORD_ACCEPTS,
     HOVERED_WORD_FEATURE,
     INTERACTION_FEATURE,
+    PICKER_ACCEPTS,
     PICKER_FEATURE,
+    PREVIEW_ACCEPTS,
     PREVIEW_FEATURE,
+    PULSE_ACCEPTS,
     PULSE_FEATURE,
+    SIDEBAR_ACCEPTS,
     SIDEBAR_FEATURE,
+    TIP_NAV_ACCEPTS,
     TIP_NAV_FEATURE,
     HelpFeature,
     HelpReducer,
@@ -60,6 +70,7 @@ class StatefulBinding[StateT, ReducerT: FeatureReducer, StoreT]:
     reducer_factory: type[ReducerT]
     initial_factory: type[StateT]
     local_store_factory: Callable[..., StoreT]
+    accepted_events: tuple[type[object], ...]
 
     def build_reducer(self) -> ReducerT:
         return self.reducer_factory()
@@ -87,11 +98,15 @@ class InstalledStatefulBinding(Protocol):
 
     def store(self, port: InteractionRoutePort) -> object: ...
 
+    @property
+    def accepted_events(self) -> tuple[type[object], ...]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class OwnerPlan:
     owner: Owner
     feature_order: tuple[str, ...]
+    event_vocabulary: tuple[type[object], ...]
 
 
 def ordered_stateful_bindings(
@@ -107,6 +122,9 @@ def ordered_stateful_bindings(
         by_key[binding.key] = binding
     if by_key.keys() != set(plan.feature_order):
         raise ValueError("owner plan and stateful bindings disagree")
+    accepted = {event for binding in bindings for event in binding.accepted_events}
+    if accepted != set(plan.event_vocabulary):
+        raise ValueError("owner plan and accepted event vocabulary disagree")
     return tuple(by_key[key] for key in plan.feature_order)
 
 
@@ -117,6 +135,7 @@ HELP_STATEFUL_BINDING = StatefulBinding(
     reducer_factory=HelpReducer,
     initial_factory=HelpFeature,
     local_store_factory=HelpStore,
+    accepted_events=HELP_ACCEPTS,
 )
 
 HOVER_STATEFUL_BINDING = StatefulBinding(
@@ -126,6 +145,7 @@ HOVER_STATEFUL_BINDING = StatefulBinding(
     HoverReducer,
     HoverFeature,
     HoverStore,
+    HOVER_ACCEPTS,
 )
 PICKER_STATEFUL_BINDING = StatefulBinding(
     "subtitle-picker",
@@ -134,6 +154,7 @@ PICKER_STATEFUL_BINDING = StatefulBinding(
     PickerReducer,
     PickerFeature,
     PickerStore,
+    PICKER_ACCEPTS,
 )
 SIDEBAR_STATEFUL_BINDING = StatefulBinding(
     "sidebar",
@@ -142,6 +163,7 @@ SIDEBAR_STATEFUL_BINDING = StatefulBinding(
     SidebarReducer,
     SidebarFeature,
     SidebarStore,
+    SIDEBAR_ACCEPTS,
 )
 TIP_NAV_STATEFUL_BINDING = StatefulBinding(
     "tooltip-navigation",
@@ -150,6 +172,7 @@ TIP_NAV_STATEFUL_BINDING = StatefulBinding(
     TipNavReducer,
     TipNavFeature,
     TipNavStore,
+    TIP_NAV_ACCEPTS,
 )
 PULSE_STATEFUL_BINDING = StatefulBinding(
     "copy-pulse",
@@ -158,6 +181,7 @@ PULSE_STATEFUL_BINDING = StatefulBinding(
     PulseReducer,
     PulseFeature,
     PulseStore,
+    PULSE_ACCEPTS,
 )
 HOVER_PAUSE_STATEFUL_BINDING = StatefulBinding(
     "hover-pause",
@@ -166,6 +190,7 @@ HOVER_PAUSE_STATEFUL_BINDING = StatefulBinding(
     HoverPauseReducer,
     HoverPauseFeature,
     HoverPauseStore,
+    HOVER_PAUSE_ACCEPTS,
 )
 HOVERED_WORD_STATEFUL_BINDING = StatefulBinding(
     "hovered-word",
@@ -174,6 +199,7 @@ HOVERED_WORD_STATEFUL_BINDING = StatefulBinding(
     HoveredWordReducer,
     HoveredWordFeature,
     HoveredWordStore,
+    HOVERED_WORD_ACCEPTS,
 )
 PREVIEW_STATEFUL_BINDING = StatefulBinding(
     "card-preview",
@@ -182,6 +208,7 @@ PREVIEW_STATEFUL_BINDING = StatefulBinding(
     PreviewReducer,
     PreviewFeature,
     PreviewStore,
+    PREVIEW_ACCEPTS,
 )
 
 INTERACTION_STATEFUL_BINDINGS: tuple[InstalledStatefulBinding, ...] = (
@@ -208,4 +235,5 @@ INTERACTION_OWNER_PLAN = OwnerPlan(
         HOVERED_WORD_FEATURE,
         PREVIEW_FEATURE,
     ),
+    (*INTERACTION_EVENTS, EpisodeRetired),
 )
