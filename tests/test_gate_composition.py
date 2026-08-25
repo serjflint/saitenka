@@ -196,6 +196,41 @@ def test_e2e_installs_the_same_bundle_runtime_the_extra_pins() -> None:
     assert "--no-sync" in shlex.split(steps["GUI tier (Linux/Xvfb, real mpv)"]["run"])
 
 
+def _triggers(workflow: dict) -> dict:
+    """A workflow's `on:` block. YAML 1.1 reads a bare `on` as the boolean True, so PyYAML keys the
+    block under `True` rather than the string — indexing `["on"]` raises KeyError."""
+    return workflow[True]
+
+
+def _auto_pushing_steps() -> list[tuple[str, dict]]:
+    """Every e2e step that publishes to the gh-pages dashboard, as (job, step)."""
+    return [
+        (job_name, step)
+        for job_name, job in _e2e_workflow()["jobs"].items()
+        for step in job["steps"]
+        if step.get("with", {}).get("auto-push") is True
+    ]
+
+
+def test_every_dashboard_publish_is_gated_on_the_store_input() -> None:
+    """A dispatch measures by default and publishes only when asked. Ungated, every scratch run puts a
+    point on the live dashboard that no commit on `main` explains, and the removal is a hand-edit of
+    `gh-pages`. Censused rather than named, so a third publishing step cannot land unguarded."""
+    gate = "github.event_name != 'workflow_dispatch' || inputs.store"
+    for job_name, step in _auto_pushing_steps():
+        assert step.get("if") == gate, f"{job_name}/{step.get('name')} publishes ungated"
+
+    store_input = _triggers(_e2e_workflow())["workflow_dispatch"]["inputs"]["store"]
+    assert store_input["type"] == "boolean"
+    assert store_input["default"] is False
+
+
+def test_the_publish_census_is_not_empty() -> None:
+    """Negative control: a renamed key or a restructured `with:` would make the census empty, and an
+    empty census makes the gate assertion above pass while binding nothing."""
+    assert len(_auto_pushing_steps()) == 2
+
+
 def test_the_bound_expressions_are_not_vacuous() -> None:
     """Negative control: a mistyped YAML path yields None on both sides, and `None == None` would make
     every assertion above pass while binding nothing."""
