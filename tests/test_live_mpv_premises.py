@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -33,6 +34,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _require(binary: str, path: str | None) -> str:
+    """A missing binary is an environment defect, not a reason to pass.
+
+    This tier is opt-in and its CI job installs `mpv` and `ffmpeg`, so absent means drifted. A skip
+    here is how a tier goes green while testing nothing — twice already, in the libass oracles and
+    the e2e tier.
+    """
+    if not path:
+        pytest.fail(f"the live tier needs {binary} and it is not installed")
+    return path
+
+
 def _bare_mpv(*args: str):
     """A headless mpv carrying `args`, and a `get(name)` that asks it for a property.
 
@@ -42,9 +55,7 @@ def _bare_mpv(*args: str):
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
 
-    mpv = find_mpv(None)
-    if not mpv:
-        pytest.skip("mpv not found")
+    mpv = _require("mpv", find_mpv(None))
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-premise-"))
     sock = default_ipc_path(tmp.name)
     proc = subprocess.Popen(
@@ -206,3 +217,110 @@ def test_the_ranking_oracle_catches_a_section_that_does_not_outrank(tmp_path: Pa
         if b.get("section") == "default" and str(b.get("cmd", "")).startswith("show-text")
     )
     assert ours["priority"] <= theirs["priority"] or ours.get("is_weak")
+
+
+NATIVE_SID, GENERATED_SID = 1, 2
+
+
+def _two_track_mpv(tmp_path: Path):
+    """A paused clip carrying two external ASS tracks: `sid` 1 loads with the file, `sid` 2 after."""
+    _require("ffmpeg", shutil.which("ffmpeg"))
+    fixtures = Path(__file__).parent / "fixtures" / "mpv_source_envelope"
+    clip = tmp_path / "clip.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=navy:s=320x180:d=8",
+            "-c:v",
+            "ffv1",
+            str(clip),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    proc, ipc = _bare_mpv(
+        "--keep-open=yes",
+        "--pause",
+        "--sub-auto=no",
+        f"--sub-file={fixtures / 'external.ass'}",
+        str(clip),
+    )
+    for index, name in enumerate(("sid", "sub-text"), start=1):
+        ipc.command("observe_property", index, name)
+    ipc.command("sub-add", str(fixtures / "generated.ass"), "auto", "generated", "jpn")
+    ipc.command("set_property", "time-pos", 1.0)
+    return proc, ipc
+
+
+def _drain_until_quiet(ipc, *, quiet: float = 0.4, limit: float = 5.0) -> list[dict]:
+    collected: list[dict] = []
+    deadline = time.monotonic() + limit
+    last = time.monotonic()
+    while time.monotonic() < deadline and time.monotonic() - last < quiet:
+        batch = ipc.drain_events()
+        if batch:
+            collected.extend(batch)
+            last = time.monotonic()
+        time.sleep(0.01)
+    return collected
+
+
+def _changes(events: list, name: str) -> list:
+    return [
+        event.get("data")
+        for event in events
+        if event.get("event") == "property-change" and event.get("name") == name
+    ]
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
+    """`tools/test_mpv_source_transition.py`'s `_FakeMpv` refreshes `sub-text` on every switch. The
+    plan that produced it assumed the opposite — that a paused mpv has no redraw and so no new
+    `sub-text` — and built a whole causal story on it before anyone asked the binary."""
+    proc, ipc = _two_track_mpv(tmp_path)
+    try:
+        _drain_until_quiet(ipc)
+        assert ipc.command("get_property", "pause").get("data") is True
+        ipc.command("set_property", "sid", GENERATED_SID)
+        events = _drain_until_quiet(ipc)
+    finally:
+        ipc.command("quit")
+        ipc.close()
+        proc.terminate()
+
+    # The last value, not the whole list: how many notifications mpv raises is timing (see the note
+    # below), and the premise here is the `sub-text` refresh, not the count.
+    assert _changes(events, "sid")[-1] == GENERATED_SID
+    assert any("生成した字幕" in (text or "") for text in _changes(events, "sub-text"))
+
+
+# Deliberately unpinned: mpv raises property-changes from the playloop, so writes reaching one
+# iteration collapse into a single event carrying the final value. How often is timing — measured on
+# 0.41, 60/60 through `command_async` against 18/60 through the blocking `command`, and even the
+# 60/60 lapses right after startup. Require a notification per write and you are asserting a rate.
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_a_deselected_sid_reads_back_as_false(tmp_path: Path) -> None:
+    """A confirm written against the literal `"no"` would never fire. `mpv_source_transition.py`
+    accepts `{None, "no", False}`; this says which one mpv sends."""
+    proc, ipc = _two_track_mpv(tmp_path)
+    try:
+        _drain_until_quiet(ipc)
+        ipc.command("set_property", "sid", "no")
+        events = _drain_until_quiet(ipc)
+        queried = ipc.command("get_property", "sid").get("data")
+    finally:
+        ipc.command("quit")
+        ipc.close()
+        proc.terminate()
+
+    assert queried is False
+    assert _changes(events, "sid")[-1] is False  # last value, not the count — see the note above

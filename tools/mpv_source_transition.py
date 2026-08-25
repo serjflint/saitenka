@@ -468,13 +468,16 @@ def _wait_track_event(ipc, path: Path, *, present: bool) -> dict[str, Any]:
 
 
 def _discard_earlier_events(ipc) -> None:
-    """Drop events the previous step produced, so a wait can only be satisfied by its own.
+    """Drop events the previous step produced, so a wait is mostly satisfied by its own.
 
-    The round-trip is what makes this a barrier: `drain_events` alone is a non-blocking snapshot of
-    the reader thread's buffer, and an event mpv had already emitted can still land after it. mpv
-    executes IPC commands in order and has the earlier ones' notifications queued by the time a
-    later query replies (measured on 0.41: the drain right after a `sid` query already carries that
-    switch's `sid` and `sub-text`).
+    `drain_events` alone is a non-blocking snapshot of the reader thread's buffer, so an event mpv
+    had already emitted can still land after it. The round-trip narrows that window to a single
+    playloop tick — it does **not** close it: mpv raises property-changes from the playloop rather
+    than from the command handler, and a query reply can outrun one. Measured on 0.41 over 60
+    trials, the drain behind a query already carried the notification **58/60**.
+
+    Worth doing anyway because the two are not the same size: the backlog it removes is six
+    undrained sampling switches, deterministic and always present, against a residual of one tick.
     """
     ipc.query("sid")
     ipc.drain_events()
@@ -483,9 +486,9 @@ def _discard_earlier_events(ipc) -> None:
 def _probe_phase(ipc, generated_sid: int, native_sid: int, *, paused: bool) -> dict[str, Any]:
     # `_sample_frame_controls` switches sid six times and never drains, so without this the first
     # wait below matches the sampling backlog and returns before mpv has processed the phase's own
-    # `set_property`. That is a phase reporting evidence it did not produce — and it un-serializes
-    # the two switches, which matters because mpv coalesces `sid` notifications issued within one
-    # playloop iteration into a single event carrying only the final value.
+    # `set_property` — a phase reporting evidence it did not produce. Draining also keeps the two
+    # switches serialized, which matters because mpv can collapse the notifications for writes that
+    # reach one playloop iteration (rates in `tests/test_live_mpv_premises.py`).
     _discard_earlier_events(ipc)
     current_pause = ipc.query("pause")
     if current_pause == paused:

@@ -235,3 +235,75 @@ GIL/native/alloc bound". `py-spy --native` and `viztracer` are great for GIL-on 
 free-threaded support is **unconfirmed** (both read/monitor interpreter internals that no-GIL changes) —
 check their trackers before relying. `pytest-benchmark` auto-disables under `pytest-xdist`, so any
 micro-suite must run serially, separate from the `-n auto` gate — the custom harness stays primary.
+
+## Gating a noisy metric — quantile, sample count, bound (2026-08-25)
+
+The repo runs four benchmark gates. Two arrived at the right policy independently, one had to be
+fixed after five CI failures in forty runs, and none of them stated the policy anywhere a reader of
+the other three would find it. This is that statement.
+
+### A percentile is a rank, so it is only as stable as `n`
+
+A sample quantile is one particular order statistic. Which one is `n - i` counting from the worst,
+where `i` is the index the implementation picks — and the two here differ:
+`native_subtitle_integration_benchmark.py` uses `round((n-1)*q)` (the numpy *nearest* method),
+`libass_prototype_benchmark.py` uses classical nearest-rank `ceil(n*q)`. They agree on every case
+below, but they are not the same function; check the one you are reasoning about.
+
+| quantile | n | which order statistic | usable as a gate? |
+| --- | --- | --- | --- |
+| p99 | 303 | 4th worst | **no** — an outlier picker; moves with one scheduler hiccup |
+| p99 | 1000 | 11th worst | yes |
+| p95 | 30 | 2nd worst | **no** |
+| p95 | 200 | 11th worst | yes |
+
+**Roughly the 10th-worst sample or deeper, or it is not a gate.** The estimate rests on the `k ≈
+n(1-q)` samples above the quantile, so its relative standard error is about `1/√k`: k=10 gives ~32%,
+k=3 gives ~58%. That is the whole reason a p99 over 303 samples cannot hold a bound to within a few
+percent.
+
+The step this came from failed 5 times in 40 CI runs — a different budget each time, with
+`interaction_cpu_delta_p99_ms` implicated in most. Its threshold had already been doubled once, which
+is what makes the estimator rather than the bound the suspect.
+
+### The order to decide in
+
+1. **Quantile from meaning.** p99 is the tail a viewer feels as a dropped frame. Do **not** drop to
+   p95 to buy stability — that measures something easier, not something truer, and hides exactly the
+   events the gate exists to catch.
+2. **`n` from the quantile.** Enough samples that the chosen quantile has a stable rank.
+3. **When `n` cannot reach it, add measurements — never lower the quantile.** Two devices, and they
+   are *not* interchangeable:
+   - **Pooling** repeats into one sample set (`perf_gate.py --loops`) raises `n`, so it raises the
+     order statistic and fixes the rank.
+   - **Median across trials** of each trial's own quantile (`native_subtitle_integration_benchmark.py`)
+     leaves the rank exactly where it was and only cuts the dispersion of a same-rank estimate.
+
+   Pooling is the stronger device, so prefer it — unless the trials are not exchangeable. They are
+   not here: trial 1 carries the warm-up (+53 MiB RSS against +5-8 for trials 2-3), and pooling would
+   blend its samples into the others. Replayed over 52 archived runs, the median rule also scored
+   better (1 run over budget against 2 for pooling).
+4. **Bound from an anchor or from measured noise.** An anchor is physical and does not move:
+   `interaction_wall_p99_ms` is `1000/60`, a frame interval. Everything else comes from the observed
+   CV — `perf_gate.py` carries `median CV ~1%`, `p99 CV ~25%`, and sets per-metric tolerances from
+   exactly that.
+
+Tightening a bound "to be safe" manufactures flakes. A bound moves when its anchor or its measured
+noise moves.
+
+### Where each gate stands
+
+| gate | estimator | order statistic | verdict |
+| --- | --- | --- | --- |
+| `tools/perf_gate.py` | p99 pooled across `--loops` | raised by pooling | meets rule 4, not rule 2 — its own docstring records that p99 "resamples 50-75% between back-to-back runs **even pooled**", so what holds it is the +100% tolerance derived from that CV, not the rank |
+| `tools/libass_prototype_benchmark.py` | p99 over 1000 warm samples | 11th worst | conforms |
+| `tools/libass_prototype_benchmark.py` (cold) | p95 over 30 process starts | 2nd worst | below the floor and left there: the 100 ms bound is a smoke bound an order of magnitude above observed cold latency, and reaching the floor would cost ~200 real process starts per CI run |
+| `tools/native_subtitle_integration_benchmark.py` | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank |
+
+Two of the four do not meet the rank floor, and say so rather than claiming it. The floor is the
+first thing to reach for; when a gate cannot, it owes the reader the device that replaces it.
+
+A trial that reports a *validity* failure (a missed presentation cadence) is discarded, not counted
+as a performance failure — otherwise the noisiest thing the harness can observe becomes the clause
+most likely to fail. Leak meters (`retained_rss_growth_mib`) stay conjunctive across trials: a median
+lets the other trials vote a leak away.

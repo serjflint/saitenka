@@ -115,6 +115,34 @@ never a near-duplicate new file. Curate the profiles (representative, not the fu
 parametrise-outer / `given`-inner to avoid combinatorial explosion. *Adding* an assertion is a growth move;
 *changing* an existing one is Sharpen's job — keep them separate, or a change-detector slips in.
 
+## A fake must model the dimension the bug lives in
+
+A negative control proves the *oracle* can fire. It does not prove the *fake* can produce the
+condition — and a fake confirms whatever it was built to confirm.
+
+- An IPC fake returning instantly scored **0 failures** against code that retired a frame under an
+  in-flight `overlay-add`; one carrying the real call's width scored **292**.
+- A `_FakeMpv` applying `set_property` synchronously made a reproduction pass on unfixed code: the
+  phase's own events always won the first drained batch. Deferring effects by one drain reproduced it.
+
+**Name the dimension the failure lives in — time, ordering, delivery latency, width, concurrency —
+and give the fake that dimension.** One faster or more synchronous than production cannot exhibit an
+ordering bug, and every test against it is green for the wrong reason.
+
+When the fake encodes an external tool: ask the tool, don't assert it, then pin what you measured in
+the live tier so the fake cannot drift. Pin only the *deterministic* half — an assertion on a rate is
+a flake generator.
+
+## Delete the fix, not just the assertion
+
+`poe test-live` negates a **test's** asserts. Negating the **fix** is a different check:
+
+> Delete each line of the change you would call load-bearing, and confirm a test goes red.
+
+A mechanism no test can distinguish from its absence is supported by prose. It caught a real gap: a
+drain's round-trip could be deleted with the suite green, because the fake modelled command latency
+but not delivery latency.
+
 ## Prove an oracle is load-bearing
 
 A green oracle test proves nothing on its own.

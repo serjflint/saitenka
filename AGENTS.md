@@ -73,7 +73,9 @@ scripts declare deps via PEP 723 inline metadata.
   an explicit param/flag instead of inferring it from a display toggle.
 - **Perf claims:** measure with the instrument that isolates the change (py-spy/Scalene self-time on the
   hot path), not a wall-clock proxy a dominant unrelated cost can swamp — and verify the premise before
-  implementing. Tooling + baselines → `BENCHMARKS.md`.
+  implementing. **Before widening a threshold, tolerance or timeout, check the git history for that
+  value**: if it has been widened before and the thing still flakes, the threshold is not the variable.
+  Tooling, baselines and how a noisy metric is gated → `BENCHMARKS.md`.
 - **Dev gate:** `uv run poe all` is the pre-push gate (CI mirrors it — `.github/workflows/ci.yml`);
   `poe pre-release` is the pre-tag superset. Task definitions are `[tool.poe.tasks]` (SSOT); how to read
   each failure, the advisory tiers, and the free-threaded / 3.13-pinned-env traps → the **dev-gate skill**
