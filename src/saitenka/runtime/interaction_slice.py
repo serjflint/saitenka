@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     from saitenka.runtime.hover_pause import ResumePlayback
     from saitenka.runtime.picker import ListingAdopted, PickerRetired
     from saitenka.runtime.pulse import Repaint
+    from saitenka.runtime.state import FeatureReducer
     from saitenka.runtime.tipnav import TipViewRestored
 
 #: What this slice reduces: its owner's vocabulary plus the one event that is nobody's.
@@ -405,11 +406,15 @@ HOVERED_WORD_FEATURE = "hovered-word"
 PREVIEW_FEATURE = "card-preview"
 
 
-def interaction_slice_reducer(*, help_reducer: HelpReducer | None = None) -> SliceReducer:
+def interaction_slice_reducer(
+    features: dict[str, FeatureReducer] | None = None,
+) -> SliceReducer:
+    if features is not None:
+        return SliceReducer(features)
     return SliceReducer(
         {
             INTERACTION_FEATURE: HoverReducer(),
-            HELP_FEATURE: help_reducer or HelpReducer(),
+            HELP_FEATURE: HelpReducer(),
             PICKER_FEATURE: PickerReducer(),
             SIDEBAR_FEATURE: SidebarReducer(),
             TIP_NAV_FEATURE: TipNavReducer(),

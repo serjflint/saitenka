@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.bindings import HELP_CLOSE_MSG, HELP_NEXT_MSG, HELP_PREV_MSG, HELP_TOGGLE_MSG
-from saitenka.app.feature_bindings import HELP_STATEFUL_BINDING, StatefulBinding
+from saitenka.app.feature_bindings import (
+    HELP_STATEFUL_BINDING,
+    INTERACTION_OWNER_PLAN,
+    INTERACTION_STATEFUL_BINDINGS,
+    InstalledStatefulBinding,
+    OwnerPlan,
+    ordered_stateful_bindings,
+)
 from saitenka.app.help_controller import HelpController, ScreenState, TooltipKeyContext
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
 from saitenka.app.runtime import CommandSpec
@@ -19,7 +26,6 @@ if TYPE_CHECKING:
 
     from saitenka.app.config import ReaderOptions
     from saitenka.mpvio.ipc import MpvIPC
-    from saitenka.runtime.interaction_slice import HelpFeature, HelpReducer, HelpStore
 
 
 class CommandEndpoint(Protocol):
@@ -64,7 +70,8 @@ class SessionAssembly:
     tooltip_keys: TooltipKeyContext
     help: HelpController
     commands: tuple[CommandRegistration, ...]
-    stateful: tuple[StatefulBinding[HelpFeature, HelpReducer, HelpStore], ...]
+    stateful: tuple[InstalledStatefulBinding, ...]
+    owner_plans: tuple[OwnerPlan, ...]
 
     def __post_init__(self) -> None:
         messages: set[str] = set()
@@ -82,9 +89,9 @@ class SessionAssembly:
         help_identity = features.get("help")
         if help_identity is None or help_identity[1] is not self.help:
             raise ValueError("help commands must terminate at the installed help owner")
-        stateful_keys = [row.key for row in self.stateful]
-        if len(stateful_keys) != len(set(stateful_keys)):
-            raise ValueError("stateful feature keys must be unique")
+        for plan in self.owner_plans:
+            owned = tuple(row for row in self.stateful if row.runtime_owner is plan.owner)
+            ordered_stateful_bindings(plan, owned)
 
     @property
     def features(self) -> frozenset[str]:
@@ -147,5 +154,6 @@ def build_session_assembly(
         tooltip_keys,
         help_owner,
         commands,
-        (HELP_STATEFUL_BINDING,),
+        INTERACTION_STATEFUL_BINDINGS,
+        (INTERACTION_OWNER_PLAN,),
     )

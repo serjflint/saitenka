@@ -16,15 +16,15 @@ from saitenka.app import (
     tooltip_panel,
     tooltip_raster,
 )
+from saitenka.app.feature_bindings import (
+    HOVER_PAUSE_STATEFUL_BINDING,
+    HOVER_STATEFUL_BINDING,
+    HOVERED_WORD_STATEFUL_BINDING,
+    PULSE_STATEFUL_BINDING,
+    TIP_NAV_STATEFUL_BINDING,
+)
 from saitenka.app.popups import HoverInputs, ShowActions, TipPorts, TooltipState
 from saitenka.runtime import events
-from saitenka.runtime.interaction_slice import (
-    HoveredWordStore,
-    HoverPauseStore,
-    HoverStore,
-    PulseStore,
-    TipNavStore,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -34,6 +34,13 @@ if TYPE_CHECKING:
     from saitenka.app.tooltip_panel import PanelKey, PanelPorts
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
+    from saitenka.runtime.interaction_slice import (
+        HoveredWordStore,
+        HoverPauseStore,
+        HoverStore,
+        PulseStore,
+        TipNavStore,
+    )
     from saitenka.runtime.jobs import JobSubmitter
     from saitenka.runtime.pulse import Repaint
 
@@ -76,11 +83,11 @@ class TooltipController:
         self._delays = delays
         self._flash_seconds = flash_seconds
         self._key_context = key_context
-        self._hover_store = HoverStore(ipc)
-        self._nav_store = TipNavStore(ipc)
-        self._pulse_store = PulseStore(ipc)
-        self._pause_store = HoverPauseStore(ipc)
-        self._word_store = HoveredWordStore(ipc)
+        self._hover_store = HOVER_STATEFUL_BINDING.store(ipc)
+        self._nav_store = TIP_NAV_STATEFUL_BINDING.store(ipc)
+        self._pulse_store = PULSE_STATEFUL_BINDING.store(ipc)
+        self._pause_store = HOVER_PAUSE_STATEFUL_BINDING.store(ipc)
+        self._word_store = HOVERED_WORD_STATEFUL_BINDING.store(ipc)
         self._hover_store.dispatch(events.HoverConfigured(delays))
         self._metadata = hover_metadata.InteractionMetadataState()
         self._metadata_submitter = hover_metadata.configure_runtime_job(ipc)

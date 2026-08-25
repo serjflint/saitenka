@@ -26,7 +26,11 @@ from saitenka.app import (
     subtitle_intents,
     telemetry,
 )
-from saitenka.app.feature_bindings import HELP_STATEFUL_BINDING
+from saitenka.app.feature_bindings import (
+    INTERACTION_OWNER_PLAN,
+    INTERACTION_STATEFUL_BINDINGS,
+    ordered_stateful_bindings,
+)
 from saitenka.app.hover_adapter import HoverAdapter, HoverHost
 from saitenka.app.interaction_adapter import InteractionAdapter, InteractionHost
 from saitenka.app.mine_adapter import MineAdapter, MineHost
@@ -84,26 +88,7 @@ from saitenka.runtime.events import (
     StartupReady,
     UserCommand,
 )
-from saitenka.runtime.interaction_slice import (
-    HELP_FEATURE,
-    HOVER_PAUSE_FEATURE,
-    HOVERED_WORD_FEATURE,
-    INTERACTION_FEATURE,
-    PICKER_FEATURE,
-    PREVIEW_FEATURE,
-    PULSE_FEATURE,
-    SIDEBAR_FEATURE,
-    TIP_NAV_FEATURE,
-    HoveredWordFeature,
-    HoverFeature,
-    HoverPauseFeature,
-    PickerFeature,
-    PreviewFeature,
-    PulseFeature,
-    SidebarFeature,
-    TipNavFeature,
-    interaction_slice_reducer,
-)
+from saitenka.runtime.interaction_slice import interaction_slice_reducer
 from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.runtime.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.runtime.playback_slice import (
@@ -504,8 +489,12 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     )
     playback = playback_slice_reducer()
     subtitle = subtitle_slice_reducer()
+    interaction_bindings = ordered_stateful_bindings(
+        INTERACTION_OWNER_PLAN,
+        INTERACTION_STATEFUL_BINDINGS,
+    )
     interaction = interaction_slice_reducer(
-        help_reducer=HELP_STATEFUL_BINDING.reducer_factory(),
+        {binding.key: binding.build_reducer() for binding in interaction_bindings}
     )
     presentation = presentation_slice_reducer()
     routes: dict[RouteKey, FeatureReducer] = {
@@ -557,17 +546,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
             subtitle=subtitle.initial({SUBTITLE_FEATURE: SubtitleTrackState()}),
             interaction=interaction.initial(
-                {
-                    INTERACTION_FEATURE: HoverFeature(),
-                    HELP_FEATURE: HELP_STATEFUL_BINDING.initial_factory(),
-                    PICKER_FEATURE: PickerFeature(),
-                    SIDEBAR_FEATURE: SidebarFeature(),
-                    TIP_NAV_FEATURE: TipNavFeature(),
-                    PULSE_FEATURE: PulseFeature(),
-                    HOVER_PAUSE_FEATURE: HoverPauseFeature(),
-                    HOVERED_WORD_FEATURE: HoveredWordFeature(),
-                    PREVIEW_FEATURE: PreviewFeature(),
-                }
+                {binding.key: binding.initial() for binding in interaction_bindings}
             ),
             presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),
         ),

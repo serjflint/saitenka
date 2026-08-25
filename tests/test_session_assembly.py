@@ -6,6 +6,10 @@ import pytest
 import util
 
 from saitenka.app.config import ReaderOptions
+from saitenka.app.feature_bindings import (
+    INTERACTION_OWNER_PLAN,
+    ordered_stateful_bindings,
+)
 from saitenka.app.session_assembly import CommandRegistration, build_session_assembly
 from saitenka.runtime import Owner
 
@@ -13,10 +17,28 @@ from saitenka.runtime import Owner
 def test_assembly_derives_help_inventory_from_installed_command_rows():
     assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
 
-    assert assembly.features == frozenset({"help"})
+    assert assembly.features == frozenset(
+        {
+            "card-preview",
+            "copy-pulse",
+            "help",
+            "hover",
+            "hover-pause",
+            "hovered-word",
+            "sidebar",
+            "subtitle-picker",
+            "tooltip-navigation",
+        }
+    )
     assert {row.runtime_owner for row in assembly.commands} == {Owner.SESSION}
     assert all(row.endpoint.owner is assembly.help for row in assembly.commands)
-    assert assembly.stateful[0].feature == "help"
+    assert (
+        tuple(
+            binding.key
+            for binding in ordered_stateful_bindings(INTERACTION_OWNER_PLAN, assembly.stateful)
+        )
+        == INTERACTION_OWNER_PLAN.feature_order
+    )
 
 
 def test_assembly_rejects_duplicate_command_messages():
@@ -50,5 +72,12 @@ def test_assembly_rejects_one_feature_resolving_to_two_owners():
 def test_assembly_rejects_duplicate_stateful_keys():
     assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
 
-    with pytest.raises(ValueError, match="stateful feature keys"):
+    with pytest.raises(ValueError, match="already registered"):
         replace(assembly, stateful=(*assembly.stateful, assembly.stateful[0]))
+
+
+def test_owner_plan_rejects_a_missing_stateful_binding():
+    assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
+
+    with pytest.raises(ValueError, match="disagree"):
+        replace(assembly, stateful=assembly.stateful[:-1])

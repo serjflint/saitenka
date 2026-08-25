@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "codemods"))
 import complete_help_controller
 import complete_tooltip_controller
 import harness
+import install_interaction_stateful_bindings
 import install_surface_router
 import move_member
 import rename_session_controller
@@ -124,5 +125,16 @@ def test_surface_router_rewrite_refuses_a_different_context_receiver():
     assert rewritten == (
         "self.surface_router.wants_mouse_capture()\n"
         "surfaces.wants_mouse_capture(other.interaction)\n"
+    )
+    assert count == 1
+
+
+def test_stateful_binding_rewrite_matches_only_direct_store_constructors():
+    source = "HoverStore(ipc)\nmodule.HoverStore(ipc)\nHoverStoreFake(ipc)\n"
+
+    rewritten, count = install_interaction_stateful_bindings.transformed(source)
+
+    assert rewritten == (
+        "HOVER_STATEFUL_BINDING.store(ipc)\nmodule.HoverStore(ipc)\nHoverStoreFake(ipc)\n"
     )
     assert count == 1

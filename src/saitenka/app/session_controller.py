@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from saitenka.app.session_assembly import SessionAssembly
     from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.help import HelpState
+    from saitenka.runtime.interaction_slice import PickerStore
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
 
@@ -111,6 +112,11 @@ from saitenka.app.bindings import (
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.config import ReaderOptions
+from saitenka.app.feature_bindings import (
+    PICKER_STATEFUL_BINDING,
+    PREVIEW_STATEFUL_BINDING,
+    SIDEBAR_STATEFUL_BINDING,
+)
 from saitenka.app.interaction_intents import InteractionCommand
 from saitenka.app.interaction_surfaces import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
@@ -226,11 +232,6 @@ from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.connection import ConnectionStore
 from saitenka.runtime.effects import ApplyPlaybackDeltas, RunUserCommand
 from saitenka.runtime.hover import HoverDelays
-from saitenka.runtime.interaction_slice import (
-    PickerStore,
-    PreviewStore,
-    SidebarStore,
-)
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.runner import SessionRunner
@@ -740,17 +741,17 @@ class SessionController:
         self.interaction.help_store = self.help_controller.store
         # …and its third: the subtitle picker. Its drawn geometry stays beside the slice rather than
         # in it — one paint on one screen is not what a session-lived slot holds.
-        self._picker_store = PickerStore(self.ipc)
+        self._picker_store = PICKER_STATEFUL_BINDING.store(self.ipc)
         self.interaction.picker_store = self._picker_store
         self.interaction.picker_panel = sub_picker.PickerPanel()
         # …and its fourth: the sidebar, cut the same way — the slice decides, the panel remembers
         # what one paint put on screen.
-        self._sidebar_store = SidebarStore(self.ipc)
+        self._sidebar_store = SIDEBAR_STATEFUL_BINDING.store(self.ipc)
         self.interaction.sidebar_store = self._sidebar_store
         self.interaction.sidebar_panel = sidebar.SidebarPanel()
         # …and its ninth: the mined-card preview. Its rects and the clip's live `Popen` stay on the
         # panel beside it — a reducer can hold neither one paint's geometry nor a process.
-        self._preview_store = PreviewStore(self.ipc)
+        self._preview_store = PREVIEW_STATEFUL_BINDING.store(self.ipc)
         self.interaction.preview_store = self._preview_store
         self.surface_router = surfaces.build_surface_router(
             self.help_controller,
