@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787632863388,
+  "lastUpdate": 1787633895949,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -9875,6 +9875,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 2.131857,
             "range": "3 replicas; min 1.23053; max 5.49061; MAD 0.901322; worst 5.49061",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "617d830aff54a491de4e003148753e6bc2115429",
+          "message": "Merge pull request #434 from serjflint/refactor/mining-controller\n\nrefactor(mining): give session mining a bounded owner",
+          "timestamp": "2026-08-25T09:56:55+05:00",
+          "tree_id": "4b9e94c58dd589c3393bfd4a6f0b92859e9b1283",
+          "url": "https://github.com/serjflint/saitenka/commit/617d830aff54a491de4e003148753e6bc2115429"
+        },
+        "date": 1787633894565,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.258405,
+            "range": "3 replicas; min 4.93765; max 6.34616; MAD 0.320758",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.520148,
+            "range": "3 replicas; min 6.8926; max 8.72173; MAD 0.62755; worst 8.72173",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 15.924353,
+            "range": "3 replicas; min 14.3507; max 20.6327; MAD 1.57364",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.799356,
+            "range": "3 replicas; min 14.4219; max 21.3148; MAD 0.515399; worst 21.3148",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 26.080014,
+            "range": "3 replicas; min 18.082; max 115.665; MAD 7.99806",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.103316,
+            "range": "3 replicas; min 0.096672; max 0.169157; MAD 0.006644; worst 0.169157",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.439469,
+            "range": "3 replicas; min 30.5334; max 96.9035; MAD 12.9061; worst 96.9035",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 7.156207,
+            "range": "3 replicas; min 2.63359; max 10.6695; MAD 3.51325; worst 10.6695",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.273846,
+            "range": "3 replicas; min 1.09918; max 4.63863; MAD 0.174666; worst 4.63863",
             "unit": "ms"
           }
         ]
