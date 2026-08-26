@@ -208,7 +208,9 @@ def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     toasts = []
-    monkeypatch.setattr(r, "toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
+    monkeypatch.setattr(
+        r.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
+    )
     r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
     assert r.hover_view().nested.state is None
     r.tokens = [Token("よむ", "よむ", "よむ", "動詞", 0, 2)]

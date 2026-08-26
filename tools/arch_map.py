@@ -14,9 +14,9 @@ Four views, one concern each, in the order a reader needs them:
     command     what a keypress reaches
     seams       where a new feature registers, and what its adapter costs
 
-The last one is the reason this exists. Both layers register, but only one of them is free: a
-stateless feature's adapter declares a host protocol, and that protocol's width is the state the
-feature never moved. No other artifact carries the per-feature number.
+The last one is the reason this exists. Both layers register; stateless capability values declare
+the bounded owners and acts each policy may reach. Their width is review evidence generated here,
+not a hand-maintained architectural claim.
 
     uv run poe arch-map              # markdown, all four views
     uv run poe arch-map -- --json    # the same data, for a diff or a check
@@ -32,6 +32,7 @@ import json
 import pathlib
 import subprocess
 import sys
+from typing import Any, cast
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "saitenka"
@@ -248,58 +249,79 @@ def _policy_name(path: pathlib.Path) -> str:
 
 
 def _adapter_ports() -> list[dict]:
-    """Each stateless feature's declared host surface, and how much of it it writes.
+    """Purpose-specific capability values at stateless policy boundaries."""
+    protocol_names: set[str] = set()
+    for path in sorted((SRC / "app").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        protocol_names.update(
+            node.name
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            and any(ast.unparse(base).endswith("Protocol") for base in node.bases)
+        )
 
-    The width is the meter that matters after the seam exists: a port is the state the feature has
-    not moved into a slice of its own, so it falls when that state does — and it cannot be narrowed
-    by hiding it, because a `SessionController` parameter is what the host inventory sits at zero to forbid.
-    """
     ports = []
-    for path in sorted((SRC / "app").rglob("*adapter.py")):
+    paths = {
+        *sorted((SRC / "app").rglob("*adapter.py")),
+        *sorted((SRC / "app").rglob("*endpoint.py")),
+    }
+    for path in sorted(paths):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in tree.body:
-            if not isinstance(node, ast.ClassDef) or not node.name.endswith("Host"):
+            if not isinstance(node, ast.ClassDef) or not node.name.endswith(
+                ("Ports", "Read", "Apply", "Endpoint")
+            ):
                 continue
-            written = [n for n in node.body if isinstance(n, ast.AnnAssign)]
-            reads = [n for n in node.body if isinstance(n, ast.FunctionDef)]
+            fields = [n for n in node.body if isinstance(n, ast.AnnAssign)]
+            field_rows = [
+                f"{ast.unparse(field.target)}: {ast.unparse(field.annotation)}" for field in fields
+            ]
+            acts = sum(
+                "Callable" in ast.unparse(field.annotation)
+                or bool(
+                    {
+                        child.id
+                        for child in ast.walk(field.annotation)
+                        if isinstance(child, ast.Name)
+                    }
+                    & protocol_names
+                )
+                for field in fields
+            )
             ports.append(
                 {
                     "port": node.name,
                     "module": _app_module(path),
-                    "members": len(written) + len(reads),
-                    "written": len(written),
+                    "members": len(fields),
+                    "acts": acts,
+                    "fields": field_rows,
                 }
             )
     return sorted(ports, key=lambda p: -p["members"])
 
 
 def _registered_policies() -> list[str]:
-    """Which policies the router actually owns. Built off a stub host: a registration needs no
-    live session, which is the point of the ports."""
-    from saitenka.app.features.mining.mine_adapter import MineAdapter
-    from saitenka.app.features.profiles.profile_adapter import ProfileAdapter
-    from saitenka.app.features.tooltip.hover_adapter import HoverAdapter
-    from saitenka.app.session.adapter import SessionAdapter
-    from saitenka.app.session.interaction_adapter import InteractionAdapter
-    from saitenka.app.session.panel_adapter import PanelAdapter
+    """Which policies the command-type registry actually owns."""
     from saitenka.app.session.routes import stateless_features
-    from saitenka.app.subtitle_adapter import SubtitleAdapter
 
-    class _Stub:
-        def __getattr__(self, name: str) -> object:
-            return None
+    class _Adapter:
+        def inputs(self) -> object:
+            return object()
 
-    host = _Stub()
+        def apply(self, effect: object, /) -> None:
+            pass
+
+    adapter = cast("Any", _Adapter())
     return sorted(
         binding.feature
         for binding in stateless_features(
-            HoverAdapter(host),  # type: ignore[arg-type]
-            MineAdapter(host),  # type: ignore[arg-type]
-            PanelAdapter(host),  # type: ignore[arg-type]
-            ProfileAdapter(host),  # type: ignore[arg-type]
-            SessionAdapter(host),  # type: ignore[arg-type]
-            SubtitleAdapter(host),  # type: ignore[arg-type]
-            InteractionAdapter(host),  # type: ignore[arg-type]
+            adapter,
+            adapter,
+            adapter,
+            adapter,
+            adapter,
+            adapter,
+            adapter,
         )
     )
 
@@ -384,31 +406,28 @@ def seams_view() -> dict:
 
 
 def command_view() -> dict:
-    """What a keypress reaches. The router is a table, so it reads statically — but the rows are
-    `action(SessionController.verb)`, resolved by name at call time, which is why a verb reached only from
-    here looks dead to every tool that follows symbols."""
-    source = (SRC / "app" / "session" / "controller.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    controller = next(
-        n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionController"
+    """What the closed stateless command table contributes to the script-message router."""
+    from saitenka.app.session.routes import STATELESS_COMMANDS
+
+    rows = [
+        {
+            "message": row.message,
+            "target": f"{type(row.command).__name__}.{getattr(row.command, 'name', row.command)}",
+            "kind": "policy",
+        }
+        for row in STATELESS_COMMANDS
+    ]
+    rows.extend(
+        (
+            {"message": "**assembly", "target": "SessionAssembly", "kind": "registration"},
+            {
+                "message": "saitenka-toggle-legacy-renderer",
+                "target": "toggle_legacy_renderer",
+                "kind": "legacy",
+            },
+        )
     )
-    builder = next(
-        n
-        for n in controller.body
-        if isinstance(n, ast.FunctionDef) and n.name == "_build_command_router"
-    )
-    # The handler table is the only large dict literal in the builder; a smaller one would be a
-    # local helper's, and there is currently none.
-    table = next(n for n in ast.walk(builder) if isinstance(n, ast.Dict) and len(n.keys) > 5)
-    rows = []
-    for key, value in zip(table.keys, table.values, strict=True):
-        text = ast.unparse(value)
-        if key is None:
-            rows.append({"message": "**registered", "target": text, "kind": "registration"})
-            continue
-        kind = "policy" if "_run_" in text else "verb"
-        rows.append({"message": ast.unparse(key), "target": text, "kind": kind})
-    return {"rows": rows, "verbs": sum(r["kind"] == "verb" for r in rows)}
+    return {"rows": rows, "verbs": sum(r["kind"] == "legacy" for r in rows)}
 
 
 # --- rendering ----------------------------------------------------------------------------------
@@ -519,17 +538,17 @@ def markdown(state: dict) -> str:
     out += [
         "",
         (
-            "Each adapter declares the host members it needs as a protocol — never a `SessionController`"
-            " parameter, which the host inventory sits at zero to forbid. The width is the state"
-            " the feature has not moved into a slice of its own, so it is a debt meter, not a"
-            " style complaint:"
+            "Each adapter declares a purpose-specific capability value — never a `SessionController`"
+            " parameter. Width is review evidence: owner references are state authority; callable"
+            " or named-call Protocol fields are acts. It is not a numeric gate."
         ),
         "",
-        "| port | module | host members | of which written |",
-        "| --- | --- | --- | --- |",
+        "| capability | module | members | acts | declarations |",
+        "| --- | --- | ---: | ---: | --- |",
     ]
     out += [
-        f"| `{p['port']}` | `{p['module']}` | {p['members']} | {p['written']} |"
+        f"| `{p['port']}` | `{p['module']}` | {p['members']} | {p['acts']} "
+        f"| {', '.join(f'`{field}`' for field in p['fields'])} |"
         for p in seams["stateless"]["ports"]
     ]
     out += [

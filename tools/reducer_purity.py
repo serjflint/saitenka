@@ -8,10 +8,9 @@ A reducer decides a turn from `(state, event)`. Reading a clock or an injected p
 turn breaks that in a way tests rarely catch: the same state and the same event stop producing the
 same result, so a replay diverges from the session it replays and no assertion says why.
 
-**Discovered at runtime, not by name.** The reducers are whatever `install_session_reactor` puts in
-the route table; a scan keyed on `reduce_*`/`*Reducer` would measure a convention instead, and miss
-the first reducer registered under another name. The reactor is built against a fake transport, the
-route table walked, and each registered callable resolved back to its source.
+**Discovered from registration, not by name.** Stateful reducers come from the installed reactor
+route table. Stateless policies come from `stateless_features`, the command-type registry used by
+the synchronous command graph. Each registered callable is then resolved back to its source.
 
 Impurity is two things, both of which make a turn depend on something outside `(state, event)`:
 
@@ -39,6 +38,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,11 +70,18 @@ class Impurity:
 
 
 def _registered() -> dict[str, object]:
-    """Every feature reducer the session reactor actually registers, by `owner:feature`."""
+    """Every stateful or stateless policy installed by the session composition."""
     sys.path.insert(0, str(ROOT / "tests"))
     from util import FakeIPC, runtime_gateway  # a tool, not a library
 
-    from saitenka.app.session.routes import install_session_reactor
+    from saitenka.app.session.routes import install_session_reactor, stateless_features
+
+    class _Adapter:
+        def inputs(self) -> object:
+            return object()
+
+        def apply(self, effect: object, /) -> None:
+            pass
 
     gateway = runtime_gateway(FakeIPC())
     try:
@@ -89,6 +96,17 @@ def _registered() -> dict[str, object]:
             )
             for feature, reducer in features.items():
                 found[f"{getattr(key, 'owner', '?')}:{feature}"] = reducer
+        adapter = cast("Any", _Adapter())
+        for binding in stateless_features(
+            adapter,
+            adapter,
+            adapter,
+            adapter,
+            adapter,
+            adapter,
+            adapter,
+        ):
+            found[f"stateless:{binding.feature}"] = binding.policy
         return found
     finally:
         gateway.close()
@@ -195,12 +213,16 @@ def collect() -> list[Impurity]:
                 )
                 if not ambient and not is_injected:
                     continue
+                call = _dotted(child.func)
+                if is_injected:
+                    assert isinstance(child.func, ast.Attribute)
+                    call = f"self.{child.func.attr}"
                 found.append(
                     Impurity(
                         reducer=name,
                         module=module,
                         line=child.lineno,
-                        call=_dotted(child.func) if ambient else f"self.{child.func.attr}",
+                        call=call,
                         kind="ambient" if ambient else "injected",
                         severity="decides" if id(child) in deciding else "stamps",
                     )
@@ -278,7 +300,7 @@ def markdown(state: dict) -> str:
     lines = [
         (
             f"- **Reducer purity** {state['reducers']} registered reducers "
-            "(the route table only — stateless policies are outside this census); "
+            "(stateful routes plus stateless command policies); "
             f"**{state['decides']} readings reach a branch**, {state['stamps']} only stamp an "
             f"emitted effect, {state['argued']} argued."
         ),
@@ -310,8 +332,8 @@ if __name__ == "__main__":
             raise SystemExit(1)
         print(  # this is a CLI
             f"reducer-purity: OK ({state['reducers']} REGISTERED reducers, 0 deciding readings; "
-            f"{state['stamps']} stamp-only, {state['argued']} argued). Decision functions outside "
-            "the route table are not measured here."
+            f"{state['stamps']} stamp-only, {state['argued']} argued). Unregistered decision "
+            "functions are not measured here."
         )
     else:
         print(markdown(state))  # this is a CLI

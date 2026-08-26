@@ -92,6 +92,27 @@ class EpisodeContext:
         self.session_recorder: SessionRecorder | None = None
 
 
+class EpisodeSlot:
+    """Stable authority whose episode value is replaced on each file change."""
+
+    def __init__(self) -> None:
+        self._current = EpisodeContext()
+
+    @property
+    def current(self) -> EpisodeContext:
+        return self._current
+
+    def get(self) -> EpisodeContext:
+        return self._current
+
+    def subtitle_source(self) -> SubtitleSource:
+        return self._current.subtitle
+
+    def replace(self, episode: EpisodeContext | None = None) -> EpisodeContext:
+        self._current = episode if episode is not None else EpisodeContext()
+        return self._current
+
+
 class InteractionContext:
     """State scoped to the current on-screen interaction (hover/tooltip).
 
@@ -185,3 +206,12 @@ class SessionContext:
         self.render_cache = render_cache
         self.anki_cache: tuple[float, bool] = (0.0, False)
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle
+
+    def ensure_backlog_store(self) -> BacklogStore:
+        """Open the session-owned backlog store on first use."""
+        store = self.backlog_store
+        if store is None:
+            from saitenka.app.backlog import BacklogStore
+
+            store = self.backlog_store = BacklogStore()
+        return store

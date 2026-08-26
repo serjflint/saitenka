@@ -8,6 +8,7 @@ from legacy_session_controller_behavior import LegacyReaderTrace
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
 from util import FakeIPC, runtime_gateway
 
+from saitenka.app import subtitle_adapter
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.session.controller import SessionController
 from saitenka.app.session.routes import install_session_reactor
@@ -45,7 +46,11 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
     reader = SessionController(ipc, renderer=NullRenderer())
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     dispatched: list[bool] = []
-    monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
+    monkeypatch.setattr(
+        reader.picker_controller,
+        "open",
+        lambda *_args, **_kwargs: dispatched.append(True),
+    )
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
     trace = LegacyReaderTrace(reader)
 
@@ -86,7 +91,7 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
     reader.set_subtitle("old")
     reader.boxes = [WordBox(0, 10, 10, 20, 20)]
     copied: list[str] = []
-    monkeypatch.setattr(reader, "copy_line", lambda: copied.append("called"))
+    monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
     trace = LegacyReaderTrace(reader)
     trace.observe("cue-installed", outcome="interactive")
 

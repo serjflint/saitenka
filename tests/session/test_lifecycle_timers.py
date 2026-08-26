@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import pytest
 
 from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
+from saitenka.app.toast_controller import ToastController
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 
@@ -71,7 +72,11 @@ def test_toast_expiry_removes_the_lifecycle_surface() -> None:
     ipc = FakeIPC()
     reader = SessionController(ipc)
     port = FakeTimerPort()
-    reader.lifecycle_timers = LifecycleTimers(port)
+    reader.notifications = ToastController(
+        reader.lifecycle_surfaces,
+        reader.screen,
+        LifecycleTimers(port),
+    )
 
     reader.toast("saved", seconds=1.0)
     port.finish(port.history[-1])

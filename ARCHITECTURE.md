@@ -109,9 +109,10 @@ cli.create_app
 
 mpv script messages go through a closed `CommandExecutor`: a declared spec per command (owner,
 whether it needs a current cue) separate from the bound handler, so ordering and ownership are
-testable without a session. `SessionAssembly` contributes handlers whose owners can exist before
-the controller; `SessionController` still binds commands whose adapters depend on its live facts.
-This is an explicit internal composition seam, not an open third-party plugin API.
+testable without a session. `SessionAssembly` contributes independently assembled handlers;
+`StatelessCommandGraph` binds the remaining messages to typed policies and purpose-specific
+capabilities. `SessionController` composes the graph but is not a capability available to a feature.
+This is an internal composition seam, not an open third-party plugin API.
 
 A feature joins the session on one of two layers, and which one follows from whether it needs a
 place to remember that does not exist yet.
@@ -121,9 +122,9 @@ place to remember that does not exist yet.
 - **Stateless** — it is a pure policy over a snapshot, `reduce(command, inputs)`. Routing that
   through the mailbox would add sequencing to a decision with nothing to sequence.
 
-Both join through typed registration rows. The current stateless composition still supplies its
-adapters from `SessionController`; moving an adapter behind a bounded owner removes that host
-coupling, while merely renaming the row does not. Which files, and in what order, is
+Both join through typed registration rows. Stateless inputs read bounded owners such as playback,
+tooltip, picker, or cue presentation stores. Cross-feature operations are named acts; replaceable
+episode state is reached through `EpisodeSlot`. Which files, and in what order, is
 [Adding a feature](docs/contributing/runtime.md#adding-a-feature).
 
 ```mermaid
@@ -136,8 +137,8 @@ flowchart TB
 
     subgraph L1["Stateless — decides over a snapshot"]
         direction LR
-        gather["adapter.inputs()"] --> policy["intents.reduce<br/>pure"]
-        policy --> perform["adapter.apply()"]
+        gather["coordinator.inputs()"] --> policy["intents.reduce<br/>pure"]
+        policy --> perform["coordinator.apply()"]
     end
 
     subgraph L2["Stateful — owns a slice of SessionState"]
@@ -147,28 +148,23 @@ flowchart TB
 
     srouter --> L1
     slice --> L2
-    gather -. "host protocol" .-> host["SessionController<br/>session controller"]
-    perform -. "host protocol" .-> host
-    host --> mining["MiningController<br/>target + index + transactions"]
+    compose["SessionController<br/>composition + owner-thread turn"] --> gather
+    compose --> perform
+    gather -. "bounded owner" .-> mining["MiningController<br/>target + index + transactions"]
+    gather -. "bounded owner" .-> playback["PlaybackStore / CueRenderStore"]
+    perform -. "named act" .-> sinks["mpv / surfaces / Anki"]
     reduce --- state[(SessionState)]
 ```
 
-The dotted edges are the whole asymmetry: the stateful half reaches its own slice, while the
-remaining stateless adapters reach the host only through the members their protocols name.
+The asymmetry is lifetime, not authority. Stateful features store facts in an owner slice;
+stateless policies sample existing owners for one synchronous command. Both keep decisions pure.
+Impure coordinators may reach only the owners and named acts declared by their capability value.
+The command graph rejects missing policies and messages, and its composition rejects deferred
+session reads.
 
-The `SessionController` node denotes the live session controller, distinct from the immutable reducer-state store
-shown beside it. SessionController still carries session assembly and mutable state that has not moved behind a
-bounded owner. Owners such as `TooltipController`, `ProfileController`, and `MiningController` retain feature state and
-operation protocols; SessionController assembles fresh per-turn ports and keeps cross-feature order explicit.
-
-The asymmetry is in what the impure ends may reach. A stateful reducer is pure by gate; a stateless
-feature's adapter has to touch the live session, so it declares the host members it needs as a
-protocol instead of taking the host itself — which is also what keeps the count of `SessionController`-taking
-functions at zero.
-
-**The known cost.** That protocol's width counts the state the feature has not moved into a slice of
-its own, and the widest ports are the ones that also write host state. Nothing gates the width, so
-it is a review judgement rather than a build failure; `poe arch-map` prints it.
+**The known cost.** A capability can still become too wide while remaining type-correct.
+`poe arch-map` prints each capability's state owners and acts as review evidence; width is not an
+arbitrary numeric build gate.
 
 `saitenka.runtime` is a production package, not a separate contract: `session_routes.py` imports it,
 and a session with a gateway is driven by `SessionLoop` off the mailbox rather than by a poll. See
@@ -183,9 +179,9 @@ protocol-shaped class from being mistaken for production swappability.
 | Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
-| Session commands | `CommandRegistration` + `CommandExecutor` | Explicit and unit-testable; feature-owned endpoints may be assembled before `SessionController`, while controller-dependent handlers remain visibly bound there. |
+| Session commands | `CommandRegistration` + `CommandExecutor` | Explicit and unit-testable; independently assembled handlers and the closed stateless command graph join once. |
 | Stateful features | `StatefulBinding` + owner plan | Live for `Owner.INTERACTION`: one declaration supplies runtime reducers, no-runtime stores, accepted events, and explicit feature order; the reducer remains pure by gate. |
-| Stateless features | `StatelessBinding` + `StatelessRouter` | Live: a typed policy registers by command type; any remaining adapter host protocol is visible coupling, and its width is not gated. |
+| Stateless features | `StatelessBinding` + `StatelessCommandGraph` | Live: command type and script message close independently; coordinators receive bounded owners and named acts, never the session controller. |
 | Session events and effects | `saitenka.runtime` | Live: the mailbox is the session's ingress, `SessionLoop` drives it, and effects return as correlated terminals. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |

@@ -322,8 +322,7 @@ def test_empty_body_click_does_nothing(monkeypatch):
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown
     events: list[str] = []
-    monkeypatch.setattr(r._stateless, "run", lambda _command: events.append("mine"))
-    monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
+    monkeypatch.setattr(r._stateless_commands, "run", lambda _command: events.append("mine"))
     # click low in the body, away from the ⊕/🔊 header buttons
     x, y, w, h = r.tip.view.rect
     ui.move(x + w * 0.5, y + h - 6).click()

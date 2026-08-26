@@ -25,10 +25,8 @@ if TYPE_CHECKING:
     from saitenka.runtime.picker import PickerState
     from saitenka.runtime.sidebar import SidebarState
 
-import saitenka.app.features.picker.sub_picker as sub_picker_module
 import saitenka.app.features.sidebar.sidebar as sidebar_module
 import saitenka.app.session.deps as reader_deps
-import saitenka.app.session.intents as session_intents
 import saitenka.app.session.resources as session_resources
 import saitenka.app.session.runtime as session_runtime
 from saitenka import otel_metrics
@@ -52,58 +50,29 @@ from saitenka.app import (
     translation,
 )
 from saitenka.app.bindings import (
-    ANALYSIS_MSG,
-    ANNOTATION_MSG,
-    BOOKMARK_MSG,
-    CLICK_MSG,
-    COPY_CLICK_MSG,
-    COPY_LINE_MSG,
-    COPY_MSG,
     GLOBAL_SECTION,
-    HOVER_PAUSE_MSG,
-    KANJI_MSG,
     LEGACY_RENDERER_MSG,
-    MINE_ALL_MSG,
-    MINE_MSG,
-    MINE_VIDEO_MSG,
-    OVERLAY_TOGGLE_MSG,
-    PREVIEW_CLOSE_MSG,
-    PREVIEW_MSG,
-    PROFILE_CYCLE_MSG,
-    SCROLL_DOWN_MSG,
-    SCROLL_UP_MSG,
-    SIDEBAR_MSG,
-    SPEAK_MSG,
-    SUB_ANCHOR_MSG,
-    SUB_NEXT_MSG,
-    SUB_PICKER_MSG,
-    SUB_PREV_MSG,
-    SUB_REPLAY_MSG,
-    SUBTITLE_LANGUAGE_MSG,
-    SUBTITLE_MARK_JP_MSG,
-    SUBTITLE_RETRY_MSG,
-    TIP_CLOSE_MSG,
-    TIP_DOWN_MSG,
-    TIP_UP_MSG,
-    TRANS_MSG,
     active_bindings,
     section_contents,
 )
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.mining import mine_intents, miner
-from saitenka.app.features.mining.mine_adapter import MineAdapter
+from saitenka.app.features.mining.mine_adapter import (
+    BookmarkCommandEndpoint,
+    MineCommandCoordinator,
+    MineCommandPorts,
+)
 from saitenka.app.features.mining.miner import MineCue
 from saitenka.app.features.mining.mining_controller import (
-    ForceDuplicate,
     MiningController,
     MiningIdentity,
     MiningSessionAssembly,
 )
 from saitenka.app.features.picker import sub_picker
 from saitenka.app.features.preview import miner_ui
-from saitenka.app.features.profiles import profile_intents
-from saitenka.app.features.profiles.profile_adapter import ProfileAdapter
+from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
+from saitenka.app.features.profiles.profile_adapter import ProfileCommandEndpoint
 from saitenka.app.features.profiles.profile_controller import (
     ProfileAftermath,
     ProfileController,
@@ -122,7 +91,11 @@ from saitenka.app.features.tooltip import (
     tooltip_engaged,
     tooltip_panel,
 )
-from saitenka.app.features.tooltip.hover_adapter import HoverAdapter
+from saitenka.app.features.tooltip.hover_adapter import (
+    HoverCommandCoordinator,
+    HoverCommandPorts,
+)
+from saitenka.app.features.tooltip.navigation_endpoint import TooltipNavigationEndpoint
 from saitenka.app.features.tooltip.popups import (
     ClickPorts,
     HoverActions,
@@ -154,17 +127,20 @@ from saitenka.app.runtime import (
     CueCommandState,
 )
 from saitenka.app.session import mined_feedback, panel_intents, sidebar_coordination, surfaces
-from saitenka.app.session.adapter import SessionAdapter
+from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
 from saitenka.app.session.close_ledger import CloseLedger, CloseStep, fallback_after
 from saitenka.app.session.context import (
     EpisodeContext,
+    EpisodeSlot,
     InteractionContext,
     RenderCacheState,
     SessionContext,
 )
-from saitenka.app.session.interaction_adapter import InteractionAdapter
-from saitenka.app.session.interaction_intents import InteractionCommand
-from saitenka.app.session.panel_adapter import PanelAdapter
+from saitenka.app.session.interaction_adapter import (
+    InteractionCommandCoordinator,
+    InteractionCommandPorts,
+)
+from saitenka.app.session.panel_adapter import PanelCommandCoordinator, PanelCommandPorts
 from saitenka.app.session.routes import (
     BACKLOG_RESOURCE,
     CAPABILITY_PARTICIPANTS,
@@ -184,6 +160,7 @@ from saitenka.app.session.routes import (
     RENDER_SPACE_PARTICIPANT,
     RESLOT_PARTICIPANT,
     SESSION_SUMMARY_RESOURCE,
+    STATELESS_COMMANDS,
     SUBTITLE_CLEAR_RESOURCE,
     SUBTITLE_CLOSE_RESOURCE,
     SUBTITLE_DEACTIVATE_RESOURCE,
@@ -193,13 +170,19 @@ from saitenka.app.session.routes import (
     stateless_features,
 )
 from saitenka.app.session.runtime import SessionEntry, SessionRuntime
-from saitenka.app.session.stateless import StatelessRouter
-from saitenka.app.subtitle_adapter import SubtitleAdapter
+from saitenka.app.session.stateless import StatelessCommandGraph
+from saitenka.app.subtitle_adapter import (
+    SubtitleCommandApply,
+    SubtitleCommandCoordinator,
+    SubtitleCommandRead,
+    SubtitleTrackCoordinator,
+)
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
 )
 from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
+from saitenka.app.subtitle_presentation import AnnotationController, CueRenderStore
 from saitenka.app.subtitle_render import (
     DrawRequest,
     NativeVisibleRenderer,
@@ -207,7 +190,7 @@ from saitenka.app.subtitle_render import (
     SubtitleRenderer,
     SubtitleTarget,
 )
-from saitenka.app.toast import render_toast
+from saitenka.app.toast_controller import ToastController
 from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.render.layout_backend import backend_label, resolve_backend
@@ -252,7 +235,6 @@ console_log = logsetup.user_facing_logger()
 # so extracted subsystems can't collide on slot numbers). IntEnum → drop-in int at every call site.
 SUB_ID = OverlayId.SUB
 TIP_ID = OverlayId.TIP
-TOAST_ID = OverlayId.TOAST
 NESTED_ID = OverlayId.NESTED
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
 # the base tooltip (tip_max_frac) doesn't cramp the deep-dive.
@@ -353,6 +335,78 @@ class SessionController:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
     @property
+    def episode(self) -> EpisodeContext:
+        return self._episodes.current
+
+    @episode.setter
+    def episode(self, value: EpisodeContext) -> None:
+        self._episodes.replace(value)
+
+    @property
+    def sub_text(self) -> str:
+        """Compatibility projection of the playback-owned cue text."""
+        return self._playback.cue.text
+
+    @sub_text.setter
+    def sub_text(self, value: str) -> None:
+        self._reduce_playback(events.CueTextReplaced(value))
+
+    @property
+    def lines(self) -> list[list[Token]]:
+        return self.cue_render.current.lines
+
+    @lines.setter
+    def lines(self, value: list[list[Token]]) -> None:
+        state = self.cue_render.current
+        self.cue_render.install_tokenized(TokenizedCue(value, state.tokens, state.styles))
+
+    @property
+    def tokens(self) -> list[Token]:
+        return self.cue_render.current.tokens
+
+    @tokens.setter
+    def tokens(self, value: list[Token]) -> None:
+        state = self.cue_render.current
+        self.cue_render.install_tokenized(TokenizedCue(state.lines, value, state.styles))
+
+    @property
+    def styles(self) -> list | None:
+        return self.cue_render.current.styles
+
+    @styles.setter
+    def styles(self, value: list | None) -> None:
+        state = self.cue_render.current
+        self.cue_render.install_tokenized(TokenizedCue(state.lines, state.tokens, value))
+
+    @property
+    def boxes(self) -> list:
+        return self.cue_render.current.boxes
+
+    @boxes.setter
+    def boxes(self, value: list) -> None:
+        self.cue_render.publish_geometry(value, self.cue_render.current.origin)
+
+    @property
+    def sub_origin(self) -> tuple[int, int]:
+        return self.cue_render.current.origin
+
+    @sub_origin.setter
+    def sub_origin(self, value: tuple[int, int]) -> None:
+        self.cue_render.publish_geometry(self.cue_render.current.boxes, value)
+
+    @property
+    def annotation_mode(self) -> subtitle_intents.AnnotationMode:
+        return self.annotation.state.mode
+
+    @property
+    def annotation_hover(self) -> bool:
+        return self.annotation.state.hover_revealed
+
+    @annotation_hover.setter
+    def annotation_hover(self, value: bool) -> None:
+        self.annotation.set_hover_revealed(revealed=value)
+
+    @property
     def osd(self) -> tuple[int, int]:
         return self.screen.osd
 
@@ -395,10 +449,7 @@ class SessionController:
             assembly = build_session_assembly(ipc, o, runtime_submit=runtime_submit)
         self._assembly = assembly
         self.options = o
-        # Episode-lifetime state, addressed directly as ``episode.<field>`` — no shim stands in
-        # front of it. A file change rebinds this in one move (#100 re-slot), which is what makes
-        # the reset leak-free; see app/reader_context.py.
-        self.episode = EpisodeContext()
+        self._episodes = EpisodeSlot()
         self.interaction = InteractionContext()  # hover/tooltip/reveal-scoped state
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
@@ -425,11 +476,15 @@ class SessionController:
         ) and ipc.register_session_resource(OVERLAY_RESOURCE, self.ov)
         self.interaction_surfaces = InteractionSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
+        self.notifications = ToastController(
+            self.lifecycle_surfaces,
+            self.screen,
+            self.lifecycle_timers,
+        )
         self._analysis_submit = analysis_overlay.configure_runtime_job(ipc)
         self._subtitle_fetch_submit = subtitle_modes.configure_runtime_job(ipc)
         self._subtitle_fetch_sequence = 0
         self._subtitle_force_select_revision = 0
-        self._sub_picker_submit = sub_picker.configure_runtime_job(ipc)
         current_renderer: CurrentSubtitleRenderer = (
             renderer if renderer is not None else SubtitleRenderer()
         )
@@ -475,7 +530,7 @@ class SessionController:
         # Alpha (0–255) of the translucent box behind the rendered subtitle; 0 = no box (fully see-through).
         self.sub_bg_opacity = max(0, min(255, o.tooltip.sub_background_opacity))
         self.scorer = scorer  # app.scoring.Scorer | None — per-word coloring
-        self.styles: list | None = None
+        self.cue_render = CueRenderStore()
         # Progressive startup: deps loaded on a background thread, injected on the main thread by the
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
         initial_profile_name = profile.name if profile is not None else "default"
@@ -508,8 +563,7 @@ class SessionController:
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
         if o.tooltip.annotation_mode not in {"full", "hover"}:
             raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
-        self.annotation_mode: subtitle_intents.AnnotationMode = o.tooltip.annotation_mode
-        self.annotation_hover = False
+        self.annotation = AnnotationController(o.tooltip.annotation_mode)
         # Visual-only: draw the kanji panel's big headword in the numbered stroke-order font. Set here
         # (the shared SessionController init) so both the run and attach seams get it from one place; a pure render
         # flag threaded onto the kanji Entry, never gating what's looked up or the panel-cache identity.
@@ -628,7 +682,6 @@ class SessionController:
         # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
-        self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
         self.mining_controller = self._assemble_mining_controller(mining_identity, anki, mine_cfg)
         self.profile_dependencies = reader_deps.ProfileDependencies(
@@ -763,9 +816,6 @@ class SessionController:
         self.osd = (1280, 720)
         # subtitle state (populated by set_subtitle; initialised for the live run() path)
         self._first_sub_logged = False  # gates the one-time "first subtitle drawn" info log
-        self.sub_text = ""
-        self.lines: list[list[Token]] = []
-        self.tokens: list[Token] = []
         # Normalized source of a cue drawn PLAIN because its annotation can't complete yet (dicts
         # loading); reader_deps re-renders it annotated once deps land. None = drawn annotated.
         self._sub_pending: str | None = None
@@ -773,8 +823,6 @@ class SessionController:
         self._warmed_index: CueIndex | None = (
             None  # sub index whose cues the episode warm has run for
         )
-        self.boxes: list = []
-        self.sub_origin: tuple[int, int] = (0, 0)
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
@@ -949,28 +997,22 @@ class SessionController:
 
     @property
     def track_ports(self) -> subtitle_modes.TrackPorts:
-        """The seam the whole track-selection family converted onto.
+        return self.track_commands.ports()
 
-        Built per call rather than held: the acts are bound methods and the slice is read through
-        `tracks`, so there is nothing here worth keeping alive between decisions.
-        """
-        return subtitle_modes.TrackPorts(
+    @cached_property
+    def track_commands(self) -> SubtitleTrackCoordinator:
+        return SubtitleTrackCoordinator(
             ipc=self.ipc,
-            get=self._get,
-            toast=self.toast,
-            tracks=lambda: self._subtitle_tracks.current,
-            declare=self.declare_subtitle,
+            tracks=self._subtitle_tracks,
+            episodes=self._episodes,
+            playback=self._playback_store,
+            property_value=self.property_value,
+            notifications=self.notifications,
             invalidate=self.invalidate_analysis,
             translation_visible=self.translation_visible,
-            drop_index=self._drop_sub_index,
             rebuild_index=self.rebuild_sub_index,
-            sample_cue=self._sample_cue_text,
-            clear_cue=lambda: self.set_subtitle(""),
-            redraw_cue=lambda: self.set_subtitle(self.sub_text),
+            install_cue=self.set_subtitle,
         )
-
-    def _drop_sub_index(self) -> None:
-        self.episode.sub_index = None
 
     def rebuild_sub_index(self) -> None:
         """Re-index whichever track mpv has selected. The one place the four facts are bound."""
@@ -979,9 +1021,6 @@ class SessionController:
         build_sub_index_for_current_track(
             self.ipc, self._get, self.load_sub_index, self.native_geometry
         )
-
-    def _sample_cue_text(self) -> str:
-        return subtitle_modes._sample_cue_text(self.episode.sub_index, self.sub_text)
 
     def declare_subtitle(self, event: events.SubtitleEvent) -> subtitle_state.SubtitleTrackState:
         """Advance `Owner.SUBTITLE`'s slice by one declaration and hand back what it now holds.
@@ -1002,9 +1041,8 @@ class SessionController:
 
     def _publish_geometry(self, boxes: list, origin: tuple[int, int] | None = None) -> None:
         """Take the hit boxes the geometry owner produced. Ordering is the generation fence's."""
-        self.boxes = boxes
-        if origin is not None:
-            self.sub_origin = origin
+        current_origin = self.cue_render.current.origin
+        self.cue_render.publish_geometry(boxes, current_origin if origin is None else origin)
 
     def _geometry_observation(self) -> native_subtitles.GeometryObservation:
         """The facts the geometry owner decides from, per operation — they all move per cue."""
@@ -1295,7 +1333,7 @@ class SessionController:
         self._clear_cue_identity()
         self.teardown_tip()
         self.tooltip_controller.retire_selection()
-        self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
+        self.cue_render.reset()
 
     def refresh_osd(self) -> bool:
         d = self.observed_property("osd-dimensions") or {}
@@ -1401,11 +1439,7 @@ class SessionController:
         with otel_metrics.traced("teardown_tip"):
             self.teardown_tip()
         self.tooltip_controller.retire_selection()
-        self.annotation_hover = False
-        self.sub_text = text
-        # Invariant 13: the projection owns which cue is current, so a SessionController-side decision about
-        # it has to reach the projection too — otherwise the next changed cue fact reconciles mpv's
-        # stale text back over this one.
+        self.annotation.retire_cue()
         self._reduce_playback(events.CueTextReplaced(text))
         self._clear_cue_identity()
         self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
@@ -1416,7 +1450,7 @@ class SessionController:
         with otel_metrics.traced("hide_preview"):
             self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
-            self.lines, self.tokens, self.boxes = [], [], []
+            self.cue_render.reset()
             if self.native_geometry is not None:
                 self.native_geometry.mark_empty()
             self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
@@ -1429,8 +1463,7 @@ class SessionController:
             provisional_navigation=provisional_navigation,
         )
         if self.subtitle_language == SECOND_LANG:
-            self.lines, self.tokens, self.styles = [], [], None
-            self.boxes = []
+            self.cue_render.reset()
             self._install_cue_identity(self._annotation_identity(cue_key(text)))
             self._cue_identity_ever_installed = True
             self.draw_subtitle()
@@ -1443,7 +1476,7 @@ class SessionController:
         if cached is not None:
             self._apply_tokenized_cue(cached)
         elif self._annotation_async:
-            self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
+            self.cue_render.reset()
             self._sub_pending = norm
             if self._dependencies_settled:
                 self._schedule_current_annotation(norm)
@@ -1570,7 +1603,7 @@ class SessionController:
             return
         self.teardown_tip()
         self.tooltip_controller.retire_selection()
-        self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
+        self.cue_render.reset()
         norm = cue_key(self.sub_text)
         self._sub_pending = norm
         if self.native_geometry is not None:
@@ -1690,7 +1723,7 @@ class SessionController:
         return cue
 
     def _apply_tokenized_cue(self, cue: TokenizedCue) -> None:
-        self.lines, self.tokens, self.styles = cue.lines, cue.tokens, cue.styles
+        self.cue_render.install_tokenized(cue)
 
     def _invalidate_profile_tokenizer(self) -> None:
         if self.native_geometry is not None:
@@ -1739,8 +1772,7 @@ class SessionController:
         if result is not None:
             # The write-back, here rather than inside the stage: the boxes and origin belong to the
             # cue that produced them, and this is the one place that owns them.
-            self.boxes = result.boxes
-            self.sub_origin = result.origin
+            self.cue_render.publish_geometry(result.boxes, result.origin)
             self._first_sub_logged = self.subtitle_pipeline.renderer.logged_first
         if self.native_geometry is not None:
             self.native_geometry.sync_pixel_owner(self.subtitle_pipeline.renderer)
@@ -1748,7 +1780,7 @@ class SessionController:
     def _clear_native_interaction(self) -> None:
         self.teardown_tip()
         self.tooltip_controller.retire_selection()
-        self.boxes = []
+        self.cue_render.clear_geometry()
         self.subtitle_pipeline.clear(self.lifecycle_surfaces, self.ipc)
 
     def _degrade_native_subtitle_geometry(self) -> None:
@@ -1756,7 +1788,7 @@ class SessionController:
         ownership = getattr(renderer, "ownership_state", None)
         owner = getattr(getattr(ownership, "owner", None), "value", None)
         if owner != "legacy":
-            self.boxes = []
+            self.cue_render.clear_geometry()
         self.subtitle_pipeline.geometry_degraded(self.subtitle_target())
 
     def _use_native_subtitle_renderer(self) -> bool:
@@ -1827,21 +1859,14 @@ class SessionController:
         )
         if target == self.annotation_hover:
             return
-        self.annotation_hover = target
+        self.annotation.set_hover_revealed(revealed=target)
         self.draw_subtitle()
 
-    def speak_hovered(self) -> None:
-        self._stateless.run(hover_intents.HoverCommand.SPEAK)
-
-    def copy_hovered(self) -> None:
-        self._stateless.run(hover_intents.HoverCommand.COPY)
+    def _set_annotation_mode(self, mode: subtitle_intents.AnnotationMode) -> None:
+        self.annotation.set_mode(mode)
 
     def copy_token(self, t) -> None:
         tooltip.copy_token(self.toast, t)
-
-    def copy_line(self) -> None:
-        """Shift+C — copy the whole subtitle cue under the cursor (all its lines)."""
-        self._stateless.run(subtitle_intents.SubtitleCommand.COPY_LINE)
 
     def copy_click(self) -> None:
         tooltip.copy_click(self.tip_ports, self.click_ports, self.hover_inputs)
@@ -1911,7 +1936,7 @@ class SessionController:
             chrome_scale=self.chrome_scale,
             surfaces=self.lifecycle_surfaces,
             video=self.text_property("path"),
-            backlog=lambda: sidebar_coordination.ensure_backlog_store(self.session),
+            backlog=self.session.ensure_backlog_store,
             mined=lambda: self.mining_controller.store,
             mined_exists=self.mining_controller.store_exists,
             backlog_exists=self.session.backlog_store is not None or backlog.db_path().exists(),
@@ -1928,8 +1953,8 @@ class SessionController:
             seek=lambda name, at: send_correlated(
                 self.ipc, name, "set_property", "time-pos", at, owner=Owner.PLAYBACK
             ),
-            bookmark=self.toggle_bookmark,
-            mine=lambda: self._stateless.run(mine_intents.MineCommand.WORD),
+            bookmark=self._stateless_commands.handler(mine_intents.MineCommand.BOOKMARK_CUE),
+            mine=lambda: self._stateless_commands.run(mine_intents.MineCommand.WORD),
             open_mined=lambda note_id: sidebar_coordination.open_mined(
                 self.sidebar_view,
                 self.sidebar_actions,
@@ -1963,6 +1988,9 @@ class SessionController:
             self.scroll_tip,
             self.tip_scale.ref_h,
         )
+
+    def _route_wheel_command(self, steps: int) -> None:
+        self.surface_router.route_scroll(self.wheel_step, steps)
 
     @property
     def click_target(self) -> surfaces.ClickTarget:
@@ -2011,8 +2039,8 @@ class SessionController:
         """What a click on a popup can do. Paired with `tip_ports` and `panel_ports`."""
         return ClickPorts(
             mine_token=self.mining_controller.mine_token,
-            mine_current=lambda: self._stateless.run(mine_intents.MineCommand.WORD),
-            speak_hovered=self.speak_hovered,
+            mine_current=lambda: self._stateless_commands.run(mine_intents.MineCommand.WORD),
+            speak_hovered=self._stateless_commands.handler(hover_intents.HoverCommand.SPEAK),
             click_preview=self._click_preview,
             cursor=lambda: self._get_mapping("mouse-pos") or None,
             paused=lambda: self.observed_property("pause"),
@@ -2100,18 +2128,21 @@ class SessionController:
     @property
     def preview_ports(self) -> miner_ui.PreviewPorts:
         """What the card-preview surface draws on and what a click on it does."""
-        return miner_ui.PreviewPorts(
+        return self.preview_commands.ports()
+
+    @cached_property
+    def preview_commands(self) -> PreviewCommandEndpoint:
+        return PreviewCommandEndpoint(
             preview=self.preview_controller,
-            help_open=self.help_controller.state.open,
-            tip_keys_bound=self.tooltip_controller.keybindings_bound,
+            help=self.help_controller,
+            tooltip=self.tooltip_controller,
+            mining=self.mining_controller,
             surfaces=self.lifecycle_surfaces,
-            osd=self.osd,
-            tip_width=self.tip_scale.width,
+            screen=self.screen,
             ipc=self.ipc,
             keys=self.keys,
-            add_duplicate=lambda: self.mining_controller.force_duplicate(
-                ForceDuplicate(miner_ui.duplicate_token(self.preview_controller.panel))
-            ),
+            tip_scale_override=self._tip_scale_override,
+            tip_max_frac=self.tip_max_frac,
             play_audio=self.play_audio,
         )
 
@@ -2189,15 +2220,11 @@ class SessionController:
         return True
 
     @property
-    def listing_ports(self) -> sub_picker_module.ListingPorts:
-        """What one subtitle listing needs to run and to publish itself back."""
-        return sub_picker_module.ListingPorts(
-            lister=self._sub_picker_lister,
-            store=self.picker_controller.store,
-            redraw=self.picker_controller.redraw,
-            submit=self._sub_picker_submit,
+    def listing_ports(self) -> sub_picker.ListingPorts:
+        """Compatibility projection of the picker-owned listing capability."""
+        return self.picker_controller.listing_ports(
+            episodes=self._episodes,
             stop=self._stop,
-            current_episode=lambda: self.episode,
             toast=self.toast,
         )
 
@@ -2216,7 +2243,7 @@ class SessionController:
             jp_sid=self.jp_sid,
             en_sid=self.en_sid,
             tracks=self._get_sequence("track-list"),
-            store=lambda: sidebar_coordination.ensure_backlog_store(self.session),
+            store=self.session.ensure_backlog_store,
             toast=self.toast,
             record_capture=self._record_capture,
         )
@@ -2260,21 +2287,21 @@ class SessionController:
         trade the chain's debt rows for one more, and every caller in the chain would still inherit
         everything it gathers.
         """
-        return TipPorts(
-            tip=self.tip,
-            pulse_store=self.tooltip_controller.pulse_store,
-            pause_store=self.tooltip_controller.pause_store,
-            word_store=self.tooltip_controller.word_store,
-            scale=self.tip_scale,
+        return self.tooltip_navigation.ports()
+
+    @cached_property
+    def tooltip_navigation(self) -> TooltipNavigationEndpoint:
+        return TooltipNavigationEndpoint(
+            tooltip=self.tooltip_controller,
+            screen=self.screen,
             surfaces=self.interaction_surfaces,
-            hover_store=self.tooltip_controller.hover_store,
-            nav_store=self.tooltip_controller.nav_store,
-            request_render_ahead=self._request_render_ahead,
-            osd=self.osd,
+            tip_scale_override=self._tip_scale_override,
+            tip_max_frac=self.tip_max_frac,
             nested_max_frac=self.nested_max_frac,
+            request_render_ahead=self._request_render_ahead,
             peek_render_cache=self._peek_render_cache,
             schedule_flash_expiry=self.schedule_flash_expiry,
-            toast=self.toast,
+            notifications=self.notifications,
             request_engaged_tooltip=self._request_engaged_tooltip,
         )
 
@@ -2655,23 +2682,118 @@ class SessionController:
         return self.interaction.tip_nav.can_go_back
 
     @cached_property
-    def _stateless(self) -> StatelessRouter:
-        """The stateless half's route table, built on first use.
-
-        Lazy rather than a line in `__init__`: the adapters read the host through the reference they
-        hold, so nothing here depends on how far construction has got, and the composition root does
-        not grow a row per feature.
-        """
-        return StatelessRouter(
-            stateless_features(
-                HoverAdapter(self),
-                MineAdapter(self),
-                PanelAdapter(self),
-                ProfileAdapter(self.profile_controller),
-                SessionAdapter(self),
-                SubtitleAdapter(self),
-                InteractionAdapter(self),
+    def _stateless_commands(self) -> StatelessCommandGraph:
+        """Build the closed synchronous command graph from bounded authorities."""
+        hover = HoverCommandCoordinator(
+            HoverCommandPorts(
+                interaction=self.interaction,
+                profile=self.profile_controller,
+                tooltip=self.tooltip_controller,
+                cue=self.cue_render,
+                copy_token=self.copy_token,
+                open_kanji=self.open_kanji,
+                resume_playback=self.resume_after_hover_pause,
+                notifications=self.notifications,
             )
+        )
+        mine = MineCommandCoordinator(
+            MineCommandPorts(
+                mining=self.mining_controller,
+                bookmark=BookmarkCommandEndpoint(
+                    playback=self._playback_store,
+                    cue=self.cue_render,
+                    tracks=self._subtitle_tracks,
+                    tooltip=self.tooltip_controller,
+                    store=self.session.ensure_backlog_store,
+                    property_value=self.property_value,
+                    number_property=self._get_number,
+                    sequence_property=self._get_sequence,
+                    secondary_text=self._secondary_text,
+                    notifications=self.notifications,
+                    record_capture=self._record_capture,
+                ),
+                playback=self._playback_store,
+                notifications=self.notifications,
+            )
+        )
+        panel = PanelCommandCoordinator(
+            PanelCommandPorts(
+                analysis=self.analysis,
+                surfaces=self.lifecycle_surfaces,
+                sidebar=self.sidebar_controller,
+                picker=self.picker_controller,
+                preview=self.preview_commands,
+                retire_hover=self.retire_hover,
+                show_sidebar=self._show_sidebar_command,
+                hide_sidebar=self._hide_sidebar_command,
+                open_picker=self._open_picker_command,
+                set_analysis_open=self.set_analysis_open,
+            )
+        )
+        session = SessionCommandCoordinator(
+            SessionCommandPorts(
+                overlay=self.ov,
+                surfaces=self.lifecycle_surfaces,
+                subtitle_pipeline=self.subtitle_pipeline,
+                tooltip=self.tooltip_controller,
+                track=self.track_commands,
+                translation_wanted=self.translation_wanted,
+                teardown_tip=self.teardown_tip,
+                subtitle_target=self.subtitle_target,
+                setup_secondary=self.setup_secondary,
+                draw_translation=self.draw_translation,
+            )
+        )
+        subtitle = SubtitleCommandCoordinator(
+            SubtitleCommandRead(
+                ipc=self.ipc,
+                episodes=self._episodes,
+                playback=self._playback_store,
+                tracks=self._subtitle_tracks,
+                cue=self.cue_render,
+                annotation=self.annotation,
+                observed_property=self.observed_property,
+                property_value=self.property_value,
+                text_property=self.text_property,
+            ),
+            SubtitleCommandApply(
+                ipc=self.ipc,
+                episodes=self._episodes,
+                track=self.track_commands,
+                submit_fetch=self.submit_subtitle_fetch,
+                set_annotation_mode=self._set_annotation_mode,
+                draw_subtitle=self.draw_subtitle,
+                seek_cue=self.seek_cue,
+                sentence_lines=self.sentence_lines,
+                translation_store=self.translation_store,
+                reveal_translation=self.reveal_translation,
+                hide_translation=self.hide_translation,
+                translation_visible=self.translation_visible,
+                property_value=self.property_value,
+                notifications=self.notifications,
+            ),
+        )
+        interaction = InteractionCommandCoordinator(
+            InteractionCommandPorts(
+                navigation=self.tooltip_navigation,
+                route_wheel=self._route_wheel_command,
+                scroll_tip=self.scroll_tip,
+                retire_hover=self.retire_hover,
+                route_click=self.on_click,
+                copy_click=self.copy_click,
+            )
+        )
+        return StatelessCommandGraph(
+            stateless_features(
+                hover,
+                mine,
+                panel,
+                ProfileCommandEndpoint(self.profile_controller),
+                session,
+                subtitle,
+                interaction,
+            ),
+            STATELESS_COMMANDS,
         )
 
     def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
@@ -2684,7 +2806,7 @@ class SessionController:
 
     # --- kanji lookup mode ------------------------------------------------------------------------
     def kanji_current(self) -> None:
-        self._stateless.run(hover_intents.HoverCommand.KANJI)
+        self._stateless_commands.run(hover_intents.HoverCommand.KANJI)
 
     def open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
         nested_popup.open_kanji(self.tip_ports, self.panel_ports, ch, wx, wy, wh)
@@ -2808,13 +2930,13 @@ class SessionController:
         )
 
     def _hide_preview(self) -> None:
-        self._stateless.run(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)
+        self._stateless_commands.run(panel_intents.PanelCommand.CLOSE_CARD_PREVIEW)
 
     def _click_preview(self, x: float, y: float) -> bool:
-        return miner_ui.click_preview(self.preview_ports, x, y)
+        return self.preview_commands.click(x, y)
 
     def replay_preview(self) -> None:
-        self._stateless.run(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
+        self._stateless_commands.run(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def setup_secondary(self) -> int | None:
@@ -2858,16 +2980,6 @@ class SessionController:
         self.reveal_translation() if self.translation_visible() else self.hide_translation(
             release=not self.translate_on
         )
-
-    def toggle_translation(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION)
-
-    # --- what SessionHost reads and calls ----------------------------------------------
-    def toggle_overlay(self) -> None:
-        self._stateless.run(session_intents.SessionCommand.TOGGLE_OVERLAY)
-
-    def cycle_profile(self) -> None:
-        self._stateless.run(profile_intents.ProfileCommand.CYCLE)
 
     def configure_subtitle_mode(
         self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
@@ -2970,12 +3082,6 @@ class SessionController:
         """Read-only public projection of the Help owner's state."""
         return self.help_controller.state
 
-    def toggle_subtitle_language(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_LANGUAGE)
-
-    def mark_current_subtitle_japanese(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.MARK_CURRENT_JAPANESE)
-
     def fetch_japanese_subs_async(self, fetch) -> None:
         subtitle_modes.start_fetch(
             self.submit_subtitle_fetch, self._get, fetch, select_if_unchanged=True
@@ -2983,9 +3089,6 @@ class SessionController:
 
     def configure_subtitle_retry(self, factory) -> None:
         subtitle_modes.configure_retry(self.episode.subtitle, factory)
-
-    def retry_japanese_subtitles(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.RETRY_ACQUISITION)
 
     def _secondary_text(self) -> str:
         return translation.clean_secondary(self.observed_property("secondary-sub-text"))
@@ -3013,42 +3116,28 @@ class SessionController:
             subtitle_modes.release_secondary(self.track_ports)
 
     def toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
-        img = render_toast(text, kind)
-        x = (self.osd[0] - img.width) // 2
-        y = round(self.osd[1] * 0.08)
-        self.lifecycle_surfaces.present(img, x, y, oid=TOAST_ID)
-
-        scheduled = self.lifecycle_timers.schedule(
-            LifecycleTimerKind.TOAST_EXPIRY,
-            seconds,
-            lambda: self.lifecycle_surfaces.remove(TOAST_ID),
-        )
-        if not scheduled:
-            self.lifecycle_surfaces.remove(TOAST_ID)
-
-    def toggle_hover_pause(self) -> None:
-        self._stateless.run(hover_intents.HoverCommand.TOGGLE_PAUSE)
-
-    def toggle_bookmark(self) -> None:
-        self._stateless.run(mine_intents.MineCommand.BOOKMARK_CUE)
-
-    def toggle_sidebar(self) -> None:
-        self._stateless.run(panel_intents.PanelCommand.TOGGLE_SIDEBAR)
-
-    def toggle_sub_picker(self) -> None:
-        self._stateless.run(panel_intents.PanelCommand.TOGGLE_SUBTITLE_PICKER)
+        self.notifications.show(text, kind, seconds)
 
     def configure_sub_picker(self, lister: Callable[[str], tuple]) -> None:
         """Enable the picker for this session with a provider-agnostic candidate lister. Called
         wherever the subtitle-retry factory is wired, so the key binding is a no-op (with a toast)
         unless at least one provider is enabled."""
-        self._sub_picker_lister = lister
+        self.picker_controller.configure_listing(lister)
 
-    def toggle_analysis(self) -> None:
-        self._stateless.run(panel_intents.PanelCommand.TOGGLE_ANALYSIS)
+    def _show_sidebar_command(self) -> None:
+        sidebar.show(self.sidebar_view)
 
-    def toggle_annotation_mode(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
+    def _hide_sidebar_command(self) -> None:
+        sidebar.hide(self.sidebar_view)
+
+    def _open_picker_command(self) -> None:
+        self.picker_controller.open(
+            self.property_value("path"),
+            retire_hover=self.retire_hover,
+            episodes=self._episodes,
+            stop=self._stop,
+            toast=self.toast,
+        )
 
     def _register_keybinds(self) -> None:
         """Install the "global"-scoped bindings as ONE mpv input section.
@@ -3091,85 +3180,11 @@ class SessionController:
         )
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
-    def _navigate_previous(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.NAVIGATE_PREVIOUS)
-
-    def _navigate_next(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.NAVIGATE_NEXT)
-
-    def _replay_cue(self) -> None:
-        self._stateless.run(subtitle_intents.SubtitleCommand.REPLAY_CUE)
-
-    def _anchor_subtitles(self) -> None:
-        """One-press manual re-time: snap the sub cue nearest the playhead to start NOW. For when
-        auto-sync leaves a residual offset (e.g. a different-length OP), pause as a line's audio
-        begins and press — mpv's ``sub-delay`` shifts so that cue lands here, and every later cue
-        follows by the same offset. The overlay reads the delayed ``sub-text``, so the on-screen line
-        moves with it. Cumulative (anchors from the current delay), so a second anchor refines a first."""
-        self._stateless.run(subtitle_intents.SubtitleCommand.ANCHOR_TIMING)
-
     def _build_command_router(self) -> CommandExecutor:
-        """Assemble feature-owned actions once; handlers are bound and receive no god context."""
-
-        def action(method: Callable[..., object]) -> Callable[[], None]:
-            """Route to a `SessionController` verb, resolved by name at call time.
-
-            Annotated by what it reads — `__name__` — and not as a `SessionController` method, because a
-            parameter that names the host is a host parameter to the contract gate whether or not
-            an instance ever reaches it. `SessionController.verb` is what every caller passes; a typo in one
-            raises at router construction, on the class.
-
-            Late binding is deliberate: a keybind test overrides the verb on the *instance* and
-            then presses the key, so a row that captured the bound method would route past the
-            override. Taking the function rather than its name is what makes the row a real
-            reference — a rename carries the table with it instead of failing at the next
-            keypress, and a verb reached only from here stops looking dead to every tool that
-            resolves symbols.
-            """
-            name = method.__name__
-            return lambda: getattr(self, name)()
-
-        def interaction(command) -> Callable[[], None]:
-            return lambda: self._stateless.run(command)
-
-        # Every row's decision is a pure reducer — `subtitle_intents`, `runtime.help`,
-        # `hover_intents`, `mine_intents`, `panel_intents`, `session_intents` or
-        # `interaction_intents`. The verb below only carries the intent to one of them.
-        handlers: dict[str, Callable[[], None]] = {
+        handlers: dict[str, Callable[[], object]] = {
             **self._assembly.command_handlers(),
-            SUBTITLE_LANGUAGE_MSG: action(SessionController.toggle_subtitle_language),
-            SUBTITLE_MARK_JP_MSG: action(SessionController.mark_current_subtitle_japanese),
-            SUBTITLE_RETRY_MSG: action(SessionController.retry_japanese_subtitles),
-            LEGACY_RENDERER_MSG: action(SessionController.toggle_legacy_renderer),
-            ANNOTATION_MSG: action(SessionController.toggle_annotation_mode),
-            TRANS_MSG: action(SessionController.toggle_translation),
-            COPY_LINE_MSG: action(SessionController.copy_line),
-            SUB_PREV_MSG: action(SessionController._navigate_previous),
-            SUB_NEXT_MSG: action(SessionController._navigate_next),
-            SUB_REPLAY_MSG: action(SessionController._replay_cue),
-            SUB_ANCHOR_MSG: action(SessionController._anchor_subtitles),
-            SPEAK_MSG: action(SessionController.speak_hovered),
-            COPY_MSG: action(SessionController.copy_hovered),
-            KANJI_MSG: action(SessionController.kanji_current),
-            HOVER_PAUSE_MSG: action(SessionController.toggle_hover_pause),
-            MINE_MSG: lambda: self._stateless.run(mine_intents.MineCommand.WORD),
-            MINE_VIDEO_MSG: lambda: self._stateless.run(mine_intents.MineCommand.WORD_VIDEO),
-            MINE_ALL_MSG: lambda: self._stateless.run(mine_intents.MineCommand.EPISODE),
-            BOOKMARK_MSG: action(SessionController.toggle_bookmark),
-            PROFILE_CYCLE_MSG: action(SessionController.cycle_profile),
-            SIDEBAR_MSG: action(SessionController.toggle_sidebar),
-            SUB_PICKER_MSG: action(SessionController.toggle_sub_picker),
-            ANALYSIS_MSG: action(SessionController.toggle_analysis),
-            PREVIEW_MSG: action(SessionController.replay_preview),
-            PREVIEW_CLOSE_MSG: action(SessionController._hide_preview),
-            SCROLL_UP_MSG: interaction(InteractionCommand.WHEEL_UP),
-            SCROLL_DOWN_MSG: interaction(InteractionCommand.WHEEL_DOWN),
-            TIP_UP_MSG: interaction(InteractionCommand.TOOLTIP_UP),
-            TIP_DOWN_MSG: interaction(InteractionCommand.TOOLTIP_DOWN),
-            TIP_CLOSE_MSG: interaction(InteractionCommand.TOOLTIP_BACK_OR_CLOSE),
-            CLICK_MSG: interaction(InteractionCommand.CLICK),
-            COPY_CLICK_MSG: interaction(InteractionCommand.COPY_UNDER_CURSOR),
-            OVERLAY_TOGGLE_MSG: action(SessionController.toggle_overlay),
+            **self._stateless_commands.handlers(),
+            LEGACY_RENDERER_MSG: self.toggle_legacy_renderer,
         }
         contributed = self._assembly.command_specs()
         contributed_names = {spec.name for spec in contributed}
@@ -3330,7 +3345,9 @@ class SessionController:
         self.picker_controller.close()
         self._subtitle_force_select_revision += 1
         self._retire_episode()
-        self.episode = EpisodeContext()
+        self._episodes.replace()
+        self.cue_render.reset()
+        self.annotation.retire_cue()
 
     def _retire_episode(self) -> None:
         """Retire every owner's per-episode facts in one turn.
@@ -3793,9 +3810,11 @@ class SessionController:
             mark_ready=self._mark_interactive_ready,
             scroll_tip=self.scroll_tip,
             setup_secondary=self.setup_secondary,
-            toggle_translation=self.toggle_translation,
-            mine_current=lambda: self._stateless.run(mine_intents.MineCommand.WORD),
-            bulk_mine=lambda: self._stateless.run(mine_intents.MineCommand.EPISODE),
+            toggle_translation=self._stateless_commands.handler(
+                subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION
+            ),
+            mine_current=self._stateless_commands.handler(mine_intents.MineCommand.WORD),
+            bulk_mine=self._stateless_commands.handler(mine_intents.MineCommand.EPISODE),
         )
 
     @property

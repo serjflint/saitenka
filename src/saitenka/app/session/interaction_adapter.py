@@ -2,66 +2,53 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from saitenka.app.features.tooltip import tooltip
 from saitenka.app.intents import DismissHover
-from saitenka.app.session import interaction_intents, surfaces
+from saitenka.app.session import interaction_intents
 
 if TYPE_CHECKING:
-    from saitenka.app.features.tooltip.popups import TipPorts
-    from saitenka.app.features.tooltip.prefetch import TipScale
-    from saitenka.app.session.surfaces import WheelStep
+    from collections.abc import Callable
+
+    from saitenka.app.features.tooltip.navigation_endpoint import TooltipNavigationEndpoint
 
 
-class InteractionHost(Protocol):
-    """This feature's whole host coupling. See `PanelHost` for why it is spelled out."""
+@dataclass(frozen=True, slots=True)
+class InteractionCommandPorts:
+    """Surface arbitration and tooltip-navigation authorities."""
 
-    @property
-    def tip_can_go_back(self) -> bool: ...
-
-    @property
-    def tip_scale(self) -> TipScale: ...
-
-    @property
-    def wheel_step(self) -> WheelStep: ...
-
-    @property
-    def surface_router(self) -> surfaces.SurfaceRouter: ...
-
-    @property
-    def tip_ports(self) -> TipPorts: ...
-
-    def scroll_tip(self, delta: int) -> None: ...
-
-    def retire_hover(self) -> None: ...
-
-    def on_click(self) -> None: ...
-
-    def copy_click(self) -> None: ...
+    navigation: TooltipNavigationEndpoint
+    route_wheel: Callable[[int], None]
+    scroll_tip: Callable[[int], None]
+    retire_hover: Callable[[], None]
+    route_click: Callable[[], None]
+    copy_click: Callable[[], None]
 
 
-class InteractionAdapter:
-    def __init__(self, host: InteractionHost) -> None:
-        self._host = host
+class InteractionCommandCoordinator:
+    """Coordinate pointer commands across surface routing and tooltip navigation."""
+
+    def __init__(self, ports: InteractionCommandPorts) -> None:
+        self._ports = ports
 
     def inputs(self) -> interaction_intents.InteractionInputs:
         return interaction_intents.InteractionInputs(
-            can_go_back=self._host.tip_can_go_back,
-            tooltip_view_height=self._host.tip_scale.ref_h,
+            can_go_back=self._ports.navigation.can_go_back(),
+            tooltip_view_height=self._ports.navigation.scale().ref_h,
         )
 
     def apply(self, effect: interaction_intents.InteractionEffect, /) -> None:
-        host = self._host
+        ports = self._ports
         if isinstance(effect, interaction_intents.RouteWheel):
-            host.surface_router.route_scroll(host.wheel_step, effect.steps)
+            ports.route_wheel(effect.steps)
         elif isinstance(effect, interaction_intents.ScrollTooltip):
-            host.scroll_tip(effect.pixels)
+            ports.scroll_tip(effect.pixels)
         elif isinstance(effect, interaction_intents.NavigateBack):
-            tooltip.tip_back(host.tip_ports)
+            ports.navigation.back()
         elif isinstance(effect, DismissHover):
-            host.retire_hover()
+            ports.retire_hover()
         elif isinstance(effect, interaction_intents.RouteClick):
-            host.on_click()
+            ports.route_click()
         elif isinstance(effect, interaction_intents.CopyUnderCursor):
-            host.copy_click()
+            ports.copy_click()

@@ -2,33 +2,21 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from saitenka.app.features.profiles import profile_intents
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from saitenka.app.features.profiles.profile_controller import ProfileSwitchOutcome
-    from saitenka.app.profiles import Profile
+    from saitenka.app.features.profiles.profile_controller import ProfileController
 
 
-class ProfileHost(Protocol):
-    @property
-    def profiles(self) -> Sequence[Profile]: ...
-
-    @property
-    def profile_index(self) -> int: ...
-
-    def switch_to(self, index: int) -> ProfileSwitchOutcome: ...
-
-
-class ProfileAdapter:
-    def __init__(self, controller: ProfileHost) -> None:
-        self._controller = controller
+@dataclass(frozen=True, slots=True)
+class ProfileCommandEndpoint:
+    controller: ProfileController
 
     def inputs(self) -> profile_intents.ProfileInputs:
-        controller = self._controller
+        controller = self.controller
         return profile_intents.ProfileInputs(
             profile_count=len(controller.profiles),
             profile_index=controller.profile_index,
@@ -36,4 +24,4 @@ class ProfileAdapter:
 
     def apply(self, effect: profile_intents.ProfileEffect, /) -> None:
         if isinstance(effect, profile_intents.SwitchProfile):
-            self._controller.switch_to(effect.index)
+            self.controller.switch_to(effect.index)

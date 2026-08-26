@@ -17,6 +17,7 @@ import util
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
+from saitenka.app import bindings as app_bindings
 from saitenka.app import subtitle_modes
 from saitenka.app.features.picker import sub_picker
 from saitenka.app.overlay_ids import OverlayId
@@ -162,7 +163,7 @@ def test_subtitle_picker_lane_rejects_work_beyond_its_bound():
         return (), ()
 
     request = sub_picker.ListingRequest(lister, "/v/ep01.mkv")
-    submitter = reader._sub_picker_submit
+    submitter = reader.picker_controller.submitter
     assert submitter is not None
     outcomes = []
     try:
@@ -221,7 +222,7 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
 def test_toggle_without_a_provider_configured_warns_and_stays_closed():
     reader, ipc = _reader(path="/v/ep01.mkv")
 
-    reader.toggle_sub_picker()
+    reader._handle(app_bindings.SUB_PICKER_MSG)
 
     assert reader.sub_picker.open is False
     assert not _picker_adds(ipc)

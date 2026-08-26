@@ -297,7 +297,7 @@ class CommandExecutor:
 
     def __init__(
         self,
-        handlers: Mapping[str, Callable[[], None]],
+        handlers: Mapping[str, Callable[[], object]],
         *,
         policy: CommandPolicy | None = None,
     ) -> None:

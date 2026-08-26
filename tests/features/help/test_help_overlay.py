@@ -141,8 +141,7 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     hover_updates: list[str] = []
     actions: list[str] = []
     monkeypatch.setattr(tooltip, "update_hover", lambda *_a: hover_updates.append("hover"))
-    monkeypatch.setattr(reader._stateless, "run", lambda _command: actions.append("mine"))
-    monkeypatch.setattr(reader, "toggle_bookmark", lambda: actions.append("bookmark"))
+    monkeypatch.setattr(reader._stateless_commands, "run", lambda _command: actions.append("mine"))
 
     ui = Driver(reader, instant=False)
     ui.key(HELP_TOGGLE_MSG).move(5, 5)

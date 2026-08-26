@@ -7,9 +7,11 @@ import util
 from driver import Driver
 from PIL import Image
 
+from saitenka.app import backlog
 from saitenka.app.anki import MineConfig
 from saitenka.app.backlog import BacklogStore, Capture
 from saitenka.app.episode_analysis import analyze_cues
+from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.features.sidebar import sidebar
 from saitenka.app.scoring import Scorer
@@ -146,16 +148,17 @@ def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("kind", "method"), [("bookmark", "toggle_bookmark"), ("mine", "mine_current")]
+    ("kind", "command"),
+    [
+        ("bookmark", mine_intents.MineCommand.BOOKMARK_CUE),
+        ("mine", mine_intents.MineCommand.WORD),
+    ],
 )
-def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch):
+def test_active_cue_actions_use_registered_mining_commands(kind, command, monkeypatch):
     reader, _ipc = _reader(active=3)
     _capture_render(monkeypatch)
     invoked = []
-    if kind == "mine":
-        monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
-    else:
-        monkeypatch.setattr(reader, method, lambda: invoked.append(method))
+    monkeypatch.setattr(reader._stateless_commands, "run", invoked.append)
     reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
@@ -164,23 +167,24 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
 
     reader.sidebar_controller.on_click(reader.click_target, 110, 110)
 
-    assert invoked == [method]
+    assert invoked == [command]
 
 
 @pytest.mark.parametrize(
-    ("kind", "method"), [("bookmark", "toggle_bookmark"), ("mine", "mine_current")]
+    ("kind", "command"),
+    [
+        ("bookmark", mine_intents.MineCommand.BOOKMARK_CUE),
+        ("mine", mine_intents.MineCommand.WORD),
+    ],
 )
-def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method, monkeypatch):
+def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, command, monkeypatch):
     """#252: B/+ render only on the active row, so re-gating the click on `hit.value == active` dropped
     it silently when playback advanced a cue between redraw and click. The click must fire regardless of
     the clicked row's value vs the now-active index — parity with the ungated Alt+b."""
     reader, _ipc = _reader(active=9)  # the live cue has moved on since the row was drawn
     _capture_render(monkeypatch)
     invoked = []
-    if kind == "mine":
-        monkeypatch.setattr(reader._stateless, "run", lambda _command: invoked.append(method))
-    else:
-        monkeypatch.setattr(reader, method, lambda: invoked.append(method))
+    monkeypatch.setattr(reader._stateless_commands, "run", invoked.append)
     reader.sidebar_controller.store.dispatch(
         events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
     )
@@ -191,18 +195,17 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method,
 
     reader.sidebar_controller.on_click(reader.click_target, 110, 110)
 
-    assert invoked == [method]  # not the old silent no-op
+    assert invoked == [command]  # not the old silent no-op
 
 
 def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
-    """Parity pin: the sidebar B button and the Alt+b keybind both funnel into ``toggle_bookmark`` — so
-    the sidebar path can't silently diverge from the keybind again."""
+    """The sidebar B button and Alt+b resolve to the same registered command policy."""
     from saitenka.app.bindings import BOOKMARK_MSG
 
     reader, _ipc = _reader(active=3)
     _capture_render(monkeypatch)
     invoked = []
-    monkeypatch.setattr(reader, "toggle_bookmark", lambda: invoked.append("toggle"))
+    monkeypatch.setattr(backlog, "capture_current", lambda _ports: invoked.append("toggle"))
 
     reader._handle(BOOKMARK_MSG)  # the Alt+b path
     reader.sidebar_controller.store.dispatch(

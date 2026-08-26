@@ -17,8 +17,8 @@ its supported operating envelope are documented in
 
 ## Adding a feature
 
-Paths are relative to `src/saitenka/`. The host is `SessionController`, in
-`app/session/controller.py`.
+Paths are relative to `src/saitenka/`. `SessionController` composes the owner-thread session turn;
+it is not a feature capability.
 
 Feature-owned policy, adapters, controllers, and presentation live together under
 `app/features/<feature>/`. Shared interaction contracts live under `app/interaction/`; session
@@ -26,24 +26,25 @@ assembly and cross-feature conjunctions live under `app/session/`. A shared doma
 `app/` when application services outside one feature consume it.
 
 **Does it need a place to remember that does not exist yet?** Not "does it have state" — a toggle
-obviously does. An adapter may read *and write* the host members it declares, so a feature whose
-flag already lives somewhere is stateless. Only one that would have to create a new home for state
-is stateful, and it creates it in a slice.
+obviously does. A feature whose facts already belong to bounded owners can be stateless. A feature
+that introduces a new authoritative fact needs its own controller/store or an owner slice.
 
 **No — every fact it needs already has a home.**
 
 1. `app/features/<feature>/<feature>_intents.py` — the pure policy `reduce(command, inputs)`, a frozen
    `<Feature>Inputs`, a closed `<Feature>Command` StrEnum, one dataclass per effect. Import nothing
    that touches mpv, the display, or the host.
-2. `app/features/<feature>/<feature>_adapter.py` — a `<Feature>Host` `Protocol` naming exactly the members you touch,
-   and an adapter over it exposing `inputs()` and `apply(effect)`.
-3. `app/session/routes.py` — a typed row in `stateless_features()` and one explicit adapter argument.
-   `StatelessBinding` checks the command, input, and effect types before the heterogeneous
-   `StatelessRouter` boundary.
+2. `app/features/<feature>/<feature>_adapter.py` — a coordinator exposing `inputs()` and
+   `apply(effect)`. Its frozen capability value names bounded state owners and precise acts; use a
+   small call `Protocol` when keyword shape matters. Never pass `SessionController`, a replaceable
+   `EpisodeContext`, or an opaque `Callable[..., ...]`.
+3. `app/session/routes.py` — one typed row in `stateless_features()` and one message row in
+   `STATELESS_COMMANDS`. `StatelessCommandGraph` proves every installed policy has a message and
+   every message has an installed policy.
 
-If the feature already has a bounded controller, its adapter protocol names that controller's
-surface instead, as the profile row does. Do not re-expose the controller's facts and acts on
-`SessionController` merely to satisfy an adapter protocol.
+If the feature already has a bounded controller, pass it directly. A cross-feature conjunction is
+a named act at the composition seam, not a set of feature internals re-exposed on
+`SessionController`.
 
 **Yes — it needs a new place to remember.**
 
@@ -54,35 +55,34 @@ surface instead, as the profile row does. Do not re-expose the controller's fact
 3. `app/session/routes.py` — route the owner's declared event vocabulary. Runtime and no-runtime
    construction consume the same feature bindings.
 
-**If a key triggers it**, three more edits, all required:
+**If a key triggers it**, two declarations are required in addition to the policy row:
 
 - `app/bindings.py` — the `*_MSG` script-message constant **and** a `BindingSpec` row in `BINDINGS`
   with a `key_attr`. The constant alone binds no key and shows nothing in the help overlay.
 - `app/runtime/commands.py` — a spec row. Not optional: `CommandExecutor` refuses at construction
   if a handler has no spec. Commands are cue-dependent by default; `_CUE_INDEPENDENT` opts out and
   `_HELP_COMMANDS` allows the command while help is open.
-- `app/session/controller.py` — one row in `SessionController._build_command_router`. Use
-  `interaction(YourCommand.X)`, which routes through the stateless router;
-  `action(SessionController.verb)` is the older form and costs a new `SessionController` member,
-  which `poe host-mass` refuses.
+- `app/session/routes.py` — the `StatelessCommandRegistration` mapping the message to the typed
+  command. Do not add a controller verb or a handler lambda.
 
 The following gates enforce the boundary:
 
 | gate | what tripped it |
 | --- | --- |
-| `tests/session/test_stateless_registration.py` | An `app/*_intents.py` exposing `reduce` that nothing registers. |
+| `tests/session/test_stateless_registration.py` | An unregistered policy; an unbound message; broad session/episode capture; an opaque callable authority; or a deferred read in command composition. |
 | `tests/session/test_session_controller_host_contract.py` | A function under `app/` takes a `SessionController` **parameter**. Declare a `Protocol`. |
 | `poe host-mass` | You added a **member** to `SessionController` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
-| `poe reducer-purity` | A **registered** stateful reducer branches on something outside `(state, event)`. Stateless policies are not in the route table and are not measured. |
+| `poe reducer-purity` | A registered stateful reducer or stateless policy branches on an ambient reading. |
 | `poe arch` | Feature packages import session composition, interaction primitives import upward, or feature packages form a runtime cycle. |
 | `poe app-package-layout` | A declared feature package disappears, an undeclared package appears, or a retired flat module/import returns. |
 
 ## Production session
 
-`SessionController` owns owner-thread session lifetime, cross-feature ordering, and application.
-Bounded controllers own feature state and policy: `TooltipController` owns tooltip interaction facts,
-presentation state, and work protocols, while `ProfileController` owns the active reading environment
-and switch transaction.
+`SessionController` composes owner-thread session lifetime, ordered cross-feature conjunctions, and
+physical application. Bounded controllers and stores own feature facts: `TooltipController` owns
+tooltip interaction and work, `ProfileController` owns the active reading environment,
+`MiningController` owns mining, `PlaybackStore` owns cue identity, and `CueRenderStore` owns derived
+tokenization and geometry.
 `SessionController.run()` hands the thread to
 `SessionLoop`, which blocks on the mailbox rather than waking at a cadence:
 
@@ -239,8 +239,8 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Exact host inventory | The checked-in per-module count of functions accepting a `SessionController` **parameter** may not grow. The census is currently empty, so any such function under `app/` fails; a removal tightens the baseline in place rather than failing. Separate from `poe host-mass`, which counts `SessionController`'s **members**. |
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
-| Effect interpreter ownership | An owner's effects are applied by that owner's adapter, never by the host. Both layers return effects; the object that interprets them belongs to the feature. |
-| Stateless registration | Every `app/*_intents.py` policy is reachable only through `StatelessRouter`, and its adapter's coupling to the host is declared rather than implicit. |
+| Effect interpreter ownership | Effects are applied by the owning adapter/coordinator, never by a generic session callback. Both layers return effects; the interpreter belongs to the feature. |
+| Stateless registration | Every stateless policy and script message closes through `StatelessCommandGraph`; capability values may name bounded owners and precise acts, never `SessionController`. |
 
 The executable sources of truth are:
 

@@ -5,13 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app.backlog import BacklogStore
 from saitenka.app.features.preview import miner_ui
 
 if TYPE_CHECKING:
     from saitenka.app.features.preview.miner_ui import CardSource, PreviewPorts
     from saitenka.app.features.sidebar.sidebar import SidebarActions, SidebarView
-    from saitenka.app.session.context import SessionContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,14 +19,6 @@ class MinedPreviewCard:
     expression: str
     reading: str
     glosses: tuple[str, ...] = ()
-
-
-def ensure_backlog_store(session: SessionContext) -> BacklogStore:
-    """Open the session backlog store on first use."""
-    store = session.backlog_store
-    if store is None:
-        store = session.backlog_store = BacklogStore()
-    return store
 
 
 def open_mined(

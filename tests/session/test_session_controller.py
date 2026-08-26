@@ -13,12 +13,13 @@ from util import FakeIPC as RuntimeFakeIPC
 from util import await_ready, keybind_registry, runtime_gateway
 
 import saitenka.app.session.controller as C
-from saitenka.app import bindings
+from saitenka.app import bindings, subtitle_adapter
+from saitenka.app import bindings as app_bindings
 from saitenka.app.anki import MineConfig
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.features.preview import miner_ui
-from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
+from saitenka.app.features.tooltip import hover_adapter, nested_popup, tooltip, tooltip_panel
 from saitenka.app.features.tooltip.tooltip_panel import PanelKey
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session.controller import SessionController
@@ -233,14 +234,14 @@ def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch):
     reader = SessionController(
         ipc, options=ReaderOptions(keys=KeyOptions(subtitle_retry_key="Ctrl+r"))
     )
-    called = []
-    monkeypatch.setattr(reader, "retry_japanese_subtitles", lambda: called.append(True))
+    messages = []
+    monkeypatch.setattr(reader.notifications, "show", lambda text, *_args: messages.append(text))
     reader._register_keybinds()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
 
     reader._handle(binds["Ctrl+r"].removeprefix("script-message "))
 
-    assert called == [True]
+    assert messages == ["No media loaded for subtitle search"]
 
 
 # --- Stage 4: subtitle navigation keys (Alt+←/→/↓, sub-delay) ------------------------------------
@@ -367,11 +368,11 @@ def test_anchor_snaps_the_nearest_cue_start_to_the_playhead(monkeypatch):
     # One-press manual re-time: at playhead 9s the nearest cue is さん (@10s), so sub-delay shifts by
     # -1s to land it here — every later cue follows by the same offset (fixes residual auto-sync drift).
     r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r, "toast", lambda *_a, **_k: None)
+    monkeypatch.setattr(r.notifications, "show", lambda *_a, **_k: None)
     ipc.props["time-pos"] = 9.0
     ipc.props["sub-delay"] = 0.0
 
-    r._anchor_subtitles()
+    r._handle(app_bindings.SUB_ANCHOR_MSG)
 
     assert ("set_property", "sub-delay", "-1.000") in ipc.commands
 
@@ -380,11 +381,11 @@ def test_anchor_is_cumulative_from_the_current_delay(monkeypatch):
     # A second anchor refines a first: from an existing +2s delay, snapping さん (@10s) to playhead 13s
     # sets an absolute delay of +3s (13 - 10), not +2 plus a fresh guess.
     r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r, "toast", lambda *_a, **_k: None)
+    monkeypatch.setattr(r.notifications, "show", lambda *_a, **_k: None)
     ipc.props["time-pos"] = 13.0
     ipc.props["sub-delay"] = 2.0
 
-    r._anchor_subtitles()
+    r._handle(app_bindings.SUB_ANCHOR_MSG)
 
     assert ("set_property", "sub-delay", "3.000") in ipc.commands
 
@@ -393,10 +394,10 @@ def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch):
     ipc = FakeIPC()
     r = SessionController(ipc)
     messages: list[str] = []
-    monkeypatch.setattr(r, "toast", lambda text, *_a: messages.append(text))
+    monkeypatch.setattr(r.notifications, "show", lambda text, *_a: messages.append(text))
     r.episode.sub_index = None
 
-    r._anchor_subtitles()
+    r._handle(app_bindings.SUB_ANCHOR_MSG)
 
     assert messages == ["No subtitle track to anchor"]
     assert not [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
@@ -424,7 +425,7 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
     ipc.props["time-pos"] = playhead
     ipc.props["sub-delay"] = delay
 
-    r._anchor_subtitles()
+    r._handle(app_bindings.SUB_ANCHOR_MSG)
 
     emitted = [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
     assert emitted, "anchor must set sub-delay"
@@ -440,7 +441,7 @@ def test_mine_current_video_forces_the_animated_clip(monkeypatch):
     r.tooltip_controller.select(0)
     captured: dict = {}
     monkeypatch.setattr(r.mining_controller, "mine_index", lambda _index, **k: captured.update(k))
-    r._handle(C.MINE_VIDEO_MSG)
+    r._handle(bindings.MINE_VIDEO_MSG)
     assert captured == {
         "animated": True
     }  # the video-mine shortcut forces a motion clip for this mine
@@ -1395,18 +1396,18 @@ def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
     r.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
-    monkeypatch.setattr(r, "toast", lambda *_args: None)
-    r.toggle_hover_pause()
+    monkeypatch.setattr(r.notifications, "show", lambda *_args: None)
+    r._handle(app_bindings.HOVER_PAUSE_MSG)
     assert ("set_property", "pause", False) in ipc.commands
 
 
 def test_hover_pause_toggle_changes_state_and_reports_it(monkeypatch):
     r = _reader_with_word(FakeIPC())
     messages = []
-    monkeypatch.setattr(r, "toast", lambda text, _kind="ok": messages.append(text))
-    r.toggle_hover_pause()
+    monkeypatch.setattr(r.notifications, "show", lambda text, _kind="ok": messages.append(text))
+    r._handle(app_bindings.HOVER_PAUSE_MSG)
     assert (r.tooltip_controller.pause_enabled, messages) == (False, ["hover auto-pause: off"])
-    r.toggle_hover_pause()
+    r._handle(app_bindings.HOVER_PAUSE_MSG)
     assert (r.tooltip_controller.pause_enabled, messages) == (
         True,
         ["hover auto-pause: off", "hover auto-pause: on"],
@@ -1417,8 +1418,8 @@ def test_hover_pause_toggle_preserves_external_pause(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r, "toast", lambda *_args: None)
-    r.toggle_hover_pause()
+    monkeypatch.setattr(r.notifications, "show", lambda *_args: None)
+    r._handle(app_bindings.HOVER_PAUSE_MSG)
     assert ("set_property", "pause", False) not in ipc.commands
 
 
@@ -1426,8 +1427,8 @@ def test_hover_pause_toggle_disables_future_hover_pause(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r, "toast", lambda *_args: None)
-    r.toggle_hover_pause()
+    monkeypatch.setattr(r.notifications, "show", lambda *_args: None)
+    r._handle(app_bindings.HOVER_PAUSE_MSG)
     Driver(r).move_to_word(0)
     assert ("set_property", "pause", True) not in ipc.commands
 
@@ -1574,7 +1575,7 @@ def test_header_add_button_click_mines_hovered_word(monkeypatch):
     monkeypatch.setattr(
         r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
     )
-    monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
+    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
     _point_at_add_button(r).click()
     assert events == ["mine"]  # ⊕ mined; did not fall through to TTS
 
@@ -1591,7 +1592,7 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     monkeypatch.setattr(
         r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
     )
-    monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
+    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
     tx, ty, tw, th = r.tip.view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + th - 5).click()  # low in the body
     assert events == []  # neither speaks nor mines
@@ -1607,7 +1608,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
-    monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
+    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
     px, py, pw, ph = header_speaker_rect(r.tip_scale.width)
     sx, sy = r.tip.view.xy
     Driver(r, instant=False).move(sx + px + pw / 2, sy + (py - r.tip.view.scroll) + ph / 2).click()
@@ -2176,7 +2177,7 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     monkeypatch.setattr(
         r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
     )
-    monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
+    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
     _point_at_link(r).click()
     assert (
         events == [] and len(r.interaction.tip_nav.back) == 1
@@ -2198,7 +2199,7 @@ def test_copy_line_copies_all_lines(monkeypatch):
 
     got = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda s: got.append(s))
-    r.copy_line()
+    r._handle(app_bindings.COPY_LINE_MSG)
     assert got == ["本命\n読む"]  # the whole cue, line by line
 
 
@@ -2341,7 +2342,7 @@ def test_no_mine_preview_suppresses_panel_and_toasts_instead(monkeypatch):
     shown, toasts = [], []
     monkeypatch.setattr(miner_ui, "preview_mined", lambda *a, **_k: shown.append(a))
     monkeypatch.setattr(miner_ui, "preview_existing", lambda *a, **_k: shown.append(a))
-    monkeypatch.setattr(r, "toast", lambda text, *_a: toasts.append(text))
+    monkeypatch.setattr(r.notifications, "show", lambda text, *_a: toasts.append(text))
 
     r._preview_mined(SimpleNamespace(expression="本命"), None, None)
     r._preview_existing(42, SimpleNamespace(expression="読む"), "exists")
@@ -2492,7 +2493,7 @@ def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
     ipc = FakeIPC()
     r = _auto_trans_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.toggle_translation()  # force it ON with `t`
+    r._handle(app_bindings.TRANS_MSG)  # force it ON with `t`
     assert r.translate_on and r.translation_visible()
     r.retire_hover()  # …and it stays even with nothing hovered
     assert r.translation_visible()
@@ -2734,7 +2735,7 @@ def test_capture_media_failure_shows_toast(monkeypatch):
     monkeypatch.setattr(_M, "clip_audio", lambda *_a: (_ for _ in ()).throw(OSError("clip failed")))
     toasts = []
     monkeypatch.setattr(
-        r, "toast", lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind))
+        r.notifications, "show", lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind))
     )
 
     operation = r.mining_controller._operation()  # transaction seam under test
@@ -2968,11 +2969,13 @@ def test_cue_change_retires_interaction_before_later_command_in_same_batch(monke
     reader.start_observing()
     reader.set_subtitle("古い字幕")
     copied = []
-    monkeypatch.setattr(reader, "copy_line", lambda: copied.append(reader.sub_text))
+    monkeypatch.setattr(
+        subtitle_adapter, "copy_clipboard", lambda _text: copied.append(reader.sub_text)
+    )
     ipc.events.extend(
         (
             {"event": "property-change", "name": "sub-text", "data": "新しい字幕"},
-            {"event": "client-message", "args": [C.COPY_LINE_MSG]},
+            {"event": "client-message", "args": [bindings.COPY_LINE_MSG]},
         )
     )
 
@@ -2998,7 +3001,7 @@ def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
     ipc.events.extend(
         (
             {"event": "property-change", "name": "sub-text", "data": "新しい字幕"},
-            {"event": "client-message", "args": [C.SUB_NEXT_MSG]},
+            {"event": "client-message", "args": [bindings.SUB_NEXT_MSG]},
         )
     )
 
@@ -3045,9 +3048,11 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkey
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader.set_subtitle("古い字幕")
     copied = []
-    monkeypatch.setattr(reader, "copy_line", lambda: copied.append(reader.sub_text))
+    monkeypatch.setattr(
+        subtitle_adapter, "copy_clipboard", lambda _text: copied.append(reader.sub_text)
+    )
     reader._drain_event(ConnectionLost(0))
-    reader._drain_event(UserCommand(C.COPY_LINE_MSG, command_id=7))
+    reader._drain_event(UserCommand(bindings.COPY_LINE_MSG, command_id=7))
     assert reader.pump()
 
     assert copied == []
@@ -3058,7 +3063,7 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkey
     assert reader.tokens == [] and reader.boxes == []
     assert ipc.runtime_outcomes == [
         CommandHandled(
-            C.COPY_LINE_MSG,
+            bindings.COPY_LINE_MSG,
             None,
             CommandOutcome.REJECTED,
             command_id=7,
@@ -3294,7 +3299,7 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
     )
     _enable_mining(r)
     r.tooltip_controller.select(0)
-    r._handle(C.MINE_MSG)
+    r._handle(bindings.MINE_MSG)
     assert mined == [(0, "本命")]
 
 
@@ -3307,7 +3312,7 @@ def test_a_reader_with_no_deck_has_no_active_mining_target(monkeypatch):
     monkeypatch.setattr(miner, "mine_token", lambda *_a, **_k: pytest.fail("mined with no deck"))
 
     assert r.mining_controller.active_target is None
-    r._handle(C.MINE_MSG)  # must be a no-op, not an AttributeError on the missing client
+    r._handle(bindings.MINE_MSG)  # must be a no-op, not an AttributeError on the missing client
 
 
 def _accrual_reader(ipc, monkeypatch) -> tuple[SessionController, list]:
@@ -3499,8 +3504,6 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
     fake missing the port silently took the other branch. Both triggers must now be indistinguishable
     at the wire.
     """
-    from saitenka.app.features.tooltip import hover_intents
-    from saitenka.app.features.tooltip.hover_adapter import HoverAdapter
 
     def resume_via(act) -> list[tuple]:
         ipc = FakeIPC()
@@ -3515,7 +3518,7 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
         return [c for c in ipc.commands[before:] if c[:2] == ("set_property", "pause")]
 
     by_cue = resume_via(lambda r: r.set_subtitle("別の字幕"))
-    by_reducer = resume_via(lambda r: HoverAdapter(r).apply(hover_intents.ResumePlayback()))
+    by_reducer = resume_via(lambda r: r._handle(app_bindings.HOVER_PAUSE_MSG))
 
     assert by_cue == by_reducer == [("set_property", "pause", False)]
 

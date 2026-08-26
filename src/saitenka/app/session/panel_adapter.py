@@ -6,71 +6,54 @@ method on the host.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app.features.picker import sub_picker
-from saitenka.app.features.preview import miner_ui
-from saitenka.app.features.sidebar import sidebar
 from saitenka.app.intents import DismissHover
 from saitenka.app.session import panel_intents
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app import analysis_overlay
     from saitenka.app.features.picker.picker_controller import PickerController
-    from saitenka.app.features.picker.sub_picker import ListingPorts
-    from saitenka.app.features.preview.miner_ui import PreviewPorts
-    from saitenka.app.features.sidebar.sidebar import SidebarView
+    from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
+    from saitenka.app.features.sidebar.sidebar_controller import SidebarController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
-    from saitenka.runtime.picker import PickerState
-    from saitenka.runtime.sidebar import SidebarState
 
 
-class PanelHost(Protocol):
-    """Exactly what this feature needs from the host — its whole coupling, in one readable block.
+class SetAnalysisOpen(Protocol):
+    def __call__(self, *, open: bool) -> None: ...  # noqa: A002
 
-    A `SessionController` parameter would be shorter to write and is what the host inventory sits at zero to
-    prevent: it hides which members a feature actually touches, so nothing can tell a narrow
-    adapter from a wide one. Declaring the surface makes the adapter constructible from a small
-    fake, and makes an adapter that grows a dependency show it here first.
-    """
+
+@dataclass(frozen=True, slots=True)
+class PanelCommandPorts:
+    """Owners and acts participating in the panel-arbitration conjunction."""
 
     analysis: analysis_overlay.AnalysisState
-    lifecycle_surfaces: LifecycleSurfaces
-    picker_controller: PickerController
-
-    def retire_hover(self) -> None: ...
-
-    @property
-    def sidebar(self) -> SidebarState: ...
-
-    @property
-    def sub_picker(self) -> PickerState: ...
-
-    @property
-    def sidebar_view(self) -> SidebarView: ...
-
-    @property
-    def listing_ports(self) -> ListingPorts: ...
-
-    @property
-    def preview_ports(self) -> PreviewPorts: ...
-
-    def set_analysis_open(self, *, open: bool) -> None:  # noqa: A002 — matches the host's signature
-        ...
-
-    def property_value(self, name: str) -> object | None: ...
+    surfaces: LifecycleSurfaces
+    sidebar: SidebarController
+    picker: PickerController
+    preview: PreviewCommandEndpoint
+    retire_hover: Callable[[], None]
+    show_sidebar: Callable[[], None]
+    hide_sidebar: Callable[[], None]
+    open_picker: Callable[[], None]
+    set_analysis_open: SetAnalysisOpen
 
 
-class PanelAdapter:
-    def __init__(self, host: PanelHost) -> None:
-        self._host = host
+class PanelCommandCoordinator:
+    """Apply ordered panel commands across independent surface owners."""
+
+    def __init__(self, ports: PanelCommandPorts) -> None:
+        self._ports = ports
 
     def inputs(self) -> panel_intents.PanelInputs:
-        host = self._host
+        ports = self._ports
         states = {
-            panel_intents.Panel.SIDEBAR: host.sidebar.open,
-            panel_intents.Panel.ANALYSIS: host.analysis.open,
-            panel_intents.Panel.SUBTITLE_PICKER: host.sub_picker.open,
+            panel_intents.Panel.SIDEBAR: ports.sidebar.state.open,
+            panel_intents.Panel.ANALYSIS: ports.analysis.open,
+            panel_intents.Panel.SUBTITLE_PICKER: ports.picker.state.open,
         }
         return panel_intents.PanelInputs(
             open_panels=frozenset(panel for panel, is_open in states.items() if is_open)
@@ -78,29 +61,21 @@ class PanelAdapter:
 
     def apply(self, effect: panel_intents.PanelEffect, /) -> None:
         if isinstance(effect, DismissHover):
-            self._host.retire_hover()
+            self._ports.retire_hover()
         elif isinstance(effect, panel_intents.ReplayCardPreview):
-            miner_ui.replay_preview(self._host.preview_ports)
+            self._ports.preview.replay()
         elif isinstance(effect, panel_intents.OpenPanel):
             self._set_open(effect.panel, opening=True)
         elif isinstance(effect, panel_intents.ClosePanel):
             self._set_open(effect.panel, opening=False)
 
     def _set_open(self, panel: panel_intents.Panel, *, opening: bool) -> None:
-        host = self._host
+        ports = self._ports
         if panel is panel_intents.Panel.SIDEBAR:
-            (sidebar.show if opening else sidebar.hide)(host.sidebar_view)
+            (ports.show_sidebar if opening else ports.hide_sidebar)()
         elif panel is panel_intents.Panel.ANALYSIS:
-            host.set_analysis_open(open=opening)
+            ports.set_analysis_open(open=opening)
         elif panel is panel_intents.Panel.SUBTITLE_PICKER:
-            (
-                sub_picker.open_picker(
-                    host.listing_ports,
-                    host.property_value("path"),
-                    retire_hover=host.retire_hover,
-                )
-                if opening
-                else host.picker_controller.close()
-            )
+            (ports.open_picker if opening else ports.picker.close)()
         elif panel is panel_intents.Panel.CARD_PREVIEW:
-            miner_ui.hide_preview(host.preview_ports)
+            ports.preview.hide()
