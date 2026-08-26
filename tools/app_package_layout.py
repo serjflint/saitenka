@@ -12,13 +12,24 @@ APP = ROOT / "src" / "saitenka" / "app"
 FEATURES = APP / "features"
 
 FEATURE_PACKAGES = frozenset(
-    {"analysis", "help", "mining", "picker", "preview", "profiles", "sidebar", "tooltip"}
+    {
+        "analysis",
+        "annotation",
+        "help",
+        "mining",
+        "picker",
+        "preview",
+        "profiles",
+        "sidebar",
+        "tooltip",
+    }
 )
 RETIRED_FLAT_MODULES = frozenset(
     {
         "analysis_overlay",
         "card_preview",
         "close_ledger",
+        "cue_annotation",
         "episode_analysis",
         "help_controller",
         "help_overlay",

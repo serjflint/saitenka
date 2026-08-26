@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from saitenka.app.anki import Anki, MineConfig
+    from saitenka.app.features.annotation import jobs as cue_annotation
     from saitenka.app.profiles import Profile
     from saitenka.app.scoring import Scorer
     from saitenka.app.session.assembly import SessionAssembly
@@ -32,7 +33,6 @@ import saitenka.app.session.runtime as session_runtime
 from saitenka import otel_metrics
 from saitenka.app import (
     backlog,
-    cue_annotation,
     episode_reslot,
     geometry_refresh,
     logsetup,
@@ -57,6 +57,10 @@ from saitenka.app.bindings import (
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.analysis.analysis_controller import AnalysisInputs
+from saitenka.app.features.annotation.annotation_controller import (
+    AnnotationInputs,
+    AnnotationTransition,
+)
 from saitenka.app.features.mining import mine_intents, miner
 from saitenka.app.features.mining.mine_adapter import (
     BookmarkCommandEndpoint,
@@ -183,7 +187,7 @@ from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
 )
 from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
-from saitenka.app.subtitle_presentation import AnnotationController, CueRenderStore
+from saitenka.app.subtitle_presentation import CueRenderStore
 from saitenka.app.subtitle_render import (
     DrawRequest,
     NativeVisibleRenderer,
@@ -192,7 +196,7 @@ from saitenka.app.subtitle_render import (
     SubtitleTarget,
 )
 from saitenka.app.toast_controller import ToastController
-from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
+from saitenka.app.token_cache import TokenizedCue, cue_key
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.render.layout_backend import backend_label, resolve_backend
 from saitenka.runtime import (
@@ -226,7 +230,7 @@ if TYPE_CHECKING:
     from saitenka.app.render_cache import RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
-    from saitenka.subtitles import CueIndex, GeometryBackend
+    from saitenka.subtitles import GeometryBackend
 
 log = logging.getLogger(__name__)
 #: For the two lines the user is meant to read on the terminal (logsetup.CONSOLE_LOGGER_NAME).
@@ -397,15 +401,15 @@ class SessionController:
 
     @property
     def annotation_mode(self) -> subtitle_intents.AnnotationMode:
-        return self.annotation.state.mode
+        return self.annotation_controller.view.mode
 
     @property
     def annotation_hover(self) -> bool:
-        return self.annotation.state.hover_revealed
+        return self.annotation_controller.view.hover_revealed
 
     @annotation_hover.setter
     def annotation_hover(self, value: bool) -> None:
-        self.annotation.set_hover_revealed(revealed=value)
+        self.annotation_controller.set_hover_revealed(revealed=value)
 
     @property
     def osd(self) -> tuple[int, int]:
@@ -447,7 +451,12 @@ class SessionController:
         if assembly is None:
             from saitenka.app.session.assembly import build_session_assembly
 
-            assembly = build_session_assembly(ipc, o, runtime_submit=runtime_submit)
+            assembly = build_session_assembly(
+                ipc,
+                o,
+                runtime_submit=runtime_submit,
+                tokenizer_warm=tokenizer_warm,
+            )
         self._assembly = assembly
         self.options = o
         self._episodes = EpisodeSlot()
@@ -463,6 +472,7 @@ class SessionController:
         self.screen = assembly.screen
         self.help_controller = assembly.help
         self.analysis_controller = assembly.analysis
+        self.annotation_controller = assembly.annotation
         self.picker_controller = assembly.picker
         self.sidebar_controller = assembly.sidebar
         self.preview_controller = assembly.preview
@@ -513,13 +523,8 @@ class SessionController:
                     redraw=self.draw_subtitle,
                     reschedule=self._arm_geometry_refresh,
                     publish=self._publish_geometry,
-                    tokenize_lookahead=lambda text: native_subtitles._lookahead_tokenized(
-                        text,
-                        normalise=cue_key,
-                        coordinator=self._annotation if self._annotation_async else None,
-                        annotation_key=self._annotation_key,
-                        annotation_inputs=self._annotation_inputs,
-                        tokenize=self._tokenize_cue,
+                    tokenize_lookahead=self.annotation_controller.captured_lookahead(
+                        self._annotation_inputs
                     ),
                 ),
                 lookahead=o.subtitle_geometry.lookahead,
@@ -562,9 +567,6 @@ class SessionController:
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
         self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
-        if o.tooltip.annotation_mode not in {"full", "hover"}:
-            raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
-        self.annotation = AnnotationController(o.tooltip.annotation_mode)
         # Visual-only: draw the kanji panel's big headword in the numbered stroke-order font. Set here
         # (the shared SessionController init) so both the run and attach seams get it from one place; a pure render
         # flag threaded onto the kanji Entry, never gating what's looked up or the panel-cache identity.
@@ -634,25 +636,7 @@ class SessionController:
             key_context=assembly.tooltip_keys,
         )
         self.interaction.tooltip = self.tooltip_controller
-        # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
-        # so a looped/re-watched/nav-back line annotates at cue time with no plain-then-upgrade flicker.
-        self.token_cache = TokenCache(o.perf.token_cache_max)
-        # Interactive run/attach enables this lazily when async dependencies are wired. Keeping the
-        # worker lazy avoids creating a thread for pure render/tests and the synchronous demo seam.
-        self._annotation: cue_annotation.CueAnnotationCoordinator | None = None
-        self._tokenizer_warm = tokenizer_warm
-        self._annotation_executor = cue_annotation.AnnotationExecutor(tokenizer_warm)
-        self._annotation_submit = cue_annotation.configure_runtime_job(
-            ipc, self._annotation_executor
-        )
-        self._annotation_async = False
-        self._dependencies_settled = True
-        self._dependency_generation = 0
-        self._current_cue_identity: cue_annotation.CueIdentity | None = None
-        self._cue_retired = True
         self._cue_identity_ever_installed = False
-        self._annotation_episode_index: CueIndex | None = None
-        self._annotation_episode_cursor = 0
         self.profile_controller = ProfileController(
             profile,
             dict_set,
@@ -819,11 +803,6 @@ class SessionController:
         self._first_sub_logged = False  # gates the one-time "first subtitle drawn" info log
         # Normalized source of a cue drawn PLAIN because its annotation can't complete yet (dicts
         # loading); reader_deps re-renders it annotated once deps land. None = drawn annotated.
-        self._sub_pending: str | None = None
-        self._annotation_degraded = False
-        self._warmed_index: CueIndex | None = (
-            None  # sub index whose cues the episode warm has run for
-        )
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
@@ -1111,8 +1090,8 @@ class SessionController:
             bg_opacity=self.sub_bg_opacity,
             bottom_margin=self.bottom_margin,
             secondary_role=self.subtitle_language == SECOND_LANG,
-            upgrade_pending=self._sub_pending is not None,
-            annotation_degraded=self._annotation_degraded,
+            upgrade_pending=self.annotation_controller.view.pending_text is not None,
+            annotation_degraded=self.annotation_controller.view.degraded,
             annotation_visible=subtitle_raster.annotation_visible(
                 mode=self.annotation_mode, hover_annotation=self.annotation_hover
             ),
@@ -1226,14 +1205,12 @@ class SessionController:
             # could not move until they were.
             self._update_hover()
 
-    def _install_cue_identity(self, identity: cue_annotation.CueIdentity) -> None:
-        """Bind the cue identity in both owners: the annotation state and the projection, which
-        decides which later observation conflicts with it."""
-        self._current_cue_identity = identity
-        self._cue_retired = False
+    def _publish_cue_identity(self, identity: cue_annotation.CueIdentity) -> None:
+        """Project the annotation owner's identity into playback conflict detection."""
         self._reduce_playback(
             events.CueIdentityInstalled(identity.observed_start, identity.observed_end)
         )
+        self._cue_identity_ever_installed = True
 
     # --- coalesced geometry refresh ----------------------------------------------------
     def _arm_geometry_refresh(self) -> None:
@@ -1320,18 +1297,16 @@ class SessionController:
         self._retire_cue_identity(reason)
 
     def _clear_cue_identity(self) -> None:
-        """Drop the installed identity in both owners; the projection then stops treating later
-        sub-start/sub-end observations as conflicts."""
-        self._cue_retired = True
-        self._current_cue_identity = None
+        """Retire annotation truth and its playback conflict-detection projection."""
+        self.annotation_controller.retire_cue()
         self._reduce_playback(events.CueIdentityRetireRequested(playback.RetireReason.CUE_TEXT))
 
     def _retire_cue_identity(self, reason: str) -> None:
-        if self._cue_retired:
-            self._clear_cue_identity()
+        if not self.annotation_controller.retire_cue():
+            self._reduce_playback(events.CueIdentityRetireRequested(playback.RetireReason.CUE_TEXT))
             return
         log.debug("cue interaction retired: %s", reason)
-        self._clear_cue_identity()
+        self._reduce_playback(events.CueIdentityRetireRequested(playback.RetireReason.CUE_TEXT))
         self.teardown_tip()
         self.tooltip_controller.retire_selection()
         self.cue_render.reset()
@@ -1440,11 +1415,8 @@ class SessionController:
         with otel_metrics.traced("teardown_tip"):
             self.teardown_tip()
         self.tooltip_controller.retire_selection()
-        self.annotation.retire_cue()
         self._reduce_playback(events.CueTextReplaced(text))
         self._clear_cue_identity()
-        self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
-        self._annotation_degraded = False
         self.episode.nav_idx = (
             -1
         )  # any external cause of a cue change invalidates the nav chaining hint
@@ -1463,37 +1435,9 @@ class SessionController:
             revise=revise_session_cue,
             provisional_navigation=provisional_navigation,
         )
-        if self.subtitle_language == SECOND_LANG:
-            self.cue_render.reset()
-            self._install_cue_identity(self._annotation_identity(cue_key(text)))
-            self._cue_identity_ever_installed = True
-            self.draw_subtitle()
-            return
-        # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
-        norm = cue_key(text)
-        cached = self.token_cache.get(norm)
-        self._install_cue_identity(self._annotation_identity(norm))
-        self._cue_identity_ever_installed = True
-        if cached is not None:
-            self._apply_tokenized_cue(cached)
-        elif self._annotation_async:
-            self.cue_render.reset()
-            self._sub_pending = norm
-            if self._dependencies_settled:
-                self._schedule_current_annotation(norm)
-            self.draw_subtitle()
-            return
-        else:
-            self._apply_tokenized_cue(self._tokenize_cue(norm))
-        # A cue must appear at its cue time even when annotation isn't ready. While the dictionaries
-        # are still loading the tokenization can't be complete (no compound merge, no coloring), so
-        # draw the cue PLAIN now; reader_deps re-renders it in place once deps land. A cache hit or a
-        # deps-ready miss tokenizes synchronously (fast) and annotates immediately.
-        self._sub_pending = norm if self.profile_controller.dict_set is None else None
-        if self.native_geometry is not None:
-            self.boxes = []
-            self.native_geometry.schedule(self._geometry_observation())
-        self.draw_subtitle()
+        self.cue_render.reset()
+        transition = self.annotation_controller.replace(text, self._annotation_inputs())
+        self._apply_annotation_transition(transition, draw=True)
 
     def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
         recorder = self.episode.session_recorder
@@ -1513,35 +1457,15 @@ class SessionController:
             self.episode.nav_provisional_cue_counted = counted
 
     def _enable_async_annotation(self) -> None:
-        self._annotation_async = True
-        self._dependencies_settled = False
-        if self._annotation is None:
-            self._annotation = cue_annotation.CueAnnotationCoordinator(
-                cache_max=self.options.perf.token_cache_max,
-                executor=self._annotation_executor,
-                submitter=self._annotation_submit,
-                on_result=self._finish_annotation,
-            )
+        self.annotation_controller.enable_async()
 
     def prepare_subtitle_blocking(self, text: str) -> None:
         """Prepare a demo/screenshot cue through the annotation worker before capture."""
-        self._annotation_async = True
-        self._dependencies_settled = True
-        if self._annotation is None:
-            self._annotation = cue_annotation.CueAnnotationCoordinator(
-                cache_max=self.options.perf.token_cache_max,
-                executor=self._annotation_executor,
-                submitter=self._annotation_submit,
-                on_result=self._finish_annotation,
-            )
-        norm = cue_key(text)
-        cue = self._annotation.resolve(
-            self._annotation_key(norm),
-            self._annotation_inputs(norm),
-            priority=cue_annotation.AnnotationPriority.CURRENT,
+        self.annotation_controller.prepare_blocking(
+            text,
+            self._annotation_inputs(),
             drive=self._drive_annotation_once,
         )
-        self.token_cache.put(norm, cue)
         self.set_subtitle(text)
 
     def _drive_annotation_once(self, timeout: float | None) -> None:
@@ -1550,194 +1474,72 @@ class SessionController:
         against the half-updated identity the outer one is still assembling."""
         self.ipc.receive_session(timeout, self._drain_event)
 
-    def _annotation_identity(self, norm: str) -> cue_annotation.CueIdentity:
-        return cue_annotation.CueIdentity(
-            self._playback.media.source.value,
-            self.observed_property("sid"),
-            self.subtitle_language,
-            norm,
-            self.observed_property("sub-start"),
-            self.observed_property("sub-end"),
-            self.episode.nav_idx if self.episode.nav_idx >= 0 else None,
+    def _annotation_inputs(self) -> AnnotationInputs:
+        dictionaries = self.profile_controller.dict_set
+        return AnnotationInputs(
+            source_epoch=self._playback.media.source.value,
+            track_identity=self.observed_property("sid"),
+            subtitle_role=self.subtitle_language,
+            observed_start=self.observed_property("sub-start"),
+            observed_end=self.observed_property("sub-end"),
+            source_order=self.episode.nav_idx if self.episode.nav_idx >= 0 else None,
+            tokenizer=self.profile_controller.tokenizer,
+            terms_exist=getattr(dictionaries, "terms_exist", None),
+            scorer=self.scorer,
+            selected_dictionaries=len(getattr(dictionaries, "dicts", ())),
+            dependencies_ready=dictionaries is not None,
+            annotate=self.subtitle_language != SECOND_LANG,
         )
 
-    def _annotation_key(self, norm: str) -> cue_annotation.AnnotationWorkKey:
-        identity = self._annotation_identity(norm)
-        return cue_annotation.AnnotationWorkKey(
-            norm,
-            identity.source_epoch,
-            identity.track_identity,
-            identity.subtitle_role,
-            self.token_cache.generation,
-            self._dependency_generation,
-        )
-
-    def _annotation_inputs(self, norm: str) -> cue_annotation.AnnotationInputs:
-        return cue_annotation.AnnotationInputs(
-            norm,
-            self.profile_controller.tokenizer,
-            getattr(self.profile_controller.dict_set, "terms_exist", None),
-            self.scorer,
-            len(getattr(self.profile_controller.dict_set, "dicts", ())),
-        )
-
-    def _schedule_current_annotation(self, norm: str) -> None:
-        if self._annotation is None or self.subtitle_language == SECOND_LANG:
-            return
-        identity = self._annotation_identity(norm)
-        self._install_cue_identity(identity)
-        cached = self._annotation.submit(
-            self._annotation_key(norm),
-            self._annotation_inputs(norm),
-            priority=cue_annotation.AnnotationPriority.CURRENT,
-            waiter=identity,
-        )
-        if cached is not None:
-            self._publish_annotation(cached, identity)
+    def _apply_annotation_transition(
+        self,
+        transition: AnnotationTransition,
+        *,
+        draw: bool,
+    ) -> None:
+        if transition.identity is not None:
+            self._publish_cue_identity(transition.identity)
+        if transition.cue is not None:
+            self.cue_render.install_tokenized(transition.cue)
+        if transition.schedule_geometry and self.native_geometry is not None:
+            self.boxes = []
+            self.native_geometry.schedule(self._geometry_observation())
+        if draw:
+            self.draw_subtitle()
 
     def _dependencies_changed(self) -> None:
-        self._dependency_generation += 1
-        self._dependencies_settled = True
-        self._annotation_degraded = False
-        self.token_cache.clear()
-        if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
+        transition = self.annotation_controller.dependencies_changed(
+            self.sub_text,
+            self._annotation_inputs(),
+        )
+        if transition is None:
             return
         self.teardown_tip()
         self.tooltip_controller.retire_selection()
         self.cue_render.reset()
-        norm = cue_key(self.sub_text)
-        self._sub_pending = norm
         if self.native_geometry is not None:
             self.native_geometry.invalidate(live=True)
-        self._schedule_current_annotation(norm)
-        self.draw_subtitle()
-
-    def _publish_annotation(self, cue: TokenizedCue, identity: cue_annotation.CueIdentity) -> bool:
-        if (
-            self._annotation_disposition_for(identity, cue)
-            is not cue_annotation.AnnotationDisposition.PUBLISH
-        ):
-            return False
-        self.token_cache.put(identity.normalized_text, cue)
-        self._apply_tokenized_cue(cue)
-        self._sub_pending = None
-        self._annotation_degraded = False
-        if self.native_geometry is not None:
-            self.native_geometry.schedule(self._geometry_observation())
-        self.draw_subtitle()
-        return True
-
-    def _annotation_disposition_for(
-        self, identity: cue_annotation.CueIdentity, cue: TokenizedCue | None
-    ) -> cue_annotation.AnnotationDisposition:
-        return self._annotation_disposition(
-            cue_annotation.AnnotationResult(
-                self._annotation_key(identity.normalized_text), identity, cue, None, 0.0, 0.0
-            )
-        )
-
-    def _annotation_disposition(
-        self, result: cue_annotation.AnnotationResult
-    ) -> cue_annotation.AnnotationDisposition:
-        current_key = (
-            self._annotation_key(result.identity.normalized_text)
-            if result.identity is not None
-            else None
-        )
-        return cue_annotation.disposition(
-            result,
-            current_identity=self._current_cue_identity,
-            current_key=current_key,
-            cue_retired=self._cue_retired,
-            pending_text=self._sub_pending,
-        )
-
-    def _finish_annotation(self, result: cue_annotation.AnnotationResult) -> None:
-        with otel_metrics.traced("cue_annotation", phase="publish") as span:
-            span.set("queue_wait_ms", round(result.queue_wait_ms, 3))
-            span.set("work_ms", round(result.work_ms, 3))
-            outcome = self._annotation_disposition(result)
-            if outcome is cue_annotation.AnnotationDisposition.DEGRADE:
-                # The cue is still on screen: drop the pending upgrade and keep its plain pixels.
-                self._sub_pending = None
-                self._annotation_degraded = True
-                log.warning("cue annotation unavailable; keeping plain subtitles")
-            if outcome.failed:
-                span.set("outcome", "failed")
-                span.set("failure", "annotation-error")
-                return
-            if outcome is cue_annotation.AnnotationDisposition.PUBLISH:
-                assert result.cue is not None and result.identity is not None
-                self._publish_annotation(result.cue, result.identity)
-            span.set("outcome", outcome.value)
+        self._apply_annotation_transition(transition, draw=True)
 
     def warm_episode_tokens(self) -> None:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
-        prefetch.warm_episode_tokens(self.warm_ports)
-
-    def _start_episode_annotation(self, index: CueIndex) -> None:
-        self._annotation_episode_index = index
-        self._annotation_episode_cursor = 0
-        self._feed_episode_annotation()
-
-    def _feed_episode_annotation(self) -> None:
-        coordinator = self._annotation
-        index = self._annotation_episode_index
-        if coordinator is None or index is None or self.episode.sub_index is not index:
+        index = self.episode.sub_index
+        if index is None or not self.prefetch or self.profile_controller.dict_set is None:
             return
-        while coordinator.pending_count() < 4 and self._annotation_episode_cursor < len(index.cues):
-            cue = index.cues[self._annotation_episode_cursor]
-            self._annotation_episode_cursor += 1
-            norm = cue_key(cue.text)
-            coordinator.submit(
-                self._annotation_key(norm),
-                self._annotation_inputs(norm),
-                priority=cue_annotation.AnnotationPriority.EPISODE,
-            )
-
-    def _tokenize_cue(self, norm: str, *, generation: int | None = None) -> TokenizedCue:
-        """Tokenize + compound-merge + score one normalized cue into a :class:`TokenizedCue`, memoizing
-        a COMPLETE, non-empty result (see TokenCache.put) so a repeated line is a hit. Pure of overlay
-        state, so a cache hit reproduces it exactly. ``generation`` (the background episode-warm passes
-        its captured value) gates the store: a profile swap that cleared the cache mid-warm drops it."""
-        # Dictionary-attested compound merge (応急+処置 → 応急処置) — one hover/color/mine unit like
-        # Yomitan. Optional dict capability, absent until the dicts finish loading (like has_term).
-        exists = getattr(self.profile_controller.dict_set, "terms_exist", None)
-        with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
-            raw = (
-                self.profile_controller.tokenizer.tokenize(ln)
-                for ln in norm.split("\n")
-                if ln.strip()
-            )
-            lines = [
-                self.profile_controller.tokenizer.merge_dict_compounds(t, exists) if exists else t
-                for t in raw
-            ]
-        tokens = [t for line in lines for t in line]
-        # score the whole cue (N+1 splits by sentence punctuation across lines); warms lookup cache
-        with otel_metrics.traced("score_line"):
-            styles = self.scorer.score_line(tokens) if self.scorer else None
-        cue = TokenizedCue(lines, tokens, styles)
-        # Only memoize a complete annotation — a pre-deps tokenization (no compound-merge dict) is a
-        # transient that must re-attempt on the next identical line once the dicts load.
-        self.token_cache.put(norm, cue, complete=exists is not None, generation=generation)
-        return cue
-
-    def _apply_tokenized_cue(self, cue: TokenizedCue) -> None:
-        self.cue_render.install_tokenized(cue)
+        self.annotation_controller.start_episode_warm(index, self._annotation_inputs())
 
     def _invalidate_profile_tokenizer(self) -> None:
         if self.native_geometry is not None:
             self.native_geometry.invalidate(live=True)
         else:
             self.subtitle_pipeline.invalidate()
-        self.token_cache.clear()
+        self.annotation_controller.invalidate_tokenizer()
 
     def _invalidate_profile_dictionary(self) -> None:
         self.session.render_cache.config_sig = None
 
     def _reset_profile_episode_warm(self) -> None:
-        self._warmed_index = None
+        self.annotation_controller.retire_episode_warm()
 
     def _has_profile_subtitle_track(self, slang: str) -> bool:
         return subtitle_modes.has_track_for_slang(self.ipc, slang)
@@ -1754,19 +1556,14 @@ class SessionController:
         (English) track is up (which never tokenizes)."""
         if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
             return
-        if self._annotation_async:
+        if self.annotation_controller.view.async_enabled:
             self._retire_cue_identity("profile")
-            norm = cue_key(self.sub_text)
-            self._install_cue_identity(self._annotation_identity(norm))
-            self._sub_pending = norm
-            self._annotation_degraded = False
-            self._schedule_current_annotation(norm)
-            self.draw_subtitle()
-            return
-        self._apply_tokenized_cue(self._tokenize_cue(cue_key(self.sub_text)))
-        if self.native_geometry is not None:
-            self.native_geometry.refresh(self._geometry_observation())
-        self.draw_subtitle()
+        transition = self.annotation_controller.retokenize(
+            self.sub_text,
+            self._annotation_inputs(),
+        )
+        if transition is not None:
+            self._apply_annotation_transition(transition, draw=True)
 
     def draw_subtitle(self) -> None:
         result = self.subtitle_pipeline.draw_current(self.subtitle_target())
@@ -1860,11 +1657,11 @@ class SessionController:
         )
         if target == self.annotation_hover:
             return
-        self.annotation.set_hover_revealed(revealed=target)
+        self.annotation_controller.set_hover_revealed(revealed=target)
         self.draw_subtitle()
 
     def _set_annotation_mode(self, mode: subtitle_intents.AnnotationMode) -> None:
-        self.annotation.set_mode(mode)
+        self.annotation_controller.set_mode(mode)
 
     def copy_token(self, t) -> None:
         tooltip.copy_token(self.toast, t)
@@ -2072,13 +1869,14 @@ class SessionController:
         drops the worker lane for the duration of a deterministic hover, and a value cached across
         that would still report itself as deferred.
         """
+        annotation = self.annotation_controller.view
         return WordLookup(
             tokenizer=self.profile_controller.tokenizer,
             dict_set=self.profile_controller.dict_set,
             mined=self.mining_controller.index_snapshot(),
             prefetch_gen=self.prefetch_state.gen,
-            dependency_gen=self._dependency_generation,
-            cue_identity=self._current_cue_identity,
+            dependency_gen=annotation.dependency_generation,
+            cue_identity=annotation.identity,
             deferred=self.tooltip_controller.metadata_deferred,
             submit=self._request_interaction_metadata,
         )
@@ -2122,9 +1920,10 @@ class SessionController:
         """How far this cue has got, as one fact rather than three reads into other features."""
         if not self.sub_text.strip():
             return "empty"
-        if self._cue_retired:
+        annotation = self.annotation_controller.view
+        if annotation.retired:
             return "retired"
-        return "pending" if self._sub_pending is not None else "ready"
+        return "pending" if annotation.pending_text is not None else "ready"
 
     @property
     def preview_ports(self) -> miner_ui.PreviewPorts:
@@ -2194,31 +1993,6 @@ class SessionController:
             panel_cache=self.tip.panel_cache,
             lookahead=self.head_prefetch_lookahead,
         )
-
-    @property
-    def warm_ports(self) -> prefetch.WarmPorts:
-        """What starting the background episode warm decides on."""
-        return prefetch.WarmPorts(
-            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
-            index=self.episode.sub_index,
-            claim=self._claim_warm_index,
-            annotate_async=self._annotation_async,
-            start_annotation=self._start_episode_annotation,
-            loop=prefetch.EpisodeWarmPorts(
-                stop=self._stop,
-                token_cache=self.token_cache,
-                current_index=lambda: self.episode.sub_index,
-                normalise=cue_key,
-                tokenize=self._tokenize_cue,
-            ),
-        )
-
-    def _claim_warm_index(self, index: CueIndex) -> bool:
-        """Claim an index for the episode warm; `False` when it is already warmed or being warmed."""
-        if self._warmed_index is index:
-            return False
-        self._warmed_index = index
-        return True
 
     @property
     def listing_ports(self) -> sub_picker.ListingPorts:
@@ -2751,7 +2525,7 @@ class SessionController:
                 playback=self._playback_store,
                 tracks=self._subtitle_tracks,
                 cue=self.cue_render,
-                annotation=self.annotation,
+                annotation=self.annotation_controller,
                 observed_property=self.observed_property,
                 property_value=self.property_value,
                 text_property=self.text_property,
@@ -3160,7 +2934,7 @@ class SessionController:
         return CommandExecutor(handlers, policy=CommandPolicy((*legacy, *contributed)))
 
     def _command_cue_state(self) -> CueCommandState:
-        if not self._cue_retired:
+        if not self.annotation_controller.view.retired:
             return CueCommandState.ACTIVE
         if self._cue_identity_ever_installed:
             return CueCommandState.RETIRED_AFTER_ACTIVE
@@ -3306,7 +3080,7 @@ class SessionController:
         self._retire_episode()
         self._episodes.replace()
         self.cue_render.reset()
-        self.annotation.retire_cue()
+        self.annotation_controller.retire_cue()
 
     def _retire_episode(self) -> None:
         """Retire every owner's per-episode facts in one turn.
@@ -3316,6 +3090,7 @@ class SessionController:
         it reaches every slice at once — the atomicity `EpisodeContext` gets from being one object.
         Without a reactor there is no turn to be atomic in, so each store reduces it in turn.
         """
+        self.annotation_controller.retire_episode_warm()
         if self._playback_store.routed:
             self._playback_store.dispatch(events.EpisodeRetired())
             return
@@ -3420,7 +3195,8 @@ class SessionController:
         contract. Every one is guarded by a cheap early return, so asking once per turn is nothing
         like the cost of asking forty times a second.
         """
-        self._feed_episode_annotation()
+        for transition in self.annotation_controller.settle():
+            self._apply_annotation_transition(transition, draw=transition.publish)
         self._sync_mouse_capture()
         self.tooltip_controller.publish_pending(self.tip_ports)
         self._update_prefetch()
@@ -3627,8 +3403,8 @@ class SessionController:
         connected_at = self.ipc.connected_at  # None until the transport has connected once
         with otel_metrics.traced(
             "startup.interactive_ready",
-            cue_pending=str(self._sub_pending is not None).lower(),
-            deps_pending=str(not self._dependencies_settled).lower(),
+            cue_pending=str(self.annotation_controller.view.pending_text is not None).lower(),
+            deps_pending=str(not self.annotation_controller.view.dependencies_settled).lower(),
         ) as span:
             if connected_at is not None:
                 span.set("since_ipc_ms", round((time.monotonic() - connected_at) * 1_000, 3))
@@ -3700,7 +3476,7 @@ class SessionController:
             geometry=self.native_geometry,
             get=self._get,
             cue_text=lambda: self.sub_text,
-            cue_retired=lambda: self._cue_retired,
+            cue_retired=lambda: self.annotation_controller.view.retired,
             draw_cue=self.set_subtitle,
             replace_source=self._replace_subtitle_source,
             invalidate=self.analysis_commands.invalidate,
@@ -4150,8 +3926,7 @@ class SessionController:
         self.mining_controller.close_capability()
 
     def _close_annotation(self) -> None:
-        if self._annotation is not None:
-            self._annotation.close()
+        self.annotation_controller.close()
 
     def _lane_remaining(self) -> float:
         """What is left of the lane budget. Zero once it is spent, never negative."""

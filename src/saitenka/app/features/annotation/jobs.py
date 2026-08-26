@@ -1,4 +1,4 @@
-"""Brokered cue annotation with identity-qualified publication."""
+"""Brokered cue annotation work with identity-qualified publication."""
 
 from __future__ import annotations
 
@@ -63,6 +63,7 @@ class AnnotationResult:
     key: AnnotationWorkKey
     identity: CueIdentity | None
     cue: TokenizedCue | None
+    complete: bool
     error: Exception | None
     queue_wait_ms: float
     work_ms: float
@@ -133,6 +134,7 @@ class _Job:
     version: int
     queued_at: float
     waiter: CueIdentity | None
+    cancelled: bool = False
 
 
 def _published_result(
@@ -159,6 +161,7 @@ def _published_result(
         key,
         job.waiter,
         cue,
+        job.inputs.terms_exist is not None,
         None if succeeded else RuntimeError("cue annotation failed"),
         execution.queue_wait_ms if execution is not None else 0.0,
         execution.work_ms if execution is not None else 0.0,
@@ -312,6 +315,7 @@ class CueAnnotationCoordinator:
                 return None
             job = self._jobs.get(key)
             if job is not None:
+                job.cancelled = False
                 if waiter is not None:
                     job.waiter = waiter
                 if priority < job.priority:
@@ -335,6 +339,23 @@ class CueAnnotationCoordinator:
     def pending_count(self) -> int:
         with self._condition:
             return len(self._jobs)
+
+    def cancel_priority(self, priority: AnnotationPriority) -> None:
+        """Retire work admitted only for this policy, preserving promoted jobs."""
+        dispatch = False
+        with self._condition:
+            for key, job in tuple(self._jobs.items()):
+                if job.priority is not priority:
+                    continue
+                if key == self._inflight:
+                    job.waiter = None
+                    job.cancelled = True
+                else:
+                    self._jobs.pop(key, None)
+            dispatch = self._inflight is None
+            self._condition.notify_all()
+        if dispatch:
+            self._dispatch_next()
 
     def resolve(
         self,
@@ -451,8 +472,11 @@ class CueAnnotationCoordinator:
             if self._closed or current is None:
                 return
             cue, annotation_result = _published_result(key, current, completion)
-            if cue is not None and cue.tokens:
+            complete = current.inputs.terms_exist is not None
+            if cue is not None and cue.tokens and complete and not current.cancelled:
                 self._cache_put(key, cue)
+            if current.cancelled:
+                annotation_result = None
             self._condition.notify_all()
         if annotation_result is not None and self._on_result is not None:
             self._on_result(annotation_result)

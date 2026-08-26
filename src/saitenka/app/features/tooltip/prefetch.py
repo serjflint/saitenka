@@ -19,10 +19,8 @@ if TYPE_CHECKING:
 
     from saitenka.app.features.profiles.profile_controller import ProfileController
     from saitenka.app.scoring import Scorer
-    from saitenka.app.token_cache import TokenCache
     from saitenka.app.tokenize import Token
     from saitenka.app.tokenizer import Tokenizer
-    from saitenka.subtitles import CueIndex
 
 log = logging.getLogger(__name__)
 
@@ -586,79 +584,6 @@ def upcoming_cue_texts(index, n: int, *, text: str, preferred: int) -> list[str]
     if current < 0:
         return []
     return [index.cues[i].text for i in range(current + 1, min(len(index), current + 1 + n))]
-
-
-def warm_episode_tokens(ports: WarmPorts) -> None:
-    """Fire-and-forget: tokenize EVERY cue of the current sub index into ``reader.token_cache`` on a
-    background thread, so no cue pays cold tokenization mid-playback (the whole episode is warm ahead
-    of playback, not just a short window). Best-effort — a key mismatch (mpv re-wrapping a line) just
-    re-tokenizes that cue on demand; a track switch (new index object) supersedes a stale warm. No-op
-    without prefetch, a dictionary, or an index; skips an index already warmed."""
-    idx = ports.index
-    if not ports.enabled or idx is None or not ports.claim(idx):
-        return
-    if ports.annotate_async:
-        ports.start_annotation(idx)
-        return
-    threading.Thread(
-        target=lambda: _warm_episode_loop(idx, ports=ports.loop),
-        name="saitenka-episode-warm",
-        daemon=True,
-    ).start()
-
-
-@dataclass(frozen=True, slots=True)
-class EpisodeWarmPorts:
-    """What the background warm keeps asking, never what it saw once.
-
-    Every member is a callable or a live object on purpose: the loop's whole job is to notice that
-    the ground moved under it — closing, a track switch, a profile swap — so a snapshot would turn
-    the supersede checks into three constants.
-    """
-
-    stop: threading.Event
-    token_cache: TokenCache
-    current_index: Callable[[], CueIndex | None]
-    normalise: Callable[[str], str]
-    tokenize: Callable[..., object]
-
-
-@dataclass(frozen=True, slots=True)
-class WarmPorts:
-    """What starting an episode warm decides on: whether there is anything to warm, which index, and
-    which of the two warm paths runs.
-
-    `claim` is one act rather than a read of the last-warmed index and a write of this one: the check
-    and the mark have to be indivisible, or two starts on the same index both warm it.
-    """
-
-    enabled: bool
-    index: CueIndex | None
-    claim: Callable[[CueIndex], bool]
-    annotate_async: bool
-    start_annotation: Callable[[CueIndex], None]
-    loop: EpisodeWarmPorts
-
-
-def _warm_episode_loop(idx: CueIndex, *, ports: EpisodeWarmPorts) -> None:
-    warmed = 0
-    # The generation this warm belongs to: a live profile swap (#254 D8) clears the cache and bumps it,
-    # so a worker mid-tokenize with the OLD tokenizer can't put() a stale-language entry after the swap
-    # — the gen is threaded into every put (dropped under the cache lock on mismatch) AND breaks the loop.
-    gen = ports.token_cache.generation
-    for cue in list(idx.cues):
-        if (
-            ports.stop.is_set()
-            or ports.current_index() is not idx
-            or ports.token_cache.generation != gen
-        ):
-            return  # closing, a track switch replaced the index, or a profile swap → drop the stale warm
-        try:
-            ports.tokenize(ports.normalise(cue.text), generation=gen)
-            warmed += 1
-        except Exception:
-            log.debug("episode token warm failed for a cue", exc_info=True)  # never kill the warm
-    log.info("episode token warm: %d/%d cues into the token cache", warmed, len(idx.cues))
 
 
 # The tooltip's FIXED reference resolution. Tooltip geometry (width, viewport-height cap) is computed

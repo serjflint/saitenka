@@ -15,8 +15,9 @@ from saitenka.runtime.effects import Owner
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.features.annotation.annotation_controller import AnnotationView
     from saitenka.app.session.context import EpisodeSlot
-    from saitenka.app.subtitle_presentation import AnnotationController, CueRenderStore
+    from saitenka.app.subtitle_presentation import CueRenderStore
     from saitenka.app.toast_controller import NotificationSink
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.playback_slice import PlaybackStore
@@ -37,6 +38,13 @@ class SubmitSubtitleFetch(Protocol):
 
 class HideTranslation(Protocol):
     def __call__(self, *, release: bool) -> None: ...
+
+
+class AnnotationViewSource(Protocol):
+    """The annotation fact exposed to subtitle command policy."""
+
+    @property
+    def view(self) -> AnnotationView: ...
 
 
 @dataclass
@@ -98,7 +106,7 @@ class SubtitleCommandRead:
     playback: PlaybackStore
     tracks: SubtitleTrackStore
     cue: CueRenderStore
-    annotation: AnnotationController
+    annotation: AnnotationViewSource
     observed_property: Callable[[str], object]
     property_value: Callable[[str], object | None]
     text_property: Callable[[str], str | None]
@@ -145,7 +153,7 @@ class SubtitleCommandCoordinator:
             tracks=subtitle_modes.discover_tracks(read.ipc, track.slang),
             active_sid=read.property_value("sid"),
             language=track.language,
-            annotation_mode=read.annotation.state.mode,
+            annotation_mode=read.annotation.view.mode,
             has_cue=bool(playback.cue.text.strip()),
             retry_in_flight=episode.subtitle.retry_active,
             media_path=read.text_property("path"),

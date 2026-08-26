@@ -174,7 +174,6 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
 def test_toggle_remains_available_while_cue_identity_is_retired():
     reader = SessionController(FakeIPC(), renderer=NullRenderer())
     reader._cue_identity_ever_installed = True
-    reader._cue_retired = True
 
     reader._handle(ANNOTATION_MSG)
 

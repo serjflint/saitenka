@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from util import FakeIPC
 
 from saitenka.app.subtitle_raster import (
     AnnotationOverlay,
@@ -170,15 +171,54 @@ class _ExistsDS:
         return set()
 
 
-def _reader(recorder, *, dict_set=None):
-    from util import FakeIPC
+class _CapturingAnnotationIPC(FakeIPC):
+    def __init__(self) -> None:
+        super().__init__()
+        self.annotation_handler = None
+        self.annotation_jobs = []
 
+    def register_runtime_job_lane(self, name, policy, handler) -> bool:  # noqa: ARG002
+        if name != "cue-annotation":
+            return False
+        self.annotation_handler = handler
+        return True
+
+    def submit_runtime_job(self, **kwargs) -> bool:
+        if kwargs["lane"] != "cue-annotation":
+            return False
+        self.annotation_jobs.append(kwargs)
+        return True
+
+
+def _finish_captured_annotation(ipc) -> None:
+    import threading
+
+    from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+
+    job = ipc.annotation_jobs.pop(0)
+    result = ipc.annotation_handler(job["request"], threading.Event())
+    job["on_finished"](
+        EffectFinished(
+            EffectId(1),
+            job["owner"],
+            job["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=result,
+        )
+    )
+
+
+def _reader(recorder, *, dict_set=None, annotation_async: bool = False):
     from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import SubtitleRenderer
 
-    reader = SessionController(FakeIPC(), dict_set=dict_set)
+    ipc = _CapturingAnnotationIPC() if annotation_async else FakeIPC()
+    reader = SessionController(ipc, dict_set=dict_set)
     reader.osd = (1920, 1080)
     reader.renderer = SubtitleRenderer(recorder)
+    if annotation_async:
+        reader._enable_async_annotation()
+        reader._dependencies_changed()
     return reader
 
 
@@ -203,23 +243,13 @@ def test_an_annotation_for_a_replaced_cue_never_restyles_the_current_one(recorde
     surface would be a second representation of the same fact, which is what invariant 13 forbids.
     So this asserts the guard from the surface's side rather than duplicating it there.
     """
-    from saitenka.app import cue_annotation
-    from saitenka.app.token_cache import TokenizedCue
-    from saitenka.app.tokenize import Token
-
-    reader = _reader(recorder, dict_set=_ExistsDS())
+    reader = _reader(recorder, dict_set=_ExistsDS(), annotation_async=True)
     reader.set_subtitle("猫を見る")
-    stale = reader._annotation_identity("猫を見る")
-    stale_key = reader._annotation_key("猫を見る")
     reader.set_subtitle("犬を見る")
     published = len(recorder.requests)
 
-    token = Token("猫", "猫", "ねこ", "名詞", 0, 1)
-    reader._finish_annotation(
-        cue_annotation.AnnotationResult(
-            stale_key, stale, TokenizedCue(lines=[[token]], tokens=[token], styles=None), None, 0, 0
-        )
-    )
+    _finish_captured_annotation(reader.ipc)
+    reader._settle_interaction()
 
     assert len(recorder.requests) == published
     assert reader.sub_text == "犬を見る"

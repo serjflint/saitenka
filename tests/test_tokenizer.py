@@ -4,7 +4,6 @@ import pytest
 import util
 
 from saitenka.app.session.controller import SessionController
-from saitenka.app.token_cache import TokenizedCue
 from saitenka.app.tokenize import (
     Token,
     inflected_in,
@@ -220,15 +219,16 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
 
 
 def test_use_tokenizer_swaps_strategy_and_clears_cache():
-    reader = SessionController(FakeIPC())
-    tok = Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)
-    reader.token_cache.put("本", TokenizedCue(lines=[[tok]], tokens=[tok], styles=None))
-    assert len(reader.token_cache) == 1
+    class _DS:
+        def terms_exist(self, _forms):
+            return set()
+
+    reader = SessionController(FakeIPC(), dict_set=_DS())
+    reader.set_subtitle("本")
 
     fake = _FakeTokenizer()
     reader.profile_controller.use_tokenizer(fake)
+    reader.set_subtitle("本")
 
     assert reader.profile_controller.tokenizer is fake
-    assert (
-        len(reader.token_cache) == 0
-    )  # cached JP segmentation must not leak into the new strategy
+    assert reader.tokens == []

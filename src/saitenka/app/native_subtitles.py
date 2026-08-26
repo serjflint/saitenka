@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 from saitenka import otel_metrics
-from saitenka.app import cue_annotation, subtitle_fonts
+from saitenka.app import subtitle_fonts
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryCacheReason,
     GeometryOutcome,
@@ -231,27 +231,6 @@ def _frame_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
         tuple(
             int(cast("int | float | str", osd.get(name) or 0)) for name in ("mt", "mb", "ml", "mr")
         ),
-    )
-
-
-def _lookahead_tokenized(
-    text: str,
-    *,
-    normalise: Callable[[str], str],
-    coordinator: cue_annotation.CueAnnotationCoordinator | None,
-    annotation_key: Callable[[str], cue_annotation.AnnotationWorkKey],
-    annotation_inputs: Callable[[str], cue_annotation.AnnotationInputs],
-    tokenize: Callable[[str], TokenizedCue],
-) -> TokenizedCue:
-    """Tokenize an off-screen cue. `coordinator` is `None` when the async path is off — the caller
-    owns that config, so the switch does not travel here as a second flag."""
-    norm = normalise(text)
-    if coordinator is None:
-        return tokenize(norm)
-    return coordinator.resolve(
-        annotation_key(norm),
-        annotation_inputs(norm),
-        priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
     )
 
 

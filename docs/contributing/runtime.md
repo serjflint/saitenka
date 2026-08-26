@@ -81,8 +81,9 @@ The following gates enforce the boundary:
 `SessionController` composes owner-thread session lifetime, ordered cross-feature conjunctions, and
 physical application. Bounded controllers and stores own feature facts: `TooltipController` owns
 tooltip interaction and work, `ProfileController` owns the active reading environment,
-`MiningController` owns mining, `PlaybackStore` owns cue identity, and `CueRenderStore` owns derived
-tokenization and geometry.
+`MiningController` owns mining, `CueAnnotationController` owns annotation identity, work, and cache,
+`PlaybackStore` owns the playback projection of cue identity, and `CueRenderStore` owns derived
+tokenization and geometry. Other features observe annotation through its frozen public view.
 `SessionController.run()` hands the thread to
 `SessionLoop`, which blocks on the mailbox rather than waking at a cadence:
 
@@ -228,6 +229,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | --- | --- |
 | One live state owner | The `SessionController` thread applies production session and presentation mutations. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
 | One mining writer | `MiningController` alone owns the selected target, deck-derived index, seed/probe lifecycle, local store, scratch resources, and operation admission. `poe mining-ownership` rejects shadow fields and direct mutator/construction escape routes. |
+| One annotation writer | `CueAnnotationController` alone owns annotation identity, admission, completion refusal, degradation, token-cache generation, and episode warming. `poe annotation-ownership` rejects the retired shell fields/facades, private cache escape, and construction outside session assembly. |
 | Ordered input | mpv events are drained in arrival order. Conflicting cue observations retire cue-dependent interaction before a later command is dispatched. |
 | One observation interpreter | `PlaybackProjection` alone turns raw mpv properties into typed facts, explicit revisions, and deltas. A transport burst has no semantic meaning: split and joined delivery of the same ordered observations converge to the same state. |
 | Identity-qualified publication | Annotation, geometry, tooltip, and related background results publish only when their semantic identity is still current. |

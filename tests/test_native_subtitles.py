@@ -71,8 +71,9 @@ class FakeIPC(util.FakeIPC):
     specialise — a double defining only what its author needed is how production ends up on a
     fallback branch it never takes in a real session."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, annotation_jobs: bool = False) -> None:
         super().__init__()
+        self.annotation_jobs = annotation_jobs
         self.props |= {
             "sid": 2,
             "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
@@ -117,7 +118,7 @@ class FakeIPC(util.FakeIPC):
         # Geometry only. Every lane in the session probes for this port at composition, so accepting
         # any name would move annotation, tooltip raster and prefetch onto lanes too — five
         # subsystems this file does not exercise, changing when their results land.
-        if name != "subtitle-geometry":
+        if name != "subtitle-geometry" and not (self.annotation_jobs and name == "cue-annotation"):
             return False
         self.job_lanes[name] = handler
         return True
@@ -131,19 +132,24 @@ class FakeIPC(util.FakeIPC):
         which a cue is scheduled but not yet published — a real state the host spends time in, and
         one several tests exist to pin.
         """
-        from saitenka.runtime import EffectError, EffectOutcome
+        from saitenka.runtime import EffectError
 
         handler = self.job_lanes.get(lane)
         if handler is None:
             return False
         outcome, error = EffectOutcome.SUCCEEDED, None
+        result = None
         try:
-            handler(request, threading.Event())
+            result = handler(request, threading.Event())
         except Exception:  # noqa: BLE001  # the broker turns a handler failure into an outcome
             outcome, error = EffectOutcome.FAILED, EffectError.INTERNAL
-        self.pending_jobs.append(
-            (on_finished, EffectFinished(EffectId(0), owner, identity, outcome, error=error))
+        completion = EffectFinished(
+            EffectId(0), owner, identity, outcome, result=result, error=error
         )
+        if lane == "cue-annotation":
+            on_finished(completion)
+        else:
+            self.pending_jobs.append((on_finished, completion))
         return True
 
     def deliver_runtime_jobs(self) -> int:
@@ -184,7 +190,7 @@ class FakeIPC(util.FakeIPC):
         own mpv-state simulation reports a stale readback, which presents as a production ownership
         regression rather than as the fake-only fault it is.
         """
-        from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
+        from saitenka.runtime import EffectError, EffectFinished, EffectId, Owner
 
         index = next(
             (
@@ -231,7 +237,7 @@ class FakeIPC(util.FakeIPC):
         return self.timers.pop(timer, None) is not None
 
     def fire_runtime_timer(self, timer) -> bool:
-        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+        from saitenka.runtime import EffectFinished, EffectId, Owner
 
         entry = self.timers.pop(timer, None)
         if entry is None:
@@ -331,6 +337,9 @@ class _SingleTokenizer:
     def phrase_terms(self, _tokens, _index, _has_term):
         return None
 
+    def merge_dict_compounds(self, tokens, _terms_exist):
+        return tokens
+
 
 class _MismatchedTokenizer(_SingleTokenizer):
     name = "mismatched"
@@ -356,16 +365,26 @@ class _AllSkippableTokenizer(_SingleTokenizer):
         return True
 
 
+class _ExistsDS:
+    def terms_exist(self, _forms):
+        return set()
+
+    def decoded_entry_count(self):
+        return 0
+
+
 def reader(
     tmp_path: Path,
     *,
     correlated_surfaces: bool = False,
     native_visible: bool = True,
     scorer=None,
+    annotation_jobs: bool = False,
+    annotations_ready: bool = True,
 ) -> tuple[SessionController, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
-    ipc = FakeIPC()
+    ipc = FakeIPC(annotation_jobs=annotation_jobs)
     backend = FakeBackend()
     options = ReaderOptions(
         subtitle_geometry=SubtitleGeometryOptions(native_visible=native_visible),
@@ -379,6 +398,7 @@ def reader(
         geometry_backend=backend,
         runtime_submit=ipc.submit_runtime_mpv if correlated_surfaces else None,
         scorer=scorer,
+        dict_set=_ExistsDS() if annotations_ready else None,
     )
     # Native geometry exists exactly when the mode does — the legacy renderer lays its own boxes out
     # and has no provider to schedule against.
@@ -602,7 +622,6 @@ def test_missing_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     assert result.native_geometry.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result._sub_pending = None
     result.draw_subtitle()
     assert result.boxes == []
     result.close()
@@ -783,7 +802,6 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result._sub_pending = None
     result.tooltip_controller.select(0)
     result.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     ipc.commands.clear()
@@ -817,7 +835,6 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready
-    result._sub_pending = None
     result.tooltip_controller.select(0)
     result.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
     ipc.commands.clear()
@@ -968,7 +985,6 @@ def test_a_non_ass_source_is_drawn_by_legacy_and_stays_scannable(tmp_path: Path)
     assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
     assert backend.requests == []  # no provider work for a source it can never accept
     assert result.native_geometry.status.owner == "legacy"
-    result._sub_pending = None
     result.draw_subtitle()
     assert result.boxes != []
     result.close()
@@ -1075,7 +1091,6 @@ def test_switching_from_an_srt_to_an_ass_returns_the_pixels_to_native(tmp_path: 
     assert result.native_geometry is not None
     result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
     result.set_subtitle("猫を見る")
-    result._sub_pending = None
     result.draw_subtitle()
     assert result.native_geometry.status.owner == "legacy"
 
@@ -1246,9 +1261,9 @@ def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path
 
 
 def test_native_lookahead_uses_the_single_annotation_coordinator(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
-    result, ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path, annotation_jobs=True)
     source = tmp_path / "episode.ass"
     source.write_bytes(
         ASS.replace(
@@ -1261,29 +1276,11 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     result.native_geometry.set_source(source)
     result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
 
-    def submit(**kwargs) -> bool:
-        completion = result._annotation_executor.run(kwargs["request"], threading.Event())
-        kwargs["on_finished"](
-            EffectFinished(
-                EffectId(1),
-                kwargs["owner"],
-                kwargs["identity"],
-                EffectOutcome.SUCCEEDED,
-                result=completion,
-            )
-        )
-        return True
-
-    result._annotation_submit = submit
     result._enable_async_annotation()
-    result._dependencies_settled = True
-    monkeypatch.setattr(
-        result,
-        "_tokenize_cue",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("second annotator used")),
-    )
+    result._dependencies_changed()
 
     result.set_subtitle("猫を見る")
+    result._settle_interaction()
     settle_jobs(result, ipc)
 
     assert any(request.timestamp_ms == 4_001 for request in backend.requests)
@@ -1476,7 +1473,7 @@ def test_unpaintable_full_width_space_is_not_required_from_libass(tmp_path: Path
 
 
 def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) -> None:
-    result, ipc, _backend = reader(tmp_path)
+    result, ipc, _backend = reader(tmp_path, annotations_ready=False)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS.replace("猫を見る".encode(), "猫　犬".encode()))
     assert result.native_geometry is not None
@@ -1557,7 +1554,6 @@ def test_unexpected_geometry_error_keeps_native_pixels(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(result.native_geometry, "_render_inputs", fail_render_inputs)
     result.set_subtitle("猫を見る")
-    result._sub_pending = None
     result.draw_subtitle()
 
     assert backend.requests == []
@@ -1753,7 +1749,6 @@ def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Pa
 
 
 def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -> None:
-    from saitenka.runtime import EffectOutcome
 
     result, ipc, _backend = _correlated_reader(tmp_path)
     result.set_subtitle("猫を見る")
@@ -1845,7 +1840,6 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result._sub_pending = None
     original_boxes = list(result.boxes)
     result._observing = True
     result._playback = result._projection.seed_all(result._playback, ipc.props)
@@ -1878,7 +1872,6 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result._sub_pending = None
     native_boxes = list(result.boxes)
     result._observing = True
     result._playback = result._projection.seed_all(result._playback, ipc.props)
@@ -3058,7 +3051,6 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result._sub_pending = None
     ipc.command(
         "set_property",
         "sub-visibility",
@@ -3085,7 +3077,6 @@ def _establish_native(result: SessionController, ipc: FakeIPC, sid: int) -> Nati
     ipc.props["sid"] = sid
     result.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    result._sub_pending = None
     result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
     assert renderer.ownership_state.native_pixels_established
     return renderer
@@ -3137,7 +3128,6 @@ def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path
     ipc.set_property_exception = OSError("pipe closed")
 
     result.set_subtitle("猫を見る")
-    result._sub_pending = None
     result.draw_subtitle()
 
     assert result.boxes
@@ -3251,7 +3241,6 @@ def test_rejected_legacy_rehandoff_keeps_mpv_visible_and_retries(tmp_path: Path)
     assert isinstance(renderer, NativeVisibleRenderer)
     ipc.set_property_exception = OSError("pipe closed")
     result.set_subtitle("猫を見る")
-    result._sub_pending = None
     result.draw_subtitle()
     assert renderer.ownership_state.owner.value == "legacy"
     ipc.set_property_exception = None

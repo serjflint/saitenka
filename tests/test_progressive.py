@@ -402,7 +402,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
 
     assert reader.pump() is True
     assert dispatched == [True]
-    assert reader.tokens == [] and reader._sub_pending == "猫"
+    assert reader.tokens == [] and reader.annotation_controller.view.pending_text == "猫"
     assert dictionary.thread_id != threading.get_ident()
 
     dictionary.release.set()
@@ -413,7 +413,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
         time.sleep(0.001)
     try:
         assert [token.surface for token in reader.tokens] == ["猫"]
-        assert reader._sub_pending is None
+        assert reader.annotation_controller.view.pending_text is None
     finally:
         dictionary.release.set()
         reader.close()

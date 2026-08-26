@@ -51,7 +51,7 @@ internal modules with explicit dependency contracts, not independently published
   without constructing a `SessionController`.
 - **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
   mpv mutation and cross-feature ordering, while `app/features/` packages own feature state and
-  policy. Tooltip, profile, mining, and analysis controllers live under their corresponding feature
+  policy. Tooltip, profile, mining, analysis, and cue-annotation controllers live under their corresponding feature
   packages.
   `app/interaction/` contains shared lower-level interaction contracts; it has no runtime dependency
   on features or session composition. `app/session/` owns assembly, routing, lifecycle, and explicit cross-feature
@@ -68,6 +68,7 @@ internal modules with explicit dependency contracts, not independently published
   dictionary DB); `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring);
   `anki.py` plus `features/mining/` (mining + optional word-pronunciation audio);
   `features/analysis/` plus `render/analysis.py` (cached whole-track metrics and their background UI);
+  `features/annotation/` (cue annotation identity, work, cache, and degradation policy);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py` (subtitle fetching).
 - **`runtime/`** — the session runtime: closed events/effects, bounded mailbox lanes with reserved
@@ -193,8 +194,8 @@ protocol-shaped class from being mistaken for production swappability.
 ## Interactive startup and cue annotation
 
 Dependency construction already runs outside the reader loop. Publication swaps the completed
-collaborators on the tick thread, then sends cue annotation to one priority worker; it never performs
-tokenizer, dictionary, or scorer work inline. The work key identifies reusable semantics, while a
+collaborators on the owner thread, then `CueAnnotationController` admits work to one priority worker;
+the no-runtime seam resolves through the same owner synchronously. The work key identifies reusable semantics, while a
 separate cue waiter carries timing and presentation identity, so the same computation can serve a
 newer current cue without allowing an old result to restore stale interaction.
 
@@ -211,13 +212,15 @@ cue change ──> retire tokens/boxes ──> plain or mpv-authored pixels
                                     │                 │
                                   stale             current
                                     │                 │
-                                 discard      tokens/styles/boxes
+                                 discard       tokens/styles
 ```
 
 The early tokenizer warm has a retained completion handle. The annotation worker waits for it before
 its first tokenizer call, preventing two concurrent initializations; demo and screenshot sessions use
 the same coordinator but deliberately wait before hovering or capturing. Native subtitle geometry
 lookahead also resolves tokenization through this worker rather than creating another annotation path.
+The controller exposes a frozen `AnnotationView`; consumers sample it through a narrow protocol rather
+than receiving the mutable cache or closures back into `SessionController`.
 
 Startup readiness is independent of cue readiness. `run` owns an asynchronous mpv breadcrumb request;
 `attach` owns none. After observers and key bindings are installed, the first successful full poll marks

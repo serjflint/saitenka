@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from saitenka.app.cue_annotation import (
+from saitenka.app.features.annotation.jobs import (
     AnnotationDisposition,
     AnnotationResult,
     AnnotationWorkKey,
@@ -37,7 +37,15 @@ def result(
     cue: TokenizedCue | None = CUE,
     error: Exception | None = None,
 ) -> AnnotationResult:
-    return AnnotationResult(key, identity, cue, error, 0.0, 0.0)
+    return AnnotationResult(
+        key=key,
+        identity=identity,
+        cue=cue,
+        complete=True,
+        error=error,
+        queue_wait_ms=0.0,
+        work_ms=0.0,
+    )
 
 
 def decide(

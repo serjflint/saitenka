@@ -7,7 +7,7 @@ from concurrent.futures import Future
 
 import pytest
 
-from saitenka.app.cue_annotation import (
+from saitenka.app.features.annotation.jobs import (
     AnnotationExecutionResult,
     AnnotationExecutor,
     AnnotationInputs,
@@ -73,8 +73,87 @@ class _FailingTokenizer(_Tokenizer):
         raise RuntimeError("secret subtitle text")
 
 
-def _inputs(text: str, tokenizer=None, *, scorer=None, exists=None) -> AnnotationInputs:
+def _exists(_forms):
+    return set()
+
+
+def _inputs(text: str, tokenizer=None, *, scorer=None, exists=_exists) -> AnnotationInputs:
     return AnnotationInputs(text, tokenizer or _Tokenizer(), exists, scorer)
+
+
+def test_retiring_episode_work_drops_a_late_result_instead_of_caching_it() -> None:
+    tokenizer = _Tokenizer()
+    executor = AnnotationExecutor()
+    admitted = deque()
+
+    def submit(**kwargs) -> bool:
+        admitted.append(kwargs)
+        return True
+
+    coordinator = CueAnnotationCoordinator(executor=executor, submitter=submit)
+    key = _key("old episode")
+    coordinator.submit(
+        key,
+        _inputs("old episode", tokenizer),
+        priority=AnnotationPriority.EPISODE,
+    )
+
+    coordinator.cancel_priority(AnnotationPriority.EPISODE)
+    old = admitted.popleft()
+    old["on_finished"](
+        EffectFinished(
+            EffectId(1),
+            old["owner"],
+            old["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=executor.run(old["request"], threading.Event()),
+        )
+    )
+
+    assert coordinator.cached(key) is None
+    assert coordinator.pending_count() == 0
+    coordinator.close()
+
+
+def test_current_request_reclaims_cancelled_same_key_episode_work() -> None:
+    tokenizer = _Tokenizer()
+    executor = AnnotationExecutor()
+    admitted = deque()
+    results = deque()
+
+    def submit(**kwargs) -> bool:
+        admitted.append(kwargs)
+        return True
+
+    coordinator = CueAnnotationCoordinator(
+        executor=executor,
+        submitter=submit,
+        on_result=results.append,
+    )
+    key = _key("shared cue")
+    inputs = _inputs("shared cue", tokenizer)
+    coordinator.submit(key, inputs, priority=AnnotationPriority.EPISODE)
+    coordinator.cancel_priority(AnnotationPriority.EPISODE)
+    coordinator.submit(
+        key,
+        inputs,
+        priority=AnnotationPriority.CURRENT,
+        waiter=_identity("shared cue"),
+    )
+
+    shared = admitted.popleft()
+    shared["on_finished"](
+        EffectFinished(
+            EffectId(1),
+            shared["owner"],
+            shared["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=executor.run(shared["request"], threading.Event()),
+        )
+    )
+
+    assert results.popleft().cue is coordinator.cached(key)
+    coordinator.close()
 
 
 class _SerialSubmitter:

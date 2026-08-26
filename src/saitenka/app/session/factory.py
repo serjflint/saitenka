@@ -45,6 +45,7 @@ def create_session_controller(
         ipc,
         resolved_options,
         runtime_submit=ipc.submit_runtime_mpv,
+        tokenizer_warm=tokenizer_warm,
     )
     return SessionController(
         ipc,
