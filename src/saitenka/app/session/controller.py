@@ -31,7 +31,6 @@ import saitenka.app.session.resources as session_resources
 import saitenka.app.session.runtime as session_runtime
 from saitenka import otel_metrics
 from saitenka.app import (
-    analysis_overlay,
     backlog,
     cue_annotation,
     episode_reslot,
@@ -57,6 +56,7 @@ from saitenka.app.bindings import (
 )
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.config import ReaderOptions
+from saitenka.app.features.analysis.analysis_controller import AnalysisInputs
 from saitenka.app.features.mining import mine_intents, miner
 from saitenka.app.features.mining.mine_adapter import (
     BookmarkCommandEndpoint,
@@ -462,6 +462,7 @@ class SessionController:
         self.lifecycle_surfaces = assembly.surfaces
         self.screen = assembly.screen
         self.help_controller = assembly.help
+        self.analysis_controller = assembly.analysis
         self.picker_controller = assembly.picker
         self.sidebar_controller = assembly.sidebar
         self.preview_controller = assembly.preview
@@ -482,7 +483,6 @@ class SessionController:
             self.screen,
             self.lifecycle_timers,
         )
-        self._analysis_submit = analysis_overlay.configure_runtime_job(ipc)
         self._subtitle_fetch_submit = subtitle_modes.configure_runtime_job(ipc)
         self._subtitle_fetch_sequence = 0
         self._subtitle_force_select_revision = 0
@@ -672,6 +672,7 @@ class SessionController:
                 notify=lambda text, kind: self.toast(text, kind),
             ),
         )
+        self.analysis_commands = self.analysis_controller.endpoint(self._analysis_inputs)
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
         # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
@@ -683,7 +684,6 @@ class SessionController:
         # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
-        self.analysis = analysis_overlay.AnalysisState()
         self.mining_controller = self._assemble_mining_controller(mining_identity, anki, mine_cfg)
         self.profile_dependencies = reader_deps.ProfileDependencies(
             mining_identity,
@@ -1009,7 +1009,7 @@ class SessionController:
             playback=self._playback_store,
             property_value=self.property_value,
             notifications=self.notifications,
-            invalidate=self.invalidate_analysis,
+            invalidate=self.analysis_commands.invalidate,
             translation_visible=self.translation_visible,
             rebuild_index=self.rebuild_sub_index,
             install_cue=self.set_subtitle,
@@ -1943,7 +1943,7 @@ class SessionController:
             backlog_exists=self.session.backlog_store is not None or backlog.db_path().exists(),
             scorer=self.scorer,
             tokenizer=self.profile_controller.tokenizer,
-            analysis=self.analysis.current,
+            analysis=self.analysis_controller.result,
             can_mine=self.mining_controller.configured,
         )
 
@@ -2719,7 +2719,7 @@ class SessionController:
         )
         panel = PanelCommandCoordinator(
             PanelCommandPorts(
-                analysis=self.analysis,
+                analysis=self.analysis_commands,
                 surfaces=self.lifecycle_surfaces,
                 sidebar=self.sidebar_controller,
                 picker=self.picker_controller,
@@ -2728,7 +2728,6 @@ class SessionController:
                 show_sidebar=self._show_sidebar_command,
                 hide_sidebar=self._hide_sidebar_command,
                 open_picker=self._open_picker_command,
-                set_analysis_open=self.set_analysis_open,
             )
         )
         session = SessionCommandCoordinator(
@@ -2994,7 +2993,7 @@ class SessionController:
             ),
             secondary_sid=self._get("secondary-sid"),
             ipc=self.ipc,
-            invalidate=self.invalidate_analysis,
+            invalidate=self.analysis_commands.invalidate,
         )
 
     # --- what HoverHost reads and calls ------------------------------------------------
@@ -3036,46 +3035,14 @@ class SessionController:
         """What the card preview is showing. Read-only, like the other three."""
         return self.preview_controller.state
 
-    # --- episode analysis: state module, executed here ------------------------------------------
-    def _draw_analysis(self) -> None:
-        if not self.analysis.open:
-            return
-        image = analysis_overlay.panel_image(
-            self.analysis,
-            osd=self.osd,
-            close_key=self.keys.analysis_key,
-            scale=self.chrome_scale,
-        )
-        x = (self.osd[0] - image.width) // 2
-        y = (self.osd[1] - image.height) // 2
-        self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.ANALYSIS)
-
-    def _refresh_analysis(self) -> None:
-        """Bring the analysis up to date and show it. Presenting is the host's, deciding is not."""
-        analysis_overlay.request(
-            self.analysis,
+    def _analysis_inputs(self) -> AnalysisInputs:
+        return AnalysisInputs(
             language=self.subtitle_language,
             index=self.episode.sub_index,
             loading=self._loading,
             scorer=self.scorer,
             tokenizer=self.profile_controller.tokenizer,
         )
-        self._draw_analysis()
-        if analysis_overlay.submit_pending(
-            self.analysis, self._analysis_submit, self._finish_analysis
-        ):
-            self._draw_analysis()
-
-    def set_analysis_open(self, *, open: bool) -> None:  # noqa: A002
-        self.analysis.open = open
-        if not open:
-            self.lifecycle_surfaces.remove(OverlayId.ANALYSIS)
-            return
-        self._refresh_analysis()
-
-    def invalidate_analysis(self, *, vocabulary_changed: bool = False) -> None:
-        analysis_overlay.invalidate(self.analysis, vocabulary_changed=vocabulary_changed)
-        self._refresh_analysis()
 
     # --- help overlay: the slice decides, this performs ----------------------------------------
     @property
@@ -3233,7 +3200,7 @@ class SessionController:
             if self.sub_text.strip():
                 self.draw_subtitle()
             self.help_controller.redraw()
-            self._draw_analysis()
+            self.analysis_controller.redraw()
             # row capacity changed, so the active row may need re-centring
             sidebar.follow(self.sidebar_view)
 
@@ -3243,15 +3210,6 @@ class SessionController:
                 self._tts_ok = bool(self._tts_capability.value)
             self._tts_capability.request()
         self.mining_controller.refresh_capability()
-
-    def _finish_analysis(self, completion: EffectFinished) -> None:
-        changed = analysis_overlay.finish(self.analysis, completion)
-        if completion.outcome is not EffectOutcome.REJECTED:
-            changed |= analysis_overlay.submit_pending(
-                self.analysis, self._analysis_submit, self._finish_analysis
-            )
-        if changed:
-            self._draw_analysis()
 
     def _request_interaction_metadata(self, request) -> bool:
         return self.tooltip_controller.request_metadata(request, self._finish_interaction_metadata)
@@ -3745,7 +3703,7 @@ class SessionController:
             cue_retired=lambda: self._cue_retired,
             draw_cue=self.set_subtitle,
             replace_source=self._replace_subtitle_source,
-            invalidate=self.invalidate_analysis,
+            invalidate=self.analysis_commands.invalidate,
             open_settle=self.open_settle_window,
             retire_settle=self.retire_settle_window,
             warm_tokens=self.warm_episode_tokens,
@@ -3892,7 +3850,7 @@ class SessionController:
 
     def _dependencies_arrived(self) -> None:
         """Everything that has to hear about a new vocabulary, in the order it has to hear it."""
-        self.invalidate_analysis(vocabulary_changed=True)
+        self.analysis_commands.invalidate(vocabulary_changed=True)
         self._dependencies_changed()
         self.start_prefetch()  # prefetch can spin up now (no-op while dict_set is still None)
         self.warm_episode_tokens()  # deps landed after the index built → warm this episode's cues
@@ -4262,7 +4220,7 @@ class SessionController:
                     lane("capabilities"),
                     lane("interaction-metadata"),
                     lane("mined-seed"),
-                    lane("episode-analysis"),
+                    lambda: self.analysis_controller.close_lane(self._lane_remaining()),
                 ),
                 strict=True,
             )
@@ -4317,7 +4275,7 @@ class SessionController:
     def finish_session_stats(self) -> str | None:
         """Close the current episode's row and retire the recorder. Idempotent."""
         recorder, self.episode.session_recorder = self.episode.session_recorder, None
-        return session_stats.finish(recorder, self.analysis.current)
+        return session_stats.finish(recorder, self.analysis_controller.result)
 
     def _clear_subtitle_pixels(self) -> None:
         """The native path clears through the pipeline; the legacy path has nothing to clear."""

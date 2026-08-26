@@ -212,3 +212,9 @@ def analysis_key(index: CueIndex, scorer: Scorer | None) -> AnalysisKey:
     )
     vocabulary = _digest((known, tuple(sorted(scorer.known.readings)), fsrs))
     return AnalysisKey(subtitle, vocabulary)
+
+
+def cue_result(result: EpisodeAnalysis | None, cue_index: int) -> CueAnalysis | None:
+    if result is None or not 0 <= cue_index < len(result.cues):
+        return None
+    return result.cues[cue_index]

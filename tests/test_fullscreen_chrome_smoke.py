@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 import util
 
+from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.features.sidebar import sidebar
 from saitenka.app.session.assembly import build_session_assembly
@@ -100,10 +101,7 @@ def _draw_sidebar(r: SessionController) -> None:
 
 
 def _draw_stats(r: SessionController) -> None:
-    r.analysis.open = (
-        True  # current=None → the "Analyzing…" status panel; enough to size the overlay
-    )
-    r._draw_analysis()
+    r._handle(ANALYSIS_MSG)
 
 
 CHROME = [("help", _draw_help), ("sidebar", _draw_sidebar), ("stats", _draw_stats)]

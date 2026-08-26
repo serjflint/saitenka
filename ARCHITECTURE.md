@@ -51,7 +51,8 @@ internal modules with explicit dependency contracts, not independently published
   without constructing a `SessionController`.
 - **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
   mpv mutation and cross-feature ordering, while `app/features/` packages own feature state and
-  policy. Tooltip, profile, and mining controllers live under their corresponding feature packages.
+  policy. Tooltip, profile, mining, and analysis controllers live under their corresponding feature
+  packages.
   `app/interaction/` contains shared lower-level interaction contracts; it has no runtime dependency
   on features or session composition. `app/session/` owns assembly, routing, lifecycle, and explicit cross-feature
   conjunctions. These directions and the declared feature-package inventory are gated.
@@ -66,7 +67,7 @@ internal modules with explicit dependency contracts, not independently published
   admission and application; `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
   dictionary DB); `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring);
   `anki.py` plus `features/mining/` (mining + optional word-pronunciation audio);
-  `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
+  `features/analysis/` plus `render/analysis.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py` (subtitle fetching).
 - **`runtime/`** — the session runtime: closed events/effects, bounded mailbox lanes with reserved

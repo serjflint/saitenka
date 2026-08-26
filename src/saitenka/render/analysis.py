@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw
 from saitenka import fonts
 
 if TYPE_CHECKING:
-    from saitenka.app.episode_analysis import EpisodeAnalysis
+    from saitenka.app.features.analysis.episode_analysis import EpisodeAnalysis
 
 BG = (13, 18, 26, 248)
 ROW_BG = (25, 33, 45, 235)
