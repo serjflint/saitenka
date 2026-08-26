@@ -66,6 +66,19 @@ class CueCommandState(StrEnum):
 CommandRejection = CommandReason
 
 
+def merge_command_handlers(
+    *groups: Mapping[str, Callable[[], object]],
+) -> dict[str, Callable[[], object]]:
+    """Join independently closed command families without silent replacement."""
+    merged: dict[str, Callable[[], object]] = {}
+    for group in groups:
+        duplicate = merged.keys() & group.keys()
+        if duplicate:
+            raise ValueError(f"command handler already registered: {sorted(duplicate)!r}")
+        merged.update(group)
+    return merged
+
+
 @dataclass(frozen=True, slots=True)
 class CommandSpec:
     name: str
@@ -297,7 +310,7 @@ class CommandExecutor:
 
     def __init__(
         self,
-        handlers: Mapping[str, Callable[[], None]],
+        handlers: Mapping[str, Callable[[], object]],
         *,
         policy: CommandPolicy | None = None,
     ) -> None:

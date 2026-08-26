@@ -644,9 +644,11 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     toasts = []
-    monkeypatch.setattr(r, "toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
+    monkeypatch.setattr(
+        r.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
+    )
     monkeypatch.setattr(r, "_mark_mined", lambda _expr: None)  # skip the view refresh
-    r._stateless.run(mine_intents.MineCommand.EPISODE)
+    r._stateless_commands.run(mine_intents.MineCommand.EPISODE)
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
     assert any("mined" in t for t in toasts)
 

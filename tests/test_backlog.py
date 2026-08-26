@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import util
 from util import keybind_registry
 
+from saitenka.app import bindings as app_bindings
 from saitenka.app.backlog import BacklogStore, Capture, normalize_match_name
 from saitenka.app.session.controller import SessionController
 from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
@@ -191,9 +192,9 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     reader.session.backlog_store = store
     captures = []
     reader.episode.session_recorder = SimpleNamespace(record_capture=lambda: captures.append(True))
-    monkeypatch.setattr(reader, "toast", lambda *_args: None)
+    monkeypatch.setattr(reader.notifications, "show", lambda *_args: None)
 
-    reader.toggle_bookmark()
+    reader._handle(app_bindings.BOOKMARK_MSG)
 
     entry = store.entries_for_path(video)[0]
     assert (entry.cue_start, entry.cue_end, entry.jp_text, entry.en_text) == (
@@ -219,7 +220,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     }
     assert (entry.hovered_surface, entry.hovered_lemma) == ("日本", "日本")
     assert captures == [True]
-    reader.toggle_bookmark()
+    reader._handle(app_bindings.BOOKMARK_MSG)
     assert captures == [True]
     forbidden = {"seek", "sub-seek", "set_property", "screenshot-to-file"}
     assert not any(command[0] in forbidden for command in ipc.commands)
@@ -243,9 +244,9 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
     reader.sub_text = "English line"
     store = BacklogStore(tmp_path / "reader.sqlite")
     reader.session.backlog_store = store
-    monkeypatch.setattr(reader, "toast", lambda *_args: None)
+    monkeypatch.setattr(reader.notifications, "show", lambda *_args: None)
 
-    reader.toggle_bookmark()
+    reader._handle(app_bindings.BOOKMARK_MSG)
 
     entry = store.entries_for_path(video)[0]
     assert (entry.jp_text, entry.en_text) == ("日本語", "English line")
@@ -255,10 +256,11 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
 def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
     ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
     reader = SessionController(ipc)
+    reader.sub_text = "日本語"
     shown = []
-    monkeypatch.setattr(reader, "toast", lambda *args: shown.append(args))
+    monkeypatch.setattr(reader.notifications, "show", lambda *args: shown.append(args))
 
-    reader.toggle_bookmark()
+    reader._handle(app_bindings.BOOKMARK_MSG)
 
     assert reader.session.backlog_store is None
     assert shown == [("no active cue to bookmark", "warn")]

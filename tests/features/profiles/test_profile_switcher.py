@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, keybind_registry, press, runtime_gateway
 
+from saitenka.app import bindings as app_bindings
 from saitenka.app.features.profiles.profile_controller import ProfileSwitchStatus
 from saitenka.app.features.tooltip import prefetch
 from saitenka.app.languages import MAIN_LANG, ReaderLanguages
@@ -109,7 +110,7 @@ def test_cycle_is_a_noop_with_a_single_profile(request):
         reader.profile_controller.profile,
     )
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     assert (
         reader.profile_controller.tokenizer.name,
@@ -191,7 +192,7 @@ def test_cycle_clears_the_token_cache_so_stale_segmentation_cannot_leak(request)
     reader.token_cache.put("本", TokenizedCue(lines=[[tok]], tokens=[tok], styles=None))
     assert len(reader.token_cache) == 1
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     assert len(reader.token_cache) == 0
 
@@ -210,7 +211,7 @@ def test_cycle_selects_the_new_profiles_language_track(request, monkeypatch):
     retokenized: list[bool] = []
     monkeypatch.setattr(reader, "_retokenize_current_cue", lambda: retokenized.append(True))
 
-    reader.cycle_profile()  # → fr
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)  # → fr
 
     assert ("set_property", "sid", 6) in reader.ipc.commands  # the fr track is now primary
     assert reader.subtitle_slang == "fr"
@@ -234,7 +235,9 @@ def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_t
     notices: list[tuple[str, str]] = []
     monkeypatch.setattr(reader, "_retokenize_current_cue", lambda: retokenized.append(True))
     monkeypatch.setattr(
-        reader, "toast", lambda text, kind="ok", _seconds=2.8: notices.append((text, kind))
+        reader.notifications,
+        "show",
+        lambda text, kind="ok", _seconds=2.8: notices.append((text, kind)),
     )
 
     outcome = reader.profile_controller.switch_to(1)  # fr, but the file has no fr track
@@ -254,7 +257,7 @@ def test_same_track_switch_retokenizes_the_current_cue(request, monkeypatch):
     retokenized: list[bool] = []
     monkeypatch.setattr(reader, "_retokenize_current_cue", lambda: retokenized.append(True))
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     assert retokenized == [True]
 
@@ -273,10 +276,12 @@ def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request):
     reader.osd = (1280, 720)
     reader.ipc.props["track-list"] = _JA_FR_TRACKS
 
-    reader.cycle_profile()  # → fr (sid 6)
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)  # → fr (sid 6)
     assert reader.subtitle_slang == "fr"
 
-    reader.cycle_profile()  # wraps → JP default; effective slang = base_slang "jpn" → the jpn track
+    reader._handle(
+        app_bindings.PROFILE_CYCLE_MSG
+    )  # wraps → JP default; effective slang = base_slang "jpn" → the jpn track
 
     assert reader.subtitle_slang == "jpn"
     assert ("set_property", "sid", 1) in reader.ipc.commands
@@ -293,7 +298,9 @@ def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror(requ
     reader.ipc.props["secondary-sid"] = 6  # the EN translation is currently revealed
     reader.declare_subtitle(SubtitleSecondaryLeased(6))
 
-    reader.cycle_profile()  # → fr, re-selects the track (configure runs mid-session)
+    reader._handle(
+        app_bindings.PROFILE_CYCLE_MSG
+    )  # → fr, re-selects the track (configure runs mid-session)
 
     assert reader._translation_secondary_sid is None  # mirror cleared → reveal can re-establish
     assert ("set_property", "secondary-sid", "no") in reader.ipc.commands
@@ -307,7 +314,9 @@ def test_cycle_reverts_atomically_when_the_new_tokenizer_is_unknown(request):
     tokenizer keeps the old profile fully intact — no half-applied identity."""
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _BROKEN])
 
-    reader.cycle_profile()  # _BROKEN.tokenizer 'nonexistent' is not registered
+    reader._handle(
+        app_bindings.PROFILE_CYCLE_MSG
+    )  # _BROKEN.tokenizer 'nonexistent' is not registered
 
     assert reader.profile_controller.profile is DEFAULT_PROFILE  # unchanged
     assert (
@@ -331,7 +340,7 @@ def test_cycle_reverts_atomically_when_dictionary_rescope_fails(request):
 
     reader.profile_controller.configure_cycle([DEFAULT_PROFILE, _FR], fail_scope)
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     assert reader.profile_controller.profile is DEFAULT_PROFILE
     assert reader.profile_controller.tokenizer.name == "unidic"
@@ -349,7 +358,7 @@ def test_late_dependency_result_cannot_overwrite_selected_profile(request):
     active_dicts = object()
     late_launch_dicts = object()
     reader.profile_controller.configure_cycle([DEFAULT_PROFILE, _FR], lambda _p: active_dicts)
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
     reader.profile_dependencies.select(_FR)
 
     reader._apply_deps(
@@ -396,7 +405,7 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
         mining_spec_for=spec_for,
     )
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     selected = reader.mining_controller.desired_spec.identity
     assert selected.profile == _FR.name
@@ -477,7 +486,7 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
     )
     assert reader.mining_controller.active_target is not None
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     assert reader.profile_controller.profile is _FR
     assert reader.mining_controller.desired_spec.enabled is False

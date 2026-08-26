@@ -2,67 +2,66 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import saitenka.app.session.intents as session_intents
 from saitenka.app import subtitle_modes
 from saitenka.app.intents import DismissHover
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.overlay import Overlay
-    from saitenka.app.subtitle_modes import TrackPorts
+    from saitenka.app.subtitle_adapter import SubtitleTrackCoordinator
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.subtitle_render import SubtitleTarget
 
 
-class SessionHost(Protocol):
-    """This feature's whole host coupling. See `PanelHost` for why it is spelled out."""
+@dataclass(frozen=True, slots=True)
+class SessionCommandPorts:
+    """Authorities participating in overlay visibility and translation restoration."""
 
-    ov: Overlay
-    lifecycle_surfaces: LifecycleSurfaces
+    overlay: Overlay
+    surfaces: LifecycleSurfaces
     subtitle_pipeline: SubtitleModeCoordinator
-    tooltip_controller: TooltipController
-
-    @property
-    def track_ports(self) -> TrackPorts: ...
-
-    def translation_wanted(self) -> bool: ...
-
-    def teardown_tip(self) -> None: ...
-
-    def subtitle_target(self) -> SubtitleTarget: ...
-
-    def setup_secondary(self) -> int | None: ...
-
-    def draw_translation(self) -> None: ...
+    tooltip: TooltipController
+    track: SubtitleTrackCoordinator
+    translation_wanted: Callable[[], bool]
+    teardown_tip: Callable[[], None]
+    subtitle_target: Callable[[], SubtitleTarget]
+    setup_secondary: Callable[[], int | None]
+    draw_translation: Callable[[], None]
 
 
-class SessionAdapter:
-    def __init__(self, host: SessionHost) -> None:
-        self._host = host
+class SessionCommandCoordinator:
+    """Apply session-wide overlay and subtitle conjunctions in reducer order."""
+
+    def __init__(self, ports: SessionCommandPorts) -> None:
+        self._ports = ports
 
     def inputs(self) -> session_intents.SessionInputs:
-        host = self._host
+        ports = self._ports
         return session_intents.SessionInputs(
-            overlay_visible=host.ov.visible,
-            translation_wanted=host.translation_wanted(),
+            overlay_visible=ports.overlay.visible,
+            translation_wanted=ports.translation_wanted(),
         )
 
     def apply(self, effect: session_intents.SessionEffect, /) -> None:
-        host = self._host
+        ports = self._ports
         if isinstance(effect, DismissHover):
-            host.tooltip_controller.retire_selection()
-            host.teardown_tip()
+            ports.tooltip.retire_selection()
+            ports.teardown_tip()
         elif isinstance(effect, session_intents.SetSurfacesVisible):
-            host.lifecycle_surfaces.set_visible(visible=effect.visible)
+            ports.surfaces.set_visible(visible=effect.visible)
         elif isinstance(effect, session_intents.ReleaseSecondarySubtitles):
-            subtitle_modes.release_secondary(host.track_ports)
+            subtitle_modes.release_secondary(ports.track.ports())
         elif isinstance(effect, session_intents.SuspendSubtitles):
-            host.subtitle_pipeline.suspend_for_overlay(host.subtitle_target())
+            ports.subtitle_pipeline.suspend_for_overlay(ports.subtitle_target())
         elif isinstance(effect, session_intents.ResumeSubtitles):
-            host.subtitle_pipeline.resume_after_overlay(host.subtitle_target())
+            ports.subtitle_pipeline.resume_after_overlay(ports.subtitle_target())
         elif isinstance(effect, session_intents.ShowTranslation):
-            host.setup_secondary()
-            host.draw_translation()
+            ports.setup_secondary()
+            ports.draw_translation()

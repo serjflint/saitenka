@@ -161,16 +161,28 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
 def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypatch):
     """The #244 flagship at the firing level: register while anki=None (attach mode), then press the
     mine key — it must reach the mining command route without re-registering the binding."""
-    from saitenka.app.features.mining.mine_intents import MineCommand
+    from saitenka.app.anki import MineConfig
+    from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 
     ipc = FakeIPC()
     r = SessionController(ipc, anki=None)
     r._register_keybinds()  # bound while the dep is down
-    calls: list[object] = []
-    monkeypatch.setattr(r._stateless, "run", calls.append)
+    config = MineConfig()
+    identity = r.mining_controller.desired_spec.identity
+    r.mining_controller.select_mining_spec(
+        MiningSpec(identity, {"deck": config.deck, "model": config.model})
+    )
+    assert r.mining_controller.publish_mining_target(MiningTarget(identity, object(), config))
+    monkeypatch.setattr(r.mining_controller, "mine_target", lambda: 0)
+    calls: list[tuple[int, object]] = []
+    monkeypatch.setattr(
+        r.mining_controller,
+        "mine_index",
+        lambda index, **kwargs: calls.append((index, kwargs["animated"])),
+    )
     press(r, ipc, r.keys.mine_key)
 
-    assert calls == [MineCommand.WORD]
+    assert calls == [(0, None)]
 
 
 def test_pressing_an_unbound_key_raises_so_the_fake_cant_pass_silently():

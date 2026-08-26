@@ -21,6 +21,40 @@ from saitenka.app import (
     subtitle_intents,
     telemetry,
 )
+from saitenka.app.bindings import (
+    ANALYSIS_MSG,
+    ANNOTATION_MSG,
+    BOOKMARK_MSG,
+    CLICK_MSG,
+    COPY_CLICK_MSG,
+    COPY_LINE_MSG,
+    COPY_MSG,
+    HOVER_PAUSE_MSG,
+    KANJI_MSG,
+    MINE_ALL_MSG,
+    MINE_MSG,
+    MINE_VIDEO_MSG,
+    OVERLAY_TOGGLE_MSG,
+    PREVIEW_CLOSE_MSG,
+    PREVIEW_MSG,
+    PROFILE_CYCLE_MSG,
+    SCROLL_DOWN_MSG,
+    SCROLL_UP_MSG,
+    SIDEBAR_MSG,
+    SPEAK_MSG,
+    SUB_ANCHOR_MSG,
+    SUB_NEXT_MSG,
+    SUB_PICKER_MSG,
+    SUB_PREV_MSG,
+    SUB_REPLAY_MSG,
+    SUBTITLE_LANGUAGE_MSG,
+    SUBTITLE_MARK_JP_MSG,
+    SUBTITLE_RETRY_MSG,
+    TIP_CLOSE_MSG,
+    TIP_DOWN_MSG,
+    TIP_UP_MSG,
+    TRANS_MSG,
+)
 from saitenka.app.feature_bindings import (
     INTERACTION_OWNER_PLAN,
     INTERACTION_STATEFUL_BINDINGS,
@@ -30,7 +64,7 @@ from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.profiles import profile_intents
 from saitenka.app.features.tooltip import hover_intents
 from saitenka.app.session import interaction_intents, panel_intents
-from saitenka.app.session.stateless import bind_stateless
+from saitenka.app.session.stateless import StatelessCommandRegistration, bind_stateless
 from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
@@ -105,14 +139,14 @@ from saitenka.runtime.user_command import COMMAND_FEATURE, CommandIntake, reduce
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.features.mining.mine_adapter import MineAdapter
-    from saitenka.app.features.profiles.profile_adapter import ProfileAdapter
-    from saitenka.app.features.tooltip.hover_adapter import HoverAdapter
-    from saitenka.app.session.adapter import SessionAdapter
-    from saitenka.app.session.interaction_adapter import InteractionAdapter
-    from saitenka.app.session.panel_adapter import PanelAdapter
+    from saitenka.app.features.mining.mine_adapter import MineCommandCoordinator
+    from saitenka.app.features.profiles.profile_adapter import ProfileCommandEndpoint
+    from saitenka.app.features.tooltip.hover_adapter import HoverCommandCoordinator
+    from saitenka.app.session.adapter import SessionCommandCoordinator
+    from saitenka.app.session.interaction_adapter import InteractionCommandCoordinator
+    from saitenka.app.session.panel_adapter import PanelCommandCoordinator
     from saitenka.app.session.stateless import InstalledStatelessBinding
-    from saitenka.app.subtitle_adapter import SubtitleAdapter
+    from saitenka.app.subtitle_adapter import SubtitleCommandCoordinator
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.effects import CoreControl, Effect
@@ -583,13 +617,13 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
 
 
 def stateless_features(
-    hover: HoverAdapter,
-    mine: MineAdapter,
-    panel: PanelAdapter,
-    profile: ProfileAdapter,
-    session: SessionAdapter,
-    subtitle: SubtitleAdapter,
-    interaction: InteractionAdapter,
+    hover: HoverCommandCoordinator,
+    mine: MineCommandCoordinator,
+    panel: PanelCommandCoordinator,
+    profile: ProfileCommandEndpoint,
+    session: SessionCommandCoordinator,
+    subtitle: SubtitleCommandCoordinator,
+    interaction: InteractionCommandCoordinator,
 ) -> tuple[InstalledStatelessBinding, ...]:
     """The stateless half's route table — the counterpart to the reducer routes above.
 
@@ -613,3 +647,53 @@ def stateless_features(
             interaction,
         ),
     )
+
+
+STATELESS_COMMANDS = (
+    StatelessCommandRegistration(
+        SUBTITLE_LANGUAGE_MSG, subtitle_intents.SubtitleCommand.TOGGLE_LANGUAGE
+    ),
+    StatelessCommandRegistration(
+        SUBTITLE_MARK_JP_MSG, subtitle_intents.SubtitleCommand.MARK_CURRENT_JAPANESE
+    ),
+    StatelessCommandRegistration(
+        SUBTITLE_RETRY_MSG, subtitle_intents.SubtitleCommand.RETRY_ACQUISITION
+    ),
+    StatelessCommandRegistration(
+        ANNOTATION_MSG, subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE
+    ),
+    StatelessCommandRegistration(TRANS_MSG, subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION),
+    StatelessCommandRegistration(COPY_LINE_MSG, subtitle_intents.SubtitleCommand.COPY_LINE),
+    StatelessCommandRegistration(SUB_PREV_MSG, subtitle_intents.SubtitleCommand.NAVIGATE_PREVIOUS),
+    StatelessCommandRegistration(SUB_NEXT_MSG, subtitle_intents.SubtitleCommand.NAVIGATE_NEXT),
+    StatelessCommandRegistration(SUB_REPLAY_MSG, subtitle_intents.SubtitleCommand.REPLAY_CUE),
+    StatelessCommandRegistration(SUB_ANCHOR_MSG, subtitle_intents.SubtitleCommand.ANCHOR_TIMING),
+    StatelessCommandRegistration(SPEAK_MSG, hover_intents.HoverCommand.SPEAK),
+    StatelessCommandRegistration(COPY_MSG, hover_intents.HoverCommand.COPY),
+    StatelessCommandRegistration(KANJI_MSG, hover_intents.HoverCommand.KANJI),
+    StatelessCommandRegistration(HOVER_PAUSE_MSG, hover_intents.HoverCommand.TOGGLE_PAUSE),
+    StatelessCommandRegistration(MINE_MSG, mine_intents.MineCommand.WORD),
+    StatelessCommandRegistration(MINE_VIDEO_MSG, mine_intents.MineCommand.WORD_VIDEO),
+    StatelessCommandRegistration(MINE_ALL_MSG, mine_intents.MineCommand.EPISODE),
+    StatelessCommandRegistration(BOOKMARK_MSG, mine_intents.MineCommand.BOOKMARK_CUE),
+    StatelessCommandRegistration(PROFILE_CYCLE_MSG, profile_intents.ProfileCommand.CYCLE),
+    StatelessCommandRegistration(SIDEBAR_MSG, panel_intents.PanelCommand.TOGGLE_SIDEBAR),
+    StatelessCommandRegistration(SUB_PICKER_MSG, panel_intents.PanelCommand.TOGGLE_SUBTITLE_PICKER),
+    StatelessCommandRegistration(ANALYSIS_MSG, panel_intents.PanelCommand.TOGGLE_ANALYSIS),
+    StatelessCommandRegistration(PREVIEW_MSG, panel_intents.PanelCommand.REPLAY_CARD_PREVIEW),
+    StatelessCommandRegistration(PREVIEW_CLOSE_MSG, panel_intents.PanelCommand.CLOSE_CARD_PREVIEW),
+    StatelessCommandRegistration(SCROLL_UP_MSG, interaction_intents.InteractionCommand.WHEEL_UP),
+    StatelessCommandRegistration(
+        SCROLL_DOWN_MSG, interaction_intents.InteractionCommand.WHEEL_DOWN
+    ),
+    StatelessCommandRegistration(TIP_UP_MSG, interaction_intents.InteractionCommand.TOOLTIP_UP),
+    StatelessCommandRegistration(TIP_DOWN_MSG, interaction_intents.InteractionCommand.TOOLTIP_DOWN),
+    StatelessCommandRegistration(
+        TIP_CLOSE_MSG, interaction_intents.InteractionCommand.TOOLTIP_BACK_OR_CLOSE
+    ),
+    StatelessCommandRegistration(CLICK_MSG, interaction_intents.InteractionCommand.CLICK),
+    StatelessCommandRegistration(
+        COPY_CLICK_MSG, interaction_intents.InteractionCommand.COPY_UNDER_CURSOR
+    ),
+    StatelessCommandRegistration(OVERLAY_TOGGLE_MSG, session_intents.SessionCommand.TOGGLE_OVERLAY),
+)

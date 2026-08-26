@@ -5,6 +5,7 @@ active profile. Japanese stays the byte-identical default when nothing is config
 import pytest
 import util
 
+from saitenka.app import bindings as app_bindings
 from saitenka.app.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, ReaderLanguages
 from saitenka.app.profiles import (
     DEFAULT_PROFILE,
@@ -221,7 +222,7 @@ def test_cycle_profile_rescopes_the_dict_set_live():
         [jp, fr], lambda p: fr_dicts if p.langs.main == "fr" else jp_dicts
     )
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     assert reader.profile_controller.profile is fr
     assert reader.profile_controller.langs.main == "fr"
@@ -240,7 +241,7 @@ def test_cycle_profile_without_a_scoper_keeps_the_dict_set():
     reader.profile_controller.replace_dictionary_set(sentinel)
     reader.profile_controller.configure_cycle([jp, fr])  # no dict_scoper
 
-    reader.cycle_profile()
+    reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
     assert reader.profile_controller.profile is fr
     assert reader.profile_controller.dict_set is sentinel  # unchanged

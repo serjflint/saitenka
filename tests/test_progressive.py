@@ -259,9 +259,9 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     clear = ("show-text", "", 1)
     observed = []
     monkeypatch.setattr(
-        reader,
-        "toggle_sub_picker",
-        lambda: observed.append(clear in ipc.commands),
+        reader.picker_controller,
+        "open",
+        lambda *_args, **_kwargs: observed.append(clear in ipc.commands),
     )
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
@@ -388,7 +388,11 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     reader.set_subtitle("猫")
     dictionary = _BlockingDictionary()
     dispatched = []
-    monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
+    monkeypatch.setattr(
+        reader.picker_controller,
+        "open",
+        lambda *_args, **_kwargs: dispatched.append(True),
+    )
 
     reader._apply_deps(
         DependencyBundle(reader.profile_dependencies.identity, dictionaries=dictionary)

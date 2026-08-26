@@ -4,6 +4,7 @@ import pytest
 import util
 from util import RecordingRasterProvider, keybind_registry
 
+from saitenka.app import bindings as app_bindings
 from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
 from saitenka.app.features.tooltip.tooltip import update_hover_impl
@@ -158,9 +159,9 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
     monkeypatch.setattr(
         reader, "renderer", _SpyRenderer(lambda rq: drawn.append(rq.annotation_visible))
     )
-    monkeypatch.setattr(reader, "toast", lambda text, *_a, **_k: toasts.append(text))
+    monkeypatch.setattr(reader.notifications, "show", lambda text, *_a, **_k: toasts.append(text))
 
-    reader.toggle_annotation_mode()
+    reader._handle(app_bindings.ANNOTATION_MSG)
 
     assert (reader.annotation_mode, drawn, toasts) == (
         "hover",

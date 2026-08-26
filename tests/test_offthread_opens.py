@@ -152,7 +152,7 @@ def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
 def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
     r = _reader(tmp_path, worker=True)
     toasts: list = []
-    monkeypatch.setattr(r, "toast", lambda text, _k="ok", _s=2.8: toasts.append(text))
+    monkeypatch.setattr(r.notifications, "show", lambda text, _k="ok", _s=2.8: toasts.append(text))
     nested_popup.open_kanji(
         r.tip_ports, r.panel_ports, "犬", 100.0, 300.0, 40.0
     )  # 犬 isn't in the kanji bank

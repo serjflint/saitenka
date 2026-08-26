@@ -4,6 +4,7 @@ import util
 from PIL import Image
 from util import keybind_registry
 
+from saitenka.app import bindings as app_bindings
 from saitenka.app.config import KeyOptions, ReaderOptions
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session.controller import SessionController
@@ -76,8 +77,8 @@ def test_showing_overlay_restores_saitenka_subtitle_policy():
     ipc = FakeIPC()
     reader = SessionController(ipc)
 
-    reader.toggle_overlay()
-    reader.toggle_overlay()
+    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
 
     assert ipc.props["sub-visibility"] is False
     assert "osd-level" not in ipc.props  # toggle never manages osd-level anymore
@@ -103,8 +104,8 @@ def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling(m
     reader.declare_subtitle(SubtitleSecondaryLeased(1))
     monkeypatch.setattr(reader, "draw_translation", lambda: None)
 
-    reader.toggle_overlay()
-    reader.toggle_overlay()
+    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
 
     secondary = [
         command[2] for command in ipc.commands if command[:2] == ("set_property", "secondary-sid")

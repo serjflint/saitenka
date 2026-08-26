@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, runtime_gateway
 
+from saitenka.app.runtime import merge_command_handlers
 from saitenka.app.session.controller import SessionController
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
@@ -19,6 +20,11 @@ from saitenka.runtime.events import ConnectionLost, SessionStarting, UserCommand
 from saitenka.runtime.user_command import CommandIntake, reduce_user_command
 
 HELP = UserCommand("saitenka-help", command_id=3)
+
+
+def test_command_families_cannot_replace_each_other_at_the_shell() -> None:
+    with pytest.raises(ValueError, match="already registered"):
+        merge_command_handlers({"same": lambda: None}, {"same": lambda: None})
 
 
 def test_a_command_rides_out_as_an_effect_carrying_itself() -> None:

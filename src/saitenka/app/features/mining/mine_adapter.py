@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
 from saitenka.app import backlog
@@ -11,34 +12,89 @@ from saitenka.app.features.mining import mine_intents
 from saitenka.app.intents import Announce
 
 if TYPE_CHECKING:
-    from saitenka.app.backlog import CapturePorts
+    from collections.abc import Callable
+
     from saitenka.app.features.mining.mining_controller import MiningController
+    from saitenka.app.features.tooltip.tooltip_controller import TooltipController
+    from saitenka.app.subtitle_presentation import CueRenderStore
+    from saitenka.app.toast_controller import NotificationSink
+    from saitenka.runtime.playback_slice import PlaybackStore
+    from saitenka.runtime.subtitle_slice import SubtitleTrackStore
+
+
+@dataclass(frozen=True, slots=True)
+class BookmarkCommandEndpoint:
+    """Freeze and persist one bookmark from bounded state owners."""
+
+    playback: PlaybackStore
+    cue: CueRenderStore
+    tracks: SubtitleTrackStore
+    tooltip: TooltipController
+    store: Callable[[], backlog.BacklogStore]
+    property_value: Callable[[str], object | None]
+    number_property: Callable[[str], float | None]
+    sequence_property: Callable[[str], list]
+    secondary_text: Callable[[], str]
+    notifications: NotificationSink
+    record_capture: Callable[[], None]
+
+    def has_active_cue(self) -> bool:
+        """Return whether the current mpv facts form a bookmarkable cue."""
+        return bool(
+            self.property_value("path")
+            and self.number_property("sub-start") is not None
+            and self.number_property("sub-end") is not None
+            and self.playback.current.state.cue.text.strip()
+        )
+
+    def capture(self) -> None:
+        playback = self.playback.current.state
+        track = self.tracks.current
+        cue = self.cue.current
+        backlog.capture_current(
+            backlog.CapturePorts(
+                video=self.property_value("path"),
+                start=self.number_property("sub-start"),
+                end=self.number_property("sub-end"),
+                text=playback.cue.text,
+                secondary_text=self.secondary_text(),
+                language=track.language,
+                tokens=cue.tokens,
+                hover=self.tooltip.selected,
+                jp_sid=track.jp_sid,
+                en_sid=track.en_sid,
+                tracks=self.sequence_property("track-list"),
+                store=self.store,
+                toast=self.notifications.show,
+                record_capture=self.record_capture,
+            )
+        )
+
 
 log = logging.getLogger("saitenka")
 
 
-class MineHost(Protocol):
-    """The command contribution: cue capture plus the bounded mining owner."""
+@dataclass(frozen=True, slots=True)
+class MineCommandPorts:
+    """Mining owner plus the separate cue-bookmark and feedback authorities."""
 
-    mining_controller: MiningController
-
-    @property
-    def capture_ports(self) -> CapturePorts: ...
-
-    def has_active_cue(self) -> bool: ...
-
-    def toast(self, text: str, kind: str = ..., seconds: float = ...) -> None: ...
+    mining: MiningController
+    bookmark: BookmarkCommandEndpoint
+    playback: PlaybackStore
+    notifications: NotificationSink
 
 
-class MineAdapter:
-    def __init__(self, host: MineHost) -> None:
-        self._mining = host.mining_controller
-        self._capture = host
+class MineCommandCoordinator:
+    """Coordinate mining transactions and the distinct bookmark command family."""
+
+    def __init__(self, ports: MineCommandPorts) -> None:
+        self._ports = ports
 
     def inputs(self) -> mine_intents.MineInputs:
-        mining = self._mining
+        ports = self._ports
+        mining = ports.mining
         return mine_intents.MineInputs(
-            has_active_cue=self._capture.has_active_cue(),
+            has_active_cue=ports.bookmark.has_active_cue(),
             configured=mining.configured,
             target=mining.mine_target() if mining.configured else None,
         )
@@ -48,11 +104,11 @@ class MineAdapter:
             log.info("mine: token-index=%d animated=%s", effect.index, effect.animated)
             with otel_metrics.traced("anki_mine", source="base") as span:
                 span.set("animated", bool(effect.animated))
-                self._mining.mine_index(effect.index, animated=effect.animated)
+                self._ports.mining.mine_index(effect.index, animated=effect.animated)
         elif isinstance(effect, mine_intents.MineEpisode):
-            self._mining.bulk_mine()
+            self._ports.mining.bulk_mine()
         elif isinstance(effect, mine_intents.BookmarkCue):
-            backlog.capture_current(self._capture.capture_ports)
+            self._ports.bookmark.capture()
         elif isinstance(effect, Announce):
             log.info("mine: no target word")
-            self._capture.toast(effect.text, effect.kind)
+            self._ports.notifications.show(effect.text, effect.kind)

@@ -11,9 +11,13 @@ from saitenka.model import claims_pointer
 from saitenka.runtime import events
 
 if TYPE_CHECKING:
+    import threading
+    from collections.abc import Callable
+
     from saitenka.app.config import KeyOptions
     from saitenka.app.features.help.help_controller import ScreenState
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+    from saitenka.app.session.context import EpisodeSlot
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.interaction_slice import PickerStore
     from saitenka.runtime.picker import PickerState
@@ -35,6 +39,8 @@ class PickerController:
         self._screen = screen
         self._keys = keys
         self._ui_scale = ui_scale
+        self.lister: Callable[[str], tuple] | None = None
+        self.submitter = sub_picker.configure_runtime_job(ipc)
 
     @property
     def state(self) -> PickerState:
@@ -61,6 +67,41 @@ class PickerController:
 
     def close(self) -> None:
         sub_picker.close_picker(self.store, self.panel, self._surfaces)
+
+    def configure_listing(self, lister: Callable[[str], tuple]) -> None:
+        self.lister = lister
+
+    def open(
+        self,
+        video: object,
+        *,
+        retire_hover: Callable[[], None],
+        episodes: EpisodeSlot,
+        stop: threading.Event,
+        toast: Callable[..., None],
+    ) -> None:
+        sub_picker.open_picker(
+            self.listing_ports(episodes=episodes, stop=stop, toast=toast),
+            video,
+            retire_hover=retire_hover,
+        )
+
+    def listing_ports(
+        self,
+        *,
+        episodes: EpisodeSlot,
+        stop: threading.Event,
+        toast: Callable[..., None],
+    ) -> sub_picker.ListingPorts:
+        return sub_picker.ListingPorts(
+            lister=self.lister,
+            store=self.store,
+            redraw=self.redraw,
+            submit=self.submitter,
+            stop=stop,
+            current_episode=episodes.get,
+            toast=toast,
+        )
 
     def suppress_hover(self, suppression: HoverSuppression) -> bool:
         state = self.state
