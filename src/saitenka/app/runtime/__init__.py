@@ -11,6 +11,7 @@ from saitenka.app.runtime.commands import (
     CommandRejection,
     CommandSpec,
     CueCommandState,
+    merge_command_handlers,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "CommandRejection",
     "CommandSpec",
     "CueCommandState",
+    "merge_command_handlers",
 ]

@@ -242,7 +242,7 @@ authored external .ass
                        ├─ inject a unique color per paintable token into an in-memory copy
                        ├─ libasslite ──> selected libass ──> public ASS_Image layers
                        ├─ color pixels ──> TokenGeometry[]
-                       └─ identity/generation gate ──> SessionController.boxes
+                       └─ identity/generation gate ──> CueRenderStore.boxes
                                                       ├─ hover focus box
                                                       └─ normal lookup/tooltip/mining path
 ```
@@ -291,7 +291,7 @@ resolve complete active-frame observation
                                       stale ──> discard │ publish ──> tick
                                                        │
                                                        v
-                                      SessionController.boxes + native focus overlay
+                                      CueRenderStore.boxes + native focus overlay
 ```
 
 The main loop drains related mpv property changes before making one geometry decision. The worker

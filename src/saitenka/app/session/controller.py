@@ -125,6 +125,7 @@ from saitenka.app.runtime import (
     CommandOutcome,
     CommandPolicy,
     CueCommandState,
+    merge_command_handlers,
 )
 from saitenka.app.session import mined_feedback, panel_intents, sidebar_coordination, surfaces
 from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
@@ -3181,11 +3182,11 @@ class SessionController:
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
     def _build_command_router(self) -> CommandExecutor:
-        handlers: dict[str, Callable[[], object]] = {
-            **self._assembly.command_handlers(),
-            **self._stateless_commands.handlers(),
-            LEGACY_RENDERER_MSG: self.toggle_legacy_renderer,
-        }
+        handlers = merge_command_handlers(
+            self._assembly.command_handlers(),
+            self._stateless_commands.handlers(),
+            {LEGACY_RENDERER_MSG: self.toggle_legacy_renderer},
+        )
         contributed = self._assembly.command_specs()
         contributed_names = {spec.name for spec in contributed}
         legacy = tuple(spec for spec in COMMAND_SPECS if spec.name not in contributed_names)

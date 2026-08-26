@@ -202,7 +202,10 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
     """The sidebar B button and Alt+b resolve to the same registered command policy."""
     from saitenka.app.bindings import BOOKMARK_MSG
 
-    reader, _ipc = _reader(active=3)
+    reader, _ipc = _reader(
+        active=3,
+        props={"path": "/video.mkv", "sub-start": 3.0, "sub-end": 3.8},
+    )
     _capture_render(monkeypatch)
     invoked = []
     monkeypatch.setattr(backlog, "capture_current", lambda _ports: invoked.append("toggle"))

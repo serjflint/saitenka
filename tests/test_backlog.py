@@ -256,6 +256,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
 def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
     ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
     reader = SessionController(ipc)
+    reader.sub_text = "日本語"
     shown = []
     monkeypatch.setattr(reader.notifications, "show", lambda *args: shown.append(args))
 

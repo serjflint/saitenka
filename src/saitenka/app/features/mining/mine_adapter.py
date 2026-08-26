@@ -38,6 +38,15 @@ class BookmarkCommandEndpoint:
     notifications: NotificationSink
     record_capture: Callable[[], None]
 
+    def has_active_cue(self) -> bool:
+        """Return whether the current mpv facts form a bookmarkable cue."""
+        return bool(
+            self.property_value("path")
+            and self.number_property("sub-start") is not None
+            and self.number_property("sub-end") is not None
+            and self.playback.current.state.cue.text.strip()
+        )
+
     def capture(self) -> None:
         playback = self.playback.current.state
         track = self.tracks.current
@@ -85,7 +94,7 @@ class MineCommandCoordinator:
         ports = self._ports
         mining = ports.mining
         return mine_intents.MineInputs(
-            has_active_cue=bool(ports.playback.current.state.cue.text.strip()),
+            has_active_cue=ports.bookmark.has_active_cue(),
             configured=mining.configured,
             target=mining.mine_target() if mining.configured else None,
         )
