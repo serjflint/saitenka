@@ -10,7 +10,7 @@ from PIL import Image
 from saitenka.app import backlog
 from saitenka.app.anki import MineConfig
 from saitenka.app.backlog import BacklogStore, Capture
-from saitenka.app.episode_analysis import analyze_cues
+from saitenka.app.features.analysis.episode_analysis import analyze_cues
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.features.sidebar import sidebar
@@ -242,37 +242,48 @@ def test_rows_use_shared_episode_analysis_when_ready():
     reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
     reader.sub_text = "私は本を読む。"
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
-    reader.analysis.current = analyze_cues(
+    analysis = analyze_cues(
         list(reader.episode.sub_index.cues), reader.scorer, reader.profile_controller.tokenizer
     )
 
-    rows, _total = sidebar._track_rows(_view(reader, active=0), 0, 1)
+    rows, _total = sidebar._track_rows(_view(reader, active=0, analysis=analysis), 0, 1)
 
     assert rows[0].status == "N+1"
 
 
 def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
-    reader, _ipc = _reader(cue_count=1)
-    reader.declare_subtitle(SubtitleTracksDiscovered(1, reader.en_sid))
-    reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
-    reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
-    reader.analysis.current = analyze_cues(
-        list(reader.episode.sub_index.cues), reader.scorer, reader.profile_controller.tokenizer
-    )
-    reader.sidebar_controller.store.dispatch(
-        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
-    )
-    reader._loading = True
-    calls = _capture_render(monkeypatch)
-    monkeypatch.setattr(
-        "saitenka.app.subnav.load_index",
-        lambda _path: CueIndex([Cue(0.0, 1.0, "猫です。")]),
-    )
+    ipc = FakeIPC()
+    gateway = util.runtime_gateway(ipc)
+    reader = SessionController(ipc)
+    try:
+        reader.declare_subtitle(SubtitleTracksDiscovered(1, reader.en_sid))
+        reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
+        reader.episode.sub_index = CueIndex([Cue(0.0, 1.0, "私は本を読む。")])
+        reader.sub_text = "私は本を読む。"
+        reader.analysis_commands.set_open(open=True)
+        util.await_ready(
+            lambda: reader.analysis_controller.settled,
+            "analysis result was not published",
+            pump=reader._drain_events,
+        )
+        assert reader.analysis_controller.result is not None
+        reader.sidebar_controller.store.dispatch(
+            events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+        )
+        reader._loading = True
+        calls = _capture_render(monkeypatch)
+        monkeypatch.setattr(
+            "saitenka.app.subnav.load_index",
+            lambda _path: CueIndex([Cue(0.0, 1.0, "猫です。")]),
+        )
 
-    reader.load_sub_index("new-track.srt")
+        reader.load_sub_index("new-track.srt")
 
-    assert calls[-1][0][0].text == "猫です。"
-    assert calls[-1][0][0].status is None
+        assert calls[-1][0][0].text == "猫です。"
+        assert calls[-1][0][0].status is None
+    finally:
+        reader.close()
+        gateway.close()
 
 
 def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):

@@ -15,22 +15,24 @@ from saitenka.app.session import panel_intents
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app import analysis_overlay
     from saitenka.app.features.picker.picker_controller import PickerController
     from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
     from saitenka.app.features.sidebar.sidebar_controller import SidebarController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
 
 
-class SetAnalysisOpen(Protocol):
-    def __call__(self, *, open: bool) -> None: ...  # noqa: A002
+class AnalysisPanelControl(Protocol):
+    @property
+    def open(self) -> bool: ...
+
+    def set_open(self, *, open: bool) -> None: ...  # noqa: A002
 
 
 @dataclass(frozen=True, slots=True)
 class PanelCommandPorts:
     """Owners and acts participating in the panel-arbitration conjunction."""
 
-    analysis: analysis_overlay.AnalysisState
+    analysis: AnalysisPanelControl
     surfaces: LifecycleSurfaces
     sidebar: SidebarController
     picker: PickerController
@@ -39,7 +41,6 @@ class PanelCommandPorts:
     show_sidebar: Callable[[], None]
     hide_sidebar: Callable[[], None]
     open_picker: Callable[[], None]
-    set_analysis_open: SetAnalysisOpen
 
 
 class PanelCommandCoordinator:
@@ -74,7 +75,7 @@ class PanelCommandCoordinator:
         if panel is panel_intents.Panel.SIDEBAR:
             (ports.show_sidebar if opening else ports.hide_sidebar)()
         elif panel is panel_intents.Panel.ANALYSIS:
-            ports.set_analysis_open(open=opening)
+            ports.analysis.set_open(open=opening)
         elif panel is panel_intents.Panel.SUBTITLE_PICKER:
             (ports.open_picker if opening else ports.picker.close)()
         elif panel is panel_intents.Panel.CARD_PREVIEW:

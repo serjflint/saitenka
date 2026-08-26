@@ -819,6 +819,10 @@ app-package-layout = { shell = "uv run python tools/app_package_layout.py" }
 # ratchet, this rejects the old shadow fields and direct mutator/construction escape routes. Planted
 # controls: tool_tests/test_mining_ownership_check.py.
 mining-ownership = { shell = "uv run python tools/mining_ownership_check.py" }
+# GATE (in `all`) — episode analysis owns its state, admission, completion, presentation, and lane
+# close. The session may hold the owner and provide fresh inputs, but the retired state/facade surface
+# cannot return. Planted controls: tool_tests/test_analysis_ownership_check.py.
+analysis-ownership = { shell = "uv run python tools/analysis_ownership_check.py" }
 # GATE (in `all`) — the completed tooltip migration keeps policy, store construction, and mutable
 # lifecycle writes behind TooltipController while preserving the existing TipPorts paint helpers.
 # Planted controls: tool_tests/test_tooltip_ownership_check.py.
@@ -938,7 +942,7 @@ hygiene = ["deadcode", "dup"]
 # name to type and one contract. CI splits the two halves across two jobs instead: the suite costs ~128s
 # of a 4-core runner, and running both passes in the same job made the gate the longest job in the run by
 # a wide margin. Both halves sync the same dev env, so the split changes wall-clock, not coverage.
-gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "runtime-migration", "app-package-layout", "mining-ownership", "tooltip-ownership", "host-arity", "host-mass", "port-probe", "reducer-purity"]
+gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "runtime-migration", "app-package-layout", "mining-ownership", "analysis-ownership", "tooltip-ownership", "host-arity", "host-mass", "port-probe", "reducer-purity"]
 all = ["gate-no-ft", "test-ft"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not

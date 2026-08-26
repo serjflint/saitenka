@@ -14,6 +14,7 @@ from saitenka.app.feature_bindings import (
     OwnerPlan,
     ordered_stateful_bindings,
 )
+from saitenka.app.features.analysis.analysis_controller import AnalysisController
 from saitenka.app.features.help.help_controller import (
     HelpController,
     ScreenState,
@@ -113,6 +114,7 @@ class SessionAssembly:
     screen: ScreenState
     tooltip_keys: TooltipKeyContext
     help: HelpController
+    analysis: AnalysisController
     picker: PickerController
     sidebar: SidebarController
     preview: PreviewController
@@ -162,6 +164,13 @@ def build_session_assembly(
         HELP_STATEFUL_BINDING.store(ipc),
         ui_scale=ui_scale,
     )
+    analysis_owner = AnalysisController(
+        ipc,
+        surfaces,
+        screen,
+        options.keys,
+        ui_scale=ui_scale,
+    )
     picker_owner = PickerController(
         ipc,
         surfaces,
@@ -188,15 +197,16 @@ def build_session_assembly(
         )
     )
     return SessionAssembly(
-        resolved_overlay,
-        surfaces,
-        screen,
-        tooltip_keys,
-        help_owner,
-        picker_owner,
-        sidebar_owner,
-        preview_owner,
-        commands,
-        INTERACTION_STATEFUL_BINDINGS,
-        (INTERACTION_OWNER_PLAN,),
+        overlay=resolved_overlay,
+        surfaces=surfaces,
+        screen=screen,
+        tooltip_keys=tooltip_keys,
+        help=help_owner,
+        analysis=analysis_owner,
+        picker=picker_owner,
+        sidebar=sidebar_owner,
+        preview=preview_owner,
+        commands=commands,
+        stateful=INTERACTION_STATEFUL_BINDINGS,
+        owner_plans=(INTERACTION_OWNER_PLAN,),
     )

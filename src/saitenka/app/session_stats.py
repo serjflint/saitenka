@@ -21,7 +21,7 @@ from saitenka.sqlite_pool import close_when_collected
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.episode_analysis import EpisodeAnalysis
+    from saitenka.app.features.analysis.episode_analysis import EpisodeAnalysis
     from saitenka.app.session.context import EpisodeContext
 
 log = logging.getLogger(__name__)

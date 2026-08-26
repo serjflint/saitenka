@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
-from saitenka.app import analysis_overlay
+from saitenka.app.features.analysis.episode_analysis import cue_result
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
@@ -172,7 +172,7 @@ def _cue_statuses(index: CueIndex, video: str, store: BacklogStore) -> dict[int,
 
 
 def _analysis_status(analysis, cue_index: int) -> str | None:
-    result = analysis_overlay.cue_result(analysis, cue_index)
+    result = cue_result(analysis, cue_index)
     if result is None:
         return None
     labels = []

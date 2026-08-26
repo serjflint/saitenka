@@ -10,6 +10,7 @@ from saitenka.app.feature_bindings import (
     INTERACTION_OWNER_PLAN,
     ordered_stateful_bindings,
 )
+from saitenka.app.features.analysis.analysis_controller import AnalysisController
 from saitenka.app.session.assembly import CommandRegistration, build_session_assembly
 from saitenka.runtime import Owner
 
@@ -51,6 +52,14 @@ def test_assembly_constructs_surface_owners_from_registered_state_factories():
     assert assembly.picker.surface_binding().state_of() is assembly.picker.state
     assert assembly.sidebar.surface_binding().state_of() is assembly.sidebar.state
     assert assembly.preview.surface_binding().state_of() is assembly.preview.state
+
+
+def test_assembly_constructs_the_analysis_owner_without_session_facts():
+    assembly = build_session_assembly(util.FakeIPC(), ReaderOptions(), runtime_submit=None)
+
+    assert isinstance(assembly.analysis, AnalysisController)
+    assert assembly.analysis.open is False
+    assert assembly.analysis.result is None
 
 
 def test_assembly_rejects_duplicate_command_messages():
