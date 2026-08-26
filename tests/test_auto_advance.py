@@ -206,7 +206,7 @@ def test_reconnect_reslots_file_changed_while_disconnected(tmp_path):
     reader._on_file_loaded()
 
     assert seen == [second]
-    assert reader._cue_retired is True
+    assert reader.annotation_controller.view.retired is True
 
 
 def test_on_file_loaded_reslots_same_basename_from_a_different_parent(tmp_path):

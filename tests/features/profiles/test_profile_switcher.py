@@ -14,7 +14,6 @@ from util import FakeIPC, keybind_registry, press, runtime_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.features.profiles.profile_controller import ProfileSwitchStatus
-from saitenka.app.features.tooltip import prefetch
 from saitenka.app.languages import MAIN_LANG, ReaderLanguages
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
 from saitenka.app.session.controller import SessionController
@@ -64,6 +63,11 @@ class _MinimalTokenizer:
 
     def merge_dict_compounds(self, tokens, _exists):
         return tokens
+
+
+class _TaggedTokenizer(_MinimalTokenizer):
+    def tokenize(self, line, *, strip_furigana=True, merge=True):  # noqa: ARG002
+        return [Token(surface=line, lemma=self.name, reading="", pos="名詞", start=0, end=1)]
 
 
 @pytest.fixture
@@ -184,17 +188,15 @@ def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_cycle_clears_the_token_cache_so_stale_segmentation_cannot_leak(request):
     """A profile swap must not serve the previous language's cached tokenization."""
-    from saitenka.app.token_cache import TokenizedCue
-
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    register_tokenizer("latin", lambda: _TaggedTokenizer("new"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])
-    tok = Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)
-    reader.token_cache.put("本", TokenizedCue(lines=[[tok]], tokens=[tok], styles=None))
-    assert len(reader.token_cache) == 1
+    reader.profile_controller.replace_dictionary_set(_ExistsDS())
+    reader.profile_controller.use_tokenizer(_TaggedTokenizer("old"))
+    reader.set_subtitle("本")
 
     reader._handle(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert len(reader.token_cache) == 0
+    assert reader.tokens[0].lemma == "new"
 
 
 # --- the track re-selection that makes the cycle a FULL switch (the reported gap) ------------------
@@ -534,6 +536,15 @@ class _ExistsDS:
         return set()
 
 
+class _ImmediateThread:
+    def __init__(self, *, target, args=(), **_kwargs) -> None:
+        self._target = target
+        self._args = args
+
+    def start(self) -> None:
+        self._target(*self._args)
+
+
 class _SwapMidWarmTokenizer(_MinimalTokenizer):
     """Reproduces the race deterministically: while tokenizing the FIRST warmed cue it performs the
     profile swap (``use_tokenizer``), so the warm's ``put`` for that cue lands AFTER the cache was
@@ -560,32 +571,44 @@ def _warm_reader(request) -> SessionController:
     return reader
 
 
-def test_swap_during_warm_drops_the_stale_language_entry(request):
-    """The P2 guard: a worker mid-``_tokenize_cue`` with the OLD tokenizer, when the swap clears+bumps
+def test_swap_during_warm_drops_the_stale_language_entry(request, monkeypatch):
+    """The P2 guard: a worker mid-tokenize with the OLD tokenizer, when the swap clears+bumps
     the cache before its ``put``, must NOT leave a stale entry behind — the generation gate drops it.
     Without the gate this cue's put would survive (len == 1), so this asserts the guard has teeth."""
     reader = _warm_reader(request)
-    new = _MinimalTokenizer("new")
+    new = _TaggedTokenizer("new")
     reader.profile_controller.use_tokenizer(_SwapMidWarmTokenizer(reader, new))  # active = OLD
+    monkeypatch.setattr(
+        "saitenka.app.features.annotation.annotation_controller.threading.Thread",
+        _ImmediateThread,
+    )
 
-    prefetch._warm_episode_loop(
-        reader.episode.sub_index, ports=reader.warm_ports.loop
-    )  # swaps to NEW mid-loop
+    reader.warm_episode_tokens()  # swaps to NEW mid-loop
+    reader.set_subtitle("AAA")
 
     assert reader.profile_controller.tokenizer is new  # the swap took effect
-    assert len(reader.token_cache) == 0  # the OLD-tokenizer cue never landed
+    assert reader.tokens[0].lemma == "new"
 
 
-def test_warm_under_the_new_generation_stores_cleanly_after_a_swap(request):
+def test_warm_under_the_new_generation_stores_cleanly_after_a_swap(request, monkeypatch):
     """Positive control: once the swap has settled, warming under the current generation caches every
     cue normally — the generation gate drops only the stale in-flight put, not all future work."""
     reader = _warm_reader(request)
-    reader.profile_controller.use_tokenizer(_MinimalTokenizer("new"))  # settled generation
-    reader._warmed_index = None
+    reader.profile_controller.use_tokenizer(_TaggedTokenizer("new"))  # settled generation
+    monkeypatch.setattr(
+        "saitenka.app.features.annotation.annotation_controller.threading.Thread",
+        _ImmediateThread,
+    )
 
-    prefetch._warm_episode_loop(reader.episode.sub_index, ports=reader.warm_ports.loop)
+    reader.warm_episode_tokens()
+    monkeypatch.setattr(
+        reader.profile_controller.tokenizer,
+        "tokenize",
+        lambda _line, **_kwargs: (_ for _ in ()).throw(AssertionError("re-tokenized")),
+    )
+    reader.set_subtitle("BBB")
 
-    assert len(reader.token_cache) == 3  # all three cues warmed under the new generation
+    assert reader.tokens[0].lemma == "new"
 
 
 def _stub_provider(name, languages):

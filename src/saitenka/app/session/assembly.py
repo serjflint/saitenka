@@ -15,6 +15,7 @@ from saitenka.app.feature_bindings import (
     ordered_stateful_bindings,
 )
 from saitenka.app.features.analysis.analysis_controller import AnalysisController
+from saitenka.app.features.annotation.annotation_controller import CueAnnotationController
 from saitenka.app.features.help.help_controller import (
     HelpController,
     ScreenState,
@@ -31,6 +32,7 @@ from saitenka.runtime.help import HelpCommand
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from concurrent.futures import Future
 
     from saitenka.app.config import ReaderOptions
     from saitenka.mpvio.ipc import MpvIPC
@@ -115,6 +117,7 @@ class SessionAssembly:
     tooltip_keys: TooltipKeyContext
     help: HelpController
     analysis: AnalysisController
+    annotation: CueAnnotationController
     picker: PickerController
     sidebar: SidebarController
     preview: PreviewController
@@ -145,6 +148,7 @@ def build_session_assembly(
     *,
     runtime_submit: Callable[..., object] | None,
     overlay: Overlay | None = None,
+    tokenizer_warm: Future[None] | None = None,
 ) -> SessionAssembly:
     resolved_overlay = overlay or Overlay(
         ipc,
@@ -170,6 +174,12 @@ def build_session_assembly(
         screen,
         options.keys,
         ui_scale=ui_scale,
+    )
+    annotation_owner = CueAnnotationController(
+        ipc,
+        mode=options.tooltip.annotation_mode,
+        cache_max=options.perf.token_cache_max,
+        tokenizer_warm=tokenizer_warm,
     )
     picker_owner = PickerController(
         ipc,
@@ -203,6 +213,7 @@ def build_session_assembly(
         tooltip_keys=tooltip_keys,
         help=help_owner,
         analysis=analysis_owner,
+        annotation=annotation_owner,
         picker=picker_owner,
         sidebar=sidebar_owner,
         preview=preview_owner,

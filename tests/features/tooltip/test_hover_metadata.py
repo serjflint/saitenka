@@ -6,7 +6,6 @@ import time
 from driver import Driver
 from util import FakeIPC
 
-from saitenka.app import cue_annotation
 from saitenka.app.features.tooltip import hover_metadata, tooltip, tooltip_controller
 from saitenka.app.features.tooltip.hover_metadata import (
     HoverMetadata,
@@ -149,15 +148,7 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
 
     reader.mining_controller.record_mined_expression("__newly-mined__")
     reader.prefetch_state.gen += 1
-    reader._dependency_generation += 1
-    reader._current_cue_identity = cue_annotation.CueIdentity(
-        1,
-        "track-b",
-        "primary",
-        "犬",
-        1.0,
-        2.0,
-    )
+    reader.set_subtitle("犬")
     submitted[0]["on_finished"](
         EffectFinished(
             EffectId(1),

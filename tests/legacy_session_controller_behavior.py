@@ -30,9 +30,9 @@ def _visible_surfaces(commands: list[tuple]) -> set[object]:
 
 
 def _cue(reader: SessionController) -> CueState:
-    if reader._cue_retired and reader._cue_identity_ever_installed:
+    if reader.annotation_controller.view.retired and reader._cue_identity_ever_installed:
         return "retired"
-    if reader._current_cue_identity is not None or reader.sub_text.strip():
+    if reader.annotation_controller.view.identity is not None or reader.sub_text.strip():
         return "active"
     return "none"
 

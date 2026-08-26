@@ -813,7 +813,7 @@ def test_repeated_empty_observation_is_idempotent(monkeypatch):
             r._reconcile_sub_text("")
 
         snap = otel_metrics.snapshot()
-        assert r.sub_text == "" and r._cue_retired is True
+        assert r.sub_text == "" and r.annotation_controller.view.retired is True
         assert tuple(ipc.commands) == commands_after_transition
         assert snap["saitenka.sub_text_reconcile.duration_ms"]["count"] == 1
         assert snap["saitenka.cue_redraw.duration_ms"]["count"] == 1
@@ -839,7 +839,9 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
     assert r.hover_view().nav_idx == 1  # and, unlike a real set_subtitle call, chaining survives
     r._reconcile_sub_text("に")  # mpv settles; identity is reinstalled with the landed timing
     assert (
-        r.sub_text == "に" and r.hover_view().nav_idx == 1 and not r._cue_retired
+        r.sub_text == "に"
+        and r.hover_view().nav_idx == 1
+        and not r.annotation_controller.view.retired
     )  # the settled cue is interactive without losing the chaining hint
 
 
@@ -897,8 +899,8 @@ def test_settle_guard_reinstalls_retired_identity_for_same_text():
 
     reader._reconcile_sub_text("同じ字幕")
 
-    assert reader._cue_retired is False
-    assert reader._current_cue_identity is not None
+    assert reader.annotation_controller.view.retired is False
+    assert reader.annotation_controller.view.identity is not None
     assert reader.hover_view().nav_idx == 1
 
 
@@ -3020,14 +3022,14 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text():
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader.start_observing()
     reader.set_subtitle("同じ字幕")
-    before = reader._current_cue_identity
+    before = reader.annotation_controller.view.identity
     assert before is not None
 
     reader._replace_subtitle_source("/media/next.mkv", reason="test")
 
-    assert reader._cue_retired is True
+    assert reader.annotation_controller.view.retired is True
     reader.set_subtitle("同じ字幕")
-    after = reader._current_cue_identity
+    after = reader.annotation_controller.view.identity
     assert after is not None
     assert after != before
     assert after.normalized_text == before.normalized_text
@@ -3059,7 +3061,7 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkey
     # A disconnected turn stops before its post-drain settlement, so readiness is never marked.
     # (Was: the tick pipeline did not run. Same claim, now that there is no pipeline to not run.)
     assert reader._interactive_ready is False
-    assert reader._cue_retired
+    assert reader.annotation_controller.view.retired
     assert reader.tokens == [] and reader.boxes == []
     assert ipc.runtime_outcomes == [
         CommandHandled(
@@ -3080,14 +3082,14 @@ def test_same_text_with_new_timing_installs_a_new_cue_identity():
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader.start_observing()
     reader.set_subtitle("同じ字幕")
-    previous = reader._current_cue_identity
+    previous = reader.annotation_controller.view.identity
 
     ipc.set_prop("sub-start", 3.0)
     reader.pump()
 
-    assert reader._cue_retired is False
-    assert reader._current_cue_identity != previous
-    assert reader._current_cue_identity.observed_start == 3.0
+    assert reader.annotation_controller.view.retired is False
+    assert reader.annotation_controller.view.identity != previous
+    assert reader.annotation_controller.view.identity.observed_start == 3.0
 
 
 def test_a_cue_cleared_by_the_reader_is_not_resurrected_by_the_next_observation():
@@ -3125,7 +3127,7 @@ def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, valu
     reader._on_ipc_reconnect()
     reader._on_property_change({"event": "property-change", "name": name, "data": value})
 
-    assert reader._cue_retired is True
+    assert reader.annotation_controller.view.retired is True
     assert reader.tokens == [] and reader.boxes == []
 
 
