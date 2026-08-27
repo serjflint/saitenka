@@ -223,7 +223,7 @@ def _returned_owner_state(function: ast.FunctionDef) -> bool:
             targets = (
                 assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
             )
-            if _mutable_owner_reference(value, aliases):
+            if value is not None and _mutable_owner_reference(value, aliases):
                 before = len(aliases)
                 aliases.update(name for target in targets for name in _bound_names(target))
                 changed = changed or len(aliases) != before
