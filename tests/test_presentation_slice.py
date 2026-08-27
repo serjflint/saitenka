@@ -79,18 +79,3 @@ def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None
 
     with pytest.raises(RuntimeError):
         store.current = TranslationState(held=True)
-
-
-def test_the_readers_hold_is_the_slice_and_assigning_it_is_a_declaration() -> None:
-    """`SessionController.translate_on` is a property over the slot now. Assigning it has to reach the same
-    place the toggle does, or a test establishing the precondition sets a copy nothing reads."""
-    from saitenka.app.session.controller import SessionController
-
-    reader = SessionController(FakeIPC(), prefetch=False)
-    try:
-        reader.translate_on = True
-
-        assert reader.translation_store.current.held
-        assert reader.translate_on
-    finally:
-        reader.close()

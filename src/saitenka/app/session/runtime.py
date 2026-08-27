@@ -66,7 +66,6 @@ class SessionActs:
     prepare_hover: Callable[[int], None]
     mark_ready: Callable[[], object]
     scroll_tip: Callable[[int], None]
-    setup_secondary: Callable[[], object]
     toggle_translation: Callable[[], None]
     mine_current: Callable[[], None]
     bulk_mine: Callable[[], None]
@@ -213,7 +212,6 @@ class SessionRuntime:
         self._acts.scroll_tip(round(self._facts.osd_height() * self.SCROLL_FRACTION))
 
     def enable_translation(self) -> None:
-        self._acts.setup_secondary()
         self._acts.toggle_translation()
 
     def mine(self, *, bulk: bool) -> None:

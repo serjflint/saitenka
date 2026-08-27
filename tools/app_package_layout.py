@@ -22,6 +22,7 @@ FEATURE_PACKAGES = frozenset(
         "profiles",
         "sidebar",
         "tooltip",
+        "translation",
     }
 )
 RETIRED_FLAT_MODULES = frozenset(

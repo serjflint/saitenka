@@ -9,19 +9,18 @@ from saitenka.app import subtitle_intents, subtitle_modes
 from saitenka.app.intents import Announce
 from saitenka.app.media import copy_clipboard
 from saitenka.app.mpv_egress import send_correlated
-from saitenka.runtime import events
 from saitenka.runtime.effects import Owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.features.annotation.annotation_controller import AnnotationView
+    from saitenka.app.features.translation import TranslationController, TranslationInputs
     from saitenka.app.session.context import EpisodeSlot
     from saitenka.app.subtitle_presentation import CueRenderStore
     from saitenka.app.toast_controller import NotificationSink
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.playback_slice import PlaybackStore
-    from saitenka.runtime.presentation_slice import TranslationStore
     from saitenka.runtime.subtitle import SubtitleTrackState
     from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 
@@ -34,10 +33,6 @@ class SubmitSubtitleFetch(Protocol):
         name: str,
         on_done: Callable[[], None] | None = None,
     ) -> None: ...
-
-
-class HideTranslation(Protocol):
-    def __call__(self, *, release: bool) -> None: ...
 
 
 class AnnotationViewSource(Protocol):
@@ -80,6 +75,12 @@ class SubtitleTrackCoordinator:
 
     def current(self) -> SubtitleTrackState:
         return self.tracks.current
+
+    def acquire(self) -> object:
+        return subtitle_modes.setup_secondary(self.ports())
+
+    def release(self) -> None:
+        subtitle_modes.release_secondary(self.ports())
 
     def drop_index(self) -> None:
         self.episodes.current.sub_index = None
@@ -124,10 +125,8 @@ class SubtitleCommandApply:
     draw_subtitle: Callable[[], None]
     seek_cue: Callable[[subtitle_intents.SeekCue], bool]
     sentence_lines: Callable[[], list[str]]
-    translation_store: TranslationStore
-    reveal_translation: Callable[[], None]
-    hide_translation: HideTranslation
-    translation_visible: Callable[[], bool]
+    translation: TranslationController
+    translation_inputs: Callable[[], TranslationInputs]
     property_value: Callable[[str], object | None]
     notifications: NotificationSink
 
@@ -209,10 +208,4 @@ class SubtitleCommandCoordinator:
 
     def _toggle_translation(self) -> None:
         apply = self._apply
-        apply.translation_store.dispatch(
-            events.TranslationHeld(not apply.translation_store.current.held)
-        )
-        if apply.translation_visible():
-            apply.reveal_translation()
-        else:
-            apply.hide_translation(release=True)
+        apply.translation.toggle(apply.translation_inputs())

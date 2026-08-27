@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from util import FakeIPC, runtime_gateway
 
+from saitenka.app import bindings as app_bindings
+from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import (
     EpisodeRetired,
@@ -106,19 +108,26 @@ def test_an_owner_with_no_per_episode_facts_is_not_counted_as_an_unrouted_gap(re
     assert not [key for key in router.ignored if key.endswith("EpisodeRetired")]
 
 
-def test_rebinding_the_episode_retires_the_slots_with_the_container() -> None:
+def test_rebinding_the_episode_retires_the_slots_with_the_container(request, monkeypatch) -> None:
     """Both halves move together or the slots keep the last episode's facts — silently, because
     nothing at the seam reads them until the next cue arrives."""
     from saitenka.app.session.controller import SessionController
 
-    reader = SessionController(FakeIPC(), prefetch=False)
-    try:
-        reader.translate_on = True
-        reader._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
+    ipc = FakeIPC()
+    ipc.props["secondary-sub-text"] = "old line"
+    gateway = runtime_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False)
+    request.addfinalizer(reader.close)
+    removed: list[int] = []
+    monkeypatch.setattr(reader.lifecycle_surfaces, "remove", removed.append)
+    reader._handle(app_bindings.TRANS_MSG)
+    reader._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
+    removed.clear()
 
-        reader.rebind_episode()
+    reader.rebind_episode()
 
-        assert reader._subtitle_tracks.current == SubtitleTrackState()
-        assert reader.translate_on  # the hold is the session's, and survives
-    finally:
-        reader.close()
+    assert reader._subtitle_tracks.current == SubtitleTrackState()
+    assert reader.translation_controller.state.held  # the hold is session-lived
+    assert removed == [OverlayId.TRANS]

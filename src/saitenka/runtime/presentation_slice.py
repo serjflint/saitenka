@@ -1,8 +1,4 @@
-"""`Owner.PRESENTATION`'s feature: the translation reveal and its store.
-
-SUBTITLE's shape, not INTERACTION's: every event is a declaration of something the sender has
-already drawn, so there is nothing to hand back and the slice needs no outbox.
-"""
+"""`Owner.PRESENTATION`'s translation-reveal state and store."""
 
 from __future__ import annotations
 

@@ -94,17 +94,18 @@ def test_overlay_toggle_key_is_configurable():
     assert "Ctrl+o" in bindings and "Alt+o" not in bindings
 
 
-def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling(monkeypatch):
+def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling():
     ipc = FakeIPC()
     reader = SessionController(ipc)
     reader.declare_subtitle(SubtitleTracksDiscovered(2, 1))
     reader._observing = True
     reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
-    reader.translate_on = True
+    reader._handle(app_bindings.TRANS_MSG)
     reader.declare_subtitle(SubtitleSecondaryLeased(1))
-    monkeypatch.setattr(reader, "draw_translation", lambda: None)
+    ipc.commands.clear()
 
     reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    assert reader.translation_controller.state.drawn is None
     reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
 
     secondary = [

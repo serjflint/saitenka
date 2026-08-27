@@ -110,6 +110,7 @@ from saitenka.app.features.tooltip.popups import (
     WordLookup,
 )
 from saitenka.app.features.tooltip.preparation import TooltipPreparationInputs
+from saitenka.app.features.translation import TranslationController, TranslationInputs
 from saitenka.app.interaction import mouse_capture
 from saitenka.app.interaction.presentation import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
@@ -632,10 +633,6 @@ class SessionController:
             False  # the runtime banner prints once, after prefetch actually starts
         )
         self._stop = threading.Event()
-        # translation reveal: manual toggle (`t`), or auto-reveal on hover when opted in.
-        # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
-        # word up (a tooltip is shown), not for every line you already understand.
-        self.auto_translate = o.translation.auto_translate
         self.mining_controller = self._assemble_mining_controller(mining_identity, anki, mine_cfg)
         self.profile_dependencies = reader_deps.ProfileDependencies(
             mining_identity,
@@ -749,9 +746,13 @@ class SessionController:
             self.preview_controller,
             self.tooltip_controller,
         )
-        # `Owner.PRESENTATION`'s slice: the translation reveal. Declarations only — the surface is
-        # already drawn or already gone by the time one arrives.
-        self.translation_store = TranslationStore(self.ipc)
+        translation_store = TranslationStore(self.ipc)
+        self.translation_controller = TranslationController(
+            translation_store,
+            self.lifecycle_surfaces,
+            self.track_commands,
+            auto_reveal=o.translation.auto_translate,
+        )
         self._geometry_refresh = geometry_refresh.RefreshWindow()
         #: Latest cue identity observed this drain, reconciled once at the batch boundary.
         self._pending_cue: playback.ObservedCue | None = None
@@ -932,7 +933,9 @@ class SessionController:
             property_value=self.property_value,
             notifications=self.notifications,
             invalidate=self.analysis_commands.invalidate,
-            translation_visible=self.translation_visible,
+            translation_visible=lambda: self.translation_controller.active(
+                self._translation_inputs()
+            ),
             rebuild_index=self.rebuild_sub_index,
             install_cue=self.set_subtitle,
         )
@@ -1141,6 +1144,11 @@ class SessionController:
                 self.episode.session_recorder,
                 paused=bool(self.observed_property("pause")),
                 language=self.subtitle_language,
+            )
+        elif isinstance(delta, playback.SecondaryTextChanged):
+            inputs = self._translation_inputs()
+            self.translation_controller.secondary_text_changed(
+                replace(inputs, secondary_text=delta.value)
             )
         elif isinstance(delta, playback.PointerMoved):
             # Hover reacts to the pointer moving, not to a tick noticing that it did. The dwells it
@@ -1858,7 +1866,9 @@ class SessionController:
                 already_paused=already_paused,
             ),
             inflected=self._inflected_surface,
-            sync_translation=self._sync_auto_translation,
+            sync_translation=lambda: self.translation_controller.sync_auto_reveal(
+                self._translation_inputs
+            ),
             record_lookup=self._record_lookup,
         )
 
@@ -2326,12 +2336,10 @@ class SessionController:
                 surfaces=self.lifecycle_surfaces,
                 subtitle_pipeline=self.subtitle_pipeline,
                 tooltip=self.tooltip_controller,
-                track=self.track_commands,
-                translation_wanted=self.translation_wanted,
+                translation=self.translation_controller,
+                translation_inputs=self._translation_inputs,
                 teardown_tip=self.teardown_tip,
                 subtitle_target=self.subtitle_target,
-                setup_secondary=self.setup_secondary,
-                draw_translation=self.draw_translation,
             )
         )
         subtitle = SubtitleCommandCoordinator(
@@ -2355,10 +2363,8 @@ class SessionController:
                 draw_subtitle=self.draw_subtitle,
                 seek_cue=self.seek_cue,
                 sentence_lines=self.sentence_lines,
-                translation_store=self.translation_store,
-                reveal_translation=self.reveal_translation,
-                hide_translation=self.hide_translation,
-                translation_visible=self.translation_visible,
+                translation=self.translation_controller,
+                translation_inputs=self._translation_inputs,
                 property_value=self.property_value,
                 notifications=self.notifications,
             ),
@@ -2529,49 +2535,16 @@ class SessionController:
         self._stateless_commands.run(panel_intents.PanelCommand.REPLAY_CARD_PREVIEW)
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
-    def setup_secondary(self) -> int | None:
-        return subtitle_modes.setup_secondary(self.track_ports)
-
-    @property
-    def translate_on(self) -> bool:
-        """The manual translation hold, off `Owner.PRESENTATION`'s slice.
-
-        The setter is a declaration, not a back door: assigning it is the same event the toggle
-        sends, so a caller establishing this precondition takes the path production takes.
-        """
-        return self.translation_store.current.held
-
-    @translate_on.setter
-    def translate_on(self, held: bool) -> None:
-        self.translation_store.dispatch(events.TranslationHeld(held))
-
-    @property
-    def _trans_text(self) -> str | None:
-        """What the translation surface is showing. Read-only: it is set by drawing it."""
-        return self.translation_store.current.drawn
-
-    def translation_visible(self) -> bool:
-        # Two conditions, and not interchangeable: whether the user wants it, and whether
-        # saitenka is drawing anything at all. Code deciding what to do once the surfaces come
-        # back needs the first without the second — see `translation_wanted`.
-        return self.ov.visible and self.translation_wanted()
-
-    def translation_wanted(self) -> bool:
-        """Whether the user wants the secondary line, independent of whether anything is drawn.
-
-        `toggle_overlay` decides what to do *after* the surfaces return, so it must not ask
-        `translation_visible` — that answers False precisely because the overlay is still hidden.
-        """
-        return self.translate_on or (
-            self.auto_translate and self.tooltip_controller.observation().selected >= 0
+    def _translation_inputs(self) -> TranslationInputs:
+        return TranslationInputs(
+            surfaces_visible=self.ov.visible,
+            tooltip_selected=self.tooltip_controller.observation().selected >= 0,
+            secondary_text=self.observed_property("secondary-sub-text"),
+            osd=self.osd,
         )
 
     def _sync_auto_translation(self) -> None:
-        if not self.auto_translate:
-            return
-        self.reveal_translation() if self.translation_visible() else self.hide_translation(
-            release=not self.translate_on
-        )
+        self.translation_controller.sync_auto_reveal(self._translation_inputs)
 
     def configure_subtitle_mode(
         self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
@@ -2652,28 +2625,6 @@ class SessionController:
 
     def _secondary_text(self) -> str:
         return translation.clean_secondary(self.observed_property("secondary-sub-text"))
-
-    def draw_translation(self) -> None:
-        text = self._secondary_text()
-        self.translation_store.dispatch(events.TranslationDrawn(text))
-        if not text:
-            self.lifecycle_surfaces.remove(OverlayId.TRANS)
-            return
-        image, x, y = translation.render_translation(text, self.osd)
-        self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.TRANS)
-
-    def reveal_translation(self) -> None:
-        self.setup_secondary()
-        self.draw_translation()
-
-    def hide_translation(self, *, release: bool) -> None:
-        """Take the overlay down. `release` hands the secondary track back to mpv, which only the
-        paths that own the reveal may do — an auto-reveal ending must not release a track the
-        manual toggle is still holding."""
-        self.lifecycle_surfaces.remove(OverlayId.TRANS)
-        self.translation_store.dispatch(events.TranslationDrawn(None))
-        if release:
-            subtitle_modes.release_secondary(self.track_ports)
 
     def toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
         self.notifications.show(text, kind, seconds)
@@ -2920,13 +2871,13 @@ class SessionController:
         Without a reactor there is no turn to be atomic in, so each store reduces it in turn.
         """
         self.annotation_controller.retire_episode_warm()
+        self.translation_controller.retire_episode()
         if self._playback_store.routed:
             self._playback_store.dispatch(events.EpisodeRetired())
             return
         self._playback_store.dispatch(events.EpisodeRetired())
         self._subtitle_tracks.dispatch(events.EpisodeRetired())
         self.tooltip_controller.retire_episode()
-        self.translation_store.dispatch(events.EpisodeRetired())
 
     # --- run loop -----------------------------------------------------------------------------
     def current_media_path(self) -> Path | None:
@@ -3029,8 +2980,6 @@ class SessionController:
         self._sync_mouse_capture()
         self.tooltip_controller.publish_pending(self._tip_ports)
         self._update_prefetch()
-        if self.translation_visible() and self._secondary_text() != self._trans_text:
-            self.draw_translation()
         # The active row tracks the loaded index, language and scorer as well as the cue, and those
         # change without a cue settling — so this is outside the early return below.
         sidebar.follow(self.sidebar_view)
@@ -3373,7 +3322,6 @@ class SessionController:
             prepare_hover=self.prepare_hover_blocking,
             mark_ready=self._mark_interactive_ready,
             scroll_tip=self.scroll_tip,
-            setup_secondary=self.setup_secondary,
             toggle_translation=self._stateless_commands.handler(
                 subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION
             ),

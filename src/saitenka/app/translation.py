@@ -1,9 +1,8 @@
 """Translation reveal: an English secondary subtitle track shown as its own overlay, either manually
 toggled (``t``) or auto-revealed while a tooltip is up (``auto_translate`` opt-in).
 
-What is left here is the part that needs no session: cleaning mpv's raw secondary text, and laying
-the box out for a given OSD size. The orchestration — read the property, decide, present — lives on
-the SessionController, because it was only ever the host's own state threaded back through a module boundary.
+This module is the pure text and layout seam. The feature owner samples volatile inputs, decides
+whether the reveal is wanted, and asks the subtitle and surface boundaries to apply that decision.
 """
 
 from __future__ import annotations

@@ -2534,7 +2534,7 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     monkeypatch.setattr(r.lifecycle_surfaces, "remove", lambda oid, **_kw: hidden.append(oid))
     ui = _hover_base_word(r)
     assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
-    assert r._trans_text == "I want you to read this."
+    assert r.translation_controller.state.drawn == "I want you to read this."
     ui.leave()  # the cursor leaves the video window…
     assert _fire_dwell(ipc, "tooltip-hide")  # …and the tip lingers until its hide dwell is due
     assert OverlayId.TRANS in hidden  # leaving the word hid it again
@@ -2558,14 +2558,26 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     assert OverlayId.TRANS not in shown  # translation stays on the manual `t` key
 
 
+def test_secondary_text_observation_updates_the_active_translation() -> None:
+    ipc = FakeIPC()
+    ipc.props["secondary-sub-text"] = "first"
+    reader = SessionController(ipc)
+    reader._handle(app_bindings.TRANS_MSG)
+
+    reader._on_property_change({"name": "secondary-sub-text", "data": "second"})
+
+    assert reader.translation_controller.state.drawn == "second"
+
+
 def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
     ipc = FakeIPC()
     r = _auto_trans_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._handle(app_bindings.TRANS_MSG)  # force it ON with `t`
-    assert r.translate_on and r.translation_visible()
+    assert r.translation_controller.state.held
+    assert r.translation_controller.state.drawn == "I want you to read this."
     r.retire_hover()  # …and it stays even with nothing hovered
-    assert r.translation_visible()
+    assert r.translation_controller.state.drawn == "I want you to read this."
 
 
 # --- JLPT pill on the tooltip (same signal as the subtitle underline) ------------------------------
@@ -3288,8 +3300,18 @@ def test_reader_accepts_grouped_options_object():
 
 def test_reader_kwargs_still_work_and_map_onto_groups():
     # legacy exploded kwargs stay accepted (they build the options object internally)
+    from saitenka.app.features.translation import TranslationInputs
+
     r = SessionController(FakeIPC(), mine_key="Ctrl+z", tip_max_frac=0.4, auto_translate=True)
-    assert r.keys.mine_key == "Ctrl+z" and r.tip_max_frac == 0.4 and r.auto_translate is True
+    assert r.keys.mine_key == "Ctrl+z" and r.tip_max_frac == 0.4
+    assert r.translation_controller.wanted(
+        TranslationInputs(
+            surfaces_visible=True,
+            tooltip_selected=True,
+            secondary_text="",
+            osd=r.osd,
+        )
+    )
     with pytest.raises(TypeError):
         SessionController(FakeIPC(), not_a_knob=1)  # typo detection preserved
 

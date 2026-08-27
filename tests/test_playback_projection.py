@@ -20,6 +20,7 @@ from saitenka.runtime.playback import (
     RenderSpaceChanged,
     RetireReason,
     Revision,
+    SecondaryTextChanged,
     SourceChanged,
     SubtitleSelectionChanged,
     SubtitleTimingChanged,
@@ -116,6 +117,7 @@ _OBSERVATIONS = st.sampled_from(
         ("osd-dimensions", {"w": 1920, "h": 1080}),
         ("pause", True),
         ("mouse-pos", {"x": 4, "y": 8}),
+        ("secondary-sub-text", "English"),
     )
 )
 
@@ -152,6 +154,14 @@ def test_reobserving_the_latest_values_emits_nothing(
         projected = projection.observe(state, name, data)
         assert projected.deltas == ()
         assert projected.state == state
+
+
+def test_secondary_text_change_carries_the_new_value() -> None:
+    projection = PlaybackProjection()
+
+    projected = projection.observe(PlaybackState(), "secondary-sub-text", "English")
+
+    assert projected.deltas == (SecondaryTextChanged("English"),)
 
 
 # --- gate: identical text under a new source/track/role/cue is a new identity -----------------

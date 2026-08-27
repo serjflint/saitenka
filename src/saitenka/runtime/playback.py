@@ -43,6 +43,7 @@ class FactDomain(StrEnum):
     POINTER = "pointer"
     PAUSE = "pause"
     EOF = "eof"
+    PRESENTATION = "presentation"
 
 
 #: Domains whose deltas the legacy driver still owns, so publishing one would give a fact two
@@ -270,6 +271,13 @@ class EndOfFileChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class SecondaryTextChanged:
+    """The secondary subtitle text used by the translation reveal changed."""
+
+    value: object
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectionChanged:
     epoch: int
     ready: bool
@@ -287,6 +295,7 @@ type PlaybackDelta = (
     | PointerMoved
     | PauseChanged
     | EndOfFileChanged
+    | SecondaryTextChanged
     | ConnectionChanged
 )
 
@@ -302,6 +311,7 @@ _DELTA_DOMAIN: dict[type, FactDomain] = {
     PointerMoved: FactDomain.POINTER,
     PauseChanged: FactDomain.PAUSE,
     EndOfFileChanged: FactDomain.EOF,
+    SecondaryTextChanged: FactDomain.PRESENTATION,
     ConnectionChanged: FactDomain.CONNECTION,
 }
 
@@ -446,6 +456,8 @@ class PlaybackProjection:
             return state, (PauseChanged(paused),)
         if name in EOF_PROPERTIES:
             return state, (EndOfFileChanged(bool(data)),)
+        if name == "secondary-sub-text":
+            return state, (SecondaryTextChanged(data),)
         return state, ()
 
     def _apply_cue(self, state: PlaybackState, name: str, data: object) -> PlaybackState:
