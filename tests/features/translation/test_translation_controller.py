@@ -84,10 +84,12 @@ def test_secondary_text_change_updates_only_an_active_reveal() -> None:
 
 
 def test_episode_retirement_clears_drawn_text_but_keeps_the_manual_hold() -> None:
-    controller, _surfaces, _lease = owner()
+    controller, surfaces, lease = owner()
     controller.toggle(inputs())
 
     controller.retire_episode()
 
     assert controller.state.held
     assert controller.state.drawn is None
+    assert surfaces.removed == [OverlayId.TRANS]
+    assert not lease.held

@@ -107,4 +107,4 @@ class TranslationController:
             self.draw(inputs)
 
     def retire_episode(self) -> None:
-        self._store.dispatch(events.EpisodeRetired())
+        self.hide(release=True)

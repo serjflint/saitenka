@@ -2871,13 +2871,13 @@ class SessionController:
         Without a reactor there is no turn to be atomic in, so each store reduces it in turn.
         """
         self.annotation_controller.retire_episode_warm()
+        self.translation_controller.retire_episode()
         if self._playback_store.routed:
             self._playback_store.dispatch(events.EpisodeRetired())
             return
         self._playback_store.dispatch(events.EpisodeRetired())
         self._subtitle_tracks.dispatch(events.EpisodeRetired())
         self.tooltip_controller.retire_episode()
-        self.translation_controller.retire_episode()
 
     # --- run loop -----------------------------------------------------------------------------
     def current_media_path(self) -> Path | None:
