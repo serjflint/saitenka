@@ -15,18 +15,11 @@ from typing import TYPE_CHECKING, Protocol
 from saitenka.app.features.tooltip.popups import hovered_meta
 from saitenka.app.subnav_settle import SettleWindow
 
-# In-RAM ceiling for the tier-2 compressed-head cache. Independent of the disk ceiling
-# (``render_cache_max_mb``, which can be GBs): compressed heads are ~10× smaller than the BGRA arrays,
-# so 64 MB still covers hundreds of pathological heads — the working set a session actually hovers.
-_MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
-
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
     from saitenka.app.features.tooltip.popups import HoverMetadata, TooltipState
-    from saitenka.app.render_cache import CompressedHeadCache, RenderCache
     from saitenka.app.session_stats import SessionRecorder
     from saitenka.app.subtitle_modes import ProviderFetchFactory
-    from saitenka.mask_atlas import MaskAtlas
     from saitenka.runtime.hover_pause import PauseClaim
     from saitenka.runtime.interaction_slice import (
         HoveredWordStore,
@@ -162,48 +155,10 @@ class InteractionContext:
         return hovered_meta(self.tooltip.word_store)
 
 
-class RenderCacheState:
-    """The #149 persistent, cross-session rendering caches: the on-disk render cache (seeds a cold
-    hover's first viewport) and the glyph mask atlas, plus the memoised config signature. Opened lazily
-    / use-when-available (``saitenka prewarm`` is the builder), so a fresh install touches no disk; every
-    handle is session-lifetime."""
-
-    def __init__(
-        self,
-        *,
-        cache_on: bool,
-        cache_max_bytes: int,
-        cache_min_height_px: int,
-        mask_atlas_on: bool,
-    ) -> None:
-        self.cache_on = cache_on
-        self.cache_max_bytes = cache_max_bytes
-        self.cache_min_height_px = cache_min_height_px  # cost gate (px): only tall heads persist
-        self.obj: RenderCache | None = None
-        # Tier-2: an in-memory store of COMPRESSED first-view heads the prefetch worker hydrates from
-        # disk, so a cold hover inflates from RAM and never opens SQLite on the main thread. Capped well
-        # below the disk ceiling (compressed heads are ~10× smaller, so this still covers a wide set).
-        self.mem: CompressedHeadCache | None = None
-        if cache_on:
-            from saitenka.app.render_cache import CompressedHeadCache
-
-            self.mem = CompressedHeadCache(max_bytes=min(cache_max_bytes, _MEM_TIER_MAX_BYTES))
-        self.built = False  # the lazy open ran once (obj stays None if no prebuilt cache exists)
-        self.config_sig: str | None = None  # format+width+cap+dict-set signature, memoised…
-        self.sig_key: tuple[int, int] | None = (
-            None  # …per (width, cap) — a res change recomputes it
-        )
-        self.mask_atlas_on = mask_atlas_on
-        self.mask_atlas: MaskAtlas | None = (
-            None  # write-back handle (kept alive), or None off/absent
-        )
-
-
 class SessionContext:
     """Shared session state not already owned by a bounded feature controller."""
 
-    def __init__(self, render_cache: RenderCacheState) -> None:
-        self.render_cache = render_cache
+    def __init__(self) -> None:
         self.anki_cache: tuple[float, bool] = (0.0, False)
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle
 

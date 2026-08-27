@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import replace
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,7 +37,6 @@ from saitenka.app import (
     episode_reslot,
     geometry_refresh,
     logsetup,
-    mask_atlas_startup,
     native_subtitles,
     session_stats,
     subnav,
@@ -111,6 +111,7 @@ from saitenka.app.features.tooltip.popups import (
     TooltipState,
     WordLookup,
 )
+from saitenka.app.features.tooltip.preparation import TooltipPreparationInputs
 from saitenka.app.interaction import mouse_capture
 from saitenka.app.interaction.presentation import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
@@ -120,7 +121,6 @@ from saitenka.app.media import (
 )
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.paths import cache_dir
 from saitenka.app.perf import gil_disabled
 from saitenka.app.runtime import (
     COMMAND_SPECS,
@@ -138,7 +138,6 @@ from saitenka.app.session.context import (
     EpisodeContext,
     EpisodeSlot,
     InteractionContext,
-    RenderCacheState,
     SessionContext,
 )
 from saitenka.app.session.interaction_adapter import (
@@ -227,7 +226,6 @@ from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.render_cache import RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.subtitles import GeometryBackend
@@ -476,6 +474,7 @@ class SessionController:
         self.picker_controller = assembly.picker
         self.sidebar_controller = assembly.sidebar
         self.preview_controller = assembly.preview
+        self.tooltip_preparation = assembly.tooltip_preparation
         # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
         # whoever owns it rather than to a line in a teardown table far away. We keep *using* it;
         # what moves is when it closes. False means no runtime owns this session, and the close
@@ -575,20 +574,7 @@ class SessionController:
         self.raw_band_ceiling = (
             o.tooltip.raw_band_ceiling_mb * 1024 * 1024
         )  # bytes; 0 = always compress
-        # Session-lifetime state (app/reader_context.py SessionContext) — durable across every #100
-        # episode re-slot: the #149 persistent render caches (opt-in, built lazily / use-when-available so
-        # a non-dict or opted-out session never touches disk), the in-deck mined set, the Anki
-        # reachability cache, and the review backlog store.
-        self.session = SessionContext(
-            RenderCacheState(
-                cache_on=o.tooltip.render_cache,
-                cache_max_bytes=o.tooltip.render_cache_max_mb * 1024 * 1024,
-                cache_min_height_px=o.tooltip.render_cache_min_height,
-                mask_atlas_on=o.tooltip.mask_atlas,  # persistent glyph mask atlas (#149 Tier-1), opt-out
-            )
-        )
-        self._mask_atlas_startup = mask_atlas_startup.ActivationState()
-        self._mask_atlas_submit = mask_atlas_startup.configure_runtime_job(ipc)
+        self.session = SessionContext()
         # Idle crisp post-render (hi-dpi): after the instant soft upscale, a single background worker
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
         # of the same word) and the poll loop swaps it in — so scrolling stays crisp, not just the first band.
@@ -605,23 +591,6 @@ class SessionController:
         # Positive, truthful signal in the report bundle (overlay.log): the EFFECTIVE backend vs what was
         # requested — a "taffy" request landing on 'default' is a silent-fallback flag.
         log.info("layout backend: %s (requested %r)", self.layout_engine, o.tooltip.layout_engine)
-        # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
-        # CPU-only work (lookup + render + BGRA), NEVER touches the mpv IPC socket (main thread only).
-        self.prefetch = o.prefetch
-        self.prefetch_workers = (
-            o.perf.prefetch_workers
-        )  # constrained-parallel (GIL build) worker count
-        self.prefetch_lookahead = (
-            o.perf.prefetch_lookahead
-        )  # cues to warm ahead of the current line
-        # Head-prefetch (see config.py PerfOptions):
-        # speculatively renders the SAME viewport-capped head a real hover would, via the SAME
-        # panel_for()/panel_cache path, for a SELECTIVE subset of upcoming words (n+1/forgotten/
-        # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
-        # is a plain panel_cache hit with no new key-matching logic to get wrong.
-        self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
-        # A dedicated broker lane keeps speculative work behind interactive raster work.
-        self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
         self.tooltip_controller = tooltip_controller.TooltipController(
             ipc,
             self.engaged_build_ports,
@@ -809,15 +778,7 @@ class SessionController:
         self.commands = self._build_command_router()
         self.start_prefetch()
 
-        mask_atlas_startup.request(
-            self._mask_atlas_startup,
-            mask_atlas_startup.MaskAtlasRequest(
-                enabled=self.session.render_cache.mask_atlas_on,
-                path=cache_dir() / "mask-atlas.sqlite",
-            ),
-            self._mask_atlas_submit,
-            self._finish_mask_atlas_startup,
-        )
+        self.tooltip_preparation.request_mask_atlas(self._finish_mask_atlas_startup)
 
     def hover_view(self) -> hover_snapshot.HoverView:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
@@ -1524,7 +1485,11 @@ class SessionController:
     def warm_episode_tokens(self) -> None:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
         index = self.episode.sub_index
-        if index is None or not self.prefetch or self.profile_controller.dict_set is None:
+        if (
+            index is None
+            or not self.tooltip_preparation.config.enabled
+            or self.profile_controller.dict_set is None
+        ):
             return
         self.annotation_controller.start_episode_warm(index, self._annotation_inputs())
 
@@ -1536,7 +1501,7 @@ class SessionController:
         self.annotation_controller.invalidate_tokenizer()
 
     def _invalidate_profile_dictionary(self) -> None:
-        self.session.render_cache.config_sig = None
+        self.tooltip_preparation.cache.invalidate_signature()
 
     def _reset_profile_episode_warm(self) -> None:
         self.annotation_controller.retire_episode_warm()
@@ -1708,6 +1673,14 @@ class SessionController:
             cap=self.tip_scale.cap,
         )
 
+    @property
+    def preparation_inputs(self) -> TooltipPreparationInputs:
+        """Facts captured for one tooltip preparation admission."""
+        return TooltipPreparationInputs(
+            panels=self.panel_ports,
+            dictionary=self.profile_controller.dict_set,
+        )
+
     def _is_mined(self, tok) -> bool:
         return tooltip_panel.is_mined(tok, self.mining_controller.index_snapshot())
 
@@ -1874,7 +1847,7 @@ class SessionController:
             tokenizer=self.profile_controller.tokenizer,
             dict_set=self.profile_controller.dict_set,
             mined=self.mining_controller.index_snapshot(),
-            prefetch_gen=self.prefetch_state.gen,
+            prefetch_gen=self.tooltip_preparation.generation,
             dependency_gen=annotation.dependency_generation,
             cue_identity=annotation.identity,
             deferred=self.tooltip_controller.metadata_deferred,
@@ -1889,7 +1862,7 @@ class SessionController:
             lookup=self.word_lookup,
             hover=self.hover_inputs,
             show=self.show_actions,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
         )
 
     @property
@@ -1900,7 +1873,11 @@ class SessionController:
             draw_cue=self.draw_subtitle,
             teardown=self.teardown_tip,
             bind_keys=self._bind_tip_keys,
-            seed_precomposed=self._seed_precomposed,
+            seed_precomposed=lambda panel, key, cap: (
+                self.tooltip_preparation.cache.seed_precomposed(
+                    self.preparation_inputs, panel, key, cap
+                )
+            ),
             freeze=lambda *, already_paused: tooltip._freeze_frame(
                 self.ipc,
                 self.observed_property,
@@ -1967,21 +1944,22 @@ class SessionController:
     def prefetch_ports(self) -> prefetch.PrefetchPorts:
         """What one speculative-warming pass reads. Paired with `head_probe`."""
         return prefetch.PrefetchPorts(
-            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
+            enabled=bool(
+                self.tooltip_preparation.config.enabled
+                and self.profile_controller.dict_set is not None
+            ),
             engaged=bool(self.observed_property("pause")) or self._mouse_in,
-            state=self.prefetch_state,
             cues=prefetch.LookaheadCues(
                 self.episode.sub_index,
                 self.sub_text,
                 self.episode.nav_idx,
-                self.prefetch_lookahead,
+                self.tooltip_preparation.config.cue_lookahead,
             ),
             tokens=self.tokens,
             styles=self.styles,
             tokenizer=self.profile_controller.tokenizer,
             inflected=self._inflected_surface,
             is_mined=self._is_mined,
-            finish=self._finish_speculative_prefetch,
         )
 
     @property
@@ -1991,7 +1969,8 @@ class SessionController:
             scorer=self.scorer,
             panel_key=self._panel_key,
             panel_cache=self.tip.panel_cache,
-            lookahead=self.head_prefetch_lookahead,
+            lookahead=self.tooltip_preparation.config.head_lookahead,
+            queue_max=self.tooltip_preparation.config.head_queue_max,
         )
 
     @property
@@ -2074,7 +2053,9 @@ class SessionController:
             tip_max_frac=self.tip_max_frac,
             nested_max_frac=self.nested_max_frac,
             request_render_ahead=self._request_render_ahead,
-            peek_render_cache=self._peek_render_cache,
+            peek_render_cache=lambda key: self.tooltip_preparation.cache.peek(
+                self.preparation_inputs, key
+            ),
             schedule_flash_expiry=self.schedule_flash_expiry,
             notifications=self.notifications,
             request_engaged_tooltip=self._request_engaged_tooltip,
@@ -2085,11 +2066,7 @@ class SessionController:
         """The exact session capabilities available to tooltip build workers."""
         return tooltip_engaged.EngagedBuildPorts(
             nested_max_frac=self.nested_max_frac,
-            tip_scale=lambda: self.tip_scale,
-            panel_for=self._panel_for,
-            worker_seed_head=self._worker_seed_head,
-            precompose_head=self._precompose_head,
-            mem_fill=self._mem_fill,
+            prepare_hover=self.tooltip_preparation.prepare_engaged,
             cap_for=self._cap_for,
             navigated_panel=self._navigated_panel,
             engaged_open_panel=self._engaged_open_panel,
@@ -2143,170 +2120,29 @@ class SessionController:
     def _panel_cache_setdefault(self, key, st) -> Panel:
         return self.tooltip_controller.cache_setdefault(key, st)
 
-    # --- persistent render cache (#149): seed a cold hover's first viewport from disk ----------
-    def _render_cache(self) -> RenderCache | None:
-        """The cross-session render cache, USED WHEN AVAILABLE: opened lazily only if a prebuilt
-        ``render-cache.sqlite`` already exists (``saitenka prewarm`` builds it). ``None`` when opted out,
-        no dict set, or no prebuilt cache — so a fresh install creates nothing and costs nothing."""
-        rc = self.session.render_cache
-        if not rc.cache_on or self.profile_controller.dict_set is None:
-            return None
-        if not rc.built:
-            rc.built = True
-            from saitenka.app.render_cache import RenderCache
-
-            path = cache_dir() / "render-cache.sqlite"
-            if path.exists():  # use-when-available — prewarm is the builder, not a live session
-                rc.obj = RenderCache.open(path, max_bytes=rc.cache_max_bytes)
-        return rc.obj
-
     def _finish_mask_atlas_startup(self, completion: EffectFinished) -> None:
-        opened = mask_atlas_startup.finish(self._mask_atlas_startup, completion)
-        if opened is not None:
-            mask_atlas_startup.install(self.session.render_cache, opened)
-
-    def _render_cache_sig(self) -> str:
-        """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
-        resolution change recomputes it. Only called when the cache is on (dict_set present)."""
-        rc = self.session.render_cache
-        cap = self.tip_scale.cap
-        ck = (self.tip_scale.width, cap)
-        if rc.config_sig is None or rc.sig_key != ck:
-            from saitenka.app.render_cache import config_signature, dict_set_signature
-
-            assert (
-                self.profile_controller.dict_set is not None
-            )  # _render_cache() gated on it before any caller reaches here
-            rc.config_sig = config_signature(
-                width=self.tip_scale.width,
-                cap=cap,
-                dict_sig=dict_set_signature(self.profile_controller.dict_set),
-            )
-            rc.sig_key = ck
-        return rc.config_sig
-
-    def _render_cache_min_height(self) -> int:
-        """Cost gate (px): only heads at least this tall — a non-trivial entry that needs scrolling, the
-        pathological tail whose cold build+raster blows the budget — are persisted."""
-        return self.session.render_cache.cache_min_height_px
-
-    def _mem_cache(self):
-        """The in-memory tier-2 compressed-head cache (RAM), or ``None`` when the render cache is off.
-        The MAIN thread reads ONLY this — never SQLite — so a cold hover inflates from RAM; the prefetch
-        worker hydrates it from disk (see :meth:`_worker_seed_head` / :meth:`_mem_fill`)."""
-        rc = self.session.render_cache
-        return rc.mem if rc.cache_on else None
-
-    def _peek_render_cache(self, key):
-        """The stored first viewport + ``full_h`` for ``key`` (direct-paint path), or ``None`` — read
-        from the in-memory tier-2 (inflate from RAM), NEVER from SQLite: the main thread must not open the
-        DB on the hover path. A miss falls through to a build (and the tier-3 deferred render)."""
-        mem = self._mem_cache()
-        if mem is None or len(mem) == 0:
-            return None  # empty tier-2 → miss without computing the sig (nothing a worker has seeded yet)
-        from saitenka.app.render_cache import content_key
-
-        cv = mem.get((self._render_cache_sig(), content_key(key)))
-        if cv is None:
-            return None
-        try:
-            return cv.inflate()
-        except ValueError:  # a garbled blob won't reshape → safe miss, build instead
-            return None
-
-    def _seed_precomposed(self, st: Panel, key, cap: int) -> bool:
-        """Seed ``st``'s first viewport from the in-memory tier-2 (cold-show fast path). ``False`` when
-        the cache is off or misses, or the stored geometry doesn't match this show's ``view_h``. Main
-        thread — an in-RAM inflate on a hit, no disk."""
-        loaded = self._peek_render_cache(key)
-        if loaded is None:
-            return False
-        view_h = min(st.full_height, cap)
-        if view_h <= 0 or loaded.view_h != view_h or loaded.overscan != view_h:
-            return False  # geometry moved (content/height changed) — safe miss, live-render
-        st.windowed.install_first_view(loaded.view_h, loaded.overscan, loaded.array)
-        return True
-
-    def _worker_seed_head(self, st: Panel, tok, inflected, *, mined: bool, cap: int) -> bool:
-        """WORKER-side: seed ``st``'s first viewport from the on-disk cache (inflate off the main thread)
-        and mirror the compressed blob into the in-memory tier-2, so the next hover paints from RAM. Far
-        cheaper than a raster on a hit — the lookahead worth doing before falling back to a full compose.
-        ``False`` on cache-off / miss / geometry mismatch (caller then rasters)."""
-        cache = self._render_cache()
-        mem = self._mem_cache()
-        if cache is None or mem is None:
-            return False
-        from saitenka.app.render_cache import content_key
-
-        sig = self._render_cache_sig()
-        ck = content_key(self._panel_key(tok, inflected, mined=mined))
-        cv = cache.peek_compressed(sig, ck)
-        if cv is None:
-            return False
-        view_h = min(st.full_height, cap)
-        if view_h <= 0 or cv.view_h != view_h or cv.overscan != view_h:
-            return False
-        st.windowed.install_first_view(cv.view_h, cv.overscan, cv.inflate().array)
-        mem.put((sig, ck), cv)
-        return True
-
-    def _mem_fill(self, tok, inflected, *, mined: bool) -> None:
-        """WORKER-side: mirror a just-composed+persisted head into the in-memory tier-2 (compressed), so a
-        later hover — or an evicted-then-rebuilt panel — re-seeds from RAM without touching SQLite. No-op
-        if the head wasn't stored (cost gate) or the cache is off; reuses the on-disk blob (no re-compress)."""
-        cache = self._render_cache()
-        mem = self._mem_cache()
-        if cache is None or mem is None:
-            return
-        from saitenka.app.render_cache import content_key
-
-        sig = self._render_cache_sig()
-        ck = content_key(self._panel_key(tok, inflected, mined=mined))
-        cv = cache.peek_compressed(sig, ck)
-        if cv is not None:
-            mem.put((sig, ck), cv)
-
-    def _precompose_head(
-        self, st: Panel, tok, inflected, *, mined: bool, cap: int, protected: bool = False
-    ) -> None:
-        """Precompose ``st``'s first viewport in idle (the prefetch lane) and, when the persistent
-        cache is on, write a cost-gated head to disk for a later session's cold hover. ``protected`` (the
-        offline prewarm) marks the popular set eviction-last so live write-back can't thrash it."""
-        cache = self._render_cache()
-        if cache is None:
-            st.precompose_head(cap)
-            return
-        from saitenka.app.render_cache import content_key
-
-        key = self._panel_key(tok, inflected, mined=mined)
-        st.precompose_head(
-            cap,
-            cache=cache,
-            config_sig=self._render_cache_sig(),
-            content_key=content_key(key),
-            min_height=self._render_cache_min_height(),
-            protected=protected,
-        )
+        self.tooltip_preparation.finish_mask_atlas(completion)
 
     # --- background prefetch (warm the current/next line's tooltips) — tooltip feature --
-    def start_prefetch(self) -> None:
-        prefetch.start_prefetch(
+    def start_prefetch(self) -> int:
+        self.tooltip_preparation.start(
             self.ipc,
-            self.prefetch_state,
-            prefetch.HostPrefetchBackend(self),
             self.profile_controller.tokenizer,
-            self.prefetch_workers,
-            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
+            dictionary_available=self.profile_controller.dict_set is not None,
         )
+        return self.tooltip_preparation.worker_count
 
     def _update_prefetch(self) -> None:
-        generation = self.prefetch_state.gen
-        prefetch.update_prefetch(self.prefetch_ports, self.head_probe)
-        if self.prefetch_state.gen != generation:
+        if self.tooltip_preparation.update(
+            self.prefetch_ports,
+            self.head_probe,
+            self.preparation_inputs,
+            self._finish_speculative_prefetch,
+        ):
             self.tooltip_controller.cancel_current_work()
 
     def _finish_speculative_prefetch(self, completion: EffectFinished) -> None:
-        prefetch.finish(self.prefetch_state, completion, self._finish_speculative_prefetch)
+        self.tooltip_preparation.finish(completion, self._finish_speculative_prefetch)
 
     def _inflected_surface(self, index: int) -> str:
         return self.profile_controller.tokenizer.inflected_in(self.tokens, index)
@@ -2997,22 +2833,27 @@ class SessionController:
         return self.tooltip_controller.request_render_ahead(
             view,
             direction,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             scale=self.tip_scale.raster,
             on_finished=self._finish_render_ahead,
         )
 
     def _request_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> bool:
+        changes = {} if request.scale is not None else {"scale": self.tip_scale}
+        if isinstance(request, tooltip_engaged.HoverRequest) and request.panels is None:
+            changes["panels"] = self.panel_ports
+        if changes:
+            request = replace(request, **changes)
         return self.tooltip_controller.request_engaged(
             request,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             on_finished=self._finish_engaged_tooltip,
         )
 
     def _finish_engaged_tooltip(self, completion: EffectFinished) -> None:
         self.tooltip_controller.finish_engaged(
             completion,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             apply_factory=self._tooltip_apply,
             on_finished=self._finish_engaged_tooltip,
         )
@@ -3020,7 +2861,7 @@ class SessionController:
     def _finish_render_ahead(self, completion: EffectFinished) -> None:
         self.tooltip_controller.finish_render_ahead(
             completion,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             ports=self.tip_ports,
             on_finished=self._finish_render_ahead,
         )
@@ -3628,9 +3469,9 @@ class SessionController:
         """Everything that has to hear about a new vocabulary, in the order it has to hear it."""
         self.analysis_commands.invalidate(vocabulary_changed=True)
         self._dependencies_changed()
-        self.start_prefetch()  # prefetch can spin up now (no-op while dict_set is still None)
+        workers = self.start_prefetch()  # no-op while dict_set is still None
         self.warm_episode_tokens()  # deps landed after the index built → warm this episode's cues
-        self._announce_runtime()  # workers are up — the banner can carry the real count (once)
+        self._announce_runtime(workers)
 
     def _draw_loading(self) -> None:
         reader_deps.draw_loading(self.lifecycle_surfaces, self._load_frame)
@@ -3650,7 +3491,7 @@ class SessionController:
         self._draw_loading()
         self._schedule_loading_frame(delay_s=0.08)
 
-    def _announce_runtime(self) -> None:
+    def _announce_runtime(self, worker_count: int | None = None) -> None:
         """Print the runtime banner exactly once, from wherever prefetch actually finishes starting
         (sync: construction; async: apply_deps after start_prefetch). Reports the LIVE worker count — the old
         run()-time print always showed 0 because async deps hadn't spawned the workers yet."""
@@ -3658,7 +3499,11 @@ class SessionController:
             return
         self._runtime_announced = True
         mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
-        console_log.info("runtime: %s · %d prefetch worker(s)", mode, self.prefetch_state.workers)
+        console_log.info(
+            "runtime: %s · %d prefetch worker(s)",
+            mode,
+            self.tooltip_preparation.worker_count if worker_count is None else worker_count,
+        )
 
     @property
     def session_entry(self) -> SessionEntry:
@@ -3981,11 +3826,11 @@ class SessionController:
                     lane("tooltip-render-ahead"),
                     self.tooltip_controller.close_engaged,
                     lane("tooltip-engaged"),
-                    lambda: prefetch.close(self.prefetch_state),
+                    self.tooltip_preparation.close_prefetch,
                     lane("speculative-prefetch"),
-                    lambda: mask_atlas_startup.close(self._mask_atlas_startup),
+                    self.tooltip_preparation.close_mask_activation,
                     lane("mask-atlas-startup"),
-                    lambda: mask_atlas_startup.uninstall(self.session.render_cache),
+                    self.tooltip_preparation.cache.uninstall_mask_atlas,
                     _close_render_pool,
                     # The unconstrained tail. Each one's state was already retired by an earlier
                     # phase — the probes at CAPABILITIES, the metadata at PARTICIPANTS, the mined

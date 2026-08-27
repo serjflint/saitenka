@@ -7,7 +7,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from itertools import islice
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app.perf import gil_disabled
@@ -17,7 +17,6 @@ from saitenka.runtime.jobs import JobLanePolicy
 if TYPE_CHECKING:
     from collections.abc import Callable, Container
 
-    from saitenka.app.features.profiles.profile_controller import ProfileController
     from saitenka.app.scoring import Scorer
     from saitenka.app.tokenize import Token
     from saitenka.app.tokenizer import Tokenizer
@@ -139,24 +138,8 @@ class PrefetchIdentity:
 @dataclass(frozen=True, slots=True)
 class PrefetchWork:
     item: PrefetchItem | HeadPrefetchItem
+    context: object
     superseded: threading.Event
-
-
-class PrefetchHost(Protocol):
-    profile_controller: ProfileController
-    tip_scale: TipScale
-
-    def _panel_for(self, token, inflected, **kwargs): ...
-
-    def _worker_seed_head(self, panel, token, inflected, **kwargs) -> bool: ...
-
-    def _precompose_head(self, panel, token, inflected, **kwargs) -> None: ...
-
-    def _mem_fill(self, token, inflected, **kwargs) -> None: ...
-
-
-class PrefetchDictionary(Protocol):
-    def entry_for(self, token, inflected): ...
 
 
 class JobSubmitter(Protocol):
@@ -171,47 +154,28 @@ class JobSubmitter(Protocol):
     ) -> bool: ...
 
 
-class HostPrefetchBackend:
-    """Worker adapter over the existing cache and panel seams."""
-
-    def __init__(self, host: object) -> None:
-        self._reader = cast("PrefetchHost", host)
-
-    def run(self, item: PrefetchItem | HeadPrefetchItem, should_cancel) -> bool:
-        if isinstance(item, HeadPrefetchItem):
-            with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
-                return self._render_head(item, should_cancel)
-        with otel_metrics.traced("prefetch_decode", kind="head" if item.full else "warm"):
-            if item.full:
-                return self._render_head(item, should_cancel)
-            reader = self._reader
-            if reader.profile_controller.dict_set is not None and not should_cancel():
-                reader.profile_controller.dict_set.entry_for(item.token, item.inflected)
-        return not should_cancel()
-
-    def _render_head(self, item: PrefetchItem | HeadPrefetchItem, should_cancel) -> bool:
-        reader = self._reader
-        cap = reader.tip_scale.cap
-        panel = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
-        if should_cancel():
-            return False
-        if not reader._worker_seed_head(
-            panel, item.token, item.inflected, mined=item.mined, cap=cap
-        ):
-            reader._precompose_head(panel, item.token, item.inflected, mined=item.mined, cap=cap)
-            if not should_cancel():
-                reader._mem_fill(item.token, item.inflected, mined=item.mined)
-        return not should_cancel()
+class PrefetchBackend(Protocol):
+    def run(
+        self, item: PrefetchItem | HeadPrefetchItem, context: object, should_cancel
+    ) -> bool: ...
 
 
-def run_prefetch(work: object, cancelled: threading.Event, backend: HostPrefetchBackend) -> bool:
+def run_prefetch(work: object, cancelled: threading.Event, backend: PrefetchBackend) -> bool:
     if not isinstance(work, PrefetchWork):
         raise TypeError("invalid speculative-prefetch request")
     should_cancel = lambda: cancelled.is_set() or work.superseded.is_set()  # noqa: E731
     if should_cancel():
         return False
     try:
-        return backend.run(work.item, should_cancel)
+        kind = (
+            "head_ahead"
+            if isinstance(work.item, HeadPrefetchItem)
+            else "head"
+            if work.item.full
+            else "warm"
+        )
+        with otel_metrics.traced("prefetch_decode", kind=kind):
+            return backend.run(work.item, work.context, should_cancel)
     except Exception:
         log.debug("speculative prefetch failed", exc_info=True)
         raise
@@ -241,7 +205,7 @@ def prefetch_worker_count(tokenizer, configured: int) -> int:
 def start_prefetch(
     ipc,
     state: PrefetchState,
-    backend: HostPrefetchBackend,
+    backend: PrefetchBackend,
     tokenizer,
     workers: int,
     *,
@@ -301,6 +265,8 @@ def schedule(
     state: PrefetchState,
     jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem]],
     on_finished,
+    *,
+    context: object = None,
 ) -> bool:
     if state.closed or state.submitter is None or state.workers <= 0:
         return False
@@ -315,7 +281,7 @@ def schedule(
         )
         heapq.heappush(
             state.pending,
-            (priority, state.sequence, identity, PrefetchWork(item, threading.Event())),
+            (priority, state.sequence, identity, PrefetchWork(item, context, threading.Event())),
         )
         admitted = True
         if otel_metrics.prefetch_queue_depth is not None:
@@ -377,14 +343,12 @@ class PrefetchPorts:
 
     enabled: bool
     engaged: bool
-    state: PrefetchState
     cues: LookaheadCues
     tokens: list[Token]
     styles: object
     tokenizer: Tokenizer
     inflected: Callable[[int], str]
     is_mined: Callable[[Token], bool]
-    finish: Callable[[EffectFinished], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,9 +362,16 @@ class HeadProbe:
     panel_key: Callable[..., object]
     panel_cache: Container[object]
     lookahead: int
+    queue_max: int = _MAX_HEAD_PENDING
 
 
-def update_prefetch(ports: PrefetchPorts, head: HeadProbe) -> None:
+def update_prefetch(
+    state: PrefetchState,
+    ports: PrefetchPorts,
+    head: HeadProbe,
+    context: object,
+    on_finished: Callable[[EffectFinished], None],
+) -> None:
     """Queue the current line's content words for background work every time the line (or engagement)
     changes — *engaged* (paused OR the cursor over the video) gets a viewport-first HEAD render (a
     hover is imminent); otherwise a cheap dict-only WARM (``full=False``): the video is just playing, but
@@ -413,7 +384,6 @@ def update_prefetch(ports: PrefetchPorts, head: HeadProbe) -> None:
     if not ports.enabled:
         return
     key = (ports.cues.text, ports.engaged)
-    state = ports.state
     if key == state.key:
         return
     state.key = key
@@ -433,7 +403,7 @@ def update_prefetch(ports: PrefetchPorts, head: HeadProbe) -> None:
         )
     if head.lookahead > 0:
         jobs.extend(_head_prefetch_items(ports, head, gen, {t.lemma for _, _, t in cands}))
-    schedule(state, jobs, ports.finish)
+    schedule(state, jobs, on_finished, context=context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -538,7 +508,10 @@ def _head_candidates_for_text(
 
 
 def _head_prefetch_items(
-    ports: PrefetchPorts, head: HeadProbe, gen: int, seen: set[str]
+    ports: PrefetchPorts,
+    head: HeadProbe,
+    gen: int,
+    seen: set[str],
 ) -> list[tuple[int, HeadPrefetchItem]]:
     """Speculative HEAD render for a SELECTIVE subset of the next
     ``head_prefetch_lookahead`` cues' words: only ones :func:`_head_priority` judges worth the extra
@@ -549,7 +522,7 @@ def _head_prefetch_items(
         return []
     candidates: list[tuple[int, HeadPrefetchItem]] = []
     probe_budget = _MAX_HEAD_TOKEN_PROBES
-    queue_max = ports.state.head_queue_max
+    queue_max = head.queue_max
     cue_limit = min(max(0, head.lookahead), queue_max)
     for text in upcoming_cue_texts(
         ports.cues.index, cue_limit, text=ports.cues.text, preferred=ports.cues.nav_index

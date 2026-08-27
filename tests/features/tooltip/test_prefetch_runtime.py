@@ -114,12 +114,12 @@ def test_superseded_work_never_enters_the_backend() -> None:
     called = False
 
     class _Backend:
-        def run(self, _item, _should_cancel):
+        def run(self, _item, _context, _should_cancel):
             nonlocal called
             called = True
             return True
 
-    work = prefetch.PrefetchWork(_item(1, "古"), threading.Event())
+    work = prefetch.PrefetchWork(_item(1, "古"), None, threading.Event())
     work.superseded.set()
 
     assert prefetch.run_prefetch(work, threading.Event(), _Backend()) is False

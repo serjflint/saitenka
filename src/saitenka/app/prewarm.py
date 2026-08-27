@@ -19,39 +19,24 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
+from saitenka.app.features.tooltip import prefetch, tooltip_panel
+from saitenka.app.features.tooltip.preparation import (
+    PersistentHeadCache,
+    TooltipPreparationConfig,
+    TooltipPreparationInputs,
+)
 from saitenka.app.tokenize import Token
 from saitenka.mask_atlas import REFERENCE_SCALE
-from saitenka.runtime.jobs import NoSessionRuntime
 
 if TYPE_CHECKING:
     from saitenka.app.render_cache import RenderCache
-    from saitenka.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)
 
 _CHECKPOINT_EVERY = 2000  # rastered words between heartbeats (WAL truncate + progress emit)
 _PLATEAU_MIN_NEW = 64  # a checkpoint adding fewer new masks than this counts as "dry"
-
-
-class _PrewarmIPC(NoSessionRuntime):
-    """A no-socket mpv stand-in: a fixed OSD and inert commands, so a headless SessionController can build panels
-    without a running mpv (mirrors the benchmark's FakeIPC).
-
-    There is no session here — no socket, no gateway, no events to reduce — so it **refuses** the
-    runtime job port rather than lacking it. Prewarm renders on its own `ThreadPoolExecutor`; a lane
-    would be a second, unowned pool. The refusal is the same one a live `MpvIPC` gives before its
-    gateway is installed, so every feature already has a path for it.
-    """
-
-    def __init__(self, width: int, height: int):
-        self._osd = {"w": width, "h": height}
-
-    def command(self, *args):
-        if args and args[0] == "get_property" and len(args) > 1 and args[1] == "osd-dimensions":
-            return {"data": self._osd}
-        return {"data": None}
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,8 +100,102 @@ def _popular_terms(ds, limit: int) -> list[tuple[str, str]]:
     ]
 
 
-def _make_session_controller(
-    width: int,
+class _HeadlessTooltipPreparation:
+    """The panel/cache capabilities prewarm needs, without a live study session."""
+
+    def __init__(
+        self,
+        height: int,
+        dictionary,
+        cache: RenderCache | None,
+        *,
+        render_cache_on: bool,
+    ) -> None:
+        from saitenka.app.config import TooltipOptions
+        from saitenka.app.features.tooltip.popups import PanelCache
+        from saitenka.app.tokenizer import get_tokenizer
+        from saitenka.render.layout_backend import backend_label, resolve_backend
+
+        options = TooltipOptions(render_cache=render_cache_on)
+        backend = resolve_backend(options.layout_engine)
+        self.dictionary = dictionary
+        self.scale = prefetch.tip_scale(
+            height,
+            override=options.tip_scale,
+            max_frac=options.tip_max_frac,
+        )
+        self._panels = tooltip_panel.PanelPorts(
+            style=tooltip_panel.PanelStyle(
+                width=self.scale.width,
+                band_cache_max=options.band_cache_max,
+                raw_band_ceiling=options.raw_band_ceiling_mb * 1024 * 1024,
+                layout_backend=backend,
+                layout_engine=backend_label(backend),
+                add_button=False,
+                speak_button=False,
+                dict_set=dictionary,
+                scorer=None,
+                tokenizer=get_tokenizer("unidic"),
+                kanji_stroke_order=options.kanji_stroke_order,
+            ),
+            mined_set=frozenset(),
+            during_scroll=False,
+            cache=PanelCache(options.panel_cache_max, threading.Lock()),
+            cap=self.scale.cap,
+        )
+        self.cache = PersistentHeadCache(
+            TooltipPreparationConfig(
+                enabled=False,
+                workers=0,
+                cue_lookahead=0,
+                head_lookahead=0,
+                head_queue_max=1,
+                cache_enabled=render_cache_on,
+                cache_max_bytes=options.render_cache_max_mb * 1024 * 1024,
+                cache_min_height=options.render_cache_min_height,
+                mask_atlas_enabled=False,
+            )
+        )
+        if cache is not None:
+            self.cache.install_build_cache(cache)
+
+    @property
+    def inputs(self) -> TooltipPreparationInputs:
+        return TooltipPreparationInputs(self._panels, self.dictionary)
+
+    def panel_key(self, token, inflected, *, mined: bool = False):
+        return tooltip_panel.panel_key(self._panels, token, inflected, mined=mined)
+
+    def panel_for(self, token, inflected, *, mined: bool = False):
+        return tooltip_panel.panel_for(
+            self._panels,
+            token,
+            inflected,
+            min_h=self.scale.cap,
+            mined=mined,
+        )
+
+    def precompose_head(
+        self,
+        panel,
+        token,
+        inflected,
+        *,
+        mined: bool,
+        protected: bool = False,
+    ) -> None:
+        self.cache.precompose_head(
+            self.inputs,
+            panel,
+            token,
+            inflected,
+            mined=mined,
+            cap=self.scale.cap,
+            protected=protected,
+        )
+
+
+def _make_headless_preparation(
     height: int,
     dict_titles,
     freqs,
@@ -125,28 +204,21 @@ def _make_session_controller(
     *,
     render_cache_on: bool = True,
 ):
-    """A fresh headless SessionController with its OWN dict set (own SQLite conns + entry caches → no cross-thread
-    race) but the SHARED render cache injected, so N worker threads render in parallel into one cache.
+    """A fresh headless tooltip preparation with its OWN dictionary set and shared render cache.
+
+    Separate dictionary sets give workers independent SQLite connections and entry caches.
     ``render_cache_on=False`` (atlas-only fill) keeps the reader off the render cache entirely, so it
     always BUILDS+RASTERS a panel (never seeds pixels from disk) — required to feed the mask atlas."""
-    from saitenka.app.config import ReaderOptions, TooltipOptions
     from saitenka.app.dictdb import DictionaryDb
     from saitenka.app.dictionary import DictionarySet
-    from saitenka.app.session.controller import SessionController
 
     ds = DictionarySet.from_db(DictionaryDb.open(), dict_titles, freqs, pitches)
-    reader = SessionController(
-        cast("MpvIPC", _PrewarmIPC(width, height)),  # headless stand-in — no socket, fixed OSD
-        dict_set=ds,
-        options=ReaderOptions(tooltip=TooltipOptions(render_cache=render_cache_on), prefetch=False),
+    return _HeadlessTooltipPreparation(
+        height,
+        ds,
+        cache,
+        render_cache_on=render_cache_on,
     )
-    reader.osd = (width, height)
-    if (
-        cache is not None
-    ):  # share ONE cache across threads (its conns are per-thread); None → lazy open
-        reader.session.render_cache.obj = cache
-        reader.session.render_cache.built = True
-    return reader
 
 
 @dataclass(frozen=True)
@@ -171,12 +243,12 @@ class PrewarmTuning:
 
 class _PrewarmJob:
     """The parallel render loop's shared state + per-word work, as methods so each stays simple (the
-    complexity ratchet). Thread-local Readers (own dict conns) share one injected cache; a lock guards
-    the counters. A per-word render is independent, so it fans out cleanly across the free-threaded pool."""
+    complexity ratchet). Thread-local preparation capabilities own their dictionary connections and
+    share one injected cache; a lock guards the counters."""
 
     def __init__(
         self,
-        session_factory,
+        preparation_factory,
         cache: RenderCache | None,
         atlas,
         gate: int,
@@ -185,7 +257,7 @@ class _PrewarmJob:
         on_progress,
         tuning: PrewarmTuning,
     ):
-        self._make = session_factory  # () -> a fresh headless controller with the shared cache
+        self._make = preparation_factory
         self.cache = cache  # None in atlas-only mode (the render cache is left untouched)
         self.atlas = atlas  # mask atlas (getmask2 write-back builds it too); None if unavailable
         self.atlas_only = tuning.atlas_only
@@ -214,12 +286,12 @@ class _PrewarmJob:
         self._start_nbytes = tuning.start_nbytes  # run-start footprint → cumulative-rate projection
         self._dry_streak = 0  # consecutive dry checkpoints, for --atlas-plateau
 
-    def _reader(self):
-        r = getattr(self._tls, "reader", None)
-        if r is None:
-            r = self._make()
-            self._tls.reader = r
-        return r
+    def _preparation(self):
+        preparation = getattr(self._tls, "preparation", None)
+        if preparation is None:
+            preparation = self._make()
+            self._tls.preparation = preparation
+        return preparation
 
     def render(self, item: tuple[str, str]) -> None:
         """One popular word: skip if already cached, else build + (cost-gated) precompose + persist."""
@@ -228,38 +300,38 @@ class _PrewarmJob:
         if self.stop:
             return
         term, reading = item
-        r = self._reader()
+        preparation = self._preparation()
         tok = Token(term, term, reading, "名詞", 0, len(term))
         # atlas-only: no render cache at all — build + raster every word to feed the mask atlas.
         if self.atlas_only:
-            self._render_atlas(r, tok, term)
+            self._render_atlas(preparation, tok, term)
             return
         assert self.cache is not None  # non-atlas_only always has a render cache
-        already = self.cache.has(self.sig, content_key(r._panel_key(tok, term, mined=False)))
+        already = self.cache.has(
+            self.sig, content_key(preparation.panel_key(tok, term, mined=False))
+        )
         if already and not self.fill_atlas:
             with self._lock:
                 self.skipped += 1
             return  # both caches already have it (incremental / resumable) — skip the expensive build
         try:
-            cap = r.tip_scale.cap
-            st = r._panel_for(tok, term, min_h=cap, mined=False)
+            cap = preparation.scale.cap
+            st = preparation.panel_for(tok, term, mined=False)
             if not already and st.full_height >= self.gate:
                 # Render CACHE: only NON-TRIVIAL (≥ gate) not-yet-stored heads — the big cache stays
                 # capped to the pathological/non-trivial tail. protected=True → live write-back of a rarer
                 # word can never evict this prewarmed popular head (the capped-cache anti-thrash).
-                r._precompose_head(
-                    tok=tok, inflected=term, st=st, mined=False, cap=cap, protected=True
-                )
+                preparation.precompose_head(st, tok, term, mined=False, protected=True)
             elif self.fill_atlas:
                 # ATLAS: raster EVERY other word (trivial, or already in the render cache) so its glyphs
                 # land in the per-glyph mask atlas — full population coverage — without a render-cache row.
                 st.precompose_head(cap)
         except Exception:  # a single pathological entry must never abort the whole prebuild
             log.debug("prewarm failed for %r", term, exc_info=True)
-        self._raster_native(r, tok, term)
+        self._raster_native(preparation, tok, term)
         self._tick()
 
-    def _render_atlas(self, r, tok, term: str) -> None:
+    def _render_atlas(self, preparation, tok, term: str) -> None:
         """One atlas-only word, with a CHEAP LEDGER READ before any raster. Every scale builds the 1×
         REFERENCE masks (``precompose_head``) plus its N× native masks (``_raster_native``); the
         reference is scale-independent, tracked under :data:`REFERENCE_SCALE`, so a run at ANY scale
@@ -277,20 +349,18 @@ class _PrewarmJob:
             return
         if not ref_done:
             try:
-                r._panel_for(tok, term, min_h=r.tip_scale.cap, mined=False).precompose_head(
-                    r.tip_scale.cap
-                )
+                preparation.panel_for(tok, term, mined=False).precompose_head(preparation.scale.cap)
             except Exception:  # a single pathological entry must never abort the whole prebuild
                 log.debug("prewarm(atlas ref) failed for %r", term, exc_info=True)
             if atlas is not None:
                 atlas.mark_done(REFERENCE_SCALE, term)  # 1× reference masks persisted
         if native_needed and not native_done:
-            self._raster_native(r, tok, term)
+            self._raster_native(preparation, tok, term)
             if atlas is not None:
                 atlas.mark_done(self.native_scale, term)  # N× native masks persisted
         self._tick()
 
-    def _raster_native(self, r, tok, term: str) -> None:
+    def _raster_native(self, preparation, tok, term: str) -> None:
         """Raster the word's reference panel at the native scale so its size×scale glyph masks land in
         the atlas — no-op at scale ≤ 1 or without an atlas. The composited pixels are discarded; only the
         atlas write-back keeps. One-panel arch: the SAME reference panel, composited natively (no second
@@ -298,8 +368,8 @@ class _PrewarmJob:
         if self.native_scale <= 1.0 or self.atlas is None:
             return
         try:
-            cap = r.tip_scale.cap
-            st = r._panel_for(tok, term, min_h=cap, mined=False)
+            cap = preparation.scale.cap
+            st = preparation.panel_for(tok, term, mined=False)
             st.viewport(
                 0, cap, scale=self.native_scale
             )  # native compose → glyph masks to the atlas
@@ -396,7 +466,7 @@ def _open_build_caches(template, *, atlas_only: bool):
     if not atlas_only:
         cache = RenderCache.open(
             cache_dir() / "render-cache.sqlite",
-            max_bytes=template.session.render_cache.cache_max_bytes,
+            max_bytes=template.cache.max_bytes,
         )
         if cache is None:  # pragma: no cover — open() only fails on a broken cache dir
             raise RuntimeError("could not open the render cache")
@@ -494,6 +564,7 @@ def prewarm(
     land in the MASK ATLAS (CJK/Latin glyphs) — match it to ``[tooltip] tip_scale`` so the hi-dpi crisp
     upgrade loads from disk. The RENDER cache is unaffected: it stays 1×-reference-only (the #149 size
     decision — per-resolution blobs would ~4× its storage and wall-time), keyed on the fixed tip_width."""
+    _ = width  # retained in the CLI contract; tooltip reference width is fixed
     from saitenka.app.config import load_config
 
     opts = opts if opts is not None else PrewarmOptions()
@@ -507,10 +578,10 @@ def prewarm(
 
     from saitenka import fonts
 
-    template = _make_session_controller(width, height, dict_titles, freqs, pitches, None)
+    template = _make_headless_preparation(height, dict_titles, freqs, pitches, None)
     cache, atlas = _open_build_caches(template, atlas_only=opts.atlas_only)
 
-    terms = _popular_terms(template.profile_controller.dict_set, limit)
+    terms = _popular_terms(template.dictionary, limit)
     if atlas is not None:
         atlas.backfill_reference_done()  # native-done ⇒ reference-done, so cross-scale runs can skip it
     plan, already_done, before = _startup_plan(
@@ -519,14 +590,14 @@ def prewarm(
     if on_start is not None:
         on_start(plan)
     job = _PrewarmJob(
-        session_factory=lambda: _make_session_controller(
-            width, height, dict_titles, freqs, pitches, cache, render_cache_on=not opts.atlas_only
+        preparation_factory=lambda: _make_headless_preparation(
+            height, dict_titles, freqs, pitches, cache, render_cache_on=not opts.atlas_only
         ),
         cache=cache,
         atlas=atlas,
-        gate=template._render_cache_min_height(),
-        sig=template._render_cache_sig(),
-        ceiling=template.session.render_cache.cache_max_bytes,
+        gate=template.cache.min_height,
+        sig=template.cache.signature(template.inputs),
+        ceiling=template.cache.max_bytes,
         on_progress=on_progress,
         tuning=PrewarmTuning(
             atlas_only=opts.atlas_only,

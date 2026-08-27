@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -14,10 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from saitenka.app.session.context import RenderCacheState
     from saitenka.mask_atlas import MaskAtlas
-
-log = logging.getLogger(__name__)
 
 _LANE = "mask-atlas-startup"
 
@@ -120,32 +116,6 @@ def finish(state: ActivationState, completion: EffectFinished) -> OpenedMaskAtla
     if isinstance(result, OpenedMaskAtlas):
         result.atlas.close()
     return None
-
-
-def install(target: RenderCacheState, opened: OpenedMaskAtlas) -> bool:
-    if target.mask_atlas is not None:
-        opened.atlas.close()
-        return False
-    from saitenka import fonts
-
-    target.mask_atlas = opened.atlas
-    fonts.set_mask_atlas(None, opened.atlas)
-    log.info(
-        "mask atlas: ready — lazy per-glyph reads (%d MB on disk)",
-        opened.atlas.disk_bytes() // 1_000_000,
-    )
-    return True
-
-
-def uninstall(target: RenderCacheState) -> None:
-    atlas = target.mask_atlas
-    if atlas is None:
-        return
-    from saitenka import fonts
-
-    fonts.set_mask_atlas(None, None)
-    target.mask_atlas = None
-    atlas.close()
 
 
 def close(state: ActivationState) -> None:

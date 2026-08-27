@@ -196,7 +196,7 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, monke
     """
     caplog.set_level(logging.INFO, logger=CONSOLE_LOGGER_NAME)
     r = SessionController(FakeIPC())
-    monkeypatch.setattr(r, "start_prefetch", lambda: setattr(r.prefetch_state, "workers", 3))
+    monkeypatch.setattr(r, "start_prefetch", lambda: 3)
     r._apply_deps(DependencyBundle(r.profile_dependencies.identity))
     assert "3 prefetch worker(s)" in caplog.text  # real count, not 0
     caplog.clear()

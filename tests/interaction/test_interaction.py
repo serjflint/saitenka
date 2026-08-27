@@ -188,8 +188,8 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    assert r._render_cache() is None  # opt-out beats a present render-cache.sqlite
-    assert r.session.render_cache.mask_atlas is None  # opt-out beats a present mask-atlas.sqlite
+    assert r.tooltip_preparation.cache.peek(r.preparation_inputs, ()) is None
+    assert r.tooltip_preparation.cache.mask_atlas is None
 
     ui = Driver(r)
     ui.move_to_word(_content_word(r))

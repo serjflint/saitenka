@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.features.tooltip.popups import Panel
     from saitenka.app.features.tooltip.prefetch import TipScale
+    from saitenka.app.features.tooltip.tooltip_panel import PanelPorts
     from saitenka.app.tokenize import Token
 
 log = logging.getLogger(__name__)
@@ -32,12 +33,15 @@ class HoverRequest:
     nested: bool = False
     tail: str = ""
     job_id: int | None = None
+    panels: PanelPorts | None = None
+    scale: TipScale | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class NavigateRequest:
     query: str
     origin: int
+    scale: TipScale | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +51,7 @@ class OpenRequest:
     anchor: tuple[float, float, float]
     origin: int
     mined: bool = False
+    scale: TipScale | None = None
 
 
 EngagedRequest = HoverRequest | NavigateRequest | OpenRequest
@@ -113,11 +118,7 @@ class EngagedBuildPorts:
     """The panel/cache capabilities available to engaged background work."""
 
     nested_max_frac: float
-    tip_scale: Callable[[], TipScale]
-    panel_for: Callable[..., Panel]
-    worker_seed_head: Callable[..., bool]
-    precompose_head: Callable[..., None]
-    mem_fill: Callable[..., None]
+    prepare_hover: Callable[[HoverRequest, Callable[[], bool]], None]
     cap_for: Callable[[float], int]
     navigated_panel: Callable[[str], Panel | None]
     engaged_open_panel: Callable[..., tuple | None]
@@ -131,34 +132,24 @@ class PortsEngagedBackend:
 
     def hover(self, request: HoverRequest, should_cancel: Callable[[], bool]) -> None:
         ports = self._ports
-        scale = ports.tip_scale()
-        panel = ports.panel_for(
+        scale = _request_scale(request.scale)
+        if not request.nested:
+            ports.prepare_hover(request, should_cancel)
+            return
+        if request.panels is None:
+            raise ValueError("engaged hover requires captured panel inputs")
+        from saitenka.app.features.tooltip.tooltip_panel import panel_for
+
+        panel = panel_for(
+            request.panels,
             request.token,
             request.inflected,
             min_h=request.cap,
             mined=request.mined,
-            nested=request.nested,
+            nested=True,
             extra_terms=request.phrase,
         )
         if should_cancel():
-            return
-        if not request.nested:
-            if not ports.worker_seed_head(
-                panel,
-                request.token,
-                request.inflected,
-                mined=request.mined,
-                cap=request.cap,
-            ):
-                ports.precompose_head(
-                    panel,
-                    request.token,
-                    request.inflected,
-                    mined=request.mined,
-                    cap=request.cap,
-                )
-                if not should_cancel():
-                    ports.mem_fill(request.token, request.inflected, mined=request.mined)
             return
         view_h = min(panel.full_height, ports.cap_for(ports.nested_max_frac))
         if view_h <= 0 or should_cancel():
@@ -170,7 +161,7 @@ class PortsEngagedBackend:
 
     def navigate(self, request: NavigateRequest, should_cancel: Callable[[], bool]) -> Panel | None:
         ports = self._ports
-        scale = ports.tip_scale()
+        scale = _request_scale(request.scale)
         panel = ports.navigated_panel(request.query)
         if panel is None or should_cancel():
             return panel
@@ -186,7 +177,7 @@ class PortsEngagedBackend:
 
     def open(self, request: OpenRequest, should_cancel: Callable[[], bool]) -> None:
         ports = self._ports
-        scale = ports.tip_scale()
+        scale = _request_scale(request.scale)
         built = ports.engaged_open_panel(request.source, request.query, mined=request.mined)
         if built is None or should_cancel():
             return
@@ -198,6 +189,12 @@ class PortsEngagedBackend:
             panel.viewport(0, view_h, overscan=view_h, scale=scale.raster)
         if not should_cancel():
             panel.viewport(0, view_h, overscan=view_h)
+
+
+def _request_scale(scale: TipScale | None) -> TipScale:
+    if scale is None:
+        raise ValueError("engaged tooltip requires captured scale inputs")
+    return scale
 
 
 def run_engaged(

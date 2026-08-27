@@ -1,4 +1,4 @@
-"""Fail when tooltip policy or mutable owner state escapes ``TooltipController``."""
+"""Fail when tooltip policy, preparation, or mutable owner state escapes its owner."""
 
 from __future__ import annotations
 
@@ -11,7 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "saitenka" / "app"
 
 _OWNER = "features/tooltip/tooltip_controller.py"
+_PREPARATION_OWNER = "features/tooltip/preparation.py"
 _COMPOSITION = "session/controller.py"
+_ASSEMBLY = "session/assembly.py"
+_PREWARM = "prewarm.py"
 _CONSTRUCTORS = {
     "HoveredWordStore",
     "HoverPauseStore",
@@ -45,6 +48,25 @@ _LEGACY_SESSION_ATTRIBUTES = {
     "word_store",
 }
 _RETIRED_TOOLTIP_STATE = {"key", "rect", "state", "tip_inflected", "tip_tok"}
+_RETIRED_PREPARATION_ATTRIBUTES = {
+    "_head_prefetch_lookahead",
+    "_head_prefetch_queue_max",
+    "_mask_atlas_startup_state",
+    "_mask_atlas_submit",
+    "_mem_cache",
+    "_prefetch_gen",
+    "_prefetch_lookahead",
+    "_prefetch_workers",
+    "_render_cache",
+    "_render_cache_min_height",
+    "_render_cache_sig",
+    "prefetch_state",
+}
+_PREPARATION_CONSTRUCTORS = {
+    "PersistentHeadCache": {_PREPARATION_OWNER, _PREWARM},
+    "PrefetchState": {_PREPARATION_OWNER},
+    "TooltipPreparationController": {_ASSEMBLY},
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,14 +201,24 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
     tree = ast.parse(source, filename=str(path))
     site = _site(path)
     findings: list[Finding] = []
+    session_controller_names = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "saitenka.app.session.controller"
+        for alias in node.names
+        if alias.name == "SessionController"
+    }
 
     for node, owner_names in _scoped_nodes(tree):
         if isinstance(node, ast.Attribute) and (
             site == _COMPOSITION
             and _is_self_attribute(node)
-            and node.attr in _LEGACY_SESSION_ATTRIBUTES
+            and node.attr in (_LEGACY_SESSION_ATTRIBUTES | _RETIRED_PREPARATION_ATTRIBUTES)
         ):
             findings.append(Finding(path, node.lineno, "legacy-session-field", node.attr))
+
+        if isinstance(node, ast.ClassDef) and site == _PREWARM and node.name == "_PrewarmIPC":
+            findings.append(Finding(path, node.lineno, "full-session-prewarm", node.name))
 
         targets: list[ast.expr] = []
         if isinstance(node, ast.Assign):
@@ -205,6 +237,12 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
                     findings.append(
                         Finding(path, attribute.lineno, "owned-state-write", attribute.attr)
                     )
+                if site == _COMPOSITION and _contains_attribute(
+                    attribute.value, "tooltip_preparation"
+                ):
+                    findings.append(
+                        Finding(path, attribute.lineno, "preparation-state-write", attribute.attr)
+                    )
                 if site not in {_OWNER, "popups.py"} and attribute.attr == "tip_keys_bound":
                     findings.append(
                         Finding(path, attribute.lineno, "keybinding-state-write", attribute.attr)
@@ -222,6 +260,11 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
             name = _call_name(node)
             if name in _CONSTRUCTORS and site != _OWNER:
                 findings.append(Finding(path, node.lineno, "owned-constructor", name or ""))
+            allowed = _PREPARATION_CONSTRUCTORS.get(name or "")
+            if allowed is not None and site not in allowed:
+                findings.append(Finding(path, node.lineno, "preparation-constructor", name or ""))
+            if site == _PREWARM and name in session_controller_names:
+                findings.append(Finding(path, node.lineno, "full-session-prewarm", name or ""))
             if (
                 site == _COMPOSITION
                 and isinstance(node.func, ast.Attribute)
@@ -248,7 +291,7 @@ def main() -> int:
     if findings:
         print(f"tooltip-ownership: {len(findings)} violation(s)", file=sys.stderr)
         return 1
-    print("tooltip-ownership: one owner for tooltip policy, stores, and mutable lifecycle")
+    print("tooltip-ownership: tooltip policy, preparation, stores, and lifecycle stay owned")
     return 0
 
 

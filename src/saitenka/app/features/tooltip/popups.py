@@ -74,7 +74,7 @@ class TipPorts:
     request_render_ahead: Callable[[PopupView, int], bool]
     osd: tuple[int, int]
     nested_max_frac: float
-    #: The in-RAM tier-2 head cache, read on the hover path. Never SQLite — see `SessionController._peek_render_cache`.
+    #: The in-RAM tier-2 head cache, read on the hover path. Never SQLite.
     peek_render_cache: Callable[[object], LoadedView | None]
     #: Arms the deadline that ends a copy-flash pulse; `False` when nothing can arm one (a closing
     #: session). The pulse is only drawn once its own retirement exists, so the port carries both.

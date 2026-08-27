@@ -19,7 +19,13 @@ from saitenka.app.anki import MineConfig
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.features.preview import miner_ui
-from saitenka.app.features.tooltip import hover_adapter, nested_popup, tooltip, tooltip_panel
+from saitenka.app.features.tooltip import (
+    hover_adapter,
+    nested_popup,
+    prefetch,
+    tooltip,
+    tooltip_panel,
+)
 from saitenka.app.features.tooltip.tooltip_panel import PanelKey
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session.controller import SessionController
@@ -51,6 +57,18 @@ def _enable_mining(r: SessionController, anki=None, config: MineConfig | None = 
         MiningTarget(identity, anki or object(), target_config)
     )
     r.mining_controller.close_capability()
+
+
+def _captured_prefetch_items(r: SessionController, monkeypatch) -> list[prefetch.PrefetchItem]:
+    items: list[prefetch.PrefetchItem] = []
+
+    def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
+        items.extend(item for _priority, item in jobs if isinstance(item, prefetch.PrefetchItem))
+        return True
+
+    monkeypatch.setattr(prefetch, "schedule", capture)
+    r._update_prefetch()
+    return items
 
 
 def test_hover_view_snapshots_the_hover_stack():
@@ -1435,21 +1453,17 @@ def test_hover_pause_toggle_disables_future_hover_pause(monkeypatch):
     assert ("set_property", "pause", True) not in ipc.commands
 
 
-def test_prefetch_queues_full_render_when_paused():
+def test_prefetch_queues_full_render_when_paused(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
     r.sub_text = "本命"
-    submitted = []
-    r.prefetch_state.workers = 8
-    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
-    r._update_prefetch()
-    queued = [entry["request"].item for entry in submitted]
+    queued = _captured_prefetch_items(r, monkeypatch)
     assert [i.token.surface for i in queued] == ["本命"]  # the content word got queued
     assert all(i.full for i in queued)  # engaged → a hover is imminent, full panel render
 
 
-def test_prefetch_queues_cheap_warm_while_just_playing():
+def test_prefetch_queues_cheap_warm_while_just_playing(monkeypatch):
     """Not engaged (playing, mouse off the video) still queues the content word — as a cheap
     dict-only WARM (`full=False`), not the expensive full render. This is the idle time the video
     is only being watched/listened to: paying the JSON-decode cost here means a later hover (or the
@@ -1457,13 +1471,9 @@ def test_prefetch_queues_cheap_warm_while_just_playing():
     ipc = FakeIPC()
     ipc.props["pause"] = False  # playing, not engaged
     r = _reader_with_word(ipc)
-    submitted = []
-    r.prefetch_state.workers = 8
-    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
-    g0 = r.prefetch_state.gen
-    r._update_prefetch()
-    assert r.prefetch_state.gen == g0 + 1  # bumped → in-flight work is invalidated
-    item = submitted[0]["request"].item
+    g0 = r.tooltip_preparation.generation
+    item = _captured_prefetch_items(r, monkeypatch)[0]
+    assert r.tooltip_preparation.generation == g0 + 1
     assert item.token.surface == "本命"
     assert item.full is False  # idle-time warm only, no layout/drawing
 
@@ -2854,11 +2864,7 @@ def test_prefetch_worker_receives_mined_flag_not_calls_card_for(monkeypatch):
         return original_is_mined(tok)
 
     monkeypatch.setattr(r, "_is_mined", tracked_is_mined)
-    submitted = []
-    r.prefetch_state.workers = 8
-    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
-    r._update_prefetch()
-    items = [entry["request"].item for entry in submitted]
+    items = _captured_prefetch_items(r, monkeypatch)
     assert items, "nothing was queued"
     # Each queued item must carry the main-thread-evaluated mined flag (typed since Stage 8b)
     assert isinstance(items[0].mined, bool), f"queue item lacks the mined flag: {items[0]}"
@@ -3215,7 +3221,7 @@ def test_reader_accepts_grouped_options_object():
     assert r.keys.sub_prev_key == "Alt+a"
     assert r.tip_max_frac == 0.5
     assert r.tooltip_controller.pause_enabled is True
-    assert r.prefetch is False
+    assert r.tooltip_preparation.config.enabled is False
 
 
 def test_reader_kwargs_still_work_and_map_onto_groups():
@@ -3226,18 +3232,14 @@ def test_reader_kwargs_still_work_and_map_onto_groups():
         SessionController(FakeIPC(), not_a_knob=1)  # typo detection preserved
 
 
-def test_prefetch_queue_items_are_typed_dataclasses():
+def test_prefetch_queue_items_are_typed_dataclasses(monkeypatch):
     from saitenka.app.features.tooltip.prefetch import PrefetchItem
 
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
     r.sub_text = "本命"
-    submitted = []
-    r.prefetch_state.workers = 8
-    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
-    r._update_prefetch()
-    item = submitted[0]["request"].item
+    item = _captured_prefetch_items(r, monkeypatch)[0]
     assert isinstance(item, PrefetchItem)
     assert item.token.surface == "本命"
     assert item.inflected == "本命"

@@ -51,8 +51,9 @@ internal modules with explicit dependency contracts, not independently published
   without constructing a `SessionController`.
 - **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
   mpv mutation and cross-feature ordering, while `app/features/` packages own feature state and
-  policy. Tooltip, profile, mining, analysis, and cue-annotation controllers live under their corresponding feature
-  packages.
+  policy. Tooltip interaction and tooltip preparation have separate bounded controllers under the
+  tooltip feature package; profile, mining, analysis, and cue-annotation controllers likewise live
+  under their corresponding feature packages.
   `app/interaction/` contains shared lower-level interaction contracts; it has no runtime dependency
   on features or session composition. `app/session/` owns assembly, routing, lifecycle, and explicit cross-feature
   conjunctions. These directions and the declared feature-package inventory are gated.
@@ -477,12 +478,14 @@ Entry  (one hovered term's whole tooltip content)
        └─ TermRecord { term · reading · semantic definitions · tags }  (LRU 256/dict)
 ```
 
-### Stage 1 — speculative prefetch (before the hover) · `app/features/tooltip/prefetch.py`
+### Stage 1 — speculative preparation (before the hover) · `app/features/tooltip/preparation.py`
 
-Every subtitle-line change enqueues background work on the persistent prefetch worker pool
-(`_AUTO_WORKERS_FREE_THREADED = 4` free-threaded, `_AUTO_WORKERS_GIL = 2`, or a pinned
-`prefetch_workers`). A generation counter (`_prefetch_gen`) invalidates stale jobs when the line,
-profile, seek position, or episode changes. Interactive requests are checked before speculative work:
+`TooltipPreparationController` owns the speculative queue, its generation, persistent head cache,
+compressed memory tier, and mask-atlas activation. `SessionController` admits one immutable
+`TooltipPreparationInputs` value from the current cue and applies identity-qualified completions on
+the owner thread; workers never read live session state. The worker count is automatic or pinned by
+`prefetch_workers`. A generation change invalidates stale jobs when the line, profile, seek position,
+or episode changes. Interactive requests are checked before speculative work:
 
 - **Warm** (`PrefetchItem(full=False)`) — decode + cache each dictionary's glossary JSON as semantic
   `TermRecord`s in `SqliteDictionaryStore`. The JSON decode is the single biggest per-word cost in a `--stress`
@@ -491,10 +494,10 @@ profile, seek position, or episode changes. Interactive requests are checked bef
   external sub index).
 - **Head render** (`HeadPrefetchItem`) — for a *selective* subset of the next `head_prefetch_lookahead`
   cues' words (default `1`), speculatively render the same viewport-capped head a hover would, straight
-  into the shared `panel_cache`. Selectivity is the cap: only n+1 / forgotten / rare-frequency words
+  into the rendered panel LRU. Selectivity is the cap: only n+1 / forgotten / rare-frequency words
   qualify (`_head_priority`), known/mined words never. Bounded by `head_prefetch_queue_max = 24`
   queued candidates; up to the fixed worker count can additionally be active. This bounds speculative
-  backlog separately from `panel_cache`'s retained-size LRU.
+  backlog separately from the panel LRU's retained-size bound.
 - **Render-ahead** (`RenderAheadReq`) — the on-screen tooltip's scroll warm; see Stage 6.
 - **Engaged work** — a cold hover, nested open, or link navigation occupies a newest-wins slot rather
   than accumulating a queue. The worker warms the current intent first; the tick revalidates it before
@@ -505,6 +508,10 @@ not worker-safe under free-threading. The speculative head priority queue has a 
 excess candidates. The decode-warm FIFO is not capacity-bounded; its practical input is the finite set
 of de-duplicated content words in the configured cue window, and generation checks make old work cheap
 to discard. That is a workload bound, not a strict memory bound.
+
+`saitenka prewarm` constructs only headless panel and `PersistentHeadCache` capabilities. It does not
+construct a study session or an mpv stand-in. The live and offline paths therefore share cache identity
+and persistence without making `SessionController` a tooltip-preparation dependency.
 
 ### Stage 2 — lookup → `Entry` · `saitenka-dict`, `app/source_adapter.py`
 
@@ -522,7 +529,7 @@ then per-dict `(def-name chip, def-body)` pairs. **Nothing is walked or drawn he
 closes over one memoised `layout_body_block` handle and exposes `measure()`, `render_window(y0,y1)`,
 `geometry()`, plus the full `render()` (the golden/finish source of truth). `Panel.from_rows` wraps
 them in a `WindowedPanel(tuning=BandedTuning(compress=True))`. `panel_rows` has a standalone default
-width, but production passes `SessionController.tip_width`: a fixed 640px reference geometry. At upload, the
+width, but production panel inputs carry a fixed 640px reference geometry. At upload, the
 composited result scales with display height; layout and persistent render-cache identity remain
 resolution-independent.
 
