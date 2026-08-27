@@ -483,6 +483,11 @@ class TooltipController:
         tooltip_engaged.cancel(self._engaged)
         tooltip_raster.cancel(self._raster)
 
+    def invalidate_dependencies(self) -> None:
+        """Refuse work and cached panels built against replaced collaborators."""
+        self.cancel_current_work()
+        self._state.panel_cache.clear()
+
     def cancel_jobs(self) -> None:
         self._state.jobs.cancel_all()
 

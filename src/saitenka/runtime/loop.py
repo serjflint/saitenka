@@ -182,8 +182,9 @@ class SessionLoop:
         """
         if self._reactor is None:
             return False
-        self._reactor.handle(EventEnvelope(0, now, EventOrigin.LIFECYCLE, connection_epoch, event))
-        return True
+        return self._reactor.handle(
+            EventEnvelope(0, now, EventOrigin.LIFECYCLE, connection_epoch, event)
+        )
 
     def _observe(self, envelope: EventEnvelope) -> None:
         if self._reactor is not None:

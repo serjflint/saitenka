@@ -147,7 +147,7 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
     original = submitted[0]["request"]
 
     reader.mining_controller.record_mined_expression("__newly-mined__")
-    reader.prefetch_state.gen += 1
+    reader.tooltip_preparation.cancel()
     reader.set_subtitle("犬")
     submitted[0]["on_finished"](
         EffectFinished(

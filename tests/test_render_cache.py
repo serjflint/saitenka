@@ -327,13 +327,13 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     # thread now direct-paints from the in-memory tier-2 (never disk), so hydrate tier-2 as a worker
     # would (peek_compressed the persisted head → mem.put); then a real cold show paints from RAM.
     cache = _cache(tmp_path)
-    r.session.render_cache.obj, r.session.render_cache.built = cache, True
+    r.tooltip_preparation.cache.install_build_cache(cache)
     sentinel = np.full(
         (cap, w, 4), 123, dtype=np.uint8
     )  # full_h == view_h == cap → no scrollbar mutates it
-    sig, ck = r._render_cache_sig(), content_key(key)
+    sig, ck = r.tooltip_preparation.cache.signature(r.preparation_inputs), content_key(key)
     cache.put(sig, ck, cap, cap, cap, sentinel)
-    r.session.render_cache.mem.put((sig, ck), cache.peek_compressed(sig, ck))
+    assert r.tooltip_preparation.cache.hydrate(r.preparation_inputs, key)
 
     uploaded: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda view, *_a, **_k: uploaded.append(np.array(view)))
@@ -714,9 +714,9 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None):
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    r.session.render_cache.cache_min_height_px = 0  # store every head (no cost gate) for the test
+    r.tooltip_preparation.cache.set_min_height(0)
     cache = _cache(tmp_path)
-    r.session.render_cache.obj, r.session.render_cache.built = cache, True
+    r.tooltip_preparation.cache.install_build_cache(cache)
     return r, cache
 
 
@@ -750,17 +750,35 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
     _i, tok, inflected, mined = _first_content(r)
     cap = r.tip_scale.cap
     st = r._panel_for(tok, inflected, min_h=cap, mined=mined)
-    r._precompose_head(st, tok, inflected, mined=mined, cap=cap, protected=True)  # a prewarmed head
+    r.tooltip_preparation.cache.precompose_head(
+        r.preparation_inputs,
+        st,
+        tok,
+        inflected,
+        mined=mined,
+        cap=cap,
+        protected=True,
+    )
     assert cache.stats()[0] == 1  # persisted to disk
 
     r.tip.panel_cache.clear()  # simulate the in-memory panel evicted
     fresh = r._panel_for(tok, inflected, min_h=cap, mined=mined)
     assert fresh.windowed.first_view is None  # cold rebuild
-    assert r._worker_seed_head(fresh, tok, inflected, mined=mined, cap=cap) is True
+    assert r.tooltip_preparation.cache.worker_seed_head(
+        r.preparation_inputs,
+        fresh,
+        tok,
+        inflected,
+        mined=mined,
+        cap=cap,
+    )
     assert fresh.windowed.first_view is not None  # seeded from disk on the worker
-    assert len(r.session.render_cache.mem) == 1  # tier-2 hydrated
+    assert r.tooltip_preparation.cache.memory_entries == 1
     assert (
-        r._peek_render_cache(r._panel_key(tok, inflected, mined=mined)) is not None
+        r.tooltip_preparation.cache.peek(
+            r.preparation_inputs, r._panel_key(tok, inflected, mined=mined)
+        )
+        is not None
     )  # main hits RAM
 
 
@@ -798,7 +816,7 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
     assert r.tip.view.state is None and submitter.calls
     r.tooltip_controller.select(i)
     submitter.finish()
-    assert cache.stats()[0] == 1 and len(r.session.render_cache.mem) == 1
+    assert cache.stats()[0] == 1 and r.tooltip_preparation.cache.memory_entries == 1
 
     # Still hovering the same word → completion shows the now-warm tooltip.
     assert r.tip.view.state is not None  # shown
@@ -927,7 +945,6 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
     from saitenka.app.features.tooltip import nested_popup
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = False
     _i, tok, inflected, _mined = _first_content(r)
     r.tip.view.xy, r.tip.view.scroll = (0, 0), 0
     r.tip.panel_cache.clear()
@@ -1092,7 +1109,6 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
     from saitenka.app.features.tooltip import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = False
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     assert r.tooltip_controller.engaged.inflight is None
@@ -1138,7 +1154,7 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
             tok, tok.surface, mined=False, key=("old",), cap=r.tip_scale.cap
         )
     )
-    r.prefetch_state.gen += 1
+    r.tooltip_preparation.cancel()
     r.tooltip_controller.cancel_current_work()
     assert r._request_engaged_tooltip(tooltip_engaged.NavigateRequest(tok.surface, id(old)))
     submitter.reject_next = True
@@ -1224,3 +1240,33 @@ def test_a_second_writer_for_the_same_key_loses_to_the_first():
 
     assert first == second == "winner"
     assert cache.get("k") == "winner"
+
+
+def test_clear_refuses_a_panel_whose_build_started_in_the_previous_generation():
+    """A dependency swap can clear while an old-profile panel is still being built."""
+    from saitenka.app.features.tooltip.popups import PanelCache
+
+    cache = PanelCache(8, threading.Lock())
+    started = threading.Event()
+    release = threading.Event()
+    returned: list[str] = []
+
+    def build_old() -> str:
+        started.set()
+        assert release.wait(1)
+        return "old-profile"
+
+    worker = threading.Thread(
+        target=lambda: returned.append(cache.get_or_build("same-token", build_old))
+    )
+    worker.start()
+    assert started.wait(1)
+
+    cache.clear()
+    release.set()
+    worker.join(1)
+
+    assert not worker.is_alive()
+    assert returned == ["old-profile"]
+    assert cache.get("same-token") is None
+    assert cache.get_or_build("same-token", lambda: "new-profile") == "new-profile"

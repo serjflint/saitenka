@@ -260,6 +260,7 @@ _LANES_BEFORE_ARTIFACTS = [
     "interaction-metadata",
     "mined-seed",
     "episode-analysis",
+    "render-pool",
 ]
 
 
@@ -278,7 +279,12 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
         assert order == _LANES_BEFORE_ARTIFACTS
         order.append("artifacts")
 
+    def close_render_pool(*, wait):
+        assert wait is False
+        order.append("render-pool")
+
     ipc.close_runtime_job_lane = close_lane
+    monkeypatch.setattr("saitenka.parallel.shutdown_shared_executor", close_render_pool)
     monkeypatch.setattr(shutil, "rmtree", remove_artifacts)
 
     reader.close()

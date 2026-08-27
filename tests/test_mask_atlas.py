@@ -14,7 +14,10 @@ import pytest
 
 from saitenka import fonts
 from saitenka.app import mask_atlas_startup
-from saitenka.app.session.context import RenderCacheState
+from saitenka.app.features.tooltip.preparation import (
+    PersistentHeadCache,
+    TooltipPreparationConfig,
+)
 from saitenka.mask_atlas import MaskAtlas, deserialize_core, serialize_core
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
@@ -140,13 +143,20 @@ def test_runtime_activation_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
         threading.Event(),
     )
     assert isinstance(opened, mask_atlas_startup.OpenedMaskAtlas)
-    target = RenderCacheState(
-        cache_on=False,
-        cache_max_bytes=0,
-        cache_min_height_px=0,
-        mask_atlas_on=True,
+    target = PersistentHeadCache(
+        TooltipPreparationConfig(
+            enabled=False,
+            workers=0,
+            cue_lookahead=0,
+            head_lookahead=0,
+            head_queue_max=1,
+            cache_enabled=False,
+            cache_max_bytes=0,
+            cache_min_height=0,
+            mask_atlas_enabled=True,
+        )
     )
-    assert mask_atlas_startup.install(target, opened)
+    assert target.install_mask_atlas(opened)
 
     assert fonts._ATLAS_MEM is None  # no bulk read dict loaded into RAM
     assert fonts._ATLAS_WRITE is target.mask_atlas  # atlas = lazy read + write-back

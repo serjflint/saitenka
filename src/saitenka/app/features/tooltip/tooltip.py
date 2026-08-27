@@ -807,6 +807,7 @@ def show_tooltip_impl(
             cap,
             tuple(meta.terms),
             job_id=view.job_id,
+            panels=panel,
         )
         if ports.request_engaged_tooltip(request):
             return True

@@ -56,9 +56,9 @@ def _effects(event: SessionClosing) -> tuple[Effect, ...]:
     if event.phase is ClosePhase.STORES:
         return (CloseSessionStores(),)
     if event.phase is ClosePhase.SURFACES:
-        # Order is the contract here, not a tuple's incidental shape: the removes go out through
-        # the transport the second effect closes.
-        return (CloseSessionSurfaces(), CloseSessionOverlay())
+        return (CloseSessionSurfaces(),)
+    if event.phase is ClosePhase.OVERLAY:
+        return (CloseSessionOverlay(),)
     if event.scratch is not None:
         return (RemoveSessionArtifacts(event.scratch),)
     return ()

@@ -527,7 +527,7 @@ def run_render_cache(
 
     _rc = RenderCache.open(
         Path(cache_dir) / "render-cache.sqlite",
-        max_bytes=reader.session.render_cache.cache_max_bytes,
+        max_bytes=reader.tooltip_preparation.cache.max_bytes,
     )
     if _rc is not None:
         _rc.close()
@@ -544,14 +544,21 @@ def run_render_cache(
         reader.sub_origin = (0, 0)
         inflected = reader._inflected_surface(0)
         st = reader._panel_for(tok, inflected, min_h=cap, mined=False)
-        reader._precompose_head(st, tok, inflected, mined=False, cap=cap)
+        reader.tooltip_preparation.cache.precompose_head(
+            reader.preparation_inputs,
+            st,
+            tok,
+            inflected,
+            mined=False,
+            cap=cap,
+        )
 
     gil_rc = finalize_runtime(rt, require_ft)
     print(f"\nSaitenka overlay — RENDER CACHE A/B (#149)   ({tag})")
     print(format_runtime(rt))
     print(
         f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_scale.width}   cap: {cap}px   "
-        f"gate: full_h ≥ {reader._render_cache_min_height()}px   reps/word: {reps}"
+        f"gate: full_h ≥ {reader.tooltip_preparation.cache.min_height}px   reps/word: {reps}"
     )
     import saitenka.app.features.tooltip.tooltip as _tt
 
@@ -565,7 +572,7 @@ def run_render_cache(
         reader.sub_origin = (0, 0)
         reader.interaction.word_store.dispatch(events.HoverWordForgotten())
         key = reader._panel_key(tok, reader._inflected_surface(0), mined=False)
-        if reader._peek_render_cache(key) is None:
+        if reader.tooltip_preparation.cache.peek(reader.preparation_inputs, key) is None:
             return None  # below the cost gate — not persisted
 
         def paint() -> None:
@@ -1695,7 +1702,11 @@ def run_timeline(
     # derived from it) predates fugashi silently re-enabling the GIL — the exact collapse its own
     # docstring warns about. The SessionController has since started prefetch, so take the count it ACTUALLY
     # got: a header claiming 8 workers while 2 are running is what makes a miss count unreadable.
-    rt = {**rt, "prefetch_workers": reader.prefetch_state.workers, "gil_enabled": _gil_enabled()}
+    rt = {
+        **rt,
+        "prefetch_workers": reader.tooltip_preparation.worker_count,
+        "gil_enabled": _gil_enabled(),
+    }
     gil_rc = finalize_runtime(rt, require_ft)
     idle_budget_ms = lookahead * dwell_s * 1000.0
     print(f"\nSaitenka overlay — TIMELINE: idle-paced session   ({tag})")
@@ -1742,7 +1753,8 @@ def run_timeline(
         rss_growth = rss_peak - rss_base
         print(
             f"head-prefetch lookahead: {head_prefetch} cues   speculative heads built: "
-            f"{reader.prefetch_state.head_built}   RSS: base {rss_base:.0f}MB -> peak {rss_peak:.0f}MB "
+            f"{reader.tooltip_preparation.snapshot.head_built}   "
+            f"RSS: base {rss_base:.0f}MB -> peak {rss_peak:.0f}MB "
             f"(+{rss_growth:.0f}MB)"
         )
         print(
@@ -1756,7 +1768,7 @@ def run_timeline(
         )
         head_json = {
             "head_prefetch_lookahead": head_prefetch,
-            "heads_built": reader.prefetch_state.head_built,
+            "heads_built": reader.tooltip_preparation.snapshot.head_built,
             "render_warm": m_render_warm,
             "render_cold": m_render_cold,
             "rss_base_mb": rss_base,
@@ -1883,13 +1895,10 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
         prefetch=True,
         prefetch_lookahead=lookahead,
         head_prefetch_lookahead=head_prefetch,
+        prefetch_workers=workers,
     )
     reader.osd = OSD
     reader.episode.sub_index = CueIndex(cues)
-    if (
-        workers > 0
-    ):  # >0 pins the worker count (sweep the idle-warm capacity lever); 0 = per-build auto
-        reader.prefetch_workers = workers
     if raw_ceiling_mb >= 0:  # >=0 overrides the config default (A/B raw bands vs always-compress)
         reader.raw_band_ceiling = raw_ceiling_mb * 1024 * 1024
     reader.start_prefetch()
@@ -2010,7 +2019,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
         print("no scroll frames")
     rss_growth = rss_peak - rss_base
     print(
-        f"speculative heads built: {reader.prefetch_state.head_built}   "
+        f"speculative heads built: {reader.tooltip_preparation.snapshot.head_built}   "
         f"RSS: base {rss_base:.0f}MB → peak {rss_peak:.0f}MB (+{rss_growth:.0f}MB)"
     )
     print(
@@ -2046,7 +2055,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
                     "scroll": m_sc,
                     "scroll_jank": len(jank),
                     "scroll_total": total_scroll,
-                    "heads_built": reader.prefetch_state.head_built,
+                    "heads_built": reader.tooltip_preparation.snapshot.head_built,
                     "rss_base_mb": rss_base,
                     "rss_peak_mb": rss_peak,
                 },

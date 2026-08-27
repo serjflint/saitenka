@@ -72,29 +72,29 @@ class _FakeAtlas:
         return {w for (s, w) in self.done if s == scale}
 
 
-class _FakeReader:
-    """Records each `_panel_for` call; a render-cache access would raise (proving decoupling)."""
+class _FakePreparation:
+    """Records each panel build; a render-cache access would raise."""
 
     def __init__(self, *, fail: bool = False) -> None:
         self.panel = _FakePanel()
         self.calls: list[tuple] = []
         self._fail = fail
 
-    tip_scale = TipScale(display=1.0, raster=1.0, cap=260)
+    scale = TipScale(display=1.0, raster=1.0, cap=260)
 
-    def _panel_for(self, *args, **kwargs):
+    def panel_for(self, *args, **kwargs):
         self.calls.append((args, kwargs))
         if self._fail:
             raise ValueError("pathological entry")
         return self.panel
 
-    def _panel_key(self, *_args, **_kwargs):  # only the native-raster path reaches this
+    def panel_key(self, *_args, **_kwargs):  # only the native-raster path reaches this
         return ("key",)
 
 
-def _job(session_factory, *, atlas=None, on_progress=None, **kw) -> _PrewarmJob:
+def _job(preparation_factory, *, atlas=None, on_progress=None, **kw) -> _PrewarmJob:
     return _PrewarmJob(
-        session_factory=session_factory,
+        preparation_factory=preparation_factory,
         cache=None,  # atlas-only opens no render cache
         atlas=atlas,
         gate=512,
@@ -106,7 +106,7 @@ def _job(session_factory, *, atlas=None, on_progress=None, **kw) -> _PrewarmJob:
 
 
 def test_atlas_only_rasters_every_word_without_touching_the_render_cache():
-    reader = _FakeReader()
+    reader = _FakePreparation()
     job = _job(lambda: reader)
     job.render(("cat", "kyatto"))
     # the word was rastered (its glyphs feed the atlas) and no render-cache path was exercised
@@ -117,7 +117,7 @@ def test_atlas_only_rasters_every_word_without_touching_the_render_cache():
 
 def test_atlas_only_survives_a_pathological_entry():
     # a single failing render must not abort the whole prebuild (best-effort per-word)
-    job = _job(lambda: _FakeReader(fail=True))
+    job = _job(lambda: _FakePreparation(fail=True))
     job.render(("boom", ""))  # does not raise
     assert job.measured == 1
 
@@ -125,14 +125,14 @@ def test_atlas_only_survives_a_pathological_entry():
 def test_native_scale_rasters_the_native_panel_into_the_atlas():
     # scale > 1 → each word ALSO composites its reference panel at the native scale (one-panel arch), so
     # size×scale glyph masks land in the atlas and the hi-dpi crisp upgrade loads from disk.
-    reader = _FakeReader()
+    reader = _FakePreparation()
     job = _job(lambda: reader, atlas=_FakeAtlas(), native_scale=1.5)
     job.render(("cat", "kyatto"))
     assert reader.panel.native_scales == [1.5]  # composited once at the configured native scale
 
 
 def test_native_scale_is_a_noop_at_reference_scale():
-    reader = _FakeReader()
+    reader = _FakePreparation()
     job = _job(lambda: reader, atlas=_FakeAtlas(), native_scale=1.0)  # default = reference only
     job.render(("cat", "kyatto"))
     assert reader.panel.native_scales == []  # no native compose at scale 1.0
@@ -141,7 +141,7 @@ def test_native_scale_is_a_noop_at_reference_scale():
 def test_atlas_only_skips_a_word_when_reference_and_native_both_done():
     # Fully skipped only when BOTH passes are done: the 1× reference AND the native scale (a stopped
     # `--limit 0` re-run picks up where it left off instead of re-rastering from the start).
-    reader = _FakeReader()
+    reader = _FakePreparation()
     atlas = _FakeAtlas()
     atlas.mark_done(1.0, "cat")  # reference pass done
     atlas.mark_done(1.5, "cat")  # native pass done
@@ -152,7 +152,7 @@ def test_atlas_only_skips_a_word_when_reference_and_native_both_done():
 
 
 def test_atlas_only_marks_both_reference_and_native_after_rastering():
-    reader = _FakeReader()
+    reader = _FakePreparation()
     atlas = _FakeAtlas()
     job = _job(lambda: reader, atlas=atlas, native_scale=1.5)
     job.render(("cat", "kyatto"))
@@ -163,7 +163,7 @@ def test_atlas_only_marks_both_reference_and_native_after_rastering():
 def test_atlas_only_skips_the_reference_a_different_scale_already_built():
     # The cheap read check: scale 1.0 needs only the reference; if another scale's run built it
     # (done(1.0)), the word is skipped WITHOUT re-rastering — no getmask2, no wasted CPU.
-    reader = _FakeReader()
+    reader = _FakePreparation()
     atlas = _FakeAtlas()
     atlas.mark_done(1.0, "cat")  # reference built by, e.g., a prior 1.5 run
     job = _job(lambda: reader, atlas=atlas, native_scale=1.0)
@@ -174,7 +174,7 @@ def test_atlas_only_skips_the_reference_a_different_scale_already_built():
 def test_atlas_only_higher_scale_skips_reference_but_builds_native():
     # Reference already built (done(1.0)) but native at 2.0 not → skip the reference raster, do ONLY
     # the native pass. Saves re-rastering the 1× the earlier scale already produced.
-    reader = _FakeReader()
+    reader = _FakePreparation()
     atlas = _FakeAtlas()
     atlas.mark_done(1.0, "cat")
     job = _job(lambda: reader, atlas=atlas, native_scale=2.0)
@@ -189,7 +189,7 @@ def test_native_scale_survives_a_pathological_native_raster():
         def viewport(self, *_a, **_k):
             raise ValueError("bad native raster")
 
-    reader = _FakeReader()
+    reader = _FakePreparation()
     reader.panel = _BoomPanel()
     job = _job(lambda: reader, atlas=_FakeAtlas(), native_scale=1.5)
     job.render(("boom", ""))  # must not raise — best-effort per word
@@ -213,7 +213,7 @@ def test_heartbeat_reports_new_masks_skipped_and_real_bytes():
     atlas.done.update({(1.0, "w1"), (1.5, "w1")})  # one word fully done (both passes) → skipped
     beats: list = []
     job = _job(
-        lambda: _FakeReader(),
+        lambda: _FakePreparation(),
         atlas=atlas,
         on_progress=beats.append,
         native_scale=1.5,
@@ -233,7 +233,7 @@ def test_heartbeat_reports_masks_already_cached_and_progress_denominator():
     atlas = _FakeAtlas(growth=0, dup_per_word=5)
     beats: list = []
     job = _job(
-        lambda: _FakeReader(),
+        lambda: _FakePreparation(),
         atlas=atlas,
         on_progress=beats.append,
         native_scale=1.5,
@@ -253,7 +253,7 @@ def test_atlas_plateau_stops_after_consecutive_dry_checkpoints():
     # growth=0 → no new masks → every checkpoint is "dry"; stop after `plateau_stop` of them.
     atlas = _FakeAtlas(growth=0)
     job = _job(
-        lambda: _FakeReader(),
+        lambda: _FakePreparation(),
         atlas=atlas,
         native_scale=1.5,
         checkpoint_every=2,
@@ -269,7 +269,7 @@ def test_a_productive_run_never_trips_the_plateau_stop():
     # growth keeps masks climbing above plateau_min every checkpoint → the sweep runs to completion.
     atlas = _FakeAtlas(growth=5)
     job = _job(
-        lambda: _FakeReader(),
+        lambda: _FakePreparation(),
         atlas=atlas,
         native_scale=1.5,
         checkpoint_every=2,
@@ -282,7 +282,7 @@ def test_a_productive_run_never_trips_the_plateau_stop():
 
 def test_plateau_stop_off_by_default_rasters_every_word():
     atlas = _FakeAtlas(growth=0)  # dry, but plateau_stop defaults to 0 → never stops
-    job = _job(lambda: _FakeReader(), atlas=atlas, native_scale=1.5, checkpoint_every=2)
+    job = _job(lambda: _FakePreparation(), atlas=atlas, native_scale=1.5, checkpoint_every=2)
     _drive(job, 8)
     assert job.stop is False and job.measured == 8
 
@@ -318,7 +318,7 @@ def test_projection_uses_cumulative_rate_not_a_single_checkpoint_delta():
     atlas = _FakeAtlas(growth=10, disk_seq=[1_020_000, 1_024_000])  # m=2 → 1.02M, m=4 → 1.024M
     beats: list = []
     job = _job(
-        lambda: _FakeReader(),
+        lambda: _FakePreparation(),
         atlas=atlas,
         on_progress=beats.append,
         native_scale=1.5,
@@ -339,7 +339,7 @@ def test_projection_is_stable_under_steady_growth():
     atlas = _FakeAtlas(growth=10, disk_seq=[start + rate * (k * every) for k in range(1, 6)])
     beats: list = []
     job = _job(
-        lambda: _FakeReader(),
+        lambda: _FakePreparation(),
         atlas=atlas,
         on_progress=beats.append,
         native_scale=1.5,
@@ -353,7 +353,7 @@ def test_projection_is_stable_under_steady_growth():
     assert projs[0] == start + rate * 1000  # = start + rate · to_raster
 
 
-def test_every_headless_stand_in_answers_the_job_port() -> None:
+def test_benchmark_headless_stand_in_answers_the_job_port() -> None:
     """A stand-in must REFUSE a lane, not lack the method.
 
     Twelve features used to reach the runtime through
@@ -364,7 +364,6 @@ def test_every_headless_stand_in_answers_the_job_port() -> None:
     import importlib.util
     from pathlib import Path
 
-    from saitenka.app.prewarm import _PrewarmIPC
     from saitenka.runtime.jobs import JobLanePolicy, configure_lane
 
     spec = importlib.util.spec_from_file_location(
@@ -376,12 +375,10 @@ def test_every_headless_stand_in_answers_the_job_port() -> None:
     sys.modules["bench_responsiveness"] = bench
     spec.loader.exec_module(bench)
 
-    for stand_in in (_PrewarmIPC(800, 600), bench.FakeIPC()):
-        assert stand_in.register_runtime_job_lane("any", JobLanePolicy(capacity=1), None) is False
-        assert stand_in.submit_runtime_job() is False
-        assert stand_in.close_runtime_job_lane("any") is False
-        # The timer port too: a probe there disarmed every lifecycle deadline just as silently.
-        assert stand_in.schedule_runtime_timer(timer="any") is False
-        assert stand_in.cancel_runtime_timer("any") is False
-        # A refusal is a declared answer, so the feature gets None and takes its no-lane path.
-        assert configure_lane(stand_in, "any", JobLanePolicy(capacity=1), None) is None
+    stand_in = bench.FakeIPC()
+    assert stand_in.register_runtime_job_lane("any", JobLanePolicy(capacity=1), None) is False
+    assert stand_in.submit_runtime_job() is False
+    assert stand_in.close_runtime_job_lane("any") is False
+    assert stand_in.schedule_runtime_timer(timer="any") is False
+    assert stand_in.cancel_runtime_timer("any") is False
+    assert configure_lane(stand_in, "any", JobLanePolicy(capacity=1), None) is None

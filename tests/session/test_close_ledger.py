@@ -321,20 +321,17 @@ def test_the_runtime_closes_the_surfaces_it_was_handed() -> None:
     assert closed == ["close"]
 
 
-def test_the_surfaces_phase_closes_the_transport_after_the_removes_go_through_it() -> None:
-    """Order within the phase is the contract: the overlay removes are queued *through* the
-    transport, so closing it first would strand them. A tuple's order is easy to lose in a
-    refactor, hence an oracle rather than a comment."""
+def test_the_transport_phase_follows_the_surface_phase() -> None:
+    """Overlay removal must settle before the transport carrying it closes."""
     from saitenka.runtime.effects import CloseSessionOverlay, CloseSessionSurfaces
     from saitenka.runtime.events import ClosePhase, SessionClosing
     from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
-    result = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing(ClosePhase.SURFACES))
+    surfaces = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing(ClosePhase.SURFACES))
+    overlay = reduce_lifecycle_close(surfaces.state, SessionClosing(ClosePhase.OVERLAY))
 
-    assert [type(effect) for effect in result.effects] == [
-        CloseSessionSurfaces,
-        CloseSessionOverlay,
-    ]
+    assert [type(effect) for effect in surfaces.effects] == [CloseSessionSurfaces]
+    assert [type(effect) for effect in overlay.effects] == [CloseSessionOverlay]
 
 
 def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
@@ -351,11 +348,12 @@ def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
 
 
 class _RecordingSurfaces:
-    def __init__(self, log: list[str]) -> None:
+    def __init__(self, log: list[str], label: str = "close") -> None:
         self._log = log
+        self._label = label
 
     def close(self) -> None:
-        self._log.append("close")
+        self._log.append(self._label)
 
 
 @pytest.mark.parametrize("startup_hint", [True, False])
@@ -542,6 +540,7 @@ def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> Non
         BACKLOG_RESOURCE,
         MINED_RESOURCE,
         SESSION_SUMMARY_RESOURCE,
+        ResourceRetirementError,
         _dispatcher,
     )
     from saitenka.runtime.diagnostics import RuntimeLedger
@@ -560,11 +559,151 @@ def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> Non
         gateway.session_resources[MINED_RESOURCE] = Retiring(lambda: retired.append("mined"))
         dispatch = _dispatcher(gateway, RuntimeLedger())
 
-        assert dispatch(CloseSessionStores()) is False  # one of them did not retire
+        with pytest.raises(ResourceRetirementError) as raised:
+            dispatch(CloseSessionStores())
     finally:
         gateway.close()
 
     assert retired == ["summary", "mined"]  # the one behind the failure still ran
+    assert [name for name, _error in raised.value.failed] == [BACKLOG_RESOURCE]
+
+
+def test_a_runtime_resource_failure_reaches_the_returned_close_ledger() -> None:
+    """A runtime-owned failure is visible without closing its successful peers twice."""
+    from util import runtime_gateway
+
+    from saitenka.app.session.routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    retired: list[str] = []
+
+    def fail_backlog() -> None:
+        raise RuntimeError("backlog close failed")
+
+    reader._close_backlog_store = fail_backlog  # type: ignore[method-assign]
+    reader.mining_controller.close_store = lambda: retired.append("mined")  # type: ignore[method-assign]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert [failure.participant for failure in ledger.failures] == ["phase:stores"]
+    assert retired == ["mined"]
+
+
+def test_a_failing_close_effect_does_not_skip_the_rest_of_its_phase() -> None:
+    """Isolation spans effect boundaries, not only peers retired by the same effect."""
+    from saitenka.app.session.resources import Retiring
+    from saitenka.app.session.routes import (
+        INPUT_CAPTURE_RESOURCE,
+        INTERACTION_WORK_PARTICIPANTS,
+        install_session_reactor,
+    )
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    retired: list[str] = []
+
+    def fail_interaction() -> None:
+        raise KeyboardInterrupt
+
+    gateway.session_resources[INTERACTION_WORK_PARTICIPANTS[0]] = Retiring(fail_interaction)
+    gateway.session_resources[INTERACTION_WORK_PARTICIPANTS[1]] = Retiring(
+        lambda: retired.append("metadata")
+    )
+    gateway.session_resources[INPUT_CAPTURE_RESOURCE] = Retiring(lambda: retired.append("capture"))
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert retired == ["metadata", "capture"]
+    assert [failure.participant for failure in ledger.failures] == ["runtime-close"]
+
+
+def test_a_failing_surface_remove_does_not_skip_the_overlay_transport() -> None:
+    from saitenka.app.session.resources import Retiring
+    from saitenka.app.session.routes import (
+        OVERLAY_RESOURCE,
+        SURFACES_RESOURCE,
+        install_session_reactor,
+    )
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    retired: list[str] = []
+
+    def fail_surfaces() -> None:
+        raise RuntimeError("surface close failed")
+
+    gateway.session_resources[SURFACES_RESOURCE] = Retiring(fail_surfaces)
+    gateway.session_resources[OVERLAY_RESOURCE] = Retiring(lambda: retired.append("overlay"))
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert retired == ["overlay"]
+    assert [failure.participant for failure in ledger.failures] == ["lifecycle-surfaces"]
+
+
+def test_a_missing_surface_resource_falls_back_before_the_overlay_transport_closes() -> None:
+    from saitenka.app.session.routes import (
+        OVERLAY_RESOURCE,
+        SURFACES_RESOURCE,
+        install_session_reactor,
+    )
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    order: list[str] = []
+    reader.lifecycle_surfaces = _RecordingSurfaces(order, "surfaces")  # type: ignore[assignment]
+    gateway.session_resources[OVERLAY_RESOURCE] = _RecordingSurfaces(order, "overlay")
+    del gateway.session_resources[SURFACES_RESOURCE]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert order == ["surfaces", "overlay"]
+    assert [failure.participant for failure in ledger.failures] == ["lifecycle-surfaces"]
+
+
+def test_a_missing_runtime_resource_is_reported_as_refused_close_work() -> None:
+    from saitenka.app.session.routes import INPUT_CAPTURE_RESOURCE, install_session_reactor
+    from saitenka.runtime.reactor import LifecycleEffectError
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    released: list[str] = []
+
+    class _LocalCapture:
+        def release(self) -> None:
+            released.append("capture")
+
+    reader._mouse = _LocalCapture()  # type: ignore[assignment]
+    del gateway.session_resources[INPUT_CAPTURE_RESOURCE]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert [failure.participant for failure in ledger.failures] == ["runtime-close"]
+    failure = ledger.failures[0].error
+    assert isinstance(failure, LifecycleEffectError)
+    assert any("input-capture: missing" in str(error) for _effect, error in failure.failures)
+    assert released == ["capture"]
 
 
 def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:

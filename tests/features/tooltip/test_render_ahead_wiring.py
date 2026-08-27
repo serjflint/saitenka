@@ -128,7 +128,6 @@ def test_render_ahead_survives_disabled_speculative_prefetch():
     assert not r._request_render_ahead(r.tip.view, 1)
 
     r.tip.view.state = _RecordingPanel()  # type: ignore[assignment]
-    r.prefetch = False
     assert r._request_render_ahead(r.tip.view, 1)
 
 
@@ -151,7 +150,7 @@ def test_stale_completion_from_a_word_switch_is_not_published():
     panel = _RecordingPanel()
     r.tip.view.state = panel  # type: ignore[assignment]
     r._request_render_ahead(r.tip.view, 1)
-    r.prefetch_state.gen += 1
+    r.tooltip_preparation.cancel()
     r.tooltip_controller.cancel_current_work()
     before = r.tip.view.scroll
     r.tooltip_controller.render_ahead_submitter.finish()

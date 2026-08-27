@@ -7,10 +7,9 @@ hover/click policy on top of it. While these lived in ``tooltip``, every nested 
 back through a one-line ``SessionController`` delegation — a round trip through the host for an intra-feature
 call, and the reason both modules read the host for things neither one owns.
 
-Host-taking (the AGENTS.md seam pattern) for now, but the build configuration is not: it arrives as
-`SessionController.panel_style`, one member rather than the eleven it gathers. As a host-taking snapshot every
-caller in the chain inherited all eleven, which is most of what made the tooltip cluster measure as
-coupled to the host. The blit path still reaches the host for the display scale and the surfaces.
+`PanelStyle` carries session-lifetime build policy; `PanelPorts` captures the per-turn mined, scroll,
+cache, and height facts. Background work receives that frozen boundary at admission rather than
+reading the session shell later.
 """
 
 from __future__ import annotations

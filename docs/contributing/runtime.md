@@ -80,7 +80,8 @@ The following gates enforce the boundary:
 
 `SessionController` composes owner-thread session lifetime, ordered cross-feature conjunctions, and
 physical application. Bounded controllers and stores own feature facts: `TooltipController` owns
-tooltip interaction and work, `ProfileController` owns the active reading environment,
+tooltip interaction and engaged work; `TooltipPreparationController` owns speculative prefetch,
+persistent tooltip heads, and mask-atlas activation; `ProfileController` owns the active reading environment,
 `MiningController` owns mining, `CueAnnotationController` owns annotation identity, work, and cache,
 `PlaybackStore` owns the playback projection of cue identity, and `CueRenderStore` owns derived
 tokenization and geometry. Other features observe annotation through its frozen public view.
@@ -228,6 +229,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Invariant | Current contract |
 | --- | --- |
 | One live state owner | The `SessionController` thread applies production session and presentation mutations. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
+| One tooltip-preparation owner | `TooltipPreparationController` owns speculative queue state, generations, persistent heads, memory inflation, and mask-atlas activation. Admitted jobs carry immutable panel, dictionary, and scale inputs; headless prewarm composes those capabilities without a session. `poe tooltip-ownership` rejects shell-owned preparation state, escaped construction, and full-session prewarm. |
 | One mining writer | `MiningController` alone owns the selected target, deck-derived index, seed/probe lifecycle, local store, scratch resources, and operation admission. `poe mining-ownership` rejects shadow fields and direct mutator/construction escape routes. |
 | One annotation writer | `CueAnnotationController` alone owns annotation identity, admission, completion refusal, degradation, token-cache generation, and episode warming. `poe annotation-ownership` rejects the retired shell fields/facades, private cache escape, and construction outside session assembly. |
 | Ordered input | mpv events are drained in arrival order. Conflicting cue observations retire cue-dependent interaction before a later command is dispatched. |
@@ -257,5 +259,7 @@ The executable sources of truth are:
   for mailbox, lifecycle, reconnect, overload, timer, and close contracts;
 - [`tools/mining_ownership_check.py`](https://github.com/serjflint/saitenka/blob/main/tools/mining_ownership_check.py)
   for the mining writer boundary and its planted controls;
+- [`tools/tooltip_ownership_check.py`](https://github.com/serjflint/saitenka/blob/main/tools/tooltip_ownership_check.py)
+  for tooltip interaction and preparation ownership;
 - [`.importlinter`](https://github.com/serjflint/saitenka/blob/main/.importlinter) for package dependency
   direction.

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import replace
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,7 +37,6 @@ from saitenka.app import (
     episode_reslot,
     geometry_refresh,
     logsetup,
-    mask_atlas_startup,
     native_subtitles,
     session_stats,
     subnav,
@@ -111,6 +111,7 @@ from saitenka.app.features.tooltip.popups import (
     TooltipState,
     WordLookup,
 )
+from saitenka.app.features.tooltip.preparation import TooltipPreparationInputs
 from saitenka.app.interaction import mouse_capture
 from saitenka.app.interaction.presentation import InteractionSurfaces
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
@@ -120,7 +121,6 @@ from saitenka.app.media import (
 )
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.paths import cache_dir
 from saitenka.app.perf import gil_disabled
 from saitenka.app.runtime import (
     COMMAND_SPECS,
@@ -133,12 +133,16 @@ from saitenka.app.runtime import (
 )
 from saitenka.app.session import mined_feedback, panel_intents, sidebar_coordination, surfaces
 from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
-from saitenka.app.session.close_ledger import CloseLedger, CloseStep, fallback_after
+from saitenka.app.session.close_ledger import (
+    CloseLedger,
+    CloseStep,
+    RuntimeCloseTracker,
+)
+from saitenka.app.session.close_plan import CloseContributions, assemble_close_participants
 from saitenka.app.session.context import (
     EpisodeContext,
     EpisodeSlot,
     InteractionContext,
-    RenderCacheState,
     SessionContext,
 )
 from saitenka.app.session.interaction_adapter import (
@@ -182,7 +186,7 @@ from saitenka.app.subtitle_adapter import (
     SubtitleCommandRead,
     SubtitleTrackCoordinator,
 )
-from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
+from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
 )
@@ -209,7 +213,6 @@ from saitenka.runtime import (
     EffectFinished,
     EffectOutcome,
     Owner,
-    SessionClosing,
     StartupReady,
     UserCommand,
     events,
@@ -227,7 +230,6 @@ from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.render_cache import RenderCache
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.subtitles import GeometryBackend
@@ -476,6 +478,7 @@ class SessionController:
         self.picker_controller = assembly.picker
         self.sidebar_controller = assembly.sidebar
         self.preview_controller = assembly.preview
+        self.tooltip_preparation = assembly.tooltip_preparation
         # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
         # whoever owns it rather than to a line in a teardown table far away. We keep *using* it;
         # what moves is when it closes. False means no runtime owns this session, and the close
@@ -483,9 +486,8 @@ class SessionController:
         # `getattr`, like the job-lane port below: a partial IPC (the benches' fake) constructs a
         # SessionController without implementing every runtime port, and construction must not demand one.
 
-        self._runtime_owns_surfaces = ipc.register_session_resource(
-            SURFACES_RESOURCE, self.lifecycle_surfaces
-        ) and ipc.register_session_resource(OVERLAY_RESOURCE, self.ov)
+        ipc.register_session_resource(SURFACES_RESOURCE, self.lifecycle_surfaces)
+        ipc.register_session_resource(OVERLAY_RESOURCE, self.ov)
         self.interaction_surfaces = InteractionSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
         self.notifications = ToastController(
@@ -575,20 +577,7 @@ class SessionController:
         self.raw_band_ceiling = (
             o.tooltip.raw_band_ceiling_mb * 1024 * 1024
         )  # bytes; 0 = always compress
-        # Session-lifetime state (app/reader_context.py SessionContext) — durable across every #100
-        # episode re-slot: the #149 persistent render caches (opt-in, built lazily / use-when-available so
-        # a non-dict or opted-out session never touches disk), the in-deck mined set, the Anki
-        # reachability cache, and the review backlog store.
-        self.session = SessionContext(
-            RenderCacheState(
-                cache_on=o.tooltip.render_cache,
-                cache_max_bytes=o.tooltip.render_cache_max_mb * 1024 * 1024,
-                cache_min_height_px=o.tooltip.render_cache_min_height,
-                mask_atlas_on=o.tooltip.mask_atlas,  # persistent glyph mask atlas (#149 Tier-1), opt-out
-            )
-        )
-        self._mask_atlas_startup = mask_atlas_startup.ActivationState()
-        self._mask_atlas_submit = mask_atlas_startup.configure_runtime_job(ipc)
+        self.session = SessionContext()
         # Idle crisp post-render (hi-dpi): after the instant soft upscale, a single background worker
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
         # of the same word) and the poll loop swaps it in — so scrolling stays crisp, not just the first band.
@@ -605,23 +594,6 @@ class SessionController:
         # Positive, truthful signal in the report bundle (overlay.log): the EFFECTIVE backend vs what was
         # requested — a "taffy" request landing on 'default' is a silent-fallback flag.
         log.info("layout backend: %s (requested %r)", self.layout_engine, o.tooltip.layout_engine)
-        # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
-        # CPU-only work (lookup + render + BGRA), NEVER touches the mpv IPC socket (main thread only).
-        self.prefetch = o.prefetch
-        self.prefetch_workers = (
-            o.perf.prefetch_workers
-        )  # constrained-parallel (GIL build) worker count
-        self.prefetch_lookahead = (
-            o.perf.prefetch_lookahead
-        )  # cues to warm ahead of the current line
-        # Head-prefetch (see config.py PerfOptions):
-        # speculatively renders the SAME viewport-capped head a real hover would, via the SAME
-        # panel_for()/panel_cache path, for a SELECTIVE subset of upcoming words (n+1/forgotten/
-        # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
-        # is a plain panel_cache hit with no new key-matching logic to get wrong.
-        self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
-        # A dedicated broker lane keeps speculative work behind interactive raster work.
-        self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
         self.tooltip_controller = tooltip_controller.TooltipController(
             ipc,
             self.engaged_build_ports,
@@ -696,7 +668,7 @@ class SessionController:
 
         self._close_participants: dict[str, Callable[[], object]] = {}
         #: Which close phases the runtime actually performed, filled by the announcement.
-        self._runtime_close_phases: dict[ClosePhase, bool] = {}
+        self._runtime_close = RuntimeCloseTracker(ipc.deliver_runtime_event)
         self._lane_deadline = 0.0
         for name in (
             CAPABILITY_PARTICIPANTS + INTERACTION_WORK_PARTICIPANTS + WORKER_LANE_PARTICIPANTS
@@ -809,15 +781,7 @@ class SessionController:
         self.commands = self._build_command_router()
         self.start_prefetch()
 
-        mask_atlas_startup.request(
-            self._mask_atlas_startup,
-            mask_atlas_startup.MaskAtlasRequest(
-                enabled=self.session.render_cache.mask_atlas_on,
-                path=cache_dir() / "mask-atlas.sqlite",
-            ),
-            self._mask_atlas_submit,
-            self._finish_mask_atlas_startup,
-        )
+        self.tooltip_preparation.request_mask_atlas(self._finish_mask_atlas_startup)
 
     def hover_view(self) -> hover_snapshot.HoverView:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
@@ -1491,12 +1455,7 @@ class SessionController:
             annotate=self.subtitle_language != SECOND_LANG,
         )
 
-    def _apply_annotation_transition(
-        self,
-        transition: AnnotationTransition,
-        *,
-        draw: bool,
-    ) -> None:
+    def _apply_annotation_transition(self, transition: AnnotationTransition, *, draw: bool) -> None:
         if transition.identity is not None:
             self._publish_cue_identity(transition.identity)
         if transition.cue is not None:
@@ -1508,6 +1467,7 @@ class SessionController:
             self.draw_subtitle()
 
     def _dependencies_changed(self) -> None:
+        self._invalidate_profile_dictionary()
         transition = self.annotation_controller.dependencies_changed(
             self.sub_text,
             self._annotation_inputs(),
@@ -1524,7 +1484,8 @@ class SessionController:
     def warm_episode_tokens(self) -> None:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
         index = self.episode.sub_index
-        if index is None or not self.prefetch or self.profile_controller.dict_set is None:
+        enabled = self.tooltip_preparation.config.enabled
+        if index is None or not enabled or self.profile_controller.dict_set is None:
             return
         self.annotation_controller.start_episode_warm(index, self._annotation_inputs())
 
@@ -1536,7 +1497,7 @@ class SessionController:
         self.annotation_controller.invalidate_tokenizer()
 
     def _invalidate_profile_dictionary(self) -> None:
-        self.session.render_cache.config_sig = None
+        self.tooltip_preparation.invalidate_dependencies(self.tooltip_controller)
 
     def _reset_profile_episode_warm(self) -> None:
         self.annotation_controller.retire_episode_warm()
@@ -1708,6 +1669,14 @@ class SessionController:
             cap=self.tip_scale.cap,
         )
 
+    @property
+    def preparation_inputs(self) -> TooltipPreparationInputs:
+        """Facts captured for one tooltip preparation admission."""
+        return TooltipPreparationInputs(
+            panels=self.panel_ports,
+            dictionary=self.profile_controller.dict_set,
+        )
+
     def _is_mined(self, tok) -> bool:
         return tooltip_panel.is_mined(tok, self.mining_controller.index_snapshot())
 
@@ -1874,7 +1843,7 @@ class SessionController:
             tokenizer=self.profile_controller.tokenizer,
             dict_set=self.profile_controller.dict_set,
             mined=self.mining_controller.index_snapshot(),
-            prefetch_gen=self.prefetch_state.gen,
+            prefetch_gen=self.tooltip_preparation.generation,
             dependency_gen=annotation.dependency_generation,
             cue_identity=annotation.identity,
             deferred=self.tooltip_controller.metadata_deferred,
@@ -1889,7 +1858,7 @@ class SessionController:
             lookup=self.word_lookup,
             hover=self.hover_inputs,
             show=self.show_actions,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
         )
 
     @property
@@ -1900,7 +1869,11 @@ class SessionController:
             draw_cue=self.draw_subtitle,
             teardown=self.teardown_tip,
             bind_keys=self._bind_tip_keys,
-            seed_precomposed=self._seed_precomposed,
+            seed_precomposed=lambda panel, key, cap: (
+                self.tooltip_preparation.cache.seed_precomposed(
+                    self.preparation_inputs, panel, key, cap
+                )
+            ),
             freeze=lambda *, already_paused: tooltip._freeze_frame(
                 self.ipc,
                 self.observed_property,
@@ -1967,21 +1940,22 @@ class SessionController:
     def prefetch_ports(self) -> prefetch.PrefetchPorts:
         """What one speculative-warming pass reads. Paired with `head_probe`."""
         return prefetch.PrefetchPorts(
-            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
+            enabled=bool(
+                self.tooltip_preparation.config.enabled
+                and self.profile_controller.dict_set is not None
+            ),
             engaged=bool(self.observed_property("pause")) or self._mouse_in,
-            state=self.prefetch_state,
             cues=prefetch.LookaheadCues(
                 self.episode.sub_index,
                 self.sub_text,
                 self.episode.nav_idx,
-                self.prefetch_lookahead,
+                self.tooltip_preparation.config.cue_lookahead,
             ),
             tokens=self.tokens,
             styles=self.styles,
             tokenizer=self.profile_controller.tokenizer,
             inflected=self._inflected_surface,
             is_mined=self._is_mined,
-            finish=self._finish_speculative_prefetch,
         )
 
     @property
@@ -1991,7 +1965,8 @@ class SessionController:
             scorer=self.scorer,
             panel_key=self._panel_key,
             panel_cache=self.tip.panel_cache,
-            lookahead=self.head_prefetch_lookahead,
+            lookahead=self.tooltip_preparation.config.head_lookahead,
+            queue_max=self.tooltip_preparation.config.head_queue_max,
         )
 
     @property
@@ -2074,7 +2049,9 @@ class SessionController:
             tip_max_frac=self.tip_max_frac,
             nested_max_frac=self.nested_max_frac,
             request_render_ahead=self._request_render_ahead,
-            peek_render_cache=self._peek_render_cache,
+            peek_render_cache=lambda key: self.tooltip_preparation.cache.peek(
+                self.preparation_inputs, key
+            ),
             schedule_flash_expiry=self.schedule_flash_expiry,
             notifications=self.notifications,
             request_engaged_tooltip=self._request_engaged_tooltip,
@@ -2085,11 +2062,7 @@ class SessionController:
         """The exact session capabilities available to tooltip build workers."""
         return tooltip_engaged.EngagedBuildPorts(
             nested_max_frac=self.nested_max_frac,
-            tip_scale=lambda: self.tip_scale,
-            panel_for=self._panel_for,
-            worker_seed_head=self._worker_seed_head,
-            precompose_head=self._precompose_head,
-            mem_fill=self._mem_fill,
+            prepare_hover=self.tooltip_preparation.prepare_engaged,
             cap_for=self._cap_for,
             navigated_panel=self._navigated_panel,
             engaged_open_panel=self._engaged_open_panel,
@@ -2143,170 +2116,29 @@ class SessionController:
     def _panel_cache_setdefault(self, key, st) -> Panel:
         return self.tooltip_controller.cache_setdefault(key, st)
 
-    # --- persistent render cache (#149): seed a cold hover's first viewport from disk ----------
-    def _render_cache(self) -> RenderCache | None:
-        """The cross-session render cache, USED WHEN AVAILABLE: opened lazily only if a prebuilt
-        ``render-cache.sqlite`` already exists (``saitenka prewarm`` builds it). ``None`` when opted out,
-        no dict set, or no prebuilt cache — so a fresh install creates nothing and costs nothing."""
-        rc = self.session.render_cache
-        if not rc.cache_on or self.profile_controller.dict_set is None:
-            return None
-        if not rc.built:
-            rc.built = True
-            from saitenka.app.render_cache import RenderCache
-
-            path = cache_dir() / "render-cache.sqlite"
-            if path.exists():  # use-when-available — prewarm is the builder, not a live session
-                rc.obj = RenderCache.open(path, max_bytes=rc.cache_max_bytes)
-        return rc.obj
-
     def _finish_mask_atlas_startup(self, completion: EffectFinished) -> None:
-        opened = mask_atlas_startup.finish(self._mask_atlas_startup, completion)
-        if opened is not None:
-            mask_atlas_startup.install(self.session.render_cache, opened)
-
-    def _render_cache_sig(self) -> str:
-        """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
-        resolution change recomputes it. Only called when the cache is on (dict_set present)."""
-        rc = self.session.render_cache
-        cap = self.tip_scale.cap
-        ck = (self.tip_scale.width, cap)
-        if rc.config_sig is None or rc.sig_key != ck:
-            from saitenka.app.render_cache import config_signature, dict_set_signature
-
-            assert (
-                self.profile_controller.dict_set is not None
-            )  # _render_cache() gated on it before any caller reaches here
-            rc.config_sig = config_signature(
-                width=self.tip_scale.width,
-                cap=cap,
-                dict_sig=dict_set_signature(self.profile_controller.dict_set),
-            )
-            rc.sig_key = ck
-        return rc.config_sig
-
-    def _render_cache_min_height(self) -> int:
-        """Cost gate (px): only heads at least this tall — a non-trivial entry that needs scrolling, the
-        pathological tail whose cold build+raster blows the budget — are persisted."""
-        return self.session.render_cache.cache_min_height_px
-
-    def _mem_cache(self):
-        """The in-memory tier-2 compressed-head cache (RAM), or ``None`` when the render cache is off.
-        The MAIN thread reads ONLY this — never SQLite — so a cold hover inflates from RAM; the prefetch
-        worker hydrates it from disk (see :meth:`_worker_seed_head` / :meth:`_mem_fill`)."""
-        rc = self.session.render_cache
-        return rc.mem if rc.cache_on else None
-
-    def _peek_render_cache(self, key):
-        """The stored first viewport + ``full_h`` for ``key`` (direct-paint path), or ``None`` — read
-        from the in-memory tier-2 (inflate from RAM), NEVER from SQLite: the main thread must not open the
-        DB on the hover path. A miss falls through to a build (and the tier-3 deferred render)."""
-        mem = self._mem_cache()
-        if mem is None or len(mem) == 0:
-            return None  # empty tier-2 → miss without computing the sig (nothing a worker has seeded yet)
-        from saitenka.app.render_cache import content_key
-
-        cv = mem.get((self._render_cache_sig(), content_key(key)))
-        if cv is None:
-            return None
-        try:
-            return cv.inflate()
-        except ValueError:  # a garbled blob won't reshape → safe miss, build instead
-            return None
-
-    def _seed_precomposed(self, st: Panel, key, cap: int) -> bool:
-        """Seed ``st``'s first viewport from the in-memory tier-2 (cold-show fast path). ``False`` when
-        the cache is off or misses, or the stored geometry doesn't match this show's ``view_h``. Main
-        thread — an in-RAM inflate on a hit, no disk."""
-        loaded = self._peek_render_cache(key)
-        if loaded is None:
-            return False
-        view_h = min(st.full_height, cap)
-        if view_h <= 0 or loaded.view_h != view_h or loaded.overscan != view_h:
-            return False  # geometry moved (content/height changed) — safe miss, live-render
-        st.windowed.install_first_view(loaded.view_h, loaded.overscan, loaded.array)
-        return True
-
-    def _worker_seed_head(self, st: Panel, tok, inflected, *, mined: bool, cap: int) -> bool:
-        """WORKER-side: seed ``st``'s first viewport from the on-disk cache (inflate off the main thread)
-        and mirror the compressed blob into the in-memory tier-2, so the next hover paints from RAM. Far
-        cheaper than a raster on a hit — the lookahead worth doing before falling back to a full compose.
-        ``False`` on cache-off / miss / geometry mismatch (caller then rasters)."""
-        cache = self._render_cache()
-        mem = self._mem_cache()
-        if cache is None or mem is None:
-            return False
-        from saitenka.app.render_cache import content_key
-
-        sig = self._render_cache_sig()
-        ck = content_key(self._panel_key(tok, inflected, mined=mined))
-        cv = cache.peek_compressed(sig, ck)
-        if cv is None:
-            return False
-        view_h = min(st.full_height, cap)
-        if view_h <= 0 or cv.view_h != view_h or cv.overscan != view_h:
-            return False
-        st.windowed.install_first_view(cv.view_h, cv.overscan, cv.inflate().array)
-        mem.put((sig, ck), cv)
-        return True
-
-    def _mem_fill(self, tok, inflected, *, mined: bool) -> None:
-        """WORKER-side: mirror a just-composed+persisted head into the in-memory tier-2 (compressed), so a
-        later hover — or an evicted-then-rebuilt panel — re-seeds from RAM without touching SQLite. No-op
-        if the head wasn't stored (cost gate) or the cache is off; reuses the on-disk blob (no re-compress)."""
-        cache = self._render_cache()
-        mem = self._mem_cache()
-        if cache is None or mem is None:
-            return
-        from saitenka.app.render_cache import content_key
-
-        sig = self._render_cache_sig()
-        ck = content_key(self._panel_key(tok, inflected, mined=mined))
-        cv = cache.peek_compressed(sig, ck)
-        if cv is not None:
-            mem.put((sig, ck), cv)
-
-    def _precompose_head(
-        self, st: Panel, tok, inflected, *, mined: bool, cap: int, protected: bool = False
-    ) -> None:
-        """Precompose ``st``'s first viewport in idle (the prefetch lane) and, when the persistent
-        cache is on, write a cost-gated head to disk for a later session's cold hover. ``protected`` (the
-        offline prewarm) marks the popular set eviction-last so live write-back can't thrash it."""
-        cache = self._render_cache()
-        if cache is None:
-            st.precompose_head(cap)
-            return
-        from saitenka.app.render_cache import content_key
-
-        key = self._panel_key(tok, inflected, mined=mined)
-        st.precompose_head(
-            cap,
-            cache=cache,
-            config_sig=self._render_cache_sig(),
-            content_key=content_key(key),
-            min_height=self._render_cache_min_height(),
-            protected=protected,
-        )
+        self.tooltip_preparation.finish_mask_atlas(completion)
 
     # --- background prefetch (warm the current/next line's tooltips) — tooltip feature --
-    def start_prefetch(self) -> None:
-        prefetch.start_prefetch(
+    def start_prefetch(self) -> int:
+        self.tooltip_preparation.start(
             self.ipc,
-            self.prefetch_state,
-            prefetch.HostPrefetchBackend(self),
             self.profile_controller.tokenizer,
-            self.prefetch_workers,
-            enabled=bool(self.prefetch and self.profile_controller.dict_set is not None),
+            dictionary_available=self.profile_controller.dict_set is not None,
         )
+        return self.tooltip_preparation.worker_count
 
     def _update_prefetch(self) -> None:
-        generation = self.prefetch_state.gen
-        prefetch.update_prefetch(self.prefetch_ports, self.head_probe)
-        if self.prefetch_state.gen != generation:
+        if self.tooltip_preparation.update(
+            self.prefetch_ports,
+            self.head_probe,
+            self.preparation_inputs,
+            self._finish_speculative_prefetch,
+        ):
             self.tooltip_controller.cancel_current_work()
 
     def _finish_speculative_prefetch(self, completion: EffectFinished) -> None:
-        prefetch.finish(self.prefetch_state, completion, self._finish_speculative_prefetch)
+        self.tooltip_preparation.finish(completion, self._finish_speculative_prefetch)
 
     def _inflected_surface(self, index: int) -> str:
         return self.profile_controller.tokenizer.inflected_in(self.tokens, index)
@@ -2997,22 +2829,33 @@ class SessionController:
         return self.tooltip_controller.request_render_ahead(
             view,
             direction,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             scale=self.tip_scale.raster,
             on_finished=self._finish_render_ahead,
         )
 
     def _request_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> bool:
+        scale = self.tip_scale
+        if isinstance(request, tooltip_engaged.HoverRequest):
+            request = replace(
+                request,
+                panels=self.panel_ports if request.panels is None else request.panels,
+                scale=scale if request.scale is None else request.scale,
+            )
+        elif (isinstance(request, tooltip_engaged.NavigateRequest) and request.scale is None) or (
+            isinstance(request, tooltip_engaged.OpenRequest) and request.scale is None
+        ):
+            request = replace(request, scale=scale)
         return self.tooltip_controller.request_engaged(
             request,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             on_finished=self._finish_engaged_tooltip,
         )
 
     def _finish_engaged_tooltip(self, completion: EffectFinished) -> None:
         self.tooltip_controller.finish_engaged(
             completion,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             apply_factory=self._tooltip_apply,
             on_finished=self._finish_engaged_tooltip,
         )
@@ -3020,7 +2863,7 @@ class SessionController:
     def _finish_render_ahead(self, completion: EffectFinished) -> None:
         self.tooltip_controller.finish_render_ahead(
             completion,
-            generation=self.prefetch_state.gen,
+            generation=self.tooltip_preparation.generation,
             ports=self.tip_ports,
             on_finished=self._finish_render_ahead,
         )
@@ -3628,9 +3471,9 @@ class SessionController:
         """Everything that has to hear about a new vocabulary, in the order it has to hear it."""
         self.analysis_commands.invalidate(vocabulary_changed=True)
         self._dependencies_changed()
-        self.start_prefetch()  # prefetch can spin up now (no-op while dict_set is still None)
+        workers = self.start_prefetch()  # no-op while dict_set is still None
         self.warm_episode_tokens()  # deps landed after the index built → warm this episode's cues
-        self._announce_runtime()  # workers are up — the banner can carry the real count (once)
+        self._announce_runtime(workers)
 
     def _draw_loading(self) -> None:
         reader_deps.draw_loading(self.lifecycle_surfaces, self._load_frame)
@@ -3650,7 +3493,7 @@ class SessionController:
         self._draw_loading()
         self._schedule_loading_frame(delay_s=0.08)
 
-    def _announce_runtime(self) -> None:
+    def _announce_runtime(self, worker_count: int | None = None) -> None:
         """Print the runtime banner exactly once, from wherever prefetch actually finishes starting
         (sync: construction; async: apply_deps after start_prefetch). Reports the LIVE worker count — the old
         run()-time print always showed 0 because async deps hadn't spawned the workers yet."""
@@ -3658,7 +3501,11 @@ class SessionController:
             return
         self._runtime_announced = True
         mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
-        console_log.info("runtime: %s · %d prefetch worker(s)", mode, self.prefetch_state.workers)
+        console_log.info(
+            "runtime: %s · %d prefetch worker(s)",
+            mode,
+            self.tooltip_preparation.worker_count if worker_count is None else worker_count,
+        )
 
     @property
     def session_entry(self) -> SessionEntry:
@@ -3730,78 +3577,89 @@ class SessionController:
                 # announcement can say whether anything performed them: a session with a gateway
                 # but no reactor registers every participant and runs none of them.
                 CloseStep(
-                    "phase:capabilities", lambda: self._announce_close(ClosePhase.CAPABILITIES)
+                    "phase:capabilities",
+                    lambda: self._runtime_close.announce(ClosePhase.CAPABILITIES),
                 ),
                 *self._fallback_steps(CAPABILITY_PARTICIPANTS, ClosePhase.CAPABILITIES),
                 # The runtime's own close participants: it announces, the session reducer emits
                 # their effects. Delivered rather than published — the session loop has stopped,
                 # and draining here would run a full domain turn against half-closed collaborators.
-                CloseStep("runtime-close", lambda: self._announce_close(ClosePhase.PARTICIPANTS)),
+                CloseStep(
+                    "runtime-close", lambda: self._runtime_close.announce(ClosePhase.PARTICIPANTS)
+                ),
                 *self._fallback_steps(INTERACTION_WORK_PARTICIPANTS, ClosePhase.PARTICIPANTS),
                 # A detached mpv must never outlive us still routing clicks here.
                 CloseStep(
                     "mouse-capture",
                     lambda: self._mouse.release(),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.PARTICIPANTS),
-                        lambda: self._mouse,
+                    self._runtime_close.fallback(
+                        ClosePhase.PARTICIPANTS, INPUT_CAPTURE_RESOURCE, lambda: self._mouse
                     ),
                 ),
-                CloseStep("phase:lanes", lambda: self._announce_close(ClosePhase.LANES)),
+                CloseStep("phase:lanes", lambda: self._runtime_close.announce(ClosePhase.LANES)),
                 # The order between these is the contract either way — it is the one
                 # `WORKER_LANE_PARTICIPANTS` declares.
                 *self._fallback_steps(WORKER_LANE_PARTICIPANTS, ClosePhase.LANES),
                 # No refresh may land after the provider closes, nor a settle deadline outlive it.
                 CloseStep("geometry-refresh", lambda: self.retire_geometry_refresh()),
                 CloseStep("settle-window", lambda: self.retire_settle_window()),
-                CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
+                CloseStep(
+                    "phase:rendering", lambda: self._runtime_close.announce(ClosePhase.RENDERING)
+                ),
                 # A step each, so a failure in one isolates — the guarantee `_retire` reproduces
                 # on the migrated path.
                 CloseStep(
                     "subtitle-deactivate",
                     lambda: self.subtitle_pipeline.deactivate(self.subtitle_target()),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                    self._runtime_close.fallback(
+                        ClosePhase.RENDERING,
+                        SUBTITLE_DEACTIVATE_RESOURCE,
                         lambda: self.subtitle_pipeline,
                     ),
                 ),
                 CloseStep(
                     "subtitle-clear",
                     self._clear_subtitle_pixels,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                    self._runtime_close.fallback(
+                        ClosePhase.RENDERING,
+                        SUBTITLE_CLEAR_RESOURCE,
                         lambda: self.native_geometry,
                     ),
                 ),
                 CloseStep(
                     "subtitle-close",
                     self._close_subtitle_raster,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                    self._runtime_close.fallback(
+                        ClosePhase.RENDERING,
+                        SUBTITLE_CLOSE_RESOURCE,
                         lambda: self.subtitle_pipeline,
                     ),
                 ),
-                CloseStep("phase:stores", lambda: self._announce_close(ClosePhase.STORES)),
+                CloseStep("phase:stores", lambda: self._runtime_close.announce(ClosePhase.STORES)),
                 CloseStep(
                     "session-stats",
                     lambda: self._report_session(self.finish_session_stats()),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.STORES), lambda: self.session
+                    self._runtime_close.fallback(
+                        ClosePhase.STORES,
+                        SESSION_SUMMARY_RESOURCE,
+                        lambda: self.session,
                     ),
                 ),
                 CloseStep(
                     "backlog-store",
                     self._close_backlog_store,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.STORES),
+                    self._runtime_close.fallback(
+                        ClosePhase.STORES,
+                        BACKLOG_RESOURCE,
                         lambda: self.session.backlog_store,
                     ),
                 ),
                 CloseStep(
                     "mined-store",
                     self.mining_controller.close_store,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.STORES),
+                    self._runtime_close.fallback(
+                        ClosePhase.STORES,
+                        MINED_RESOURCE,
                         lambda: self.mining_controller,
                     ),
                 ),
@@ -3811,13 +3669,12 @@ class SessionController:
                 # `PARTICIPANTS` would strip the overlays ~30 steps early, while a lane could
                 # still add one.
                 CloseStep("lifecycle-surfaces", lambda: self._retire_surfaces()),
-                # Closed by the `SURFACES` phase above when a runtime owns it — this is the
-                # fallback for a SessionController that has none, and must stay after the removes it carries.
+                # Separate phase: a missing surface registration must fall back while the
+                # transport is still open, before this step closes it.
                 CloseStep(
                     "transport",
-                    lambda: self.ov.close(),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.SURFACES), lambda: self.ov
+                    lambda: self._runtime_close.retire(
+                        ClosePhase.OVERLAY, OVERLAY_RESOURCE, self.ov.close
                     ),
                 ),
                 # Disarm what `PROCESS` armed. Process-global and session-lived: `run` turns it on
@@ -3905,7 +3762,7 @@ class SessionController:
             CloseStep(
                 name,
                 self._participant_for(name),
-                fallback_after(lambda: self._phase_performed(phase), lambda: self),
+                self._runtime_close.fallback(phase, name, lambda: self),
             )
             for name in names
         )
@@ -3941,9 +3798,10 @@ class SessionController:
         """
 
         close_lane = self.ipc.close_runtime_job_lane
-
-        def lane(name: str) -> Callable[[], object]:
-            return lambda: close_lane(name, self._lane_remaining())
+        tooltip_preparation = self.tooltip_preparation.close_participants(
+            close_lane,
+            self._lane_remaining,
+        )
 
         def _close_render_pool() -> None:
             """Retire the shared render pool once every lane above has cancelled its work.
@@ -3963,41 +3821,21 @@ class SessionController:
             self.request_stop()
             self._lane_deadline = time.monotonic() + 2.0
 
-        self._close_participants = dict(
-            zip(
-                CAPABILITY_PARTICIPANTS + INTERACTION_WORK_PARTICIPANTS + WORKER_LANE_PARTICIPANTS,
-                (
-                    self._close_tts_capability,
-                    self._close_anki_capability,
-                    self.tooltip_controller.cancel_jobs,
-                    self.tooltip_controller.close_metadata,
-                    start_lane_budget,
-                    lane("subtitle-fetch"),
-                    lane("subtitle-picker"),
-                    lane(GEOMETRY_LANE),
-                    self._close_annotation,
-                    lane("cue-annotation"),
-                    self.tooltip_controller.close_render_ahead,
-                    lane("tooltip-render-ahead"),
-                    self.tooltip_controller.close_engaged,
-                    lane("tooltip-engaged"),
-                    lambda: prefetch.close(self.prefetch_state),
-                    lane("speculative-prefetch"),
-                    lambda: mask_atlas_startup.close(self._mask_atlas_startup),
-                    lane("mask-atlas-startup"),
-                    lambda: mask_atlas_startup.uninstall(self.session.render_cache),
-                    _close_render_pool,
-                    # The unconstrained tail. Each one's state was already retired by an earlier
-                    # phase — the probes at CAPABILITIES, the metadata at PARTICIPANTS, the mined
-                    # seed by the generation bump `close` opens with — so what is left is the
-                    # workers, and cancelling them here is what keeps one from running on into the
-                    # store and anki closes two phases below.
-                    lane("capabilities"),
-                    lane("interaction-metadata"),
-                    lane("mined-seed"),
-                    lambda: self.analysis_controller.close_lane(self._lane_remaining()),
-                ),
-                strict=True,
+        self._close_participants = assemble_close_participants(
+            CloseContributions(
+                close_tts=self._close_tts_capability,
+                close_anki=self._close_anki_capability,
+                cancel_interaction_jobs=self.tooltip_controller.cancel_jobs,
+                close_hover_metadata=self.tooltip_controller.close_metadata,
+                start_lane_budget=start_lane_budget,
+                close_lane=close_lane,
+                lane_remaining=self._lane_remaining,
+                close_annotation=self._close_annotation,
+                close_tooltip_raster=self.tooltip_controller.close_render_ahead,
+                close_tooltip_engaged=self.tooltip_controller.close_engaged,
+                tooltip_preparation=tooltip_preparation,
+                close_analysis=lambda: self.analysis_controller.close_lane(self._lane_remaining()),
+                close_render_pool=_close_render_pool,
             )
         )
 
@@ -4006,34 +3844,17 @@ class SessionController:
 
         guard_main_render(on=False)
 
-    def _phase_performed(self, phase: ClosePhase) -> bool:
-        """Whether the runtime performed `phase`'s steps, so this session's own must not."""
-        return self._runtime_close_phases.get(phase, False)
-
-    def _announce_close(self, phase: ClosePhase, scratch: str | None = None) -> bool:
-        """Tell the runtime the close sequence reached `phase`. False when no runtime owns us.
-
-        Delivered rather than published: the session loop has stopped, so a published event would
-        sit in the mailbox, and draining here would run a full domain turn against half-closed
-        collaborators.
-        """
-        performed = self.ipc.deliver_runtime_event(SessionClosing(phase, scratch))
-        self._runtime_close_phases[phase] = performed
-        return performed
-
     def _retire_surfaces(self) -> None:
         """Announce the `SURFACES` phase, or close them ourselves.
 
-        Same fallback shape as `_retire_artifacts`, and for the same reason: a `SessionController` with no
-        runtime still built the surfaces, so somebody has to remove them.
-
-        Gated on the *registration*, not on the announcement's return: `announce` reports only that
-        a reactor saw the event, not that anything performed the effect. A session with a reactor
-        but no registered resource would take the True and leak the overlays.
+        Per-resource acknowledgement keeps a missing registration on the local path; this method
+        finishes before the separate overlay-transport phase begins.
         """
-        if self._runtime_owns_surfaces and self._announce_close(ClosePhase.SURFACES):
-            return
-        self.lifecycle_surfaces.close()
+        self._runtime_close.retire(
+            ClosePhase.SURFACES,
+            SURFACES_RESOURCE,
+            self.lifecycle_surfaces.close,
+        )
 
     def _retire_artifacts(self) -> None:
         """Hand the scratch dir to the runtime's `ARTIFACTS` phase, or remove it ourselves.
@@ -4044,7 +3865,7 @@ class SessionController:
         perform it, which is the one case where `announce`'s return answers the question asked.
         """
         self.mining_controller.retire_artifacts(
-            lambda path: self._announce_close(ClosePhase.ARTIFACTS, path)
+            lambda path: self._runtime_close.announce(ClosePhase.ARTIFACTS, path)
         )
 
     def finish_session_stats(self) -> str | None:

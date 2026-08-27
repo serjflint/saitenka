@@ -23,6 +23,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from saitenka.runtime.events import ClosePhase, SessionClosing
+
+from saitenka.runtime.events import SessionClosing
+from saitenka.runtime.reactor import LifecycleEffectError
+
 log = logging.getLogger(__name__)
 
 
@@ -45,29 +50,52 @@ class CloseStep:
     present: Callable[[], object] | None = None
 
 
-def _absent() -> None:
-    """A participant the runtime already retired — `present` skips on None."""
-    return
+class RuntimeCloseTracker:
+    """Track which runtime retirements still require their local fallback."""
 
+    def __init__(self, deliver: Callable[[SessionClosing], bool]) -> None:
+        self._deliver = deliver
+        self._missing: dict[ClosePhase, frozenset[str]] = {}
 
-def fallback_for(present: Callable[[], object], *, owned: bool) -> Callable[[], object]:
-    """`CloseStep.present` for a step the runtime performs when a runtime owns the session.
+    def performed(self, phase: ClosePhase, resource: str) -> bool:
+        missing = self._missing.get(phase)
+        return missing is not None and resource not in missing
 
-    `present` skips on `None`, not on falsy, so "the runtime owns this" has to *be* None: a
-    `not owned` bool keeps the fallback running beside the effect it is a fallback for.
-    """
-    return _absent if owned else present
+    def fallback(
+        self,
+        phase: ClosePhase,
+        resource: str,
+        present: Callable[[], object],
+    ) -> Callable[[], object]:
+        return lambda: None if self.performed(phase, resource) else present()
 
+    def announce(self, phase: ClosePhase, scratch: str | None = None) -> bool:
+        try:
+            performed = self._deliver(SessionClosing(phase, scratch))
+        except LifecycleEffectError as error:
+            self._missing[phase] = error.missing_resources
+            raise
+        except BaseException:
+            self._missing.pop(phase, None)
+            raise
+        if performed:
+            self._missing[phase] = frozenset()
+        return performed
 
-def fallback_after(performed: Callable[[], bool], present: Callable[[], object]):
-    """`fallback_for` for a decision only the announcement can make.
-
-    Registering a participant is not the same as something performing it: a session with a gateway
-    but no reactor registers everything and runs nothing, so a fallback gated on registration alone
-    is skipped by a runtime that never acted. The phase's announcement is what actually answers,
-    which is why it has to run *before* the steps it might replace.
-    """
-    return lambda: _absent() if performed() else present()
+    def retire(
+        self,
+        phase: ClosePhase,
+        resource: str,
+        local: Callable[[], None],
+    ) -> None:
+        try:
+            if self.announce(phase):
+                return
+        except LifecycleEffectError:
+            if not self.performed(phase, resource):
+                local()
+            raise
+        local()
 
 
 @dataclass(slots=True)

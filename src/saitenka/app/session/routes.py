@@ -63,6 +63,9 @@ from saitenka.app.feature_bindings import (
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.profiles import profile_intents
 from saitenka.app.features.tooltip import hover_intents
+from saitenka.app.features.tooltip.preparation import (
+    TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
+)
 from saitenka.app.session import interaction_intents, panel_intents
 from saitenka.app.session.stateless import StatelessCommandRegistration, bind_stateless
 from saitenka.runtime.connection import ConnectionState, reduce_connection
@@ -259,11 +262,7 @@ WORKER_LANE_PARTICIPANTS = (
     "lanes:tooltip-render-ahead",
     "lanes:tooltip-engaged-worker",
     "lanes:tooltip-engaged",
-    "lanes:prefetch",
-    "lanes:speculative-prefetch",
-    "lanes:mask-atlas-startup-worker",
-    "lanes:mask-atlas-startup",
-    "lanes:mask-atlas-uninstall",
+    *TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
     "lanes:capabilities",
     "lanes:interaction-metadata",
     "lanes:mined-seed",
@@ -388,25 +387,48 @@ def _begin(gateway: MpvGateway, name: str) -> bool:
     return True
 
 
-def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
-    """Close each named resource in order, isolating them, and say whether all of them were there.
+class ResourceRetirementError(RuntimeError):
+    """One close phase finished its sequence but could not retire every resource."""
 
-    False, not an exception, for an unregistered one: it means this session's owner never handed
-    it over, so its own teardown still runs. Isolation is what `CloseLedger` gives a step it owns —
-    a phase that retires three participants must not lose it by being one announcement.
+    def __init__(
+        self,
+        *,
+        missing: tuple[str, ...],
+        failed: tuple[tuple[str, BaseException], ...],
+    ) -> None:
+        self.missing = missing
+        self.failed = failed
+        details = [*(f"{name}: missing" for name in missing)]
+        details.extend(f"{name}: {type(error).__name__}" for name, error in failed)
+        super().__init__("session resources failed to retire: " + ", ".join(details))
+
+
+def _retire(
+    gateway: MpvGateway,
+    names: tuple[str, ...],
+    *,
+    missing_is_failure: bool = False,
+) -> bool:
+    """Close each named resource in order and report any failures after the sequence.
+
+    The exception is delayed until every peer has run. The controller's `CloseLedger` catches it at
+    the phase boundary, preserving both isolation and caller-visible failure truth.
     """
-    retired = True
+    missing: list[str] = []
+    failed: list[tuple[str, BaseException]] = []
     for name in names:
         resource = gateway.session_resources.get(name)
         if resource is None:
-            retired = False
+            missing.append(name)
             continue
         try:
             resource.close()  # type: ignore[attr-defined]  # registered by the owner that made it
-        except Exception:  # teardown continues; the owner's own close still ran
+        except BaseException as error:  # teardown continues; the owner's own close still ran
             log.warning("session resource %s failed to close", name, exc_info=True)
-            retired = False
-    return retired
+            failed.append((name, error))
+    if failed or (missing and missing_is_failure):
+        raise ResourceRetirementError(missing=tuple(missing), failed=tuple(failed))
+    return not missing
 
 
 def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect], bool]:
@@ -432,7 +454,11 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
             return _begin(gateway, participant)
         names = _RESOURCE_OF.get(type(effect))
         if names is not None:
-            return _retire(gateway, names)
+            return _retire(
+                gateway,
+                names,
+                missing_is_failure=not isinstance(effect, RetireCueIdentity),
+            )
         if isinstance(effect, RemoveSessionArtifacts):
             shutil.rmtree(effect.path, ignore_errors=True)
             return True

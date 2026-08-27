@@ -35,22 +35,39 @@ class _FakeDS:
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
 
-def _reader(monkeypatch, *, lookahead, props=None):
+def _reader(
+    monkeypatch,
+    *,
+    lookahead,
+    props=None,
+    head_lookahead: int = 0,
+    head_queue_max: int = 4,
+):
     ipc = _FakeIPC(props)
-    r = SessionController(ipc, dict_set=_FakeDS())
+    options = ReaderOptions(
+        perf=PerfOptions(
+            prefetch_lookahead=lookahead,
+            head_prefetch_lookahead=head_lookahead,
+            head_prefetch_queue_max=head_queue_max,
+        )
+    )
+    r = SessionController(ipc, dict_set=_FakeDS(), options=options)
     r.osd = (1280, 720)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.episode.sub_index = CueIndex(parse_srt(_SRT))
-    r.prefetch_lookahead = lookahead
     return r
 
 
-def _submitted_items(r):
+def _submitted_items(r, monkeypatch):
     submitted = []
-    r.prefetch_state.workers = 64
-    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
+
+    def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
+        submitted.extend(item for _priority, item in jobs)
+        return True
+
+    monkeypatch.setattr(prefetch, "schedule", capture)
     r._update_prefetch()
-    return [entry["request"].item for entry in submitted]
+    return submitted
 
 
 def _upcoming(r, n: int) -> list[str]:
@@ -63,16 +80,34 @@ def _upcoming(r, n: int) -> list[str]:
 def test_lookahead_warms_the_next_cues_words(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
     r.set_subtitle("本を読む")  # cue 1
-    surfaces = [i.token.surface for i in _submitted_items(r)]
+    surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
     # cue 2 (書く) and cue 3 (水, 飲む) get warmed; を is a particle, skipped.
     assert "書く" in surfaces and "水" in surfaces and "飲む" in surfaces
+
+
+def test_dependency_replacement_readmits_the_unchanged_cue(monkeypatch):
+    r = _reader(monkeypatch, lookahead=0)
+    r.set_subtitle("本を読む")
+    scheduled: list[list[object]] = []
+
+    def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
+        scheduled.append([item for _priority, item in jobs])
+        return True
+
+    monkeypatch.setattr(prefetch, "schedule", capture)
+    r._update_prefetch()
+
+    r._dependencies_changed()
+    r._update_prefetch()
+
+    assert len(scheduled) == 2
 
 
 def test_lookahead_items_are_warm_only_even_while_engaged(monkeypatch):
     # Paused ⇒ the CURRENT line renders full; a future line is never engaged → always warm/unmined.
     r = _reader(monkeypatch, lookahead=1, props={"pause": True})
     r.set_subtitle("本を読む")
-    items = _submitted_items(r)
+    items = _submitted_items(r, monkeypatch)
     future = [i for i in items if i.token.surface == "書く"]  # only in cue 2
     assert future and all(i.full is False and i.mined is False for i in future)
     current = [i for i in items if i.token.surface == "読む"]  # only in cue 1
@@ -82,14 +117,14 @@ def test_lookahead_items_are_warm_only_even_while_engaged(monkeypatch):
 def test_lookahead_dedupes_against_the_current_line(monkeypatch):
     r = _reader(monkeypatch, lookahead=1)
     r.set_subtitle("本を読む")  # 本 is also cue 2's first word
-    surfaces = [i.token.surface for i in _submitted_items(r)]
+    surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
     assert surfaces.count("本") == 1  # warmed once by the current line, not again for the next
 
 
 def test_no_lookahead_when_disabled(monkeypatch):
     r = _reader(monkeypatch, lookahead=0)
     r.set_subtitle("本を読む")
-    surfaces = [i.token.surface for i in _submitted_items(r)]
+    surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
     assert "書く" not in surfaces and "水" not in surfaces  # only the current line queued
 
 
@@ -107,16 +142,14 @@ def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
     r.set_subtitle("本を読む")
-    _submitted_items(r)
+    _submitted_items(r, monkeypatch)
 
     assert calls <= 65  # current cue plus at most 64 future cues
 
 
 def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypatch):
-    r = _reader(monkeypatch, lookahead=0)
+    r = _reader(monkeypatch, lookahead=0, head_lookahead=10_000, head_queue_max=4)
     r.set_subtitle("本を読む")
-    r.head_prefetch_lookahead = 10_000
-    r.prefetch_state = prefetch.PrefetchState(4)
     calls = 0
 
     class _Scorer:
@@ -128,16 +161,14 @@ def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypat
     r.scorer = _Scorer()
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
-    _submitted_items(r)
+    _submitted_items(r, monkeypatch)
 
     assert calls == 4
 
 
 def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypatch):
-    r = _reader(monkeypatch, lookahead=0)
+    r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=4)
     r.set_subtitle("本を読む")
-    r.head_prefetch_lookahead = 1
-    r.prefetch_state = prefetch.PrefetchState(4)
     tokens = [Token(f"語{i}", f"語{i}", f"ご{i}", "名詞", i, i + 1) for i in range(100)]
     probes = 0
 
@@ -162,10 +193,8 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
 
 
 def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_prefix(monkeypatch):
-    r = _reader(monkeypatch, lookahead=0)
+    r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=1)
     r.set_subtitle("本を読む")
-    r.head_prefetch_lookahead = 1
-    r.prefetch_state = prefetch.PrefetchState(1)
     tokens = [
         Token("は", "は", "は", "助詞", 0, 1),
         Token("語", "語", "ご", "名詞", 1, 2),

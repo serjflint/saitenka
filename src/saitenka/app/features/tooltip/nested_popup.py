@@ -204,6 +204,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
             nested=True,
             tail=tail or tok.surface,
             job_id=ports.tip.nest.job_id,
+            panels=panel,
         )
         if ports.request_engaged_tooltip(request):
             return

@@ -24,6 +24,10 @@ from saitenka.app.features.help.help_controller import (
 from saitenka.app.features.picker.picker_controller import PickerController
 from saitenka.app.features.preview.preview_controller import PreviewController
 from saitenka.app.features.sidebar.sidebar_controller import SidebarController
+from saitenka.app.features.tooltip.preparation import (
+    TooltipPreparationConfig,
+    TooltipPreparationController,
+)
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
 from saitenka.app.runtime import CommandSpec
 from saitenka.mpvio.osd import Overlay
@@ -121,6 +125,7 @@ class SessionAssembly:
     picker: PickerController
     sidebar: SidebarController
     preview: PreviewController
+    tooltip_preparation: TooltipPreparationController
     commands: tuple[CommandRegistration, ...]
     stateful: tuple[InstalledStatefulBinding, ...]
     owner_plans: tuple[OwnerPlan, ...]
@@ -190,6 +195,20 @@ def build_session_assembly(
     )
     sidebar_owner = SidebarController(ipc)
     preview_owner = PreviewController(ipc)
+    tooltip_preparation = TooltipPreparationController(
+        ipc,
+        TooltipPreparationConfig(
+            enabled=options.prefetch,
+            workers=options.perf.prefetch_workers,
+            cue_lookahead=options.perf.prefetch_lookahead,
+            head_lookahead=options.perf.head_prefetch_lookahead,
+            head_queue_max=options.perf.head_prefetch_queue_max,
+            cache_enabled=options.tooltip.render_cache,
+            cache_max_bytes=options.tooltip.render_cache_max_mb * 1024 * 1024,
+            cache_min_height=options.tooltip.render_cache_min_height,
+            mask_atlas_enabled=options.tooltip.mask_atlas,
+        ),
+    )
     commands = tuple(
         CommandRegistration(
             "help",
@@ -217,6 +236,7 @@ def build_session_assembly(
         picker=picker_owner,
         sidebar=sidebar_owner,
         preview=preview_owner,
+        tooltip_preparation=tooltip_preparation,
         commands=commands,
         stateful=INTERACTION_STATEFUL_BINDINGS,
         owner_plans=(INTERACTION_OWNER_PLAN,),
