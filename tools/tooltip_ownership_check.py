@@ -164,6 +164,17 @@ def _annotation_is_tooltip_controller(annotation: ast.AST | None) -> bool:
     return isinstance(annotation, ast.Constant) and annotation.value == "TooltipController"
 
 
+def _annotation_is_tooltip_preparation(annotation: ast.AST | None) -> bool:
+    if isinstance(annotation, ast.Name | ast.Attribute):
+        return (
+            getattr(annotation, "id", None) == "TooltipPreparationController"
+            or getattr(annotation, "attr", None) == "TooltipPreparationController"
+        )
+    return (
+        isinstance(annotation, ast.Constant) and annotation.value == "TooltipPreparationController"
+    )
+
+
 def _bound_names(target: ast.AST) -> set[str]:
     if isinstance(target, ast.Name):
         return {target.id}
@@ -230,6 +241,11 @@ def _preparation_names(scope: ast.AST, inherited: set[str]) -> set[str]:
         if scope.args.kwarg is not None:
             arguments.append(scope.args.kwarg)
         names.difference_update(argument.arg for argument in arguments)
+        names.update(
+            argument.arg
+            for argument in arguments
+            if _annotation_is_tooltip_preparation(argument.annotation)
+        )
 
     nodes = _scope_nodes(scope)
     changed = True

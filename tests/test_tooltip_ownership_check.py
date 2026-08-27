@@ -121,3 +121,15 @@ def test_preparation_close_alias_cannot_return_to_the_session_shell(body: str):
     )
 
     assert "preparation-close-detail" in rules
+
+
+def test_preparation_close_cannot_cross_a_typed_helper_parameter():
+    rules = _rules(
+        "def close(preparation: TooltipPreparationController):\n"
+        "    return preparation.close_prefetch\n\n"
+        "def drift(self):\n"
+        "    return close(self.tooltip_preparation)\n",
+        "session/controller.py",
+    )
+
+    assert "preparation-close-detail" in rules
