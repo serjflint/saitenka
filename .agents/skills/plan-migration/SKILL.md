@@ -70,13 +70,13 @@ arrived" from "the old thing left". A debt count falling while the retired objec
 the failure mode, and only two numbers side by side can see it. `poe host-mass` is the standing
 instance — declare yours on day 1, not after the first surprise.
 
-**Responsibility migrations need a policy meter.** Moving fields, adding a collaborator, reducing LOC, or
-turning methods into delegators does not prove that ownership moved. Census the authoritative writers and
-the substantive admission, completion, fallback, publication, and lifecycle decisions before the first
-batch. Retirement means those decisions terminate at the bounded owner; the old host may remain as the
-composition root or sole effect executor. Pair the meter with a one-writer proof so a facade cannot make the
-numbers fall while leaving two homes for the same fact, but only when the accepted invariant requires one
-writer. Otherwise name the multiple-writer ordering or consistency mechanism and its failure semantics.
+**Responsibility migrations need an authority/writer retirement meter.** Moving fields, adding a
+collaborator, reducing LOC, or turning methods into delegators does not prove that ownership moved. When the
+migration also retires policy, meter the substantive admission, completion, fallback, publication, and
+lifecycle decisions. Retirement means the claimed authority terminates at the bounded owner; the old host
+may remain as composition root or sole effect executor. Add a one-writer proof only when the accepted
+invariant requires one writer. Otherwise name the multiple-writer ordering or consistency mechanism and its
+failure semantics.
 
 Self-attack the intended boundary using that same canonical lens. Keep the guard proportionate to the
 retired semantic path; do not freeze private layout or benign test construction.

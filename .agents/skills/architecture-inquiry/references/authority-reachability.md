@@ -1,6 +1,6 @@
 # Authority reachability
 
-Use this lens only when an inquiry or migration claims that mutable authority or substantive policy moved.
+Use this lens when ownership is disputed or a migration claims that mutable authority or policy moved.
 It complements control/data flow: a layered call graph can still forward the former authority unchanged.
 
 ## Trace
