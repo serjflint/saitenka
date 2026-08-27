@@ -371,6 +371,16 @@ def _bound_names(target: ast.AST) -> set[str]:
     return set()
 
 
+def _receiver_names(target: ast.AST) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Attribute | ast.Subscript):
+        return _receiver_names(target.value)
+    if isinstance(target, ast.List | ast.Tuple):
+        return {name for item in target.elts for name in _receiver_names(item)}
+    return set()
+
+
 def _scope_nodes(scope: ast.AST) -> list[ast.AST]:
     nodes: list[ast.AST] = []
     pending = list(ast.iter_child_nodes(scope))
@@ -415,21 +425,19 @@ def _owner_names(scope: ast.AST, inherited: set[str], type_names: set[str]) -> s
                 continue
             if not _is_tooltip_owner_reference(value, names):
                 continue
-            aliases = {name for target in targets for name in _bound_names(target)}
+            aliases = {name for target in targets for name in _receiver_names(target)}
             if not aliases <= names:
                 names.update(aliases)
                 changed = True
         for node in nodes:
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in {"append", "extend", "insert"}
-                and isinstance(node.func.value, ast.Name)
-                and any(_is_tooltip_owner_reference(argument, names) for argument in node.args)
-            ):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
                 continue
-            if node.func.value.id not in names:
-                names.add(node.func.value.id)
+            arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
+            if not any(_is_tooltip_owner_reference(argument, names) for argument in arguments):
+                continue
+            receivers = _receiver_names(node.func.value)
+            if not receivers <= names:
+                names.update(receivers)
                 changed = True
     return names
 

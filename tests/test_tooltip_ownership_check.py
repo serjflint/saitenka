@@ -153,12 +153,18 @@ def test_feature_cannot_hide_the_owner_type_in_a_union_alias():
     assert "owner-raw-boundary-outside-tooltip" in rules
 
 
-def test_feature_cannot_forward_the_owner_through_a_container():
+@pytest.mark.parametrize(
+    "body",
+    [
+        "box = []\n    box.append(owner)\n    return box[0].surface_state()",
+        "box = {}\n    box['owner'] = owner\n    return box['owner'].surface_state()",
+        "holder.owner = owner\n    return holder.owner.surface_state()",
+        "owners.add(owner)\n    return next(iter(owners)).surface_state()",
+    ],
+)
+def test_feature_cannot_forward_the_owner_through_a_container(body: str):
     rules = _rules(
-        "def drift(owner: TooltipController):\n"
-        "    box = []\n"
-        "    box.append(owner)\n"
-        "    return box[0].surface_state()\n",
+        f"def drift(owner: TooltipController):\n    {body}\n",
         "features/mining/mine_adapter.py",
     )
 
