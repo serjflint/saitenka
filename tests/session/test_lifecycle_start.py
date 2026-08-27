@@ -70,7 +70,7 @@ def test_setup_brings_the_same_session_up_with_or_without_a_runtime(
     for phase in StartPhase:
         reader._announce_start(phase)
 
-    assert reader._observing  # reads are event-driven from here on
+    assert reader.playback_observation.observing  # reads are event-driven from here on
     assert any(c and c[0] == "define-section" for c in ipc.commands)  # input routes to us
     assert "lifecycle:startup-health" in ipc.timers  # diagnostics armed
 

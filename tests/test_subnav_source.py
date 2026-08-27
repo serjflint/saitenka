@@ -23,7 +23,7 @@ def _reader_showing_the_cue() -> SessionController:
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader.refresh_osd()
     ipc.props["sub-text"] = CUE
-    reader._observe_property("sub-text", CUE)
+    reader.playback_observation.observe("sub-text", CUE)
     reader.pump()
     assert reader.tokens, "the observed cue should be tokenized before the source changes"
     return reader

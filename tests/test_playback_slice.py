@@ -134,11 +134,11 @@ def _reader_with_a_session_runtime(request):
 def test_a_session_runtime_owns_the_slot_the_reader_observes_into(request) -> None:
     """The whole point of item 13: with a runtime installed there is no SessionController-side copy."""
     reader, gateway = _reader_with_a_session_runtime(request)
-    reader._observe_property("sub-text", "こんにちは")
+    reader.playback_observation.observe("sub-text", "こんにちは")
 
     slot = gateway.session_reactor.state.playback
     assert slice_of(slot).state.value("sub-text") == "こんにちは"
-    assert reader._playback is slice_of(slot).state
+    assert reader.playback_observation.state is slice_of(slot).state
 
 
 def test_a_reader_with_no_runtime_still_observes_into_its_own_slice(request) -> None:
@@ -149,18 +149,18 @@ def test_a_reader_with_no_runtime_still_observes_into_its_own_slice(request) -> 
 
     reader = SessionController(FakeIPC(), renderer=NullRenderer())
     request.addfinalizer(reader.close)
-    reader._observe_property("sub-text", "ただいま")
+    reader.playback_observation.observe("sub-text", "ただいま")
 
-    assert reader._playback.value("sub-text") == "ただいま"
+    assert reader.playback_observation.state.value("sub-text") == "ただいま"
 
 
 def test_a_closed_reactor_drops_the_event_instead_of_replaying_the_last_outbox(request) -> None:
     """A dropped turn leaves `published` in place; applying it again would double every delta."""
     reader, gateway = _reader_with_a_session_runtime(request)
-    reader._observe_property("sub-text", "one")
+    reader.playback_observation.observe("sub-text", "one")
     gateway.session_reactor.close()
 
-    store = reader._playback_store
+    store = reader.playback_observation.store
     assert store.dispatch(PropertyObserved("sub-text", "two")) == ()
 
 
@@ -173,7 +173,7 @@ def test_an_empty_routed_dispatch_does_not_mean_the_event_did_nothing(request) -
     happened*, and `routed` is what tells a caller which.
     """
     reader, _gateway = _reader_with_a_session_runtime(request)
-    store = reader._playback_store
+    store = reader.playback_observation.store
     assert store.routed
 
     assert store.dispatch(PropertyObserved("sub-text", "ただいま")) == ()
