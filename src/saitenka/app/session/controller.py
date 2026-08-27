@@ -138,6 +138,7 @@ from saitenka.app.session.close_ledger import (
     CloseStep,
     RuntimeCloseTracker,
 )
+from saitenka.app.session.close_plan import CloseContributions, assemble_close_participants
 from saitenka.app.session.context import (
     EpisodeContext,
     EpisodeSlot,
@@ -185,7 +186,7 @@ from saitenka.app.subtitle_adapter import (
     SubtitleCommandRead,
     SubtitleTrackCoordinator,
 )
-from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
+from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import (
     configure_runtime_job as configure_geometry_lane,
 )
@@ -3797,9 +3798,10 @@ class SessionController:
         """
 
         close_lane = self.ipc.close_runtime_job_lane
-
-        def lane(name: str) -> Callable[[], object]:
-            return lambda: close_lane(name, self._lane_remaining())
+        tooltip_preparation = self.tooltip_preparation.close_participants(
+            close_lane,
+            self._lane_remaining,
+        )
 
         def _close_render_pool() -> None:
             """Retire the shared render pool once every lane above has cancelled its work.
@@ -3819,41 +3821,21 @@ class SessionController:
             self.request_stop()
             self._lane_deadline = time.monotonic() + 2.0
 
-        self._close_participants = dict(
-            zip(
-                CAPABILITY_PARTICIPANTS + INTERACTION_WORK_PARTICIPANTS + WORKER_LANE_PARTICIPANTS,
-                (
-                    self._close_tts_capability,
-                    self._close_anki_capability,
-                    self.tooltip_controller.cancel_jobs,
-                    self.tooltip_controller.close_metadata,
-                    start_lane_budget,
-                    lane("subtitle-fetch"),
-                    lane("subtitle-picker"),
-                    lane(GEOMETRY_LANE),
-                    self._close_annotation,
-                    lane("cue-annotation"),
-                    self.tooltip_controller.close_render_ahead,
-                    lane("tooltip-render-ahead"),
-                    self.tooltip_controller.close_engaged,
-                    lane("tooltip-engaged"),
-                    self.tooltip_preparation.close_prefetch,
-                    lane("speculative-prefetch"),
-                    self.tooltip_preparation.close_mask_activation,
-                    lane("mask-atlas-startup"),
-                    self.tooltip_preparation.cache.uninstall_mask_atlas,
-                    _close_render_pool,
-                    # The unconstrained tail. Each one's state was already retired by an earlier
-                    # phase — the probes at CAPABILITIES, the metadata at PARTICIPANTS, the mined
-                    # seed by the generation bump `close` opens with — so what is left is the
-                    # workers, and cancelling them here is what keeps one from running on into the
-                    # store and anki closes two phases below.
-                    lane("capabilities"),
-                    lane("interaction-metadata"),
-                    lane("mined-seed"),
-                    lambda: self.analysis_controller.close_lane(self._lane_remaining()),
-                ),
-                strict=True,
+        self._close_participants = assemble_close_participants(
+            CloseContributions(
+                close_tts=self._close_tts_capability,
+                close_anki=self._close_anki_capability,
+                cancel_interaction_jobs=self.tooltip_controller.cancel_jobs,
+                close_hover_metadata=self.tooltip_controller.close_metadata,
+                start_lane_budget=start_lane_budget,
+                close_lane=close_lane,
+                lane_remaining=self._lane_remaining,
+                close_annotation=self._close_annotation,
+                close_tooltip_raster=self.tooltip_controller.close_render_ahead,
+                close_tooltip_engaged=self.tooltip_controller.close_engaged,
+                tooltip_preparation=tooltip_preparation,
+                close_analysis=lambda: self.analysis_controller.close_lane(self._lane_remaining()),
+                close_render_pool=_close_render_pool,
             )
         )
 

@@ -86,3 +86,20 @@ def test_prewarm_cannot_reconstruct_a_session_through_a_module_alias():
     )
 
     assert "full-session-prewarm" in rules
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "self.tooltip_preparation.close_prefetch",
+        "self.tooltip_preparation.close_mask_activation",
+        "self.tooltip_preparation.cache.uninstall_mask_atlas",
+    ],
+)
+def test_preparation_close_detail_cannot_return_to_the_session_shell(expression: str):
+    rules = _rules(
+        f"def drift(self):\n    return {expression}\n",
+        "session/controller.py",
+    )
+
+    assert "preparation-close-detail" in rules

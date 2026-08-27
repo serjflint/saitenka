@@ -63,6 +63,9 @@ from saitenka.app.feature_bindings import (
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.profiles import profile_intents
 from saitenka.app.features.tooltip import hover_intents
+from saitenka.app.features.tooltip.preparation import (
+    TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
+)
 from saitenka.app.session import interaction_intents, panel_intents
 from saitenka.app.session.stateless import StatelessCommandRegistration, bind_stateless
 from saitenka.runtime.connection import ConnectionState, reduce_connection
@@ -259,11 +262,7 @@ WORKER_LANE_PARTICIPANTS = (
     "lanes:tooltip-render-ahead",
     "lanes:tooltip-engaged-worker",
     "lanes:tooltip-engaged",
-    "lanes:prefetch",
-    "lanes:speculative-prefetch",
-    "lanes:mask-atlas-startup-worker",
-    "lanes:mask-atlas-startup",
-    "lanes:mask-atlas-uninstall",
+    *TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
     "lanes:capabilities",
     "lanes:interaction-metadata",
     "lanes:mined-seed",

@@ -68,6 +68,11 @@ _RETIRED_PREPARATION_ATTRIBUTES = {
     "prefetch_workers",
     "render_cache",
 }
+_RETIRED_PREPARATION_CLOSE_ACCESS = {
+    "close_mask_activation",
+    "close_prefetch",
+    "uninstall_mask_atlas",
+}
 _PREPARATION_CONSTRUCTORS = {
     "PersistentHeadCache": {_PREPARATION_OWNER, _PREWARM},
     "PrefetchState": {_PREPARATION_OWNER},
@@ -250,6 +255,14 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
             and node.attr in (_LEGACY_SESSION_ATTRIBUTES | _RETIRED_PREPARATION_ATTRIBUTES)
         ):
             findings.append(Finding(path, node.lineno, "legacy-session-field", node.attr))
+
+        if (
+            site == _COMPOSITION
+            and isinstance(node, ast.Attribute)
+            and node.attr in _RETIRED_PREPARATION_CLOSE_ACCESS
+            and _contains_attribute(node, "tooltip_preparation")
+        ):
+            findings.append(Finding(path, node.lineno, "preparation-close-detail", node.attr))
 
         if isinstance(node, ast.ClassDef) and site == _PREWARM and node.name == "_PrewarmIPC":
             findings.append(Finding(path, node.lineno, "full-session-prewarm", node.name))

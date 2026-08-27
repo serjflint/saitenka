@@ -29,6 +29,14 @@ log = logging.getLogger(__name__)
 
 _MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
 
+TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS = (
+    "lanes:prefetch",
+    "lanes:speculative-prefetch",
+    "lanes:mask-atlas-startup-worker",
+    "lanes:mask-atlas-startup",
+    "lanes:mask-atlas-uninstall",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class TooltipPreparationConfig:
@@ -367,6 +375,20 @@ class TooltipPreparationController:
 
     def close_mask_activation(self) -> None:
         mask_atlas_startup.close(self._mask_activation)
+
+    def close_participants(
+        self,
+        close_lane: Callable[[str, float], object],
+        remaining: Callable[[], float],
+    ) -> dict[str, Callable[[], object]]:
+        """Contribute local retirement acts; the session lifecycle retains their global order."""
+        return {
+            "lanes:prefetch": self.close_prefetch,
+            "lanes:speculative-prefetch": lambda: close_lane("speculative-prefetch", remaining()),
+            "lanes:mask-atlas-startup-worker": self.close_mask_activation,
+            "lanes:mask-atlas-startup": lambda: close_lane("mask-atlas-startup", remaining()),
+            "lanes:mask-atlas-uninstall": self.cache.uninstall_mask_atlas,
+        }
 
     def prepare_hover(
         self,
