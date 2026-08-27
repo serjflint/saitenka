@@ -1469,6 +1469,7 @@ class SessionController:
             self.draw_subtitle()
 
     def _dependencies_changed(self) -> None:
+        self._invalidate_tooltip_dependencies()
         transition = self.annotation_controller.dependencies_changed(
             self.sub_text,
             self._annotation_inputs(),
@@ -1501,6 +1502,12 @@ class SessionController:
         self.annotation_controller.invalidate_tokenizer()
 
     def _invalidate_profile_dictionary(self) -> None:
+        self._invalidate_tooltip_dependencies()
+
+    def _invalidate_tooltip_dependencies(self) -> None:
+        """Retire work and caches derived from a replaced dictionary or scorer."""
+        self.tooltip_controller.invalidate_dependencies()
+        self.tooltip_preparation.cancel()
         self.tooltip_preparation.cache.invalidate_signature()
 
     def _reset_profile_episode_warm(self) -> None:

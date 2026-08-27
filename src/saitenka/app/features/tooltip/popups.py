@@ -462,6 +462,7 @@ class PanelCache:
         self._entries: OrderedDict = OrderedDict()
         self._limit = limit
         self._lock = lock
+        self._generation = 0
 
     def __contains__(self, key) -> bool:
         return key in self._entries
@@ -487,6 +488,7 @@ class PanelCache:
         """Drop everything. A cold restart of the cache, not an eviction — no metric fires."""
         with self._lock:
             self._entries.clear()
+            self._generation += 1
 
     def values(self):
         return self._entries.values()
@@ -499,14 +501,19 @@ class PanelCache:
         """
         from saitenka import otel_metrics
 
-        cached = self._entries.get(key)
+        with self._lock:
+            cached = self._entries.get(key)
+            generation = self._generation
+            if cached is not None:
+                self._entries.move_to_end(key)
         if cached is not None:
             if otel_metrics.panel_cache_hits is not None:
                 otel_metrics.panel_cache_hits.add(1)
-            self.touch(key)
             return cached
         built = build()
         with self._lock:
+            if generation != self._generation:
+                return built
             return self._setdefault(key, built)
 
     def touch(self, key) -> None:

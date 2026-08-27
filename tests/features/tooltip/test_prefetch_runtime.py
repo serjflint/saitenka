@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 from saitenka.app.features.tooltip import prefetch
+from saitenka.app.features.tooltip.preparation import (
+    PersistentHeadCache,
+    TooltipPreparationConfig,
+    TooltipPreparationInputs,
+)
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
@@ -124,3 +130,37 @@ def test_superseded_work_never_enters_the_backend() -> None:
 
     assert prefetch.run_prefetch(work, threading.Event(), _Backend()) is False
     assert called is False
+
+
+def test_persistent_signature_tracks_the_captured_dictionary_identity() -> None:
+    config = TooltipPreparationConfig(
+        enabled=False,
+        workers=0,
+        cue_lookahead=0,
+        head_lookahead=0,
+        head_queue_max=1,
+        cache_enabled=False,
+        cache_max_bytes=0,
+        cache_min_height=0,
+        mask_atlas_enabled=False,
+    )
+    cache = PersistentHeadCache(config)
+    panels = SimpleNamespace(style=SimpleNamespace(width=384), cap=260)
+
+    def inputs(label: str) -> TooltipPreparationInputs:
+        dictionary = SimpleNamespace(
+            dicts=(),
+            freqs=(SimpleNamespace(title=label),),
+            pitches=(),
+        )
+        return TooltipPreparationInputs(panels, dictionary)  # type: ignore[arg-type]
+
+    old, new = inputs("old-profile"), inputs("new-profile")
+
+    old_signature = cache.signature(old)
+    cache.invalidate_signature()
+    new_signature = cache.signature(new)
+    cache.signature(old)  # an old worker finishes after the replacement
+
+    assert old_signature != new_signature
+    assert cache.signature(new) == new_signature

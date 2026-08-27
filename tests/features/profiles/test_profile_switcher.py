@@ -199,6 +199,20 @@ def test_cycle_clears_the_token_cache_so_stale_segmentation_cannot_leak(request)
     assert reader.tokens[0].lemma == "new"
 
 
+def test_dictionary_replacement_retires_tooltip_work_and_cached_panels(request):
+    reader = _headless(request)
+    reader.profile_controller.replace_dictionary_set(_ExistsDS())
+    reader._dependencies_changed()
+    reader.tooltip_controller.cache_setdefault(("same-token",), object())  # type: ignore[arg-type]
+    generation = reader.tooltip_preparation.generation
+
+    reader.profile_controller.replace_dictionary_set(_ExistsDS())
+    reader._dependencies_changed()
+
+    assert reader.tooltip_preparation.generation > generation
+    assert reader.tooltip_controller.cache_totals() == (0, 0)
+
+
 # --- the track re-selection that makes the cycle a FULL switch (the reported gap) ------------------
 
 

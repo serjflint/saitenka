@@ -2,6 +2,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 _CHECK = Path(__file__).resolve().parent.parent / "tools" / "tooltip_ownership_check.py"
 
 
@@ -26,9 +28,20 @@ def test_current_tooltip_ownership_tree_is_clean():
     assert ownership.inspect_tree() == []
 
 
-def test_preparation_state_cannot_return_to_the_session_shell():
+@pytest.mark.parametrize(
+    "attribute",
+    [
+        "prefetch",
+        "prefetch_workers",
+        "prefetch_lookahead",
+        "head_prefetch_lookahead",
+        "_mask_atlas_startup",
+        "render_cache",
+    ],
+)
+def test_preparation_state_cannot_return_to_the_session_shell(attribute: str):
     rules = _rules(
-        "def drift(self):\n    self.prefetch_state = object()\n",
+        f"def drift(self):\n    self.{attribute} = object()\n",
         "session/controller.py",
     )
 

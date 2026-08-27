@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -66,7 +67,9 @@ class PersistentHeadCache:
         self._opened = False
         self._signature: str | None = None
         self._signature_key: tuple[int, int] | None = None
+        self._signature_dictionary: object | None = None
         self._mask_atlas: MaskAtlas | None = None
+        self._state_lock = threading.Lock()
 
     @property
     def mask_atlas(self) -> MaskAtlas | None:
@@ -78,44 +81,55 @@ class PersistentHeadCache:
 
     def install_build_cache(self, cache: RenderCache | None) -> None:
         """Install the cache explicitly built by the headless prewarm path."""
-        self._cache = cache
-        self._opened = True
+        with self._state_lock:
+            self._cache = cache
+            self._opened = True
 
     def set_min_height(self, value: int) -> None:
         """Configure an isolated preparation run without mutating session state."""
         self.min_height = value
 
     def invalidate_signature(self) -> None:
-        self._signature = None
-        self._signature_key = None
+        with self._state_lock:
+            self._signature = None
+            self._signature_key = None
+            self._signature_dictionary = None
 
     def _open(self, inputs: TooltipPreparationInputs) -> RenderCache | None:
         if not self.enabled or inputs.dictionary is None:
             return None
-        if not self._opened:
-            self._opened = True
-            from saitenka.app.render_cache import RenderCache
+        with self._state_lock:
+            if not self._opened:
+                self._opened = True
+                from saitenka.app.render_cache import RenderCache
 
-            path = cache_dir() / "render-cache.sqlite"
-            if path.exists():
-                self._cache = RenderCache.open(path, max_bytes=self.max_bytes)
-        return self._cache
+                path = cache_dir() / "render-cache.sqlite"
+                if path.exists():
+                    self._cache = RenderCache.open(path, max_bytes=self.max_bytes)
+            return self._cache
 
     def signature(self, inputs: TooltipPreparationInputs) -> str:
         panels = inputs.panels
+        dictionary = inputs.dictionary
+        if dictionary is None:
+            raise ValueError("a dictionary is required for a render-cache signature")
         key = (panels.style.width, panels.cap)
-        if self._signature is None or self._signature_key != key:
-            from saitenka.app.render_cache import config_signature, dict_set_signature
+        with self._state_lock:
+            if (
+                self._signature is None
+                or self._signature_dictionary is not dictionary
+                or self._signature_key != key
+            ):
+                from saitenka.app.render_cache import config_signature, dict_set_signature
 
-            if inputs.dictionary is None:
-                raise ValueError("a dictionary is required for a render-cache signature")
-            self._signature = config_signature(
-                width=panels.style.width,
-                cap=panels.cap,
-                dict_sig=dict_set_signature(inputs.dictionary),
-            )
-            self._signature_key = key
-        return self._signature
+                self._signature = config_signature(
+                    width=panels.style.width,
+                    cap=panels.cap,
+                    dict_sig=dict_set_signature(dictionary),
+                )
+                self._signature_key = key
+                self._signature_dictionary = dictionary
+            return self._signature
 
     def peek(self, inputs: TooltipPreparationInputs, key: object) -> LoadedView | None:
         memory = self._memory
@@ -375,6 +389,8 @@ class TooltipPreparationController:
             panels,
             cast("DictionarySet | None", panels.style.dict_set),
         )
+        if should_cancel():
+            return
         panel = tooltip_panel.panel_for(
             panels,
             request.token,
@@ -408,6 +424,8 @@ class _PreparationBackend:
     ) -> bool:
         if not isinstance(context, TooltipPreparationInputs):
             raise TypeError("invalid tooltip-preparation inputs")
+        if should_cancel():
+            return False
         if isinstance(item, prefetch.HeadPrefetchItem) or item.full:
             panel = tooltip_panel.panel_for(
                 context.panels,

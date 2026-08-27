@@ -1240,3 +1240,33 @@ def test_a_second_writer_for_the_same_key_loses_to_the_first():
 
     assert first == second == "winner"
     assert cache.get("k") == "winner"
+
+
+def test_clear_refuses_a_panel_whose_build_started_in_the_previous_generation():
+    """A dependency swap can clear while an old-profile panel is still being built."""
+    from saitenka.app.features.tooltip.popups import PanelCache
+
+    cache = PanelCache(8, threading.Lock())
+    started = threading.Event()
+    release = threading.Event()
+    returned: list[str] = []
+
+    def build_old() -> str:
+        started.set()
+        assert release.wait(1)
+        return "old-profile"
+
+    worker = threading.Thread(
+        target=lambda: returned.append(cache.get_or_build("same-token", build_old))
+    )
+    worker.start()
+    assert started.wait(1)
+
+    cache.clear()
+    release.set()
+    worker.join(1)
+
+    assert not worker.is_alive()
+    assert returned == ["old-profile"]
+    assert cache.get("same-token") is None
+    assert cache.get_or_build("same-token", lambda: "new-profile") == "new-profile"

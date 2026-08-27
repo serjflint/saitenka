@@ -49,6 +49,7 @@ _LEGACY_SESSION_ATTRIBUTES = {
 }
 _RETIRED_TOOLTIP_STATE = {"key", "rect", "state", "tip_inflected", "tip_tok"}
 _RETIRED_PREPARATION_ATTRIBUTES = {
+    "_mask_atlas_startup",
     "_head_prefetch_lookahead",
     "_head_prefetch_queue_max",
     "_mask_atlas_startup_state",
@@ -60,7 +61,12 @@ _RETIRED_PREPARATION_ATTRIBUTES = {
     "_render_cache",
     "_render_cache_min_height",
     "_render_cache_sig",
+    "head_prefetch_lookahead",
+    "prefetch",
+    "prefetch_lookahead",
     "prefetch_state",
+    "prefetch_workers",
+    "render_cache",
 }
 _PREPARATION_CONSTRUCTORS = {
     "PersistentHeadCache": {_PREPARATION_OWNER, _PREWARM},
