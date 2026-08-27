@@ -77,10 +77,7 @@ def test_metadata_worker_resolves_off_the_event_thread():
     assert reader._request_interaction_metadata(_request(0, Dictionary()))
     try:
         deadline = time.monotonic() + 1
-        while (
-            reader.tooltip_controller.work_view().metadata_inflight is not None
-            and time.monotonic() < deadline
-        ):
+        while resolved_thread is None and time.monotonic() < deadline:
             reader._drain_events()
             time.sleep(0.001)
         assert resolved_thread is not None and resolved_thread != event_thread

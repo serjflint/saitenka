@@ -88,14 +88,14 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
 
     # A click must NEVER spawn a nested popup (hover-governed → self-dismisses unless the cursor chases
     # it); a headword kanji navigates the base tooltip IN PLACE, Yomitan-style.
-    assert r.tooltip_controller.hover_view().nested.state is None
+    assert not r.tooltip_controller.hover_view().nested.shown
     # Content swapped to 読's kanji entry, previous view pushed for back. len==1 is only reached when
     # kanji_for('読') resolved and installed — a dead/missing kanji would leave the stack empty.
     assert (
         r.tooltip_controller.surface_state().view.state is not None
         and r.tooltip_controller.surface_state().view.state is not base
     )
-    assert len(r.tooltip_controller.observation().navigation.back) == 1
+    assert r.tooltip_controller.observation().navigation_depth == 1
     # A navigated view is keyless — not a subtitle token, so scroll won't rebuild it from a token.
     assert (
         r.tooltip_controller.surface_state().view.key is None

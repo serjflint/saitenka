@@ -79,9 +79,8 @@ def test_scroll_keeps_one_newest_pending_request():
     r.tooltip_controller.surface_state().view.scroll = 999
     r.tooltip_controller.surface_state().view.desired_scroll = 999
     r._request_render_ahead(r.tooltip_controller.surface_state().view, -1)
-    pending = r.tooltip_controller.work_view().render_pending
-    assert pending is not None
-    req = pending[1]
+    _submitter(r).finish()
+    req = _submitter(r).calls[0]["request"]
     assert (req.scroll, req.view_h, req.direction) == (999, 300, -1)  # newest scroll won
 
 

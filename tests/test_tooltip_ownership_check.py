@@ -44,6 +44,7 @@ def test_session_cannot_reintroduce_tooltip_state_projections(attribute: str):
         "state",
         "hover_store",
         "word_store",
+        "work_view",
         "metadata",
         "metadata_submitter",
         "engaged",
@@ -61,6 +62,33 @@ def test_tooltip_owner_cannot_republish_mutable_state(name: str):
     )
 
     assert "owner-projection" in rules
+
+
+def test_tooltip_owner_cannot_republish_state_under_a_new_name():
+    rules = _rules(
+        "class TooltipController:\n    def raw_state(self):\n        return self._state\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-state-projection" in rules
+
+
+def test_tooltip_owner_cannot_republish_a_nested_state_member():
+    rules = _rules(
+        "class TooltipController:\n    def raw_view(self):\n        return self._state.view\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-state-projection" in rules
+
+
+def test_feature_cannot_take_the_mutable_surface_state():
+    rules = _rules(
+        "def drift(owner):\n    return owner.surface_state()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "surface-state-outside-physical-boundary" in rules
 
 
 @pytest.mark.parametrize(

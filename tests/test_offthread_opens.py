@@ -115,7 +115,7 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
         r.tooltip_controller.surface_state().nest.state is not None
         and r.tooltip_controller.surface_state().nest.word == "読"
     )
-    assert r.tooltip_controller.work_view().engaged_inflight is None  # nothing deferred
+    assert _submitter(r).calls == []  # nothing deferred
 
 
 def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path):
@@ -194,10 +194,7 @@ def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
         r.tip_ports, r.panel_ports, "犬", 100.0, 300.0, 40.0
     )  # 犬 isn't in the kanji bank
     assert toasts and "犬" in toasts[0]  # the no-entry toast fired on the tick…
-    assert (
-        r.tooltip_controller.work_view().engaged_inflight is None
-        and r.tooltip_controller.surface_state().nest.state is None
-    )
+    assert _submitter(r).calls == [] and r.tooltip_controller.surface_state().nest.state is None
 
 
 def test_cross_reference_link_open_defers(tmp_path):

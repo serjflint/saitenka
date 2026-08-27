@@ -92,8 +92,8 @@ def test_sustained_churn_evicts_and_stays_clean():
         f"panel cache overflowed its LRU cap: {len(r.tooltip_controller.surface_state().panel_cache)}"
     )
     # after the final retire_hover() the whole hover stack must be torn down
-    assert r.tooltip_controller.hover_view().tip.state is None
-    assert r.tooltip_controller.hover_view().nested.state is None  # nested popup cleared
+    assert not r.tooltip_controller.hover_view().tip.shown
+    assert not r.tooltip_controller.hover_view().nested.shown  # nested popup cleared
     assert r.tooltip_controller.observation().selected == -1
 
 

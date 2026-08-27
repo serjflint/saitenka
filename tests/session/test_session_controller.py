@@ -1206,7 +1206,7 @@ def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
 
     due(EffectFinished(EffectId(0), Owner.INTERACTION, identity, EffectOutcome.SUCCEEDED))
 
-    assert r.tooltip_controller.hover_view().nested.state is None  # the revision fence rejected it
+    assert not r.tooltip_controller.hover_view().nested.shown  # the revision fence rejected it
     assert r.tooltip_controller.hover_view().scan_target is None
 
 
@@ -1572,7 +1572,7 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
         r.tooltip_controller.surface_state().view.view_h >= r.tip_scale.cap - 1
     )  # …but the viewport is fully covered
     assert (
-        r.tooltip_controller.hover_view().tip.state.full_height
+        r.tooltip_controller.hover_view().tip.full_height
         >= r.tooltip_controller.surface_state().view.view_h
     )  # estimate at least fills the viewport
     before = wp.measured
@@ -1868,7 +1868,7 @@ def test_hover_inner_word_opens_nested_popup(monkeypatch):
     _hover_base_word(r)  # base tooltip on the subtitle word
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.state is not None  # a nested popup opened…
+    assert r.tooltip_controller.hover_view().nested.shown  # a nested popup opened…
     assert r.tooltip_controller.hover_view().nested.rect is not None
     assert r.tooltip_controller.hover_view().nested.word.startswith(
         "追"
@@ -1884,15 +1884,13 @@ def test_nested_scan_waits_for_dwell(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
-    assert (
-        r.tooltip_controller.hover_view().nested.state is None
-    )  # just arrived — nothing opens yet
+    assert not r.tooltip_controller.hover_view().nested.shown  # just arrived — nothing opens yet
     _hover_first_scan_cell(r)  # re-arriving on the same cell must not re-arm
-    assert r.tooltip_controller.hover_view().nested.state is None  # still settling on the same cell
+    assert not r.tooltip_controller.hover_view().nested.shown  # still settling on the same cell
 
     assert _fire_dwell(ipc, "scan-open")  # the cursor rested it out
 
-    assert r.tooltip_controller.hover_view().nested.state is not None
+    assert r.tooltip_controller.hover_view().nested.shown
 
 
 def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
@@ -1916,9 +1914,9 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     assert (
         r.tooltip_controller.hover_view().scan_target == boxes[1].text
     )  # the dwell restarted on the new cell
-    assert r.tooltip_controller.hover_view().nested.state is None  # no popup fired mid-drift
+    assert not r.tooltip_controller.hover_view().nested.shown  # no popup fired mid-drift
     assert _fire_dwell(ipc, "scan-open")  # and when it does elapse, it opens the NEW cell
-    assert r.tooltip_controller.hover_view().nested.state is not None
+    assert r.tooltip_controller.hover_view().nested.shown
 
 
 def test_switch_base_word_drops_nested(monkeypatch):
@@ -1936,10 +1934,10 @@ def test_switch_base_word_drops_nested(monkeypatch):
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.state is not None
+    assert r.tooltip_controller.hover_view().nested.shown
     # a real switch: the cursor moves to the other word and its switch dwell comes due
     Driver(r).move_to_word(1)
-    assert r.tooltip_controller.hover_view().nested.state is None  # the stale scan popup is dropped
+    assert not r.tooltip_controller.hover_view().nested.shown  # the stale scan popup is dropped
 
 
 def test_nested_lingers_then_dismisses(monkeypatch):
@@ -1951,7 +1949,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.state is not None
+    assert r.tooltip_controller.hover_view().nested.shown
     Driver(r, instant=False).move(5, 5)  # leave the whole stack
     assert (
         r.tooltip_controller.observation().hover.hysteresis.nest_hide_pending
@@ -1959,7 +1957,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
 
     assert _fire_dwell(ipc, "nested-hide")
 
-    assert r.tooltip_controller.hover_view().nested.state is None  # dismissed after the linger
+    assert not r.tooltip_controller.hover_view().nested.shown  # dismissed after the linger
 
 
 @pytest.mark.usefixtures("anki_up")  # the ⊕ button only draws when AnkiConnect is reachable
@@ -1974,7 +1972,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.token is not None
+    assert r.tooltip_controller.hover_view().nested.has_token
     mined = []
     monkeypatch.setattr(r.mining_controller, "mine_token", lambda tok: mined.append(tok.surface))
     px, py, pw, ph = header_add_rect(r.tip_scale.width)
@@ -2018,12 +2016,9 @@ def _point_at_link(r) -> Driver:
 
     The header's per-kanji `kanji:` links sit first and are skipped — this is the body link.
     """
-    lb = next(
-        b
-        for b in r.tooltip_controller.surface_state().view.state.windowed.link_boxes()
-        if not b.query.startswith("kanji:")
-    )
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    tip = r.tooltip_controller.hover_view().tip
+    lb = next(b for b in tip.links if not b.query.startswith("kanji:"))
+    sx, sy = tip.xy
     return Driver(r, instant=False).move(
         sx + lb.x + lb.w / 2,
         sy + (lb.y - r.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
@@ -2039,20 +2034,17 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
     r = _link_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
-    assert (
-        r.tooltip_controller.hover_view().tip.state.windowed.link_boxes()
-    )  # the def body exposed a clickable link
+    assert r.tooltip_controller.hover_view().tip.links  # the def body exposed a clickable link
     base = r.tooltip_controller.surface_state().view.state
     _point_at_link(r).click()
-    assert r.tooltip_controller.hover_view().nested.state is None  # NOT a nested popup
+    assert not r.tooltip_controller.hover_view().nested.shown  # NOT a nested popup
     assert (
-        r.tooltip_controller.hover_view().tip.state is not None
-        and r.tooltip_controller.hover_view().tip.state is not base
+        r.tooltip_controller.hover_view().tip.shown
+        and r.tooltip_controller.hover_view().tip.panel_id != id(base)
     )
-    assert (
-        tooltip.tip_back(r.tip_ports) is True
-        and r.tooltip_controller.hover_view().tip.state is base
-    )
+    assert tooltip.tip_back(
+        r.tip_ports
+    ) is True and r.tooltip_controller.hover_view().tip.panel_id == id(base)
     assert tooltip.tip_back(r.tip_ports) is False
 
 
@@ -2101,8 +2093,8 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
         sy + (lb.y - r.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
     ).click()
     # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
-    assert r.tooltip_controller.hover_view().nested.state is None
-    assert len(r.tooltip_controller.observation().navigation.back) == 1
+    assert not r.tooltip_controller.hover_view().nested.shown
+    assert r.tooltip_controller.observation().navigation_depth == 1
     results = [
         b
         for b in r.tooltip_controller.surface_state().view.state.windowed.link_boxes()
@@ -2138,9 +2130,7 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     _hover_base_word(r)
     body_links = [
-        b
-        for b in r.tooltip_controller.hover_view().tip.state.windowed.link_boxes()
-        if not b.query.startswith("kanji:")
+        b for b in r.tooltip_controller.hover_view().tip.links if not b.query.startswith("kanji:")
     ]
     assert body_links == []  # external link → no clickable body region (header kanji links aside)
 
@@ -2222,12 +2212,12 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     _hover_base_word(r)
     ui = _point_at_link(r)  # cursor on the link cell
     assert (
-        r.tooltip_controller.hover_view().nested.state is None
+        not r.tooltip_controller.hover_view().nested.shown
     )  # hover did NOT open a scan popup over the link
     ui.click()  # …a click navigates the base in place (no floating popup)
     assert (
-        r.tooltip_controller.hover_view().nested.state is None
-        and len(r.tooltip_controller.observation().navigation.back) == 1
+        not r.tooltip_controller.hover_view().nested.shown
+        and r.tooltip_controller.observation().navigation_depth == 1
     )
 
 
@@ -2261,7 +2251,7 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
     _point_at_link(r).click()
     assert (
-        events == [] and len(r.tooltip_controller.observation().navigation.back) == 1
+        events == [] and r.tooltip_controller.observation().navigation_depth == 1
     )  # navigated the base, no mine/speak fallthrough
 
 
@@ -2860,7 +2850,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
 
     assert C.TIP_ID in hidden  # tooltip was hidden
     assert r.tooltip_controller.hover_view().tip.rect is None  # _tip_rect reset
-    assert r.tooltip_controller.hover_view().tip.state is None  # _tip_state reset
+    assert not r.tooltip_controller.hover_view().tip.shown  # _tip_state reset
     assert r.tooltip_controller.hover_view().tip.key is None  # _tip_key reset
     assert r.tooltip_controller.observation().selected == -1  # hover index reset
 
@@ -2950,7 +2940,7 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")  # open the nested popup
-    assert r.tooltip_controller.hover_view().nested.state is not None
+    assert r.tooltip_controller.hover_view().nested.shown
 
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1])
@@ -2958,7 +2948,7 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     r.set_subtitle("別の字幕")
 
     assert (
-        C.NESTED_ID in hidden or r.tooltip_controller.hover_view().nested.state is None
+        C.NESTED_ID in hidden or not r.tooltip_controller.hover_view().nested.shown
     )  # nested cleared
 
 

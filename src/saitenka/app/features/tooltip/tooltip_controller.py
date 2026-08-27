@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -40,7 +39,7 @@ from saitenka.app.interaction.surfaces import (
 from saitenka.runtime import events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterator
+    from collections.abc import Callable, Collection
 
     from saitenka.app.features.help.help_controller import TooltipKeyContext
     from saitenka.app.features.tooltip.popups import (
@@ -62,7 +61,6 @@ if TYPE_CHECKING:
     from saitenka.runtime.interaction_slice import HoverFeature
     from saitenka.runtime.jobs import JobSubmitter
     from saitenka.runtime.pulse import PulseState, Repaint
-    from saitenka.runtime.tipnav import TipNavState
 
 log = logging.getLogger(__name__)
 
@@ -86,23 +84,12 @@ class TooltipObservation:
     selected: int
     pause_enabled: bool
     hover: HoverFeature
-    navigation: TipNavState
+    navigation_depth: int
+    can_go_back: bool
     pulse: PulseState
     pause: PauseClaim
     word: HoveredWord
     metadata: HoverMetadataView
-
-
-@dataclass(frozen=True, slots=True)
-class TooltipWorkView:
-    """Read-only volatile-work snapshot for diagnostics and boundary tests."""
-
-    metadata_inflight: object | None
-    metadata_pending: object | None
-    engaged_inflight: object | None
-    engaged_pending: object | None
-    render_inflight: object | None
-    render_pending: object | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +173,8 @@ class TooltipController:
             selected=self._selected,
             pause_enabled=self._pause_enabled,
             hover=self._hover_store.current,
-            navigation=self._nav_store.current,
+            navigation_depth=len(self._nav_store.current.back),
+            can_go_back=self._nav_store.current.can_go_back,
             pulse=self._pulse_store.current,
             pause=self._pause_store.current,
             word=word,
@@ -198,25 +186,10 @@ class TooltipController:
         hysteresis = self._hover_store.current.hysteresis
         return hover_snapshot.snapshot(
             self._state.nest,
-            hover_snapshot.TipView(
-                state=self._state.view.state,
-                key=self._state.view.key,
-                rect=self._state.view.rect,
-                hide_pending=hysteresis.tip_hide_pending,
-            ),
+            self._state.view,
             paused=self._pause_store.current.held,
             scan_target=hysteresis.scan_target,
-        )
-
-    def work_view(self) -> TooltipWorkView:
-        """Capture job identities without exposing mutable lane state."""
-        return TooltipWorkView(
-            metadata_inflight=self._metadata.inflight,
-            metadata_pending=self._metadata.pending,
-            engaged_inflight=self._engaged.inflight,
-            engaged_pending=self._engaged.pending,
-            render_inflight=self._raster.inflight,
-            render_pending=self._raster.pending,
+            hide_pending=hysteresis.tip_hide_pending,
         )
 
     @staticmethod
@@ -362,18 +335,6 @@ class TooltipController:
     @property
     def metadata_deferred(self) -> bool:
         return self._metadata_submitter is not None
-
-    @contextmanager
-    def blocking(self) -> Iterator[None]:
-        """Run deterministic tooltip preparation without metadata/build deferral."""
-        metadata, engaged = self._metadata_submitter, self._engaged_submitter
-        self._metadata_submitter = None
-        self._engaged_submitter = None
-        try:
-            yield
-        finally:
-            self._metadata_submitter = metadata
-            self._engaged_submitter = engaged
 
     def request_metadata(
         self,

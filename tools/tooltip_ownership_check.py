@@ -64,6 +64,23 @@ _RETIRED_OWNER_PROJECTIONS = {
     "selected",
     "state",
     "word_store",
+    "work_view",
+}
+_OWNER_STATE_ATTRIBUTES = {
+    "_engaged",
+    "_hover_store",
+    "_metadata",
+    "_nav_store",
+    "_pause_store",
+    "_pulse_store",
+    "_raster",
+    "_state",
+    "_word_store",
+}
+_OWNER_MUTABLE_CHAINS = {(attribute,) for attribute in _OWNER_STATE_ATTRIBUTES} | {
+    ("_state", "nest"),
+    ("_state", "panel_cache"),
+    ("_state", "view"),
 }
 _RETIRED_TOOLTIP_STATE = {"key", "rect", "state", "tip_inflected", "tip_tok"}
 _RETIRED_PREPARATION_ATTRIBUTES = {
@@ -148,6 +165,16 @@ def _session_constructor_call(
 
 def _is_self_attribute(attribute: ast.Attribute) -> bool:
     return isinstance(attribute.value, ast.Name) and attribute.value.id == "self"
+
+
+def _self_attribute_chain(node: ast.AST) -> tuple[str, ...] | None:
+    attributes: list[str] = []
+    while isinstance(node, ast.Attribute):
+        attributes.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name) or node.id != "self":
+        return None
+    return tuple(reversed(attributes))
 
 
 def _contains_attribute(node: ast.AST, name: str) -> bool:
@@ -332,6 +359,28 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
             and node.name in _RETIRED_OWNER_PROJECTIONS
         ):
             findings.append(Finding(path, node.lineno, "owner-projection", node.name))
+        if (
+            site == _OWNER
+            and isinstance(node, ast.FunctionDef)
+            and node.name != "surface_state"
+            and any(
+                isinstance(child, ast.Return)
+                and child.value is not None
+                and (chain := _self_attribute_chain(child.value)) is not None
+                and chain in _OWNER_MUTABLE_CHAINS
+                for child in ast.walk(node)
+            )
+        ):
+            findings.append(Finding(path, node.lineno, "owner-state-projection", node.name))
+        if (
+            site not in {_OWNER, _COMPOSITION}
+            and isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "surface_state"
+        ):
+            findings.append(
+                Finding(path, node.lineno, "surface-state-outside-physical-boundary", site)
+            )
         if isinstance(node, ast.Attribute) and (
             site == _COMPOSITION
             and _is_self_attribute(node)

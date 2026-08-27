@@ -157,10 +157,10 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule()
     def navigate(self) -> None:
-        before = len(self.r.tooltip_controller.observation().navigation.back)
+        before = self.r.tooltip_controller.observation().navigation_depth
         tooltip.navigate_tip(self.r.tip_ports, self.r.panel_ports, _NAV_QUERY)
         assert (
-            len(self.r.tooltip_controller.observation().navigation.back) == before + 1
+            self.r.tooltip_controller.observation().navigation_depth == before + 1
         )  # the wildcard target always resolves
         assert (
             self.r.tooltip_controller.surface_state().view.key is None
@@ -206,7 +206,7 @@ class TooltipSession(RuleBasedStateMachine):
     @invariant()
     def model_matches_impl(self) -> None:
         assert (self.r.tooltip_controller.surface_state().view.state is not None) == self.shown
-        assert len(self.r.tooltip_controller.observation().navigation.back) == self.nav_depth
+        assert self.r.tooltip_controller.observation().navigation_depth == self.nav_depth
         assert (
             self.r.tooltip_controller.surface_state().nest.state is not None
         ) == self.nested_open

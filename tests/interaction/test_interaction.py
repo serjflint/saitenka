@@ -11,7 +11,7 @@ from dataclasses import replace
 
 import pytest
 from driver import Driver
-from util import FakeIPC
+from util import FakeIPC, ManualRenderAheadSubmitter
 
 from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import TIP_CLOSE_MSG
@@ -360,19 +360,19 @@ def test_wheel_scrolls_the_tooltip():
 def test_scroll_warms_native_bands_ahead_at_hidpi():
     # One-panel: a scroll must warm the NEXT native bands off the main thread (render-ahead), so continued
     # scrolling composites crisp without a synchronous raster (the old bug: only the first band was crisp).
-    submitted = []
-    r = _reader(render_ahead_submitter=lambda **kwargs: submitted.append(kwargs) or True)
+    submitter = ManualRenderAheadSubmitter()
+    r = _reader(render_ahead_submitter=submitter)
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
     ui = Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
     assert (
         r.tooltip_controller.surface_state().view.state.full_height
         > r.tooltip_controller.surface_state().view.view_h
     )  # scrollable
+    while submitter.calls:
+        submitter.finish()
     ui.wheel(1)
     assert r.tooltip_controller.surface_state().view.scroll > 0  # scrolled
-    pending = r.tooltip_controller.work_view().render_pending
-    assert pending is not None
-    req = pending[1]
+    req = submitter.calls[-1]["request"]
     assert (
         req is not None
         and req.scroll == r.tooltip_controller.surface_state().view.scroll
@@ -401,7 +401,7 @@ def test_golden_base_and_nested_render():
     r = _reader()
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert r.tooltip_controller.hover_view().tip.state is not None
+    assert r.tooltip_controller.hover_view().tip.shown
     assert_golden(
         _full_panel_image(r.tooltip_controller.surface_state().view.state),
         "interaction_base_tooltip.png",
@@ -409,7 +409,7 @@ def test_golden_base_and_nested_render():
     )
 
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
-    assert r.tooltip_controller.hover_view().nested.state is not None
+    assert r.tooltip_controller.hover_view().nested.shown
     assert_golden(
         _full_panel_image(r.tooltip_controller.surface_state().nest.state),
         "interaction_nested_popup.png",
@@ -433,7 +433,7 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
         r.tooltip_controller.surface_state().view.state is not None
         and r.tooltip_controller.surface_state().view.state is not base
     )
-    assert len(r.tooltip_controller.observation().navigation.back) == 1, (
+    assert r.tooltip_controller.observation().navigation_depth == 1, (
         "the previous view is pushed for back"
     )
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
@@ -441,7 +441,7 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     assert tooltip.tip_back(r.tip_ports) is True
     assert (
         r.tooltip_controller.surface_state().view.state is base
-        and r.tooltip_controller.observation().navigation.back == ()
+        and r.tooltip_controller.observation().navigation_depth == 0
     )
     assert tooltip.tip_back(r.tip_ports) is False, "no history left → caller falls through to close"
 
@@ -454,11 +454,11 @@ def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
     i = _content_word(r)
     ui.move_to_word(i)
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
-    assert r.tooltip_controller.observation().navigation.back
+    assert r.tooltip_controller.observation().can_go_back
 
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
     ui.move_to_word(j)  # a newly hovered word abandons the link-navigation
-    assert r.tooltip_controller.observation().navigation.back == ()
+    assert r.tooltip_controller.observation().navigation_depth == 0
 
 
 def test_esc_steps_back_through_navigation_then_closes():
@@ -469,12 +469,12 @@ def test_esc_steps_back_through_navigation_then_closes():
 
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
-    assert len(r.tooltip_controller.observation().navigation.back) == 2
+    assert r.tooltip_controller.observation().navigation_depth == 2
 
     ui.key(TIP_CLOSE_MSG)
-    assert len(r.tooltip_controller.observation().navigation.back) == 1 and ui.tip_shown
+    assert r.tooltip_controller.observation().navigation_depth == 1 and ui.tip_shown
     ui.key(TIP_CLOSE_MSG)
-    assert r.tooltip_controller.observation().navigation.back == () and ui.tip_shown
+    assert r.tooltip_controller.observation().navigation_depth == 0 and ui.tip_shown
     ui.key(TIP_CLOSE_MSG)  # at the root → close
     assert not ui.tip_shown
 

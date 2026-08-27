@@ -1577,16 +1577,15 @@ class SessionController:
         tooltip.retire_hover(self.tip_ports, self.hover_inputs, self.show_actions)
 
     def prepare_hover_blocking(self, index: int) -> None:
-        """Build the deterministic demo/screenshot hover before the event loop starts."""
-        with self.tooltip_controller.blocking():
-            tooltip.set_hover(
-                self.tip_ports,
-                self.panel_ports,
-                self.word_lookup,
-                self.hover_inputs,
-                self.show_actions,
-                index,
-            )
+        """Build a demo/screenshot hover with the inline lanes chosen by composition."""
+        tooltip.set_hover(
+            self.tip_ports,
+            self.panel_ports,
+            self.word_lookup,
+            self.hover_inputs,
+            self.show_actions,
+            index,
+        )
 
     def set_annotation_hover(self, *, revealed: bool) -> None:
         target = bool(
@@ -2266,7 +2265,7 @@ class SessionController:
     @property
     def tip_can_go_back(self) -> bool:
         """A link-navigation step is available to pop — the fact, split from the act."""
-        return self.tooltip_controller.observation().navigation.can_go_back
+        return self.tooltip_controller.observation().can_go_back
 
     @cached_property
     def _stateless_commands(self) -> StatelessCommandGraph:

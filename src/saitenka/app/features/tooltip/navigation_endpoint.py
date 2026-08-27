@@ -58,7 +58,7 @@ class TooltipNavigationEndpoint:
         )
 
     def can_go_back(self) -> bool:
-        return self.tooltip.observation().navigation.can_go_back
+        return self.tooltip.observation().can_go_back
 
     def back(self) -> None:
         tooltip.tip_back(self.ports())

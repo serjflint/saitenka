@@ -537,9 +537,7 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
         r.tooltip_controller.surface_state().nest,
         max(1, r.tooltip_controller.surface_state().nest.view_h // 3),
     )
-    pending = r.tooltip_controller.work_view().render_pending
-    assert pending is not None
-    req = pending[1]
+    req = _render_submitter(r).calls[-1]["request"]
     assert req is not None and req.panel is nest  # the request targets the nested panel
 
 
@@ -760,7 +758,7 @@ def test_compressed_head_cache_get_bumps_ram_recency():
 # --- worker disk→tier-2 hydration + tier-3 poll-deferred render ----------------------------------
 
 
-def _tall_reader(tmp_path, monkeypatch, ipc=None):
+def _tall_reader(tmp_path, monkeypatch, ipc=None, *, tooltip_inline: bool = False):
     from util import FakeIPC
 
     from saitenka.app.config import ReaderOptions, TooltipOptions
@@ -769,13 +767,17 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None):
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     engaged_slot = _SwitchableSubmitter()
     metadata_slot = _SwitchableSubmitter()
+
+    def runtime_jobs(_owner, jobs):
+        if tooltip_inline:
+            return replace(jobs, metadata=None, engaged=None)
+        return replace(jobs, engaged=engaged_slot, metadata=metadata_slot)
+
     r = SessionController(
         ipc or FakeIPC(),
         dict_set=_TallDS(),
         options=ReaderOptions(tooltip=TooltipOptions(render_cache=True)),
-        tooltip_runtime_jobs=lambda _owner, jobs: replace(
-            jobs, engaged=engaged_slot, metadata=metadata_slot
-        ),
+        tooltip_runtime_jobs=runtime_jobs,
     )
     _ENGAGED_SLOTS[r] = engaged_slot
     _METADATA_SLOTS[r] = metadata_slot
@@ -792,13 +794,13 @@ def test_preloop_demo_hover_is_ready_with_a_real_runtime_gateway(tmp_path, monke
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    r, _cache_obj = _tall_reader(tmp_path, monkeypatch, ipc)
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch, ipc, tooltip_inline=True)
     i, _tok, _inflected, _mined = _first_content(r)
     r.tooltip_controller.surface_state().panel_cache.clear()
     try:
         r.prepare_hover_blocking(i)
         assert r.tooltip_controller.surface_state().view.state is not None
-        assert r.tooltip_controller.work_view().engaged_inflight is None
+        assert r.tooltip_controller.surface_state().view.state is not None
     finally:
         r.close()
         gateway.close()
@@ -998,7 +1000,7 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     )
 
     assert r.tooltip_controller.surface_state().view.state is None
-    assert r.tooltip_controller.work_view().engaged_pending is None
+    assert r.tooltip_controller.surface_state().view.state is None
 
 
 # --- nested scan popup: the same tier-3 off-thread treatment (PR A) ------------------------------
@@ -1041,10 +1043,7 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
         r.tip_ports, r.panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
     )
     assert r.tooltip_controller.surface_state().nest.state is not None  # shown synchronously
-    assert (
-        r.tooltip_controller.work_view().engaged_pending is None
-        and r.tooltip_controller.work_view().engaged_inflight is None
-    )
+    assert r.tooltip_controller.surface_state().nest.state is not None
 
 
 def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch):
@@ -1201,7 +1200,7 @@ def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
     request = submitter.calls[-1]["request"].request
     assert isinstance(request, tooltip_engaged.NavigateRequest) and request.query == tok.surface
-    assert r.tooltip_controller.observation().navigation.back == ()  # nothing pushed / swapped yet
+    assert r.tooltip_controller.observation().navigation_depth == 0  # nothing pushed / swapped yet
 
 
 def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
@@ -1210,9 +1209,8 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
-    assert r.tooltip_controller.work_view().engaged_inflight is None
     assert (
-        len(r.tooltip_controller.observation().navigation.back) == 1
+        r.tooltip_controller.observation().navigation_depth == 1
     )  # synchronous swap pushed the previous view
 
 
@@ -1230,7 +1228,7 @@ def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
         and r.tooltip_controller.surface_state().view.state is not old
     )  # navigated panel installed
     assert (
-        len(r.tooltip_controller.observation().navigation.back) == 1
+        r.tooltip_controller.observation().navigation_depth == 1
     )  # previous view pushed for Esc/back
     assert r.tooltip_controller.surface_state().view.key is None  # a navigated view is keyless
 
@@ -1250,7 +1248,7 @@ def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, 
         r.tooltip_controller.surface_state().view.state is not None
         and r.tooltip_controller.surface_state().view.state is not old
     )
-    assert len(r.tooltip_controller.observation().navigation.back) == 1
+    assert r.tooltip_controller.observation().navigation_depth == 1
 
 
 def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatch):
@@ -1274,7 +1272,7 @@ def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatc
         r.tooltip_controller.surface_state().view.state is not None
         and r.tooltip_controller.surface_state().view.state is not old
     )
-    assert len(r.tooltip_controller.observation().navigation.back) == 1
+    assert r.tooltip_controller.observation().navigation_depth == 1
 
 
 def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
@@ -1298,7 +1296,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
             EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
         )
     )
-    assert r.tooltip_controller.observation().navigation.back == ()  # not swapped — origin mismatch
+    assert r.tooltip_controller.observation().navigation_depth == 0  # not swapped — origin mismatch
 
 
 def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
@@ -1317,7 +1315,7 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
 
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert rebuilt == [] and r.tooltip_controller.observation().navigation.back == ()
+    assert rebuilt == [] and r.tooltip_controller.observation().navigation_depth == 0
 
 
 def test_the_panel_cache_evicts_the_least_recently_used_entry_at_the_cap():

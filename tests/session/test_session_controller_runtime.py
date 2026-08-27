@@ -12,7 +12,11 @@ from saitenka.app.runtime import (
     CueCommandState,
 )
 from saitenka.app.session.controller import SessionController
-from saitenka.app.session.factory import SessionServices, create_session_controller
+from saitenka.app.session.factory import (
+    SessionServices,
+    TooltipWorkMode,
+    create_session_controller,
+)
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
 
@@ -150,6 +154,13 @@ def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request):
     assert ipc.runtime_outcomes == [
         CommandHandled("fail", Owner.SESSION, CommandOutcome.FAILED, reason=CommandReason.INTERNAL)
     ]
+
+
+def test_inline_tooltip_work_is_selected_at_session_construction(request):
+    reader = create_session_controller(FakeIPC(), tooltip_work=TooltipWorkMode.INLINE)
+    request.addfinalizer(reader.close)
+
+    assert not reader.tooltip_controller.metadata_deferred
 
 
 def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request):
