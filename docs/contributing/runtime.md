@@ -165,8 +165,10 @@ hit boxes while keeping the selected pixel owner stable.
 ## Playback projection
 
 `PlaybackProjection` (`saitenka/runtime/playback.py`) is the sole interpreter of raw mpv property
-observations. `SessionController` hands it one ordered observation at a time and applies the typed deltas it
-publishes; nothing downstream compares raw property values or decides what a property means.
+observations. `PlaybackObservationController` owns observer registration, initial seeding, and the
+local or reactor-routed projection path. `SessionController` applies the typed deltas it publishes as
+explicit cross-feature conjunctions; nothing downstream compares raw property values or decides what
+a property means.
 
 ```text
 property-change ──► PlaybackProjection.observe(state, name, data)
