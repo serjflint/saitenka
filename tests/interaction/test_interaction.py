@@ -201,7 +201,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    assert r.tooltip_preparation.cache.peek(r.preparation_inputs, ()) is None
+    assert r.tooltip_preparation.cache.peek(r._preparation_inputs, ()) is None
     assert r.tooltip_preparation.cache.mask_atlas is None
 
     ui = Driver(r)

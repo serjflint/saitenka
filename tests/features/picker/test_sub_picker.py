@@ -307,7 +307,7 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     hit = next(h for h in panel.hits if h.kind == "picker-download" and h.value == 1)
     gx, gy = rect[0] + hit.x + hit.w / 2, rect[1] + hit.y + hit.h / 2
 
-    assert reader.picker_controller.on_click(reader.click_target, gx, gy) is True
+    assert reader.picker_controller.on_click(reader._click_target, gx, gy) is True
     assert reader.sub_picker.open is False  # panel closes; the swap lands from broker completion
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
     assert len(fetches) == 1
@@ -326,7 +326,7 @@ def test_click_outside_the_panel_is_not_captured():
     _adopt(reader, candidates=(_candidate("a.srt"),))
     reader.picker_controller.redraw()
 
-    assert reader.picker_controller.on_click(reader.click_target, 0, 0) is False
+    assert reader.picker_controller.on_click(reader._click_target, 0, 0) is False
 
 
 def test_scroll_only_fires_with_the_pointer_over_the_panel():

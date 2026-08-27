@@ -1560,7 +1560,7 @@ class SessionController:
             self.hover_suppression
         ):
             return
-        tooltip.update_hover(self._tip_ports, self.hover_actions, self.hover_inputs)
+        tooltip.update_hover(self._tip_ports, self._hover_actions, self.hover_inputs)
 
     def set_hover(self, index: int) -> None:
         tooltip.set_hover(
@@ -1612,7 +1612,7 @@ class SessionController:
         if not self.ov.visible:
             return
         mp = self._get_mapping("mouse-pos")
-        self.surface_router.route_click(self.click_target, mp.get("x", -1), mp.get("y", -1))
+        self.surface_router.route_click(self._click_target, mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
         self,
@@ -1647,7 +1647,7 @@ class SessionController:
         )
 
     @property
-    def preparation_inputs(self) -> TooltipPreparationInputs:
+    def _preparation_inputs(self) -> TooltipPreparationInputs:
         """Facts captured for one tooltip preparation admission."""
         return TooltipPreparationInputs(
             panels=self._panel_ports,
@@ -1737,7 +1737,7 @@ class SessionController:
         self.surface_router.route_scroll(self.wheel_step, steps)
 
     @property
-    def click_target(self) -> surfaces.ClickTarget:
+    def _click_target(self) -> surfaces.ClickTarget:
         """What a surface needs to decide whether it claims a left-click."""
         return surfaces.ClickTarget(
             sub_picker.DownloadPorts(
@@ -1755,7 +1755,7 @@ class SessionController:
         )
 
     @property
-    def hover_actions(self) -> HoverActions:
+    def _hover_actions(self) -> HoverActions:
         """The acts a hover decision performs, bound. Paired with `tip_ports`.
 
         Every callable resolves through `self` when it runs, which is what lets the applier and the
@@ -1766,7 +1766,7 @@ class SessionController:
             arm=lambda kind, delay, intent: self.arm_hover_deadline(
                 kind,
                 delay,
-                lambda: tooltip._dwell_elapsed(self._tip_ports, self.hover_actions, intent),
+                lambda: tooltip._dwell_elapsed(self._tip_ports, self._hover_actions, intent),
             ),
             cancel=self.cancel_hover_deadline,
             show_word=self.set_hover,
@@ -1848,7 +1848,7 @@ class SessionController:
             bind_keys=self._bind_tip_keys,
             seed_precomposed=lambda panel, key, cap: (
                 self.tooltip_preparation.cache.seed_precomposed(
-                    self.preparation_inputs, panel, key, cap
+                    self._preparation_inputs, panel, key, cap
                 )
             ),
             freeze=lambda *, already_paused: tooltip._freeze_frame(
@@ -2027,7 +2027,7 @@ class SessionController:
             nested_max_frac=self.nested_max_frac,
             request_render_ahead=self._request_render_ahead,
             peek_render_cache=lambda key: self.tooltip_preparation.cache.peek(
-                self.preparation_inputs, key
+                self._preparation_inputs, key
             ),
             schedule_flash_expiry=self.schedule_flash_expiry,
             notifications=self.notifications,
@@ -2109,7 +2109,7 @@ class SessionController:
         if self.tooltip_preparation.update(
             self.prefetch_ports,
             self.head_probe,
-            self.preparation_inputs,
+            self._preparation_inputs,
             self._finish_speculative_prefetch,
         ):
             self.tooltip_controller.cancel_current_work()
@@ -2227,7 +2227,7 @@ class SessionController:
             "scroll_frame",
             layout_backend=self.layout_engine,
         ) as span:
-            tooltip.scroll_tip(self._tip_ports, self.hover_actions, delta)
+            tooltip.scroll_tip(self._tip_ports, self._hover_actions, delta)
             st = self.tooltip_controller.surface_state().view.state
             if st is not None:
                 # Attribute a janky frame: bands rastered synchronously (render_ahead was behind) and

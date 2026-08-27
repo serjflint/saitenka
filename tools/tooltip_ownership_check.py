@@ -106,6 +106,8 @@ _OWNER_DECLARED_RESULTS = {
 }
 _OWNER_RAW_BOUNDARY_MEMBERS = {*_OWNER_MUTABLE_BRIDGES}
 _RETIRED_SESSION_PORTS = {"panel_ports", "tip_ports"}
+_SESSION_PRIVATE_TOOLTIP_PORTS = {"_panel_ports", "_tip_ports"}
+_TOOLTIP_RAW_BRIDGE_SITES = {_OWNER, _COMPOSITION, "features/tooltip/navigation_endpoint.py"}
 _COMPOSITION_RAW_TOOLTIP_METHODS = {
     "_panel_cache_setdefault",
     "_panel_ports",
@@ -245,6 +247,43 @@ def _returned_owner_state(function: ast.FunctionDef) -> bool:
     )
 
 
+def _session_port_reference(node: ast.AST, aliases: set[str]) -> bool:
+    if isinstance(node, ast.Attribute):
+        chain = _self_attribute_chain(node)
+        if chain is not None and chain[:1] in {(name,) for name in _SESSION_PRIVATE_TOOLTIP_PORTS}:
+            return True
+    if isinstance(node, ast.Name):
+        return node.id in aliases
+    return any(_session_port_reference(child, aliases) for child in ast.iter_child_nodes(node))
+
+
+def _returned_session_port(function: ast.FunctionDef) -> bool:
+    aliases: set[str] = set()
+    assignments = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.NamedExpr)
+    ]
+    changed = True
+    while changed:
+        changed = False
+        for assignment in assignments:
+            value = assignment.value
+            targets = (
+                assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
+            )
+            if value is not None and _session_port_reference(value, aliases):
+                before = len(aliases)
+                aliases.update(name for target in targets for name in _bound_names(target))
+                changed = changed or len(aliases) != before
+    return any(
+        isinstance(node, ast.Return)
+        and node.value is not None
+        and _session_port_reference(node.value, aliases)
+        for node in ast.walk(function)
+    )
+
+
 def _contains_attribute(node: ast.AST, name: str) -> bool:
     return any(isinstance(part, ast.Attribute) and part.attr == name for part in ast.walk(node))
 
@@ -283,15 +322,24 @@ def _annotation_is_tooltip_controller(annotation: ast.AST | None, type_names: se
 
 
 def _tooltip_controller_type_names(tree: ast.AST) -> set[str]:
-    names = {"TooltipController"}
+    names = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == "TooltipController"
+    } | {"TooltipController"}
     changed = True
-    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
+    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign | ast.TypeAlias)]
     while changed:
         changed = False
         for assignment in assignments:
             if _annotation_name(assignment.value) not in names:
                 continue
-            aliases = {name for target in assignment.targets for name in _bound_names(target)}
+            targets = (
+                assignment.targets if isinstance(assignment, ast.Assign) else [assignment.name]
+            )
+            aliases = {name for target in targets for name in _bound_names(target)}
             if not aliases <= names:
                 names.update(aliases)
                 changed = True
@@ -453,6 +501,13 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
             and node.name in _RETIRED_SESSION_PORTS
         ):
             findings.append(Finding(path, node.lineno, "session-tooltip-port", node.name))
+        if (
+            site == _COMPOSITION
+            and isinstance(node, ast.FunctionDef)
+            and not node.name.startswith("_")
+            and _returned_session_port(node)
+        ):
+            findings.append(Finding(path, node.lineno, "session-tooltip-port", node.name))
         if isinstance(node, ast.Attribute) and node.attr in _RETIRED_SESSION_PORTS:
             findings.append(Finding(path, node.lineno, "session-tooltip-port", node.attr))
         if (
@@ -469,8 +524,7 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
         ):
             findings.append(Finding(path, node.lineno, "owner-state-projection", node.name))
         if (
-            site not in {_OWNER, _COMPOSITION}
-            and not site.startswith("features/tooltip/")
+            site not in _TOOLTIP_RAW_BRIDGE_SITES
             and isinstance(node, ast.Attribute)
             and node.attr in _OWNER_RAW_BOUNDARY_MEMBERS
             and _is_tooltip_owner_reference(node.value, owner_names)

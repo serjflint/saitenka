@@ -127,10 +127,52 @@ def test_feature_cannot_hide_the_owner_type_behind_an_alias():
     assert "owner-raw-boundary-outside-tooltip" in rules
 
 
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "from saitenka.app.features.tooltip.tooltip_controller import TooltipController as TC",
+        "type TC = TooltipController",
+    ],
+)
+def test_feature_cannot_hide_the_owner_type_behind_import_or_type_alias(declaration: str):
+    rules = _rules(
+        f"{declaration}\ndef drift(owner: TC):\n    return owner.surface_state()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+def test_tooltip_policy_module_cannot_take_mutable_surface_state():
+    rules = _rules(
+        "def drift(owner: TooltipController):\n    return owner.surface_state()\n",
+        "features/tooltip/hover_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
 @pytest.mark.parametrize("name", ["tip_ports", "panel_ports"])
 def test_session_cannot_republish_raw_tooltip_ports(name: str):
     rules = _rules(
         f"class SessionController:\n    def {name}(self):\n        return object()\n",
+        "session/controller.py",
+    )
+
+    assert "session-tooltip-port" in rules
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "return self._tip_ports",
+        "ports = self._panel_ports\n        return ports",
+        "return tuple((self._tip_ports,))",
+    ],
+)
+def test_session_cannot_republish_private_tooltip_ports_under_a_new_name(body: str):
+    rules = _rules(
+        f"class SessionController:\n    def tooltip_capabilities(self):\n        {body}\n",
         "session/controller.py",
     )
 

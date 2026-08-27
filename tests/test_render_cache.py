@@ -352,9 +352,9 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     sentinel = np.full(
         (cap, w, 4), 123, dtype=np.uint8
     )  # full_h == view_h == cap → no scrollbar mutates it
-    sig, ck = r.tooltip_preparation.cache.signature(r.preparation_inputs), content_key(key)
+    sig, ck = r.tooltip_preparation.cache.signature(r._preparation_inputs), content_key(key)
     cache.put(sig, ck, cap, cap, cap, sentinel)
-    assert r.tooltip_preparation.cache.hydrate(r.preparation_inputs, key)
+    assert r.tooltip_preparation.cache.hydrate(r._preparation_inputs, key)
 
     uploaded: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda view, *_a, **_k: uploaded.append(np.array(view)))
@@ -820,7 +820,7 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
     cap = r.tip_scale.cap
     st = r._panel_for(tok, inflected, min_h=cap, mined=mined)
     r.tooltip_preparation.cache.precompose_head(
-        r.preparation_inputs,
+        r._preparation_inputs,
         st,
         tok,
         inflected,
@@ -834,7 +834,7 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
     fresh = r._panel_for(tok, inflected, min_h=cap, mined=mined)
     assert fresh.windowed.first_view is None  # cold rebuild
     assert r.tooltip_preparation.cache.worker_seed_head(
-        r.preparation_inputs,
+        r._preparation_inputs,
         fresh,
         tok,
         inflected,
@@ -845,7 +845,7 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
     assert r.tooltip_preparation.cache.memory_entries == 1
     assert (
         r.tooltip_preparation.cache.peek(
-            r.preparation_inputs, r._panel_key(tok, inflected, mined=mined)
+            r._preparation_inputs, r._panel_key(tok, inflected, mined=mined)
         )
         is not None
     )  # main hits RAM

@@ -63,7 +63,7 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     )
 
     assert (
-        reader.sidebar_controller.on_click(reader.click_target, 50, 50) is True
+        reader.sidebar_controller.on_click(reader._click_target, 50, 50) is True
     )  # inside the panel, off every hitbox
     assert _named(spans, "sidebar_click") == []
 

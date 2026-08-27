@@ -544,7 +544,7 @@ def run_render_cache(
         inflected = reader._inflected_surface(0)
         st = reader._panel_for(tok, inflected, min_h=cap, mined=False)
         reader.tooltip_preparation.cache.precompose_head(
-            reader.preparation_inputs,
+            reader._preparation_inputs,
             st,
             tok,
             inflected,
@@ -571,7 +571,7 @@ def run_render_cache(
         reader.sub_origin = (0, 0)
         reader.retire_hover()
         key = reader._panel_key(tok, reader._inflected_surface(0), mined=False)
-        if reader.tooltip_preparation.cache.peek(reader.preparation_inputs, key) is None:
+        if reader.tooltip_preparation.cache.peek(reader._preparation_inputs, key) is None:
             return None  # below the cost gate — not persisted
 
         def paint() -> None:
@@ -1225,7 +1225,7 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
         if tab is None or panel.rect is None:
             return
         reader.sidebar_controller.on_click(
-            reader.click_target,
+            reader._click_target,
             panel.rect[0] + tab.x + 1,
             panel.rect[1] + tab.y + 1,
         )
