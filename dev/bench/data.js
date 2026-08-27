@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787830742315,
+  "lastUpdate": 1787845084526,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -10811,6 +10811,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.331528,
             "range": "3 replicas; min 1.26803; max 1.96198; MAD 0.0635; worst 1.96198",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "322fc0b4569fdd38be7acccdbfe0f78b7743d6c9",
+          "message": "Refactor Tooltip's public ownership boundary (#446)\n\n* refactor: make tooltip ownership boundary explicit\n\n* refactor: close tooltip observation leaks\n\n* refactor: enforce tooltip ownership boundary\n\n* fix: handle annotation-only ownership aliases\n\n* refactor: close tooltip port projections\n\n* refactor: close remaining tooltip capabilities\n\n* refactor: narrow tooltip command endpoints\n\n* refactor: generalize tooltip authority checks\n\n* refactor: bind tooltip navigation at its action seam\n\n* fix: type tooltip back action result",
+          "timestamp": "2026-08-27T20:36:48+05:00",
+          "tree_id": "51166f2d16c2c24d968e05c6ffefca940afa33e7",
+          "url": "https://github.com/serjflint/saitenka/commit/322fc0b4569fdd38be7acccdbfe0f78b7743d6c9"
+        },
+        "date": 1787845082246,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.402358,
+            "range": "3 replicas; min 5.33853; max 6.55035; MAD 0.147987",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.832607,
+            "range": "3 replicas; min 7.83347; max 9.90492; MAD 0.999133; worst 9.90492",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.580399,
+            "range": "3 replicas; min 14.3801; max 20.6873; MAD 2.10687",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.76599,
+            "range": "3 replicas; min 14.6695; max 20.8396; MAD 2.07362; worst 20.8396",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 20.049204,
+            "range": "3 replicas; min 16.8879; max 20.0858; MAD 0.036637",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.140262,
+            "range": "3 replicas; min 0.104266; max 0.169838; MAD 0.029576; worst 0.169838",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.022284,
+            "range": "3 replicas; min 36.3331; max 45.4001; MAD 2.68914; worst 45.4001",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.095121,
+            "range": "3 replicas; min 2.67691; max 3.10712; MAD 0.012001; worst 3.10712",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.351731,
+            "range": "3 replicas; min 1.2151; max 4.48133; MAD 0.136634; worst 4.48133",
             "unit": "ms"
           }
         ]
