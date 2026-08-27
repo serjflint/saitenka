@@ -422,9 +422,9 @@ def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
         except Exception as error:  # teardown continues; the owner's own close still ran
             log.warning("session resource %s failed to close", name, exc_info=True)
             failed.append((name, error))
-    if missing or failed:
+    if failed:
         raise ResourceRetirementError(missing=tuple(missing), failed=tuple(failed))
-    return True
+    return not missing
 
 
 def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect], bool]:
