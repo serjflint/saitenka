@@ -39,6 +39,10 @@ class EpisodeContext:
         # durable per-session recorder (app/session_stats.py); None until stats start on file load
         self.session_recorder: SessionRecorder | None = None
 
+    def record_mined(self, count: int) -> None:
+        if self.session_recorder is not None:
+            self.session_recorder.record_mined(count)
+
 
 class EpisodeSlot:
     """Stable authority whose episode value is replaced on each file change."""

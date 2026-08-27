@@ -73,6 +73,7 @@ from saitenka.app.features.mining.mining_controller import (
     MiningIdentity,
     MiningSessionAssembly,
 )
+from saitenka.app.features.mining.mining_projection import MiningProjection
 from saitenka.app.features.picker import sub_picker
 from saitenka.app.features.preview import miner_ui
 from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
@@ -131,7 +132,7 @@ from saitenka.app.runtime import (
     CueCommandState,
     merge_command_handlers,
 )
-from saitenka.app.session import mined_feedback, panel_intents, sidebar_coordination, surfaces
+from saitenka.app.session import panel_intents, sidebar_coordination, surfaces
 from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
 from saitenka.app.session.close_ledger import (
     CloseLedger,
@@ -2290,6 +2291,17 @@ class SessionController:
         anki: Anki | None,
         config: MineConfig | None,
     ) -> MiningController:
+        projection = MiningProjection(
+            toast=self.toast,
+            preview=self.preview_controller,
+            preview_ports=lambda: self.preview_ports,
+            card_source=lambda: self.card_source,
+            preview_enabled=lambda: self.show_preview,
+            tooltip=self.tooltip_controller,
+            tooltip_apply=self._tooltip_apply,
+            mined_here=lambda: sidebar.mine_active(self.sidebar_view),
+            record_mined=lambda count: self.episode.record_mined(count),
+        )
         return MiningController.for_session(
             identity,
             anki,
@@ -2301,15 +2313,16 @@ class SessionController:
                 stopped=self._stop.is_set,
                 settings=self.options.mining,
                 encounter=self._mining_encounter,
-                apply=self._mining_apply,
+                apply=projection.build,
             ),
         )
 
     def _mining_encounter(self) -> miner.MiningEncounter:
+        cue = self.cue_render.current
         return miner.MiningEncounter(
             cue=MineCue(
-                self.tokens,
-                self.styles,
+                cue.tokens,
+                cue.styles,
                 self.tooltip_controller.observation().selected,
                 self.profile_controller.tokenizer,
                 self.options.mining.max_bulk,
@@ -2318,42 +2331,9 @@ class SessionController:
             ipc=self.ipc,
             media_path=self.text_property("path"),
             playhead=self._get_number("time-pos") or 0.0,
-            sentence_html=self._sentence_html(),
+            sentence_html=miner.sentence_html(cue.lines),
             hovered_terms=self.tooltip_controller.observation().metadata.terms,
         )
-
-    def _mining_apply(self) -> miner.MiningApply:
-        preview = self.preview_controller.panel
-
-        def reset_capture() -> None:
-            preview.last_jpg = preview.last_audio = None
-
-        def record_mined(count: int) -> None:
-            if self.episode.session_recorder is not None:
-                self.episode.session_recorder.record_mined(count)
-
-        return miner.MiningApply(
-            toast=self.toast,
-            reset_capture=reset_capture,
-            captured_image=lambda path: setattr(preview, "last_jpg", path),
-            captured_audio=lambda path: setattr(preview, "last_audio", path),
-            mark_mined=self._mark_mined,
-            mined_here=self._sidebar_mined_here,
-            remember_duplicate=lambda token: setattr(preview, "dup_tok", token),
-            preview_existing=self._preview_existing,
-            preview_mined=self._preview_mined,
-            record_mined=record_mined,
-        )
-
-    def _sidebar_mined_here(self) -> None:
-        """Mark the backlog rows covering this cue mined and redraw. The sidebar's own read set stays
-        the sidebar's — mining asks for the act, not for the view."""
-        from saitenka.app.features.sidebar import sidebar
-
-        sidebar.mine_active(self.sidebar_view)
-
-    def _sentence_html(self) -> str:
-        return "<br>".join("".join(t.surface for t in line) for line in self.lines)
 
     def _provenance(self, video) -> str:
         return miner.provenance(self._get_number("time-pos") or 0.0, video)
@@ -2368,30 +2348,9 @@ class SessionController:
             and self.sub_text.strip()
         )
 
-    def _mark_mined(self, expression: str) -> None:
-        mined_feedback.mark_mined(
-            self._tip_ports,
-            self._panel_ports,
-            self.hover_inputs,
-            self.show_actions,
-            expression,
-        )
-
     # --- card preview (verify correctness / image / sound, one surface) — preview feature
     def sentence_lines(self) -> list[str]:
         return miner_ui.sentence_lines(self.lines)
-
-    def _preview_mined(self, card, tok, video, status: str = "mined") -> None:
-        if not self.show_preview:
-            self.toast(f"mined {card.expression}")  # preview off → a terse confirmation instead
-            return
-        miner_ui.preview_mined(self.preview_ports, self.card_source, card, tok, video, status)
-
-    def _preview_existing(self, note_id: int, card, status: str) -> None:
-        if not self.show_preview:
-            self.toast(f"already have {card.expression}")
-            return
-        miner_ui.preview_existing(self.preview_ports, self.card_source, note_id, card, status)
 
     def _render_preview(self) -> None:
         miner_ui.render_preview(

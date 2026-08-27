@@ -38,7 +38,8 @@ if TYPE_CHECKING:
     from saitenka.app.anki import Anki, MineConfig
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.features.mining.mined_store import MinedCardStore
-    from saitenka.tokenize import Tokenizer
+    from saitenka.app.tokenize import Token
+    from saitenka.app.tokenizer import Tokenizer
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class MiningApply:
     captured_audio: Callable[[Path], None]
     mark_mined: Callable[[str], None]
     mined_here: Callable[[], None]
-    remember_duplicate: Callable[[object], None]
+    remember_duplicate: Callable[[Token], None]
     preview_existing: Callable[..., None]
     preview_mined: Callable[..., None]
     record_mined: Callable[[int], None]
@@ -136,6 +137,11 @@ def mine_target(cue: MineCue) -> int | None:
         if cue.tokenizer.is_content(t):
             return i
     return 0
+
+
+def sentence_html(lines) -> str:
+    """Join the admitted cue lines for the mined note's sentence field."""
+    return "<br>".join("".join(token.surface for token in line) for line in lines)
 
 
 def _select_bulk_targets(cue: MineCue) -> list[int]:

@@ -3,7 +3,6 @@
 import functools
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from driver import Driver
@@ -2403,34 +2402,6 @@ def test_preview_does_not_autoplay(monkeypatch):
     assert played == []  # showing the preview no longer autoplays
 
 
-def test_no_mine_preview_suppresses_panel_and_toasts_instead(monkeypatch):
-
-    from saitenka.app.config import MiningOptions, ReaderOptions
-
-    r = SessionController(
-        FakeIPC(), options=ReaderOptions(mining=MiningOptions(show_preview=False))
-    )
-    shown, toasts = [], []
-    monkeypatch.setattr(miner_ui, "preview_mined", lambda *a, **_k: shown.append(a))
-    monkeypatch.setattr(miner_ui, "preview_existing", lambda *a, **_k: shown.append(a))
-    monkeypatch.setattr(r.notifications, "show", lambda text, *_a: toasts.append(text))
-
-    r._preview_mined(SimpleNamespace(expression="本命"), None, None)
-    r._preview_existing(42, SimpleNamespace(expression="読む"), "exists")
-
-    assert shown == []  # panel never rendered
-    assert toasts == ["mined 本命", "already have 読む"]  # terse confirmation replaces it
-
-
-def test_mine_preview_default_pops_the_panel(monkeypatch):
-
-    r = SessionController(FakeIPC())  # default options → show_preview True
-    calls = []
-    monkeypatch.setattr(miner_ui, "preview_mined", lambda *a, **_k: calls.append(a))
-    r._preview_mined(SimpleNamespace(expression="本命"), None, None)
-    assert len(calls) == 1  # the verify-panel path is taken by default
-
-
 def test_preview_audio_button_plays_on_click(monkeypatch):
     played = []
     monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
@@ -2487,7 +2458,7 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
     assert r.tooltip_controller.hover_view().tip.key.mined is False  # not mined yet → ⊕
     expression = card_for(r.tokens[0]).expression
     r.mining_controller.record_mined_expression(expression)
-    r._mark_mined(expression)
+    r.tooltip_controller.mark_mined(expression, r._tooltip_apply())
     assert r.tooltip_controller.hover_view().tip.key.mined is True  # tooltip rebuilt with ✓
 
 

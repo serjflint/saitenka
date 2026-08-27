@@ -1,13 +1,13 @@
 {
   "counts": {
-    "delegator": 93,
+    "delegator": 89,
     "derived": 47,
     "init_lines": 328,
     "self_delegator": 2,
     "slice": 18,
-    "substantive": 110,
-    "substantive_lines": 1444,
-    "total": 270
+    "substantive": 108,
+    "substantive_lines": 1453,
+    "total": 264
   },
-  "reason": "playback observation state and transport bookkeeping moved to its owner"
+  "reason": "mining outcomes are explicit contributions while their policy moved to feature owners"
 }

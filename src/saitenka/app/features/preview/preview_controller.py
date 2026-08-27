@@ -9,6 +9,10 @@ from saitenka.app.features.preview.card_preview import PreviewPanel
 from saitenka.app.interaction.surfaces import SurfaceSpec
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from saitenka.app.features.preview.miner_ui import CardSource, PreviewPorts
+    from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.interaction_slice import PreviewStore
@@ -28,3 +32,50 @@ class PreviewController:
 
     def surface_binding(self) -> SurfaceSpec:
         return SurfaceSpec("preview", state_of=self.surface_state)
+
+    def reset_capture(self) -> None:
+        self.panel.last_jpg = self.panel.last_audio = None
+
+    def captured_image(self, path: Path) -> None:
+        self.panel.last_jpg = path
+
+    def captured_audio(self, path: Path) -> None:
+        self.panel.last_audio = path
+
+    def remember_duplicate(self, token: Token | None) -> None:
+        self.panel.dup_tok = token
+
+    def present_mined(
+        self,
+        ports: PreviewPorts,
+        source: CardSource,
+        card,
+        token,
+        video,
+        status: str = "mined",
+        *,
+        enabled: bool,
+    ) -> None:
+        if not enabled:
+            source.toast(f"mined {card.expression}")
+            return
+        from saitenka.app.features.preview import miner_ui
+
+        miner_ui.preview_mined(ports, source, card, token, video, status)
+
+    def present_existing(
+        self,
+        ports: PreviewPorts,
+        source: CardSource,
+        note_id: int,
+        card,
+        status: str,
+        *,
+        enabled: bool,
+    ) -> None:
+        if not enabled:
+            source.toast(f"already have {card.expression}")
+            return
+        from saitenka.app.features.preview import miner_ui
+
+        miner_ui.preview_existing(ports, source, note_id, card, status)

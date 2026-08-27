@@ -4,10 +4,15 @@ import pytest
 
 from saitenka.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
 from saitenka.app.features.mining import miner
+from saitenka.app.features.preview import miner_ui
 from saitenka.app.lookup import card_for
 from saitenka.app.media import AnimatedClip, Timespan, clip_audio
 from saitenka.app.toast import render_toast
 from saitenka.app.tokenize import tokenize
+
+
+def _discard_preview(*_args, **_kwargs) -> None:
+    pass
 
 
 def test_card_data_from_token():
@@ -205,7 +210,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
     r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(card_format={"Word": "{expression}"}))
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
+    monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     assert anki.added == [] and "読む" in r.mining_controller.index_snapshot()
@@ -396,7 +401,9 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     shown = []
     monkeypatch.setattr(
-        r, "_preview_mined", lambda card, _tok, _video, _st="mined": shown.append(card.expression)
+        miner_ui,
+        "preview_mined",
+        lambda _ports, _source, card, _tok, _video, _st="mined": shown.append(card.expression),
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
@@ -499,7 +506,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok, card=chosen)
@@ -518,7 +525,9 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     r.set_subtitle("本を読む")
     previewed = []
     monkeypatch.setattr(
-        r, "_preview_existing", lambda nid, _card, status: previewed.append((nid, status))
+        miner_ui,
+        "preview_existing",
+        lambda _ports, _source, nid, _card, status: previewed.append((nid, status)),
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
@@ -548,7 +557,6 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
     from util import FakeIPC
 
     from saitenka.app.bindings import PREVIEW_CLOSE_MSG
-    from saitenka.app.features.preview import miner_ui
     from saitenka.app.features.preview.card_preview import PreviewData
     from saitenka.app.session.controller import SessionController
 
@@ -580,10 +588,12 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
+    monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
     dup_status = []
     monkeypatch.setattr(
-        r, "_preview_mined", lambda _c, _t, _v, status="mined": dup_status.append(status)
+        miner_ui,
+        "preview_mined",
+        lambda _ports, _source, _c, _t, _v, status="mined": dup_status.append(status),
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
 
@@ -647,7 +657,11 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     monkeypatch.setattr(
         r.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
     )
-    monkeypatch.setattr(r, "_mark_mined", lambda _expr: None)  # skip the view refresh
+    monkeypatch.setattr(
+        r.tooltip_controller,
+        "mark_mined",
+        lambda _expr, _apply: None,
+    )  # skip the view refresh
     r._stateless_commands.run(mine_intents.MineCommand.EPISODE)
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
     assert any("mined" in t for t in toasts)
@@ -688,7 +702,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("退いた")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
         r.profile_controller.dict_set,
@@ -734,7 +748,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     r = SessionController(ipc, anki=anki, mine_cfg=cfg, dict_set=ds)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     f = anki.added[0]["fields"]
@@ -771,7 +785,7 @@ def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path
     r = SessionController(ipc, anki=anki, mine_cfg=cfg)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
@@ -793,7 +807,7 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     r = SessionController(ipc, anki=anki, mine_cfg=cfg)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
@@ -828,7 +842,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
     )
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
@@ -847,7 +861,7 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     assert "WordAudio" not in anki.added[0]["fields"]
@@ -903,7 +917,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
@@ -931,7 +945,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
+    monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r.mining_controller.mine_token(tok)
     assert anki.added[0]["fields"]["ID"] == "1"
