@@ -48,8 +48,9 @@ class MiningProjection:
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         self.preview.present_existing(
-            self.preview_ports(),
-            self.card_source(),
+            self.preview_ports,
+            self.card_source,
+            self.toast,
             note_id,
             card,
             status,
@@ -58,8 +59,9 @@ class MiningProjection:
 
     def _preview_mined(self, card, token, video, status: str = "mined") -> None:
         self.preview.present_mined(
-            self.preview_ports(),
-            self.card_source(),
+            self.preview_ports,
+            self.card_source,
+            self.toast,
             card,
             token,
             video,

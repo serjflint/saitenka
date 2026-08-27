@@ -9,6 +9,7 @@ from saitenka.app.features.preview.card_preview import PreviewPanel
 from saitenka.app.interaction.surfaces import SurfaceSpec
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from saitenka.app.features.preview.miner_ui import CardSource, PreviewPorts
@@ -47,8 +48,9 @@ class PreviewController:
 
     def present_mined(
         self,
-        ports: PreviewPorts,
-        source: CardSource,
+        ports: Callable[[], PreviewPorts],
+        source: Callable[[], CardSource],
+        toast: Callable[..., object],
         card,
         token,
         video,
@@ -57,16 +59,17 @@ class PreviewController:
         enabled: bool,
     ) -> None:
         if not enabled:
-            source.toast(f"mined {card.expression}")
+            toast(f"mined {card.expression}")
             return
         from saitenka.app.features.preview import miner_ui
 
-        miner_ui.preview_mined(ports, source, card, token, video, status)
+        miner_ui.preview_mined(ports(), source(), card, token, video, status)
 
     def present_existing(
         self,
-        ports: PreviewPorts,
-        source: CardSource,
+        ports: Callable[[], PreviewPorts],
+        source: Callable[[], CardSource],
+        toast: Callable[..., object],
         note_id: int,
         card,
         status: str,
@@ -74,8 +77,8 @@ class PreviewController:
         enabled: bool,
     ) -> None:
         if not enabled:
-            source.toast(f"already have {card.expression}")
+            toast(f"already have {card.expression}")
             return
         from saitenka.app.features.preview import miner_ui
 
-        miner_ui.preview_existing(ports, source, note_id, card, status)
+        miner_ui.preview_existing(ports(), source(), note_id, card, status)

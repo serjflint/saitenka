@@ -9,18 +9,31 @@ from saitenka.app.features.preview.preview_controller import PreviewController
 def test_disabled_mining_preview_toasts_instead(monkeypatch):
     preview = PreviewController(FakeIPC())
     shown, toasts = [], []
-    source = SimpleNamespace(toast=lambda text, *_args: toasts.append(text))
+    resolved = []
     monkeypatch.setattr(miner_ui, "preview_mined", lambda *args: shown.append(args))
     monkeypatch.setattr(miner_ui, "preview_existing", lambda *args: shown.append(args))
 
     preview.present_mined(
-        None, source, SimpleNamespace(expression="本命"), None, None, enabled=False
+        lambda: resolved.append("ports"),
+        lambda: resolved.append("source"),
+        lambda text, *_args: toasts.append(text),
+        SimpleNamespace(expression="本命"),
+        None,
+        None,
+        enabled=False,
     )
     preview.present_existing(
-        None, source, 42, SimpleNamespace(expression="読む"), "exists", enabled=False
+        lambda: resolved.append("ports"),
+        lambda: resolved.append("source"),
+        lambda text, *_args: toasts.append(text),
+        42,
+        SimpleNamespace(expression="読む"),
+        "exists",
+        enabled=False,
     )
 
     assert shown == []
+    assert resolved == []
     assert toasts == ["mined 本命", "already have 読む"]
 
 
@@ -30,8 +43,9 @@ def test_enabled_mining_preview_delegates_to_renderer(monkeypatch):
     monkeypatch.setattr(miner_ui, "preview_mined", lambda *args: calls.append(args))
 
     preview.present_mined(
-        None,
-        SimpleNamespace(toast=lambda *_args: None),
+        lambda: None,
+        lambda: SimpleNamespace(toast=lambda *_args: None),
+        lambda *_args: None,
         SimpleNamespace(expression="本命"),
         None,
         None,
