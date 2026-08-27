@@ -111,7 +111,8 @@ Before merge, review the diff in a fresh, isolated context that did not author i
 (`.agents/sharpen/`, author→skeptic→judge, two independent UPHOLDs) or `/code-review`. Give it only the
 base, the PR title/description, the diff, and the claimed validation — no prior rationale. Fix every
 P0/P1 (correctness, data loss, false contract, inert feature, FT race); resolve or explicitly accept P2.
-Any code change invalidates a prior pass. Prefer reviewers from a different model family than the author
+Any reviewed-artifact change invalidates a prior pass; record the reviewed commit or diff digest. Prefer
+reviewers from a different model family than the author
 when the host roster makes that available: different families reduce correlated blind spots. This is a
 recommendation, not a validity condition — two genuinely isolated reviewers still satisfy the review
 gate when cross-family routing is unavailable. Deterministic gates remain mandatory either way.

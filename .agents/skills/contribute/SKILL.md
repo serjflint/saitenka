@@ -63,9 +63,9 @@ PoC feeds the review, a review finding sends you back to the design.
 5. **Fresh adversarial review is a gate, not a formality.** Spawn a subagent that did **not**
    author the change; give it only the base, the diff, and the claimed validation — **no
    rationale**. Have it verify independently and classify P0–P3. Fix every P0/P1; resolve or
-   explicitly accept each P2; **any code change invalidates the pass** → re-review the exact new
-   tree/diff, or a pinned commit when review happens after commit. Full criteria and pattern tables are in
-   the applicable gate (§5 + the adversarial tables). **Prefer cross-family when available:** route the
+   explicitly accept each P2; **any reviewed-artifact change invalidates the pass**. Record the reviewed
+   commit or diff digest, then re-review the changed tree. Full criteria and pattern tables are in the
+   applicable gate (§5 + the adversarial tables). **Prefer cross-family when available:** route the
    reviewer to a different model family
    when the host roster supports it, because correlated blind spots are less useful than independent
    disagreement. Do not pretend this is always available or make it a validity condition: record the

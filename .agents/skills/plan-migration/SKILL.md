@@ -38,14 +38,11 @@ only to the bug in front of you.
 
     sites × the kind of decision each site needs × the observed rows-per-commit rate = commits
 
-`poe host-arity-over`, `poe runtime-status` and `poe cluster-map` produce the mechanical census inputs;
-read counts from them rather than retyping a number from another document. They do not observe every
-Protocol, callback, endpoint, wrapper, or nested value and cannot prove authority retirement alone.
+Read mechanical counts from the repository census tools rather than copying them into the plan.
 
 For a responsibility migration, also use the architecture-inquiry skill's canonical
 [`authority-reachability.md`](../architecture-inquiry/references/authority-reachability.md). Price decisions
-per authority path, not every textual mention; use symbol navigation and a focused structural checker where
-the boundary warrants enforcement.
+per authority path, not every textual mention.
 
 If the result exceeds the expected shape by an order of magnitude, that is the signal to **stop and
 look for a shared shape** — not a reason to start early. Sites are rarely independent: several names
@@ -78,7 +75,8 @@ turning methods into delegators does not prove that ownership moved. Census the 
 the substantive admission, completion, fallback, publication, and lifecycle decisions before the first
 batch. Retirement means those decisions terminate at the bounded owner; the old host may remain as the
 composition root or sole effect executor. Pair the meter with a one-writer proof so a facade cannot make the
-numbers fall while leaving two homes for the same fact.
+numbers fall while leaving two homes for the same fact, but only when the accepted invariant requires one
+writer. Otherwise name the multiple-writer ordering or consistency mechanism and its failure semantics.
 
 Self-attack the intended boundary using that same canonical lens. Keep the guard proportionate to the
 retired semantic path; do not freeze private layout or benign test construction.
