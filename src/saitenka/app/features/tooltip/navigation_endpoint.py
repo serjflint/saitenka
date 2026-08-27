@@ -19,7 +19,7 @@ class TooltipNavigationEndpoint:
     tip_scale_override: float
     tip_max_frac: float
     observe_can_go_back: Callable[[], bool]
-    navigate_back: Callable[[], None]
+    navigate_back: Callable[[], bool]
 
     def scale(self) -> prefetch.TipScale:
         return prefetch.tip_scale(
