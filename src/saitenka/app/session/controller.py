@@ -1885,7 +1885,7 @@ class SessionController:
         return PreviewCommandEndpoint(
             preview=self.preview_controller,
             help=self.help_controller,
-            tooltip=self.tooltip_controller,
+            tip_keys_bound=lambda: self.tooltip_controller.keybindings_bound,
             mining=self.mining_controller,
             surfaces=self.lifecycle_surfaces,
             screen=self.screen,
@@ -2014,24 +2014,33 @@ class SessionController:
         trade the chain's debt rows for one more, and every caller in the chain would still inherit
         everything it gathers.
         """
-        return self.tooltip_navigation.ports()
+        return self.tooltip_controller.build_tip_ports(
+            tooltip_controller.TooltipPresentation(
+                scale=self.tooltip_navigation.scale(),
+                surfaces=self.interaction_surfaces,
+                request_render_ahead=self._request_render_ahead,
+                osd=self.screen.osd,
+                nested_max_frac=self.nested_max_frac,
+                peek_render_cache=lambda key: self.tooltip_preparation.cache.peek(
+                    self._preparation_inputs, key
+                ),
+                schedule_flash_expiry=self.schedule_flash_expiry,
+                toast=self.notifications.show,
+                request_engaged_tooltip=self._request_engaged_tooltip,
+            )
+        )
+
+    def _navigate_tip_back(self) -> None:
+        tooltip.tip_back(self._tip_ports)
 
     @cached_property
     def tooltip_navigation(self) -> TooltipNavigationEndpoint:
         return TooltipNavigationEndpoint(
-            tooltip=self.tooltip_controller,
             screen=self.screen,
-            surfaces=self.interaction_surfaces,
             tip_scale_override=self._tip_scale_override,
             tip_max_frac=self.tip_max_frac,
-            nested_max_frac=self.nested_max_frac,
-            request_render_ahead=self._request_render_ahead,
-            peek_render_cache=lambda key: self.tooltip_preparation.cache.peek(
-                self._preparation_inputs, key
-            ),
-            schedule_flash_expiry=self.schedule_flash_expiry,
-            notifications=self.notifications,
-            request_engaged_tooltip=self._request_engaged_tooltip,
+            observe_can_go_back=lambda: self.tooltip_controller.observation().can_go_back,
+            navigate_back=self._navigate_tip_back,
         )
 
     @property

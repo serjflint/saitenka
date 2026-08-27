@@ -143,6 +143,28 @@ def test_feature_cannot_hide_the_owner_type_behind_import_or_type_alias(declarat
     assert "owner-raw-boundary-outside-tooltip" in rules
 
 
+def test_feature_cannot_hide_the_owner_type_in_a_union_alias():
+    rules = _rules(
+        "type Maybe = TooltipController | None\n"
+        "def drift(owner: Maybe):\n    return owner.surface_state()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+def test_feature_cannot_forward_the_owner_through_a_container():
+    rules = _rules(
+        "def drift(owner: TooltipController):\n"
+        "    box = []\n"
+        "    box.append(owner)\n"
+        "    return box[0].surface_state()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
 def test_tooltip_policy_module_cannot_take_mutable_surface_state():
     rules = _rules(
         "def drift(owner: TooltipController):\n    return owner.surface_state()\n",

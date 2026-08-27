@@ -107,10 +107,11 @@ _OWNER_DECLARED_RESULTS = {
 _OWNER_RAW_BOUNDARY_MEMBERS = {*_OWNER_MUTABLE_BRIDGES}
 _RETIRED_SESSION_PORTS = {"panel_ports", "tip_ports"}
 _SESSION_PRIVATE_TOOLTIP_PORTS = {"_panel_ports", "_tip_ports"}
-_TOOLTIP_RAW_BRIDGE_SITES = {_OWNER, _COMPOSITION, "features/tooltip/navigation_endpoint.py"}
+_TOOLTIP_RAW_BRIDGE_SITES = {_OWNER, _COMPOSITION}
 _COMPOSITION_RAW_TOOLTIP_METHODS = {
     "_panel_cache_setdefault",
     "_panel_ports",
+    "_navigate_tip_back",
     "_render_nested_view",
     "_render_tip_view",
     "_tip_ports",
@@ -307,18 +308,23 @@ def _is_preparation_reference(node: ast.AST, names: set[str]) -> bool:
     )
 
 
-def _annotation_name(annotation: ast.AST | None) -> str | None:
-    if isinstance(annotation, ast.Name):
-        return annotation.id
-    if isinstance(annotation, ast.Attribute):
-        return annotation.attr
+def _annotation_mentions_type(annotation: ast.AST | None, type_names: set[str]) -> bool:
+    if annotation is None:
+        return False
     if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
-        return annotation.value
-    return None
+        try:
+            annotation = ast.parse(annotation.value, mode="eval")
+        except SyntaxError:
+            return annotation.value in type_names
+    return any(
+        (isinstance(part, ast.Name) and part.id in type_names)
+        or (isinstance(part, ast.Attribute) and part.attr in type_names)
+        for part in ast.walk(annotation)
+    )
 
 
 def _annotation_is_tooltip_controller(annotation: ast.AST | None, type_names: set[str]) -> bool:
-    return _annotation_name(annotation) in type_names
+    return _annotation_mentions_type(annotation, type_names)
 
 
 def _tooltip_controller_type_names(tree: ast.AST) -> set[str]:
@@ -334,7 +340,7 @@ def _tooltip_controller_type_names(tree: ast.AST) -> set[str]:
     while changed:
         changed = False
         for assignment in assignments:
-            if _annotation_name(assignment.value) not in names:
+            if not _annotation_mentions_type(assignment.value, names):
                 continue
             targets = (
                 assignment.targets if isinstance(assignment, ast.Assign) else [assignment.name]
@@ -412,6 +418,18 @@ def _owner_names(scope: ast.AST, inherited: set[str], type_names: set[str]) -> s
             aliases = {name for target in targets for name in _bound_names(target)}
             if not aliases <= names:
                 names.update(aliases)
+                changed = True
+        for node in nodes:
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"append", "extend", "insert"}
+                and isinstance(node.func.value, ast.Name)
+                and any(_is_tooltip_owner_reference(argument, names) for argument in node.args)
+            ):
+                continue
+            if node.func.value.id not in names:
+                names.add(node.func.value.id)
                 changed = True
     return names
 

@@ -10,11 +10,12 @@ from saitenka.app.features.preview.miner_ui import PreviewPorts
 from saitenka.app.features.tooltip import prefetch
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.config import KeyOptions
     from saitenka.app.features.help.help_controller import HelpController, ScreenState
     from saitenka.app.features.mining.mining_controller import MiningController
     from saitenka.app.features.preview.preview_controller import PreviewController
-    from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.mpvio.ipc import MpvIPC
 
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 class PreviewCommandEndpoint:
     preview: PreviewController
     help: HelpController
-    tooltip: TooltipController
+    tip_keys_bound: Callable[[], bool]
     mining: MiningController
     surfaces: LifecycleSurfaces
     screen: ScreenState
@@ -42,7 +43,7 @@ class PreviewCommandEndpoint:
         return PreviewPorts(
             preview=self.preview,
             help_open=self.help.state.open,
-            tip_keys_bound=self.tooltip.keybindings_bound,
+            tip_keys_bound=self.tip_keys_bound(),
             surfaces=self.surfaces,
             osd=self.screen.osd,
             tip_width=tip_width,
