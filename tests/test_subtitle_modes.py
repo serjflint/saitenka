@@ -11,6 +11,7 @@ from util import RecordingRasterProvider, runtime_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app import subtitle_modes, subtitle_selection
+from saitenka.app.features.translation import TranslationInputs
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import SubtitleRenderer
@@ -61,6 +62,17 @@ class FakeIPC(RuntimeFakeIPC):
 
 JP = {"id": 2, "type": "sub", "lang": "jpn"}
 EN = {"id": 1, "type": "sub", "lang": "eng"}
+
+
+def hold_translation(reader: SessionController) -> None:
+    reader.translation_controller.toggle(
+        TranslationInputs(
+            surfaces_visible=False,
+            tooltip_selected=False,
+            secondary_text=None,
+            osd=(1280, 720),
+        )
+    )
 
 
 class FetchJobs:
@@ -331,7 +343,7 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = SessionController(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader.translate_on = True
+    hold_translation(reader)
     messages = []
     monkeypatch.setattr(reader.notifications, "show", lambda text, *_args: messages.append(text))
     rebuilt = []
@@ -341,7 +353,7 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     reader._handle(app_bindings.SUBTITLE_LANGUAGE_MSG)
 
     assert reader.subtitle_language == "en"
-    assert reader.translate_on is True
+    assert reader.translation_controller.state.held
     assert ("set_property", "sid", 1) in ipc.commands
     assert ("set_property", "secondary-sid", 2) in ipc.commands
     assert rebuilt == ["rebuilt"]
@@ -354,7 +366,7 @@ def test_language_switch_releases_secondary_before_selecting_its_track(monkeypat
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = SessionController(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader.translate_on = True
+    reader._handle(app_bindings.TRANS_MSG)
     reader.declare_subtitle(SubtitleSecondaryLeased(1))
     ipc.props["secondary-sid"] = 1
     monkeypatch.setattr(reader.notifications, "show", lambda *_args: None)
@@ -408,11 +420,10 @@ def test_hidden_translation_does_not_reserve_english_secondary():
     ]
 
 
-def test_translation_leases_english_only_while_visible(monkeypatch):
+def test_translation_leases_english_only_while_visible():
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = SessionController(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    monkeypatch.setattr(reader, "draw_translation", lambda: None)
     ipc.commands.clear()
 
     reader._handle(app_bindings.TRANS_MSG)
@@ -428,7 +439,7 @@ def test_primary_sid_event_updates_rendering_language():
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = SessionController(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    reader.translate_on = True
+    hold_translation(reader)
     reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
     ipc.props["sid"] = 1
     ipc.commands.clear()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from util import FakeIPC, runtime_gateway
 
+from saitenka.app import bindings as app_bindings
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import (
     EpisodeRetired,
@@ -113,12 +114,12 @@ def test_rebinding_the_episode_retires_the_slots_with_the_container() -> None:
 
     reader = SessionController(FakeIPC(), prefetch=False)
     try:
-        reader.translate_on = True
+        reader._handle(app_bindings.TRANS_MSG)
         reader._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
 
         reader.rebind_episode()
 
         assert reader._subtitle_tracks.current == SubtitleTrackState()
-        assert reader.translate_on  # the hold is the session's, and survives
+        assert reader.translation_controller.state.held  # the hold is session-lived
     finally:
         reader.close()

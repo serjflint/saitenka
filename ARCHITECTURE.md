@@ -52,8 +52,8 @@ internal modules with explicit dependency contracts, not independently published
 - **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
   mpv mutation and cross-feature ordering, while `app/features/` packages own feature state and
   policy. Tooltip interaction and tooltip preparation have separate bounded controllers under the
-  tooltip feature package; profile, mining, analysis, and cue-annotation controllers likewise live
-  under their corresponding feature packages.
+  tooltip feature package; profile, mining, analysis, cue-annotation, and translation-reveal
+  controllers likewise live under their corresponding feature packages.
   `app/interaction/` contains shared lower-level interaction contracts; it has no runtime dependency
   on features or session composition. `app/session/` owns assembly, routing, lifecycle, and explicit cross-feature
   conjunctions. These directions and the declared feature-package inventory are gated.

@@ -1,8 +1,4 @@
-"""`Owner.PRESENTATION`'s state: what saitenka has decided to put on screen.
-
-The first fact here is the translation reveal, and moving it is an ownership correction before it
-is a migration step — the manual hold and the drawn text were kept on the *interaction* context,
-which is neither who decides them nor who draws them.
+"""`Owner.PRESENTATION`'s state: what Saitenka has decided to put on screen.
 
 Deliberately not here: whether the overlay is visible at all. That is the mpv `Overlay`'s own
 state, and a copy in this slot would be a second representation of one fact rather than a slice of

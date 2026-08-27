@@ -70,7 +70,6 @@ def ports_for(texts: list[str], ipc: FakeIPC, clock: list[float]):
             prepare_hover=unused,
             mark_ready=unused,
             scroll_tip=unused,
-            setup_secondary=unused,
             toggle_translation=unused,
             mine_current=unused,
             bulk_mine=unused,
