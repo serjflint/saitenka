@@ -2912,16 +2912,15 @@ def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> 
     ipc.timers.clear()
 
     result._on_property_change({"name": "options/sub-pos", "data": 95.0})
-    first = result._geometry_refresh.armed
+    first = ipc.timers["subtitle:geometry-refresh"]
     result._on_property_change({"name": "options/sub-scale", "data": 1.5})
     result._on_property_change({"name": "options/sub-use-margins", "data": True})
 
-    assert first is not None
-    assert result._geometry_refresh.armed is first  # both later changes coalesced into it
+    assert ipc.timers["subtitle:geometry-refresh"] is first
     assert list(ipc.timers) == ["subtitle:geometry-refresh"]
 
     assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
-    assert result._geometry_refresh.armed is None  # retired by its own due event
+    assert "subtitle:geometry-refresh" not in ipc.timers
     result.close()
 
 
@@ -2937,11 +2936,10 @@ def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> No
 
     ipc.props["options/sub-pos"] = 95.0
     result._on_property_change({"name": "options/sub-pos", "data": 95.0})
-    assert result._geometry_refresh.armed is not None
+    assert "subtitle:geometry-refresh" in ipc.timers
 
     result._on_property_change({"name": "sid", "data": 3})
 
-    assert result._geometry_refresh.armed is None
     assert "subtitle:geometry-refresh" not in ipc.timers
     result.close()
 

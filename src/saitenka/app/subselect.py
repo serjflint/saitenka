@@ -483,7 +483,7 @@ def provider_fetch_factory(
     providers: tuple[str, ...], cfg: ProviderConfig, *, force: bool = False
 ) -> Callable[[str], Callable[[], tuple[Path | None, str]]]:
     """``factory(video) -> deferred fetch thunk`` — the one provider-fetch closure both ``run`` and
-    ``attach`` hand to ``fetch_japanese_subs_async`` / ``configure_subtitle_retry``. ``providers`` is a
+    ``attach`` hand to the re-slot fetch/retry ports. ``providers`` is a
     per-call subset (startup vs retry vs background differ); the rest comes from ``cfg``. ``force=True``
     re-fetches + re-syncs past a stale/mistimed cached srt (the manual retry)."""
 
