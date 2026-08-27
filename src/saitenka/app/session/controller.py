@@ -4017,7 +4017,13 @@ class SessionController:
         sit in the mailbox, and draining here would run a full domain turn against half-closed
         collaborators.
         """
-        performed = self.ipc.deliver_runtime_event(SessionClosing(phase, scratch))
+        try:
+            performed = self.ipc.deliver_runtime_event(SessionClosing(phase, scratch))
+        except BaseException:
+            # The reactor reached and attempted the phase. Its delayed retirement error belongs in
+            # CloseLedger, but the successful peers must not run again through the local fallback.
+            self._runtime_close_phases[phase] = True
+            raise
         self._runtime_close_phases[phase] = performed
         return performed
 

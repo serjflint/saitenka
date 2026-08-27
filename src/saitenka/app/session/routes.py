@@ -388,25 +388,43 @@ def _begin(gateway: MpvGateway, name: str) -> bool:
     return True
 
 
-def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
-    """Close each named resource in order, isolating them, and say whether all of them were there.
+class ResourceRetirementError(RuntimeError):
+    """One close phase finished its sequence but could not retire every resource."""
 
-    False, not an exception, for an unregistered one: it means this session's owner never handed
-    it over, so its own teardown still runs. Isolation is what `CloseLedger` gives a step it owns —
-    a phase that retires three participants must not lose it by being one announcement.
+    def __init__(
+        self,
+        *,
+        missing: tuple[str, ...],
+        failed: tuple[tuple[str, BaseException], ...],
+    ) -> None:
+        self.missing = missing
+        self.failed = failed
+        details = [*(f"{name}: missing" for name in missing)]
+        details.extend(f"{name}: {type(error).__name__}" for name, error in failed)
+        super().__init__("session resources failed to retire: " + ", ".join(details))
+
+
+def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
+    """Close each named resource in order and report any failures after the sequence.
+
+    The exception is delayed until every peer has run. The controller's `CloseLedger` catches it at
+    the phase boundary, preserving both isolation and caller-visible failure truth.
     """
-    retired = True
+    missing: list[str] = []
+    failed: list[tuple[str, BaseException]] = []
     for name in names:
         resource = gateway.session_resources.get(name)
         if resource is None:
-            retired = False
+            missing.append(name)
             continue
         try:
             resource.close()  # type: ignore[attr-defined]  # registered by the owner that made it
-        except Exception:  # teardown continues; the owner's own close still ran
+        except Exception as error:  # teardown continues; the owner's own close still ran
             log.warning("session resource %s failed to close", name, exc_info=True)
-            retired = False
-    return retired
+            failed.append((name, error))
+    if missing or failed:
+        raise ResourceRetirementError(missing=tuple(missing), failed=tuple(failed))
+    return True
 
 
 def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect], bool]:

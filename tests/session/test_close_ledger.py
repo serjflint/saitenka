@@ -542,6 +542,7 @@ def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> Non
         BACKLOG_RESOURCE,
         MINED_RESOURCE,
         SESSION_SUMMARY_RESOURCE,
+        ResourceRetirementError,
         _dispatcher,
     )
     from saitenka.runtime.diagnostics import RuntimeLedger
@@ -560,11 +561,39 @@ def test_the_stores_phase_retires_the_session_writers_and_isolates_them() -> Non
         gateway.session_resources[MINED_RESOURCE] = Retiring(lambda: retired.append("mined"))
         dispatch = _dispatcher(gateway, RuntimeLedger())
 
-        assert dispatch(CloseSessionStores()) is False  # one of them did not retire
+        with pytest.raises(ResourceRetirementError) as raised:
+            dispatch(CloseSessionStores())
     finally:
         gateway.close()
 
     assert retired == ["summary", "mined"]  # the one behind the failure still ran
+    assert [name for name, _error in raised.value.failed] == [BACKLOG_RESOURCE]
+
+
+def test_a_runtime_resource_failure_reaches_the_returned_close_ledger() -> None:
+    """A runtime-owned failure is visible without closing its successful peers twice."""
+    from util import runtime_gateway
+
+    from saitenka.app.session.routes import install_session_reactor
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    retired: list[str] = []
+
+    def fail_backlog() -> None:
+        raise RuntimeError("backlog close failed")
+
+    reader._close_backlog_store = fail_backlog  # type: ignore[method-assign]
+    reader.mining_controller.close_store = lambda: retired.append("mined")  # type: ignore[method-assign]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert [failure.participant for failure in ledger.failures] == ["phase:stores"]
+    assert retired == ["mined"]
 
 
 def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
