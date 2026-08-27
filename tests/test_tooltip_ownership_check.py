@@ -115,6 +115,39 @@ def test_feature_cannot_take_the_mutable_surface_state(body: str):
     assert "owner-raw-boundary-outside-tooltip" in rules
 
 
+def test_feature_cannot_hide_the_owner_type_behind_an_alias():
+    rules = _rules(
+        "TC = TooltipController\n"
+        "def drift(owner: TC):\n"
+        "    surface = owner.surface_state\n"
+        "    return surface()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+@pytest.mark.parametrize("name", ["tip_ports", "panel_ports"])
+def test_session_cannot_republish_raw_tooltip_ports(name: str):
+    rules = _rules(
+        f"class SessionController:\n    def {name}(self):\n        return object()\n",
+        "session/controller.py",
+    )
+
+    assert "session-tooltip-port" in rules
+
+
+def test_non_physical_session_method_cannot_take_mutable_tooltip_state():
+    rules = _rules(
+        "class SessionController:\n"
+        "    def decide_business_policy(self):\n"
+        "        return self.tooltip_controller.surface_state()\n",
+        "session/controller.py",
+    )
+
+    assert "owner-raw-boundary-outside-physical-method" in rules
+
+
 @pytest.mark.parametrize(
     "attribute",
     [

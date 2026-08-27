@@ -90,7 +90,7 @@ def test_cold_paint_is_soft_then_upgrades_to_crisp_when_bands_warm(scale, monkey
     y0 = max(0, min(r.tooltip_controller.surface_state().view.scroll, max(0, st.full_height - vh)))
     st.viewport(y0, vh, scale=r.tip_scale.raster)  # simulate the worker warming the native viewport
     tooltip_panel.apply_pending_crisp(
-        r.tip_ports, r.tooltip_controller.surface_state().view
+        r._tip_ports, r.tooltip_controller.surface_state().view
     )  # the poll-loop upgrade
 
     assert (
@@ -115,7 +115,7 @@ def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
     y0 = max(0, min(r.tooltip_controller.surface_state().view.scroll, max(0, st.full_height - vh)))
     st.viewport(y0, vh, scale=r.tip_scale.raster)  # warm the native viewport
     tooltip_panel.render_view(
-        r.tip_ports, r.tooltip_controller.surface_state().view
+        r._tip_ports, r.tooltip_controller.surface_state().view
     )  # re-blit with warm bands
     assert (
         r.tooltip_controller.surface_state().view.crisp_miss == ""
@@ -127,7 +127,7 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
     # A link-navigated view builds no second panel — it composites native from its own reference panel
     # and the seam still holds, with no synthetic key.
     r = _reader(2.0, monkeypatch)
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "見る")
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "見る")
     assert (
         r.tooltip_controller.surface_state().view.key is None
     )  # no synthetic nav key needed — one panel

@@ -1513,8 +1513,8 @@ def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: 
     assert result.tooltip_controller.observation().selected == -1
     assert result.tooltip_controller.surface_state().view.state is None
     result.tooltip_controller.select(0)
-    kanji_current(result.tip_ports, result.panel_ports, result.hover_inputs)
-    assert result.tooltip_controller.observation().word.kanji == 0
+    kanji_current(result._tip_ports, result._panel_ports, result.hover_inputs)
+    assert result.tooltip_controller.observation().kanji_index == 0
     result.close()
 
 

@@ -116,13 +116,13 @@ def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
     reader = SessionController(FakeIPC())
     token = Token("猫", "猫", "ネコ", "名詞", 0, 1)
     try:
-        before = panel_key(reader.panel_ports, token, "猫")
+        before = panel_key(reader._panel_ports, token, "猫")
         reader._apply_capabilities()
         release.set()
         await_ready(
             lambda: reader._tts_ok, "tts probe never published", pump=reader._apply_capabilities
         )
-        after = panel_key(reader.panel_ports, token, "猫")
+        after = panel_key(reader._panel_ports, token, "猫")
 
         assert before.tts_ok is False
         assert after.tts_ok is True

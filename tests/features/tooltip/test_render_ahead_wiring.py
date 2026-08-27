@@ -51,7 +51,7 @@ def _reader() -> SessionController:
     r = SessionController(
         _FakeIPC(),
         options=ReaderOptions(prefetch=True),
-        tooltip_runtime_jobs=lambda _owner, jobs: replace(jobs, render_ahead=submitter),
+        tooltip_runtime_jobs=lambda jobs: replace(jobs, render_ahead=submitter),
     )
     _SUBMITTERS[r] = submitter
     r.tooltip_controller.surface_state().view.view_h = 300
@@ -312,7 +312,7 @@ def test_a_wheel_burst_reaches_the_viewport_it_scrolled_to():
     r.tooltip_controller.surface_state().view.state = _tall_panel()
 
     for _ in range(3):
-        tooltip_panel.scroll_view(r.tip_ports, r.tooltip_controller.surface_state().view, 150)
+        tooltip_panel.scroll_view(r._tip_ports, r.tooltip_controller.surface_state().view, 150)
     while _submitter(r).calls:
         _submitter(r).finish()
 
@@ -337,7 +337,9 @@ def test_scrolling_down_and_back_up_returns_to_where_it_started(notch):
 
     def burst(delta):
         for _ in range(4):
-            tooltip_panel.scroll_view(r.tip_ports, r.tooltip_controller.surface_state().view, delta)
+            tooltip_panel.scroll_view(
+                r._tip_ports, r.tooltip_controller.surface_state().view, delta
+            )
             while _submitter(r).calls:
                 _submitter(r).finish()
             r._settle_interaction()

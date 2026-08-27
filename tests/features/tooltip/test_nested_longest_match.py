@@ -84,7 +84,7 @@ def test_open_link_navigates_the_whole_query(monkeypatch):
     monkeypatch.setattr(reader, "renderer", NullRenderer())
     lb = LinkBox("それにつけても", 0, 0, 10, 10)
     nested_popup.open_link(
-        reader.tip_ports, reader.panel_ports, lb, (0, 0), 0
+        reader._tip_ports, reader._panel_ports, lb, (0, 0), 0
     )  # no worker → synchronous open
     assert ds.seen == ["それにつけても"]  # the WHOLE query reached the lookup, not それ
     assert (
@@ -103,8 +103,8 @@ def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
     monkeypatch.setattr(reader.profile_controller.tokenizer, "tokenize", lambda _s: _SPLIT)
 
     nested_popup.show_nested(
-        reader.tip_ports,
-        reader.panel_ports,
+        reader._tip_ports,
+        reader._panel_ports,
         reader.word_lookup,
         ScanBox("コンサート", 0, 0, 20, 20),
     )

@@ -1773,7 +1773,7 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     tok = r.tokens[0]
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r._tip_ports, r._panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # anchor low → nested_view_h keeps full height
     st = r.tooltip_controller.surface_state().nest.state
     assert st is not None
@@ -1781,7 +1781,7 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     # Wheel toward the bottom until the clamp stops moving; each notch grows the converging estimate.
     prev = -1
     for _ in range(200):
-        tooltip_panel.scroll_view(r.tip_ports, r.tooltip_controller.surface_state().nest, 10_000)
+        tooltip_panel.scroll_view(r._tip_ports, r.tooltip_controller.surface_state().nest, 10_000)
         if r.tooltip_controller.surface_state().nest.scroll == prev:
             break
         prev = r.tooltip_controller.surface_state().nest.scroll
@@ -1951,9 +1951,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     _fire_dwell(ipc, "scan-open")
     assert r.tooltip_controller.hover_view().nested.shown
     Driver(r, instant=False).move(5, 5)  # leave the whole stack
-    assert (
-        r.tooltip_controller.observation().hover.hysteresis.nest_hide_pending
-    )  # scheduled, not instant
+    assert r.tooltip_controller.hover_diagnostics().nested_hide_pending  # scheduled, not instant
 
     assert _fire_dwell(ipc, "nested-hide")
 
@@ -2043,9 +2041,9 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
         and r.tooltip_controller.hover_view().tip.panel_id != id(base)
     )
     assert tooltip.tip_back(
-        r.tip_ports
+        r._tip_ports
     ) is True and r.tooltip_controller.hover_view().tip.panel_id == id(base)
-    assert tooltip.tip_back(r.tip_ports) is False
+    assert tooltip.tip_back(r._tip_ports) is False
 
 
 class _WildcardDS:

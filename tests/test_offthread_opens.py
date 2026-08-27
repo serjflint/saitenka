@@ -88,7 +88,7 @@ def _reader(tmp_path, *, worker: bool):
         FakeIPC(),
         dict_set=_fixture_ds(tmp_path),
         options=ReaderOptions(prefetch=True),
-        tooltip_runtime_jobs=lambda _owner, jobs: replace(jobs, engaged=submitter),
+        tooltip_runtime_jobs=lambda jobs: replace(jobs, engaged=submitter),
     )
     _SUBMITTERS[r] = submitter
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -110,7 +110,7 @@ def _reader(tmp_path, *, worker: bool):
 def test_no_worker_opens_kanji_synchronously(tmp_path):
     # Negative control: with no prefetch worker, the open builds + shows on the calling tick (unchanged).
     r = _reader(tmp_path, worker=False)
-    nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
     assert (
         r.tooltip_controller.surface_state().nest.state is not None
         and r.tooltip_controller.surface_state().nest.word == "読"
@@ -120,7 +120,7 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
 
 def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path):
     r = _reader(tmp_path, worker=True)
-    nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
     assert (
         r.tooltip_controller.surface_state().nest.state is None
     )  # deferred — nothing shown on the click tick
@@ -138,7 +138,7 @@ def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path)
 
 def test_kanji_open_worker_failure_uses_current_origin_sync_fallback(tmp_path):
     r = _reader(tmp_path, worker=True)
-    nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
 
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
@@ -153,7 +153,7 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
     # the new word.
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(
-        r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0
+        r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0
     )  # origin = id(読む panel)
     submitter = _submitter(r)
     call = submitter.calls.pop(0)
@@ -172,7 +172,7 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
 
 def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     r = _reader(tmp_path, worker=True)
-    nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
     Driver(r).move_to_word(1)
     rebuilt = []
     monkeypatch.setattr(
@@ -191,7 +191,7 @@ def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
     toasts: list = []
     monkeypatch.setattr(r.notifications, "show", lambda text, _k="ok", _s=2.8: toasts.append(text))
     nested_popup.open_kanji(
-        r.tip_ports, r.panel_ports, "犬", 100.0, 300.0, 40.0
+        r._tip_ports, r._panel_ports, "犬", 100.0, 300.0, 40.0
     )  # 犬 isn't in the kanji bank
     assert toasts and "犬" in toasts[0]  # the no-entry toast fired on the tick…
     assert _submitter(r).calls == [] and r.tooltip_controller.surface_state().nest.state is None
@@ -204,8 +204,8 @@ def test_cross_reference_link_open_defers(tmp_path):
     r = _reader(tmp_path, worker=True)
     lb = LinkBox("見る", 10, 20, 40, 40)
     tooltip.nested_popup.open_link(
-        r.tip_ports,
-        r.panel_ports,
+        r._tip_ports,
+        r._panel_ports,
         lb,
         r.tooltip_controller.surface_state().view.xy,
         r.tooltip_controller.surface_state().view.scroll,

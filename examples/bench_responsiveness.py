@@ -575,7 +575,7 @@ def run_render_cache(
             return None  # below the cost gate — not persisted
 
         def paint() -> None:
-            _tt._paint_from_cache(reader.tip_ports, key, cap, (0, 400, 60))
+            _tt._paint_from_cache(reader._tip_ports, key, cap, (0, 400, 60))
 
         return measure(paint, reps, warmup=1)["p50"]
 
@@ -814,7 +814,7 @@ def run_stress(
             sb = boxes[len(boxes) // 3]  # a deterministic cell well inside the body
             timed(
                 lambda: nested_popup.show_nested(
-                    reader.tip_ports, reader.panel_ports, reader.word_lookup, sb
+                    reader._tip_ports, reader._panel_ports, reader.word_lookup, sb
                 )
             )
             timed(lambda: reader.scroll_tip(step))  # scroll while the nested popup is up
@@ -1536,15 +1536,15 @@ def _timeline_interact(reader) -> None:
     if boxes:
         sb = boxes[len(boxes) // 2]  # a cell well inside the body
         nested_popup.show_nested(
-            reader.tip_ports, reader.panel_ports, reader.word_lookup, sb
+            reader._tip_ports, reader._panel_ports, reader.word_lookup, sb
         )  # cold inner word → off-thread compose (kind=engaged_nested / nested)
         time.sleep(0.02)  # let the worker compose the nested head
         nested_popup.show_nested(
-            reader.tip_ports, reader.panel_ports, reader.word_lookup, sb
+            reader._tip_ports, reader._panel_ports, reader.word_lookup, sb
         )  # warm → synchronous nested show (tip_compose kind="nested")
         # scroll the nested popup so its render-ahead + crisp-poll are exercised (the base already is)
         tooltip_panel.scroll_view(
-            reader.tip_ports,
+            reader._tip_ports,
             reader.tooltip_controller.surface_state().nest,
             round(reader.osd[1] * 0.1),
         )
@@ -1556,8 +1556,8 @@ def _timeline_interact(reader) -> None:
     reader._hide_nested()
     if 0 <= reader.tooltip_controller.observation().selected < len(reader.tokens):
         tooltip.navigate_tip(
-            reader.tip_ports,
-            reader.panel_ports,
+            reader._tip_ports,
+            reader._panel_ports,
             reader.tokens[reader.tooltip_controller.observation().selected].surface,
         )  # in-place nav → kind="clicked"
         time.sleep(0.02)
@@ -2424,7 +2424,7 @@ def main() -> int:
             reader.tooltip_controller.surface_state().panel_cache.discard(
                 reader._panel_key(tokenize(sb.text)[0], tokenize(sb.text)[0].surface)
             )
-            nested_popup.show_nested(reader.tip_ports, reader.panel_ports, reader.word_lookup, sb)
+            nested_popup.show_nested(reader._tip_ports, reader._panel_ports, reader.word_lookup, sb)
 
         rows.append(("nested popup first paint  (inner word)", measure(nested_cold, args.reps)))
 

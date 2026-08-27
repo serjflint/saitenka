@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+    from saitenka.app.features.tooltip.tooltip_controller import TooltipRuntimeJobs
     from saitenka.app.profiles import Profile
     from saitenka.app.scoring import Scorer
     from saitenka.app.session.controller import SessionController
@@ -81,7 +82,7 @@ def create_session_controller(
     )
 
 
-def _inline_tooltip_jobs(_owner, jobs):
+def _inline_tooltip_jobs(jobs: TooltipRuntimeJobs) -> TooltipRuntimeJobs:
     from dataclasses import replace
 
     return replace(jobs, metadata=None, engaged=None)

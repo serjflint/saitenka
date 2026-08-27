@@ -57,8 +57,6 @@ if TYPE_CHECKING:
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
     from saitenka.runtime.hover_pause import PauseClaim
-    from saitenka.runtime.hovered_word import HoveredWord
-    from saitenka.runtime.interaction_slice import HoverFeature
     from saitenka.runtime.jobs import JobSubmitter
     from saitenka.runtime.pulse import PulseState, Repaint
 
@@ -83,13 +81,21 @@ class TooltipObservation:
 
     selected: int
     pause_enabled: bool
-    hover: HoverFeature
     navigation_depth: int
     can_go_back: bool
     pulse: PulseState
     pause: PauseClaim
-    word: HoveredWord
+    reading: str
+    kanji_index: int
     metadata: HoverMetadataView
+
+
+@dataclass(frozen=True, slots=True)
+class HoverDiagnostics:
+    """Immutable hover-machine facts used by transition diagnostics."""
+
+    word_target: int | None
+    nested_hide_pending: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,8 +135,7 @@ class TooltipController:
         delays: HoverDelays,
         flash_seconds: float,
         key_context: TooltipKeyContext,
-        runtime_jobs: Callable[[TooltipController, TooltipRuntimeJobs], TooltipRuntimeJobs]
-        | None = None,
+        runtime_jobs: Callable[[TooltipRuntimeJobs], TooltipRuntimeJobs] | None = None,
     ) -> None:
         self._cache_lock = threading.Lock()
         self._state = TooltipState(
@@ -157,7 +162,7 @@ class TooltipController:
         render_ahead_submitter = tooltip_raster.configure_runtime_job(ipc)
         jobs = TooltipRuntimeJobs(metadata_submitter, engaged_submitter, render_ahead_submitter)
         if runtime_jobs is not None:
-            jobs = runtime_jobs(self, jobs)
+            jobs = runtime_jobs(jobs)
         self._metadata_submitter = jobs.metadata
         self._engaged_submitter = jobs.engaged
         self._render_ahead_submitter = jobs.render_ahead
@@ -172,13 +177,20 @@ class TooltipController:
         return TooltipObservation(
             selected=self._selected,
             pause_enabled=self._pause_enabled,
-            hover=self._hover_store.current,
             navigation_depth=len(self._nav_store.current.back),
             can_go_back=self._nav_store.current.can_go_back,
             pulse=self._pulse_store.current,
             pause=self._pause_store.current,
-            word=word,
+            reading=word.reading,
+            kanji_index=word.kanji,
             metadata=hovered_meta(self._word_store),
+        )
+
+    def hover_diagnostics(self) -> HoverDiagnostics:
+        hysteresis = self._hover_store.current.hysteresis
+        return HoverDiagnostics(
+            word_target=hysteresis.word_target,
+            nested_hide_pending=hysteresis.nest_hide_pending,
         )
 
     def hover_view(self) -> hover_snapshot.HoverView:

@@ -65,7 +65,7 @@ def _churn(r: SessionController, term: str) -> bool:
     opened = False
     if boxes:
         nested_popup.show_nested(
-            r.tip_ports, r.panel_ports, r.word_lookup, boxes[len(boxes) // 3]
+            r._tip_ports, r._panel_ports, r.word_lookup, boxes[len(boxes) // 3]
         )  # nested popup on an inner cell
         opened = r.tooltip_controller.surface_state().nest.state is not None
         ui.wheel(1)  # nested is up

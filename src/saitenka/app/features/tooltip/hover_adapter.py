@@ -58,10 +58,10 @@ class HoverCommandCoordinator:
         return hover_intents.HoverInputs(
             hovered=True,
             surface=token.surface,
-            reading=observed.word.reading,
+            reading=observed.reading,
             token_reading=token.reading,
             kanji=tuple(char for char in token.surface if is_ideograph(char)),
-            kanji_index=observed.word.kanji,
+            kanji_index=observed.kanji_index,
             has_dictionaries=ports.profile.dict_set is not None,
             anchored=box_for_token(cue.boxes, observed.selected) is not None,
             pause_on_tooltip=observed.pause_enabled,

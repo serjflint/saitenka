@@ -414,7 +414,7 @@ def _nested_reader(*, two_words: bool = False):
         dict_set=_ScrollTallDS(),
         options=ReaderOptions(prefetch=True),
         scan_delay=0.0,
-        tooltip_runtime_jobs=lambda _owner, jobs: replace(jobs, render_ahead=submitter),
+        tooltip_runtime_jobs=lambda jobs: replace(jobs, render_ahead=submitter),
     )
     _RENDER_SUBMITTERS[r] = submitter
     r.osd = (3840, 2160)  # 4K → tip_scale.raster 2.0, so _blit_native takes the crisp path
@@ -450,13 +450,13 @@ def test_a_cold_nested_scroll_still_rasters_nothing_on_the_interactive_thread():
     r = _nested_reader()
     tok = r.tokens[0]
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r._tip_ports, r._panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )
 
     def scroll_to_the_cold_tail() -> None:
         for _ in range(6):  # each notch moves further past anything the show warmed
             tooltip_panel.scroll_view(
-                r.tip_ports,
+                r._tip_ports,
                 r.tooltip_controller.surface_state().nest,
                 r.tooltip_controller.surface_state().nest.view_h,
             )
@@ -481,7 +481,7 @@ def test_the_raster_oracle_can_fire():
     r = _nested_reader()
     tok = r.tokens[0]
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r._tip_ports, r._panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )
     panel = r.tooltip_controller.surface_state().nest.state
     assert panel is not None
@@ -500,10 +500,10 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
     r = _nested_reader()
     tok = r.tokens[0]
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r._tip_ports, r._panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # soft first paint
     tooltip_panel.scroll_view(
-        r.tip_ports,
+        r._tip_ports,
         r.tooltip_controller.surface_state().nest,
         r.tooltip_controller.surface_state().nest.view_h // 2,
     )  # soft-first + records a render-ahead
@@ -513,7 +513,7 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
     rasters = assert_no_interactive_raster(
         r.tooltip_controller.surface_state().nest,
         lambda: tooltip_panel.apply_pending_crisp(
-            r.tip_ports, r.tooltip_controller.surface_state().nest
+            r._tip_ports, r.tooltip_controller.surface_state().nest
         ),
     )
     assert rasters == 0
@@ -529,11 +529,11 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     r = _nested_reader()
     tok = r.tokens[0]
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r._tip_ports, r._panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )
     nest = r.tooltip_controller.surface_state().nest.state
     tooltip_panel.scroll_view(
-        r.tip_ports,
+        r._tip_ports,
         r.tooltip_controller.surface_state().nest,
         max(1, r.tooltip_controller.surface_state().nest.view_h // 3),
     )
@@ -555,7 +555,7 @@ def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
         return real(*a, **k)
 
     monkeypatch.setattr(st, "render_ahead", spy)
-    tooltip_panel.scroll_view(r.tip_ports, view, view.view_h)  # flick → records a render-ahead
+    tooltip_panel.scroll_view(r._tip_ports, view, view.view_h)  # flick → records a render-ahead
     _render_submitter(r).finish_all()
     return seen
 
@@ -597,7 +597,7 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     assert r.tooltip_controller.surface_state().view.crisp_pending
     tok = r.tokens[1]  # nested on a DIFFERENT word, so warming it can't warm the base
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
+        r._tip_ports, r._panel_ports, tok, tok.surface, nested_popup.Anchor(300.0, 2000.0, 40.0)
     )  # nested soft paint
     assert (
         r.tooltip_controller.surface_state().nest.crisp_pending
@@ -619,10 +619,10 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     uploads: list = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda _v, *_a, oid=None, **_k: uploads.append(oid))
     tooltip_panel.apply_pending_crisp(
-        r.tip_ports, r.tooltip_controller.surface_state().view
+        r._tip_ports, r.tooltip_controller.surface_state().view
     )  # base native still cold → no-op, base not re-blit
     tooltip_panel.apply_pending_crisp(
-        r.tip_ports, r.tooltip_controller.surface_state().nest
+        r._tip_ports, r.tooltip_controller.surface_state().nest
     )  # nested native warm → upgrades the NESTED to crisp
 
     assert (
@@ -768,7 +768,7 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None, *, tooltip_inline: bool = Fals
     engaged_slot = _SwitchableSubmitter()
     metadata_slot = _SwitchableSubmitter()
 
-    def runtime_jobs(_owner, jobs):
+    def runtime_jobs(jobs):
         if tooltip_inline:
             return replace(jobs, metadata=None, engaged=None)
         return replace(jobs, engaged=engaged_slot, metadata=metadata_slot)
@@ -860,7 +860,7 @@ def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
     submitter = _enable_engaged(r)
     i, _tok, _inflected, _mined = _first_content(r)
     r.tooltip_controller.surface_state().panel_cache.clear()  # ensure cold
-    tooltip.show_tooltip(r.tip_ports, r.panel_ports, r.hover_inputs, r.show_actions, i)
+    tooltip.show_tooltip(r._tip_ports, r._panel_ports, r.hover_inputs, r.show_actions, i)
     assert r.tooltip_controller.surface_state().view.state is None  # nothing shown — deferred
     assert submitter.calls  # handed to the runtime actor
 
@@ -872,7 +872,7 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
     key = tooltip_panel.panel_key(
-        r.panel_ports,
+        r._panel_ports,
         tok,
         inflected,
         mined=mined,
@@ -881,7 +881,7 @@ def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatc
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
     r.tooltip_controller.surface_state().panel_cache.clear()
-    tooltip.show_tooltip(r.tip_ports, r.panel_ports, r.hover_inputs, r.show_actions, i)
+    tooltip.show_tooltip(r._tip_ports, r._panel_ports, r.hover_inputs, r.show_actions, i)
     assert r.tooltip_controller.surface_state().view.state is None and submitter.calls
     r.tooltip_controller.select(i)
     submitter.finish()
@@ -900,7 +900,7 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     _i, tok, inflected, mined = _first_content(r)
-    key = tooltip_panel.panel_key(r.panel_ports, tok, inflected, mined=mined)
+    key = tooltip_panel.panel_key(r._panel_ports, tok, inflected, mined=mined)
     spans = []
 
     @contextlib.contextmanager
@@ -935,7 +935,7 @@ def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkey
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
-    old_key = tooltip_panel.panel_key(r.panel_ports, tok, inflected, mined=mined)
+    old_key = tooltip_panel.panel_key(r._panel_ports, tok, inflected, mined=mined)
     r.tooltip_controller.surface_state().view.job_id = (
         r.tooltip_controller.surface_state().jobs.begin("tooltip")
     )
@@ -971,8 +971,8 @@ def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     r.tooltip_controller.retire_selection()
     r.tooltip_controller.surface_state().view.state = None  # not hovering that word anymore
     tooltip.apply_engaged_hover(
-        r.tip_ports,
-        r.panel_ports,
+        r._tip_ports,
+        r._panel_ports,
         r.hover_inputs,
         r.show_actions,
         tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=None),
@@ -992,8 +992,8 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     )
 
     tooltip.apply_engaged_hover(
-        r.tip_ports,
-        r.panel_ports,
+        r._tip_ports,
+        r._panel_ports,
         r.hover_inputs,
         r.show_actions,
         tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=old_job),
@@ -1020,7 +1020,7 @@ def test_nested_cold_miss_defers_and_enqueues_nested(tmp_path, monkeypatch):
     ) = (0, 0), 0
     r.tooltip_controller.surface_state().panel_cache.clear()
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
+        r._tip_ports, r._panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
     )
     assert r.tooltip_controller.surface_state().nest.state is None  # nothing shown — deferred
     request = submitter.calls[-1]["request"].request
@@ -1040,7 +1040,7 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
     ) = (0, 0), 0
     r.tooltip_controller.surface_state().panel_cache.clear()
     nested_popup.open_nested(
-        r.tip_ports, r.panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
+        r._tip_ports, r._panel_ports, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True
     )
     assert r.tooltip_controller.surface_state().nest.state is not None  # shown synchronously
     assert r.tooltip_controller.surface_state().nest.state is not None
@@ -1055,7 +1055,7 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     r, cache = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     _i, tok, inflected, mined = _first_content(r)
-    key = tooltip_panel.panel_key(r.panel_ports, tok, inflected, mined=mined)
+    key = tooltip_panel.panel_key(r._panel_ports, tok, inflected, mined=mined)
 
     r.tooltip_controller.surface_state().panel_cache.clear()
     assert r._request_engaged_tooltip(
@@ -1114,7 +1114,7 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
 
     r.tooltip_controller.surface_state().panel_cache.clear()
     nested_popup.show_nested(
-        r.tip_ports, r.panel_ports, r.word_lookup, sb
+        r._tip_ports, r._panel_ports, r.word_lookup, sb
     )  # cold → defer (same phrase the worker will build under)
     deadline = time.monotonic() + 1
     while not submitter.calls and time.monotonic() < deadline:
@@ -1136,12 +1136,12 @@ def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monke
     r.tooltip_controller.surface_state().view.job_id = (
         r.tooltip_controller.surface_state().jobs.begin("tooltip")
     )
-    tooltip._request_hover_metadata(r.tip_ports, r.word_lookup, r.hover_inputs, index)
+    tooltip._request_hover_metadata(r._tip_ports, r.word_lookup, r.hover_inputs, index)
     original = requests[-1]
     r.mining_controller.record_mined_expression("__newly-mined__")
     tooltip.apply_hover_metadata(
-        r.tip_ports,
-        r.panel_ports,
+        r._tip_ports,
+        r._panel_ports,
         r.word_lookup,
         r.hover_inputs,
         r.show_actions,
@@ -1169,8 +1169,8 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
         r.tooltip_controller.surface_state().view.rect,
     ) = None, None
     tooltip.apply_engaged_hover(
-        r.tip_ports,
-        r.panel_ports,
+        r._tip_ports,
+        r._panel_ports,
         r.hover_inputs,
         r.show_actions,
         tooltip_engaged.HoverReady(("k",), nested=True, tail="本", job_id=None),
@@ -1197,7 +1197,7 @@ def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, tok.surface)
     request = submitter.calls[-1]["request"].request
     assert isinstance(request, tooltip_engaged.NavigateRequest) and request.query == tok.surface
     assert r.tooltip_controller.observation().navigation_depth == 0  # nothing pushed / swapped yet
@@ -1208,7 +1208,7 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, tok.surface)
     assert (
         r.tooltip_controller.observation().navigation_depth == 1
     )  # synchronous swap pushed the previous view
@@ -1221,7 +1221,7 @@ def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
     old = r.tooltip_controller.surface_state().view.state
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)  # defer
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, tok.surface)  # defer
     submitter.finish()
     assert (
         r.tooltip_controller.surface_state().view.state is not None
@@ -1241,7 +1241,7 @@ def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, 
     tok = _base_tip_up(r)
     old = r.tooltip_controller.surface_state().view.state
 
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, tok.surface)
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert (
@@ -1283,7 +1283,7 @@ def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, tok.surface)
     call = submitter.calls.pop(0)
     result = submitter.run(call["request"])
     # A word switch in the defer window → a genuinely different panel object under _tip_state.
@@ -1305,7 +1305,7 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, tok.surface)
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, tok.surface)
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
     r.tooltip_controller.surface_state().view.state = r._panel_for(
         r.tokens[j], r._inflected_surface(j), min_h=r.tip_scale.cap, mined=False

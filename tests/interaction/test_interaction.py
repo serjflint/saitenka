@@ -42,7 +42,7 @@ def _reader(*, render_ahead_submitter=None):
     runtime_jobs = None
     if render_ahead_submitter is not None:
 
-        def runtime_jobs(_owner, jobs):
+        def runtime_jobs(jobs):
             return replace(jobs, render_ahead=render_ahead_submitter)
 
     r = SessionController(
@@ -428,7 +428,7 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     assert ui.tip_shown
     base = r.tooltip_controller.surface_state().view.state
 
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")  # what _click_tip routes a link to
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "本命")  # what _click_tip routes a link to
     assert (
         r.tooltip_controller.surface_state().view.state is not None
         and r.tooltip_controller.surface_state().view.state is not base
@@ -438,12 +438,14 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     )
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
 
-    assert tooltip.tip_back(r.tip_ports) is True
+    assert tooltip.tip_back(r._tip_ports) is True
     assert (
         r.tooltip_controller.surface_state().view.state is base
         and r.tooltip_controller.observation().navigation_depth == 0
     )
-    assert tooltip.tip_back(r.tip_ports) is False, "no history left → caller falls through to close"
+    assert tooltip.tip_back(r._tip_ports) is False, (
+        "no history left → caller falls through to close"
+    )
 
 
 def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
@@ -453,7 +455,7 @@ def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
     ui = Driver(r)
     i = _content_word(r)
     ui.move_to_word(i)
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "本命")
     assert r.tooltip_controller.observation().can_go_back
 
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
@@ -467,8 +469,8 @@ def test_esc_steps_back_through_navigation_then_closes():
     ui.move_to_word(_content_word(r))
     from saitenka.app.features.tooltip import tooltip
 
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "本命")
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "読む")
     assert r.tooltip_controller.observation().navigation_depth == 2
 
     ui.key(TIP_CLOSE_MSG)

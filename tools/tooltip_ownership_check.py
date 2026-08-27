@@ -94,6 +94,7 @@ _OWNER_DECLARED_RESULTS = {
     "expire_pulse",
     "has_cached_panel",
     "hover_view",
+    "hover_diagnostics",
     "keybindings_bound",
     "metadata_deferred",
     "observation",
@@ -104,6 +105,15 @@ _OWNER_DECLARED_RESULTS = {
     "surface_binding",
 }
 _OWNER_RAW_BOUNDARY_MEMBERS = {*_OWNER_MUTABLE_BRIDGES}
+_RETIRED_SESSION_PORTS = {"panel_ports", "tip_ports"}
+_COMPOSITION_RAW_TOOLTIP_METHODS = {
+    "_panel_cache_setdefault",
+    "_panel_ports",
+    "_render_nested_view",
+    "_render_tip_view",
+    "_tip_ports",
+    "scroll_tip",
+}
 _RETIRED_TOOLTIP_STATE = {"key", "rect", "state", "tip_inflected", "tip_tok"}
 _RETIRED_PREPARATION_ATTRIBUTES = {
     "_mask_atlas_startup",
@@ -258,13 +268,34 @@ def _is_preparation_reference(node: ast.AST, names: set[str]) -> bool:
     )
 
 
-def _annotation_is_tooltip_controller(annotation: ast.AST | None) -> bool:
-    if isinstance(annotation, ast.Name | ast.Attribute):
-        return (
-            getattr(annotation, "id", None) == "TooltipController"
-            or getattr(annotation, "attr", None) == "TooltipController"
-        )
-    return isinstance(annotation, ast.Constant) and annotation.value == "TooltipController"
+def _annotation_name(annotation: ast.AST | None) -> str | None:
+    if isinstance(annotation, ast.Name):
+        return annotation.id
+    if isinstance(annotation, ast.Attribute):
+        return annotation.attr
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        return annotation.value
+    return None
+
+
+def _annotation_is_tooltip_controller(annotation: ast.AST | None, type_names: set[str]) -> bool:
+    return _annotation_name(annotation) in type_names
+
+
+def _tooltip_controller_type_names(tree: ast.AST) -> set[str]:
+    names = {"TooltipController"}
+    changed = True
+    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
+    while changed:
+        changed = False
+        for assignment in assignments:
+            if _annotation_name(assignment.value) not in names:
+                continue
+            aliases = {name for target in assignment.targets for name in _bound_names(target)}
+            if not aliases <= names:
+                names.update(aliases)
+                changed = True
+    return names
 
 
 def _annotation_is_tooltip_preparation(annotation: ast.AST | None) -> bool:
@@ -297,7 +328,7 @@ def _scope_nodes(scope: ast.AST) -> list[ast.AST]:
     return nodes
 
 
-def _owner_names(scope: ast.AST, inherited: set[str]) -> set[str]:
+def _owner_names(scope: ast.AST, inherited: set[str], type_names: set[str]) -> set[str]:
     names = {*inherited, "tooltip_controller"}
     if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
         arguments = [*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs]
@@ -309,12 +340,14 @@ def _owner_names(scope: ast.AST, inherited: set[str]) -> set[str]:
         names.update(
             argument.arg
             for argument in arguments
-            if _annotation_is_tooltip_controller(argument.annotation)
+            if _annotation_is_tooltip_controller(argument.annotation, type_names)
         )
 
     nodes = _scope_nodes(scope)
     for node in nodes:
-        if isinstance(node, ast.AnnAssign) and _annotation_is_tooltip_controller(node.annotation):
+        if isinstance(node, ast.AnnAssign) and _annotation_is_tooltip_controller(
+            node.annotation, type_names
+        ):
             names.update(_bound_names(node.target))
     changed = True
     while changed:
@@ -374,13 +407,15 @@ def _scoped_nodes(
     scope: ast.AST,
     inherited_owner: set[str] | None = None,
     inherited_preparation: set[str] | None = None,
+    owner_types: set[str] | None = None,
 ):
-    owner_names = _owner_names(scope, inherited_owner or set())
+    type_names = owner_types or {"TooltipController"}
+    owner_names = _owner_names(scope, inherited_owner or set(), type_names)
     preparation_names = _preparation_names(scope, inherited_preparation or set())
     yield scope, owner_names, preparation_names
     for node in _scope_nodes(scope):
         if isinstance(node, _SCOPES):
-            yield from _scoped_nodes(node, owner_names, preparation_names)
+            yield from _scoped_nodes(node, owner_names, preparation_names, type_names)
         else:
             yield node, owner_names, preparation_names
 
@@ -388,6 +423,7 @@ def _scoped_nodes(
 def inspect_source(source: str, path: Path) -> list[Finding]:
     tree = ast.parse(source, filename=str(path))
     site = _site(path)
+    owner_types = _tooltip_controller_type_names(tree)
     findings: list[Finding] = []
     imported_aliases = {
         alias.asname or alias.name: alias.name
@@ -410,7 +446,15 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
         if alias.name == "saitenka.app.session.controller" and alias.asname is not None
     }
 
-    for node, owner_names, preparation_names in _scoped_nodes(tree):
+    for node, owner_names, preparation_names in _scoped_nodes(tree, owner_types=owner_types):
+        if (
+            site == _COMPOSITION
+            and isinstance(node, ast.FunctionDef)
+            and node.name in _RETIRED_SESSION_PORTS
+        ):
+            findings.append(Finding(path, node.lineno, "session-tooltip-port", node.name))
+        if isinstance(node, ast.Attribute) and node.attr in _RETIRED_SESSION_PORTS:
+            findings.append(Finding(path, node.lineno, "session-tooltip-port", node.attr))
         if (
             site == _OWNER
             and isinstance(node, ast.FunctionDef)
@@ -434,6 +478,27 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
             findings.append(
                 Finding(path, node.lineno, "owner-raw-boundary-outside-tooltip", node.attr)
             )
+        if (
+            site == _COMPOSITION
+            and isinstance(node, ast.FunctionDef)
+            and node.name not in _COMPOSITION_RAW_TOOLTIP_METHODS
+        ):
+            raw = next(
+                (
+                    child
+                    for child in ast.walk(node)
+                    if isinstance(child, ast.Attribute)
+                    and child.attr in _OWNER_RAW_BOUNDARY_MEMBERS
+                    and _is_tooltip_owner_reference(child.value, owner_names)
+                ),
+                None,
+            )
+            if raw is not None:
+                findings.append(
+                    Finding(
+                        path, raw.lineno, "owner-raw-boundary-outside-physical-method", node.name
+                    )
+                )
         if isinstance(node, ast.Attribute) and (
             site == _COMPOSITION
             and _is_self_attribute(node)

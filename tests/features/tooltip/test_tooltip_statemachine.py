@@ -158,7 +158,7 @@ class TooltipSession(RuleBasedStateMachine):
     @rule()
     def navigate(self) -> None:
         before = self.r.tooltip_controller.observation().navigation_depth
-        tooltip.navigate_tip(self.r.tip_ports, self.r.panel_ports, _NAV_QUERY)
+        tooltip.navigate_tip(self.r._tip_ports, self.r._panel_ports, _NAV_QUERY)
         assert (
             self.r.tooltip_controller.observation().navigation_depth == before + 1
         )  # the wildcard target always resolves
@@ -174,7 +174,7 @@ class TooltipSession(RuleBasedStateMachine):
     def back(self) -> None:
         expected = self.nav_depth > 0
         assert (
-            tooltip.tip_back(self.r.tip_ports) == expected
+            tooltip.tip_back(self.r._tip_ports) == expected
         )  # False at the root → caller closes the tooltip
         if expected:
             self.nav_depth -= 1
@@ -185,8 +185,8 @@ class TooltipSession(RuleBasedStateMachine):
     def open_nested(self) -> None:
         tok = self.r.tokens[0]
         nested_popup.open_nested(
-            self.r.tip_ports,
-            self.r.panel_ports,
+            self.r._tip_ports,
+            self.r._panel_ports,
             tok,
             tok.surface,
             nested_popup.Anchor(200.0, 200.0, 40.0),
@@ -199,7 +199,7 @@ class TooltipSession(RuleBasedStateMachine):
     def resize(self, scale: int) -> None:
         self.r.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
         tooltip_panel.render_view(
-            self.r.tip_ports, self.r.tooltip_controller.surface_state().view
+            self.r._tip_ports, self.r.tooltip_controller.surface_state().view
         )  # re-blit at the new scale
         self._check("resize")
 

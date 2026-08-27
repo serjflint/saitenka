@@ -131,14 +131,14 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
 
     reader = SessionController(
         FakeIPC(),
-        tooltip_runtime_jobs=lambda _owner, jobs: replace(jobs, metadata=submitter),
+        tooltip_runtime_jobs=lambda jobs: replace(jobs, metadata=submitter),
     )
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     reader.tooltip_controller.select(0)
     reader.tooltip_controller.surface_state().view.job_id = (
         reader.tooltip_controller.surface_state().jobs.begin("tooltip")
     )
-    tooltip._request_hover_metadata(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
+    tooltip._request_hover_metadata(reader._tip_ports, reader.word_lookup, reader.hover_inputs, 0)
     original = submitted[0]["request"]
 
     reader.mining_controller.record_mined_expression("__newly-mined__")
@@ -187,7 +187,7 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
     reader = SessionController(
         FakeIPC(),
         dict_set=Dictionary(),
-        tooltip_runtime_jobs=lambda _owner, jobs: replace(
+        tooltip_runtime_jobs=lambda jobs: replace(
             jobs, metadata=lambda **kwargs: submitted.append(kwargs["request"]) or True
         ),
     )
