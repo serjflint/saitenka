@@ -35,7 +35,7 @@ class ReslotPorts:
     configure_retry: Callable[..., object]
     configure_picker: Callable[..., object]
     fetch_japanese: Callable[[object], None]
-    start_prefetch: Callable[[], None]
+    start_prefetch: Callable[[], object]
     toast: Callable[..., None]
 
 

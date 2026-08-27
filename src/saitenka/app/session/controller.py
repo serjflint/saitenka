@@ -2839,11 +2839,17 @@ class SessionController:
         )
 
     def _request_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> bool:
-        changes = {} if request.scale is not None else {"scale": self.tip_scale}
-        if isinstance(request, tooltip_engaged.HoverRequest) and request.panels is None:
-            changes["panels"] = self.panel_ports
-        if changes:
-            request = replace(request, **changes)
+        scale = self.tip_scale
+        if isinstance(request, tooltip_engaged.HoverRequest):
+            request = replace(
+                request,
+                panels=self.panel_ports if request.panels is None else request.panels,
+                scale=scale if request.scale is None else request.scale,
+            )
+        elif (isinstance(request, tooltip_engaged.NavigateRequest) and request.scale is None) or (
+            isinstance(request, tooltip_engaged.OpenRequest) and request.scale is None
+        ):
+            request = replace(request, scale=scale)
         return self.tooltip_controller.request_engaged(
             request,
             generation=self.tooltip_preparation.generation,
