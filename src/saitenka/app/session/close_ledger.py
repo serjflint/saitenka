@@ -50,31 +50,6 @@ class CloseStep:
     present: Callable[[], object] | None = None
 
 
-def _absent() -> None:
-    """A participant the runtime already retired — `present` skips on None."""
-    return
-
-
-def fallback_for(present: Callable[[], object], *, owned: bool) -> Callable[[], object]:
-    """`CloseStep.present` for a step the runtime performs when a runtime owns the session.
-
-    `present` skips on `None`, not on falsy, so "the runtime owns this" has to *be* None: a
-    `not owned` bool keeps the fallback running beside the effect it is a fallback for.
-    """
-    return _absent if owned else present
-
-
-def fallback_after(performed: Callable[[], bool], present: Callable[[], object]):
-    """`fallback_for` for a decision only the announcement can make.
-
-    Registering a participant is not the same as something performing it: a session with a gateway
-    but no reactor registers everything and runs nothing, so a fallback gated on registration alone
-    is skipped by a runtime that never acted. The phase's announcement is what actually answers,
-    which is why it has to run *before* the steps it might replace.
-    """
-    return lambda: _absent() if performed() else present()
-
-
 class RuntimeCloseTracker:
     """Track which runtime retirements still require their local fallback."""
 

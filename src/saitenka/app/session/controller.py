@@ -3865,12 +3865,8 @@ class SessionController:
     def _retire_surfaces(self) -> None:
         """Announce the `SURFACES` phase, or close them ourselves.
 
-        Same fallback shape as `_retire_artifacts`, and for the same reason: a `SessionController` with no
-        runtime still built the surfaces, so somebody has to remove them.
-
-        Gated on the *registration*, not on the announcement's return: `announce` reports only that
-        a reactor saw the event, not that anything performed the effect. A session with a reactor
-        but no registered resource would take the True and leak the overlays.
+        Per-resource acknowledgement keeps a missing registration on the local path; this method
+        finishes before the separate overlay-transport phase begins.
         """
         self._runtime_close.retire(
             ClosePhase.SURFACES,
