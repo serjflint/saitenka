@@ -211,8 +211,8 @@ def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
 
         Driver(reader, instant=False).move(5, 5)
 
-        assert reader.tooltip_controller.hover_store.current.hysteresis.word_target == 1
-        assert reader.hover_view().scan_target is None
+        assert reader.tooltip_controller.hover_diagnostics().word_target == 1
+        assert reader.tooltip_controller.hover_view().scan_target is None
     finally:
         reader.close()
 

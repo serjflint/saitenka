@@ -7,7 +7,6 @@ exactly what the future file-change re-slot relies on, so it is asserted here di
 
 from __future__ import annotations
 
-import pytest
 import util
 
 from saitenka.app.features.tooltip.popups import PopupView, TooltipState
@@ -88,21 +87,25 @@ def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
     assert r._translation_secondary_sid is None  # the lease goes with the selection
 
 
-def test_reader_projects_the_tooltip_controllers_state():
+def test_tooltip_controller_owns_its_surface_state():
     r = SessionController(FakeIPC())
-    assert isinstance(r.tip, TooltipState)
-    assert r.tip.nest is r.tip.nest and isinstance(r.tip.nest, PopupView)
-    r.tip.view.scroll = 4
-    r.tip.hover_reading = "よむ"
-    assert r.tip.view.scroll == 4 and r.tip.hover_reading == "よむ"
+    assert isinstance(r.tooltip_controller.surface_state(), TooltipState)
+    assert (
+        r.tooltip_controller.surface_state().nest is r.tooltip_controller.surface_state().nest
+        and isinstance(r.tooltip_controller.surface_state().nest, PopupView)
+    )
+    r.tooltip_controller.surface_state().view.scroll = 4
+    r.tooltip_controller.surface_state().hover_reading = "よむ"
+    assert (
+        r.tooltip_controller.surface_state().view.scroll == 4
+        and r.tooltip_controller.surface_state().hover_reading == "よむ"
+    )
 
 
-def test_tooltip_state_has_one_read_only_owner():
+def test_session_does_not_project_tooltip_state_twice():
     r = SessionController(FakeIPC())
 
-    assert r.tip is r.interaction.tip is r.tooltip_controller.state
-    with pytest.raises(AttributeError):
-        r.tip = TooltipState()
+    assert not hasattr(r, "tip") and not hasattr(r, "interaction")
 
 
 def test_session_state_survives_an_episode_reslot():

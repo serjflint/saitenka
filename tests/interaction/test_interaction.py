@@ -7,9 +7,11 @@ These use the :class:`Driver` (tests/driver.py) so they read as interaction scri
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from driver import Driver
-from util import FakeIPC
+from util import FakeIPC, ManualRenderAheadSubmitter
 
 from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import TIP_CLOSE_MSG
@@ -33,11 +35,22 @@ class _FakeDS:
         return any(f in {"本命", "を", "読む", "命", "ほんめい", "よむ"} for f in forms)
 
 
-def _reader():
+def _reader(*, render_ahead_submitter=None):
     # Pin tip_max_frac so the fixed hit-points and layout goldens below are independent of the product
     # default: a change to the default tooltip height must not silently move these interaction goldens.
     # osd = 1080p so the UI scale is 1.0 (REF_H) — the goldens capture the reference (unscaled) layout.
-    r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+    runtime_jobs = None
+    if render_ahead_submitter is not None:
+
+        def runtime_jobs(jobs):
+            return replace(jobs, render_ahead=render_ahead_submitter)
+
+    r = SessionController(
+        FakeIPC(),
+        dict_set=_FakeDS(),
+        tip_max_frac=0.5,
+        tooltip_runtime_jobs=runtime_jobs,
+    )
     r.osd = (1920, 1080)
     # the default SubtitleRenderer produces the real per-word boxes these goldens hit-test against
     r.set_subtitle("本命を読む")  # → 本命 / を / 読む
@@ -188,7 +201,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
     )
     r.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
-    assert r.tooltip_preparation.cache.peek(r.preparation_inputs, ()) is None
+    assert r.tooltip_preparation.cache.peek(r._preparation_inputs, ()) is None
     assert r.tooltip_preparation.cache.mask_atlas is None
 
     ui = Driver(r)
@@ -203,7 +216,7 @@ def test_main_flow_renders_at_4k_without_caches():
     r.set_subtitle("本命を読む")
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert ui.tip_shown and r.tip.view.rect is not None
+    assert ui.tip_shown and r.tooltip_controller.surface_state().view.rect is not None
 
 
 def test_tooltip_keeps_lease_over_occluded_word(monkeypatch):
@@ -238,13 +251,14 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     monkeypatch.setattr(r.profile_controller.dict_set, "has_term", lambda *forms: "本命を" in forms)
     ui = Driver(r)
     ui.move_to_word(0)
-    assert r.interaction.hovered_word_meta.terms == ("本命を",)
-    assert r.interaction.hovered_word_meta.span == (0, 2), (
+    assert r.tooltip_controller.observation().metadata.terms == ("本命を",)
+    assert r.tooltip_controller.observation().metadata.span == (0, 2), (
         "the highlight must span the hovered token and its phrase partner"
     )
     ui.move_to_word(2)  # switch to 読む — a word with no following phrase term
     assert (
-        r.interaction.hovered_word_meta.span is None and r.interaction.hovered_word_meta.terms == ()
+        r.tooltip_controller.observation().metadata.span is None
+        and r.tooltip_controller.observation().metadata.terms == ()
     )
 
 
@@ -297,9 +311,11 @@ def test_full_stress_chain_through_the_hit_test_path():
     assert ui.tip_shown, "hover shows the tooltip"
 
     ui.move_into_tip(0.5, 0.5)  # cursor over the tip so the wheel routes to it
-    before = r.tip.view.scroll
+    before = r.tooltip_controller.surface_state().view.scroll
     ui.wheel(1)
-    assert r.tip.view.scroll > before, "wheel over the tip scrolls it (hit-test-routed)"
+    assert r.tooltip_controller.surface_state().view.scroll > before, (
+        "wheel over the tip scrolls it (hit-test-routed)"
+    )
 
     ui.move_into_tip(0.5, 0.6)  # rest on an inner word → nested scan popup
     assert ui.nested_shown, "hovering inside the body opens the nested popup"
@@ -324,7 +340,7 @@ def test_empty_body_click_does_nothing(monkeypatch):
     events: list[str] = []
     monkeypatch.setattr(r._stateless_commands, "run", lambda _command: events.append("mine"))
     # click low in the body, away from the ⊕/🔊 header buttons
-    x, y, w, h = r.tip.view.rect
+    x, y, w, h = r.tooltip_controller.surface_state().view.rect
     ui.move(x + w * 0.5, y + h - 6).click()
     assert events == [], "a click in an empty body area must not mine or speak"
 
@@ -334,27 +350,33 @@ def test_wheel_scrolls_the_tooltip():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     ui.move_into_tip(0.5, 0.5)  # cursor over the tip so the wheel routes to it
-    before = r.tip.view.scroll
+    before = r.tooltip_controller.surface_state().view.scroll
     ui.wheel(1)  # one notch down
-    assert r.tip.view.scroll > before, "wheeling over a scrollable tooltip must scroll it down"
+    assert r.tooltip_controller.surface_state().view.scroll > before, (
+        "wheeling over a scrollable tooltip must scroll it down"
+    )
 
 
 def test_scroll_warms_native_bands_ahead_at_hidpi():
     # One-panel: a scroll must warm the NEXT native bands off the main thread (render-ahead), so continued
     # scrolling composites crisp without a synchronous raster (the old bug: only the first band was crisp).
-    r = _reader()
-    submitted = []
-    r.tooltip_controller.render_ahead_submitter = lambda **kwargs: submitted.append(kwargs) or True
+    submitter = ManualRenderAheadSubmitter()
+    r = _reader(render_ahead_submitter=submitter)
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
     ui = Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
-    assert r.tip.view.state.full_height > r.tip.view.view_h  # scrollable
-    ui.wheel(1)
-    assert r.tip.view.scroll > 0  # scrolled
-    pending = r.tooltip_controller.render_ahead.pending
-    assert pending is not None
-    req = pending[1]
     assert (
-        req is not None and req.scroll == r.tip.view.scroll and req.direction == 1
+        r.tooltip_controller.surface_state().view.state.full_height
+        > r.tooltip_controller.surface_state().view.view_h
+    )  # scrollable
+    while submitter.calls:
+        submitter.finish()
+    ui.wheel(1)
+    assert r.tooltip_controller.surface_state().view.scroll > 0  # scrolled
+    req = submitter.calls[-1]["request"]
+    assert (
+        req is not None
+        and req.scroll == r.tooltip_controller.surface_state().view.scroll
+        and req.direction == 1
     )  # warm follows scroll
 
 
@@ -379,12 +401,20 @@ def test_golden_base_and_nested_render():
     r = _reader()
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert r.hover_view().tip.state is not None
-    assert_golden(_full_panel_image(r.tip.view.state), "interaction_base_tooltip.png", tol=3.0)
+    assert r.tooltip_controller.hover_view().tip.shown
+    assert_golden(
+        _full_panel_image(r.tooltip_controller.surface_state().view.state),
+        "interaction_base_tooltip.png",
+        tol=3.0,
+    )
 
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
-    assert r.hover_view().nested.state is not None
-    assert_golden(_full_panel_image(r.tip.nest.state), "interaction_nested_popup.png", tol=3.0)
+    assert r.tooltip_controller.hover_view().nested.shown
+    assert_golden(
+        _full_panel_image(r.tooltip_controller.surface_state().nest.state),
+        "interaction_nested_popup.png",
+        tol=3.0,
+    )
 
 
 def test_link_click_navigates_the_base_tooltip_in_place_with_back():
@@ -396,16 +426,26 @@ def test_link_click_navigates_the_base_tooltip_in_place_with_back():
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown
-    base = r.tip.view.state
+    base = r.tooltip_controller.surface_state().view.state
 
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")  # what _click_tip routes a link to
-    assert r.tip.view.state is not None and r.tip.view.state is not base
-    assert len(r.interaction.tip_nav.back) == 1, "the previous view is pushed for back"
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "本命")  # what _click_tip routes a link to
+    assert (
+        r.tooltip_controller.surface_state().view.state is not None
+        and r.tooltip_controller.surface_state().view.state is not base
+    )
+    assert r.tooltip_controller.observation().navigation_depth == 1, (
+        "the previous view is pushed for back"
+    )
     assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
 
-    assert tooltip.tip_back(r.tip_ports) is True
-    assert r.tip.view.state is base and r.interaction.tip_nav.back == ()
-    assert tooltip.tip_back(r.tip_ports) is False, "no history left → caller falls through to close"
+    assert tooltip.tip_back(r._tip_ports) is True
+    assert (
+        r.tooltip_controller.surface_state().view.state is base
+        and r.tooltip_controller.observation().navigation_depth == 0
+    )
+    assert tooltip.tip_back(r._tip_ports) is False, (
+        "no history left → caller falls through to close"
+    )
 
 
 def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
@@ -415,12 +455,12 @@ def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
     ui = Driver(r)
     i = _content_word(r)
     ui.move_to_word(i)
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
-    assert r.interaction.tip_nav.back
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "本命")
+    assert r.tooltip_controller.observation().can_go_back
 
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
     ui.move_to_word(j)  # a newly hovered word abandons the link-navigation
-    assert r.interaction.tip_nav.back == ()
+    assert r.tooltip_controller.observation().navigation_depth == 0
 
 
 def test_esc_steps_back_through_navigation_then_closes():
@@ -429,14 +469,14 @@ def test_esc_steps_back_through_navigation_then_closes():
     ui.move_to_word(_content_word(r))
     from saitenka.app.features.tooltip import tooltip
 
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "本命")
-    tooltip.navigate_tip(r.tip_ports, r.panel_ports, "読む")
-    assert len(r.interaction.tip_nav.back) == 2
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "本命")
+    tooltip.navigate_tip(r._tip_ports, r._panel_ports, "読む")
+    assert r.tooltip_controller.observation().navigation_depth == 2
 
     ui.key(TIP_CLOSE_MSG)
-    assert len(r.interaction.tip_nav.back) == 1 and ui.tip_shown
+    assert r.tooltip_controller.observation().navigation_depth == 1 and ui.tip_shown
     ui.key(TIP_CLOSE_MSG)
-    assert r.interaction.tip_nav.back == () and ui.tip_shown
+    assert r.tooltip_controller.observation().navigation_depth == 0 and ui.tip_shown
     ui.key(TIP_CLOSE_MSG)  # at the root → close
     assert not ui.tip_shown
 

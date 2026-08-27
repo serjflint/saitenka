@@ -101,25 +101,28 @@ def _why_stuck(reader) -> str:
     bare "did not advance" this replaces reports only that one of them happened, which is not enough to
     act on from a CI log.
     """
-    view, nest = reader.tip.view, reader.tip.nest
+    view, nest = (
+        reader.tooltip_controller.surface_state().view,
+        reader.tooltip_controller.surface_state().nest,
+    )
     state = view.state
     full_h = getattr(state, "full_height", None)
     return (
         f"state={'present' if state is not None else 'MISSING'} "
         f"full_h={full_h} view_h={view.view_h} scrollable={full_h is not None and full_h > view.view_h} "
         f"desired={view.desired_scroll} rect={view.rect} "
-        f"nest_rect={nest.rect} nest_scroll={nest.scroll} mouse={reader.tip.last_mouse}"
+        f"nest_rect={nest.rect} nest_scroll={nest.scroll} mouse={reader.tooltip_controller.surface_state().last_mouse}"
     )
 
 
 def _scroll_four(reader) -> None:
     from saitenka.app.session import surfaces
 
-    before = reader.tip.view.scroll
+    before = reader.tooltip_controller.surface_state().view.scroll
     for _ in range(4):
         reader.scroll_tip(surfaces.tip_wheel_pixels(reader.tip_scale.ref_h, 1))
         reader.pump()
-    if reader.tip.view.scroll == before:
+    if reader.tooltip_controller.surface_state().view.scroll == before:
         raise RuntimeError(
             f"live scroll workload did not advance the tooltip viewport ({_why_stuck(reader)})"
         )
@@ -202,12 +205,17 @@ def run(*, settle_s: float = 0.4) -> dict:
         def hover() -> None:
             ipc.command("mouse", cx, cy)  # tooltip composites; pause lease engages
 
-        sample("hover", timed(hover, lambda: reader.tip.view.rect is not None))
+        sample(
+            "hover",
+            timed(hover, lambda: reader.tooltip_controller.surface_state().view.rect is not None),
+        )
 
         sample("scroll", timed(lambda: _scroll_four(reader)))
 
-        if reader.tip.view.rect is not None:  # nested popup over an inner word
-            tx, ty, tw, th = reader.tip.view.rect
+        if (
+            reader.tooltip_controller.surface_state().view.rect is not None
+        ):  # nested popup over an inner word
+            tx, ty, tw, th = reader.tooltip_controller.surface_state().view.rect
 
             def nested() -> None:
                 ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))

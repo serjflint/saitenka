@@ -80,11 +80,14 @@ The following gates enforce the boundary:
 
 `SessionController` composes owner-thread session lifetime, ordered cross-feature conjunctions, and
 physical application. Bounded controllers and stores own feature facts: `TooltipController` owns
-tooltip interaction and engaged work; `TooltipPreparationController` owns speculative prefetch,
+tooltip interaction and engaged work, exposes frozen observations to other features, and releases
+mutable paint state only to the physical presentation seam; `TooltipPreparationController` owns speculative prefetch,
 persistent tooltip heads, and mask-atlas activation; `ProfileController` owns the active reading environment,
 `MiningController` owns mining, `CueAnnotationController` owns annotation identity, work, and cache,
 `PlaybackStore` owns the playback projection of cue identity, and `CueRenderStore` owns derived
 tokenization and geometry. Other features observe annotation through its frozen public view.
+Demo and screenshot sessions choose inline Tooltip work during session construction; lanes are not
+swapped after the session starts.
 `SessionController.run()` hands the thread to
 `SessionLoop`, which blocks on the mailbox rather than waking at a cadence:
 

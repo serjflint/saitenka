@@ -157,7 +157,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
     reader.profile_controller.use_tokenizer(spy)
     reader.tokens = [Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
 
-    tooltip.resolve_hover(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
+    tooltip.resolve_hover(reader._tip_ports, reader.word_lookup, reader.hover_inputs, 0)
 
     assert "phrase_terms" in spy.calls
 
@@ -173,7 +173,7 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     reader.profile_controller.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
 
-    nested_popup.open_link(reader.tip_ports, reader.panel_ports, lb, (0, 0), 0)
+    nested_popup.open_link(reader._tip_ports, reader._panel_ports, lb, (0, 0), 0)
 
     assert "query_token" in spy.calls
 

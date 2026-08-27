@@ -178,7 +178,7 @@ def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
     r = SessionController(FakeIPC())
-    r.tip.jobs.begin("tooltip")
+    r.tooltip_controller.surface_state().jobs.begin("tooltip")
 
     r.close()
 

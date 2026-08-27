@@ -28,6 +28,207 @@ def test_current_tooltip_ownership_tree_is_clean():
     assert ownership.inspect_tree() == []
 
 
+@pytest.mark.parametrize("attribute", ["tip", "interaction"])
+def test_session_cannot_reintroduce_tooltip_state_projections(attribute: str):
+    rules = _rules(
+        f"def drift(self):\n    return self.{attribute}\n",
+        "session/controller.py",
+    )
+
+    assert "legacy-session-field" in rules
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "state",
+        "hover_store",
+        "word_store",
+        "work_view",
+        "metadata",
+        "metadata_submitter",
+        "engaged",
+        "engaged_submitter",
+        "render_ahead",
+        "render_ahead_submitter",
+        "selected",
+        "pause_enabled",
+    ],
+)
+def test_tooltip_owner_cannot_republish_mutable_state(name: str):
+    rules = _rules(
+        f"class TooltipController:\n    def {name}(self):\n        return self._state\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-projection" in rules
+
+
+def test_tooltip_owner_cannot_republish_state_under_a_new_name():
+    rules = _rules(
+        "class TooltipController:\n    def raw_state(self):\n        return self._state\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-state-projection" in rules
+
+
+def test_tooltip_owner_cannot_republish_a_nested_state_member():
+    rules = _rules(
+        "class TooltipController:\n    def raw_view(self):\n        return self._state.view\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-state-projection" in rules
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "state = self._state\n        return state",
+        "return (self._state,)",
+        "state = self._state\n        return tuple((state,))",
+    ],
+)
+def test_tooltip_owner_cannot_republish_wrapped_or_aliased_state(body: str):
+    rules = _rules(
+        f"class TooltipController:\n    def raw_state(self):\n        {body}\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-state-projection" in rules
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "return owner.surface_state()",
+        "surface = owner.surface_state\n    return surface()",
+    ],
+)
+def test_feature_cannot_take_the_mutable_surface_state(body: str):
+    rules = _rules(
+        f"def drift(owner: TooltipController):\n    {body}\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+def test_feature_cannot_hide_the_owner_type_behind_an_alias():
+    rules = _rules(
+        "TC = TooltipController\n"
+        "def drift(owner: TC):\n"
+        "    surface = owner.surface_state\n"
+        "    return surface()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "from saitenka.app.features.tooltip.tooltip_controller import TooltipController as TC",
+        "type TC = TooltipController",
+    ],
+)
+def test_feature_cannot_hide_the_owner_type_behind_import_or_type_alias(declaration: str):
+    rules = _rules(
+        f"{declaration}\ndef drift(owner: TC):\n    return owner.surface_state()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+def test_feature_cannot_hide_the_owner_type_in_a_union_alias():
+    rules = _rules(
+        "type Maybe = TooltipController | None\n"
+        "def drift(owner: Maybe):\n    return owner.surface_state()\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "box = []\n    box.append(owner)\n    return box[0].surface_state()",
+        "box = {}\n    box['owner'] = owner\n    return box['owner'].surface_state()",
+        "holder.owner = owner\n    return holder.owner.surface_state()",
+        "owners.add(owner)\n    return next(iter(owners)).surface_state()",
+    ],
+)
+def test_feature_cannot_forward_the_owner_through_a_container(body: str):
+    rules = _rules(
+        f"def drift(owner: TooltipController):\n    {body}\n",
+        "features/mining/mine_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+def test_tooltip_policy_module_cannot_take_mutable_surface_state():
+    rules = _rules(
+        "def drift(owner: TooltipController):\n    return owner.surface_state()\n",
+        "features/tooltip/hover_adapter.py",
+    )
+
+    assert "owner-raw-boundary-outside-tooltip" in rules
+
+
+@pytest.mark.parametrize("name", ["tip_ports", "panel_ports"])
+def test_session_cannot_republish_raw_tooltip_ports(name: str):
+    rules = _rules(
+        f"class SessionController:\n    def {name}(self):\n        return object()\n",
+        "session/controller.py",
+    )
+
+    assert "session-tooltip-port" in rules
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "return self._tip_ports",
+        "ports = self._panel_ports\n        return ports",
+        "return tuple((self._tip_ports,))",
+    ],
+)
+def test_session_cannot_republish_private_tooltip_ports_under_a_new_name(body: str):
+    rules = _rules(
+        f"class SessionController:\n    def tooltip_capabilities(self):\n        {body}\n",
+        "session/controller.py",
+    )
+
+    assert "session-tooltip-port" in rules
+
+
+def test_session_may_bind_private_ports_into_the_declared_navigation_act():
+    rules = _rules(
+        "class SessionController:\n"
+        "    def tooltip_navigation(self):\n"
+        "        return Endpoint(navigate_back=lambda: tooltip.tip_back(self._tip_ports))\n",
+        "session/controller.py",
+    )
+
+    assert "session-tooltip-port" not in rules
+
+
+def test_non_physical_session_method_cannot_take_mutable_tooltip_state():
+    rules = _rules(
+        "class SessionController:\n"
+        "    def decide_business_policy(self):\n"
+        "        return self.tooltip_controller.surface_state()\n",
+        "session/controller.py",
+    )
+
+    assert "owner-raw-boundary-outside-physical-method" in rules
+
+
 @pytest.mark.parametrize(
     "attribute",
     [

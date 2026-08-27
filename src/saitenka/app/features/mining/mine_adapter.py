@@ -60,7 +60,7 @@ class BookmarkCommandEndpoint:
                 secondary_text=self.secondary_text(),
                 language=track.language,
                 tokens=cue.tokens,
-                hover=self.tooltip.selected,
+                hover=self.tooltip.observation().selected,
                 jp_sid=track.jp_sid,
                 en_sid=track.en_sid,
                 tracks=self.sequence_property("track-list"),

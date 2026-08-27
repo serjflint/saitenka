@@ -87,7 +87,6 @@ from saitenka.app.features.profiles.profile_controller import (
 from saitenka.app.features.sidebar import sidebar
 from saitenka.app.features.tooltip import (
     hover_intents,
-    hover_snapshot,
     nested_popup,
     prefetch,
     tooltip,
@@ -108,7 +107,6 @@ from saitenka.app.features.tooltip.popups import (
     PopupView,
     ShowActions,
     TipPorts,
-    TooltipState,
     WordLookup,
 )
 from saitenka.app.features.tooltip.preparation import TooltipPreparationInputs
@@ -142,7 +140,6 @@ from saitenka.app.session.close_plan import CloseContributions, assemble_close_p
 from saitenka.app.session.context import (
     EpisodeContext,
     EpisodeSlot,
-    InteractionContext,
     SessionContext,
 )
 from saitenka.app.session.interaction_adapter import (
@@ -421,11 +418,6 @@ class SessionController:
     def osd(self, value: tuple[int, int]) -> None:
         self.screen.osd = value
 
-    @property
-    def tip(self) -> TooltipState:
-        """Read-only compatibility projection of the tooltip feature's owned state."""
-        return self.tooltip_controller.state
-
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
         self,
         ipc: MpvIPC,
@@ -440,6 +432,11 @@ class SessionController:
         tokenizer_warm: Future[None] | None = None,
         tts_ok: bool | None = None,  # noqa: FBT001 -- tri-state capability snapshot
         runtime_submit=None,
+        tooltip_runtime_jobs: Callable[
+            [tooltip_controller.TooltipRuntimeJobs],
+            tooltip_controller.TooltipRuntimeJobs,
+        ]
+        | None = None,
         assembly: SessionAssembly | None = None,
         **legacy_kw,
     ):
@@ -462,7 +459,6 @@ class SessionController:
         self._assembly = assembly
         self.options = o
         self._episodes = EpisodeSlot()
-        self.interaction = InteractionContext()  # hover/tooltip/reveal-scoped state
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self._interactive_ready = False
@@ -606,8 +602,8 @@ class SessionController:
             ),
             flash_seconds=o.tooltip.flash_secs,
             key_context=assembly.tooltip_keys,
+            runtime_jobs=tooltip_runtime_jobs,
         )
-        self.interaction.tooltip = self.tooltip_controller
         self._cue_identity_ever_installed = False
         self.profile_controller = ProfileController(
             profile,
@@ -782,23 +778,6 @@ class SessionController:
         self.start_prefetch()
 
         self.tooltip_preparation.request_mask_atlas(self._finish_mask_atlas_startup)
-
-    def hover_view(self) -> hover_snapshot.HoverView:
-        """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
-        the public seam tests observe instead of the private ``_nest`` / ``_tip_*`` fields (#43)."""
-        hysteresis = self.tooltip_controller.hover_store.current.hysteresis
-        return hover_snapshot.snapshot(
-            self.tip.nest,
-            hover_snapshot.TipView(
-                state=self.tip.view.state,
-                key=self.tip.view.key,
-                rect=self.tip.view.rect,
-                hide_pending=hysteresis.tip_hide_pending,
-            ),
-            paused=self.interaction.hover_pause.held,
-            nav_idx=self.episode.nav_idx,
-            scan_target=hysteresis.scan_target,
-        )
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
@@ -1059,8 +1038,8 @@ class SessionController:
             annotation_visible=subtitle_raster.annotation_visible(
                 mode=self.annotation_mode, hover_annotation=self.annotation_hover
             ),
-            hover=self.tooltip_controller.selected,
-            hover_span=self.interaction.hovered_word_meta.span,
+            hover=self.tooltip_controller.observation().selected,
+            hover_span=self.tooltip_controller.observation().metadata.span,
             styles=self.styles,
             boxes=self.boxes,
             paused=bool(self.observed_property("pause")),
@@ -1581,12 +1560,12 @@ class SessionController:
             self.hover_suppression
         ):
             return
-        tooltip.update_hover(self.tip_ports, self.hover_actions, self.hover_inputs)
+        tooltip.update_hover(self._tip_ports, self._hover_actions, self.hover_inputs)
 
     def set_hover(self, index: int) -> None:
         tooltip.set_hover(
-            self.tip_ports,
-            self.panel_ports,
+            self._tip_ports,
+            self._panel_ports,
             self.word_lookup,
             self.hover_inputs,
             self.show_actions,
@@ -1595,19 +1574,18 @@ class SessionController:
 
     def retire_hover(self) -> None:
         """Publish that nothing is hovered — the teardown half of the old `set_hover(-1)`."""
-        tooltip.retire_hover(self.tip_ports, self.hover_inputs, self.show_actions)
+        tooltip.retire_hover(self._tip_ports, self.hover_inputs, self.show_actions)
 
     def prepare_hover_blocking(self, index: int) -> None:
-        """Build the deterministic demo/screenshot hover before the event loop starts."""
-        with self.tooltip_controller.blocking():
-            tooltip.set_hover(
-                self.tip_ports,
-                self.panel_ports,
-                self.word_lookup,
-                self.hover_inputs,
-                self.show_actions,
-                index,
-            )
+        """Build a demo/screenshot hover with the inline lanes chosen by composition."""
+        tooltip.set_hover(
+            self._tip_ports,
+            self._panel_ports,
+            self.word_lookup,
+            self.hover_inputs,
+            self.show_actions,
+            index,
+        )
 
     def set_annotation_hover(self, *, revealed: bool) -> None:
         target = bool(
@@ -1628,13 +1606,13 @@ class SessionController:
         tooltip.copy_token(self.toast, t)
 
     def copy_click(self) -> None:
-        tooltip.copy_click(self.tip_ports, self.click_ports, self.hover_inputs)
+        tooltip.copy_click(self._tip_ports, self.click_ports, self.hover_inputs)
 
     def on_click(self) -> None:
         if not self.ov.visible:
             return
         mp = self._get_mapping("mouse-pos")
-        self.surface_router.route_click(self.click_target, mp.get("x", -1), mp.get("y", -1))
+        self.surface_router.route_click(self._click_target, mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
         self,
@@ -1646,7 +1624,7 @@ class SessionController:
         group_mined: tuple[bool, ...] | None = None,
     ) -> tooltip_panel.PanelKey:
         return tooltip_panel.panel_key(
-            self.panel_ports,
+            self._panel_ports,
             tok,
             inflected,
             mined=mined,
@@ -1655,25 +1633,24 @@ class SessionController:
         )
 
     @property
-    def panel_ports(self) -> tooltip_panel.PanelPorts:
+    def _panel_ports(self) -> tooltip_panel.PanelPorts:
         """A panel build's per-turn inputs. `panel_style` is the half that does not change.
 
         Built per call so the mined set and the scroll flag are both read fresh: a panel keyed on a
         stale mined set shows the wrong header for a word that was mined since.
         """
-        return tooltip_panel.PanelPorts(
+        return self.tooltip_controller.build_panel_ports(
             style=self.panel_style,
             mined_set=self.mining_controller.index_snapshot(),
             during_scroll=self._scrolled_this_tick,
-            cache=self.tip.panel_cache,
             cap=self.tip_scale.cap,
         )
 
     @property
-    def preparation_inputs(self) -> TooltipPreparationInputs:
+    def _preparation_inputs(self) -> TooltipPreparationInputs:
         """Facts captured for one tooltip preparation admission."""
         return TooltipPreparationInputs(
-            panels=self.panel_ports,
+            panels=self._panel_ports,
             dictionary=self.profile_controller.dict_set,
         )
 
@@ -1760,7 +1737,7 @@ class SessionController:
         self.surface_router.route_scroll(self.wheel_step, steps)
 
     @property
-    def click_target(self) -> surfaces.ClickTarget:
+    def _click_target(self) -> surfaces.ClickTarget:
         """What a surface needs to decide whether it claims a left-click."""
         return surfaces.ClickTarget(
             sub_picker.DownloadPorts(
@@ -1771,14 +1748,14 @@ class SessionController:
             ),
             self.sidebar_view,
             self.sidebar_actions,
-            self.tip_ports,
-            self.panel_ports,
+            self._tip_ports,
+            self._panel_ports,
             self.click_ports,
             self.hover_inputs,
         )
 
     @property
-    def hover_actions(self) -> HoverActions:
+    def _hover_actions(self) -> HoverActions:
         """The acts a hover decision performs, bound. Paired with `tip_ports`.
 
         Every callable resolves through `self` when it runs, which is what lets the applier and the
@@ -1789,13 +1766,13 @@ class SessionController:
             arm=lambda kind, delay, intent: self.arm_hover_deadline(
                 kind,
                 delay,
-                lambda: tooltip._dwell_elapsed(self.tip_ports, self.hover_actions, intent),
+                lambda: tooltip._dwell_elapsed(self._tip_ports, self._hover_actions, intent),
             ),
             cancel=self.cancel_hover_deadline,
             show_word=self.set_hover,
             retire_word=self.retire_hover,
             open_nested=lambda scan: nested_popup.show_nested(
-                self.tip_ports, self.panel_ports, self.word_lookup, scan
+                self._tip_ports, self._panel_ports, self.word_lookup, scan
             ),
             reveal_annotation=lambda revealed: self.set_annotation_hover(revealed=revealed),
             publish_engagement=lambda inside: setattr(self, "_mouse_in", inside),
@@ -1823,7 +1800,7 @@ class SessionController:
         return HoverInputs(
             mouse_pos=lambda: self.observed_property("mouse-pos"),
             hit=self._hit,
-            hover=lambda: self.tooltip_controller.selected,
+            hover=lambda: self.tooltip_controller.observation().selected,
             cue_state=self._cue_state,
             tokens=self.tokens,
             boxes=self.boxes,
@@ -1853,8 +1830,8 @@ class SessionController:
     def _tooltip_apply(self) -> tooltip_controller.TooltipApply:
         """Fresh values for applying one tooltip worker completion on the owner thread."""
         return tooltip_controller.TooltipApply(
-            ports=self.tip_ports,
-            panel=self.panel_ports,
+            ports=self._tip_ports,
+            panel=self._panel_ports,
             lookup=self.word_lookup,
             hover=self.hover_inputs,
             show=self.show_actions,
@@ -1871,13 +1848,13 @@ class SessionController:
             bind_keys=self._bind_tip_keys,
             seed_precomposed=lambda panel, key, cap: (
                 self.tooltip_preparation.cache.seed_precomposed(
-                    self.preparation_inputs, panel, key, cap
+                    self._preparation_inputs, panel, key, cap
                 )
             ),
             freeze=lambda *, already_paused: tooltip._freeze_frame(
                 self.ipc,
                 self.observed_property,
-                enabled=self.tooltip_controller.pause_enabled,
+                enabled=self.tooltip_controller.observation().pause_enabled,
                 already_paused=already_paused,
             ),
             inflected=self._inflected_surface,
@@ -1908,7 +1885,7 @@ class SessionController:
         return PreviewCommandEndpoint(
             preview=self.preview_controller,
             help=self.help_controller,
-            tooltip=self.tooltip_controller,
+            tip_keys_bound=lambda: self.tooltip_controller.keybindings_bound,
             mining=self.mining_controller,
             surfaces=self.lifecycle_surfaces,
             screen=self.screen,
@@ -1964,7 +1941,7 @@ class SessionController:
         return prefetch.HeadProbe(
             scorer=self.scorer,
             panel_key=self._panel_key,
-            panel_cache=self.tip.panel_cache,
+            panel_present=self.tooltip_controller.has_cached_panel,
             lookahead=self.tooltip_preparation.config.head_lookahead,
             queue_max=self.tooltip_preparation.config.head_queue_max,
         )
@@ -1989,7 +1966,7 @@ class SessionController:
             secondary_text=self._secondary_text(),
             language=self.subtitle_language,
             tokens=self.tokens,
-            hover=self.tooltip_controller.selected,
+            hover=self.tooltip_controller.observation().selected,
             jp_sid=self.jp_sid,
             en_sid=self.en_sid,
             tracks=self._get_sequence("track-list"),
@@ -2030,31 +2007,37 @@ class SessionController:
         )
 
     @property
-    def tip_ports(self) -> TipPorts:
+    def _tip_ports(self) -> TipPorts:
         """What the popup blit/scroll/placement chain needs, as one member rather than the set.
 
         A property for the same reason `panel_style` is one: as a host-taking builder it would
         trade the chain's debt rows for one more, and every caller in the chain would still inherit
         everything it gathers.
         """
-        return self.tooltip_navigation.ports()
+        return self.tooltip_controller.build_tip_ports(
+            tooltip_controller.TooltipPresentation(
+                scale=self.tooltip_navigation.scale(),
+                surfaces=self.interaction_surfaces,
+                request_render_ahead=self._request_render_ahead,
+                osd=self.screen.osd,
+                nested_max_frac=self.nested_max_frac,
+                peek_render_cache=lambda key: self.tooltip_preparation.cache.peek(
+                    self._preparation_inputs, key
+                ),
+                schedule_flash_expiry=self.schedule_flash_expiry,
+                toast=self.notifications.show,
+                request_engaged_tooltip=self._request_engaged_tooltip,
+            )
+        )
 
     @cached_property
     def tooltip_navigation(self) -> TooltipNavigationEndpoint:
         return TooltipNavigationEndpoint(
-            tooltip=self.tooltip_controller,
             screen=self.screen,
-            surfaces=self.interaction_surfaces,
             tip_scale_override=self._tip_scale_override,
             tip_max_frac=self.tip_max_frac,
-            nested_max_frac=self.nested_max_frac,
-            request_render_ahead=self._request_render_ahead,
-            peek_render_cache=lambda key: self.tooltip_preparation.cache.peek(
-                self.preparation_inputs, key
-            ),
-            schedule_flash_expiry=self.schedule_flash_expiry,
-            notifications=self.notifications,
-            request_engaged_tooltip=self._request_engaged_tooltip,
+            observe_can_go_back=lambda: self.tooltip_controller.observation().can_go_back,
+            navigate_back=lambda: tooltip.tip_back(self._tip_ports),
         )
 
     @property
@@ -2103,7 +2086,7 @@ class SessionController:
         group_mined: tuple[bool, ...] | None = None,
     ):
         return tooltip_panel.panel_for(
-            self.panel_ports,
+            self._panel_ports,
             tok,
             inflected,
             min_h,
@@ -2132,7 +2115,7 @@ class SessionController:
         if self.tooltip_preparation.update(
             self.prefetch_ports,
             self.head_probe,
-            self.preparation_inputs,
+            self._preparation_inputs,
             self._finish_speculative_prefetch,
         ):
             self.tooltip_controller.cancel_current_work()
@@ -2184,7 +2167,7 @@ class SessionController:
 
     def _show_tooltip(self, index: int) -> None:
         tooltip.show_tooltip(
-            self.tip_ports, self.panel_ports, self.hover_inputs, self.show_actions, index
+            self._tip_ports, self._panel_ports, self.hover_inputs, self.show_actions, index
         )
 
     def _bind_tip_keys(self) -> None:
@@ -2233,10 +2216,10 @@ class SessionController:
         return self._mouse.defined
 
     def _render_tip_view(self) -> None:
-        tooltip_panel.render_view(self.tip_ports, self.tip.view)
+        tooltip_panel.render_view(self._tip_ports, self.tooltip_controller.surface_state().view)
 
     def _render_nested_view(self) -> None:
-        tooltip_panel.render_view(self.tip_ports, self.tip.nest)
+        tooltip_panel.render_view(self._tip_ports, self.tooltip_controller.surface_state().nest)
 
     def scroll_tip(self, delta: int) -> None:
         # event → redraw-finished latency for one scroll tick: nests the downstream "render"
@@ -2250,8 +2233,8 @@ class SessionController:
             "scroll_frame",
             layout_backend=self.layout_engine,
         ) as span:
-            tooltip.scroll_tip(self.tip_ports, self.hover_actions, delta)
-            st = self.tip.view.state
+            tooltip.scroll_tip(self._tip_ports, self._hover_actions, delta)
+            st = self.tooltip_controller.surface_state().view.state
             if st is not None:
                 # Attribute a janky frame: bands rastered synchronously (render_ahead was behind) and
                 # the panel's height. A warm frame is bands=0; the jank tail is the frames with bands>0.
@@ -2260,7 +2243,7 @@ class SessionController:
                 # Where the wheel asked to be vs where the pixels are. The two diverging across a
                 # whole burst is the shape of a scroll that arrives and never lands — otherwise
                 # only inferable by cross-reading `scroll_request` outcomes.
-                view = self.tip.view
+                view = self.tooltip_controller.surface_state().view
                 span.set("scroll", view.scroll)
                 span.set("desired", view.desired_scroll)
                 # ...and which predicate refused, since publication asks the 1x tier while a hi-dpi
@@ -2275,7 +2258,9 @@ class SessionController:
                 # Crisp health per scroll frame: the display scale (does it jitter mid-scroll?) and the
                 # soft-fallback reason ("" = composited crisp) — so a soft run is attributable to a cause.
                 span.set("scale", f"{self.tip_scale.display:.4f}")
-                span.set("crisp_miss", self.tip.view.crisp_miss or "n/a")
+                span.set(
+                    "crisp_miss", self.tooltip_controller.surface_state().view.crisp_miss or "n/a"
+                )
 
     def _navigated_panel(self, query: str):
         """The read-only reference Panel for a nav target — built off the main thread by the engaged
@@ -2286,14 +2271,13 @@ class SessionController:
     @property
     def tip_can_go_back(self) -> bool:
         """A link-navigation step is available to pop — the fact, split from the act."""
-        return self.interaction.tip_nav.can_go_back
+        return self.tooltip_controller.observation().can_go_back
 
     @cached_property
     def _stateless_commands(self) -> StatelessCommandGraph:
         """Build the closed synchronous command graph from bounded authorities."""
         hover = HoverCommandCoordinator(
             HoverCommandPorts(
-                interaction=self.interaction,
                 profile=self.profile_controller,
                 tooltip=self.tooltip_controller,
                 cue=self.cue_render,
@@ -2407,7 +2391,7 @@ class SessionController:
         lane and session thread reach via the SessionController seam. The worker
         passes ``mined`` (jamdict isn't worker-safe); the main thread lets it recompute."""
         return nested_popup._engaged_open_panel(
-            self.tip_ports, self.panel_ports, source, query, mined=mined
+            self._tip_ports, self._panel_ports, source, query, mined=mined
         )
 
     # --- kanji lookup mode ------------------------------------------------------------------------
@@ -2415,10 +2399,10 @@ class SessionController:
         self._stateless_commands.run(hover_intents.HoverCommand.KANJI)
 
     def open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
-        nested_popup.open_kanji(self.tip_ports, self.panel_ports, ch, wx, wy, wh)
+        nested_popup.open_kanji(self._tip_ports, self._panel_ports, ch, wx, wy, wh)
 
     def _hide_nested(self) -> None:
-        nested_popup.hide_nested(self.tip_ports)
+        nested_popup.hide_nested(self._tip_ports)
 
     # --- mining -------------------------------------------------------------------------------
     def _assemble_mining_controller(
@@ -2447,7 +2431,7 @@ class SessionController:
             cue=MineCue(
                 self.tokens,
                 self.styles,
-                self.tooltip_controller.selected,
+                self.tooltip_controller.observation().selected,
                 self.profile_controller.tokenizer,
                 self.options.mining.max_bulk,
             ),
@@ -2456,7 +2440,7 @@ class SessionController:
             media_path=self.text_property("path"),
             playhead=self._get_number("time-pos") or 0.0,
             sentence_html=self._sentence_html(),
-            hovered_terms=self.interaction.hovered_word_meta.terms,
+            hovered_terms=self.tooltip_controller.observation().metadata.terms,
         )
 
     def _mining_apply(self) -> miner.MiningApply:
@@ -2507,8 +2491,8 @@ class SessionController:
 
     def _mark_mined(self, expression: str) -> None:
         mined_feedback.mark_mined(
-            self.tip_ports,
-            self.panel_ports,
+            self._tip_ports,
+            self._panel_ports,
             self.hover_inputs,
             self.show_actions,
             expression,
@@ -2578,7 +2562,9 @@ class SessionController:
         `toggle_overlay` decides what to do *after* the surfaces return, so it must not ask
         `translation_visible` — that answers False precisely because the overlay is still hidden.
         """
-        return self.translate_on or (self.auto_translate and self.tooltip_controller.selected >= 0)
+        return self.translate_on or (
+            self.auto_translate and self.tooltip_controller.observation().selected >= 0
+        )
 
     def _sync_auto_translation(self) -> None:
         if not self.auto_translate:
@@ -2839,7 +2825,7 @@ class SessionController:
         if isinstance(request, tooltip_engaged.HoverRequest):
             request = replace(
                 request,
-                panels=self.panel_ports if request.panels is None else request.panels,
+                panels=self._panel_ports if request.panels is None else request.panels,
                 scale=scale if request.scale is None else request.scale,
             )
         elif (isinstance(request, tooltip_engaged.NavigateRequest) and request.scale is None) or (
@@ -2864,7 +2850,7 @@ class SessionController:
         self.tooltip_controller.finish_render_ahead(
             completion,
             generation=self.tooltip_preparation.generation,
-            ports=self.tip_ports,
+            ports=self._tip_ports,
             on_finished=self._finish_render_ahead,
         )
 
@@ -3041,7 +3027,7 @@ class SessionController:
         for transition in self.annotation_controller.settle():
             self._apply_annotation_transition(transition, draw=transition.publish)
         self._sync_mouse_capture()
-        self.tooltip_controller.publish_pending(self.tip_ports)
+        self.tooltip_controller.publish_pending(self._tip_ports)
         self._update_prefetch()
         if self.translation_visible() and self._secondary_text() != self._trans_text:
             self.draw_translation()

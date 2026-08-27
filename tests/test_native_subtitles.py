@@ -26,7 +26,7 @@ from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.app.tokenize import Token
 from saitenka.app.wordlists import KnownWords
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, events
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
     Cue,
@@ -369,6 +369,11 @@ class _ExistsDS:
     def terms_exist(self, _forms):
         return set()
 
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002
+        from saitenka.panel import Definition, Entry
+
+        return Entry(headword=tok.surface, defs=[Definition("test", ["entry"])])
+
     def decoded_entry_count(self):
         return 0
 
@@ -705,7 +710,7 @@ def test_navigation_lands_on_the_target_cue_under_either_renderer(
 
     assert result.sub_text == "犬も見る"  # the target cue, drawn from the index without waiting
     assert (
-        result.tooltip_controller.selected == -1
+        result.tooltip_controller.observation().selected == -1
     )  # …with the previous cue's interaction state gone
     assert [token.surface for token in result.tokens] == ["犬", "も", "見る"]
     assert ("sub-seek", "1") in [command[:2] for command in ipc.commands if len(command) >= 2]
@@ -802,8 +807,7 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.tooltip_controller.select(0)
-    result.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
+    Driver(result).move_to_word(0)
     ipc.commands.clear()
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
@@ -814,11 +818,11 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert not result.native_geometry.apply(result._geometry_observation())
 
     assert ("set_property", "pause", False) not in ipc.commands
-    assert result.tooltip_controller.selected == 0
+    assert result.tooltip_controller.observation().selected == 0
     assert result.boxes == []
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.tooltip_controller.pause_store.dispatch(events.HoverPauseReleased())
+    result.tooltip_controller.release_pause_claim()
     result.close()
 
 
@@ -835,8 +839,7 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready
-    result.tooltip_controller.select(0)
-    result.tooltip_controller.pause_store.dispatch(events.HoverPauseClaimed(paused=True))
+    Driver(result).move_to_word(0)
     ipc.commands.clear()
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
@@ -847,11 +850,11 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
 
     assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
     assert result.boxes == []
-    assert result.tooltip_controller.selected == 0
+    assert result.tooltip_controller.observation().selected == 0
     assert ("set_property", "pause", False) not in ipc.commands
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.tooltip_controller.pause_store.dispatch(events.HoverPauseReleased())
+    result.tooltip_controller.release_pause_claim()
     result.close()
 
 
@@ -1489,8 +1492,8 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
 
     Driver(result).move_to_word(2)
 
-    assert result.tooltip_controller.selected == 2
-    assert result.tip.view.state is not None
+    assert result.tooltip_controller.observation().selected == 2
+    assert result.tooltip_controller.surface_state().view.state is not None
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
     ]
@@ -1507,11 +1510,11 @@ def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: 
 
     result._show_tooltip(0)
 
-    assert result.tooltip_controller.selected == -1
-    assert result.tip.view.state is None
+    assert result.tooltip_controller.observation().selected == -1
+    assert result.tooltip_controller.surface_state().view.state is None
     result.tooltip_controller.select(0)
-    kanji_current(result.tip_ports, result.panel_ports, result.hover_inputs)
-    assert result.interaction.word_store.current.kanji == 0
+    kanji_current(result._tip_ports, result._panel_ports, result.hover_inputs)
+    assert result.tooltip_controller.observation().kanji_index == 0
     result.close()
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 
 from driver import Driver
 from util import FakeIPC
@@ -60,7 +61,6 @@ def test_metadata_scheduler_keeps_only_the_newest_queued_intent():
 def test_metadata_worker_resolves_off_the_event_thread():
     event_thread = threading.get_ident()
     resolved_thread = None
-    done = threading.Event()
 
     class Dictionary:
         def has_term(self, _term: str) -> bool:
@@ -74,21 +74,12 @@ def test_metadata_worker_resolves_off_the_event_thread():
     gateway = runtime_gateway(ipc)
     reader = SessionController(ipc, dict_set=Dictionary())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
-    submitter = reader.tooltip_controller.metadata_submitter
-    assert submitter is not None
-    submitter(
-        owner=Owner.INTERACTION,
-        identity=1,
-        lane="interaction-metadata",
-        request=_request(0, Dictionary()),
-        on_finished=lambda _completion: done.set(),
-    )
+    assert reader._request_interaction_metadata(_request(0, Dictionary()))
     try:
         deadline = time.monotonic() + 1
-        while not done.is_set() and time.monotonic() < deadline:
+        while resolved_thread is None and time.monotonic() < deadline:
             reader._drain_events()
             time.sleep(0.001)
-        assert done.is_set()
         assert resolved_thread is not None and resolved_thread != event_thread
     finally:
         reader.close()
@@ -132,18 +123,22 @@ def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
 
 
 def test_metadata_completion_refuses_facts_that_changed_after_submission():
-    reader = SessionController(FakeIPC())
-    reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
-    reader.tooltip_controller.select(0)
-    reader.tip.view.job_id = reader.tip.jobs.begin("tooltip")
     submitted = []
 
     def submitter(**kwargs):
         submitted.append(kwargs)
         return True
 
-    reader.tooltip_controller.metadata_submitter = submitter
-    tooltip._request_hover_metadata(reader.tip_ports, reader.word_lookup, reader.hover_inputs, 0)
+    reader = SessionController(
+        FakeIPC(),
+        tooltip_runtime_jobs=lambda jobs: replace(jobs, metadata=submitter),
+    )
+    reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
+    reader.tooltip_controller.select(0)
+    reader.tooltip_controller.surface_state().view.job_id = (
+        reader.tooltip_controller.surface_state().jobs.begin("tooltip")
+    )
+    tooltip._request_hover_metadata(reader._tip_ports, reader.word_lookup, reader.hover_inputs, 0)
     original = submitted[0]["request"]
 
     reader.mining_controller.record_mined_expression("__newly-mined__")
@@ -166,8 +161,8 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
     )
 
     assert len(submitted) == 1
-    assert reader.interaction.hovered_word_meta.terms == ()
-    assert reader.tip.view.state is None
+    assert reader.tooltip_controller.observation().metadata.terms == ()
+    assert reader.tooltip_controller.surface_state().view.state is None
 
 
 def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch):
@@ -188,14 +183,17 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
         def has_term(self, _term: str) -> bool:
             raise AssertionError("dictionary probe ran on the event thread")
 
-    reader = SessionController(FakeIPC(), dict_set=Dictionary())
+    submitted = []
+    reader = SessionController(
+        FakeIPC(),
+        dict_set=Dictionary(),
+        tooltip_runtime_jobs=lambda jobs: replace(
+            jobs, metadata=lambda **kwargs: submitted.append(kwargs["request"]) or True
+        ),
+    )
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     reader.sub_origin = (0, 0)
     reader.boxes = [WordBox(0, 100, 100, 40, 40)]
-    submitted = []
-    reader.tooltip_controller.metadata_submitter = lambda **kwargs: (
-        submitted.append(kwargs["request"]) or True
-    )
     monkeypatch.setattr(reader, "draw_subtitle", lambda: None)
 
     # Through the cursor, because the claim is about the *event thread*: the hit-test and the hover
@@ -203,4 +201,4 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
     Driver(reader).move_to_word(0)
 
     assert len(submitted) == 1
-    assert reader.tip.view.state is None
+    assert reader.tooltip_controller.surface_state().view.state is None

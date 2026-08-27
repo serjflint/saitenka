@@ -192,7 +192,7 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     reader.set_subtitle(cue)
     idx = _index_at(reader.tokens, at)
     resolve_hover(
-        reader.tip_ports, reader.word_lookup, reader.hover_inputs, idx
+        reader._tip_ports, reader.word_lookup, reader.hover_inputs, idx
     )  # forward longest-match → _hover_meta.terms (the phrase/prefix seam)
     tok = reader.tokens[idx]
     entry = entry_for_tok(
@@ -200,9 +200,9 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
         reader._inflected_surface(idx),
         dict_set=reader.profile_controller.dict_set,
         scorer=reader.scorer,
-        extra_terms=reader.interaction.hovered_word_meta.terms,
+        extra_terms=reader.tooltip_controller.observation().metadata.terms,
     )
-    return dict_set, tok, reader.interaction.hovered_word_meta.terms, entry
+    return dict_set, tok, reader.tooltip_controller.observation().metadata.terms, entry
 
 
 def _all_text(entry) -> str:

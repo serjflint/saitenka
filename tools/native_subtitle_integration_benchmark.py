@@ -596,18 +596,18 @@ def _open_tooltip(reader: SessionController, ipc: _IPC, *, native: bool) -> tupl
         else True
     )
     reader._show_tooltip(box.index)
-    opened = reader.tip.view.state is not None
+    opened = reader.tooltip_controller.surface_state().view.state is not None
     return hit, focus, opened
 
 
 def _scroll_and_close_tooltip(reader: SessionController) -> bool:
-    opened = reader.tip.view.state is not None
+    opened = reader.tooltip_controller.surface_state().view.state is not None
     reader.scroll_tip(1)
     scrolled = (
         opened
         and reader._scrolled_this_tick
-        and reader.tip.view.state is not None
-        and reader.tip.view.scroll > 0
+        and reader.tooltip_controller.surface_state().view.state is not None
+        and reader.tooltip_controller.surface_state().view.scroll > 0
     )
     reader.teardown_tip()
     reader.tooltip_controller.select(-1)

@@ -47,28 +47,40 @@ def _content_word(r: SessionController) -> int:
 def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
     r = _reader()
     Driver(r).move_to_word(_content_word(r))
-    st = r.tip.view.state
+    st = r.tooltip_controller.surface_state().view.state
     assert st is not None and st.windowed is not None  # the windowed engine composites the tooltip
-    assert r.hover_view().tip.rect is not None  # first frame composited + uploaded without error
+    assert (
+        r.tooltip_controller.hover_view().tip.rect is not None
+    )  # first frame composited + uploaded without error
 
     wp = st.windowed
     assert wp.measured < wp.count  # lazy: show measured only the head, not the whole tall panel
-    assert st.full_height > r.tip.view.view_h, "entry should be tall enough to scroll"
+    assert st.full_height > r.tooltip_controller.surface_state().view.view_h, (
+        "entry should be tall enough to scroll"
+    )
 
     # Scrolling drives the windowed re-composite (and measures more blocks) without error.
     before = wp.measured
     Driver(r).wheel(1)  # one wheel notch
-    assert r.tip.view.scroll > 0 and r.hover_view().tip.rect is not None
+    assert (
+        r.tooltip_controller.surface_state().view.scroll > 0
+        and r.tooltip_controller.hover_view().tip.rect is not None
+    )
     assert wp.measured >= before
 
     # Hit-testing: a point over a real scan cell resolves to that cell through the windowed path.
-    r.tip.view.scroll = 0
+    r.tooltip_controller.surface_state().view.scroll = 0
     r._render_tip_view()  # materialise the top blocks' geometry
-    cells = [b for b in wp.scan_boxes() if b.y < r.tip.view.view_h]  # a cell in the top viewport
+    cells = [
+        b for b in wp.scan_boxes() if b.y < r.tooltip_controller.surface_state().view.view_h
+    ]  # a cell in the top viewport
     assert cells, "expected scan cells in the top viewport"
     cell = cells[0]
-    sx, sy = r.tip.view.xy
+    sx, sy = r.tooltip_controller.surface_state().view.xy
     hit = tooltip_panel.scan_hit(
-        r.tip, r.tip_scale.raster, sx + cell.x + cell.w // 2, sy + cell.y + cell.h // 2
+        r.tooltip_controller.surface_state(),
+        r.tip_scale.raster,
+        sx + cell.x + cell.w // 2,
+        sy + cell.y + cell.h // 2,
     )
     assert hit is not None and hit.text == cell.text

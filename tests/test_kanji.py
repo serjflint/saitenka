@@ -189,12 +189,12 @@ def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.tooltip_controller.select(0)
     r._handle("saitenka-kanji")
-    assert r.hover_view().nested.state is not None
-    assert r.hover_view().nested.word == "読"  # first kanji of the hovered word
+    assert r.tooltip_controller.hover_view().nested.shown
+    assert r.tooltip_controller.hover_view().nested.word == "読"  # first kanji of the hovered word
     r._handle("saitenka-kanji")
-    assert r.hover_view().nested.word == "本"  # repeat cycles to the next kanji
+    assert r.tooltip_controller.hover_view().nested.word == "本"  # repeat cycles to the next kanji
     r._handle("saitenka-kanji")
-    assert r.hover_view().nested.word == "読"  # …and wraps around
+    assert r.tooltip_controller.hover_view().nested.word == "読"  # …and wraps around
 
 
 def test_k_key_bound_globally():
@@ -212,11 +212,11 @@ def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
         r.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
     )
     r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
-    assert r.hover_view().nested.state is None
+    assert not r.tooltip_controller.hover_view().nested.shown
     r.tokens = [Token("よむ", "よむ", "よむ", "動詞", 0, 2)]
     r.tooltip_controller.select(0)
     r._handle("saitenka-kanji")  # kana-only word → warn toast
-    assert r.hover_view().nested.state is None and toasts
+    assert not r.tooltip_controller.hover_view().nested.shown and toasts
 
 
 # --- single-ideograph scan cell with no term match falls back to the kanji entry -------------------
@@ -235,12 +235,23 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     ui = Driver(r)
     ui.move_to_word(0)  # base tooltip through hit-testing, not a poke
     # find the scan cell whose tail starts with 本
-    sb = next(b for b in r.tip.view.state.windowed.scan_boxes() if b.text.startswith("本"))
+    sb = next(
+        b
+        for b in r.tooltip_controller.surface_state().view.state.windowed.scan_boxes()
+        if b.text.startswith("本")
+    )
     # make the term lookup miss so the fallback triggers (本 has no term entry in this fixture… it
     # actually might tokenize to 本 with a lemma the dict lacks — force the miss deterministically)
     monkeypatch.setattr(type(ds), "has_term", lambda _self, *_forms: False)
-    sx, sy = r.tip.view.xy
-    ui.move(sx + sb.x + sb.w / 2, sy + (sb.y - r.tip.view.scroll) + sb.h / 2).click()
-    assert r.hover_view().nested.state is not None
-    assert r.hover_view().nested.word == "本"  # the kanji entry, via the nested-popup route
-    assert r.hover_view().nested.token is None  # a kanji panel has no minable token
+    sx, sy = r.tooltip_controller.surface_state().view.xy
+    ui.move(
+        sx + sb.x + sb.w / 2,
+        sy + (sb.y - r.tooltip_controller.surface_state().view.scroll) + sb.h / 2,
+    ).click()
+    assert r.tooltip_controller.hover_view().nested.shown
+    assert (
+        r.tooltip_controller.hover_view().nested.word == "本"
+    )  # the kanji entry, via the nested-popup route
+    assert (
+        not r.tooltip_controller.hover_view().nested.has_token
+    )  # a kanji panel has no minable token

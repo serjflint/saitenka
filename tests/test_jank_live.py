@@ -84,6 +84,7 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
 
         def __init__(self):
             self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
+            self.tooltip_controller = SimpleNamespace(surface_state=lambda: self.tip)
 
         def scroll_tip(self, delta):
             self.tip.view.scroll += delta
@@ -113,6 +114,7 @@ def _stuck_controller(mod_state):
                 nest=SimpleNamespace(rect=None, scroll=0),
                 last_mouse=(10.0, 20.0),
             )
+            self.tooltip_controller = SimpleNamespace(surface_state=lambda: self.tip)
 
         def scroll_tip(self, _delta):
             pass
@@ -176,7 +178,7 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
         reader.pump()
 
     Driver(reader).move_to_word(word)
-    view = reader.tip.view
+    view = reader.tooltip_controller.surface_state().view
     assert view.state is not None
     assert view.state.full_height > view.view_h, mod._why_stuck(reader)
     mod._scroll_four(reader)  # raises if the viewport did not move

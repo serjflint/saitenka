@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+    from saitenka.app.features.tooltip.tooltip_controller import TooltipRuntimeJobs
     from saitenka.app.profiles import Profile
     from saitenka.app.scoring import Scorer
     from saitenka.app.session.controller import SessionController
@@ -26,6 +28,11 @@ class SessionServices:
     tts: bool | None = None
 
 
+class TooltipWorkMode(Enum):
+    DEFERRED = "deferred"
+    INLINE = "inline"
+
+
 def create_session_controller(
     ipc: MpvIPC,
     *,
@@ -34,6 +41,7 @@ def create_session_controller(
     renderer: SubtitleRenderer | NullRenderer | None = None,
     profile: Profile | None = None,
     tokenizer_warm: Future[None] | None = None,
+    tooltip_work: TooltipWorkMode = TooltipWorkMode.DEFERRED,
 ) -> SessionController:
     from saitenka.app.config import ReaderOptions
     from saitenka.app.session.assembly import build_session_assembly
@@ -64,11 +72,20 @@ def create_session_controller(
         # port is on every `MpvIPC`, so a probe here could only ever answer "renamed" as "absent",
         # and absent silently moves every overlay write back onto the direct path.
         runtime_submit=ipc.submit_runtime_mpv,
+        tooltip_runtime_jobs=_inline_tooltip_jobs
+        if tooltip_work is TooltipWorkMode.INLINE
+        else None,
         assembly=assembly,
         # Same reasoning for the geometry provider: which implementation runs is composition's
         # call, not the SessionController's. A SessionController built directly gets whatever its caller injects.
         geometry_backend=_geometry_backend((options or ReaderOptions()).subtitle_geometry),
     )
+
+
+def _inline_tooltip_jobs(jobs: TooltipRuntimeJobs) -> TooltipRuntimeJobs:
+    from dataclasses import replace
+
+    return replace(jobs, metadata=None, engaged=None)
 
 
 def _geometry_backend(settings: SubtitleGeometryOptions):
