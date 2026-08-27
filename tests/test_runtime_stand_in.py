@@ -51,7 +51,7 @@ def _runtime_port_names() -> set[str]:
 def _call_sites() -> dict[str, list[str]]:
     """Every `<expr>.<port>(...)` in the shipped tree, by port name."""
     files = subprocess.run(
-        ["git", "ls-files", "src/saitenka"],
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "src/saitenka"],
         capture_output=True,
         text=True,
         check=True,
@@ -59,9 +59,10 @@ def _call_sites() -> dict[str, list[str]]:
     ports = _runtime_port_names()
     found: dict[str, list[str]] = {}
     for path in files:
-        if not path.endswith(".py"):
+        source = Path(path)
+        if not path.endswith(".py") or not source.is_file():
             continue
-        tree = ast.parse(Path(path).read_text(encoding="utf-8"), path)
+        tree = ast.parse(source.read_text(encoding="utf-8"), path)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
