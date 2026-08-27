@@ -82,6 +82,28 @@ _OWNER_MUTABLE_CHAINS = {(attribute,) for attribute in _OWNER_STATE_ATTRIBUTES} 
     ("_state", "panel_cache"),
     ("_state", "view"),
 }
+_OWNER_MUTABLE_BRIDGES = {
+    "build_panel_ports",
+    "build_tip_ports",
+    "cache_setdefault",
+    "surface_state",
+}
+_OWNER_DECLARED_RESULTS = {
+    "cache_limit",
+    "cache_totals",
+    "expire_pulse",
+    "has_cached_panel",
+    "hover_view",
+    "keybindings_bound",
+    "metadata_deferred",
+    "observation",
+    "release_pause_claim",
+    "request_engaged",
+    "request_metadata",
+    "request_render_ahead",
+    "surface_binding",
+}
+_OWNER_RAW_BOUNDARY_MEMBERS = {*_OWNER_MUTABLE_BRIDGES}
 _RETIRED_TOOLTIP_STATE = {"key", "rect", "state", "tip_inflected", "tip_tok"}
 _RETIRED_PREPARATION_ATTRIBUTES = {
     "_mask_atlas_startup",
@@ -175,6 +197,42 @@ def _self_attribute_chain(node: ast.AST) -> tuple[str, ...] | None:
     if not isinstance(node, ast.Name) or node.id != "self":
         return None
     return tuple(reversed(attributes))
+
+
+def _mutable_owner_reference(node: ast.AST, aliases: set[str]) -> bool:
+    chain = _self_attribute_chain(node)
+    if chain is not None and chain[:1] in _OWNER_MUTABLE_CHAINS:
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in aliases
+    return any(_mutable_owner_reference(child, aliases) for child in ast.iter_child_nodes(node))
+
+
+def _returned_owner_state(function: ast.FunctionDef) -> bool:
+    aliases: set[str] = set()
+    assignments = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.NamedExpr)
+    ]
+    changed = True
+    while changed:
+        changed = False
+        for assignment in assignments:
+            value = assignment.value
+            targets = (
+                assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
+            )
+            if _mutable_owner_reference(value, aliases):
+                before = len(aliases)
+                aliases.update(name for target in targets for name in _bound_names(target))
+                changed = changed or len(aliases) != before
+    return any(
+        isinstance(node, ast.Return)
+        and node.value is not None
+        and _mutable_owner_reference(node.value, aliases)
+        for node in ast.walk(function)
+    )
 
 
 def _contains_attribute(node: ast.AST, name: str) -> bool:
@@ -362,24 +420,19 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
         if (
             site == _OWNER
             and isinstance(node, ast.FunctionDef)
-            and node.name != "surface_state"
-            and any(
-                isinstance(child, ast.Return)
-                and child.value is not None
-                and (chain := _self_attribute_chain(child.value)) is not None
-                and chain in _OWNER_MUTABLE_CHAINS
-                for child in ast.walk(node)
-            )
+            and node.name not in (_OWNER_MUTABLE_BRIDGES | _OWNER_DECLARED_RESULTS)
+            and _returned_owner_state(node)
         ):
             findings.append(Finding(path, node.lineno, "owner-state-projection", node.name))
         if (
             site not in {_OWNER, _COMPOSITION}
-            and isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "surface_state"
+            and not site.startswith("features/tooltip/")
+            and isinstance(node, ast.Attribute)
+            and node.attr in _OWNER_RAW_BOUNDARY_MEMBERS
+            and _is_tooltip_owner_reference(node.value, owner_names)
         ):
             findings.append(
-                Finding(path, node.lineno, "surface-state-outside-physical-boundary", site)
+                Finding(path, node.lineno, "owner-raw-boundary-outside-tooltip", node.attr)
             )
         if isinstance(node, ast.Attribute) and (
             site == _COMPOSITION

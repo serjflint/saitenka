@@ -369,6 +369,11 @@ class _ExistsDS:
     def terms_exist(self, _forms):
         return set()
 
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002
+        from saitenka.panel import Definition, Entry
+
+        return Entry(headword=tok.surface, defs=[Definition("test", ["entry"])])
+
     def decoded_entry_count(self):
         return 0
 
@@ -802,8 +807,7 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.tooltip_controller.select(0)
-    result.tooltip_controller.claim_pause(paused=True)
+    Driver(result).move_to_word(0)
     ipc.commands.clear()
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
@@ -835,8 +839,7 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     assert result.native_geometry is not None
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready
-    result.tooltip_controller.select(0)
-    result.tooltip_controller.claim_pause(paused=True)
+    Driver(result).move_to_word(0)
     ipc.commands.clear()
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()

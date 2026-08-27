@@ -12,9 +12,9 @@ from dataclasses import FrozenInstanceError
 import pytest
 from util import FakeIPC
 
-from saitenka.app.features.tooltip.popups import NO_HOVER_METADATA, HoverMetadata
-from saitenka.app.session.controller import SessionController
-from saitenka.app.subtitle_render import NullRenderer
+from saitenka.app.features.tooltip.popups import NO_HOVER_METADATA, HoverMetadata, hovered_meta
+from saitenka.runtime import events
+from saitenka.runtime.interaction_slice import HoveredWordStore
 
 
 def test_the_empty_metadata_is_every_field_empty() -> None:
@@ -30,32 +30,24 @@ def test_metadata_cannot_be_updated_field_by_field() -> None:
 
 
 def test_retiring_a_hover_clears_every_field_together() -> None:
-    """Against the real SessionController, so the route through the slice is exercised too."""
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
-    try:
-        reader.tooltip_controller.resolve_word(
+    store = HoveredWordStore(FakeIPC())
+    store.dispatch(
+        events.HoverWordResolved(
             HoverMetadata(terms=("本命を",), span=(0, 2), mined=True, group_mined=(True, False))
         )
-        reader.tooltip_controller.forget_word()
+    )
+    store.dispatch(events.HoverWordForgotten())
 
-        meta = reader.tooltip_controller.observation().metadata
-        assert (meta.terms, meta.span, meta.mined, meta.group_mined) == ((), None, False, ())
-    finally:
-        reader.close()
+    meta = hovered_meta(store)
+    assert (meta.terms, meta.span, meta.mined, meta.group_mined) == ((), None, False, ())
 
 
 def test_the_slice_hands_back_the_value_it_was_given() -> None:
     """Two write paths for one channel is the divergence that makes a fake lie; assert there is one
     — and that the answer round-trips by identity, so nothing rebuilds it field by field."""
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
-    try:
-        meta = HoverMetadata(terms=("読む",), span=(1, 2), mined=False, group_mined=(False,))
-        reader.tooltip_controller.resolve_word(meta)
+    store = HoveredWordStore(FakeIPC())
+    meta = HoverMetadata(terms=("読む",), span=(1, 2), mined=False, group_mined=(False,))
+    store.dispatch(events.HoverWordResolved(meta))
 
-        assert reader.tooltip_controller.observation().metadata is meta
-        assert (
-            reader.tooltip_controller.observation().metadata
-            is reader.tooltip_controller.observation().metadata
-        )
-    finally:
-        reader.close()
+    assert hovered_meta(store) is meta
+    assert hovered_meta(store) is hovered_meta(store)

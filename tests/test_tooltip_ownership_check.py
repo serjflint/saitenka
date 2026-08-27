@@ -82,13 +82,37 @@ def test_tooltip_owner_cannot_republish_a_nested_state_member():
     assert "owner-state-projection" in rules
 
 
-def test_feature_cannot_take_the_mutable_surface_state():
+@pytest.mark.parametrize(
+    "body",
+    [
+        "state = self._state\n        return state",
+        "return (self._state,)",
+        "state = self._state\n        return tuple((state,))",
+    ],
+)
+def test_tooltip_owner_cannot_republish_wrapped_or_aliased_state(body: str):
     rules = _rules(
-        "def drift(owner):\n    return owner.surface_state()\n",
+        f"class TooltipController:\n    def raw_state(self):\n        {body}\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-state-projection" in rules
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "return owner.surface_state()",
+        "surface = owner.surface_state\n    return surface()",
+    ],
+)
+def test_feature_cannot_take_the_mutable_surface_state(body: str):
+    rules = _rules(
+        f"def drift(owner: TooltipController):\n    {body}\n",
         "features/mining/mine_adapter.py",
     )
 
-    assert "surface-state-outside-physical-boundary" in rules
+    assert "owner-raw-boundary-outside-tooltip" in rules
 
 
 @pytest.mark.parametrize(

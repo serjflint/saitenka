@@ -569,7 +569,7 @@ def run_render_cache(
         reader.tokens = [tok]
         reader.boxes = [WordBox(0, 400, 800, 60, 60)]
         reader.sub_origin = (0, 0)
-        reader.tooltip_controller.forget_word()
+        reader.retire_hover()
         key = reader._panel_key(tok, reader._inflected_surface(0), mined=False)
         if reader.tooltip_preparation.cache.peek(reader.preparation_inputs, key) is None:
             return None  # below the cost gate — not persisted

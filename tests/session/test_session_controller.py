@@ -72,8 +72,8 @@ def _captured_prefetch_items(r: SessionController, monkeypatch) -> list[prefetch
 
 
 def test_hover_view_snapshots_the_hover_stack():
-    r = SessionController(FakeIPC())
-    r.tooltip_controller.claim_pause(paused=True)
+    r = _reader_with_word(FakeIPC())
+    Driver(r).move_to_word(0)
     r.episode.nav_idx = 4
     r.tooltip_controller.surface_state().nest.word = "読"
     view = r.tooltip_controller.hover_view()
@@ -1423,7 +1423,7 @@ def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
 
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
-    r.tooltip_controller.claim_pause(paused=True)
+    Driver(r).move_to_word(0)
     monkeypatch.setattr(r.notifications, "show", lambda *_args: None)
     r._handle(app_bindings.HOVER_PAUSE_MSG)
     assert ("set_property", "pause", False) in ipc.commands

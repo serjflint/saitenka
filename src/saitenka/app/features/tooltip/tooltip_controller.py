@@ -219,12 +219,6 @@ class TooltipController:
     def advance_kanji(self) -> None:
         self._word_store.dispatch(events.HoverKanjiAdvanced())
 
-    def resolve_word(self, metadata: object, *, revised: bool = False) -> None:
-        self._word_store.dispatch(events.HoverWordResolved(metadata, revised=revised))
-
-    def forget_word(self) -> None:
-        self._word_store.dispatch(events.HoverWordForgotten())
-
     def set_pause_enabled(self, *, enabled: bool) -> None:
         self._pause_enabled = enabled
 
@@ -314,9 +308,6 @@ class TooltipController:
 
     def release_pause_claim(self) -> bool:
         return tooltip.release_frame(self._pause_store)
-
-    def claim_pause(self, *, paused: bool) -> None:
-        self._pause_store.dispatch(events.HoverPauseClaimed(paused=paused))
 
     def cache_setdefault(self, key: PanelKey, panel: Panel) -> Panel:
         return self._state.panel_cache.setdefault(key, panel)
