@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from saitenka.app.session.routes import (
     CAPABILITY_PARTICIPANTS,
     INTERACTION_WORK_PARTICIPANTS,
+    TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
     WORKER_LANE_PARTICIPANTS,
 )
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE
@@ -34,6 +35,15 @@ class CloseContributions:
 
 def assemble_close_participants(contributions: CloseContributions) -> dict[str, CloseAct]:
     """Bind every declaration by name so ordering changes cannot retarget an act."""
+
+    preparation_names = set(contributions.tooltip_preparation)
+    expected_preparation_names = set(TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS)
+    if preparation_names != expected_preparation_names:
+        raise RuntimeError(
+            "tooltip preparation close contribution mismatch: "
+            f"missing={sorted(expected_preparation_names - preparation_names)!r}, "
+            f"unexpected={sorted(preparation_names - expected_preparation_names)!r}"
+        )
 
     def lane(name: str) -> CloseAct:
         return lambda: contributions.close_lane(name, contributions.lane_remaining())

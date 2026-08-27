@@ -103,3 +103,21 @@ def test_preparation_close_detail_cannot_return_to_the_session_shell(expression:
     )
 
     assert "preparation-close-detail" in rules
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "preparation = self.tooltip_preparation\n    return preparation.close_prefetch",
+        """preparation = self.tooltip_preparation
+    cache = preparation.cache
+    return cache.uninstall_mask_atlas""",
+    ],
+)
+def test_preparation_close_alias_cannot_return_to_the_session_shell(body: str):
+    rules = _rules(
+        f"def drift(self):\n    {body}\n",
+        "session/controller.py",
+    )
+
+    assert "preparation-close-detail" in rules
