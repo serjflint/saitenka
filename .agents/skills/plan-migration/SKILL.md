@@ -75,8 +75,8 @@ collaborator, reducing LOC, or turning methods into delegators does not prove th
 migration also retires policy, meter the substantive admission, completion, fallback, publication, and
 lifecycle decisions. Retirement means the claimed authority terminates at the bounded owner; the old host
 may remain as composition root or sole effect executor. Add a one-writer proof only when the accepted
-invariant requires one writer. Otherwise name the multiple-writer ordering or consistency mechanism and its
-failure semantics.
+invariant requires one writer. Where more than one writer participates, name the ordering or consistency
+mechanism and its failure semantics.
 
 Self-attack the intended boundary using that same canonical lens. Keep the guard proportionate to the
 retired semantic path; do not freeze private layout or benign test construction.
