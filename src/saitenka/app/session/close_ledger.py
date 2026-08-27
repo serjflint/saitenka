@@ -112,17 +112,14 @@ class RuntimeCloseTracker:
         phase: ClosePhase,
         resource: str,
         local: Callable[[], None],
-        *,
-        owned: bool,
     ) -> None:
-        if owned:
-            try:
-                if self.announce(phase):
-                    return
-            except LifecycleEffectError:
-                if not self.performed(phase, resource):
-                    local()
-                raise
+        try:
+            if self.announce(phase):
+                return
+        except LifecycleEffectError:
+            if not self.performed(phase, resource):
+                local()
+            raise
         local()
 
 

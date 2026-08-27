@@ -321,20 +321,17 @@ def test_the_runtime_closes_the_surfaces_it_was_handed() -> None:
     assert closed == ["close"]
 
 
-def test_the_surfaces_phase_closes_the_transport_after_the_removes_go_through_it() -> None:
-    """Order within the phase is the contract: the overlay removes are queued *through* the
-    transport, so closing it first would strand them. A tuple's order is easy to lose in a
-    refactor, hence an oracle rather than a comment."""
+def test_the_transport_phase_follows_the_surface_phase() -> None:
+    """Overlay removal must settle before the transport carrying it closes."""
     from saitenka.runtime.effects import CloseSessionOverlay, CloseSessionSurfaces
     from saitenka.runtime.events import ClosePhase, SessionClosing
     from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 
-    result = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing(ClosePhase.SURFACES))
+    surfaces = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing(ClosePhase.SURFACES))
+    overlay = reduce_lifecycle_close(surfaces.state, SessionClosing(ClosePhase.OVERLAY))
 
-    assert [type(effect) for effect in result.effects] == [
-        CloseSessionSurfaces,
-        CloseSessionOverlay,
-    ]
+    assert [type(effect) for effect in surfaces.effects] == [CloseSessionSurfaces]
+    assert [type(effect) for effect in overlay.effects] == [CloseSessionOverlay]
 
 
 def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
@@ -351,11 +348,12 @@ def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
 
 
 class _RecordingSurfaces:
-    def __init__(self, log: list[str]) -> None:
+    def __init__(self, log: list[str], label: str = "close") -> None:
         self._log = log
+        self._label = label
 
     def close(self) -> None:
-        self._log.append("close")
+        self._log.append(self._label)
 
 
 @pytest.mark.parametrize("startup_hint", [True, False])
@@ -653,6 +651,30 @@ def test_a_failing_surface_remove_does_not_skip_the_overlay_transport() -> None:
         gateway.close()
 
     assert retired == ["overlay"]
+    assert [failure.participant for failure in ledger.failures] == ["lifecycle-surfaces"]
+
+
+def test_a_missing_surface_resource_falls_back_before_the_overlay_transport_closes() -> None:
+    from saitenka.app.session.routes import (
+        OVERLAY_RESOURCE,
+        SURFACES_RESOURCE,
+        install_session_reactor,
+    )
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    order: list[str] = []
+    reader.lifecycle_surfaces = _RecordingSurfaces(order, "surfaces")  # type: ignore[assignment]
+    gateway.session_resources[OVERLAY_RESOURCE] = _RecordingSurfaces(order, "overlay")
+    del gateway.session_resources[SURFACES_RESOURCE]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert order == ["surfaces", "overlay"]
     assert [failure.participant for failure in ledger.failures] == ["lifecycle-surfaces"]
 
 

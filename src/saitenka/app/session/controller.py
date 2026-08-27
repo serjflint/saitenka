@@ -485,9 +485,8 @@ class SessionController:
         # `getattr`, like the job-lane port below: a partial IPC (the benches' fake) constructs a
         # SessionController without implementing every runtime port, and construction must not demand one.
 
-        self._runtime_owns_surfaces = ipc.register_session_resource(
-            SURFACES_RESOURCE, self.lifecycle_surfaces
-        ) and ipc.register_session_resource(OVERLAY_RESOURCE, self.ov)
+        ipc.register_session_resource(SURFACES_RESOURCE, self.lifecycle_surfaces)
+        ipc.register_session_resource(OVERLAY_RESOURCE, self.ov)
         self.interaction_surfaces = InteractionSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
         self.notifications = ToastController(
@@ -3669,13 +3668,12 @@ class SessionController:
                 # `PARTICIPANTS` would strip the overlays ~30 steps early, while a lane could
                 # still add one.
                 CloseStep("lifecycle-surfaces", lambda: self._retire_surfaces()),
-                # Closed by the `SURFACES` phase above when a runtime owns it — this is the
-                # fallback for a SessionController that has none, and must stay after the removes it carries.
+                # Separate phase: a missing surface registration must fall back while the
+                # transport is still open, before this step closes it.
                 CloseStep(
                     "transport",
-                    lambda: self.ov.close(),
-                    self._runtime_close.fallback(
-                        ClosePhase.SURFACES, OVERLAY_RESOURCE, lambda: self.ov
+                    lambda: self._runtime_close.retire(
+                        ClosePhase.OVERLAY, OVERLAY_RESOURCE, self.ov.close
                     ),
                 ),
                 # Disarm what `PROCESS` armed. Process-global and session-lived: `run` turns it on
@@ -3878,7 +3876,6 @@ class SessionController:
             ClosePhase.SURFACES,
             SURFACES_RESOURCE,
             self.lifecycle_surfaces.close,
-            owned=self._runtime_owns_surfaces,
         )
 
     def _retire_artifacts(self) -> None:

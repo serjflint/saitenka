@@ -70,8 +70,10 @@ class ClosePhase(StrEnum):
     RENDERING = "rendering"
     #: Session stores are flushed and closed.
     STORES = "stores"
-    #: Nothing can present again, so overlays and their transport can go.
+    #: Nothing can present again, so lifecycle surfaces can go.
     SURFACES = "surfaces"
+    #: Lifecycle surfaces are gone, so their overlay transport can close.
+    OVERLAY = "overlay"
     #: Nothing can write any more.
     ARTIFACTS = "artifacts"
 
