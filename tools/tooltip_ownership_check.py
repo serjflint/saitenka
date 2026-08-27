@@ -100,12 +100,27 @@ def _attributes(node: ast.AST) -> list[ast.Attribute]:
     return []
 
 
-def _call_name(node: ast.Call) -> str | None:
+def _call_name(node: ast.Call, aliases: dict[str, str]) -> str | None:
     if isinstance(node.func, ast.Name):
-        return node.func.id
+        return aliases.get(node.func.id, node.func.id)
     if isinstance(node.func, ast.Attribute):
         return node.func.attr
     return None
+
+
+def _session_constructor_call(
+    node: ast.Call,
+    direct: set[str],
+    modules: set[str],
+) -> bool:
+    if isinstance(node.func, ast.Name):
+        return node.func.id in direct
+    return (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "SessionController"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in modules
+    )
 
 
 def _is_self_attribute(attribute: ast.Attribute) -> bool:
@@ -207,12 +222,25 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
     tree = ast.parse(source, filename=str(path))
     site = _site(path)
     findings: list[Finding] = []
+    imported_aliases = {
+        alias.asname or alias.name: alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
     session_controller_names = {
         alias.asname or alias.name
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom) and node.module == "saitenka.app.session.controller"
         for alias in node.names
         if alias.name == "SessionController"
+    }
+    session_controller_modules = {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "saitenka.app.session.controller" and alias.asname is not None
     }
 
     for node, owner_names in _scoped_nodes(tree):
@@ -263,13 +291,15 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
                     )
 
         if isinstance(node, ast.Call):
-            name = _call_name(node)
+            name = _call_name(node, imported_aliases)
             if name in _CONSTRUCTORS and site != _OWNER:
                 findings.append(Finding(path, node.lineno, "owned-constructor", name or ""))
             allowed = _PREPARATION_CONSTRUCTORS.get(name or "")
             if allowed is not None and site not in allowed:
                 findings.append(Finding(path, node.lineno, "preparation-constructor", name or ""))
-            if site == _PREWARM and name in session_controller_names:
+            if site == _PREWARM and _session_constructor_call(
+                node, session_controller_names, session_controller_modules
+            ):
                 findings.append(Finding(path, node.lineno, "full-session-prewarm", name or ""))
             if (
                 site == _COMPOSITION

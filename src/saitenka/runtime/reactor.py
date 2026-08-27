@@ -65,12 +65,19 @@ class Lifecycle(StrEnum):
 class LifecycleEffectError(RuntimeError):
     """A close turn ran every effect but one or more applications failed."""
 
-    def __init__(self, failures: tuple[tuple[Effect, Exception], ...]) -> None:
+    def __init__(self, failures: tuple[tuple[Effect, BaseException], ...]) -> None:
         self.failures = failures
         details = ", ".join(
             f"{type(effect).__name__}: {type(error).__name__}" for effect, error in failures
         )
         super().__init__(f"lifecycle effects failed: {details}")
+
+    @property
+    def missing_resources(self) -> frozenset[str]:
+        """Resource names a local fallback may still retire."""
+        return frozenset(
+            name for _effect, error in self.failures for name in getattr(error, "missing", ())
+        )
 
 
 class Reducer[StateT](Protocol):
@@ -206,14 +213,14 @@ class SessionReactor[StateT]:
     def _reduce(self, event: RuntimeEvent) -> bool:
         self._state, effects = self._reducer(self._state, event)
         performed = True
-        failures: list[tuple[Effect, Exception]] = []
+        failures: list[tuple[Effect, BaseException]] = []
         for effect in effects:
             if not isinstance(event, SessionClosing):
                 performed = self._apply(effect) and performed
                 continue
             try:
                 performed = self._apply(effect) and performed
-            except Exception as error:  # noqa: BLE001  # every close peer must get its turn
+            except BaseException as error:  # noqa: BLE001  # every close peer must get its turn
                 failures.append((effect, error))
         if failures:
             raise LifecycleEffectError(tuple(failures))

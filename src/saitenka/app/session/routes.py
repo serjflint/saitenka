@@ -424,7 +424,7 @@ def _retire(
             continue
         try:
             resource.close()  # type: ignore[attr-defined]  # registered by the owner that made it
-        except Exception as error:  # teardown continues; the owner's own close still ran
+        except BaseException as error:  # teardown continues; the owner's own close still ran
             log.warning("session resource %s failed to close", name, exc_info=True)
             failed.append((name, error))
     if failed or (missing and missing_is_failure):

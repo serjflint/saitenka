@@ -57,10 +57,31 @@ def test_preparation_controllers_can_only_be_built_by_session_assembly():
     assert "preparation-constructor" in rules
 
 
+def test_aliased_preparation_construction_cannot_escape_the_assembly():
+    rules = _rules(
+        "from saitenka.app.features.tooltip.preparation import "
+        "TooltipPreparationController as Preparation\n"
+        "def drift():\n    return Preparation()\n",
+        "features/tooltip/tooltip.py",
+    )
+
+    assert "preparation-constructor" in rules
+
+
 def test_prewarm_cannot_reconstruct_a_full_session():
     rules = _rules(
         "from saitenka.app.session.controller import SessionController as Reader\n"
         "def drift():\n    return Reader()\n",
+        "prewarm.py",
+    )
+
+    assert "full-session-prewarm" in rules
+
+
+def test_prewarm_cannot_reconstruct_a_session_through_a_module_alias():
+    rules = _rules(
+        "import saitenka.app.session.controller as controller\n"
+        "def drift():\n    return controller.SessionController()\n",
         "prewarm.py",
     )
 

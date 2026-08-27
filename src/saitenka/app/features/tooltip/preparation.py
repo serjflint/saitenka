@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.features.tooltip.popups import Panel
+    from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.features.tooltip.tooltip_engaged import HoverRequest
     from saitenka.app.features.tooltip.tooltip_panel import PanelPorts
     from saitenka.app.render_cache import CompressedHeadCache, LoadedView, RenderCache
@@ -305,6 +306,13 @@ class TooltipPreparationController:
     def cancel(self) -> int:
         """Invalidate all work admitted against an earlier interaction fact."""
         return self._prefetch.cancel()
+
+    def invalidate_dependencies(self, tooltip: TooltipController) -> None:
+        """Retire every tooltip artifact derived from replaced collaborators."""
+        tooltip.invalidate_dependencies()
+        self.cancel()
+        self._prefetch.key = None
+        self.cache.invalidate_signature()
 
     def start(self, ipc: MpvIPC, tokenizer: Tokenizer, *, dictionary_available: bool) -> None:
         prefetch.start_prefetch(

@@ -133,7 +133,11 @@ from saitenka.app.runtime import (
 )
 from saitenka.app.session import mined_feedback, panel_intents, sidebar_coordination, surfaces
 from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
-from saitenka.app.session.close_ledger import CloseLedger, CloseStep, fallback_after
+from saitenka.app.session.close_ledger import (
+    CloseLedger,
+    CloseStep,
+    RuntimeCloseTracker,
+)
 from saitenka.app.session.context import (
     EpisodeContext,
     EpisodeSlot,
@@ -208,7 +212,6 @@ from saitenka.runtime import (
     EffectFinished,
     EffectOutcome,
     Owner,
-    SessionClosing,
     StartupReady,
     UserCommand,
     events,
@@ -665,7 +668,7 @@ class SessionController:
 
         self._close_participants: dict[str, Callable[[], object]] = {}
         #: Which close phases the runtime actually performed, filled by the announcement.
-        self._runtime_close_phases: dict[ClosePhase, bool] = {}
+        self._runtime_close = RuntimeCloseTracker(ipc.deliver_runtime_event)
         self._lane_deadline = 0.0
         for name in (
             CAPABILITY_PARTICIPANTS + INTERACTION_WORK_PARTICIPANTS + WORKER_LANE_PARTICIPANTS
@@ -1452,12 +1455,7 @@ class SessionController:
             annotate=self.subtitle_language != SECOND_LANG,
         )
 
-    def _apply_annotation_transition(
-        self,
-        transition: AnnotationTransition,
-        *,
-        draw: bool,
-    ) -> None:
+    def _apply_annotation_transition(self, transition: AnnotationTransition, *, draw: bool) -> None:
         if transition.identity is not None:
             self._publish_cue_identity(transition.identity)
         if transition.cue is not None:
@@ -1469,7 +1467,7 @@ class SessionController:
             self.draw_subtitle()
 
     def _dependencies_changed(self) -> None:
-        self._invalidate_tooltip_dependencies()
+        self._invalidate_profile_dictionary()
         transition = self.annotation_controller.dependencies_changed(
             self.sub_text,
             self._annotation_inputs(),
@@ -1486,11 +1484,8 @@ class SessionController:
     def warm_episode_tokens(self) -> None:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
         index = self.episode.sub_index
-        if (
-            index is None
-            or not self.tooltip_preparation.config.enabled
-            or self.profile_controller.dict_set is None
-        ):
+        enabled = self.tooltip_preparation.config.enabled
+        if index is None or not enabled or self.profile_controller.dict_set is None:
             return
         self.annotation_controller.start_episode_warm(index, self._annotation_inputs())
 
@@ -1502,13 +1497,7 @@ class SessionController:
         self.annotation_controller.invalidate_tokenizer()
 
     def _invalidate_profile_dictionary(self) -> None:
-        self._invalidate_tooltip_dependencies()
-
-    def _invalidate_tooltip_dependencies(self) -> None:
-        """Retire work and caches derived from a replaced dictionary or scorer."""
-        self.tooltip_controller.invalidate_dependencies()
-        self.tooltip_preparation.cancel()
-        self.tooltip_preparation.cache.invalidate_signature()
+        self.tooltip_preparation.invalidate_dependencies(self.tooltip_controller)
 
     def _reset_profile_episode_warm(self) -> None:
         self.annotation_controller.retire_episode_warm()
@@ -3588,78 +3577,89 @@ class SessionController:
                 # announcement can say whether anything performed them: a session with a gateway
                 # but no reactor registers every participant and runs none of them.
                 CloseStep(
-                    "phase:capabilities", lambda: self._announce_close(ClosePhase.CAPABILITIES)
+                    "phase:capabilities",
+                    lambda: self._runtime_close.announce(ClosePhase.CAPABILITIES),
                 ),
                 *self._fallback_steps(CAPABILITY_PARTICIPANTS, ClosePhase.CAPABILITIES),
                 # The runtime's own close participants: it announces, the session reducer emits
                 # their effects. Delivered rather than published — the session loop has stopped,
                 # and draining here would run a full domain turn against half-closed collaborators.
-                CloseStep("runtime-close", lambda: self._announce_close(ClosePhase.PARTICIPANTS)),
+                CloseStep(
+                    "runtime-close", lambda: self._runtime_close.announce(ClosePhase.PARTICIPANTS)
+                ),
                 *self._fallback_steps(INTERACTION_WORK_PARTICIPANTS, ClosePhase.PARTICIPANTS),
                 # A detached mpv must never outlive us still routing clicks here.
                 CloseStep(
                     "mouse-capture",
                     lambda: self._mouse.release(),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.PARTICIPANTS),
-                        lambda: self._mouse,
+                    self._runtime_close.fallback(
+                        ClosePhase.PARTICIPANTS, INPUT_CAPTURE_RESOURCE, lambda: self._mouse
                     ),
                 ),
-                CloseStep("phase:lanes", lambda: self._announce_close(ClosePhase.LANES)),
+                CloseStep("phase:lanes", lambda: self._runtime_close.announce(ClosePhase.LANES)),
                 # The order between these is the contract either way — it is the one
                 # `WORKER_LANE_PARTICIPANTS` declares.
                 *self._fallback_steps(WORKER_LANE_PARTICIPANTS, ClosePhase.LANES),
                 # No refresh may land after the provider closes, nor a settle deadline outlive it.
                 CloseStep("geometry-refresh", lambda: self.retire_geometry_refresh()),
                 CloseStep("settle-window", lambda: self.retire_settle_window()),
-                CloseStep("phase:rendering", lambda: self._announce_close(ClosePhase.RENDERING)),
+                CloseStep(
+                    "phase:rendering", lambda: self._runtime_close.announce(ClosePhase.RENDERING)
+                ),
                 # A step each, so a failure in one isolates — the guarantee `_retire` reproduces
                 # on the migrated path.
                 CloseStep(
                     "subtitle-deactivate",
                     lambda: self.subtitle_pipeline.deactivate(self.subtitle_target()),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                    self._runtime_close.fallback(
+                        ClosePhase.RENDERING,
+                        SUBTITLE_DEACTIVATE_RESOURCE,
                         lambda: self.subtitle_pipeline,
                     ),
                 ),
                 CloseStep(
                     "subtitle-clear",
                     self._clear_subtitle_pixels,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                    self._runtime_close.fallback(
+                        ClosePhase.RENDERING,
+                        SUBTITLE_CLEAR_RESOURCE,
                         lambda: self.native_geometry,
                     ),
                 ),
                 CloseStep(
                     "subtitle-close",
                     self._close_subtitle_raster,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.RENDERING),
+                    self._runtime_close.fallback(
+                        ClosePhase.RENDERING,
+                        SUBTITLE_CLOSE_RESOURCE,
                         lambda: self.subtitle_pipeline,
                     ),
                 ),
-                CloseStep("phase:stores", lambda: self._announce_close(ClosePhase.STORES)),
+                CloseStep("phase:stores", lambda: self._runtime_close.announce(ClosePhase.STORES)),
                 CloseStep(
                     "session-stats",
                     lambda: self._report_session(self.finish_session_stats()),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.STORES), lambda: self.session
+                    self._runtime_close.fallback(
+                        ClosePhase.STORES,
+                        SESSION_SUMMARY_RESOURCE,
+                        lambda: self.session,
                     ),
                 ),
                 CloseStep(
                     "backlog-store",
                     self._close_backlog_store,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.STORES),
+                    self._runtime_close.fallback(
+                        ClosePhase.STORES,
+                        BACKLOG_RESOURCE,
                         lambda: self.session.backlog_store,
                     ),
                 ),
                 CloseStep(
                     "mined-store",
                     self.mining_controller.close_store,
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.STORES),
+                    self._runtime_close.fallback(
+                        ClosePhase.STORES,
+                        MINED_RESOURCE,
                         lambda: self.mining_controller,
                     ),
                 ),
@@ -3674,8 +3674,8 @@ class SessionController:
                 CloseStep(
                     "transport",
                     lambda: self.ov.close(),
-                    fallback_after(
-                        lambda: self._phase_performed(ClosePhase.SURFACES), lambda: self.ov
+                    self._runtime_close.fallback(
+                        ClosePhase.SURFACES, OVERLAY_RESOURCE, lambda: self.ov
                     ),
                 ),
                 # Disarm what `PROCESS` armed. Process-global and session-lived: `run` turns it on
@@ -3763,7 +3763,7 @@ class SessionController:
             CloseStep(
                 name,
                 self._participant_for(name),
-                fallback_after(lambda: self._phase_performed(phase), lambda: self),
+                self._runtime_close.fallback(phase, name, lambda: self),
             )
             for name in names
         )
@@ -3864,27 +3864,6 @@ class SessionController:
 
         guard_main_render(on=False)
 
-    def _phase_performed(self, phase: ClosePhase) -> bool:
-        """Whether the runtime performed `phase`'s steps, so this session's own must not."""
-        return self._runtime_close_phases.get(phase, False)
-
-    def _announce_close(self, phase: ClosePhase, scratch: str | None = None) -> bool:
-        """Tell the runtime the close sequence reached `phase`. False when no runtime owns us.
-
-        Delivered rather than published: the session loop has stopped, so a published event would
-        sit in the mailbox, and draining here would run a full domain turn against half-closed
-        collaborators.
-        """
-        try:
-            performed = self.ipc.deliver_runtime_event(SessionClosing(phase, scratch))
-        except BaseException:
-            # The reactor reached and attempted the phase. Its delayed retirement error belongs in
-            # CloseLedger, but the successful peers must not run again through the local fallback.
-            self._runtime_close_phases[phase] = True
-            raise
-        self._runtime_close_phases[phase] = performed
-        return performed
-
     def _retire_surfaces(self) -> None:
         """Announce the `SURFACES` phase, or close them ourselves.
 
@@ -3895,9 +3874,12 @@ class SessionController:
         a reactor saw the event, not that anything performed the effect. A session with a reactor
         but no registered resource would take the True and leak the overlays.
         """
-        if self._runtime_owns_surfaces and self._announce_close(ClosePhase.SURFACES):
-            return
-        self.lifecycle_surfaces.close()
+        self._runtime_close.retire(
+            ClosePhase.SURFACES,
+            SURFACES_RESOURCE,
+            self.lifecycle_surfaces.close,
+            owned=self._runtime_owns_surfaces,
+        )
 
     def _retire_artifacts(self) -> None:
         """Hand the scratch dir to the runtime's `ARTIFACTS` phase, or remove it ourselves.
@@ -3908,7 +3890,7 @@ class SessionController:
         perform it, which is the one case where `announce`'s return answers the question asked.
         """
         self.mining_controller.retire_artifacts(
-            lambda path: self._announce_close(ClosePhase.ARTIFACTS, path)
+            lambda path: self._runtime_close.announce(ClosePhase.ARTIFACTS, path)
         )
 
     def finish_session_stats(self) -> str | None:

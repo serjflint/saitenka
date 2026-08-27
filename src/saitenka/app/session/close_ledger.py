@@ -23,6 +23,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from saitenka.runtime.events import ClosePhase, SessionClosing
+
+from saitenka.runtime.events import SessionClosing
+from saitenka.runtime.reactor import LifecycleEffectError
+
 log = logging.getLogger(__name__)
 
 
@@ -68,6 +73,57 @@ def fallback_after(performed: Callable[[], bool], present: Callable[[], object])
     which is why it has to run *before* the steps it might replace.
     """
     return lambda: _absent() if performed() else present()
+
+
+class RuntimeCloseTracker:
+    """Track which runtime retirements still require their local fallback."""
+
+    def __init__(self, deliver: Callable[[SessionClosing], bool]) -> None:
+        self._deliver = deliver
+        self._missing: dict[ClosePhase, frozenset[str]] = {}
+
+    def performed(self, phase: ClosePhase, resource: str) -> bool:
+        missing = self._missing.get(phase)
+        return missing is not None and resource not in missing
+
+    def fallback(
+        self,
+        phase: ClosePhase,
+        resource: str,
+        present: Callable[[], object],
+    ) -> Callable[[], object]:
+        return lambda: None if self.performed(phase, resource) else present()
+
+    def announce(self, phase: ClosePhase, scratch: str | None = None) -> bool:
+        try:
+            performed = self._deliver(SessionClosing(phase, scratch))
+        except LifecycleEffectError as error:
+            self._missing[phase] = error.missing_resources
+            raise
+        except BaseException:
+            self._missing.pop(phase, None)
+            raise
+        if performed:
+            self._missing[phase] = frozenset()
+        return performed
+
+    def retire(
+        self,
+        phase: ClosePhase,
+        resource: str,
+        local: Callable[[], None],
+        *,
+        owned: bool,
+    ) -> None:
+        if owned:
+            try:
+                if self.announce(phase):
+                    return
+            except LifecycleEffectError:
+                if not self.performed(phase, resource):
+                    local()
+                raise
+        local()
 
 
 @dataclass(slots=True)

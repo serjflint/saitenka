@@ -612,7 +612,7 @@ def test_a_failing_close_effect_does_not_skip_the_rest_of_its_phase() -> None:
     retired: list[str] = []
 
     def fail_interaction() -> None:
-        raise RuntimeError("interaction close failed")
+        raise KeyboardInterrupt
 
     gateway.session_resources[INTERACTION_WORK_PARTICIPANTS[0]] = Retiring(fail_interaction)
     gateway.session_resources[INTERACTION_WORK_PARTICIPANTS[1]] = Retiring(
@@ -664,6 +664,13 @@ def test_a_missing_runtime_resource_is_reported_as_refused_close_work() -> None:
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    released: list[str] = []
+
+    class _LocalCapture:
+        def release(self) -> None:
+            released.append("capture")
+
+    reader._mouse = _LocalCapture()  # type: ignore[assignment]
     del gateway.session_resources[INPUT_CAPTURE_RESOURCE]
     try:
         ledger = reader.close()
@@ -674,6 +681,7 @@ def test_a_missing_runtime_resource_is_reported_as_refused_close_work() -> None:
     failure = ledger.failures[0].error
     assert isinstance(failure, LifecycleEffectError)
     assert any("input-capture: missing" in str(error) for _effect, error in failure.failures)
+    assert released == ["capture"]
 
 
 def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:

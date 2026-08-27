@@ -85,6 +85,24 @@ def test_lookahead_warms_the_next_cues_words(monkeypatch):
     assert "書く" in surfaces and "水" in surfaces and "飲む" in surfaces
 
 
+def test_dependency_replacement_readmits_the_unchanged_cue(monkeypatch):
+    r = _reader(monkeypatch, lookahead=0)
+    r.set_subtitle("本を読む")
+    scheduled: list[list[object]] = []
+
+    def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
+        scheduled.append([item for _priority, item in jobs])
+        return True
+
+    monkeypatch.setattr(prefetch, "schedule", capture)
+    r._update_prefetch()
+
+    r._dependencies_changed()
+    r._update_prefetch()
+
+    assert len(scheduled) == 2
+
+
 def test_lookahead_items_are_warm_only_even_while_engaged(monkeypatch):
     # Paused ⇒ the CURRENT line renders full; a future line is never engaged → always warm/unmined.
     r = _reader(monkeypatch, lookahead=1, props={"pause": True})
