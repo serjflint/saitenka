@@ -335,10 +335,6 @@ _DISPLAY_PROBE_PROPS = (
 _Nested = PopupView
 
 
-def _navigate_tip_back(controller: SessionController) -> None:
-    tooltip.tip_back(controller._tip_ports)
-
-
 class SessionController:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
@@ -2041,7 +2037,7 @@ class SessionController:
             tip_scale_override=self._tip_scale_override,
             tip_max_frac=self.tip_max_frac,
             observe_can_go_back=lambda: self.tooltip_controller.observation().can_go_back,
-            navigate_back=lambda: _navigate_tip_back(self),
+            navigate_back=lambda: tooltip.tip_back(self._tip_ports),
         )
 
     @property

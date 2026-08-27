@@ -207,6 +207,17 @@ def test_session_cannot_republish_private_tooltip_ports_under_a_new_name(body: s
     assert "session-tooltip-port" in rules
 
 
+def test_session_may_bind_private_ports_into_the_declared_navigation_act():
+    rules = _rules(
+        "class SessionController:\n"
+        "    def tooltip_navigation(self):\n"
+        "        return Endpoint(navigate_back=lambda: tooltip.tip_back(self._tip_ports))\n",
+        "session/controller.py",
+    )
+
+    assert "session-tooltip-port" not in rules
+
+
 def test_non_physical_session_method_cannot_take_mutable_tooltip_state():
     rules = _rules(
         "class SessionController:\n"

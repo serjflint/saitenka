@@ -111,7 +111,6 @@ _TOOLTIP_RAW_BRIDGE_SITES = {_OWNER, _COMPOSITION}
 _COMPOSITION_RAW_TOOLTIP_METHODS = {
     "_panel_cache_setdefault",
     "_panel_ports",
-    "_navigate_tip_back",
     "_render_nested_view",
     "_render_tip_view",
     "_tip_ports",
@@ -249,6 +248,13 @@ def _returned_owner_state(function: ast.FunctionDef) -> bool:
 
 
 def _session_port_reference(node: ast.AST, aliases: set[str]) -> bool:
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and (node.func.value.id, node.func.attr) == ("tooltip", "tip_back")
+    ):
+        return False
     if isinstance(node, ast.Attribute):
         chain = _self_attribute_chain(node)
         if chain is not None and chain[:1] in {(name,) for name in _SESSION_PRIVATE_TOOLTIP_PORTS}:
