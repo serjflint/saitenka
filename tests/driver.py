@@ -52,7 +52,7 @@ class Driver:
     def move_into_tip(self, dx: float = 0.5, dy: float = 0.5) -> Driver:
         """Move to a point inside the shown tooltip (fractions of its rect) — e.g. to scan an inner
         word or hit a body region."""
-        x, y, w, h = self.r.tip.view.rect
+        x, y, w, h = self.r.tooltip_controller.surface_state().view.rect
         return self.move(x + w * dx, y + h * dy)
 
     # --- clicks / wheel / keys (client-message path) ----------------------------------------------
@@ -81,12 +81,12 @@ class Driver:
     # --- observed state ---------------------------------------------------------------------------
     @property
     def hover(self) -> int:
-        return self.r.tooltip_controller.selected
+        return self.r.tooltip_controller.observation().selected
 
     @property
     def tip_shown(self) -> bool:
-        return self.r.tip.view.rect is not None
+        return self.r.tooltip_controller.surface_state().view.rect is not None
 
     @property
     def nested_shown(self) -> bool:
-        return self.r.tip.nest.state is not None
+        return self.r.tooltip_controller.surface_state().nest.state is not None

@@ -38,9 +38,9 @@ def _cue(reader: SessionController) -> CueState:
 
 
 def _interaction(reader: SessionController) -> InteractionState:
-    if reader.tip.view.rect is not None:
+    if reader.tooltip_controller.surface_state().view.rect is not None:
         return "tooltip"
-    if reader.tooltip_controller.selected >= 0 and reader.boxes:
+    if reader.tooltip_controller.observation().selected >= 0 and reader.boxes:
         return "hovered"
     return "ready" if reader.boxes else "unavailable"
 

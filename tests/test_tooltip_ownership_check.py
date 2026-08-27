@@ -28,6 +28,41 @@ def test_current_tooltip_ownership_tree_is_clean():
     assert ownership.inspect_tree() == []
 
 
+@pytest.mark.parametrize("attribute", ["tip", "interaction"])
+def test_session_cannot_reintroduce_tooltip_state_projections(attribute: str):
+    rules = _rules(
+        f"def drift(self):\n    return self.{attribute}\n",
+        "session/controller.py",
+    )
+
+    assert "legacy-session-field" in rules
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "state",
+        "hover_store",
+        "word_store",
+        "metadata",
+        "metadata_submitter",
+        "engaged",
+        "engaged_submitter",
+        "render_ahead",
+        "render_ahead_submitter",
+        "selected",
+        "pause_enabled",
+    ],
+)
+def test_tooltip_owner_cannot_republish_mutable_state(name: str):
+    rules = _rules(
+        f"class TooltipController:\n    def {name}(self):\n        return self._state\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "owner-projection" in rules
+
+
 @pytest.mark.parametrize(
     "attribute",
     [

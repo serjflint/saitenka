@@ -692,7 +692,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
         r.profile_controller.dict_set,
-        r.interaction.hovered_word_meta.terms,
+        r.tooltip_controller.observation().metadata.terms,
         r.mining_controller.mine_token,
         LinkBox("mine:1", 0, 0, 10, 10),
         tok,

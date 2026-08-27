@@ -60,14 +60,14 @@ def _churn(r: SessionController, term: str) -> bool:
     ui = Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
         ui.wheel(1)
-    st = r.tip.view.state
+    st = r.tooltip_controller.surface_state().view.state
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
     if boxes:
         nested_popup.show_nested(
             r.tip_ports, r.panel_ports, r.word_lookup, boxes[len(boxes) // 3]
         )  # nested popup on an inner cell
-        opened = r.tip.nest.state is not None
+        opened = r.tooltip_controller.surface_state().nest.state is not None
         ui.wheel(1)  # nested is up
         r._hide_nested()
     r.retire_hover()  # dismiss the whole stack
@@ -81,20 +81,20 @@ def test_sustained_churn_evicts_and_stays_clean():
     nested_seen = 0
     for term in _CORPUS:  # fill past the cap → eviction
         nested_seen += _churn(r, term)
-    assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX, (
-        f"cache overflowed its LRU cap mid-fill: {len(r.tip.panel_cache)}"
+    assert len(r.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
+        f"cache overflowed its LRU cap mid-fill: {len(r.tooltip_controller.surface_state().panel_cache)}"
     )
     for term in _CORPUS[:8]:  # revisit the earliest (now-evicted) entries → cold rebuild, no crash
         nested_seen += _churn(r, term)
 
     assert nested_seen > 0, "nested popups never opened — the nested path wasn't exercised"
-    assert len(r.tip.panel_cache) <= PANEL_CACHE_MAX, (
-        f"panel cache overflowed its LRU cap: {len(r.tip.panel_cache)}"
+    assert len(r.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
+        f"panel cache overflowed its LRU cap: {len(r.tooltip_controller.surface_state().panel_cache)}"
     )
     # after the final retire_hover() the whole hover stack must be torn down
-    assert r.hover_view().tip.state is None
-    assert r.hover_view().nested.state is None  # nested popup cleared
-    assert r.tooltip_controller.selected == -1
+    assert r.tooltip_controller.hover_view().tip.state is None
+    assert r.tooltip_controller.hover_view().nested.state is None  # nested popup cleared
+    assert r.tooltip_controller.observation().selected == -1
 
 
 def test_churn_removes_both_overlays_no_ghost():

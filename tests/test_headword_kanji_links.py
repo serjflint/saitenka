@@ -74,22 +74,35 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     ui = Driver(r)
     ui.move_to_word(0)  # base tooltip for 読む, through hit-testing rather than a poke
 
-    lb = next(b for b in r.tip.view.state.windowed.link_boxes() if b.query == "kanji:読")
-    sx, sy = r.tip.view.xy
-    base = r.tip.view.state
-    ui.move(sx + lb.x + lb.w / 2, sy + (lb.y - r.tip.view.scroll) + lb.h / 2).click()
+    lb = next(
+        b
+        for b in r.tooltip_controller.surface_state().view.state.windowed.link_boxes()
+        if b.query == "kanji:読"
+    )
+    sx, sy = r.tooltip_controller.surface_state().view.xy
+    base = r.tooltip_controller.surface_state().view.state
+    ui.move(
+        sx + lb.x + lb.w / 2,
+        sy + (lb.y - r.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
+    ).click()
 
     # A click must NEVER spawn a nested popup (hover-governed → self-dismisses unless the cursor chases
     # it); a headword kanji navigates the base tooltip IN PLACE, Yomitan-style.
-    assert r.hover_view().nested.state is None
+    assert r.tooltip_controller.hover_view().nested.state is None
     # Content swapped to 読's kanji entry, previous view pushed for back. len==1 is only reached when
     # kanji_for('読') resolved and installed — a dead/missing kanji would leave the stack empty.
-    assert r.tip.view.state is not None and r.tip.view.state is not base
-    assert len(r.interaction.tip_nav.back) == 1
+    assert (
+        r.tooltip_controller.surface_state().view.state is not None
+        and r.tooltip_controller.surface_state().view.state is not base
+    )
+    assert len(r.tooltip_controller.observation().navigation.back) == 1
     # A navigated view is keyless — not a subtitle token, so scroll won't rebuild it from a token.
-    assert r.tip.view.key is None and r.tip.tip_tok is None
+    assert (
+        r.tooltip_controller.surface_state().view.key is None
+        and r.tooltip_controller.surface_state().tip_tok is None
+    )
     # Reversible: back restores the base 読む tooltip.
     from saitenka.app.features.tooltip import tooltip
 
     assert tooltip.tip_back(r.tip_ports) is True
-    assert r.tip.view.state is base
+    assert r.tooltip_controller.surface_state().view.state is base

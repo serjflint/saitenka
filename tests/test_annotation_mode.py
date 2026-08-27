@@ -99,8 +99,8 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
     assert calls == [("style", True)]
     # The switch is a decision the dwell has not made yet: the target is armed, the tooltip has not
     # moved. No stub stands in for the build — nothing calls it.
-    assert reader.tooltip_controller.hover_store.current.hysteresis.word_target == 1
-    assert reader.tooltip_controller.selected == 0
+    assert reader.tooltip_controller.observation().hover.hysteresis.word_target == 1
+    assert reader.tooltip_controller.observation().selected == 0
 
 
 def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch):
@@ -113,7 +113,7 @@ def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatc
 
     reader.set_annotation_hover(revealed=True)
 
-    assert reader.tooltip_controller.selected == -1
+    assert reader.tooltip_controller.observation().selected == -1
     assert redrawn == [True]
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 

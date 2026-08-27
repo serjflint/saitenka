@@ -246,8 +246,8 @@ def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
         def __init__(self, n):
             self.retained_nbytes = n
 
-    r.tip.panel_cache.setdefault("a", _Panel(100))
-    r.tip.panel_cache.setdefault("b", _Panel(250))
+    r.tooltip_controller.surface_state().panel_cache.setdefault("a", _Panel(100))
+    r.tooltip_controller.surface_state().panel_cache.setdefault("b", _Panel(250))
     monkeypatch.setattr(
         r.profile_controller.dict_set, "decoded_entry_count", lambda: 7, raising=False
     )

@@ -80,7 +80,7 @@ def _apply(reader, action: str, arg: object) -> None:
     elif action == "resize":
         scale = float(arg)  # type: ignore[arg-type]
         reader.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
-        tooltip_panel.render_view(reader.tip_ports, reader.tip.view)
+        tooltip_panel.render_view(reader.tip_ports, reader.tooltip_controller.surface_state().view)
     else:  # pragma: no cover - guards a typo in a scenario table
         raise AssertionError(f"unknown action {action!r}")
 
@@ -101,5 +101,5 @@ def test_session_replay_keeps_the_seam_under_each_backend(scenario, backend_name
         _apply(reader, action, arg)
         # The render↔hit-test agreement holds after every transition, base panel and (when open) nested.
         _assert_agrees(reader, nested=False)
-        if reader.tip.nest.state is not None:
+        if reader.tooltip_controller.surface_state().nest.state is not None:
             _assert_agrees(reader, nested=True)

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import zipfile
+from dataclasses import replace
+from weakref import WeakKeyDictionary
 
 import dicthelp
 from driver import Driver
@@ -20,18 +22,28 @@ from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
+_SUBMITTERS: WeakKeyDictionary[SessionController, _DeferredEngagedSubmitter]
+
 
 class _DeferredEngagedSubmitter:
-    def __init__(self, reader):
-        self.run = reader.tooltip_controller.run_engaged
+    def __init__(self):
+        self.run = None
+        self.enabled = False
         self.calls = []
 
     def __call__(self, **kwargs):
+        if not self.enabled:
+            return False
         self.calls.append(kwargs)
         return True
 
+    def enable(self, reader: SessionController) -> None:
+        self.run = reader.tooltip_controller.run_engaged
+        self.enabled = True
+
     def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
         call = self.calls.pop(0)
+        assert self.run is not None
         result = self.run(call["request"]) if run else None
         call["on_finished"](
             EffectFinished(
@@ -63,10 +75,22 @@ def _fixture_ds(tmp_path):
     return dicthelp.load_set([str(p)])
 
 
+_SUBMITTERS = WeakKeyDictionary()
+
+
+def _submitter(reader: SessionController) -> _DeferredEngagedSubmitter:
+    return _SUBMITTERS[reader]
+
+
 def _reader(tmp_path, *, worker: bool):
+    submitter = _DeferredEngagedSubmitter()
     r = SessionController(
-        FakeIPC(), dict_set=_fixture_ds(tmp_path), options=ReaderOptions(prefetch=True)
+        FakeIPC(),
+        dict_set=_fixture_ds(tmp_path),
+        options=ReaderOptions(prefetch=True),
+        tooltip_runtime_jobs=lambda _owner, jobs: replace(jobs, engaged=submitter),
     )
+    _SUBMITTERS[r] = submitter
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [
@@ -79,7 +103,7 @@ def _reader(tmp_path, *, worker: bool):
     # the base tooltip is up + switchable synchronously and the tests isolate the nested-open defer.
     Driver(r).move_to_word(0).move_to_word(1).move_to_word(0)  # end on 読む, both panels cached
     if worker:
-        r.tooltip_controller.engaged_submitter = _DeferredEngagedSubmitter(r)
+        submitter.enable(r)
     return r
 
 
@@ -87,30 +111,41 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
     # Negative control: with no prefetch worker, the open builds + shows on the calling tick (unchanged).
     r = _reader(tmp_path, worker=False)
     nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
-    assert r.tip.nest.state is not None and r.tip.nest.word == "読"
-    assert r.tooltip_controller.engaged.inflight is None  # nothing deferred
+    assert (
+        r.tooltip_controller.surface_state().nest.state is not None
+        and r.tooltip_controller.surface_state().nest.word == "読"
+    )
+    assert r.tooltip_controller.work_view().engaged_inflight is None  # nothing deferred
 
 
 def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
-    assert r.tip.nest.state is None  # deferred — nothing shown on the click tick
-    assert r.tooltip_controller.engaged_submitter.calls
+    assert (
+        r.tooltip_controller.surface_state().nest.state is None
+    )  # deferred — nothing shown on the click tick
+    assert _submitter(r).calls
 
-    r.tooltip_controller.engaged_submitter.finish()
+    _submitter(r).finish()
 
-    assert r.tip.nest.state is not None and r.tip.nest.word == "読"
+    assert (
+        r.tooltip_controller.surface_state().nest.state is not None
+        and r.tooltip_controller.surface_state().nest.word == "読"
+    )
     # the place composited from worker-warmed bands — zero synchronous glyph rasters on this tick
-    assert r.tip.nest.state.windowed.last_frame_rasters == 0
+    assert r.tooltip_controller.surface_state().nest.state.windowed.last_frame_rasters == 0
 
 
 def test_kanji_open_worker_failure_uses_current_origin_sync_fallback(tmp_path):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0)
 
-    r.tooltip_controller.engaged_submitter.finish(outcome=EffectOutcome.FAILED, run=False)
+    _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert r.tip.nest.state is not None and r.tip.nest.word == "読"
+    assert (
+        r.tooltip_controller.surface_state().nest.state is not None
+        and r.tooltip_controller.surface_state().nest.word == "読"
+    )
 
 
 def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
@@ -120,7 +155,7 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
     nested_popup.open_kanji(
         r.tip_ports, r.panel_ports, "読", 100.0, 300.0, 40.0
     )  # origin = id(読む panel)
-    submitter = r.tooltip_controller.engaged_submitter
+    submitter = _submitter(r)
     call = submitter.calls.pop(0)
     result = submitter.run(call["request"])
     # the user moves to another word mid-flight → a different panel, so a different id
@@ -130,7 +165,9 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
             EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
         )
     )
-    assert r.tip.nest.state is None  # the stale open was dropped, not opened onto 見る
+    assert (
+        r.tooltip_controller.surface_state().nest.state is None
+    )  # the stale open was dropped, not opened onto 見る
 
 
 def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
@@ -144,9 +181,9 @@ def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
         lambda source, query, **kwargs: rebuilt.append((source, query, kwargs)),
     )
 
-    r.tooltip_controller.engaged_submitter.finish(outcome=EffectOutcome.FAILED, run=False)
+    _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert rebuilt == [] and r.tip.nest.state is None
+    assert rebuilt == [] and r.tooltip_controller.surface_state().nest.state is None
 
 
 def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
@@ -157,7 +194,10 @@ def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
         r.tip_ports, r.panel_ports, "犬", 100.0, 300.0, 40.0
     )  # 犬 isn't in the kanji bank
     assert toasts and "犬" in toasts[0]  # the no-entry toast fired on the tick…
-    assert r.tooltip_controller.engaged.inflight is None and r.tip.nest.state is None
+    assert (
+        r.tooltip_controller.work_view().engaged_inflight is None
+        and r.tooltip_controller.surface_state().nest.state is None
+    )
 
 
 def test_cross_reference_link_open_defers(tmp_path):
@@ -166,7 +206,16 @@ def test_cross_reference_link_open_defers(tmp_path):
 
     r = _reader(tmp_path, worker=True)
     lb = LinkBox("見る", 10, 20, 40, 40)
-    tooltip.nested_popup.open_link(r.tip_ports, r.panel_ports, lb, r.tip.view.xy, r.tip.view.scroll)
-    assert r.tip.nest.state is None and r.tooltip_controller.engaged_submitter.calls
-    r.tooltip_controller.engaged_submitter.finish()
-    assert r.tip.nest.state is not None and r.tip.nest.word == "見る"
+    tooltip.nested_popup.open_link(
+        r.tip_ports,
+        r.panel_ports,
+        lb,
+        r.tooltip_controller.surface_state().view.xy,
+        r.tooltip_controller.surface_state().view.scroll,
+    )
+    assert r.tooltip_controller.surface_state().nest.state is None and _submitter(r).calls
+    _submitter(r).finish()
+    assert (
+        r.tooltip_controller.surface_state().nest.state is not None
+        and r.tooltip_controller.surface_state().nest.word == "見る"
+    )

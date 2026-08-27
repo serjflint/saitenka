@@ -2,12 +2,12 @@
   "counts": {
     "delegator": 86,
     "derived": 47,
-    "init_lines": 335,
+    "init_lines": 334,
     "self_delegator": 2,
-    "slice": 21,
-    "substantive": 131,
-    "substantive_lines": 1581,
-    "total": 287
+    "slice": 20,
+    "substantive": 130,
+    "substantive_lines": 1571,
+    "total": 285
   },
   "reason": ""
 }

@@ -10,25 +10,14 @@ feature-owned collaborators whose state shares the interaction lifetime.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
-from saitenka.app.features.tooltip.popups import hovered_meta
 from saitenka.app.subnav_settle import SettleWindow
 
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
-    from saitenka.app.features.tooltip.popups import HoverMetadata, TooltipState
     from saitenka.app.session_stats import SessionRecorder
     from saitenka.app.subtitle_modes import ProviderFetchFactory
-    from saitenka.runtime.hover_pause import PauseClaim
-    from saitenka.runtime.interaction_slice import (
-        HoveredWordStore,
-        HoverPauseStore,
-        PulseStore,
-        TipNavStore,
-    )
-    from saitenka.runtime.pulse import PulseState
-    from saitenka.runtime.tipnav import TipNavState
     from saitenka.subtitles import Cue, CueIndex
 
 
@@ -42,25 +31,6 @@ class SubtitleSource:
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()
-
-
-class TooltipStateOwner(Protocol):
-    """The interaction context reads tooltip facts through their bounded owner."""
-
-    @property
-    def state(self) -> TooltipState: ...
-
-    @property
-    def nav_store(self) -> TipNavStore: ...
-
-    @property
-    def pulse_store(self) -> PulseStore: ...
-
-    @property
-    def pause_store(self) -> HoverPauseStore: ...
-
-    @property
-    def word_store(self) -> HoveredWordStore: ...
 
 
 class EpisodeContext:
@@ -104,55 +74,6 @@ class EpisodeSlot:
     def replace(self, episode: EpisodeContext | None = None) -> EpisodeContext:
         self._current = episode if episode is not None else EpisodeContext()
         return self._current
-
-
-class InteractionContext:
-    """State scoped to the current on-screen interaction (hover/tooltip).
-
-    Holds the tooltip collaborator whose state shares this volatile interaction lifetime. Other OSD
-    surfaces are owned directly by their feature controllers.
-    """
-
-    #: Assigned by `SessionController.__init__`; the owner needs runtime/build collaborators this lifetime
-    #: container has no business constructing.
-    tooltip: TooltipStateOwner
-
-    @property
-    def tip_nav(self) -> TipNavState:
-        return self.tooltip.nav_store.current
-
-    @property
-    def tip(self) -> TooltipState:
-        """Read-only surface projection of the tooltip feature's owned state."""
-        return self.tooltip.state
-
-    @property
-    def nav_store(self) -> TipNavStore:
-        return self.tooltip.nav_store
-
-    @property
-    def pulse_store(self) -> PulseStore:
-        return self.tooltip.pulse_store
-
-    @property
-    def pause_store(self) -> HoverPauseStore:
-        return self.tooltip.pause_store
-
-    @property
-    def word_store(self) -> HoveredWordStore:
-        return self.tooltip.word_store
-
-    @property
-    def copy_pulse(self) -> PulseState:
-        return self.tooltip.pulse_store.current
-
-    @property
-    def hover_pause(self) -> PauseClaim:
-        return self.tooltip.pause_store.current
-
-    @property
-    def hovered_word_meta(self) -> HoverMetadata:
-        return hovered_meta(self.tooltip.word_store)
 
 
 class SessionContext:

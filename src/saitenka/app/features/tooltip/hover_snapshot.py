@@ -1,9 +1,6 @@
-"""A read-only snapshot of the SessionController's hover stack — the public observation seam (#43).
+"""A read-only snapshot of Tooltip's hover stack.
 
-Tests assert against ``reader.hover_view()`` instead of reaching into ``_nest`` / ``_tip_*`` /
-``_paused_by_tip`` / ``_nav_idx`` / ``_scan_target``, so a behaviour-preserving reshape of that state
-(rename a field, fold the tip state into an object) no longer breaks the suite. The views are frozen
-copies of the values at call time, never the live mutable objects.
+The owner returns frozen copies of the values at call time, never its live mutable containers.
 """
 
 from __future__ import annotations
@@ -42,7 +39,6 @@ class HoverView:
     nested: NestedView
     tip: TipView
     paused: bool  # playback auto-paused by the tooltip
-    nav_idx: int  # last sub-nav cue index jumped to (-1 = unknown)
     scan_target: str | None  # scan-cell tail the cursor is settling on
 
 
@@ -51,7 +47,6 @@ def snapshot(
     tip: TipView,
     *,
     paused: bool,
-    nav_idx: int,
     scan_target: str | None,
 ) -> HoverView:
     """Frozen point-in-time view of the hover stack."""
@@ -61,6 +56,5 @@ def snapshot(
         ),
         tip=tip,
         paused=paused,
-        nav_idx=nav_idx,
         scan_target=scan_target,
     )

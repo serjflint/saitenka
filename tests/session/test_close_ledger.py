@@ -91,7 +91,7 @@ def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
         def cancel_all(self) -> None:
             raise RuntimeError("wedged")
 
-    reader.tip.jobs = Wedged()  # type: ignore[assignment]
+    reader.tooltip_controller.surface_state().jobs = Wedged()  # type: ignore[assignment]
     ledger = reader.close()
 
     report = ledger.report()
@@ -203,7 +203,7 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
     install_session_reactor(gateway)
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
     reader._register_keybinds()
-    reader.tip.view.rect = (0, 0, 10, 10)
+    reader.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
     reader._sync_mouse_capture()
     try:
         assert reader._mouse_captured  # negative control: there is a capture to hand back

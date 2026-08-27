@@ -43,8 +43,26 @@ _LEGACY_SESSION_ATTRIBUTES = {
     "hide_delay",
     "hover",
     "hover_switch_delay",
+    "interaction",
     "pause_on_tooltip",
     "scan_delay",
+    "tip",
+    "word_store",
+}
+_RETIRED_OWNER_PROJECTIONS = {
+    "engaged",
+    "engaged_submitter",
+    "hover_store",
+    "metadata",
+    "metadata_submitter",
+    "nav_store",
+    "pause_store",
+    "pause_enabled",
+    "pulse_store",
+    "render_ahead",
+    "render_ahead_submitter",
+    "selected",
+    "state",
     "word_store",
 }
 _RETIRED_TOOLTIP_STATE = {"key", "rect", "state", "tip_inflected", "tip_tok"}
@@ -308,6 +326,12 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
     }
 
     for node, owner_names, preparation_names in _scoped_nodes(tree):
+        if (
+            site == _OWNER
+            and isinstance(node, ast.FunctionDef)
+            and node.name in _RETIRED_OWNER_PROJECTIONS
+        ):
+            findings.append(Finding(path, node.lineno, "owner-projection", node.name))
         if isinstance(node, ast.Attribute) and (
             site == _COMPOSITION
             and _is_self_attribute(node)

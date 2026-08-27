@@ -96,7 +96,7 @@ class SessionController:
         self.tip.panel_cache.setdefault(key, panel)
 """,
         "src/saitenka/app/session/controller.py",
-    ) == {"tooltip-cache-write", "tooltip-state-write"}
+    ) == {"legacy-session-field", "tooltip-cache-write", "tooltip-state-write"}
 
 
 def test_keybinding_fact_has_one_writer() -> None:

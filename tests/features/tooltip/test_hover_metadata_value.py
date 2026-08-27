@@ -15,7 +15,6 @@ from util import FakeIPC
 from saitenka.app.features.tooltip.popups import NO_HOVER_METADATA, HoverMetadata
 from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.runtime import events
 
 
 def test_the_empty_metadata_is_every_field_empty() -> None:
@@ -34,14 +33,12 @@ def test_retiring_a_hover_clears_every_field_together() -> None:
     """Against the real SessionController, so the route through the slice is exercised too."""
     reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
-        reader.interaction.word_store.dispatch(
-            events.HoverWordResolved(
-                HoverMetadata(terms=("本命を",), span=(0, 2), mined=True, group_mined=(True, False))
-            )
+        reader.tooltip_controller.resolve_word(
+            HoverMetadata(terms=("本命を",), span=(0, 2), mined=True, group_mined=(True, False))
         )
-        reader.interaction.word_store.dispatch(events.HoverWordForgotten())
+        reader.tooltip_controller.forget_word()
 
-        meta = reader.interaction.hovered_word_meta
+        meta = reader.tooltip_controller.observation().metadata
         assert (meta.terms, meta.span, meta.mined, meta.group_mined) == ((), None, False, ())
     finally:
         reader.close()
@@ -53,9 +50,12 @@ def test_the_slice_hands_back_the_value_it_was_given() -> None:
     reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
     try:
         meta = HoverMetadata(terms=("読む",), span=(1, 2), mined=False, group_mined=(False,))
-        reader.interaction.word_store.dispatch(events.HoverWordResolved(meta))
+        reader.tooltip_controller.resolve_word(meta)
 
-        assert reader.interaction.hovered_word_meta is meta
-        assert reader.interaction.hovered_word_meta is reader.interaction.hovered_word_meta
+        assert reader.tooltip_controller.observation().metadata is meta
+        assert (
+            reader.tooltip_controller.observation().metadata
+            is reader.tooltip_controller.observation().metadata
+        )
     finally:
         reader.close()

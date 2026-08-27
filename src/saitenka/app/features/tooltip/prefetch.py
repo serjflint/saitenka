@@ -15,7 +15,7 @@ from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container
+    from collections.abc import Callable
 
     from saitenka.app.scoring import Scorer
     from saitenka.app.tokenize import Token
@@ -360,7 +360,7 @@ class HeadProbe:
 
     scorer: Scorer | None
     panel_key: Callable[..., object]
-    panel_cache: Container[object]
+    panel_present: Callable[[object], bool]
     lookahead: int
     queue_max: int = _MAX_HEAD_PENDING
 
@@ -475,7 +475,7 @@ def _head_prefetch_candidate(
         return None
     inflected = ports.tokenizer.inflected_in(toks, i)
     key = head.panel_key(t, inflected, mined=False)
-    if key in head.panel_cache:
+    if head.panel_present(key):
         return None  # already warm (hovered earlier, or a prior speculative render)
     return priority, HeadPrefetchItem(gen, t, inflected, mined=False)
 

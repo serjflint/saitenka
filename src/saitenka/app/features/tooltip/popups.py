@@ -4,8 +4,8 @@
 rows plus its reading. ``PopupView`` is the per-popup VIEW state — overlay id, anchor, viewport,
 scroll, screen rect, linger timer, and its own soft→crisp flags. BOTH the base tooltip (``TooltipState.
 view``) and the nested scan popup (``TooltipState.nest``) are a ``PopupView`` now, so they share one
-blit/scroll/crisp path. ``TooltipController`` owns that shared state; ``SessionController.tip`` is its read-only
-surface projection.
+blit/scroll/crisp path. ``TooltipController`` owns that shared state and exposes it only to the
+physical surface path.
 """
 
 from __future__ import annotations
@@ -49,8 +49,9 @@ class TipPorts:
 
     The chain spans `tooltip`, `tooltip_panel` and `nested_popup` and only ever wants the tip's own
     state, the scale it draws at, and the collaborators it hands work to. It is the one port the
-    tooltip cluster has: everything outside this chain is the host under another name. Built as
-    `SessionController.tip_ports`, so a caller still holding the host pays one member rather than the set.
+    tooltip cluster has: everything outside this chain is the host under another name. Built by
+    `TooltipController.build_tip_ports`, so the stores remain private while the session binds fresh
+    physical capabilities for one owner-thread turn.
 
     `tip` is the live mutable `TooltipState`, not a copy: the chain writes scroll and crisp flags
     back onto the view it was given, and a snapshot would silently drop those.
@@ -575,7 +576,7 @@ class TooltipState:
     while the owning ``TooltipController`` retains the concrete background protocols and their
     lifecycle.
 
-    Owned by ``TooltipController``; ``SessionController.tip`` is a read-only projection."""
+    Owned by ``TooltipController``; its mutable value is only a physical surface seam."""
 
     def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same

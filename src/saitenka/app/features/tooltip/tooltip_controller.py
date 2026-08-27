@@ -17,13 +17,20 @@ from saitenka.app.feature_bindings import (
 )
 from saitenka.app.features.tooltip import (
     hover_metadata,
+    hover_snapshot,
     nested_popup,
     tooltip,
     tooltip_engaged,
     tooltip_panel,
     tooltip_raster,
 )
-from saitenka.app.features.tooltip.popups import HoverInputs, ShowActions, TipPorts, TooltipState
+from saitenka.app.features.tooltip.popups import (
+    HoverInputs,
+    ShowActions,
+    TipPorts,
+    TooltipState,
+    hovered_meta,
+)
 from saitenka.app.interaction.surfaces import (
     ClickTarget,
     SurfaceSpec,
@@ -33,22 +40,29 @@ from saitenka.app.interaction.surfaces import (
 from saitenka.runtime import events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Collection, Iterator
 
     from saitenka.app.features.help.help_controller import TooltipKeyContext
-    from saitenka.app.features.tooltip.popups import Panel, WordLookup
-    from saitenka.app.features.tooltip.tooltip_panel import PanelKey, PanelPorts
+    from saitenka.app.features.tooltip.popups import (
+        HoverMetadata as HoverMetadataView,
+    )
+    from saitenka.app.features.tooltip.popups import (
+        Panel,
+        PopupView,
+        WordLookup,
+    )
+    from saitenka.app.features.tooltip.prefetch import TipScale
+    from saitenka.app.features.tooltip.tooltip_panel import PanelKey, PanelPorts, PanelStyle
+    from saitenka.app.interaction.presentation import InteractionSurfaces
+    from saitenka.app.render_cache import LoadedView
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
-    from saitenka.runtime.interaction_slice import (
-        HoveredWordStore,
-        HoverPauseStore,
-        HoverStore,
-        PulseStore,
-        TipNavStore,
-    )
+    from saitenka.runtime.hover_pause import PauseClaim
+    from saitenka.runtime.hovered_word import HoveredWord
+    from saitenka.runtime.interaction_slice import HoverFeature
     from saitenka.runtime.jobs import JobSubmitter
-    from saitenka.runtime.pulse import Repaint
+    from saitenka.runtime.pulse import PulseState, Repaint
+    from saitenka.runtime.tipnav import TipNavState
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +79,56 @@ class TooltipApply:
     generation: int
 
 
+@dataclass(frozen=True, slots=True)
+class TooltipObservation:
+    """Frozen product facts other features may observe during one owner-thread turn."""
+
+    selected: int
+    pause_enabled: bool
+    hover: HoverFeature
+    navigation: TipNavState
+    pulse: PulseState
+    pause: PauseClaim
+    word: HoveredWord
+    metadata: HoverMetadataView
+
+
+@dataclass(frozen=True, slots=True)
+class TooltipWorkView:
+    """Read-only volatile-work snapshot for diagnostics and boundary tests."""
+
+    metadata_inflight: object | None
+    metadata_pending: object | None
+    engaged_inflight: object | None
+    engaged_pending: object | None
+    render_inflight: object | None
+    render_pending: object | None
+
+
+@dataclass(frozen=True, slots=True)
+class TooltipRuntimeJobs:
+    """Construction-time placement of Tooltip's three volatile job lanes."""
+
+    metadata: JobSubmitter | None
+    engaged: JobSubmitter | None
+    render_ahead: JobSubmitter | None
+
+
+@dataclass(frozen=True, slots=True)
+class TooltipPresentation:
+    """Fresh physical capabilities bound to one Tooltip presentation turn."""
+
+    scale: TipScale
+    surfaces: InteractionSurfaces
+    request_render_ahead: Callable[[PopupView, int], bool]
+    osd: tuple[int, int]
+    nested_max_frac: float
+    peek_render_cache: Callable[[object], LoadedView | None]
+    schedule_flash_expiry: Callable[[], bool]
+    toast: Callable[..., None]
+    request_engaged_tooltip: Callable[[tooltip_engaged.EngagedRequest], bool]
+
+
 class TooltipController:
     """Own tooltip state, work admission, stale refusal, fallback, and publication."""
 
@@ -78,6 +142,8 @@ class TooltipController:
         delays: HoverDelays,
         flash_seconds: float,
         key_context: TooltipKeyContext,
+        runtime_jobs: Callable[[TooltipController, TooltipRuntimeJobs], TooltipRuntimeJobs]
+        | None = None,
     ) -> None:
         self._cache_lock = threading.Lock()
         self._state = TooltipState(
@@ -96,19 +162,62 @@ class TooltipController:
         self._word_store = HOVERED_WORD_STATEFUL_BINDING.store(ipc)
         self._hover_store.dispatch(events.HoverConfigured(delays))
         self._metadata = hover_metadata.InteractionMetadataState()
-        self._metadata_submitter = hover_metadata.configure_runtime_job(ipc)
+        metadata_submitter = hover_metadata.configure_runtime_job(ipc)
         self._engaged = tooltip_engaged.EngagedState()
         self._engaged_backend = tooltip_engaged.PortsEngagedBackend(build)
-        self._engaged_submitter = tooltip_engaged.configure_runtime_job(ipc, self._engaged_backend)
+        engaged_submitter = tooltip_engaged.configure_runtime_job(ipc, self._engaged_backend)
         self._raster = tooltip_raster.RenderAheadState()
-        self._render_ahead_submitter = tooltip_raster.configure_runtime_job(ipc)
-
-    @property
-    def state(self) -> TooltipState:
-        return self._state
+        render_ahead_submitter = tooltip_raster.configure_runtime_job(ipc)
+        jobs = TooltipRuntimeJobs(metadata_submitter, engaged_submitter, render_ahead_submitter)
+        if runtime_jobs is not None:
+            jobs = runtime_jobs(self, jobs)
+        self._metadata_submitter = jobs.metadata
+        self._engaged_submitter = jobs.engaged
+        self._render_ahead_submitter = jobs.render_ahead
 
     def surface_state(self) -> TooltipState:
-        return self.state
+        """Mutable paint machinery exposed only to the physical surface boundary."""
+        return self._state
+
+    def observation(self) -> TooltipObservation:
+        """Capture the Tooltip-owned facts safe for cross-feature decisions."""
+        word = self._word_store.current
+        return TooltipObservation(
+            selected=self._selected,
+            pause_enabled=self._pause_enabled,
+            hover=self._hover_store.current,
+            navigation=self._nav_store.current,
+            pulse=self._pulse_store.current,
+            pause=self._pause_store.current,
+            word=word,
+            metadata=hovered_meta(self._word_store),
+        )
+
+    def hover_view(self) -> hover_snapshot.HoverView:
+        """Capture the rendered hover stack without publishing its mutable containers."""
+        hysteresis = self._hover_store.current.hysteresis
+        return hover_snapshot.snapshot(
+            self._state.nest,
+            hover_snapshot.TipView(
+                state=self._state.view.state,
+                key=self._state.view.key,
+                rect=self._state.view.rect,
+                hide_pending=hysteresis.tip_hide_pending,
+            ),
+            paused=self._pause_store.current.held,
+            scan_target=hysteresis.scan_target,
+        )
+
+    def work_view(self) -> TooltipWorkView:
+        """Capture job identities without exposing mutable lane state."""
+        return TooltipWorkView(
+            metadata_inflight=self._metadata.inflight,
+            metadata_pending=self._metadata.pending,
+            engaged_inflight=self._engaged.inflight,
+            engaged_pending=self._engaged.pending,
+            render_inflight=self._raster.inflight,
+            render_pending=self._raster.pending,
+        )
 
     @staticmethod
     def _surface_click(target: ClickTarget, _x: float, _y: float) -> bool:
@@ -128,31 +237,20 @@ class TooltipController:
             scroll=self._surface_scroll,
         )
 
-    @property
-    def metadata(self) -> hover_metadata.InteractionMetadataState:
-        return self._metadata
-
-    @property
-    def engaged(self) -> tooltip_engaged.EngagedState:
-        return self._engaged
-
-    @property
-    def render_ahead(self) -> tooltip_raster.RenderAheadState:
-        return self._raster
-
-    @property
-    def selected(self) -> int:
-        return self._selected
-
     def select(self, index: int) -> None:
         self._selected = index
 
     def retire_selection(self) -> None:
         self.select(-1)
 
-    @property
-    def pause_enabled(self) -> bool:
-        return self._pause_enabled
+    def advance_kanji(self) -> None:
+        self._word_store.dispatch(events.HoverKanjiAdvanced())
+
+    def resolve_word(self, metadata: object, *, revised: bool = False) -> None:
+        self._word_store.dispatch(events.HoverWordResolved(metadata, revised=revised))
+
+    def forget_word(self) -> None:
+        self._word_store.dispatch(events.HoverWordForgotten())
 
     def set_pause_enabled(self, *, enabled: bool) -> None:
         self._pause_enabled = enabled
@@ -180,25 +278,41 @@ class TooltipController:
     def flash_seconds(self) -> float:
         return self._flash_seconds
 
-    @property
-    def hover_store(self) -> HoverStore:
-        return self._hover_store
+    def build_tip_ports(self, presentation: TooltipPresentation) -> TipPorts:
+        """Bind Tooltip-private state to fresh owner-thread presentation capabilities."""
+        return TipPorts(
+            tip=self._state,
+            scale=presentation.scale,
+            surfaces=presentation.surfaces,
+            hover_store=self._hover_store,
+            nav_store=self._nav_store,
+            pulse_store=self._pulse_store,
+            pause_store=self._pause_store,
+            word_store=self._word_store,
+            request_render_ahead=presentation.request_render_ahead,
+            osd=presentation.osd,
+            nested_max_frac=presentation.nested_max_frac,
+            peek_render_cache=presentation.peek_render_cache,
+            schedule_flash_expiry=presentation.schedule_flash_expiry,
+            toast=presentation.toast,
+            request_engaged_tooltip=presentation.request_engaged_tooltip,
+        )
 
-    @property
-    def nav_store(self) -> TipNavStore:
-        return self._nav_store
+    def build_panel_ports(
+        self,
+        *,
+        style: PanelStyle,
+        mined_set: Collection[str],
+        during_scroll: bool,
+        cap: int,
+    ) -> PanelPorts:
+        """Bind Tooltip's cache to the fresh facts for one panel build."""
+        return tooltip_panel.PanelPorts(
+            style, mined_set, during_scroll, self._state.panel_cache, cap
+        )
 
-    @property
-    def pulse_store(self) -> PulseStore:
-        return self._pulse_store
-
-    @property
-    def pause_store(self) -> HoverPauseStore:
-        return self._pause_store
-
-    @property
-    def word_store(self) -> HoveredWordStore:
-        return self._word_store
+    def has_cached_panel(self, key: object) -> bool:
+        return key in self._state.panel_cache
 
     @property
     def keybindings_bound(self) -> bool:
@@ -228,6 +342,9 @@ class TooltipController:
     def release_pause_claim(self) -> bool:
         return tooltip.release_frame(self._pause_store)
 
+    def claim_pause(self, *, paused: bool) -> None:
+        self._pause_store.dispatch(events.HoverPauseClaimed(paused=paused))
+
     def cache_setdefault(self, key: PanelKey, panel: Panel) -> Panel:
         return self._state.panel_cache.setdefault(key, panel)
 
@@ -241,30 +358,6 @@ class TooltipController:
                 len(self._state.panel_cache),
                 sum(panel.retained_nbytes for panel in self._state.panel_cache.values()),
             )
-
-    @property
-    def metadata_submitter(self) -> JobSubmitter | None:
-        return self._metadata_submitter
-
-    @metadata_submitter.setter
-    def metadata_submitter(self, submitter: JobSubmitter | None) -> None:
-        self._metadata_submitter = submitter
-
-    @property
-    def engaged_submitter(self) -> JobSubmitter | None:
-        return self._engaged_submitter
-
-    @engaged_submitter.setter
-    def engaged_submitter(self, submitter: JobSubmitter | None) -> None:
-        self._engaged_submitter = submitter
-
-    @property
-    def render_ahead_submitter(self) -> JobSubmitter | None:
-        return self._render_ahead_submitter
-
-    @render_ahead_submitter.setter
-    def render_ahead_submitter(self, submitter: JobSubmitter | None) -> None:
-        self._render_ahead_submitter = submitter
 
     @property
     def metadata_deferred(self) -> bool:
