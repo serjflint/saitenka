@@ -58,12 +58,15 @@ PoC feeds the review, a review finding sends you back to the design.
    assert the module's **documented invariants**, and **measure the churn / blast-radius** —
    *is* the regression test (fails on base, passes on the branch). What the PoC prints is what
    the reviewer reads next.
+   For an ownership change, use the canonical authority-reachability lens linked from the repository gate.
+   Protect the semantic seam without freezing private layout or adding ceremonial indirection.
 5. **Fresh adversarial review is a gate, not a formality.** Spawn a subagent that did **not**
    author the change; give it only the base, the diff, and the claimed validation — **no
    rationale**. Have it verify independently and classify P0–P3. Fix every P0/P1; resolve or
-   explicitly accept each P2; **any code change invalidates the pass** → re-review on the new
-   diff. Full criteria and the pattern tables are in the applicable gate (§5 + the adversarial
-   tables). **Prefer cross-family when available:** route the reviewer to a different model family
+   explicitly accept each P2; **any code change invalidates the pass** → re-review the exact new
+   tree/diff, or a pinned commit when review happens after commit. Full criteria and pattern tables are in
+   the applicable gate (§5 + the adversarial tables). **Prefer cross-family when available:** route the
+   reviewer to a different model family
    when the host roster supports it, because correlated blind spots are less useful than independent
    disagreement. Do not pretend this is always available or make it a validity condition: record the
    limitation and retain two genuinely isolated reviews. Deterministic gates such as `poe all` remain

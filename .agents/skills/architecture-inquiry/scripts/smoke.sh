@@ -5,6 +5,7 @@ set -euo pipefail
 skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 test -f "$skill_dir/SKILL.md"
 test -f "$skill_dir/references/inquiry-contract.md"
+test -f "$skill_dir/references/authority-reachability.md"
 cd "$skill_dir/../../.."   # -> repo root
 fail=0
 have() { test -e "$1" || { echo "MISSING: $1"; fail=1; }; }

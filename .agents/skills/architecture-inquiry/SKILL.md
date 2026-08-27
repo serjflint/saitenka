@@ -59,6 +59,12 @@ the code paths that would falsify the declared ownership. Establish **declared /
 
 Write a provisional whole with unresolved tensions and **no recommendation**. Size, line count, file count,
 framework absence, mechanism count, and co-change during a migration are inspection signals, never proof.
+Alongside control/data flow, trace **authority reachability** where ownership is disputed: which objects can
+reach the mutable fact or substantive policy, through which seam, in each supported execution placement.
+A layered call graph does not prove ownership when each layer can still forward the old authority.
+Use the proportionate method in
+[`references/authority-reachability.md`](references/authority-reachability.md); existing architecture meters
+are mechanical evidence, not a complete authority proof.
 
 ## 2. Choose bounded operational slices
 
@@ -128,6 +134,8 @@ to `contribute`. Require:
 
 - an explicit authority/writer model and exact scenario traces; name the ordering or consistency mechanism
   and its failure semantics wherever more than one writer participates;
+- a reachability census proportionate to the claimed boundary, including non-production callers only when
+  they can preserve a second write or policy path;
 - a one-writer proof only for facts whose accepted invariant requires one writer;
 - a policy-retirement meter when the pilot retires or replaces policy, not merely fields, delegators, or
   lines;

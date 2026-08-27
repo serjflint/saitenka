@@ -34,13 +34,18 @@ batching sits unread in the same branch.
 So: enumerate the family first, then convert it. This applies to the work that is *running*, not
 only to the bug in front of you.
 
-## 1. Census, then price the unit
+## 1. Census authority, then price the unit
 
     sites × the kind of decision each site needs × the observed rows-per-commit rate = commits
 
-Write that number in the plan. `poe host-arity-over`, `poe runtime-status` and `poe cluster-map`
-already produce the census inputs here; read counts from them rather than retyping a number from
-another document, which is how a plan ships two wrong ones.
+`poe host-arity-over`, `poe runtime-status` and `poe cluster-map` produce the mechanical census inputs;
+read counts from them rather than retyping a number from another document. They do not observe every
+Protocol, callback, endpoint, wrapper, or nested value and cannot prove authority retirement alone.
+
+For a responsibility migration, also use the architecture-inquiry skill's canonical
+[`authority-reachability.md`](../architecture-inquiry/references/authority-reachability.md). Price decisions
+per authority path, not every textual mention; use symbol navigation and a focused structural checker where
+the boundary warrants enforcement.
 
 If the result exceeds the expected shape by an order of magnitude, that is the signal to **stop and
 look for a shared shape** — not a reason to start early. Sites are rarely independent: several names
@@ -74,6 +79,9 @@ the substantive admission, completion, fallback, publication, and lifecycle deci
 batch. Retirement means those decisions terminate at the bounded owner; the old host may remain as the
 composition root or sole effect executor. Pair the meter with a one-writer proof so a facade cannot make the
 numbers fall while leaving two homes for the same fact.
+
+Self-attack the intended boundary using that same canonical lens. Keep the guard proportionate to the
+retired semantic path; do not freeze private layout or benign test construction.
 
 ## 4. Batch the class; codemod the mechanical part
 

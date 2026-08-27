@@ -147,6 +147,7 @@ Mandatory review prompts for this codebase's surfaces:
 | Complexity ratchet dodge | Was `complexipy-snapshot.json` regenerated to silence a regression rather than after a deliberate refactor? |
 | Copyleft leak | Did a new dependency add copyleft to the graph? (Only our own GPL `deinflect` is allowed.) |
 | Documentation drift | Do README, the docs site, ARCHITECTURE, the skills, and runtime behavior say the same thing — one canonical source, the rest pointing? |
+| Ownership boundary | Apply the proportionate [authority-reachability lens](.agents/skills/architecture-inquiry/references/authority-reachability.md): can the retired host still decide or mutate the fact, or does the guard instead freeze private layout? |
 
 ## Readiness checklist
 

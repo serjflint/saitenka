@@ -16,4 +16,5 @@ have tools/codemods/harness.py     # the worklist -> LibCST handoff
 have tools/codemods/move_member.py # the runnable worked example
 have pyproject.toml                # the poe tasks and the `codemod` dependency group
 have .agents/skills/architecture-inquiry/SKILL.md # reverse handoff while architecture is undecided
+have .agents/skills/architecture-inquiry/references/authority-reachability.md
 if [ "$fail" -eq 0 ]; then echo "plan-migration smoke OK"; else echo "plan-migration smoke FAILED"; exit 1; fi
