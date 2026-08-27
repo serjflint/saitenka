@@ -47,6 +47,7 @@ from saitenka.runtime.events import (
     EventEnvelope,
     EventOrigin,
     RuntimeEvent,
+    SessionClosing,
 )
 
 if TYPE_CHECKING:
@@ -59,6 +60,17 @@ class Lifecycle(StrEnum):
     OPEN = "open"
     CLOSING = "closing"
     CLOSED = "closed"
+
+
+class LifecycleEffectError(RuntimeError):
+    """A close turn ran every effect but one or more applications failed."""
+
+    def __init__(self, failures: tuple[tuple[Effect, Exception], ...]) -> None:
+        self.failures = failures
+        details = ", ".join(
+            f"{type(effect).__name__}: {type(error).__name__}" for effect, error in failures
+        )
+        super().__init__(f"lifecycle effects failed: {details}")
 
 
 class Reducer[StateT](Protocol):
@@ -123,24 +135,24 @@ class SessionReactor[StateT]:
             tuple(sorted(self._pending)),
         )
 
-    def handle(self, envelope: EventEnvelope) -> None:
+    def handle(self, envelope: EventEnvelope) -> bool:
         payload = envelope.payload
         if self._lifecycle != Lifecycle.OPEN and not isinstance(payload, EffectFinished):
-            return
+            return False
         if isinstance(payload, ConnectionReplaced):
             if not self._replace_connection(payload):
-                return
+                return False
         elif not isinstance(payload, EffectFinished) and (
             envelope.connection_epoch is not None
             and envelope.connection_epoch != self._connection_epoch
         ):
-            return
+            return False
         if isinstance(payload, EffectFinished):
             completion = self._finish(payload)
             if completion is None:
-                return
+                return False
             payload = completion
-        self._reduce(payload)
+        return self._reduce(payload)
 
     def owns(self, effect_id: EffectId) -> bool:
         """Did this reactor dispatch that effect and is it still awaiting its completion?
@@ -191,19 +203,30 @@ class SessionReactor[StateT]:
         self._lifecycle = Lifecycle.CLOSED
         self._mailbox.close()
 
-    def _reduce(self, event: RuntimeEvent) -> None:
+    def _reduce(self, event: RuntimeEvent) -> bool:
         self._state, effects = self._reducer(self._state, event)
+        performed = True
+        failures: list[tuple[Effect, Exception]] = []
         for effect in effects:
-            self._apply(effect)
+            if not isinstance(event, SessionClosing):
+                performed = self._apply(effect) and performed
+                continue
+            try:
+                performed = self._apply(effect) and performed
+            except Exception as error:  # noqa: BLE001  # every close peer must get its turn
+                failures.append((effect, error))
+        if failures:
+            raise LifecycleEffectError(tuple(failures))
+        return bool(effects) and performed
 
-    def _apply(self, effect: Effect) -> None:
+    def _apply(self, effect: Effect) -> bool:
         if isinstance(effect, EmitDiagnostic):
             if self._diagnostics is not None:
                 self._diagnostics(effect)
-            return
+            return True
         if isinstance(effect, StopSession):
             self.close()
-            return
+            return True
         if isinstance(
             effect,
             GuardMainRender
@@ -237,22 +260,21 @@ class SessionReactor[StateT]:
             # a literal union here, and the alias' `__value__` defeats it. `test_reactor.py` pins
             # the two together — an effect that misses this branch falls through to the async path
             # and dies on the `effect_id` it does not carry.
-            self._dispatch(effect)
-            return
+            return self._dispatch(effect)
         if isinstance(effect, (CancelEffect, ExpireEffect)):
             if self._control is not None:
                 self._control(effect)
-            return
+            return True
         async_effect = effect
         if async_effect.effect_id.value <= self._highest_effect_id:
             raise ValueError(f"effect ID already used: {async_effect.effect_id.value}")
         self._highest_effect_id = async_effect.effect_id.value
         if self._lifecycle != Lifecycle.OPEN:
             self._reject(async_effect, EffectError.UNAVAILABLE)
-            return
+            return True
         if not self._mailbox.reserve_terminal(async_effect.effect_id):
             self._reject(async_effect, EffectError.OVERLOADED)
-            return
+            return True
         self._pending[async_effect.effect_id] = async_effect
         try:
             accepted = self._dispatch(async_effect)
@@ -278,6 +300,7 @@ class SessionReactor[StateT]:
                 ),
                 origin=EventOrigin.WORKER,
             )
+        return True
 
     def _reject(self, effect: AsyncEffect, error: EffectError) -> None:
         completion = EffectFinished(

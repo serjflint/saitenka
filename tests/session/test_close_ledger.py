@@ -596,6 +596,86 @@ def test_a_runtime_resource_failure_reaches_the_returned_close_ledger() -> None:
     assert retired == ["mined"]
 
 
+def test_a_failing_close_effect_does_not_skip_the_rest_of_its_phase() -> None:
+    """Isolation spans effect boundaries, not only peers retired by the same effect."""
+    from saitenka.app.session.resources import Retiring
+    from saitenka.app.session.routes import (
+        INPUT_CAPTURE_RESOURCE,
+        INTERACTION_WORK_PARTICIPANTS,
+        install_session_reactor,
+    )
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    retired: list[str] = []
+
+    def fail_interaction() -> None:
+        raise RuntimeError("interaction close failed")
+
+    gateway.session_resources[INTERACTION_WORK_PARTICIPANTS[0]] = Retiring(fail_interaction)
+    gateway.session_resources[INTERACTION_WORK_PARTICIPANTS[1]] = Retiring(
+        lambda: retired.append("metadata")
+    )
+    gateway.session_resources[INPUT_CAPTURE_RESOURCE] = Retiring(lambda: retired.append("capture"))
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert retired == ["metadata", "capture"]
+    assert [failure.participant for failure in ledger.failures] == ["runtime-close"]
+
+
+def test_a_failing_surface_remove_does_not_skip_the_overlay_transport() -> None:
+    from saitenka.app.session.resources import Retiring
+    from saitenka.app.session.routes import (
+        OVERLAY_RESOURCE,
+        SURFACES_RESOURCE,
+        install_session_reactor,
+    )
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    retired: list[str] = []
+
+    def fail_surfaces() -> None:
+        raise RuntimeError("surface close failed")
+
+    gateway.session_resources[SURFACES_RESOURCE] = Retiring(fail_surfaces)
+    gateway.session_resources[OVERLAY_RESOURCE] = Retiring(lambda: retired.append("overlay"))
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert retired == ["overlay"]
+    assert [failure.participant for failure in ledger.failures] == ["lifecycle-surfaces"]
+
+
+def test_a_missing_runtime_resource_is_reported_as_refused_close_work() -> None:
+    from saitenka.app.session.routes import INPUT_CAPTURE_RESOURCE, install_session_reactor
+    from saitenka.runtime.reactor import LifecycleEffectError
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    install_session_reactor(gateway)
+    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    del gateway.session_resources[INPUT_CAPTURE_RESOURCE]
+    try:
+        ledger = reader.close()
+    finally:
+        gateway.close()
+
+    assert [failure.participant for failure in ledger.failures] == ["runtime-close"]
+    failure = ledger.failures[0].error
+    assert isinstance(failure, LifecycleEffectError)
+    assert any("input-capture: missing" in str(error) for _effect, error in failure.failures)
+
+
 def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
     """SessionController keeps the store steps as no-runtime fallbacks; both paths must not run."""
     from util import runtime_gateway

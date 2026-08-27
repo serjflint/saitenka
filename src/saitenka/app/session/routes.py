@@ -404,7 +404,12 @@ class ResourceRetirementError(RuntimeError):
         super().__init__("session resources failed to retire: " + ", ".join(details))
 
 
-def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
+def _retire(
+    gateway: MpvGateway,
+    names: tuple[str, ...],
+    *,
+    missing_is_failure: bool = False,
+) -> bool:
     """Close each named resource in order and report any failures after the sequence.
 
     The exception is delayed until every peer has run. The controller's `CloseLedger` catches it at
@@ -422,7 +427,7 @@ def _retire(gateway: MpvGateway, names: tuple[str, ...]) -> bool:
         except Exception as error:  # teardown continues; the owner's own close still ran
             log.warning("session resource %s failed to close", name, exc_info=True)
             failed.append((name, error))
-    if failed:
+    if failed or (missing and missing_is_failure):
         raise ResourceRetirementError(missing=tuple(missing), failed=tuple(failed))
     return not missing
 
@@ -450,7 +455,11 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
             return _begin(gateway, participant)
         names = _RESOURCE_OF.get(type(effect))
         if names is not None:
-            return _retire(gateway, names)
+            return _retire(
+                gateway,
+                names,
+                missing_is_failure=not isinstance(effect, RetireCueIdentity),
+            )
         if isinstance(effect, RemoveSessionArtifacts):
             shutil.rmtree(effect.path, ignore_errors=True)
             return True
