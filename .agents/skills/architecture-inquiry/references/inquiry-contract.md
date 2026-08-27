@@ -15,10 +15,12 @@ constraint audits, pilots, and retirement meters are Saitenka-specific engineeri
 1. **Provisional synthesis** — what assumption changed, unresolved tensions, no recommendation.
 2. **Atomic claims ledger** — source/revision, proven subclaim, non-proven inference, status, confidence.
 3. **Grounded scenario traces** — admission through visible settlement, including failure and retirement.
-4. **State/fact ownership** — authoritative fact, projections/tokens, lifetime, writers, readers.
-5. **Mechanism contracts** — guarantee supplied, guarantee absent, interaction failure prevented or created.
-6. **Strongest case for the present shape** — steelman it before calling anything smell.
-7. **Missing evidence and policy questions** — what research cannot decide and what would settle the rest.
+4. **Authority reachability** — when ownership is disputed, which objects and public values can reach the
+   mutable fact or policy, including alternate execution and non-production paths that preserve authority.
+5. **State/fact ownership** — authoritative fact, projections/tokens, lifetime, writers, readers.
+6. **Mechanism contracts** — guarantee supplied, guarantee absent, interaction failure prevented or created.
+7. **Strongest case for the present shape** — steelman it before calling anything smell.
+8. **Missing evidence and policy questions** — what research cannot decide and what would settle the rest.
 
 ## Conditional lenses
 
@@ -38,6 +40,10 @@ plausible lens was omitted; do not manufacture a section merely to complete a te
 
 A remote write may need write provenance while a hover path needs generation identities; another slice may
 need neither. Preserve the evidence discipline, not this session's vocabulary or mechanism census.
+
+When ownership is disputed, apply the proportionate trace and attack in
+[`authority-reachability.md`](authority-reachability.md). It is the canonical access-shape taxonomy and
+explains what the existing mechanical meters do not prove.
 
 ## Constraint audit
 
@@ -97,9 +103,10 @@ Confirmed facts, missing facts, and the smallest local experiments that separate
 Only policy choices whose answer changes the architecture.
 
 ## Bounded pilot
-Scope, authority/writer model, ordering or consistency failure semantics, scenario traces, exact-tree review,
-and stop conditions. Include a one-writer proof only for an accepted one-writer invariant, and a
-policy-retirement meter only when the pilot retires or replaces policy.
+Scope, authority/writer and reachability model, ordering or consistency failure semantics, scenario traces,
+proportionate boundary attack, exact-tree review, and stop conditions. Include a one-writer proof only for
+an accepted one-writer invariant, and a policy-retirement meter only when the pilot retires or replaces
+policy.
 ```
 
 ## Saturation test

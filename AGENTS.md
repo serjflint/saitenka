@@ -135,9 +135,11 @@ the floor for every change; 3–6 are escalations, not replacements.
   its leverage device (and the rejected ones), and a retirement meter beside its debt meter, on day 1
   — the **`plan-migration`** skill (`.agents/skills/plan-migration/`) is the procedure.
 - **Extract behind a stable seam.** Move logic into a new module as functions taking the host
-  (`def f(reader: SessionController)`) and leave thin delegating methods, so the public API is unchanged and both
-  mypy and basedpyright stay green (a `self: Subclass` mixin trips mypy's supertype rule). Repoint any
-  `monkeypatch.setattr` to the symbol's new lookup site, or tests raise `AttributeError`.
+  (`def f(reader: SessionController)`) and leave thin delegating methods, so the public API is unchanged and
+  both mypy and basedpyright stay green (a `self: Subclass` mixin trips mypy's supertype rule). For an
+  accepted ownership migration this is a staging shape, not proof that authority moved; use the
+  `architecture-inquiry`/`plan-migration` retirement criteria. Repoint any `monkeypatch.setattr` to the
+  symbol's new lookup site.
 
 ## Comments
 

@@ -34,13 +34,15 @@ batching sits unread in the same branch.
 So: enumerate the family first, then convert it. This applies to the work that is *running*, not
 only to the bug in front of you.
 
-## 1. Census, then price the unit
+## 1. Census authority, then price the unit
 
     sites × the kind of decision each site needs × the observed rows-per-commit rate = commits
 
-Write that number in the plan. `poe host-arity-over`, `poe runtime-status` and `poe cluster-map`
-already produce the census inputs here; read counts from them rather than retyping a number from
-another document, which is how a plan ships two wrong ones.
+Read mechanical counts from the repository census tools rather than copying them into the plan.
+
+For a responsibility migration, also use the architecture-inquiry skill's canonical
+[`authority-reachability.md`](../architecture-inquiry/references/authority-reachability.md). Price decisions
+per authority path, not every textual mention.
 
 If the result exceeds the expected shape by an order of magnitude, that is the signal to **stop and
 look for a shared shape** — not a reason to start early. Sites are rarely independent: several names
@@ -68,12 +70,16 @@ arrived" from "the old thing left". A debt count falling while the retired objec
 the failure mode, and only two numbers side by side can see it. `poe host-mass` is the standing
 instance — declare yours on day 1, not after the first surprise.
 
-**Responsibility migrations need a policy meter.** Moving fields, adding a collaborator, reducing LOC, or
-turning methods into delegators does not prove that ownership moved. Census the authoritative writers and
-the substantive admission, completion, fallback, publication, and lifecycle decisions before the first
-batch. Retirement means those decisions terminate at the bounded owner; the old host may remain as the
-composition root or sole effect executor. Pair the meter with a one-writer proof so a facade cannot make the
-numbers fall while leaving two homes for the same fact.
+**Responsibility migrations need an authority/writer retirement meter.** Moving fields, adding a
+collaborator, reducing LOC, or turning methods into delegators does not prove that ownership moved. When the
+migration also retires policy, meter the substantive admission, completion, fallback, publication, and
+lifecycle decisions. Retirement means the claimed authority terminates at the bounded owner; the old host
+may remain as composition root or sole effect executor. Add a one-writer proof only when the accepted
+invariant requires one writer. Where more than one writer participates, name the ordering or consistency
+mechanism and its failure semantics.
+
+Self-attack the intended boundary using that same canonical lens. Keep the guard proportionate to the
+retired semantic path; do not freeze private layout or benign test construction.
 
 ## 4. Batch the class; codemod the mechanical part
 
