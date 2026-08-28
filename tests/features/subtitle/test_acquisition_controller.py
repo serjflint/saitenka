@@ -2,7 +2,7 @@ import threading
 from typing import TYPE_CHECKING, cast
 
 from saitenka.app.features.subtitle import SubtitleAcquisitionController
-from saitenka.app.session.context import EpisodeSlot
+from saitenka.app.subtitle_intents import AcquisitionSource
 from saitenka.app.subtitle_modes import SubtitleFetchRequest, SubtitleFetchResult
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
@@ -16,7 +16,6 @@ class Notifications:
 
 
 def test_completion_from_a_retired_episode_is_ignored() -> None:
-    episodes = EpisodeSlot()
     submitted = []
 
     def submit(**job) -> bool:
@@ -28,7 +27,6 @@ def test_completion_from_a_retired_episode_is_ignored() -> None:
 
     owner = SubtitleAcquisitionController(
         ipc=cast("MpvIPC", object()),
-        episodes=episodes,
         stop=threading.Event(),
         get=lambda _name: None,
         notifications=Notifications(),
@@ -45,7 +43,6 @@ def test_completion_from_a_retired_episode_is_ignored() -> None:
     owner.submit(request, name="background")
 
     owner.retire_episode()
-    episodes.replace()
     submitted[0]["on_finished"](
         EffectFinished(
             EffectId(1),
@@ -60,3 +57,26 @@ def test_completion_from_a_retired_episode_is_ignored() -> None:
             ),
         )
     )
+
+
+def test_retiring_an_episode_retires_its_retry_configuration() -> None:
+    messages = []
+
+    class RecordingNotifications:
+        def show(self, text, kind="ok") -> None:
+            messages.append((text, kind))
+
+    owner = SubtitleAcquisitionController(
+        ipc=cast("MpvIPC", object()),
+        stop=threading.Event(),
+        get=lambda _name: None,
+        notifications=RecordingNotifications(),
+        track_ports=lambda: cast("object", None),
+        submitter=None,
+    )
+    owner.configure_retry(lambda _path: lambda: (None, "unused"))
+
+    owner.retire_episode()
+    owner.begin("/videos/next.mkv", AcquisitionSource.PROVIDERS)
+
+    assert messages == [("No Japanese subtitle providers enabled", "warn")]

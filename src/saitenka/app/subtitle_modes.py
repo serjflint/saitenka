@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from saitenka.app.session.context import SubtitleSource
     from saitenka.runtime.events import SubtitleEvent
     from saitenka.runtime.subtitle import SubtitleTrackState
 
@@ -83,13 +82,15 @@ class SubtitleFetchRequest:
     force_select: bool
 
 
-#: What the acquisition path needs from the host, named rather than reached for. `episode_subtitle`
-#: is a callable, not a value: the completion lambda re-reads the CURRENT episode when it fires, and
-#: binding the source eagerly would finish a retry against the episode we just left.
 if TYPE_CHECKING:
     PropertyGet = Callable[[str], object]
     Toast = Callable[..., None]
-    EpisodeSubtitle = Callable[[], SubtitleSource]
+
+
+class SubtitleRetryState(Protocol):
+    retry_factory: ProviderFetchFactory | None
+    retry_active: bool
+    retry_lock: threading.Lock
 
 
 class FetchSubmitter(Protocol):
@@ -389,11 +390,11 @@ def start_fetch(
     submit(request, name=name, on_done=on_done)
 
 
-def configure_retry(source: SubtitleSource, factory: ProviderFetchFactory | None) -> None:
+def configure_retry(source: SubtitleRetryState, factory: ProviderFetchFactory | None) -> None:
     source.retry_factory = factory
 
 
-def _finish_retry(source: SubtitleSource) -> None:
+def _finish_retry(source: SubtitleRetryState) -> None:
     with source.retry_lock:
         source.retry_active = False
 
@@ -423,7 +424,7 @@ def _start_resync_window(
     submit: FetchSubmitter,
     get: PropertyGet,
     toast: Toast,
-    episode_subtitle: EpisodeSubtitle,
+    retry: SubtitleRetryState,
     video_path: str,
     sub: Path,
 ) -> None:
@@ -455,7 +456,7 @@ def _start_resync_window(
         do,
         name="subtitle-resync",
         replace=True,
-        on_done=lambda: _finish_retry(episode_subtitle()),
+        on_done=lambda: _finish_retry(retry),
     )
 
 
@@ -463,18 +464,18 @@ def _start_provider_fetch(
     submit: FetchSubmitter,
     get: PropertyGet,
     toast: Toast,
-    episode_subtitle: EpisodeSubtitle,
+    retry: SubtitleRetryState,
     video_path: str,
 ) -> None:
-    factory = episode_subtitle().retry_factory
+    factory = retry.retry_factory
     if factory is None:
-        _finish_retry(episode_subtitle())
+        _finish_retry(retry)
         toast("No Japanese subtitle providers enabled", "warn")
         return
     try:
         fetch = factory(video_path)
     except Exception as exc:
-        _finish_retry(episode_subtitle())
+        _finish_retry(retry)
         log.warning("subtitle retry setup failed", exc_info=True)
         toast(f"Japanese subtitle search failed: {exc}", "warn")
         return
@@ -485,7 +486,7 @@ def _start_provider_fetch(
         fetch,
         name="subtitle-retry",
         replace=True,
-        on_done=lambda: _finish_retry(episode_subtitle()),
+        on_done=lambda: _finish_retry(retry),
     )
 
 
@@ -503,7 +504,7 @@ def begin_acquisition(
     submit: FetchSubmitter,
     get: PropertyGet,
     toast: Toast,
-    episode_subtitle: EpisodeSubtitle,
+    retry: SubtitleRetryState,
     ipc,
     video_path: str,
     source,
@@ -513,13 +514,13 @@ def begin_acquisition(
     from saitenka.app.subtitle_intents import AcquisitionSource
 
     current = _current_external_sub(ipc) if source is AcquisitionSource.RESYNC_CURRENT else None
-    if not _claim_retry(episode_subtitle()):
+    if not _claim_retry(retry):
         toast("Subtitle sync already running", "warn")
         return
     if current is not None:
-        _start_resync_window(submit, get, toast, episode_subtitle, video_path, current)
+        _start_resync_window(submit, get, toast, retry, video_path, current)
     else:
-        _start_provider_fetch(submit, get, toast, episode_subtitle, video_path)
+        _start_provider_fetch(submit, get, toast, retry, video_path)
 
 
 def _reset_sub_delay(ipc) -> None:

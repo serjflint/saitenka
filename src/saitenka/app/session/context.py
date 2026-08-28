@@ -3,13 +3,12 @@
 An mpv session outlives the file it plays; a hover outlives nothing. Grouping SessionController state by *when it
 is born and dies* — session ⊃ episode ⊃ interaction — is what makes a re-slot (swap the episode on a
 file change, #100) correct by construction: rebind the context and no prior-episode state can leak. This
-module owns the **episode** tier (and its cohesive sub-clusters, e.g. ``SubtitleSource``) plus the
-feature-owned collaborators whose state shares the interaction lifetime.
+module owns the remaining **episode** tier plus the feature-owned collaborators whose state shares
+the interaction lifetime.
 """
 
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING
 
 from saitenka.app.subnav_settle import SettleWindow
@@ -17,20 +16,7 @@ from saitenka.app.subnav_settle import SettleWindow
 if TYPE_CHECKING:
     from saitenka.app.backlog import BacklogStore
     from saitenka.app.session_stats import SessionRecorder
-    from saitenka.app.subtitle_modes import ProviderFetchFactory
     from saitenka.subtitles import Cue, CueIndex
-
-
-class SubtitleSource:
-    """The background provider-fetch and retry handshake for one file.
-
-    The *selection* it used to hold moved to `Owner.SUBTITLE`'s slice. What is left is the part no
-    reducer can take: a lock and the flag it guards."""
-
-    def __init__(self) -> None:
-        self.retry_factory: ProviderFetchFactory | None = None
-        self.retry_active = False
-        self.retry_lock = threading.Lock()
 
 
 class EpisodeContext:
@@ -38,7 +24,6 @@ class EpisodeContext:
     outlive the episode."""
 
     def __init__(self) -> None:
-        self.subtitle = SubtitleSource()
         # external sub-index of the JP cue file → Alt+←/→/↓ render the target line INSTANTLY, decoupled
         # from mpv's slow video seek; the real sub-seek fires behind it and reconciles once it settles.
         self.sub_index: CueIndex | None = None
@@ -67,9 +52,6 @@ class EpisodeSlot:
 
     def get(self) -> EpisodeContext:
         return self._current
-
-    def subtitle_source(self) -> SubtitleSource:
-        return self._current.subtitle
 
     def replace(self, episode: EpisodeContext | None = None) -> EpisodeContext:
         self._current = episode if episode is not None else EpisodeContext()

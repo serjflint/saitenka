@@ -2381,7 +2381,6 @@ class SessionController:
     ) -> SubtitleAcquisitionController:
         return SubtitleAcquisitionController(
             ipc=self.ipc,
-            episodes=self._episodes,
             stop=self._stop,
             get=self.property_value,
             notifications=self.notifications,

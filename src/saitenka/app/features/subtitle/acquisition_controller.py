@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from saitenka.app import subtitle_modes
 from saitenka.runtime import EffectFinished, Owner
 
 if TYPE_CHECKING:
-    import threading
     from collections.abc import Callable
 
-    from saitenka.app.session.context import EpisodeSlot
     from saitenka.app.subtitle_intents import AcquisitionSource
     from saitenka.app.subtitle_modes import (
         PropertyGet,
@@ -24,6 +23,13 @@ if TYPE_CHECKING:
     from saitenka.runtime.jobs import JobSubmitter
 
 
+class _RetryState:
+    def __init__(self) -> None:
+        self.retry_factory: ProviderFetchFactory | None = None
+        self.retry_active = False
+        self.retry_lock = threading.Lock()
+
+
 class SubtitleAcquisitionController:
     """Own provider retries, fetch identity, and episode-safe result application."""
 
@@ -31,7 +37,6 @@ class SubtitleAcquisitionController:
         self,
         *,
         ipc: MpvIPC,
-        episodes: EpisodeSlot,
         stop: threading.Event,
         get: PropertyGet,
         notifications: NotificationSink,
@@ -39,21 +44,22 @@ class SubtitleAcquisitionController:
         submitter: JobSubmitter | None,
     ) -> None:
         self._ipc = ipc
-        self._episodes = episodes
         self._stop = stop
         self._get = get
         self._notifications = notifications
         self._track_ports = track_ports
         self._submitter = submitter
         self._sequence = 0
+        self._episode_generation = 0
         self._force_select_revision = 0
+        self._retry = _RetryState()
 
     @property
     def retry_in_flight(self) -> bool:
-        return self._episodes.current.subtitle.retry_active
+        return self._retry.retry_active
 
     def configure_retry(self, factory: ProviderFetchFactory | None) -> None:
-        subtitle_modes.configure_retry(self._episodes.current.subtitle, factory)
+        subtitle_modes.configure_retry(self._retry, factory)
 
     def start(
         self,
@@ -81,7 +87,7 @@ class SubtitleAcquisitionController:
             self.submit,
             self._get,
             self._notifications.show,
-            self._episodes.subtitle_source,
+            self._retry,
             self._ipc,
             media_path,
             source,
@@ -97,7 +103,7 @@ class SubtitleAcquisitionController:
         name: str,
         on_done: Callable[[], None] | None = None,
     ) -> None:
-        episode = self._episodes.current
+        episode_generation = self._episode_generation
         self._sequence += 1
         identity = (self._sequence, name)
         force_select_revision = None
@@ -107,7 +113,7 @@ class SubtitleAcquisitionController:
 
         def finish(completion: EffectFinished) -> None:
             if (
-                episode is not self._episodes.current
+                episode_generation != self._episode_generation
                 or self._stop.is_set()
                 or (
                     force_select_revision is not None
@@ -139,5 +145,7 @@ class SubtitleAcquisitionController:
         )
 
     def retire_episode(self) -> None:
-        """Refuse any explicit selection that completes after this episode retires."""
+        """Retire acquisition identity and retry state with the episode."""
+        self._episode_generation += 1
         self._force_select_revision += 1
+        self._retry = _RetryState()
