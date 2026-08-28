@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from saitenka.app.subtitle_modes import ProviderFetch
+
 
 @dataclass(frozen=True, slots=True)
 class ReslotPorts:
@@ -34,7 +36,7 @@ class ReslotPorts:
     configure_mode: Callable[..., None]
     configure_retry: Callable[..., object]
     configure_picker: Callable[..., object]
-    fetch_japanese: Callable[[object], None]
+    fetch_japanese: Callable[[ProviderFetch], None]
     start_prefetch: Callable[[], object]
     toast: Callable[..., None]
 

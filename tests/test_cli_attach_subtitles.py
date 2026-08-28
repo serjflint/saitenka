@@ -159,7 +159,9 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
         ),
     )
     background: list = []
-    monkeypatch.setattr(reader, "fetch_japanese_subs_async", lambda fetch: background.append(fetch))
+    monkeypatch.setattr(
+        reader.subtitle_acquisition, "fetch_background", lambda fetch: background.append(fetch)
+    )
 
     attach_commands._attach_reslot(
         reader.reslot_ports,

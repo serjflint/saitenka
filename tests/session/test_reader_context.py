@@ -22,7 +22,6 @@ class FakeIPC(util.FakeIPC):
 
 def test_episode_context_defaults_are_the_no_episode_state():
     ctx = EpisodeContext()
-    assert (ctx.subtitle.retry_factory, ctx.subtitle.retry_active) == (None, False)
     assert (
         ctx.sub_index,
         ctx.nav_idx,
@@ -40,22 +39,15 @@ def test_episode_context_defaults_are_the_no_episode_state():
 
 def test_reader_delegates_episode_fields_to_the_context():
     r = SessionController(FakeIPC())
-    # a nested field (episode.subtitle) and a direct one (episode) both read through…
-    assert r.episode.subtitle.retry_active is False
-    assert r.episode.nav_idx == r.episode.nav_idx == -1
-    # …and writes land on the owning context, under both the public and historical private names
-    r.episode.subtitle.retry_active = True
+    assert r.episode.nav_idx == -1
     r.episode.nav_idx = 7
-    assert (r.episode.subtitle.retry_active, r.episode.nav_idx) == (True, 7)
+    assert r.episode.nav_idx == 7
 
 
 def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     r = SessionController(FakeIPC())
     r.episode.nav_idx = 9
     r.episode.sub_settle = r.episode.sub_settle.begin()
-    r.episode.subtitle.retry_active = (
-        True  # a nested-cluster field, migrated fully off the SessionController
-    )
     # A geometry hint names a cue of *this* file, so carrying one over would aim the next episode's
     # first decision at a line that is nowhere in it. It was a SessionController field, where nothing cleared it.
     r.episode.geometry_cue_hint = Cue(1.0, 2.0, "犬")
@@ -64,7 +56,6 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
 
     assert r.episode.nav_idx == -1
     assert r.episode.sub_settle.open is False
-    assert r.episode.subtitle.retry_active is False
     assert r.episode.geometry_cue_hint is None
 
 

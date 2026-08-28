@@ -21,6 +21,7 @@ FEATURE_PACKAGES = frozenset(
         "preview",
         "profiles",
         "sidebar",
+        "subtitle",
         "tooltip",
         "translation",
     }

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.features.annotation.annotation_controller import AnnotationView
+    from saitenka.app.features.subtitle import SubtitleAcquisitionController
     from saitenka.app.features.translation import TranslationController, TranslationInputs
     from saitenka.app.session.context import EpisodeSlot
     from saitenka.app.subtitle_presentation import CueRenderStore
@@ -23,16 +24,6 @@ if TYPE_CHECKING:
     from saitenka.runtime.playback_slice import PlaybackStore
     from saitenka.runtime.subtitle import SubtitleTrackState
     from saitenka.runtime.subtitle_slice import SubtitleTrackStore
-
-
-class SubmitSubtitleFetch(Protocol):
-    def __call__(
-        self,
-        request: subtitle_modes.SubtitleFetchRequest,
-        *,
-        name: str,
-        on_done: Callable[[], None] | None = None,
-    ) -> None: ...
 
 
 class AnnotationViewSource(Protocol):
@@ -118,16 +109,14 @@ class SubtitleCommandApply:
     """Named subtitle, translation, and mpv acts the coordinator may perform."""
 
     ipc: MpvIPC
-    episodes: EpisodeSlot
     track: SubtitleTrackCoordinator
-    submit_fetch: SubmitSubtitleFetch
+    acquisition: SubtitleAcquisitionController
     set_annotation_mode: Callable[[subtitle_intents.AnnotationMode], None]
     draw_subtitle: Callable[[], None]
     seek_cue: Callable[[subtitle_intents.SeekCue], bool]
     sentence_lines: Callable[[], list[str]]
     translation: TranslationController
     translation_inputs: Callable[[], TranslationInputs]
-    property_value: Callable[[str], object | None]
     notifications: NotificationSink
 
 
@@ -154,7 +143,7 @@ class SubtitleCommandCoordinator:
             language=track.language,
             annotation_mode=read.annotation.view.mode,
             has_cue=bool(playback.cue.text.strip()),
-            retry_in_flight=episode.subtitle.retry_active,
+            retry_in_flight=self._apply.acquisition.retry_in_flight,
             media_path=read.text_property("path"),
             has_external_sub=_current_external_sub(read.ipc) is not None,
             has_cue_lines=bool(cue.lines),
@@ -196,15 +185,7 @@ class SubtitleCommandCoordinator:
 
     def _acquire(self, effect: subtitle_intents.AcquireSubtitles) -> None:
         apply = self._apply
-        subtitle_modes.begin_acquisition(
-            apply.submit_fetch,
-            apply.property_value,
-            apply.notifications.show,
-            apply.episodes.subtitle_source,
-            apply.ipc,
-            effect.media_path,
-            effect.source,
-        )
+        apply.acquisition.begin(effect.media_path, effect.source)
 
     def _toggle_translation(self) -> None:
         apply = self._apply

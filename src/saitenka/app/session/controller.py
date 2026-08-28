@@ -85,6 +85,7 @@ from saitenka.app.features.profiles.profile_controller import (
     ProfileSubtitles,
 )
 from saitenka.app.features.sidebar import sidebar
+from saitenka.app.features.subtitle import SubtitleAcquisitionController
 from saitenka.app.features.tooltip import (
     hover_intents,
     nested_popup,
@@ -230,6 +231,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
+    from saitenka.runtime.jobs import JobSubmitter
     from saitenka.subtitles import GeometryBackend
 
 log = logging.getLogger(__name__)
@@ -305,7 +307,6 @@ OBSERVED_PROPS = (
 # Which observations are geometry inputs, which retire the cue identity, and which render space
 # they revise all live in saitenka/runtime/playback.py — the sole interpreter.
 _SETTLE_TIMER = "subtitle:navigation-settle"
-_GEOMETRY_REFRESH_TIMER = "subtitle:geometry-refresh"
 
 # Every mpv size/scale source, probed at each osd-dimensions change to diagnose why the tooltip scale
 # (osd_h/REF_H) jitters: which source is stable (a candidate to key scale off) vs which wobbles. Unknown
@@ -492,9 +493,8 @@ class SessionController:
             self.screen,
             self.lifecycle_timers,
         )
-        self._subtitle_fetch_submit = subtitle_modes.configure_runtime_job(ipc)
-        self._subtitle_fetch_sequence = 0
-        self._subtitle_force_select_revision = 0
+        self._stop = threading.Event()
+        subtitle_fetch_submit = subtitle_modes.configure_runtime_job(ipc)
         current_renderer: CurrentSubtitleRenderer = (
             renderer if renderer is not None else SubtitleRenderer()
         )
@@ -506,6 +506,7 @@ class SessionController:
         # be handed a different one, which is what makes the fake/null/libass conformance contract
         # testable at all.
         self.subtitle_pipeline = SubtitleModeCoordinator(current_renderer, geometry_backend)
+        self.geometry_refresh = self._assemble_geometry_refresh_controller()
         if o.subtitle_geometry.native_visible:
             self.native_geometry = native_subtitles.NativeSubtitleGeometry(
                 SubtitleGeometryWorker(
@@ -520,7 +521,7 @@ class SessionController:
                     use_native=self._use_native_subtitle_renderer,
                     ownership_undecided=self._native_ownership_undecided,
                     redraw=self.draw_subtitle,
-                    reschedule=self._arm_geometry_refresh,
+                    reschedule=self.geometry_refresh.arm,
                     publish=self._publish_geometry,
                     tokenize_lookahead=self.annotation_controller.captured_lookahead(
                         self._annotation_inputs
@@ -632,7 +633,6 @@ class SessionController:
         self._runtime_announced = (
             False  # the runtime banner prints once, after prefetch actually starts
         )
-        self._stop = threading.Event()
         self.mining_controller = self._assemble_mining_controller(mining_identity, anki, mine_cfg)
         self.profile_dependencies = reader_deps.ProfileDependencies(
             mining_identity,
@@ -739,6 +739,7 @@ class SessionController:
         # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
         # whose event resets the whole state.
         self._subtitle_tracks = SubtitleTrackStore(self.ipc)
+        self.subtitle_acquisition = self._assemble_subtitle_acquisition(subtitle_fetch_submit)
         self.surface_router = surfaces.build_surface_router(
             self.help_controller,
             self.picker_controller,
@@ -753,7 +754,6 @@ class SessionController:
             self.track_commands,
             auto_reveal=o.translation.auto_translate,
         )
-        self._geometry_refresh = geometry_refresh.RefreshWindow()
         #: Latest cue identity observed this drain, reconciled once at the batch boundary.
         self._pending_cue: playback.ObservedCue | None = None
         self._ass_full_probe_dirty = True
@@ -1108,7 +1108,7 @@ class SessionController:
         elif isinstance(delta, playback.CueObservationChanged):
             self._pending_cue = delta.cue  # coalesced at the drain boundary; latest wins
         elif isinstance(delta, playback.SubtitleSelectionChanged):
-            self.retire_geometry_refresh()  # the track it was armed for is gone
+            self.geometry_refresh.retire()  # the track it was armed for is gone
             if self.native_geometry is not None:
                 self.native_geometry.set_source(None, live=True)
             else:
@@ -1118,7 +1118,7 @@ class SessionController:
             if self.native_geometry is not None:
                 self.native_geometry.record_clock_change(self.observed_property)
         elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
-            self._arm_geometry_refresh()
+            self.geometry_refresh.arm()
         else:
             self._apply_session_delta(delta)
 
@@ -1162,51 +1162,6 @@ class SessionController:
             events.CueIdentityInstalled(identity.observed_start, identity.observed_end)
         )
         self._cue_identity_ever_installed = True
-
-    # --- coalesced geometry refresh ----------------------------------------------------
-    def _arm_geometry_refresh(self) -> None:
-        """Defer the refresh to a zero-delay deadline so one batch of input changes runs libass
-        once, at the head of the next drain — after the whole batch has been observed."""
-        generation = self.subtitle_pipeline.generation
-        window, due = self._geometry_refresh.arm(generation)
-        self._geometry_refresh = window
-        if due is None:  # an armed deadline already covers this change
-            return
-
-        def fired(completion: EffectFinished) -> None:
-            if completion.outcome is EffectOutcome.SUCCEEDED:
-                self._geometry_refresh_due(due)
-
-        if not self.ipc.schedule_runtime_timer(
-            owner=Owner.SUBTITLE,
-            identity=due,
-            timer=_GEOMETRY_REFRESH_TIMER,
-            due_at=time.monotonic(),
-            on_finished=fired,
-        ):
-            # Coalescing is an optimisation, not a guard: with no timer port (or a full one) the
-            # refresh still has to happen, so run it now. Unlike the settle window — whose absence
-            # must fail closed because it changes what the user sees — skipping this one would
-            # silently drop hit boxes.
-            self._geometry_refresh = self._geometry_refresh.retire()
-            self._refresh_geometry()
-
-    def _geometry_refresh_due(self, due: geometry_refresh.GeometryRefreshDue) -> None:
-        if not self._geometry_refresh.fires(due, self.subtitle_pipeline.generation):
-            return  # superseded, or the source moved under it
-        self._geometry_refresh = self._geometry_refresh.retire()
-        self._refresh_geometry()
-
-    def _refresh_geometry(self) -> None:
-        if self.native_geometry is not None:
-            self.native_geometry.refresh(self._geometry_observation())
-
-    def retire_geometry_refresh(self) -> None:
-        """Drop a pending refresh; the source or track it was armed for is gone."""
-        if self._geometry_refresh.armed is None:
-            return
-        self._geometry_refresh = self._geometry_refresh.retire()
-        self.ipc.cancel_runtime_timer(_GEOMETRY_REFRESH_TIMER)
 
     # --- subtitle navigation settle window --------------------------------------------
     def open_settle_window(self) -> None:
@@ -1750,7 +1705,7 @@ class SessionController:
         return surfaces.ClickTarget(
             sub_picker.DownloadPorts(
                 self.toast,
-                self.submit_subtitle_fetch,
+                self.subtitle_acquisition.submit,
                 self._get,
                 self.lifecycle_surfaces,
             ),
@@ -1999,9 +1954,9 @@ class SessionController:
             rebind_episode=self.rebind_episode,
             rebuild_index=self.rebuild_sub_index,
             configure_mode=self.configure_subtitle_mode,
-            configure_retry=self.configure_subtitle_retry,
+            configure_retry=self.subtitle_acquisition.configure_retry,
             configure_picker=self.configure_sub_picker,
-            fetch_japanese=self.fetch_japanese_subs_async,
+            fetch_japanese=self.subtitle_acquisition.fetch_background,
             start_prefetch=self.start_prefetch,
             toast=self.toast,
         )
@@ -2356,16 +2311,14 @@ class SessionController:
             ),
             SubtitleCommandApply(
                 ipc=self.ipc,
-                episodes=self._episodes,
                 track=self.track_commands,
-                submit_fetch=self.submit_subtitle_fetch,
+                acquisition=self.subtitle_acquisition,
                 set_annotation_mode=self._set_annotation_mode,
                 draw_subtitle=self.draw_subtitle,
                 seek_cue=self.seek_cue,
                 sentence_lines=self.sentence_lines,
                 translation=self.translation_controller,
                 translation_inputs=self._translation_inputs,
-                property_value=self.property_value,
                 notifications=self.notifications,
             ),
         )
@@ -2409,6 +2362,31 @@ class SessionController:
 
     def _hide_nested(self) -> None:
         nested_popup.hide_nested(self._tip_ports)
+
+    def _assemble_geometry_refresh_controller(
+        self,
+    ) -> geometry_refresh.GeometryRefreshController:
+        def refresh() -> None:
+            if self.native_geometry is not None:
+                self.native_geometry.refresh(self._geometry_observation())
+
+        return geometry_refresh.GeometryRefreshController(
+            self.ipc,
+            generation=lambda: self.subtitle_pipeline.generation,
+            refresh=refresh,
+        )
+
+    def _assemble_subtitle_acquisition(
+        self, submitter: JobSubmitter | None
+    ) -> SubtitleAcquisitionController:
+        return SubtitleAcquisitionController(
+            ipc=self.ipc,
+            stop=self._stop,
+            get=self.property_value,
+            notifications=self.notifications,
+            track_ports=lambda: self.track_ports,
+            submitter=submitter,
+        )
 
     # --- mining -------------------------------------------------------------------------------
     def _assemble_mining_controller(
@@ -2615,14 +2593,6 @@ class SessionController:
         """Read-only public projection of the Help owner's state."""
         return self.help_controller.state
 
-    def fetch_japanese_subs_async(self, fetch) -> None:
-        subtitle_modes.start_fetch(
-            self.submit_subtitle_fetch, self._get, fetch, select_if_unchanged=True
-        )
-
-    def configure_subtitle_retry(self, factory) -> None:
-        subtitle_modes.configure_retry(self.episode.subtitle, factory)
-
     def _secondary_text(self) -> str:
         return translation.clean_secondary(self.observed_property("secondary-sub-text"))
 
@@ -2805,58 +2775,9 @@ class SessionController:
             on_finished=self._finish_render_ahead,
         )
 
-    def submit_subtitle_fetch(
-        self,
-        request: subtitle_modes.SubtitleFetchRequest,
-        *,
-        name: str,
-        on_done: Callable[[], None] | None = None,
-    ) -> None:
-        episode = self.episode
-        self._subtitle_fetch_sequence += 1
-        identity = (self._subtitle_fetch_sequence, name)
-        force_select_revision = None
-        if request.force_select:
-            self._subtitle_force_select_revision += 1
-            force_select_revision = self._subtitle_force_select_revision
-
-        def finish(completion: EffectFinished) -> None:
-            if (
-                episode is not self.episode
-                or self._stop.is_set()
-                or (
-                    force_select_revision is not None
-                    and force_select_revision != self._subtitle_force_select_revision
-                )
-            ):
-                return
-            try:
-                subtitle_modes.apply_fetch_result(
-                    self.track_ports, subtitle_modes.finish_fetch(request, completion)
-                )
-            finally:
-                if on_done is not None:
-                    on_done()
-
-        submitter = self._subtitle_fetch_submit
-        if submitter is None:
-            subtitle_modes.apply_fetch_result(
-                self.track_ports, subtitle_modes.unavailable_fetch(request)
-            )
-            if on_done is not None:
-                on_done()
-            return
-        submitter(
-            owner=Owner.SUBTITLE,
-            identity=identity,
-            lane="subtitle-fetch",
-            request=request,
-            on_finished=finish,
-        )
-
     def rebind_episode(self) -> None:
         self.picker_controller.close()
-        self._subtitle_force_select_revision += 1
+        self.subtitle_acquisition.retire_episode()
         self._retire_episode()
         self._episodes.replace()
         self.cue_render.reset()
@@ -3535,7 +3456,7 @@ class SessionController:
                 # `WORKER_LANE_PARTICIPANTS` declares.
                 *self._fallback_steps(WORKER_LANE_PARTICIPANTS, ClosePhase.LANES),
                 # No refresh may land after the provider closes, nor a settle deadline outlive it.
-                CloseStep("geometry-refresh", lambda: self.retire_geometry_refresh()),
+                CloseStep("geometry-refresh", lambda: self.geometry_refresh.retire()),
                 CloseStep("settle-window", lambda: self.retire_settle_window()),
                 CloseStep(
                     "phase:rendering", lambda: self._runtime_close.announce(ClosePhase.RENDERING)

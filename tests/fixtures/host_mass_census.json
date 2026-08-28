@@ -1,13 +1,13 @@
 {
   "counts": {
-    "delegator": 88,
+    "delegator": 87,
     "derived": 47,
-    "init_lines": 334,
+    "init_lines": 333,
     "self_delegator": 2,
     "slice": 18,
-    "substantive": 123,
-    "substantive_lines": 1543,
-    "total": 278
+    "substantive": 119,
+    "substantive_lines": 1477,
+    "total": 273
   },
   "reason": ""
 }
