@@ -5,7 +5,7 @@
 The deltas still have to reach the SessionController, so they arrive as `ApplyPlaybackDeltas` instead of as a
 return value; a mailbox-delivered observation has no caller to hand them back to.
 
-The hazard this pins is double reduction: `SessionController._observe_property` already routes through the
+The hazard this pins is double reduction: the observation owner already routes through the
 reactor, so an observation that was routed *and* left to fall through would reduce twice — the
 projection would hide it (it is idempotent) and the deltas would not.
 """
@@ -26,7 +26,7 @@ def _session(*, reactor: bool):
     if reactor:
         install_session_reactor(gateway, startup_hint=False)
     reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
-    reader._observing = True
+    reader.playback_observation.install_seed({})
     return ipc, gateway, reader
 
 
@@ -40,7 +40,7 @@ def test_an_observation_lands_the_same_whether_the_reactor_owns_it(reactor) -> N
     try:
         ipc.emit({"event": "property-change", "name": "sub-text", "data": "いち"})
         reader._drain_events()
-        text, observed = reader.sub_text, reader._playback.value("sub-text")
+        text, observed = reader.sub_text, reader.playback_observation.state.value("sub-text")
     finally:
         reader.close()
         gateway.close()
@@ -77,7 +77,7 @@ def test_the_pointer_is_the_only_observation_that_coalesces_in_a_batch() -> None
         ipc.emit({"event": "property-change", "name": "pause", "data": True})
         reader._drain_events()
         seen = gateway.claim_census()["PropertyObserved"]
-        pointer = reader._playback.value("mouse-pos")
+        pointer = reader.playback_observation.state.value("mouse-pos")
     finally:
         reader.close()
         gateway.close()

@@ -1036,7 +1036,8 @@ def test_paused_draw_schedules_and_fires_an_osd_nudge():
     r = SessionController(ipc)
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
-    r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
+    # mpv reports the cue; the drain reconciles it
+    r.playback_observation.observe("sub-text", "いち")
     r.pump()  # adopts the cue → draws SUB_ID while paused → arms the nudge
     assert r._nudge_pending is True
     before = _count_adds(ipc)
@@ -1056,9 +1057,9 @@ def test_a_burst_of_paused_draws_repaints_once():
     r = SessionController(ipc)
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
-    r._observe_property("sub-text", "いち")
+    r.playback_observation.observe("sub-text", "いち")
     r.pump()
-    r._observe_property("sub-text", "に")
+    r.playback_observation.observe("sub-text", "に")
     r.pump()  # a second paused draw, before the first nudge was ever delivered
     before = _count_adds(ipc)
 
@@ -1077,7 +1078,7 @@ def test_playing_draw_does_not_nudge():
     r = SessionController(ipc)
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
-    r._observe_property("sub-text", "いち")
+    r.playback_observation.observe("sub-text", "いち")
     r.pump()
     assert r.sub_text == "いち"  # the cue really did draw — otherwise the nudge check is vacuous
     assert r._nudge_pending is False
@@ -1115,7 +1116,8 @@ def test_paused_nudge_records_otel_counters():
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
         ipc.props["sub-text"] = "いち"
-        r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
+        # mpv reports the cue; the drain reconciles it
+        r.playback_observation.observe("sub-text", "いち")
         r.pump()  # a draw lands while paused → osd.paused_draw, arms the nudge
         assert ipc.fire_runtime_timer("lifecycle:paused-repaint")  # → osd.paused_nudge
         snap = otel_metrics.snapshot()
@@ -2564,7 +2566,7 @@ def test_secondary_text_observation_updates_the_active_translation() -> None:
     reader = SessionController(ipc)
     reader._handle(app_bindings.TRANS_MSG)
 
-    reader._on_property_change({"name": "secondary-sub-text", "data": "second"})
+    reader.playback_observation.observe_event({"name": "secondary-sub-text", "data": "second"})
 
     assert reader.translation_controller.state.drawn == "second"
 
@@ -3187,7 +3189,7 @@ def test_a_cue_cleared_by_the_reader_is_not_resurrected_by_the_next_observation(
     reader.set_subtitle("")  # what a language/track switch does
     assert reader.sub_text == ""
 
-    reader._on_property_change({"name": "sub-end", "data": 9.5})
+    reader.playback_observation.observe_event({"name": "sub-end", "data": 9.5})
     reader._settle_cue_observation()
 
     assert reader.sub_text == ""
@@ -3205,7 +3207,9 @@ def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, valu
     ipc.props[name] = value
 
     reader._on_ipc_reconnect()
-    reader._on_property_change({"event": "property-change", "name": name, "data": value})
+    reader.playback_observation.observe_event(
+        {"event": "property-change", "name": name, "data": value}
+    )
 
     assert reader.annotation_controller.view.retired is True
     assert reader.tokens == [] and reader.boxes == []
@@ -3274,7 +3278,7 @@ def test_property_change_event_drives_hover(monkeypatch):
     ipc.set_prop("mouse-pos", {"hover": True, "x": 5, "y": 5})
     for ev in ipc.drain_events():  # what pump's drain loop does
         if ev.get("event") == "property-change":
-            r._on_property_change(ev)
+            r.playback_observation.observe_event(ev)
     r._update_hover()
     assert seen == [0]  # hover driven purely by the observed event state
 

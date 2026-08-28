@@ -386,7 +386,7 @@ def test_primary_track_event_shows_language_and_counter(monkeypatch):
     messages = []
     monkeypatch.setattr(reader.notifications, "show", lambda text: messages.append(text))
 
-    reader._on_property_change({"name": "sid", "data": 1})
+    reader.playback_observation.observe_event({"name": "sid", "data": 1})
 
     assert messages == ["subtitles: English (1/2)"]
 
@@ -424,11 +424,11 @@ def test_primary_sid_event_updates_rendering_language():
     reader = SessionController(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     hold_translation(reader)
-    reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
+    reader.playback_observation.install_seed({"sid": 2})
     ipc.props["sid"] = 1
     ipc.commands.clear()
 
-    reader._on_property_change({"name": "sid", "data": 1})
+    reader.playback_observation.observe_event({"name": "sid", "data": 1})
 
     assert reader.subtitle_language == "en"
     assert ("set_property", "secondary-sid", 2) in ipc.commands

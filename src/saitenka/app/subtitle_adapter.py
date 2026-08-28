@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from saitenka.app.subtitle_presentation import CueRenderStore
     from saitenka.app.toast_controller import NotificationSink
     from saitenka.mpvio.ipc import MpvIPC
-    from saitenka.runtime.playback_slice import PlaybackStore
+    from saitenka.runtime.playback import PlaybackCueView
     from saitenka.runtime.subtitle import SubtitleTrackState
     from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 
@@ -40,7 +40,7 @@ class SubtitleTrackCoordinator:
     ipc: MpvIPC
     tracks: SubtitleTrackStore
     episodes: EpisodeSlot
-    playback: PlaybackStore
+    playback: PlaybackCueView
     property_value: Callable[[str], object | None]
     notifications: NotificationSink
     invalidate: Callable[[], None]
@@ -79,14 +79,14 @@ class SubtitleTrackCoordinator:
     def sample_cue(self) -> str:
         return subtitle_modes._sample_cue_text(
             self.episodes.current.sub_index,
-            self.playback.current.state.cue.text,
+            self.playback.cue.text,
         )
 
     def clear_cue(self) -> None:
         self.install_cue("")
 
     def redraw_cue(self) -> None:
-        self.install_cue(self.playback.current.state.cue.text)
+        self.install_cue(self.playback.cue.text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +95,7 @@ class SubtitleCommandRead:
 
     ipc: MpvIPC
     episodes: EpisodeSlot
-    playback: PlaybackStore
+    playback: PlaybackCueView
     tracks: SubtitleTrackStore
     cue: CueRenderStore
     annotation: AnnotationViewSource
@@ -133,7 +133,7 @@ class SubtitleCommandCoordinator:
         read = self._read
         episode = read.episodes.current
         index = episode.sub_index
-        playback = read.playback.current.state
+        cue_facts = read.playback.cue
         track = read.tracks.current
         cue = read.cue.current
         playhead = read.observed_property("time-pos")
@@ -142,7 +142,7 @@ class SubtitleCommandCoordinator:
             active_sid=read.property_value("sid"),
             language=track.language,
             annotation_mode=read.annotation.view.mode,
-            has_cue=bool(playback.cue.text.strip()),
+            has_cue=bool(cue_facts.text.strip()),
             retry_in_flight=self._apply.acquisition.retry_in_flight,
             media_path=read.text_property("path"),
             has_external_sub=_current_external_sub(read.ipc) is not None,
@@ -150,7 +150,7 @@ class SubtitleCommandCoordinator:
             cue_starts=tuple(cue.start for cue in index.cues) if index is not None else (),
             playhead=None if playhead is None else float(playhead),  # type: ignore[arg-type]
             sub_delay=float(read.observed_property("sub-delay") or 0.0),  # type: ignore[arg-type]
-            cue_revision=playback.cue.cue.value,
+            cue_revision=cue_facts.cue.value,
         )
 
     def apply(self, effect: subtitle_intents.SubtitleEffect, /) -> None:

@@ -1123,17 +1123,14 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     assert len(backend.requests) == 2
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.set_subtitle("")
-    result._observing = True
-    result._playback = result._projection.seed_all(result._playback, ipc.props)
-    result._playback = result._projection.seed_all(
-        result._playback, {"sub-text": "", "sub-start": None, "sub-end": None}
+    result.playback_observation.install_seed(
+        ipc.props | {"sub-text": "", "sub-start": None, "sub-end": None}
     )
 
-    result._on_property_change({"name": "sub-delay", "data": -6.0})
+    result.playback_observation.observe_event({"name": "sub-delay", "data": -6.0})
     result._settle_cue_observation()
 
     assert len(backend.requests) == 2
-    result._observing = False
     ipc.commands.clear()
     ipc.props.update(
         {
@@ -1143,6 +1140,7 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
             "time-pos": 4.2,
         }
     )
+    result.playback_observation.install_seed(ipc.props)
 
     result.set_subtitle("犬も見る")
 
@@ -1336,11 +1334,9 @@ def test_sub_delay_property_event_records_the_derived_subtitle_clock(
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
-    result._observing = True
-    result._playback = result._projection.seed_all(result._playback, ipc.props)
-    result._playback = result._projection.seed(result._playback, "time-pos", 11.25)
+    result.playback_observation.install_seed(ipc.props | {"time-pos": 11.25})
 
-    result._on_property_change({"name": "sub-delay", "data": 10.0})
+    result.playback_observation.observe_event({"name": "sub-delay", "data": 10.0})
 
     assert captured == [
         {
@@ -1372,13 +1368,9 @@ def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
-    result._observing = True
-    result._playback = result._projection.seed_all(result._playback, ipc.props)
-    result._playback = result._projection.seed_all(
-        result._playback, {"time-pos": None, "sub-start": None}
-    )
+    result.playback_observation.install_seed(ipc.props | {"time-pos": None, "sub-start": None})
 
-    result._on_property_change({"name": "sub-delay", "data": 10.0})
+    result.playback_observation.observe_event({"name": "sub-delay", "data": 10.0})
 
     assert captured == [{"outcome": "invalid"}]
     result.close()
@@ -1799,10 +1791,9 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     # Drive the first cue as an observation, not a set_subtitle call: reconciliation reads the cue
     # from the projection now, so a cue the projection never saw settles as empty and the next
     # observation retires a cue this test never installed there.
-    result._observing = True
-    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result.playback_observation.install_seed(ipc.props)
     ipc.props["sub-text"] = "猫を見る"
-    result._on_property_change({"name": "sub-text", "data": "猫を見る"})
+    result.playback_observation.observe_event({"name": "sub-text", "data": "猫を見る"})
     result._settle_cue_observation()
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
@@ -1818,11 +1809,11 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     )
     # mpv pushes the new authored row as its own observation; the old tick stage used to pull it
     # through the ass-full probe instead, which let this test skip it.
-    result._on_property_change(
+    result.playback_observation.observe_event(
         {"name": "sub-text/ass-full", "data": ipc.props["sub-text/ass-full"]}
     )
-    result._on_property_change({"name": "sub-start", "data": 4.0})
-    result._on_property_change({"name": "sub-end", "data": 6.0})
+    result.playback_observation.observe_event({"name": "sub-start", "data": 4.0})
+    result.playback_observation.observe_event({"name": "sub-end", "data": 6.0})
     assert result.boxes == []
 
     settle_geometry(result, ipc)
@@ -1844,21 +1835,19 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     original_boxes = list(result.boxes)
-    result._observing = True
-    result._playback = result._projection.seed_all(result._playback, ipc.props)
-    result._playback = result._projection.seed(result._playback, "sub-text", result.sub_text)
+    result.playback_observation.install_seed(ipc.props | {"sub-text": result.sub_text})
     ipc.commands.clear()
 
-    result._on_property_change({"name": "sub-start", "data": None})
-    result._on_property_change({"name": "sub-end", "data": None})
+    result.playback_observation.observe_event({"name": "sub-start", "data": None})
+    result.playback_observation.observe_event({"name": "sub-end", "data": None})
     settle_geometry(result, ipc)
 
     assert result.boxes == original_boxes
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.native_geometry.status.fallback_reason == "subtitle-observation-pending"
 
-    result._on_property_change({"name": "sub-start", "data": 1.0})
-    result._on_property_change({"name": "sub-end", "data": 3.0})
+    result.playback_observation.observe_event({"name": "sub-start", "data": 1.0})
+    result.playback_observation.observe_event({"name": "sub-end", "data": 3.0})
     settle_geometry(result, ipc)
 
     assert result.boxes == original_boxes
@@ -1876,19 +1865,17 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     native_boxes = list(result.boxes)
-    result._observing = True
-    result._playback = result._projection.seed_all(result._playback, ipc.props)
-    result._playback = result._projection.seed(result._playback, "sub-text", result.sub_text)
+    result.playback_observation.install_seed(ipc.props | {"sub-text": result.sub_text})
     ipc.commands.clear()
 
-    result._on_property_change(
+    result.playback_observation.observe_event(
         {
             "name": "sub-text/ass-full",
             "data": ("Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,猫を見る"),
         }
     )
-    result._on_property_change({"name": "sub-start", "data": None})
-    result._on_property_change({"name": "sub-end", "data": None})
+    result.playback_observation.observe_event({"name": "sub-start", "data": None})
+    result.playback_observation.observe_event({"name": "sub-end", "data": None})
     settle_geometry(result, ipc)
 
     assert native_boxes
@@ -2458,7 +2445,7 @@ def test_a_document_with_no_playresy_keeps_its_boxes_and_loses_its_overprint() -
 def test_every_gate_option_is_observed_and_counted_a_render_space_input() -> None:
     """Three lists that have to agree, and nothing made them.
 
-    An option missing from `OBSERVED_PROPS` is not merely slower: `observed_property` falls through
+    An option missing from `OBSERVED_PROPERTIES` is not merely slower: `observed_property` falls through
     to a blocking `get_property`, and `_render_inputs` runs twice per cue, so each omission is two
     more round trips per cue on the interaction loop. Missing from `RENDER_SPACE_PROPERTIES` is the
     correctness half — a mid-episode change to it never invalidates the geometry it just moved, so
@@ -2467,12 +2454,12 @@ def test_every_gate_option_is_observed_and_counted_a_render_space_input() -> Non
     Four options landed on this branch reading the gate but neither list, which is why this exists.
     """
     from saitenka.app.native_subtitles import GATE_OPTIONS
-    from saitenka.app.session.controller import OBSERVED_PROPS
+    from saitenka.app.session.playback_observation import OBSERVED_PROPERTIES
     from saitenka.runtime.playback import RENDER_SPACE_PROPERTIES
 
     qualified = {f"options/{name}" for name in GATE_OPTIONS}
 
-    assert qualified <= set(OBSERVED_PROPS)
+    assert qualified <= set(OBSERVED_PROPERTIES)
     assert qualified <= RENDER_SPACE_PROPERTIES
 
 
@@ -2888,7 +2875,9 @@ def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) ->
     assert backend.requests[-1].use_margins is False  # the input the change is about to flip
 
     ipc.props["options/sub-ass-force-margins"] = True
-    result._on_property_change({"name": "options/sub-ass-force-margins", "data": True})
+    result.playback_observation.observe_event(
+        {"name": "options/sub-ass-force-margins", "data": True}
+    )
     ipc.fire_runtime_timer("subtitle:geometry-refresh")
     settle_jobs(result, ipc)
 
@@ -2911,10 +2900,10 @@ def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> 
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.timers.clear()
 
-    result._on_property_change({"name": "options/sub-pos", "data": 95.0})
+    result.playback_observation.observe_event({"name": "options/sub-pos", "data": 95.0})
     first = ipc.timers["subtitle:geometry-refresh"]
-    result._on_property_change({"name": "options/sub-scale", "data": 1.5})
-    result._on_property_change({"name": "options/sub-use-margins", "data": True})
+    result.playback_observation.observe_event({"name": "options/sub-scale", "data": 1.5})
+    result.playback_observation.observe_event({"name": "options/sub-use-margins", "data": True})
 
     assert ipc.timers["subtitle:geometry-refresh"] is first
     assert list(ipc.timers) == ["subtitle:geometry-refresh"]
@@ -2935,10 +2924,10 @@ def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> No
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     ipc.props["options/sub-pos"] = 95.0
-    result._on_property_change({"name": "options/sub-pos", "data": 95.0})
+    result.playback_observation.observe_event({"name": "options/sub-pos", "data": 95.0})
     assert "subtitle:geometry-refresh" in ipc.timers
 
-    result._on_property_change({"name": "sid", "data": 3})
+    result.playback_observation.observe_event({"name": "sid", "data": 3})
 
     assert "subtitle:geometry-refresh" not in ipc.timers
     result.close()

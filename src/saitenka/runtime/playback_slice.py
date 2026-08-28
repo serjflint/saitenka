@@ -1,9 +1,10 @@
 """`Owner.PLAYBACK`'s feature: one slice of state and the reducer that advances it.
 
-The reduction lives here rather than at the call site so there is one of it. A SessionController with no
-session runtime installed drives this reducer directly; a SessionController with one drives it through the
-reactor's route table. Only the *store* differs — an inline second copy of the reduction would be
-the untested path that drifts, which is the argument `LocalJobLane` already makes for job lanes.
+The reduction lives here rather than at the call site so there is one of it.
+`PlaybackObservationController` drives it locally without a session runtime or through the reactor's
+route table when one is installed. Only the *store* differs — an inline second copy of the reduction
+would be the untested path that drifts, which is the argument `LocalJobLane` already makes for job
+lanes.
 """
 
 from __future__ import annotations

@@ -1,13 +1,13 @@
 {
   "counts": {
-    "delegator": 87,
+    "delegator": 93,
     "derived": 47,
-    "init_lines": 333,
+    "init_lines": 328,
     "self_delegator": 2,
     "slice": 18,
-    "substantive": 119,
-    "substantive_lines": 1477,
-    "total": 273
+    "substantive": 110,
+    "substantive_lines": 1444,
+    "total": 270
   },
-  "reason": ""
+  "reason": "playback observation state and transport bookkeeping moved to its owner"
 }

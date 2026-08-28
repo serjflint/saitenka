@@ -186,14 +186,9 @@ _SESSION_EVENTS = (
 #: `UserCommand` is here on the same protocol and is the one whose act carries a subject: the
 #: binding table does not move, only the decision to consult it.
 #:
-#: `PropertyObserved` is the first claim that is not `Owner.SESSION`'s, and the first where the act
-#: is *applying what the turn published*. It has to be claimed in the same breath as being routed:
-#: the SessionController's own `_reduce_playback` already routes through the reactor, so an observation both
-#: routed and left to fall through would reduce twice.
-#:
-#: Claiming withholds from the SessionController, so what is left in `_drain_event` for these is the
-#: no-reactor fallback and nothing else. Deleting that would make a session without a runtime stop
-#: noticing its transport, which is most of the unit suite.
+#: `PropertyObserved` is the first claim outside `Owner.SESSION`. With a reactor, claiming sends the
+#: raw observation straight to the playback slice. Without one, `PlaybackObservationController`
+#: drives the same reducer locally. Letting a routed observation fall through would reduce it twice.
 _CLAIMED = (
     StartupHintRequested,
     StartupReady,
@@ -558,9 +553,9 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     routes: dict[RouteKey, FeatureReducer] = {
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
-    # `Owner.PLAYBACK` is not claimed: the SessionController routes its observations here and then acts on
-    # the deltas the turn published. What has moved is the *state* — the slot is where the
-    # projection lives, so there is one of it. The duties that read it move next.
+    # Raw observations are claimed at the gateway; the observation owner dispatches the other
+    # playback declarations. Both paths meet in this slice, and SessionController applies the
+    # cross-feature consequences of its typed deltas.
     routes.update({RouteKey(event, Owner.PLAYBACK): playback for event in PLAYBACK_EVENTS})
     # `Owner.SUBTITLE` is not claimed either, and for a sharper reason: every event it takes is a
     # declaration of a track selection the sender has already sent to mpv. The slot holds what was

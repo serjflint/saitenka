@@ -149,6 +149,7 @@ from saitenka.app.session.interaction_adapter import (
     InteractionCommandPorts,
 )
 from saitenka.app.session.panel_adapter import PanelCommandCoordinator, PanelCommandPorts
+from saitenka.app.session.playback_observation import PlaybackObservationController
 from saitenka.app.session.routes import (
     BACKLOG_RESOURCE,
     CAPABILITY_PARTICIPANTS,
@@ -200,7 +201,6 @@ from saitenka.app.subtitle_render import (
 )
 from saitenka.app.toast_controller import ToastController
 from saitenka.app.token_cache import TokenizedCue, cue_key
-from saitenka.mpvio.gateway import register_observer_set
 from saitenka.render.layout_backend import backend_label, resolve_backend
 from saitenka.runtime import (
     ClosePhase,
@@ -221,7 +221,6 @@ from saitenka.runtime import subtitle as subtitle_state
 from saitenka.runtime.connection import ConnectionStore
 from saitenka.runtime.effects import ApplyPlaybackDeltas, RunUserCommand
 from saitenka.runtime.hover import HoverDelays
-from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackSlice, PlaybackStore
 from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.runner import SessionRunner
 from saitenka.runtime.subtitle_slice import SubtitleTrackStore
@@ -247,63 +246,6 @@ NESTED_ID = OverlayId.NESTED
 # the base tooltip (tip_max_frac) doesn't cramp the deep-dive.
 
 
-# Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
-# blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
-OBSERVED_PROPS = (
-    "sub-text",
-    "sub-text/ass-full",
-    "mouse-pos",
-    "osd-dimensions",
-    "pause",
-    "secondary-sub-text",
-    "sid",
-    "sub-start",
-    "sub-end",
-    "sub-delay",
-    "time-pos",
-    "video-out-params",
-    "options/sub-ass-override",
-    "options/sub-ass-scale-with-window",
-    "options/sub-scale",
-    "options/sub-pos",
-    "options/sub-use-margins",
-    "options/sub-ass-force-margins",
-    "options/sub-ass-video-aspect-override",
-    "options/sub-ass-use-video-data",
-    "options/sub-ass-style-overrides",
-    "options/sub-scale-with-window",
-    "options/sub-scale-by-window",
-    "options/blend-subtitles",
-    "options/sub-filter-sdh",
-    "options/sub-font-provider",
-    "options/embeddedfonts",
-    "options/sub-fonts-dir",
-    "options/sub-font",
-    "options/osd-fonts-dir",
-    "options/osd-font-provider",
-    # `converted.STYLE_OPTIONS` — the style mpv applies to a track it converted. Observed so
-    # `_render_inputs` does not block on them per cue, and counted a render-space input so a
-    # mid-episode change re-measures the boxes it just moved.
-    "options/sub-font-size",
-    "options/sub-color",
-    "options/sub-outline-color",
-    "options/sub-back-color",
-    "options/sub-border-style",
-    "options/sub-outline-size",
-    "options/sub-shadow-offset",
-    "options/sub-spacing",
-    "options/sub-margin-x",
-    "options/sub-margin-y",
-    "options/sub-align-x",
-    "options/sub-align-y",
-    "options/sub-blur",
-    "options/sub-bold",
-    "options/sub-italic",
-    "options/sub-justify",
-    "options/video-crop",
-    "options/video-rotate",
-    "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
-)
 # Which observations are geometry inputs, which retire the cue identity, and which render space
 # they revise all live in saitenka/runtime/playback.py — the sole interpreter.
 _SETTLE_TIMER = "subtitle:navigation-settle"
@@ -726,15 +668,10 @@ class SessionController:
             (SUBTITLE_CLOSE_RESOURCE, lambda: self._close_subtitle_raster()),
         ):
             ipc.register_session_resource(name, session_resources.Retiring(retire))
-        # Event-driven property state (observe_property); empty + off until run() calls
-        # start_observing(), so direct get_property keeps working for tests / pre-run paths.
-        self._observing = False
-        # Sole interpreter of raw mpv observations (saitenka/runtime/playback.py): it owns the
-        # latest values, the explicit source/track/render-space revisions, and the decision that a
-        # given observation conflicts with the installed cue identity.
-        reducer = PlaybackReducer()
-        self._projection = reducer.projection
-        self._playback_store = PlaybackStore(self.ipc, reducer=reducer)
+        self.playback_observation = PlaybackObservationController(
+            self.ipc,
+            self._apply_playback_delta,
+        )
         # `Owner.SUBTITLE`'s slice: which mpv track plays which role. Session-lived like the
         # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
         # whose event resets the whole state.
@@ -821,45 +758,29 @@ class SessionController:
 
     # --- mpv property helpers -----------------------------------------------------------------
     def _get(self, prop: str) -> object | None:
-        """One property, un-narrowed. The transport promises a JSON value and nothing more.
-
-        The three readers below are the narrowings that have a consumer; each answers `None` (or
-        empty) for a shape mpv did not send, because "the property is unset" and "mpv sent something
-        this caller cannot use" are the same fact to every one of them.
-        """
-        return self.ipc.query(prop)
+        """One blocking property read, un-narrowed."""
+        return self.playback_observation.query(prop)
 
     def text_property(self, prop: str) -> str | None:
-        value = self._get(prop)
-        return value if isinstance(value, str) else None
+        return self.playback_observation.text(prop)
 
     def _get_number(self, prop: str) -> float | None:
-        value = self._get(prop)
-        return float(value) if isinstance(value, int | float) else None
+        return self.playback_observation.number(prop)
 
     def _get_mapping(self, prop: str) -> dict:
-        value = self._get(prop)
-        return value if isinstance(value, dict) else {}
+        return self.playback_observation.mapping(prop)
 
     def _get_sequence(self, prop: str) -> list:
-        value = self._get(prop)
-        return value if isinstance(value, list) else []
+        return self.playback_observation.sequence(prop)
 
     def start_observing(self, *, connection_replaced: bool = False) -> None:
         """Register ``observe_property`` for the hot-path properties and seed their initial values
         with ONE get_property each. After this, the poll loop consumes buffered ``property-change``
         events instead of doing blocking round-trips every tick. Main-thread only (IPC)."""
-        replies = self._register_observers()
-        for name in OBSERVED_PROPS:
-            reply = replies[name]
-            data = reply.get("data")
-            if connection_replaced:
-                self._observe_property(name, data)
-            else:
-                self._reduce_playback(events.PropertySeeded(name, data))
+        replies = self.playback_observation.start(connection_replaced=connection_replaced)
+        for name, reply in replies.items():
             if name == "sub-text/ass-full" and self.native_geometry is not None:
                 self.native_geometry.observe_ass_full_reply(reply)
-        self._observing = True
         # Seeding goes through projection.seed, which discards the deltas it would publish, so the
         # cue already on screen at startup never produces a CueObservationChanged. Reconcile it once
         # by hand — otherwise the overlay stays blank until mpv's next sub-text change.
@@ -884,11 +805,6 @@ class SessionController:
             )
         else:
             self._probe_display_sources("seed", osd if isinstance(osd, dict) else {})
-
-    def _register_observers(self) -> dict[str, dict]:
-        replies = register_observer_set(self.ipc, tuple(OBSERVED_PROPS))
-        replies = {name: replies.get(name) or {"error": "unavailable"} for name in OBSERVED_PROPS}
-        return replies
 
     @property
     def subtitle_tracks(self) -> subtitle_state.SubtitleTrackState:
@@ -929,7 +845,7 @@ class SessionController:
             ipc=self.ipc,
             tracks=self._subtitle_tracks,
             episodes=self._episodes,
-            playback=self._playback_store,
+            playback=self.playback_observation,
             property_value=self.property_value,
             notifications=self.notifications,
             invalidate=self.analysis_commands.invalidate,
@@ -959,11 +875,7 @@ class SessionController:
 
     @property
     def _playback(self) -> playback.PlaybackState:
-        return self._playback_store.current.state
-
-    @_playback.setter
-    def _playback(self, state: playback.PlaybackState) -> None:
-        self._playback_store.current = PlaybackSlice(state)
+        return self.playback_observation.state
 
     def _publish_geometry(self, boxes: list, origin: tuple[int, int] | None = None) -> None:
         """Take the hit boxes the geometry owner produced. Ordering is the generation fence's."""
@@ -1054,8 +966,7 @@ class SessionController:
         Empty for a routed session — the turn's deltas arrived through `ApplyPlaybackDeltas` before
         this returned. What is left here is the store that keeps its own slice.
         """
-        for delta in self._playback_store.dispatch(event):
-            self._apply_playback_delta(delta)
+        self.playback_observation.dispatch(event)
 
     def _apply_playback_deltas(self, effect: object) -> None:
         """Perform `ApplyPlaybackDeltas`: `Owner.PLAYBACK`'s outbox, delivered.
@@ -1071,23 +982,7 @@ class SessionController:
     def observed_property(self, name: str) -> Any:
         """Latest value of a property: the observed (event-driven) state when observing, else a
         blocking get_property (tests / pre-run paths)."""
-        if self._observing and self._playback.observes(name):
-            return self._playback.value(name)
-        return self._get(name)
-
-    def _on_property_change(self, ev: dict) -> None:
-        name = ev.get("name")
-        if name:
-            self._observe_property(str(name), ev.get("data"))
-
-    def _observe_property(self, name: str, data: object) -> None:
-        """Hand one ordered observation to the projection and apply the deltas it publishes."""
-        if name == "pause" and data != self._playback.value("pause"):
-            # Breadcrumb for the "overlay only updates on mouse move" report: while paused, mpv's
-            # d3d11 flip-model VO won't re-present the window on an overlay-add (see the
-            # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
-            log.debug("mpv pause -> %s", data)
-        self._reduce_playback(events.PropertyObserved(name, data))
+        return self.playback_observation.value(name)
 
     def _probe_ass_full(self) -> None:
         """Resolve mpv's authored-ASS capability once per file. Driven by `AuthoredCueStale`, which
@@ -1138,6 +1033,7 @@ class SessionController:
             if delta.reached and self.advance_hook is not None:
                 self.advance_hook()
         elif isinstance(delta, playback.PauseChanged):
+            log.debug("mpv pause -> %s", delta.paused)
             # Watch time is accrued at the transition, not sampled by a tick: the segment that
             # just ended is exactly what the change delimits, and an idle runtime does no work.
             session_stats.accrue(
@@ -2256,7 +2152,7 @@ class SessionController:
             MineCommandPorts(
                 mining=self.mining_controller,
                 bookmark=BookmarkCommandEndpoint(
-                    playback=self._playback_store,
+                    playback=self.playback_observation,
                     cue=self.cue_render,
                     tracks=self._subtitle_tracks,
                     tooltip=self.tooltip_controller,
@@ -2268,7 +2164,6 @@ class SessionController:
                     notifications=self.notifications,
                     record_capture=self._record_capture,
                 ),
-                playback=self._playback_store,
                 notifications=self.notifications,
             )
         )
@@ -2301,7 +2196,7 @@ class SessionController:
             SubtitleCommandRead(
                 ipc=self.ipc,
                 episodes=self._episodes,
-                playback=self._playback_store,
+                playback=self.playback_observation,
                 tracks=self._subtitle_tracks,
                 cue=self.cue_render,
                 annotation=self.annotation_controller,
@@ -2793,10 +2688,10 @@ class SessionController:
         """
         self.annotation_controller.retire_episode_warm()
         self.translation_controller.retire_episode()
-        if self._playback_store.routed:
-            self._playback_store.dispatch(events.EpisodeRetired())
+        if self.playback_observation.routed:
+            self.playback_observation.retire_episode()
             return
-        self._playback_store.dispatch(events.EpisodeRetired())
+        self.playback_observation.retire_episode()
         self._subtitle_tracks.dispatch(events.EpisodeRetired())
         self.tooltip_controller.retire_episode()
 
@@ -2944,7 +2839,7 @@ class SessionController:
             self._on_file_loaded()
             return
         if isinstance(ev, events.PropertyObserved):
-            self._observe_property(ev.name, ev.data)
+            self.playback_observation.observe(ev.name, ev.data)
             return
         if isinstance(ev, ConnectionReady):
             # Only reached without a reactor: a session that has one claims this, because learning
@@ -2965,7 +2860,7 @@ class SessionController:
         if kind == "file-loaded":
             self._on_file_loaded()
         elif kind == "property-change":
-            self._on_property_change(ev)
+            self.playback_observation.observe_event(ev)
         elif kind == "client-message":
             args = ev.get("args") or [""]
             name = args[0] if isinstance(args[0], str) else ""
@@ -3096,7 +2991,10 @@ class SessionController:
         """Announce interactive readiness once. True when this call published the fact."""
         if self._interactive_ready:
             return False
-        if self._observing and self._playback.value("osd-dimensions") in (None, {}):
+        if self.playback_observation.observing and self._playback.value("osd-dimensions") in (
+            None,
+            {},
+        ):
             return False
         self._interactive_ready = True
         connected_at = self.ipc.connected_at  # None until the transport has connected once

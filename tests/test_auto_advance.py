@@ -62,7 +62,7 @@ class FakeIPC(util.FakeIPC):
 def _observe_eof(reader, *, reached: bool) -> None:
     """Drive EOF the way mpv does. The advance is delta-driven now, so a test that poked a method
     and a clock would be exercising a path production no longer has."""
-    reader._observe_property("eof-reached", reached)
+    reader.playback_observation.observe("eof-reached", reached)
 
 
 def test_advance_fires_once_per_eof_edge():
@@ -202,7 +202,9 @@ def test_reconnect_reslots_file_changed_while_disconnected(tmp_path):
     ipc.props["path"] = str(second)
 
     reader._on_ipc_reconnect()
-    reader._on_property_change({"event": "property-change", "name": "path", "data": str(second)})
+    reader.playback_observation.observe_event(
+        {"event": "property-change", "name": "path", "data": str(second)}
+    )
     reader._on_file_loaded()
 
     assert seen == [second]
