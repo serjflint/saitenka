@@ -17,6 +17,7 @@ from saitenka.app.feature_bindings import (
 from saitenka.app.features.tooltip import (
     hover_metadata,
     hover_snapshot,
+    mined_feedback,
     nested_popup,
     tooltip,
     tooltip_engaged,
@@ -314,6 +315,16 @@ class TooltipController:
 
     def retire_episode(self) -> None:
         self._hover_store.dispatch(events.EpisodeRetired())
+
+    @staticmethod
+    def mark_mined(expression: str, apply: TooltipApply) -> None:
+        mined_feedback.mark_mined(
+            apply.ports,
+            apply.panel,
+            apply.hover,
+            apply.show,
+            expression,
+        )
 
     def expire_pulse(self) -> tuple[Repaint, ...]:
         return self._pulse_store.dispatch(events.CopyPulseExpired())

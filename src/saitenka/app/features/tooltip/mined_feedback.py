@@ -1,8 +1,4 @@
-"""The ⊕→✓ feedback: refreshing whatever is showing a newly mined word.
-
-Split out of `miner_ui`, which is the card-*preview* surface — a different owner and a different
-lifetime. The mining owner writes membership before asking this INTERACTION projection to redraw.
-"""
+"""Refresh visible tooltip projections after mining membership changes."""
 
 from __future__ import annotations
 
@@ -25,7 +21,7 @@ def mark_mined(
     show: ShowActions,
     expression: str,
 ) -> None:
-    """Refresh the shown popups after mining membership has committed."""
+    """Refresh shown popups after mining membership commits."""
     if not expression:
         return
     hovered = inputs.hover()
@@ -34,7 +30,6 @@ def mark_mined(
         if expression in {token.lemma, token.surface}:
             revised = replace(hovered_meta(ports.word_store), mined=True)
             ports.word_store.dispatch(events.HoverWordResolved(revised, revised=True))
-        # Re-SHOW, not re-hover: the word did not change, and `set_hover` would return early.
         tooltip.show_tooltip(ports, panel, inputs, show, hovered)
     if ports.tip.nest.state is not None and ports.tip.nest.token is not None:
         nested_popup.rerender_with_mined_state(ports, panel)
