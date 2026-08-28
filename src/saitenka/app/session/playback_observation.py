@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from saitenka.mpvio.gateway import register_observer_set
@@ -91,8 +92,8 @@ class PlaybackObservationController:
         return self._store.current.state
 
     @property
-    def store(self) -> PlaybackStore:
-        return self._store
+    def cue(self) -> playback.CueFacts:
+        return self.state.cue
 
     @property
     def observing(self) -> bool:
@@ -120,11 +121,11 @@ class PlaybackObservationController:
 
     def mapping(self, name: str) -> dict:
         value = self.query(name)
-        return value if isinstance(value, dict) else {}
+        return deepcopy(value) if isinstance(value, dict) else {}
 
     def sequence(self, name: str) -> list:
         value = self.query(name)
-        return value if isinstance(value, list) else []
+        return deepcopy(value) if isinstance(value, list) else []
 
     def dispatch(self, event: events.PlaybackEvent | events.EpisodeRetired) -> None:
         for delta in self._store.dispatch(event):

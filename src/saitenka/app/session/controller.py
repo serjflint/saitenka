@@ -845,7 +845,7 @@ class SessionController:
             ipc=self.ipc,
             tracks=self._subtitle_tracks,
             episodes=self._episodes,
-            playback=self.playback_observation.store,
+            playback=self.playback_observation,
             property_value=self.property_value,
             notifications=self.notifications,
             invalidate=self.analysis_commands.invalidate,
@@ -2152,7 +2152,7 @@ class SessionController:
             MineCommandPorts(
                 mining=self.mining_controller,
                 bookmark=BookmarkCommandEndpoint(
-                    playback=self.playback_observation.store,
+                    playback=self.playback_observation,
                     cue=self.cue_render,
                     tracks=self._subtitle_tracks,
                     tooltip=self.tooltip_controller,
@@ -2164,7 +2164,6 @@ class SessionController:
                     notifications=self.notifications,
                     record_capture=self._record_capture,
                 ),
-                playback=self.playback_observation.store,
                 notifications=self.notifications,
             )
         )
@@ -2197,7 +2196,7 @@ class SessionController:
             SubtitleCommandRead(
                 ipc=self.ipc,
                 episodes=self._episodes,
-                playback=self.playback_observation.store,
+                playback=self.playback_observation,
                 tracks=self._subtitle_tracks,
                 cue=self.cue_render,
                 annotation=self.annotation_controller,

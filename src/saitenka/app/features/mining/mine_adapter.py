@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.subtitle_presentation import CueRenderStore
     from saitenka.app.toast_controller import NotificationSink
-    from saitenka.runtime.playback_slice import PlaybackStore
+    from saitenka.runtime.playback import PlaybackCueView
     from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class BookmarkCommandEndpoint:
     """Freeze and persist one bookmark from bounded state owners."""
 
-    playback: PlaybackStore
+    playback: PlaybackCueView
     cue: CueRenderStore
     tracks: SubtitleTrackStore
     tooltip: TooltipController
@@ -44,11 +44,11 @@ class BookmarkCommandEndpoint:
             self.property_value("path")
             and self.number_property("sub-start") is not None
             and self.number_property("sub-end") is not None
-            and self.playback.current.state.cue.text.strip()
+            and self.playback.cue.text.strip()
         )
 
     def capture(self) -> None:
-        playback = self.playback.current.state
+        cue_facts = self.playback.cue
         track = self.tracks.current
         cue = self.cue.current
         backlog.capture_current(
@@ -56,7 +56,7 @@ class BookmarkCommandEndpoint:
                 video=self.property_value("path"),
                 start=self.number_property("sub-start"),
                 end=self.number_property("sub-end"),
-                text=playback.cue.text,
+                text=cue_facts.text,
                 secondary_text=self.secondary_text(),
                 language=track.language,
                 tokens=cue.tokens,
@@ -80,7 +80,6 @@ class MineCommandPorts:
 
     mining: MiningController
     bookmark: BookmarkCommandEndpoint
-    playback: PlaybackStore
     notifications: NotificationSink
 
 

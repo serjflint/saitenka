@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -170,6 +170,13 @@ class CueFacts:
     end: object = None
     installed: InstalledCue | None = None
     authored_stale: bool = True
+
+
+class PlaybackCueView(Protocol):
+    """The immutable playback fact shared with cue-consuming features."""
+
+    @property
+    def cue(self) -> CueFacts: ...
 
 
 @dataclass(frozen=True, slots=True)

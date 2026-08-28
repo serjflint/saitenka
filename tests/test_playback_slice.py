@@ -160,8 +160,9 @@ def test_a_closed_reactor_drops_the_event_instead_of_replaying_the_last_outbox(r
     reader.playback_observation.observe("sub-text", "one")
     gateway.session_reactor.close()
 
-    store = reader.playback_observation.store
-    assert store.dispatch(PropertyObserved("sub-text", "two")) == ()
+    reader.playback_observation.dispatch(PropertyObserved("sub-text", "two"))
+
+    assert reader.playback_observation.state.cue.text == "one"
 
 
 def test_an_empty_routed_dispatch_does_not_mean_the_event_did_nothing(request) -> None:
@@ -173,8 +174,9 @@ def test_an_empty_routed_dispatch_does_not_mean_the_event_did_nothing(request) -
     happened*, and `routed` is what tells a caller which.
     """
     reader, _gateway = _reader_with_a_session_runtime(request)
-    store = reader.playback_observation.store
-    assert store.routed
+    observation = reader.playback_observation
+    assert observation.routed
 
-    assert store.dispatch(PropertyObserved("sub-text", "ただいま")) == ()
-    assert store.current.state.cue.text == "ただいま"
+    observation.dispatch(PropertyObserved("sub-text", "ただいま"))
+
+    assert observation.state.cue.text == "ただいま"
