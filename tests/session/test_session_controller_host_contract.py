@@ -1,6 +1,7 @@
 import ast
 from pathlib import Path
 
+import pytest
 from session_controller_host_contract import session_controller_parameters
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,19 +24,57 @@ def _turn_graph_collaborators(
     for method in controller.body:
         if not isinstance(method, ast.FunctionDef) or method.name == "_build_entry_runtime":
             continue
+        aliases = {"graph"} if method.name == "__init__" else set()
+        assignments = [node for node in ast.walk(method) if isinstance(node, ast.Assign)]
+        changed = True
+        while changed:
+            changed = False
+            for assignment in assignments:
+                source_is_graph = _is_graph_reference(assignment.value, aliases)
+                if not source_is_graph:
+                    continue
+                for target in assignment.targets:
+                    if isinstance(target, ast.Name) and target.id not in aliases:
+                        aliases.add(target.id)
+                        changed = True
+        parents = {
+            child: parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)
+        }
         for node in ast.walk(method):
-            if not isinstance(node, ast.Attribute):
-                continue
-            graph_alias = isinstance(node.value, ast.Name) and node.value.id == "graph"
-            controller_graph = (
-                isinstance(node.value, ast.Attribute)
-                and isinstance(node.value.value, ast.Name)
-                and node.value.value.id == "self"
-                and node.value.attr == "_graph"
-            )
-            if graph_alias or controller_graph:
+            if isinstance(node, ast.Attribute) and _is_graph_reference(node.value, aliases):
                 collaborators.add(node.attr)
+                continue
+            if not _is_graph_reference(node, aliases):
+                continue
+            parent = parents.get(node)
+            if isinstance(parent, ast.Attribute) and parent.value is node:
+                continue
+            if (
+                isinstance(parent, ast.Assign)
+                and parent.value is node
+                and all(
+                    isinstance(target, ast.Name) or _is_self_graph(target)
+                    for target in parent.targets
+                )
+            ):
+                continue
+            collaborators.add("<session-graph-escape>")
     return collaborators
+
+
+def _is_self_graph(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+        and node.attr == "_graph"
+    )
+
+
+def _is_graph_reference(node: ast.AST, aliases: set[str]) -> bool:
+    return (_is_self_graph(node) and isinstance(node.ctx, ast.Load)) or (
+        isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in aliases
+    )
 
 
 def test_the_live_turn_does_not_reach_new_feature_authority() -> None:
@@ -55,17 +94,27 @@ def test_the_live_turn_does_not_reach_new_feature_authority() -> None:
     }
 
 
-def test_the_live_turn_guard_detects_direct_feature_authority(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("g = self._graph\ng.mining.mine()", {"mining"}),
+        ("consume(self._graph)", {"<session-graph-escape>"}),
+        ("graph = object()\nconsume(graph)", set()),
+    ],
+)
+def test_the_live_turn_guard_detects_authority_without_name_heuristics(
+    tmp_path: Path,
+    body: str,
+    expected: set[str],
+) -> None:
     controller = tmp_path / "controller.py"
+    indented = "\n".join(f"        {line}" for line in body.splitlines())
     controller.write_text(
-        "class SessionController:\n"
-        "    def perform(self):\n"
-        "        graph = self._graph\n"
-        "        graph.mining.mine()\n",
+        f"class SessionController:\n    def perform(self):\n{indented}\n",
         encoding="utf-8",
     )
 
-    assert _turn_graph_collaborators(controller) == {"mining"}
+    assert _turn_graph_collaborators(controller) == expected
 
 
 def test_session_controller_aliases_and_reader_names_are_detected(tmp_path: Path) -> None:
