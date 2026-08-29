@@ -128,9 +128,9 @@ def _compose_session(
     """Return the live object, internal turn, and public pre-start capabilities."""
     from saitenka.app.config import ReaderOptions
     from saitenka.app.session.assembly import build_session_assembly
+    from saitenka.app.session.builder import build_session_turn
     from saitenka.app.session.controller import SessionController, SessionGraph
     from saitenka.app.session.runtime import SessionEntry
-    from saitenka.app.session.turn import SessionTurn
 
     resolved = services or SessionServices()
     resolved_options = options or ReaderOptions()
@@ -143,7 +143,7 @@ def _compose_session(
         overlay=physical.overlay,
         tokenizer_warm=session_identity.tokenizer_warm,
     )
-    turn = SessionTurn(
+    turn = build_session_turn(
         ipc,
         resolved_assembly,
         resolved_options,

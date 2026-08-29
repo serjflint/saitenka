@@ -94,9 +94,9 @@ def _tts_present(monkeypatch):
     """Default: pretend a Japanese TTS voice exists so the 🔊 button is drawn — existing geometry tests
     assume it, and this keeps them hermetic (no real `say`/PowerShell subprocess). Tests for the
     hidden-button case patches the turn's capability lookup explicitly."""
-    from saitenka.app.session import turn
+    from saitenka.app.session import builder
 
-    monkeypatch.setattr(turn, "tts_available", lambda: True)
+    monkeypatch.setattr(builder, "tts_available", lambda: True)
 
 
 @pytest.fixture(autouse=True)

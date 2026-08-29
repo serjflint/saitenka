@@ -98,7 +98,7 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
         called = True
         return True
 
-    monkeypatch.setattr("saitenka.app.session.turn.tts_available", probe)
+    monkeypatch.setattr("saitenka.app.session.builder.tts_available", probe)
     reader = build_session(FakeIPC())
     try:
         assert called is False
@@ -110,7 +110,7 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
 def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
     release = threading.Event()
     monkeypatch.setattr(
-        "saitenka.app.session.turn.tts_available",
+        "saitenka.app.session.builder.tts_available",
         lambda: release.wait(1) or True,
     )
     reader = build_session(FakeIPC())
@@ -140,7 +140,7 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
         finished.set()
         return True
 
-    monkeypatch.setattr("saitenka.app.session.turn.tts_available", probe)
+    monkeypatch.setattr("saitenka.app.session.builder.tts_available", probe)
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     reader = build_session(ipc)
