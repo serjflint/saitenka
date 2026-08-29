@@ -114,9 +114,7 @@ def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None =
             ipc,
             services=SessionServices(dictionaries=dict_set if dict_set is not None else MiniDS()),
         )
-        reader.graph.presentation.refresh_osd()
-        reader.graph.playback.start_session()
-        reader.graph.commands.install_input()
+        reader.start()
         reader.graph.subtitle_navigation.load_index(srt)
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes

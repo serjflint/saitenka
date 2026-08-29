@@ -30,7 +30,8 @@ class TestSession:
     live: LiveSession
     graph: SessionGraph
     entry: SessionEntry
-    _emit: Callable[[dict], None]
+    _emit: Callable[[dict], None] | None
+    _mpv_command: Callable[..., object]
 
     def start(self) -> None:
         self.live.start()
@@ -51,7 +52,11 @@ class TestSession:
         event = command if isinstance(command, UserCommand) else UserCommand(command)
         if event.command_id is not None or event.coalesced_ids:
             raise ValueError("test commands acquire identity at runtime ingress")
-        self._emit({"event": "client-message", "args": [event.name, *event.args]})
+        message = {"event": "client-message", "args": [event.name, *event.args]}
+        if self._emit is None:
+            self._mpv_command("script-message", event.name, *event.args)
+        else:
+            self._emit(message)
         self.pump()
 
     def close(self):
@@ -100,7 +105,7 @@ def build_session(
         infrastructure=physical,
         identity=identity,
     )
-    return TestSession(live, graph, prepared.entry, ipc.emit)
+    return TestSession(live, graph, prepared.entry, getattr(ipc, "emit", None), ipc.command)
 
 
 def install_profile_dependencies(session, *, scorer=None, dictionaries=None) -> None:
