@@ -65,10 +65,10 @@ class CommandRuntime:
             ports.stateless.handlers(),
         )
         contributed_names = {spec.name for spec in ports.contributed_specs}
-        legacy = tuple(spec for spec in COMMAND_SPECS if spec.name not in contributed_names)
+        built_in_specs = tuple(spec for spec in COMMAND_SPECS if spec.name not in contributed_names)
         self._commands = CommandExecutor(
             handlers,
-            policy=CommandPolicy((*legacy, *ports.contributed_specs)),
+            policy=CommandPolicy((*built_in_specs, *ports.contributed_specs)),
         )
 
     def install_input(self) -> None:
@@ -145,7 +145,7 @@ class CommandRuntime:
         if result.outcome == CommandOutcome.REJECTED:
             log.debug("script-message rejected (%s): %s", result.rejection, command.name)
         elif result.outcome == CommandOutcome.UNBOUND:
-            log.error("script-message has no migration binding: %s", command.name)
+            log.error("script-message has no registered binding: %s", command.name)
         elif result.outcome == CommandOutcome.FAILED:
             log.error("script-message failed (%s): %s", result.error_type, command.name)
 

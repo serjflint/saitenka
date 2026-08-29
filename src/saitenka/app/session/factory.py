@@ -154,18 +154,13 @@ def _compose_session(
         tts_ok=resolved.tts,
         renderer=physical.renderer,
         profile=session_identity.profile,
-        # This factory is the composition layer, so it is where the correlated-command port is
-        # handed over. A session assembled here uses gateway egress; a SessionController built directly (tests,
-        # prewarm) writes straight to mpv unless its caller says otherwise. Named, not probed: the
-        # port is on every `MpvIPC`, so a probe here could only ever answer "renamed" as "absent",
-        # and absent silently moves every overlay write back onto the direct path.
+        # The composition root chooses queued tooltip work or the explicit inline fallback.
         tooltip_runtime_jobs=(
             physical.tooltip_jobs
             if physical.tooltip_jobs is not None
             else (_inline_tooltip_jobs if physical.tooltip_work is TooltipWorkMode.INLINE else None)
         ),
-        # Same reasoning for the geometry provider: which implementation runs is composition's
-        # call, not the SessionController's. A SessionController built directly gets whatever its caller injects.
+        # Geometry placement is physical assembly policy, not session-turn policy.
         geometry_backend=(
             physical.geometry
             if physical.geometry is not None

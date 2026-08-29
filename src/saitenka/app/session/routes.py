@@ -1,9 +1,7 @@
-"""Wire the typed reactor into a live session, one migrated owner at a time.
+"""Route typed runtime events to their owning session features.
 
-This is the table D3 grows: a route per (event, owner) pair a feature actually owns, and an
-`owner_of` that answers "nobody yet" for everything else. `OwnerRouter` turns that answer into a
-counted fact instead of an error, so the gap is readable at any point in the migration —
-`gateway.session_ledger.counts`, alongside what the session's reducers reported and controlled.
+`owner_of` returns no owner for events outside the session graph. `OwnerRouter` records those
+events in `gateway.session_ledger.counts` rather than treating them as dispatch errors.
 
 It lives in `app/` rather than `mpvio/` because it names app features; `mpvio` must not import
 `app`. The gateway only exposes the seam (`observe`, `mailbox`, `dispatch_effect`).

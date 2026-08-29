@@ -248,6 +248,7 @@ class TooltipSessionContext:
 
     observe: Callable[[], TooltipSessionView]
     read_playback: Callable[[str], object]
+    query_playback: Callable[[str], object | None]
     actions: TooltipSessionActions
     surfaces: InteractionSurfaces
 
@@ -380,8 +381,12 @@ class TooltipController:
     def copy_click(self) -> None:
         tooltip.copy_click(self.tip_ports, self.click_ports, self.hover_inputs)
 
-    def _mouse_position(self) -> dict | None:
+    def _observed_mouse_position(self) -> dict | None:
         value = self._session().read_playback("mouse-pos")
+        return value if isinstance(value, dict) else None
+
+    def _current_mouse_position(self) -> dict | None:
+        value = self._session().query_playback("mouse-pos")
         return value if isinstance(value, dict) else None
 
     @property
@@ -412,7 +417,7 @@ class TooltipController:
                 hover_intents.HoverCommand.SPEAK
             ),
             click_preview=context.actions.preview_click,
-            cursor=self._mouse_position,
+            cursor=self._current_mouse_position,
             paused=lambda: context.read_playback("pause"),
         )
 
@@ -421,7 +426,7 @@ class TooltipController:
         context = self._session()
         cue = context.observe().cue
         return HoverInputs(
-            mouse_pos=self._mouse_position,
+            mouse_pos=self._observed_mouse_position,
             hit=self.hit,
             hover=lambda: self.observation().selected,
             cue_state=self.cue_state,

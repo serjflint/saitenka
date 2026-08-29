@@ -181,10 +181,7 @@ def test_mouse_controls_live_in_a_separate_forced_section():
 
 
 def test_hover_reacts_to_the_pointer_observation_not_to_a_tick():
-    """WP5.1's ingress half, asserted where it is observable: a pointer observation alone has to
-    move the hover, with no tick anywhere in the trace. The negative control is the same trace
-    without the observation — a tick that still drove hover would pass both halves.
-    """
+    """A pointer observation moves hover without a polling turn."""
     ipc = RuntimeFakeIPC()
     r = build_session(
         ipc,
@@ -321,13 +318,7 @@ def test_sub_seek_next_sends_ipc_command():
 
 
 def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch):
-    """WP4.5: a navigation effect is qualified by the cue it was decided against.
-
-    Today reduce and execute are adjacent, so this cannot happen live — which is exactly why it
-    needs pinning now. The moment the step is queued behind anything, a seek carried out against a
-    cue the user has already left moves the video somewhere they never asked for, and the whole
-    keypress reads as a runtime glitch rather than a stale command.
-    """
+    """A queued navigation effect remains qualified by the cue that produced it."""
     from util import record_spans
 
     from saitenka.app.subtitle_intents import SeekCue
@@ -798,7 +789,7 @@ def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     assert r.turn.playback_observation.cue.text == ""
 
 
-# --- WP4.5 gate: the settle timer is retired exactly once, by each of its four triggers ---------
+# --- The settle timer retires exactly once for every terminal trigger. -------------------------
 
 _SETTLE = "subtitle:navigation-settle"
 
@@ -3334,6 +3325,23 @@ def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch):
     assert gets == [], f"steady-state tick still does blocking property reads: {gets}"
 
 
+def test_click_cursor_queries_mpv_instead_of_using_the_hover_observation(request):
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    observed = {"hover": True, "x": 5, "y": 5}
+    current = {"hover": True, "x": 50, "y": 50}
+    ipc.props["mouse-pos"] = observed
+    reader = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
+    request.addfinalizer(reader.close)
+    reader.turn.playback_observation.start_session()
+    reader.turn.playback_observation.observe("mouse-pos", observed)
+    ipc.props["mouse-pos"] = current
+
+    assert reader.turn.tooltip_controller.hover_inputs.mouse_pos() == observed
+    assert reader.turn.tooltip_controller.click_ports.cursor() == current
+
+
 def test_property_change_event_drives_subtitle_update(monkeypatch):
     from util import FakeIPC as EventIPC
 
@@ -3819,8 +3827,7 @@ def _accrual_reader(ipc, monkeypatch) -> tuple[TestSession, list]:
 
 
 def test_watch_time_accrues_on_the_pause_transition_not_on_a_tick(monkeypatch):
-    """WP5.4: the segment a pause delimits is exactly what should be accrued, so an idle runtime
-    does no work and a tickless one still measures correctly."""
+    """A pause transition accrues its completed watch segment without polling."""
     ipc = RuntimeFakeIPC()
     r, accrued = _accrual_reader(ipc, monkeypatch)
     r.turn.playback_observation.start_session()
@@ -3849,8 +3856,7 @@ def test_an_uninterrupted_session_still_persists_on_its_own_deadline(monkeypatch
 
 
 def test_an_osd_resize_redraws_from_the_observation_alone():
-    """WP5.4: `refresh_osd` re-detected, per tick, a change the projection already publishes. The
-    resize is a `RenderSpaceChanged` now, with no tick anywhere in the trace."""
+    """An observed resize redraws without polling the projected dimensions."""
     ipc = RuntimeFakeIPC()
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     r = build_session(

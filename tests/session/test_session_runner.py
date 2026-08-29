@@ -1,4 +1,4 @@
-"""WP5.5: the shared session-driving loop, so no feature keeps one of its own."""
+"""The shared session-driving loop; features do not keep private loops."""
 
 from __future__ import annotations
 

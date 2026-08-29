@@ -540,6 +540,7 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
         TooltipSessionContext(
             observe=observe_tooltip_session,
             read_playback=turn.playback_observation.value,
+            query_playback=turn.playback_observation.query,
             actions=TooltipSessionActions(
                 hide=hide_tooltip,
                 set_annotation_hover=set_annotation_hover,
