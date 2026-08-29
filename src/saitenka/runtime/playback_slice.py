@@ -43,9 +43,8 @@ class PlaybackSlice:
 
     `published` is an outbox, not a fact: it holds exactly the deltas of the event just reduced,
     and the next event replaces it. It sits on the state because `ReduceResult` has nowhere else
-    for an output that is neither an effect nor an event a registered owner reduces — the
-    consumers are still the SessionController's `_apply_playback_delta` branches. When SUBTITLE, INTERACTION
-    and PRESENTATION have slices, these become the turn's internal events and this field goes.
+    for an output that is neither an effect nor an event a registered owner reduces. The bounded
+    playback projector interprets these deltas on the owner thread.
     """
 
     state: PlaybackState = field(default_factory=PlaybackState)

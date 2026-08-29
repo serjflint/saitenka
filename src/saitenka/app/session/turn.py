@@ -10,7 +10,6 @@ import logging
 import time
 from dataclasses import replace
 from functools import cached_property
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -114,7 +113,10 @@ from saitenka.app.session.lifecycle import (
 )
 from saitenka.app.session.panel_adapter import PanelCommandCoordinator, PanelCommandPorts
 from saitenka.app.session.playback_observation import (
+    AuthoredSubtitleProbe,
+    PlaybackApplication,
     PlaybackObservationController,
+    PlaybackProjection,
     PlaybackStartup,
 )
 from saitenka.app.session.routes import (
@@ -156,7 +158,6 @@ from saitenka.runtime import (
     playback,
 )
 from saitenka.runtime.connection import ConnectionStore
-from saitenka.runtime.effects import ApplyPlaybackDeltas
 from saitenka.runtime.hover import HoverDelays
 from saitenka.runtime.presentation_slice import TranslationStore
 
@@ -361,9 +362,16 @@ class SessionTurn:
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
         # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
+        playback_projection: PlaybackProjection | None = None
+
+        def apply_playback_delta(delta: playback.PlaybackDelta) -> None:
+            if playback_projection is None:
+                raise RuntimeError("playback projection is not bound")
+            playback_projection.apply(delta)
+
         self.playback_observation = PlaybackObservationController(
             self.ipc,
-            self._apply_playback_delta,
+            apply_playback_delta,
             PlaybackStartup(
                 reconcile_cue=lambda text: self.subtitle_navigation.reconcile(text),
                 refresh_render_space=self.refresh_osd,
@@ -374,6 +382,11 @@ class SessionTurn:
                 ),
                 probe_display_sources=self._probe_display_sources,
             ),
+        )
+        authored_subtitle_probe = AuthoredSubtitleProbe(
+            self.ipc,
+            self.playback_observation,
+            self.subtitle_presentation,
         )
         self.mining_controller = self._assemble_mining_controller(
             mining_identity,
@@ -422,15 +435,6 @@ class SessionTurn:
                 # Late-bound like every other registered step: an early-bound method also freezes the
                 # seam a test replaces, and these two are reached only through the effect.
                 session_resources.Starting(lambda: self._on_ipc_reconnect()),
-            )
-        )
-        registrations.append(
-            (RESLOT_PARTICIPANT, session_resources.Starting(lambda: self._on_file_loaded()))
-        )
-        registrations.append(
-            (
-                PLAYBACK_DELTAS_PERFORMER,
-                session_resources.Performing(lambda effect: self._apply_playback_deltas(effect)),
             )
         )
         # `Owner.SUBTITLE`'s slice: which mpv track plays which role. Session-lived like the
@@ -571,17 +575,6 @@ class SessionTurn:
                 tts_available=tts_is_available,
             )
         )
-        self._ass_full_probe_dirty = True
-        # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
-        # opt-in (never set under attach, so SyncPlay-managed playback never advances). The
-        # eof-reached edge is one-shot per file because a delta only exists when the value changed.
-        self.advance_hook: Callable[[], bool] | None = None
-        # #100 reactive re-slot: `reslot_hook` fires on EVERY mpv `file-loaded` (our own eof loadfile,
-        # a native autoload/playlist advance, a manual next/prev) so the overlay follows whatever mpv
-        # plays — installed for any interactive run, independent of auto-advance. `_slotted_path` dedups
-        # the file we've already set up (the initial load, or a redundant file-loaded for the same file).
-        self.reslot_hook: Callable[[Path], None] | None = None
-        self._slotted_path: Path | None = None
         self.screen.osd = (1280, 720)
         # Normalized source of a cue drawn PLAIN because its annotation can't complete yet (dicts
         # loading); reader_deps re-renders it annotated once deps land. None = drawn annotated.
@@ -665,6 +658,70 @@ class SessionTurn:
                 ),
                 retire_tooltip_episode=self.tooltip_controller.retire_episode,
                 replace_navigation=self.track_commands.navigation.replace,
+            )
+        )
+        self.episode_watch = episode_reslot.EpisodeWatch(
+            prop=self.playback_observation.value,
+            replace_source=self._cue.replace_source,
+            mark_authored_probe_dirty=authored_subtitle_probe.mark_dirty,
+        )
+
+        def subtitle_selection_changed(sid: object) -> None:
+            self.subtitle_presentation.refresh.retire()
+            if self.subtitle_presentation.native is not None:
+                self.subtitle_presentation.native.set_source(None, live=True)
+            else:
+                self.subtitle_presentation.pipeline.invalidate()
+            subtitle_modes.on_primary_changed(self.track_commands.ports(), sid)
+
+        def subtitle_timing_changed() -> None:
+            if self.subtitle_presentation.native is not None:
+                self.subtitle_presentation.native.record_clock_change(
+                    self.playback_observation.value
+                )
+
+        def geometry_input_changed() -> None:
+            if self.subtitle_presentation.native is not None:
+                self.subtitle_presentation.refresh.arm()
+
+        def pause_changed(*, paused: bool) -> None:
+            log.debug("mpv pause -> %s", paused)
+            session_stats.accrue(
+                self.history.recorder,
+                paused=bool(self.playback_observation.value("pause")),
+                language=self._subtitle_tracks.current.language,
+            )
+
+        def secondary_text_changed(value: object) -> None:
+            inputs = self.translation_observation.current()
+            self.translation_controller.secondary_text_changed(
+                replace(inputs, secondary_text=value)
+            )
+
+        playback_projection = PlaybackProjection(
+            PlaybackApplication(
+                retire_cue=self._cue.retire,
+                probe_authored_subtitle=authored_subtitle_probe.resolve,
+                observe_cue=self._cue.observe,
+                subtitle_selection_changed=subtitle_selection_changed,
+                subtitle_timing_changed=subtitle_timing_changed,
+                geometry_input_changed=geometry_input_changed,
+                render_space_changed=self._redraw_after_resize,
+                end_of_file_changed=self.episode_watch.advance_if_reached,
+                pause_changed=pause_changed,
+                secondary_text_changed=secondary_text_changed,
+                pointer_moved=self.interaction.update_hover,
+            )
+        )
+
+        def file_loaded() -> None:
+            self.episode_watch.file_loaded()
+
+        registrations.append((RESLOT_PARTICIPANT, session_resources.Starting(file_loaded)))
+        registrations.append(
+            (
+                PLAYBACK_DELTAS_PERFORMER,
+                session_resources.Performing(playback_projection.apply_effect),
             )
         )
         registrations.append(
@@ -838,92 +895,6 @@ class SessionTurn:
             boxes=self.subtitle_presentation.cue.current.boxes,
             paused=bool(self.playback_observation.value("pause")),
         )
-
-    def _apply_playback_deltas(self, effect: object) -> None:
-        """Perform `ApplyPlaybackDeltas`: `Owner.PLAYBACK`'s outbox, delivered.
-
-        The tuple is bound by the effect rather than read back off the slice, which is also what
-        makes it safe to re-enter: applying one delta can reduce another event (`AuthoredCueStale`
-        probes mpv and seeds the reply) and replace the slice underneath this loop.
-        """
-        assert isinstance(effect, ApplyPlaybackDeltas)
-        for delta in effect.deltas:
-            self._apply_playback_delta(delta)
-
-    def _probe_ass_full(self) -> None:
-        """Resolve mpv's authored-ASS capability once per file. Driven by `AuthoredCueStale`, which
-        the projection publishes on the same observation that invalidated the cached probe."""
-        if self.subtitle_presentation.native is None or not self._ass_full_probe_dirty:
-            return
-        if self.subtitle_presentation.native.ass_full_capability.value == "unknown":
-            reply = self.ipc.probe("sub-text/ass-full")
-            self.playback_observation.dispatch(
-                events.PropertySeeded("sub-text/ass-full", reply.get("data"))
-            )
-            self.subtitle_presentation.native.observe_ass_full_reply(reply)
-        self._ass_full_probe_dirty = False
-
-    def _apply_playback_delta(self, delta: playback.PlaybackDelta) -> None:
-        if isinstance(delta, playback.CueIdentityRetired):
-            self._cue.retire(delta.reason.value)
-        elif isinstance(delta, playback.AuthoredCueStale):
-            self._probe_ass_full()
-        elif isinstance(delta, playback.CueObservationChanged):
-            self._cue.observe(delta.cue)
-        elif isinstance(delta, playback.SubtitleSelectionChanged):
-            self.subtitle_presentation.refresh.retire()  # the track it was armed for is gone
-            if self.subtitle_presentation.native is not None:
-                self.subtitle_presentation.native.set_source(None, live=True)
-            else:
-                self.subtitle_presentation.pipeline.invalidate()
-            subtitle_modes.on_primary_changed(self.track_commands.ports(), delta.sid)
-        elif isinstance(delta, playback.SubtitleTimingChanged):
-            if self.subtitle_presentation.native is not None:
-                self.subtitle_presentation.native.record_clock_change(
-                    self.playback_observation.value
-                )
-        elif (
-            isinstance(delta, playback.GeometryInputChanged)
-            and self.subtitle_presentation.native is not None
-        ):
-            self.subtitle_presentation.refresh.arm()
-        else:
-            self._apply_session_delta(delta)
-
-    def _apply_session_delta(self, delta: playback.PlaybackDelta) -> None:
-        """Deltas whose consumer is the session rather than the cue pipeline — split off its
-        sibling for the complexity ratchet, and they do read as a group."""
-        if isinstance(delta, playback.RenderSpaceChanged):
-            # Only the window size: the rest of the render space is sub-rendering options, which
-            # change the geometry a cue is laid out in without resizing anything to redraw.
-            if delta.property_name == "osd-dimensions":
-                self._redraw_after_resize()
-        elif isinstance(delta, playback.EndOfFileChanged):
-            # #100: on the rising edge, ask the installed hook to re-slot to the next episode. No
-            # seen-it-already latch — mpv sits paused at EOF republishing the same value, and the
-            # projection's unchanged-value guard already turns that into silence. A hook that
-            # returns False (no sibling, ambiguous) is a no-op; mpv holds the last frame.
-            if delta.reached and self.advance_hook is not None:
-                self.advance_hook()
-        elif isinstance(delta, playback.PauseChanged):
-            log.debug("mpv pause -> %s", delta.paused)
-            # Watch time is accrued at the transition, not sampled by a tick: the segment that
-            # just ended is exactly what the change delimits, and an idle runtime does no work.
-            session_stats.accrue(
-                self.history.recorder,
-                paused=bool(self.playback_observation.value("pause")),
-                language=self._subtitle_tracks.current.language,
-            )
-        elif isinstance(delta, playback.SecondaryTextChanged):
-            inputs = self.translation_observation.current()
-            self.translation_controller.secondary_text_changed(
-                replace(inputs, secondary_text=delta.value)
-            )
-        elif isinstance(delta, playback.PointerMoved):
-            # Hover reacts to the pointer moving, not to a tick noticing that it did. The dwells it
-            # arms are deadlines, so a cursor that stops still gets its linger — which is why this
-            # could not move until they were.
-            self.interaction.update_hover()
 
     def _publish_cue_identity(self, identity: cue_annotation.CueIdentity) -> None:
         """Project the annotation owner's identity into playback conflict detection."""
@@ -1179,12 +1150,7 @@ class SessionTurn:
     @property
     def watch_ports(self) -> episode_reslot.WatchPorts:
         """What wiring the follow-mpv-onto-the-next-episode hooks needs."""
-        return episode_reslot.WatchPorts(
-            install_reslot_hook=self.install_reslot_hook,
-            set_advance_hook=lambda hook: setattr(self, "advance_hook", hook),
-            prop=self.playback_observation.value,
-            current_media_path=self.current_media_path,
-        )
+        return self.episode_watch.ports()
 
     def _telemetry_gauges(self) -> dict[str, float]:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
@@ -1434,40 +1400,6 @@ class SessionTurn:
         self.mining_controller.refresh_capability()
 
     # --- run loop -----------------------------------------------------------------------------
-    def current_media_path(self) -> Path | None:
-        """mpv's current file as an absolute path (``path`` is verbatim what was loaded, so resolve a
-        relative one against ``working-directory``). None when nothing is loaded. Used by the reactive
-        re-slot and the eof advance to key the #100 sibling resolver off the real filesystem path."""
-        raw = self.playback_observation.value("path")
-        if not raw:
-            return None
-        p = Path(str(raw)).expanduser()
-        if not p.is_absolute():
-            wd = self.playback_observation.value("working-directory")
-            if wd:
-                p = Path(str(wd)) / p
-        return p
-
-    def install_reslot_hook(self, hook: Callable[[Path], None], *, initial: Path) -> None:
-        """Follow mpv's ``file-loaded`` from now on (#100): ``hook`` re-slots the overlay onto whatever
-        file mpv loads next — a native autoload/playlist advance, our own eof loadfile, or a manual
-        next/prev. Seed ``initial`` (already set up by ``run_impl``) so its own file-loaded is skipped."""
-        self.reslot_hook = hook
-        self._slotted_path = self.current_media_path() or Path(str(initial)).expanduser()
-
-    def _on_file_loaded(self) -> None:
-        """A new file finished loading — re-slot the overlay onto it (once per distinct file). Skips the
-        already-slotted file so the initial load and a redundant file-loaded don't reset stats/subs."""
-        self._ass_full_probe_dirty = True
-        if self.reslot_hook is None:
-            return
-        p = self.current_media_path()
-        if p is None or p == self._slotted_path:
-            return
-        self._cue.replace_source(p, reason="file-loaded")
-        self._slotted_path = p
-        self.reslot_hook(p)
-
     def pump(self, timeout: float | None = 0.0) -> bool:
         """Consume one turn of events, blocking up to ``timeout``. False if mpv went away.
 
@@ -1535,7 +1467,7 @@ class SessionTurn:
             self._on_ipc_reconnect()
             return
         if isinstance(ev, events.FileLoaded):
-            self._on_file_loaded()
+            self.episode_watch.file_loaded()
             return
         if isinstance(ev, events.PropertyObserved):
             self.playback_observation.observe(ev.name, ev.data)
@@ -1557,7 +1489,7 @@ class SessionTurn:
         # is all there is. Three layers, one writer — a reactor performs the effect, a gateway
         # without one hands over `FileLoaded`, and this is what is left when neither exists.
         if kind == "file-loaded":
-            self._on_file_loaded()
+            self.episode_watch.file_loaded()
         elif kind == "property-change":
             self.playback_observation.observe_event(ev)
         elif kind == "client-message":

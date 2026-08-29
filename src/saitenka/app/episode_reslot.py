@@ -9,11 +9,11 @@ bug #100 was: a step added to one path and not the other, invisible until an epi
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from saitenka.app.subtitle_modes import ProviderFetch
 
@@ -54,3 +54,62 @@ class WatchPorts:
     set_advance_hook: Callable[[Callable[[], bool]], None]
     prop: Callable[[str], object]
     current_media_path: Callable[[], Path | None]
+
+
+class EpisodeWatch:
+    """Own the session-lived hooks that follow mpv across episode files."""
+
+    def __init__(
+        self,
+        *,
+        prop: Callable[[str], object],
+        replace_source: Callable[..., None],
+        mark_authored_probe_dirty: Callable[[], None],
+    ) -> None:
+        self._prop = prop
+        self._replace_source = replace_source
+        self._mark_authored_probe_dirty = mark_authored_probe_dirty
+        self.reslot_hook: Callable[[Path], None] | None = None
+        self.advance_hook: Callable[[], bool] | None = None
+        self._slotted_path: Path | None = None
+
+    def current_media_path(self) -> Path | None:
+        raw = self._prop("path")
+        if not raw:
+            return None
+        path = Path(str(raw)).expanduser()
+        if not path.is_absolute():
+            working_directory = self._prop("working-directory")
+            if working_directory:
+                path = Path(str(working_directory)) / path
+        return path
+
+    def install_reslot_hook(self, hook: Callable[[Path], None], *, initial: Path) -> None:
+        self.reslot_hook = hook
+        self._slotted_path = self.current_media_path() or Path(str(initial)).expanduser()
+
+    def set_advance_hook(self, hook: Callable[[], bool]) -> None:
+        self.advance_hook = hook
+
+    def advance_if_reached(self, *, reached: bool) -> None:
+        if reached and self.advance_hook is not None:
+            self.advance_hook()
+
+    def file_loaded(self) -> None:
+        self._mark_authored_probe_dirty()
+        if self.reslot_hook is None:
+            return
+        path = self.current_media_path()
+        if path is None or path == self._slotted_path:
+            return
+        self._replace_source(path, reason="file-loaded")
+        self._slotted_path = path
+        self.reslot_hook(path)
+
+    def ports(self) -> WatchPorts:
+        return WatchPorts(
+            install_reslot_hook=self.install_reslot_hook,
+            set_advance_hook=self.set_advance_hook,
+            prop=self._prop,
+            current_media_path=self.current_media_path,
+        )

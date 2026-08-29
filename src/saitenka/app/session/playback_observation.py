@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from saitenka.mpvio.gateway import register_observer_set
 from saitenka.runtime import events, playback
@@ -14,6 +14,7 @@ from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackStore
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from saitenka.app.subtitle_presentation import SubtitlePresentation
     from saitenka.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)
@@ -197,3 +198,97 @@ class PlaybackObservationController:
 
     def retire_episode(self) -> None:
         self.dispatch(events.EpisodeRetired())
+
+
+class AuthoredSubtitleProbe:
+    """Own the once-per-file authored-ASS capability probe."""
+
+    def __init__(
+        self,
+        ipc: MpvIPC,
+        playback: PlaybackObservationController,
+        presentation: SubtitlePresentation,
+    ) -> None:
+        self._ipc = ipc
+        self._playback = playback
+        self._presentation = presentation
+        self._dirty = True
+
+    def mark_dirty(self) -> None:
+        self._dirty = True
+
+    def resolve(self) -> None:
+        native = self._presentation.native
+        if native is None or not self._dirty:
+            return
+        if native.ass_full_capability.value == "unknown":
+            reply = self._ipc.probe("sub-text/ass-full")
+            self._playback.dispatch(events.PropertySeeded("sub-text/ass-full", reply.get("data")))
+            native.observe_ass_full_reply(reply)
+        self._dirty = False
+
+
+@dataclass(frozen=True, slots=True)
+class PlaybackApplication:
+    """Closed set of owner-thread consequences produced by playback deltas."""
+
+    retire_cue: Callable[[str], None]
+    probe_authored_subtitle: Callable[[], None]
+    observe_cue: Callable[[playback.ObservedCue], None]
+    subtitle_selection_changed: Callable[[object], None]
+    subtitle_timing_changed: Callable[[], None]
+    geometry_input_changed: Callable[[], None]
+    render_space_changed: Callable[[], None]
+    end_of_file_changed: EndOfFileEffect
+    pause_changed: PauseEffect
+    secondary_text_changed: Callable[[object], None]
+    pointer_moved: Callable[[], None]
+
+
+class PlaybackProjection:
+    """Interpret typed playback deltas exactly once on the owner thread."""
+
+    def __init__(self, application: PlaybackApplication) -> None:
+        self._application = application
+
+    def apply_effect(self, effect: object) -> None:
+        from saitenka.runtime.effects import ApplyPlaybackDeltas
+
+        if not isinstance(effect, ApplyPlaybackDeltas):
+            raise TypeError(f"expected ApplyPlaybackDeltas, got {type(effect).__name__}")
+        for delta in effect.deltas:
+            self.apply(delta)
+
+    def apply(self, delta: playback.PlaybackDelta) -> None:
+        target = self._application
+        if isinstance(delta, playback.CueIdentityRetired):
+            target.retire_cue(delta.reason.value)
+        elif isinstance(delta, playback.AuthoredCueStale):
+            target.probe_authored_subtitle()
+        elif isinstance(delta, playback.CueObservationChanged):
+            target.observe_cue(delta.cue)
+        elif isinstance(delta, playback.SubtitleSelectionChanged):
+            target.subtitle_selection_changed(delta.sid)
+        elif isinstance(delta, playback.SubtitleTimingChanged):
+            target.subtitle_timing_changed()
+        elif isinstance(delta, playback.GeometryInputChanged):
+            target.geometry_input_changed()
+        elif isinstance(delta, playback.RenderSpaceChanged):
+            if delta.property_name == "osd-dimensions":
+                target.render_space_changed()
+        elif isinstance(delta, playback.EndOfFileChanged):
+            target.end_of_file_changed(reached=delta.reached)
+        elif isinstance(delta, playback.PauseChanged):
+            target.pause_changed(paused=delta.paused)
+        elif isinstance(delta, playback.SecondaryTextChanged):
+            target.secondary_text_changed(delta.value)
+        elif isinstance(delta, playback.PointerMoved):
+            target.pointer_moved()
+
+
+class EndOfFileEffect(Protocol):
+    def __call__(self, *, reached: bool) -> None: ...
+
+
+class PauseEffect(Protocol):
+    def __call__(self, *, paused: bool) -> None: ...

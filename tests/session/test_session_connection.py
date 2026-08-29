@@ -179,7 +179,11 @@ def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
         ),
     )
     reader.start()
-    monkeypatch.setattr(reader.turn, "_on_file_loaded", lambda: reslotted.append("reslot"))
+    monkeypatch.setattr(
+        reader.turn.episode_watch,
+        "file_loaded",
+        lambda: reslotted.append("reslot"),
+    )
     try:
         gateway.publish_session_event(FileLoaded())
         ipc.drain_events(0.0)
