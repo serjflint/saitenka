@@ -219,11 +219,8 @@ def test_the_ranking_oracle_catches_a_section_that_does_not_outrank(tmp_path: Pa
     assert ours["priority"] <= theirs["priority"] or ours.get("is_weak")
 
 
-NATIVE_SID, GENERATED_SID = 1, 2
-
-
 def _two_track_mpv(tmp_path: Path):
-    """A paused clip carrying two external ASS tracks: `sid` 1 loads with the file, `sid` 2 after."""
+    """A paused clip carrying two external ASS tracks."""
     _require("ffmpeg", shutil.which("ffmpeg"))
     fixtures = Path(__file__).parent / "fixtures" / "mpv_source_envelope"
     clip = tmp_path / "clip.mkv"
@@ -253,7 +250,16 @@ def _two_track_mpv(tmp_path: Path):
         ipc.command("observe_property", index, name)
     ipc.command("sub-add", str(fixtures / "generated.ass"), "auto", "generated", "jpn")
     ipc.command("set_property", "time-pos", 1.0)
-    return proc, ipc
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        tracks = ipc.command("get_property", "track-list").get("data") or []
+        generated = next(
+            (track.get("id") for track in tracks if track.get("title") == "generated"), None
+        )
+        if generated is not None:
+            return proc, ipc, generated
+        time.sleep(0.01)
+    pytest.fail("mpv did not admit the generated subtitle track")
 
 
 def _drain_until_quiet(ipc, *, quiet: float = 0.4, limit: float = 5.0) -> list[dict]:
@@ -283,12 +289,13 @@ def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
     """`tool_tests/test_mpv_source_transition.py`'s `_FakeMpv` refreshes `sub-text` on every switch. The
     plan that produced it assumed the opposite — that a paused mpv has no redraw and so no new
     `sub-text` — and built a whole causal story on it before anyone asked the binary."""
-    proc, ipc = _two_track_mpv(tmp_path)
+    proc, ipc, generated_sid = _two_track_mpv(tmp_path)
     try:
         _drain_until_quiet(ipc)
         assert ipc.command("get_property", "pause").get("data") is True
-        ipc.command("set_property", "sid", GENERATED_SID)
+        ipc.command("set_property", "sid", generated_sid)
         events = _drain_until_quiet(ipc)
+        selected = ipc.command("get_property", "sid").get("data")
     finally:
         ipc.command("quit")
         ipc.close()
@@ -296,7 +303,7 @@ def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
 
     # The last value, not the whole list: how many notifications mpv raises is timing (see the note
     # below), and the premise here is the `sub-text` refresh, not the count.
-    assert _changes(events, "sid")[-1] == GENERATED_SID
+    assert selected == generated_sid
     assert any("生成した字幕" in (text or "") for text in _changes(events, "sub-text"))
 
 
@@ -311,7 +318,7 @@ def test_mpv_emits_sub_text_on_a_paused_track_switch(tmp_path: Path) -> None:
 def test_a_deselected_sid_reads_back_as_false(tmp_path: Path) -> None:
     """A confirm written against the literal `"no"` would never fire. `mpv_source_transition.py`
     accepts `{None, "no", False}`; this says which one mpv sends."""
-    proc, ipc = _two_track_mpv(tmp_path)
+    proc, ipc, _generated_sid = _two_track_mpv(tmp_path)
     try:
         _drain_until_quiet(ipc)
         ipc.command("set_property", "sid", "no")
