@@ -694,7 +694,6 @@ def _present(reader: _BenchmarkSession, text: str, *, native: bool) -> bool:
     if native:
         presentation = reader.graph.subtitle_presentation
         assert presentation.native is not None
-        assert reader.live.pump(0.0)
         presentation.native.apply(reader.graph.cue.geometry_observation())
         return bool(presentation.cue.current.boxes) and presentation.native.fallback_reason is None
     return bool(reader.graph.subtitle_presentation.cue.current.boxes)
@@ -767,6 +766,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         _managed_readers(baseline_ipc, native_ipc, backend) as readers,
     ):
         baseline, native = readers
+        assert native.live.pump(0.0)
         baseline_graph = baseline.graph
         native_graph = native.graph
         source_path = Path(raw_workspace) / "integration.ass"
