@@ -9,10 +9,12 @@ coalescing window survives the trip through the reactor.
 from __future__ import annotations
 
 import pytest
+from session_builder import build_session
 from util import FakeIPC, runtime_gateway
 
+from saitenka.app.config import ReaderOptions
 from saitenka.app.runtime import merge_command_handlers
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.effects import RunUserCommand
@@ -49,12 +51,23 @@ def test_a_command_reaches_its_handler_once_through_the_reactor(monkeypatch) -> 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    reader.start()
     handled: list[str] = []
-    monkeypatch.setattr(reader, "_handle", lambda command: handled.append(command.name))
+    monkeypatch.setattr(
+        reader.turn.command_runtime, "handle", lambda command: handled.append(command.name)
+    )
     try:
         ipc.emit({"event": "client-message", "args": ["saitenka-help"]})
-        reader._drain_events()
+        reader.turn._drain_events()
     finally:
         reader.close()
         gateway.close()
@@ -76,14 +89,25 @@ def test_the_transport_decides_whether_a_claimed_command_runs(monkeypatch, trans
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    reader.start()
     handled: list[str] = []
-    monkeypatch.setattr(reader, "_handle", lambda command: handled.append(command.name))
+    monkeypatch.setattr(
+        reader.turn.command_runtime, "handle", lambda command: handled.append(command.name)
+    )
     try:
         if transport_lost:
             gateway.publish_session_event(ConnectionLost(0))
         ipc.emit({"event": "client-message", "args": ["saitenka-help"]})
-        reader._drain_events()
+        reader.turn._drain_events()
         outcomes = gateway.snapshot.command_outcomes
     finally:
         reader.close()

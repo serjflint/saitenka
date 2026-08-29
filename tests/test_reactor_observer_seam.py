@@ -19,8 +19,11 @@ that outlives them.
 
 from __future__ import annotations
 
+from session_builder import build_session
 from util import FakeIPC
 
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.runtime import (
     EffectFinished,
     EffectOutcome,
@@ -126,7 +129,6 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     """
     from util import runtime_gateway
 
-    from saitenka.app.session.controller import SessionController
     from saitenka.app.session.routes import (
         _CLAIMED,
         _PARTICIPANT_OF,
@@ -148,8 +150,17 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     try:
+        reader.start()
         registered = set(gateway.session_resources)
     finally:
         reader.close()
@@ -272,13 +283,20 @@ def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None
     """
     from util import runtime_gateway
 
-    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import NullRenderer
 
     def commands_for(*, observing: bool) -> list[tuple]:
         ipc = FakeIPC()
         gateway = runtime_gateway(ipc)  # the REAL gateway, whose router is the sole consumer
-        reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+        reader = build_session(
+            ipc,
+            infrastructure=SessionInfrastructure(
+                renderer=NullRenderer(),
+            ),
+            options=ReaderOptions().with_overrides(
+                prefetch=False,
+            ),
+        )
         try:
             if observing:
                 gateway.observe(
@@ -289,7 +307,7 @@ def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None
                         lambda _effect: True,
                     )
                 )
-            reader.set_subtitle("猫を見る")
+            reader.turn.cue_coordinator.set_subtitle("猫を見る")
             reader.pump()
             reader.pump()
             return list(ipc.commands)

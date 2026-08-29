@@ -26,9 +26,8 @@ argument:
     port + conversion     O(1) + O(clusters)
 
 So the port pays exactly when sites cluster — and whether they do is a *measurement*, not an
-intuition. `poe cluster-map` answers it: it resolves each host member to the fact underneath, so a
-cluster reading sixteen members may be reading far fewer facts, and the "too big for a value"
-judgement made from the raw count is simply wrong.
+intuition. Resolve the names to their authoritative owners before counting facts: a cluster reading
+many projections of one owner may need one narrow view, not many parameters.
 
 Two traps:
 
@@ -49,9 +48,9 @@ and enumerating it is free once the transform runs with `--check`.
 
 ## Not a leverage device: a ratchet
 
-A ratchet (`poe host-arity`, `poe host-mass`, `poe runtime-migration`) refuses regression and makes
-progress visible. It is a **safety device**. It does not make one site cheaper to convert, and a plan
-that lists it as its answer to "how will this get cheaper" has not answered the question.
+A ratchet refuses regression and makes progress visible. It is a **safety device**. It does not
+make one site cheaper to convert, and a plan that lists it as its answer to "how will this get
+cheaper" has not answered the question. Retire a migration-only ratchet when its debt reaches zero.
 
 ## Recording the call
 

@@ -9,9 +9,6 @@ test -f "$skill_dir/references/codemod-recipe.md"
 cd "$skill_dir/../../.."   # -> repo root
 fail=0
 have() { test -e "$1" || { echo "MISSING: $1"; fail=1; }; }
-have tools/cluster_map.py          # the census the design step reads
-have tools/host_mass.py            # the standing retirement meter
-have tools/host_arity.py           # the debt meter beside it
 have tools/codemods/harness.py     # the worklist -> LibCST handoff
 have tools/codemods/move_member.py # the runnable worked example
 have pyproject.toml                # the poe tasks and the `codemod` dependency group

@@ -9,6 +9,7 @@ import pytest
 import util
 from dirty_equals import IsPartialDict
 from driver import Driver
+from session_builder import TestSession, build_session
 from util import record_spans
 
 from saitenka.app import native_subtitles, subtitle_fonts, subtitle_render
@@ -19,7 +20,10 @@ from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import (
+    SessionInfrastructure,
+    SessionServices,
+)
 from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
@@ -386,7 +390,7 @@ def reader(
     scorer=None,
     annotation_jobs: bool = False,
     annotations_ready: bool = True,
-) -> tuple[SessionController, FakeIPC, FakeBackend]:
+) -> tuple[TestSession, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
     ipc = FakeIPC(annotation_jobs=annotation_jobs)
@@ -397,27 +401,31 @@ def reader(
     )
     # Overlay egress is a composition decision, so the surface path is only correlated when a test
     # asks for it; without it the overlay writes run inline, as they do with no gateway.
-    result = SessionController(
+    result = build_session(
         ipc,
-        options=options,
-        geometry_backend=backend,
         runtime_submit=ipc.submit_runtime_mpv if correlated_surfaces else None,
-        scorer=scorer,
-        dict_set=_ExistsDS() if annotations_ready else None,
+        services=SessionServices(
+            scorer=scorer,
+            dictionaries=_ExistsDS() if annotations_ready else None,
+        ),
+        infrastructure=SessionInfrastructure(
+            geometry=backend,
+        ),
+        options=options,
     )
     # Native geometry exists exactly when the mode does — the legacy renderer lays its own boxes out
     # and has no provider to schedule against.
-    assert (result.native_geometry is not None) == native_visible
-    if result.native_geometry is not None:
+    assert (result.turn.subtitle_presentation.native is not None) == native_visible
+    if result.turn.subtitle_presentation.native is not None:
         # Through the production resolver, not a hand-built environment: a track load is where the
         # font set is read, and a harness that skipped it would leave every test measuring against
         # an environment the runtime never produces.
-        resolve_track_fonts(ipc, ipc.query, result.native_geometry)
-        result.native_geometry.set_source(source)
+        resolve_track_fonts(ipc, ipc.query, result.turn.subtitle_presentation.native)
+        result.turn.subtitle_presentation.native.set_source(source)
     return result, ipc, backend
 
 
-def settle_jobs(result: SessionController, ipc: FakeIPC) -> None:
+def settle_jobs(result: TestSession, ipc: FakeIPC) -> None:
     """Let the geometry lane finish and deliver its terminals.
 
     Two steps because they are two facts: the work completing, and the host being told. The broker
@@ -425,9 +433,9 @@ def settle_jobs(result: SessionController, ipc: FakeIPC) -> None:
     can be scheduled and not yet published, and why this is not folded into `wait_idle`. A legacy
     session has no lane at all, so there is nothing to settle.
     """
-    if result.native_geometry is None:
+    if result.turn.subtitle_presentation.native is None:
         return
-    assert result.native_geometry.worker.wait_idle()
+    assert result.turn.subtitle_presentation.native.worker.wait_idle()
     ipc.deliver_runtime_jobs()
 
 
@@ -456,7 +464,7 @@ def visible_pixel_changes(ipc: FakeIPC) -> list[tuple[object, object]]:
     return changes
 
 
-def settle_geometry(result: SessionController, ipc: FakeIPC) -> None:
+def settle_geometry(result: TestSession, ipc: FakeIPC) -> None:
     """Advance past the batch boundary the way the next drain would.
 
     Geometry-input changes arm one zero-delay deadline rather than refreshing per observation, so
@@ -467,21 +475,25 @@ def settle_geometry(result: SessionController, ipc: FakeIPC) -> None:
     # the next, and cue reconciliation settles at that drain's end. Firing after settling would let
     # reconciliation retire the deadline before it is ever delivered.
     ipc.fire_runtime_timer("subtitle:geometry-refresh")
-    result._settle_cue_observation()
+    result.turn.cue_coordinator.settle()
 
 
 def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
 
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
 
     assert backend.requests
-    assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
-    result.tooltip_controller.select(0)
-    result.draw_subtitle()
+    assert [box.index for box in result.turn.subtitle_presentation.cue.current.boxes] == list(
+        range(len(result.turn.subtitle_presentation.cue.current.tokens))
+    )
+    result.turn.tooltip_controller.select(0)
+    result.turn.subtitle_presentation.draw()
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
     ]
@@ -499,18 +511,23 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
 def test_visible_cue_cache_miss_keeps_native_pixels_until_geometry_is_ready(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
-    assert result.native_geometry.status.owner == "native"
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-geometry-cache-miss"
+    )
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.boxes == []
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    assert result.boxes
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    assert result.turn.subtitle_presentation.cue.current.boxes
     result.close()
 
 
@@ -519,34 +536,46 @@ def test_successful_empty_ass_full_reply_proves_mpv_capability(
     tmp_path: Path, data: object
 ) -> None:
     result, _ipc, _backend = reader(tmp_path)
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
 
-    result.native_geometry.observe_ass_full_reply({"error": "success", "data": data})
+    result.turn.subtitle_presentation.native.observe_ass_full_reply(
+        {"error": "success", "data": data}
+    )
 
-    assert result.native_geometry.ass_full_capability == AssFullCapability.SUPPORTED
+    assert (
+        result.turn.subtitle_presentation.native.ass_full_capability == AssFullCapability.SUPPORTED
+    )
     result.close()
 
 
 def test_temporarily_unavailable_ass_full_reply_remains_retryable(tmp_path: Path) -> None:
     result, _ipc, _backend = reader(tmp_path)
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
 
-    result.native_geometry.observe_ass_full_reply({"error": "property unavailable"})
+    result.turn.subtitle_presentation.native.observe_ass_full_reply(
+        {"error": "property unavailable"}
+    )
 
-    assert result.native_geometry.ass_full_capability == AssFullCapability.UNKNOWN
+    assert result.turn.subtitle_presentation.native.ass_full_capability == AssFullCapability.UNKNOWN
     result.close()
 
 
 def test_missing_ass_full_property_disables_only_native_geometry(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
-    assert result.native_geometry is not None
-    result.native_geometry.observe_ass_full_reply({"error": "property not found"})
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.observe_ass_full_reply({"error": "property not found"})
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
-    assert result.native_geometry.ass_full_capability == AssFullCapability.UNSUPPORTED
-    assert result.native_geometry.status.fallback_reason == "subtitle-ass-full-unsupported"
-    assert result.native_geometry.status.owner == "native"
+    assert (
+        result.turn.subtitle_presentation.native.ass_full_capability
+        == AssFullCapability.UNSUPPORTED
+    )
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-ass-full-unsupported"
+    )
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     assert backend.requests == []
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
@@ -563,16 +592,22 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     caller cannot know whether the ground moved under it.
     """
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     ipc.commands.clear()
 
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    result.turn.subtitle_presentation.pipeline.activate(
+        result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+    )
     ipc.props["sid"] = 6
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    result.turn.subtitle_presentation.pipeline.activate(
+        result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+    )
 
     assert _visibility_asserts(ipc) == 2
     result.close()
@@ -582,13 +617,17 @@ def test_reconfiguring_the_same_track_does_not_reassert(tmp_path: Path) -> None:
     """The negative control, and the reason the renderer decides rather than the caller: a repeat
     with nothing changed must not spend an mpv round-trip proving what it already proved."""
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     ipc.props["sid"] = 5
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    result.turn.subtitle_presentation.pipeline.activate(
+        result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+    )
     ipc.commands.clear()
 
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    result.turn.subtitle_presentation.pipeline.activate(
+        result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+    )
 
     assert _visibility_asserts(ipc) == 0
     result.close()
@@ -598,13 +637,13 @@ def test_same_session_reconnect_reasserts_native_and_preserves_restore_baseline(
     tmp_path: Path,
 ) -> None:
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    renderer = result.subtitle_pipeline.renderer
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     ipc.props["sub-visibility"] = False
     ipc.commands.clear()
 
-    renderer.connection_replaced(result.subtitle_target())
+    renderer.connection_replaced(result.turn.subtitle_presentation.target())
 
     assert renderer.ownership_state.owner.value == "native"
     assert renderer.ownership_state.context.connection_epoch == 1
@@ -616,19 +655,24 @@ def test_same_session_reconnect_reasserts_native_and_preserves_restore_baseline(
 
 def test_missing_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(tmp_path / "missing.ass")
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(tmp_path / "missing.ass")
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    result.native_geometry.apply(result._geometry_observation())
+    result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
-    assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
-    assert result.native_geometry.status.owner == "native"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-source-unavailable"
+    )
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.draw_subtitle()
-    assert result.boxes == []
+    result.turn.subtitle_presentation.draw()
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     result.close()
 
 
@@ -638,14 +682,17 @@ def test_oversized_source_hands_the_pixels_to_legacy_without_provider_work(tmp_p
     result, _ipc, backend = reader(tmp_path)
     source = tmp_path / "oversized.ass"
     source.write_bytes(b"x" * (MAX_ASS_SOURCE_BYTES + 1))
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
 
-    result.native_geometry.set_source(source)
-    result.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
-    assert result.native_geometry.status.fallback_reason == "subtitle-source-too-large"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-source-too-large"
+    )
     assert backend.requests == []
-    assert result.native_geometry.status.owner == "legacy"
+    assert result.turn.subtitle_presentation.native.status.owner == "legacy"
     result.close()
 
 
@@ -658,34 +705,44 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     get welded together.
     """
     result, ipc, backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    renderer = result.subtitle_pipeline.renderer
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     assert renderer.ownership_state.owner is PixelOwner.NATIVE
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
 
     backend.error = RuntimeError("font provider unavailable")
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result._geometry_observation())
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
     assert renderer.ownership_state.owner is PixelOwner.NATIVE  # unproved boxes go, pixels stay
     assert not renderer.ownership_state.geometry_ready
-    assert result.boxes == []
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
 
     backend.error = None
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result._geometry_observation())
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     assert renderer.ownership_state.owner is PixelOwner.NATIVE  # recovery does not re-own either
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
     result.close()
 
 
@@ -701,18 +758,26 @@ def test_navigation_lands_on_the_target_cue_under_either_renderer(
     every test written against the other.
     """
     result, ipc, _backend = reader(tmp_path, native_visible=native_visible)
-    result.episode.sub_index = CueIndex([Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")])
-    result.set_subtitle("猫を見る")
+    result.turn.track_commands.navigation.current.sub_index = CueIndex(
+        [Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")]
+    )
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    result.tooltip_controller.select(0)
+    result.turn.tooltip_controller.select(0)
 
-    assert result.seek_cue(SeekCue(1, result.cue_revision))
+    assert result.turn.subtitle_navigation.seek(SeekCue(1, result.turn.cue_coordinator.revision))
 
-    assert result.sub_text == "犬も見る"  # the target cue, drawn from the index without waiting
     assert (
-        result.tooltip_controller.observation().selected == -1
+        result.turn.playback_observation.cue.text == "犬も見る"
+    )  # the target cue, drawn from the index without waiting
+    assert (
+        result.turn.tooltip_controller.observation().selected == -1
     )  # …with the previous cue's interaction state gone
-    assert [token.surface for token in result.tokens] == ["犬", "も", "見る"]
+    assert [token.surface for token in result.turn.subtitle_presentation.cue.current.tokens] == [
+        "犬",
+        "も",
+        "見る",
+    ]
     assert ("sub-seek", "1") in [command[:2] for command in ipc.commands if len(command) >= 2]
     result.close()
 
@@ -735,19 +800,25 @@ def test_every_geometry_cache_miss_reports_a_bounded_text_free_reason(
     spans = record_spans(monkeypatch)
     result, ipc, _backend = reader(tmp_path)
     text = "猫を見る"
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
 
-    result.set_subtitle(text)  # the artifact was installed moments ago
+    result.turn.cue_coordinator.set_subtitle(text)  # the artifact was installed moments ago
     settle_jobs(result, ipc)
-    result.native_geometry.schedule(result._geometry_observation())  # same epoch, key never cached
+    result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )  # same epoch, key never cached
     settle_jobs(result, ipc)
-    result.native_geometry.invalidate(live=True)  # a render input moved
-    result.native_geometry.schedule(result._geometry_observation())
+    result.turn.subtitle_presentation.native.invalidate(live=True)  # a render input moved
+    result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
     second = tmp_path / "other.ass"
     second.write_bytes(ASS)
-    result.native_geometry.set_source(second)  # a different artifact entirely
-    result.native_geometry.schedule(result._geometry_observation())
+    result.turn.subtitle_presentation.native.set_source(second)  # a different artifact entirely
+    result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
 
     misses = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_cache"]
@@ -773,56 +844,70 @@ def test_a_late_valid_hit_map_restores_interaction_without_changing_visible_pixe
     a restore that repaints, so the user sees the cue flicker to prove a hit map they never see.
     """
     result, ipc, backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
 
     # A provider failure retires the hit boxes for the cue that is still displayed.
     backend.error = RuntimeError("font provider unavailable")
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result._geometry_observation())
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
-    assert result.boxes == []
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     degraded = visible_pixel_changes(ipc)
 
     # The retry lands while that same cue is still on screen: interaction comes back…
     backend.error = None
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result._geometry_observation())
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
 
-    assert result.native_geometry.status.geometry_ready
-    assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
+    assert result.turn.subtitle_presentation.native.status.geometry_ready
+    assert [box.index for box in result.turn.subtitle_presentation.cue.current.boxes] == list(
+        range(len(result.turn.subtitle_presentation.cue.current.tokens))
+    )
     assert visible_pixel_changes(ipc) == degraded  # …and nothing the user can see moved
     result.close()
 
 
 def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     Driver(result).move_to_word(0)
     ipc.commands.clear()
     backend.error = RuntimeError("font provider unavailable")
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
 
-    assert result.native_geometry.schedule(result._geometry_observation())
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
     assert ("set_property", "pause", False) not in ipc.commands
-    assert result.tooltip_controller.observation().selected == 0
-    assert result.boxes == []
+    assert result.turn.tooltip_controller.observation().selected == 0
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.tooltip_controller.release_pause_claim()
+    result.turn.tooltip_controller.release_pause_claim()
     result.close()
 
 
@@ -835,49 +920,60 @@ def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path
     removal were ever wider than the boxes, this is the path the user would feel it on.
     """
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready
+    assert result.turn.subtitle_presentation.native.status.geometry_ready
     Driver(result).move_to_word(0)
     ipc.commands.clear()
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
 
-    assert result.native_geometry.schedule(
-        result._geometry_observation()
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
     )  # degrades on the miss, before the lane runs
 
-    assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
-    assert result.boxes == []
-    assert result.tooltip_controller.observation().selected == 0
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-geometry-cache-miss"
+    )
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
+    assert result.turn.tooltip_controller.observation().selected == 0
     assert ("set_property", "pause", False) not in ipc.commands
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.tooltip_controller.release_pause_claim()
+    result.turn.tooltip_controller.release_pause_claim()
     result.close()
 
 
 def test_failed_provider_keeps_native_pixels_while_recovery_is_pending(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     backend.error = RuntimeError("font provider unavailable")
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result._geometry_observation())
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     ipc.commands.clear()
     backend.error = None
     ipc.props["sub-start"] = None
     ipc.props["sub-end"] = None
 
-    result.native_geometry.refresh(result._geometry_observation())
+    result.turn.subtitle_presentation.native.refresh(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
-    assert result.native_geometry.status.owner == "native"
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
@@ -886,20 +982,27 @@ def test_failed_provider_keeps_native_pixels_while_recovery_is_pending(tmp_path:
 def test_completed_provider_failure_survives_refresh_before_apply(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
     ipc.props["sub-start"] = None
     ipc.props["sub-end"] = None
     ipc.commands.clear()
 
-    result.native_geometry.refresh(result._geometry_observation())
+    result.turn.subtitle_presentation.native.refresh(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
-    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
-    assert result.native_geometry.status.owner == "native"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "geometry-provider-failed"
+    )
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     result.close()
 
 
@@ -908,27 +1011,31 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
 ) -> None:
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
-    original_tokenizer = result.profile_controller.tokenizer
-    result.profile_controller.use_tokenizer(_AllSkippableTokenizer())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
+    original_tokenizer = result.turn.profile_session.profile.tokenizer
+    result.turn.profile_session.profile.use_tokenizer(_AllSkippableTokenizer())
     ipc.commands.clear()
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
-    assert result.native_geometry.status.owner == "native"
-    assert result.native_geometry.status.fallback_reason is None
-    assert result.native_geometry.status.geometry_ready is False
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native.status.geometry_ready is False
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    result.profile_controller.use_tokenizer(original_tokenizer)
+    result.turn.profile_session.profile.use_tokenizer(original_tokenizer)
     ipc.commands.clear()
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
-    assert result.native_geometry.status.owner == "native"
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
 
@@ -936,19 +1043,26 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
 def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     ipc.commands.clear()
 
-    result.set_subtitle("")
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
-    assert result.native_geometry.status.owner == "native"
-    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "geometry-provider-failed"
+    )
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
 
@@ -956,17 +1070,21 @@ def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path)
 def test_blank_interval_does_not_repeat_provider_failure_diagnostic(tmp_path: Path, caplog) -> None:
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
-        result.set_subtitle("猫を見る")
+        result.turn.cue_coordinator.set_subtitle("猫を見る")
         settle_jobs(result, ipc)
-        assert not result.native_geometry.apply(result._geometry_observation())
-        result.set_subtitle("")
-        result.set_subtitle("猫を見る")
+        assert not result.turn.subtitle_presentation.native.apply(
+            result.turn.cue_coordinator.geometry_observation()
+        )
+        result.turn.cue_coordinator.set_subtitle("")
+        result.turn.cue_coordinator.set_subtitle("猫を見る")
         settle_jobs(result, ipc)
-        assert not result.native_geometry.apply(result._geometry_observation())
+        assert not result.turn.subtitle_presentation.native.apply(
+            result.turn.cue_coordinator.geometry_observation()
+        )
 
     assert [record.getMessage() for record in caplog.records] == [
         ("native subtitle interaction unavailable: geometry-provider-failed detail=provider-error")
@@ -980,16 +1098,19 @@ def test_a_non_ass_source_is_drawn_by_legacy_and_stays_scannable(tmp_path: Path)
     It used to keep mpv's pixels and produce none, which left the episode unscannable for its whole
     run — the boxes here are the whole reason the renderer switches."""
     result, _ipc, backend = reader(tmp_path)
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
 
-    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
-    result.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.native.set_source(tmp_path / "episode.srt", live=True)
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
-    assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-source-not-authored-ass"
+    )
     assert backend.requests == []  # no provider work for a source it can never accept
-    assert result.native_geometry.status.owner == "legacy"
-    result.draw_subtitle()
-    assert result.boxes != []
+    assert result.turn.subtitle_presentation.native.status.owner == "legacy"
+    result.turn.subtitle_presentation.draw()
+    assert result.turn.subtitle_presentation.cue.current.boxes != []
     result.close()
 
 
@@ -1004,10 +1125,10 @@ def test_unsupported_transition_is_not_counted_as_provider_failure(tmp_path: Pat
     provider = MeterProvider(metric_readers=[metric_reader])
     otel_metrics.register(metric_reader, provider.get_meter("test"))
     try:
-        assert result.native_geometry is not None
+        assert result.turn.subtitle_presentation.native is not None
         source = tmp_path / "episode.srt"
-        result.native_geometry.set_source(source, live=True)
-        result.native_geometry.set_source(source, live=True)
+        result.turn.subtitle_presentation.native.set_source(source, live=True)
+        result.turn.subtitle_presentation.native.set_source(source, live=True)
 
         failures = otel_metrics.snapshot().get("saitenka.subtitle_geometry.failures")
         assert failures is None or failures["value"] == 0
@@ -1029,18 +1150,20 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
     otel_metrics.register(metric_reader, provider.get_meter("test"))
     try:
         ipc.set_property_error = "rejected"
-        result.set_subtitle("猫を見る")
-        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+        result.turn.cue_coordinator.set_subtitle("猫を見る")
+        result.turn.subtitle_presentation.pipeline.activate(
+            result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+        )
 
-        renderer = result.subtitle_pipeline.renderer
+        renderer = result.turn.subtitle_presentation.pipeline.renderer
         assert isinstance(renderer, NativeVisibleRenderer)
         assert renderer.ownership_state.owner.value == "legacy"
         assert (
             otel_metrics.snapshot()["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
         )
         ipc.set_property_error = None
-        renderer.suspend_for_overlay(result.subtitle_target())
-        renderer.resume_after_overlay(result.subtitle_target())
+        renderer.suspend_for_overlay(result.turn.subtitle_presentation.target())
+        renderer.resume_after_overlay(result.turn.subtitle_presentation.target())
 
         assert renderer.ownership_state.owner.value == "legacy"
         assert (
@@ -1058,12 +1181,14 @@ def test_a_source_geometry_can_never_use_hands_the_pixels_to_legacy(tmp_path: Pa
     selects a renderer once per track rather than reacting to a geometry outcome."""
     result, _ipc, _backend = reader(tmp_path)
     renderer = NativeVisibleRenderer()
-    result.subtitle_pipeline.renderer = renderer
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
-    result.sub_text = "猫を見る"
+    result.turn.subtitle_presentation.pipeline.renderer = renderer
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(tmp_path / "episode.srt", live=True)
+    result.turn.playback_observation.install_seed({"sub-text": "猫を見る"})
 
-    result.subtitle_pipeline.draw_current(result.subtitle_target())
+    result.turn.subtitle_presentation.pipeline.draw_current(
+        result.turn.subtitle_presentation.target()
+    )
 
     assert renderer.ownership_state.context.mode.value == "legacy-overlay"
     result.close()
@@ -1076,12 +1201,14 @@ def test_the_track_load_reset_does_not_hand_the_pixels_to_legacy(tmp_path: Path)
     """
     result, _ipc, _backend = reader(tmp_path)
     renderer = NativeVisibleRenderer()
-    result.subtitle_pipeline.renderer = renderer
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(None, live=True)
-    result.sub_text = "猫を見る"
+    result.turn.subtitle_presentation.pipeline.renderer = renderer
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(None, live=True)
+    result.turn.playback_observation.install_seed({"sub-text": "猫を見る"})
 
-    result.subtitle_pipeline.draw_current(result.subtitle_target())
+    result.turn.subtitle_presentation.pipeline.draw_current(
+        result.turn.subtitle_presentation.target()
+    )
 
     assert renderer.ownership_state.context.mode.value == "native-visible"
     result.close()
@@ -1091,22 +1218,24 @@ def test_switching_from_an_srt_to_an_ass_returns_the_pixels_to_native(tmp_path: 
     """The switch is per selection and reversible: an unusable source parks the pixels with legacy,
     and selecting an authored `.ass` takes them back rather than latching the fallback."""
     result, ipc, backend = reader(tmp_path)
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(tmp_path / "episode.srt", live=True)
-    result.set_subtitle("猫を見る")
-    result.draw_subtitle()
-    assert result.native_geometry.status.owner == "legacy"
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(tmp_path / "episode.srt", live=True)
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.draw()
+    assert result.turn.subtitle_presentation.native.status.owner == "legacy"
 
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
-    result.native_geometry.set_source(source, live=True)
-    result.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.native.set_source(source, live=True)
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     assert backend.requests
     assert ("set_property", "sub-visibility", True) in ipc.commands
-    assert result.native_geometry.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
     result.close()
 
 
@@ -1114,21 +1243,25 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る"))
+    )
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     assert len(backend.requests) == 2
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.set_subtitle("")
-    result.playback_observation.install_seed(
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    result.turn.cue_coordinator.set_subtitle("")
+    result.turn.playback_observation.install_seed(
         ipc.props | {"sub-text": "", "sub-start": None, "sub-end": None}
     )
 
-    result.playback_observation.observe_event({"name": "sub-delay", "data": -6.0})
-    result._settle_cue_observation()
+    result.turn.playback_observation.observe_event({"name": "sub-delay", "data": -6.0})
+    result.turn.cue_coordinator.settle()
 
     assert len(backend.requests) == 2
     ipc.commands.clear()
@@ -1140,15 +1273,17 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
             "time-pos": 4.2,
         }
     )
-    result.playback_observation.install_seed(ipc.props)
+    result.turn.playback_observation.install_seed(ipc.props)
 
-    result.set_subtitle("犬も見る")
+    result.turn.cue_coordinator.set_subtitle("犬も見る")
 
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     assert len(backend.requests) == 2
-    stats = result.native_geometry.worker.stats
+    stats = result.turn.subtitle_presentation.native.worker.stats
     assert (stats.ready_before_presented, stats.presented) == (1, 2)
     result.close()
 
@@ -1157,19 +1292,25 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る"))
+    )
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     backend.error = RuntimeError("font provider unavailable")
     ipc.props["osd-dimensions"] = {"w": 1279, "h": 720}
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert not result.native_geometry.apply(result._geometry_observation())
-    assert result.native_geometry.status.owner == "native"
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     backend.error = None
     ipc.props.update(
         {
@@ -1184,13 +1325,15 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     )
     ipc.commands.clear()
 
-    result.set_subtitle("犬も見る")
+    result.turn.cue_coordinator.set_subtitle("犬も見る")
 
-    assert result.native_geometry.status.owner == "native"
-    assert result.native_geometry.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     result.close()
 
 
@@ -1208,15 +1351,19 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
             ).encode(),
         )
     )
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.episode.sub_index = CueIndex((Cue(1.0, 5.0, "猫を見る"), Cue(3.0, 7.0, "犬も見る")))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 5.0, "猫を見る"), Cue(3.0, 7.0, "犬も見る"))
+    )
     first = "Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0000,0000,0000,,猫を見る"
     second = "Dialogue: 1,0:00:03.00,0:00:07.00,Default,,0000,0000,0000,,犬も見る"
     ipc.props.update({"sub-text/ass-full": first, "sub-end": 5.0})
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     assert len(backend.requests) == 3
     ipc.commands.clear()
 
@@ -1228,8 +1375,10 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
             "time-pos": 3.2,
         }
     )
-    result.set_subtitle("猫を見る\n犬も見る")
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    result.turn.cue_coordinator.set_subtitle("猫を見る\n犬も見る")
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     ipc.props.update(
         {
             "sub-text/ass-full": second,
@@ -1238,9 +1387,11 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
             "time-pos": 5.2,
         }
     )
-    result.set_subtitle("犬も見る")
+    result.turn.cue_coordinator.set_subtitle("犬も見る")
 
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     assert len(backend.requests) == 3
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
@@ -1249,15 +1400,19 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
 
 def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
-    assert result.native_geometry is not None
-    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在")))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在"))
+    )
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     assert len(backend.requests) == 1
-    assert result.native_geometry.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
     result.close()
 
 
@@ -1273,15 +1428,17 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
             b"Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,\xe7\x8a\xac\n",
         )
     )
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.episode.sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬"))
+    )
 
-    result._enable_async_annotation()
-    result._dependencies_changed()
+    result.turn.profile_integration.enable_async_annotation()
+    result.turn.profile_integration.dependencies_changed()
 
-    result.set_subtitle("猫を見る")
-    result._settle_interaction()
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    result.turn.interaction.settle()
     settle_jobs(result, ipc)
 
     assert any(request.timestamp_ms == 4_001 for request in backend.requests)
@@ -1307,8 +1464,8 @@ def test_geometry_request_uses_delay_adjusted_subtitle_timestamp(
     ipc.props["time-pos"] = time_pos
     ipc.props["sub-delay"] = sub_delay
 
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     assert backend.requests[0].timestamp_ms == expected_timestamp_ms
@@ -1334,9 +1491,9 @@ def test_sub_delay_property_event_records_the_derived_subtitle_clock(
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
-    result.playback_observation.install_seed(ipc.props | {"time-pos": 11.25})
+    result.turn.playback_observation.install_seed(ipc.props | {"time-pos": 11.25})
 
-    result.playback_observation.observe_event({"name": "sub-delay", "data": 10.0})
+    result.turn.playback_observation.observe_event({"name": "sub-delay", "data": 10.0})
 
     assert captured == [
         {
@@ -1368,9 +1525,9 @@ def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
-    result.playback_observation.install_seed(ipc.props | {"time-pos": None, "sub-start": None})
+    result.turn.playback_observation.install_seed(ipc.props | {"time-pos": None, "sub-start": None})
 
-    result.playback_observation.observe_event({"name": "sub-delay", "data": 10.0})
+    result.turn.playback_observation.observe_event({"name": "sub-delay", "data": 10.0})
 
     assert captured == [{"outcome": "invalid"}]
     result.close()
@@ -1380,12 +1537,12 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.episode.geometry_cue_hint = Cue(4.0, 6.0, "犬も見る")
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.track_commands.navigation.current.geometry_cue_hint = Cue(4.0, 6.0, "犬も見る")
 
-    result.set_subtitle("犬も見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("犬も見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     assert backend.requests[0].frame_id.active_event_ids[0].start_ms == 4_000
@@ -1394,53 +1551,68 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
 
 def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    old_generation = result.subtitle_pipeline.generation
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    old_generation = result.turn.subtitle_presentation.pipeline.generation
     ipc.commands.clear()
 
-    result.native_geometry.set_source(None, live=True)
+    result.turn.subtitle_presentation.native.set_source(None, live=True)
 
-    assert result.subtitle_pipeline.generation == old_generation + 1
-    assert result.subtitle_pipeline.current is None
+    assert result.turn.subtitle_presentation.pipeline.generation == old_generation + 1
+    assert result.turn.subtitle_presentation.pipeline.current is None
     assert ("osd-overlay", 1001, "none", "") in ipc.commands
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.boxes == []
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     result.close()
 
 
 def test_tokenizer_change_rebuilds_geometry_after_new_tokens_land(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    assert len(result.boxes) > 1
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    assert len(result.turn.subtitle_presentation.cue.current.boxes) > 1
 
-    result.profile_controller.use_tokenizer(_SingleTokenizer())
-    result._retokenize_current_cue()
+    result.turn.profile_session.profile.use_tokenizer(_SingleTokenizer())
+    result.turn.profile_integration.retokenize_current_cue()
 
-    assert result.boxes == []
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    assert len(result.boxes) == len(backend.requests[-1].palette) == 1
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    assert (
+        len(result.turn.subtitle_presentation.cue.current.boxes)
+        == len(backend.requests[-1].palette)
+        == 1
+    )
     result.close()
 
 
 def test_mismatched_token_annotation_fails_closed(tmp_path: Path) -> None:
     result, _ipc, backend = reader(tmp_path)
-    result.profile_controller.use_tokenizer(_MismatchedTokenizer())
+    result.turn.profile_session.profile.use_tokenizer(_MismatchedTokenizer())
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     assert backend.requests == []
-    assert result.boxes == []
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-token-annotation-invalid"
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-token-annotation-invalid"
+    )
     result.close()
 
 
@@ -1448,22 +1620,24 @@ def test_unpaintable_full_width_space_is_not_required_from_libass(tmp_path: Path
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS.replace("猫を見る".encode(), "猫　犬".encode()))
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
     ipc.props["sub-text/ass-full"] = (
         "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫　犬"
     )
-    result.profile_controller.use_tokenizer(_WhitespaceTokenizer())
+    result.turn.profile_session.profile.use_tokenizer(_WhitespaceTokenizer())
 
-    result.set_subtitle("猫　犬")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫　犬")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     assert [entry.token_index for entry in backend.requests[0].palette] == [0, 2]
-    assert result.native_geometry.status.eligible_tokens == 2
-    assert result.native_geometry.status.skipped_tokens == 1
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    assert [box.index for box in result.boxes] == [0, 2]
+    assert result.turn.subtitle_presentation.native.status.eligible_tokens == 2
+    assert result.turn.subtitle_presentation.native.status.skipped_tokens == 1
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    assert [box.index for box in result.turn.subtitle_presentation.cue.current.boxes] == [0, 2]
     result.close()
 
 
@@ -1471,21 +1645,23 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
     result, ipc, _backend = reader(tmp_path, annotations_ready=False)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS.replace("猫を見る".encode(), "猫　犬".encode()))
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
     ipc.props["sub-text/ass-full"] = (
         "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫　犬"
     )
-    result.profile_controller.use_tokenizer(_WhitespaceTokenizer())
-    result.set_subtitle("猫　犬")
+    result.turn.profile_session.profile.use_tokenizer(_WhitespaceTokenizer())
+    result.turn.cue_coordinator.set_subtitle("猫　犬")
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     ipc.commands.clear()
 
     Driver(result).move_to_word(2)
 
-    assert result.tooltip_controller.observation().selected == 2
-    assert result.tooltip_controller.surface_state().view.state is not None
+    assert result.turn.tooltip_controller.observation().selected == 2
+    assert result.turn.tooltip_controller.surface_state().view.state is not None
     focus = [
         command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
     ]
@@ -1496,17 +1672,21 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
 
 def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: Path) -> None:
     result, _ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫")
-    result.tooltip_controller.select(0)
-    result.profile_controller.replace_dictionary_set(object())
+    result.turn.cue_coordinator.set_subtitle("猫")
+    result.turn.tooltip_controller.select(0)
+    result.turn.profile_session.profile.replace_dictionary_set(object())
 
-    result._show_tooltip(0)
+    result.turn.tooltip_controller.show_tooltip(0)
 
-    assert result.tooltip_controller.observation().selected == -1
-    assert result.tooltip_controller.surface_state().view.state is None
-    result.tooltip_controller.select(0)
-    kanji_current(result._tip_ports, result._panel_ports, result.hover_inputs)
-    assert result.tooltip_controller.observation().kanji_index == 0
+    assert result.turn.tooltip_controller.observation().selected == -1
+    assert result.turn.tooltip_controller.surface_state().view.state is None
+    result.turn.tooltip_controller.select(0)
+    kanji_current(
+        result.turn.tooltip_controller.tip_ports,
+        result.turn.tooltip_controller.panel_ports,
+        result.turn.tooltip_controller.hover_inputs,
+    )
+    assert result.turn.tooltip_controller.observation().kanji_index == 0
     result.close()
 
 
@@ -1522,39 +1702,48 @@ def test_simultaneous_ass_events_publish_event_aware_hit_geometry(tmp_path: Path
             ).encode(),
         )
     )
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
     ipc.props["sub-text/ass-full"] = (
         "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫\n"
         "Dialogue: 1,0:00:01.50,0:00:02.50,Default,sign,0012,0034,0056,,犬"
     )
 
-    result.set_subtitle("猫\n犬")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫\n犬")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     assert [event.source_order for event in backend.requests[0].frame_id.active_event_ids] == [0, 1]
     assert {entry.event_id.source_order for entry in backend.requests[0].palette} == {0, 1}
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    assert len(result.boxes) == len(backend.requests[0].palette)
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    assert len(result.turn.subtitle_presentation.cue.current.boxes) == len(
+        backend.requests[0].palette
+    )
     result.close()
 
 
 def test_unexpected_geometry_error_keeps_native_pixels(tmp_path: Path, monkeypatch) -> None:
     result, ipc, backend = reader(tmp_path)
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
 
     def fail_render_inputs(_observed_property, _osd):
         raise RuntimeError("unexpected profile failure")
 
-    monkeypatch.setattr(result.native_geometry, "_render_inputs", fail_render_inputs)
-    result.set_subtitle("猫を見る")
-    result.draw_subtitle()
+    monkeypatch.setattr(
+        result.turn.subtitle_presentation.native, "_render_inputs", fail_render_inputs
+    )
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.draw()
 
     assert backend.requests == []
-    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
-    assert result.native_geometry.status.geometry_ready is False
-    assert result.boxes == []
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "geometry-provider-failed"
+    )
+    assert result.turn.subtitle_presentation.native.status.geometry_ready is False
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
 
@@ -1562,36 +1751,49 @@ def test_unexpected_geometry_error_keeps_native_pixels(tmp_path: Path, monkeypat
 def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("boom")
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     clears = ipc.commands.count(("osd-overlay", 1001, "none", ""))
-    assert not result.native_geometry.apply(result._geometry_observation())
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     assert ipc.commands.count(("osd-overlay", 1001, "none", "")) == clears
 
-    result.native_geometry.set_source(None, live=True)
-    assert result.subtitle_pipeline.last_error is None
-    assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
+    result.turn.subtitle_presentation.native.set_source(None, live=True)
+    assert result.turn.subtitle_presentation.pipeline.last_error is None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-source-unavailable"
+    )
     result.close()
 
 
 def test_repeated_provider_failure_emits_one_transition_diagnostic(tmp_path: Path, caplog) -> None:
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
-        result.set_subtitle("猫を見る")
+        result.turn.cue_coordinator.set_subtitle("猫を見る")
         settle_jobs(result, ipc)
-        result.native_geometry.apply(result._geometry_observation())
-        result.subtitle_pipeline.invalidate()
-        result.native_geometry.worker.invalidate_cache()
-        assert result.native_geometry.schedule(result._geometry_observation())
+        result.turn.subtitle_presentation.native.apply(
+            result.turn.cue_coordinator.geometry_observation()
+        )
+        result.turn.subtitle_presentation.pipeline.invalidate()
+        result.turn.subtitle_presentation.native.worker.invalidate_cache()
+        assert result.turn.subtitle_presentation.native.schedule(
+            result.turn.cue_coordinator.geometry_observation()
+        )
         settle_jobs(result, ipc)
-        result.native_geometry.apply(result._geometry_observation())
+        result.turn.subtitle_presentation.native.apply(
+            result.turn.cue_coordinator.geometry_observation()
+        )
 
     assert [record.getMessage() for record in caplog.records] == [
         ("native subtitle interaction unavailable: geometry-provider-failed detail=provider-error")
@@ -1601,50 +1803,60 @@ def test_repeated_provider_failure_emits_one_transition_diagnostic(tmp_path: Pat
 
 def test_invalid_result_identity_removes_visible_native_focus(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.tooltip_controller.select(0)
-    result.draw_subtitle()
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    result.turn.tooltip_controller.select(0)
+    result.turn.subtitle_presentation.draw()
     focus_index = len(ipc.commands)
 
-    backend.token_index_offset = len(result.tokens)
-    result.subtitle_pipeline.invalidate()
-    result.native_geometry.worker.invalidate_cache()
-    assert result.native_geometry.schedule(result._geometry_observation())
+    backend.token_index_offset = len(result.turn.subtitle_presentation.cue.current.tokens)
+    result.turn.subtitle_presentation.pipeline.invalidate()
+    result.turn.subtitle_presentation.native.worker.invalidate_cache()
+    assert result.turn.subtitle_presentation.native.schedule(
+        result.turn.cue_coordinator.geometry_observation()
+    )
     settle_jobs(result, ipc)
 
-    assert not result.native_geometry.apply(result._geometry_observation())
-    assert result.boxes == []
+    assert not result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     assert ("osd-overlay", 1001, "none", "") in ipc.commands[focus_index:]
     result.close()
 
 
 def test_empty_cue_removes_visible_native_focus(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.tooltip_controller.select(0)
-    result.draw_subtitle()
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    result.turn.tooltip_controller.select(0)
+    result.turn.subtitle_presentation.draw()
 
-    result.set_subtitle("")
+    result.turn.cue_coordinator.set_subtitle("")
 
-    assert result.boxes == []
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     assert ("osd-overlay", 1001, "none", "") in ipc.commands
     result.close()
 
 
 def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    result.tooltip_controller.select(0)
-    result.draw_subtitle()
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    result.turn.tooltip_controller.select(0)
+    result.turn.subtitle_presentation.draw()
 
     result.close()
 
@@ -1656,18 +1868,27 @@ def test_a_geometry_schedule_that_never_starts_names_the_missing_input(tmp_path:
     that never ran left no trace in logs or telemetry — which is why the repeated-text gap below took
     an hour to locate. Not a degrade: pixels and ownership are untouched, only the silence was wrong."""
     result, _ipc, _backend = reader(tmp_path)
-    assert result.native_geometry is not None
-    result.set_subtitle("猫を見る")
-    result.tokens = []  # annotation has not landed yet: inputs are not assembled
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.cue.replace_tokenized(
+        tokens=[]
+    )  # annotation has not landed yet: inputs are not assembled
 
     traced: list[tuple[str, int]] = []
-    result.native_geometry._trace_unscheduled = lambda reason, revision: traced.append(  # type: ignore[method-assign]
-        (reason, revision)
+    result.turn.subtitle_presentation.native._trace_unscheduled = lambda reason, revision: (
+        traced.append(  # type: ignore[method-assign]
+            (reason, revision)
+        )
     )
-    assert result.native_geometry.schedule(result._geometry_observation()) is False
+    assert (
+        result.turn.subtitle_presentation.native.schedule(
+            result.turn.cue_coordinator.geometry_observation()
+        )
+        is False
+    )
 
     # The revision is what lets a dropped schedule be matched to the observation that armed it.
-    assert traced == [("no-tokens", result.cue_revision)]
+    assert traced == [("no-tokens", result.turn.cue_coordinator.revision)]
     result.close()
 
 
@@ -1684,15 +1905,15 @@ def _correlated_reader(tmp_path: Path):
 
 def test_an_undecided_assertion_defers_publishing_instead_of_degrading(tmp_path: Path) -> None:
     result, _ipc, _backend = _correlated_reader(tmp_path)
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     # Mid-flight: no answer yet. Degrading here is the regression this asserts against — it would
     # mark geometry rejected for the lack of a reply and never publish hit boxes.
-    assert result._native_ownership_undecided()
-    assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
-    assert result.boxes == []
+    assert result.turn.subtitle_presentation.native_ownership_undecided()
+    assert result.turn.subtitle_presentation.native.fallback_reason != "mpv-sub-visibility-rejected"
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     result.close()
 
 
@@ -1707,30 +1928,32 @@ def test_a_geometry_result_that_lands_while_ownership_is_undecided_is_not_lost(
     defensive.
     """
     result, ipc, _backend = _correlated_reader(tmp_path)
-    assert result.native_geometry is not None
-    result.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     settle_jobs(result, ipc)
     assert (
-        result.native_geometry.status.geometry_ready
+        result.turn.subtitle_presentation.native.status.geometry_ready
     )  # the lane terminal published it is False  # deferred: no answer to publish against
     # Deferring is not degrading — recording a rejection here is the regression.
-    assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
+    assert result.turn.subtitle_presentation.native.fallback_reason != "mpv-sub-visibility-rejected"
 
     ipc.props["sub-visibility"] = True  # mpv now reports what the write asked for
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the set_property terminal
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the get_property readback
-    assert not result._native_ownership_undecided()
+    assert not result.turn.subtitle_presentation.native_ownership_undecided()
 
-    assert result.native_geometry.status.geometry_ready
-    assert result.native_geometry.fallback_reason is None
-    assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
+    assert result.turn.subtitle_presentation.native.status.geometry_ready
+    assert result.turn.subtitle_presentation.native.fallback_reason is None
+    assert [box.index for box in result.turn.subtitle_presentation.cue.current.boxes] == list(
+        range(len(result.turn.subtitle_presentation.cue.current.tokens))
+    )
     result.close()
 
 
 def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Path) -> None:
     result, ipc, _backend = _correlated_reader(tmp_path)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     # mpv accepted the write and still reports FALSE — the case the readback exists for, and the
     # reason the write's own outcome cannot stand in for it.
@@ -1738,15 +1961,18 @@ def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Pa
     ipc.props["sub-visibility"] = False  # ...and mpv did not honour it
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the get_property readback
 
-    assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
-    assert not result._native_ownership_undecided()
+    assert (
+        result.turn.subtitle_presentation.pipeline.renderer.ownership_state.owner
+        != PixelOwner.NATIVE
+    )
+    assert not result.turn.subtitle_presentation.native_ownership_undecided()
     result.close()
 
 
 def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -> None:
 
     result, ipc, _backend = _correlated_reader(tmp_path)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     assert ipc.deliver_runtime_mpv(match="sub-visibility", outcome=EffectOutcome.REJECTED)
 
@@ -1756,19 +1982,24 @@ def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -
         command for _identity, command, _cb in ipc.submitted if "sub-visibility" in command
     ] == [("get_property", "sub-visibility")]
     assert ipc.deliver_runtime_mpv()
-    assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
+    assert (
+        result.turn.subtitle_presentation.pipeline.renderer.ownership_state.owner
+        != PixelOwner.NATIVE
+    )
     result.close()
 
 
 def test_only_one_assertion_is_in_flight_across_a_reassert(tmp_path: Path) -> None:
     result, ipc, _backend = _correlated_reader(tmp_path)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     visibility = [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c]
     assert len(visibility) == 1
 
     # Through the fact, not a verb: an overlay release is the production trigger for a
     # re-verification with the selection unchanged.
-    result.subtitle_pipeline.renderer.resume_after_overlay(result.subtitle_target())
+    result.turn.subtitle_presentation.pipeline.renderer.resume_after_overlay(
+        result.turn.subtitle_presentation.target()
+    )
 
     # A second assertion would orphan the first's effect id and leave a terminal nobody retires.
     assert [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c] == visibility
@@ -1785,18 +2016,20 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
             b"Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,\xe7\x8c\xab\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b\n",
         )
     )
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
 
     # Drive the first cue as an observation, not a set_subtitle call: reconciliation reads the cue
     # from the projection now, so a cue the projection never saw settles as empty and the next
     # observation retires a cue this test never installed there.
-    result.playback_observation.install_seed(ipc.props)
+    result.turn.playback_observation.install_seed(ipc.props)
     ipc.props["sub-text"] = "猫を見る"
-    result.playback_observation.observe_event({"name": "sub-text", "data": "猫を見る"})
-    result._settle_cue_observation()
+    result.turn.playback_observation.observe_event({"name": "sub-text", "data": "猫を見る"})
+    result.turn.cue_coordinator.settle()
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
 
     ipc.props.update(
         {
@@ -1809,20 +2042,22 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     )
     # mpv pushes the new authored row as its own observation; the old tick stage used to pull it
     # through the ass-full probe instead, which let this test skip it.
-    result.playback_observation.observe_event(
+    result.turn.playback_observation.observe_event(
         {"name": "sub-text/ass-full", "data": ipc.props["sub-text/ass-full"]}
     )
-    result.playback_observation.observe_event({"name": "sub-start", "data": 4.0})
-    result.playback_observation.observe_event({"name": "sub-end", "data": 6.0})
-    assert result.boxes == []
+    result.turn.playback_observation.observe_event({"name": "sub-start", "data": 4.0})
+    result.turn.playback_observation.observe_event({"name": "sub-end", "data": 6.0})
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
 
     settle_geometry(result, ipc)
 
-    assert result.boxes == []
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     settle_jobs(result, ipc)
 
     assert backend.requests[-1].frame_id.active_event_ids[0].start_ms == 4_000
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     result.close()
 
 
@@ -1830,29 +2065,36 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
     tmp_path: Path,
 ) -> None:
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    original_boxes = list(result.boxes)
-    result.playback_observation.install_seed(ipc.props | {"sub-text": result.sub_text})
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    original_boxes = list(result.turn.subtitle_presentation.cue.current.boxes)
+    result.turn.playback_observation.install_seed(
+        ipc.props | {"sub-text": result.turn.playback_observation.cue.text}
+    )
     ipc.commands.clear()
 
-    result.playback_observation.observe_event({"name": "sub-start", "data": None})
-    result.playback_observation.observe_event({"name": "sub-end", "data": None})
+    result.turn.playback_observation.observe_event({"name": "sub-start", "data": None})
+    result.turn.playback_observation.observe_event({"name": "sub-end", "data": None})
     settle_geometry(result, ipc)
 
-    assert result.boxes == original_boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes == original_boxes
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.status.fallback_reason == "subtitle-observation-pending"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-observation-pending"
+    )
 
-    result.playback_observation.observe_event({"name": "sub-start", "data": 1.0})
-    result.playback_observation.observe_event({"name": "sub-end", "data": 3.0})
+    result.turn.playback_observation.observe_event({"name": "sub-start", "data": 1.0})
+    result.turn.playback_observation.observe_event({"name": "sub-end", "data": 3.0})
     settle_geometry(result, ipc)
 
-    assert result.boxes == original_boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes == original_boxes
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
     result.close()
 
 
@@ -1860,29 +2102,36 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     tmp_path: Path,
 ) -> None:
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-    native_boxes = list(result.boxes)
-    result.playback_observation.install_seed(ipc.props | {"sub-text": result.sub_text})
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
+    native_boxes = list(result.turn.subtitle_presentation.cue.current.boxes)
+    result.turn.playback_observation.install_seed(
+        ipc.props | {"sub-text": result.turn.playback_observation.cue.text}
+    )
     ipc.commands.clear()
 
-    result.playback_observation.observe_event(
+    result.turn.playback_observation.observe_event(
         {
             "name": "sub-text/ass-full",
             "data": ("Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,猫を見る"),
         }
     )
-    result.playback_observation.observe_event({"name": "sub-start", "data": None})
-    result.playback_observation.observe_event({"name": "sub-end", "data": None})
+    result.turn.playback_observation.observe_event({"name": "sub-start", "data": None})
+    result.turn.playback_observation.observe_event({"name": "sub-end", "data": None})
     settle_geometry(result, ipc)
 
     assert native_boxes
-    assert result.boxes == []
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert ("set_property", "sub-visibility", False) not in ipc.commands
-    assert result.native_geometry.status.fallback_reason == "subtitle-observation-pending"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-observation-pending"
+    )
     result.close()
 
 
@@ -1893,12 +2142,15 @@ def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, c
     caplog.clear()
 
     with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
-        result.set_subtitle("猫を見る")
+        result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     assert backend.requests == []
-    assert result.boxes == []
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-render-input-unsupported"
+    )
     assert [record.getMessage() for record in caplog.records] == [
         (
             "native subtitle interaction unavailable: "
@@ -1915,12 +2167,15 @@ def test_pending_timing_does_not_escape_an_unsupported_render_profile(tmp_path: 
     ipc.props["sub-start"] = None
     ipc.props["sub-end"] = None
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     assert backend.requests == []
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
-    assert result.native_geometry.status.owner == "native"
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-render-input-unsupported"
+    )
+    assert result.turn.subtitle_presentation.native.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
@@ -1944,12 +2199,15 @@ def test_a_font_setting_changed_under_a_resolved_track_fails_closed(
     result, ipc, backend = reader(tmp_path)
     ipc.props[option] = value
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     assert backend.requests == []
-    assert result.boxes == []
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-font-environment-stale"
+    assert result.turn.subtitle_presentation.cue.current.boxes == []
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-font-environment-stale"
+    )
     result.close()
 
 
@@ -1964,13 +2222,13 @@ def converted_reader(tmp_path: Path, *, codec: str = "subrip"):
     drawing — see `set_track_codec`.
     """
     result, ipc, backend = reader(tmp_path)
-    assert result.native_geometry is not None
-    result.native_geometry.formats = native_subtitles.NativeFormats.ALL
-    result.native_geometry.set_track_codec(codec)
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.formats = native_subtitles.NativeFormats.ALL
+    result.turn.subtitle_presentation.native.set_track_codec(codec)
     ipc.props["sub-text/ass-full"] = SRT_ROWS
     source = tmp_path / "episode.srt"
     source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
-    result.native_geometry.set_source(source, live=True)
+    result.turn.subtitle_presentation.native.set_source(source, live=True)
     return result, ipc, backend
 
 
@@ -1986,7 +2244,7 @@ def test_the_user_s_subtitle_style_reaches_the_document_the_boxes_are_measured_a
     ipc.props["options/sub-margin-y"] = 120
     ipc.props["options/sub-bold"] = True
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     style = next(
@@ -2005,7 +2263,7 @@ def test_a_converted_track_says_so_in_the_span_that_diagnoses_it(tmp_path: Path,
     spans = _decision_spans(monkeypatch)
     result, ipc, _backend = converted_reader(tmp_path)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert {span["source_class"] for span in spans if "source_class" in span} == {"converted"}
@@ -2017,11 +2275,14 @@ def test_a_converted_track_is_measured_against_the_document_mpv_rebuilt(tmp_path
     rather than read off disk."""
     result, ipc, backend = converted_reader(tmp_path)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.native_geometry is not None
-    assert result.native_geometry.source_kind is native_subtitles.SourceKind.CONVERTED
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.source_kind
+        is native_subtitles.SourceKind.CONVERTED
+    )
     assert backend.requests
     document = backend.requests[-1].ass.decode()
     assert "PlayResY: 288" in document  # libavcodec's, not the .srt's (it has none)
@@ -2039,7 +2300,7 @@ def test_a_converted_track_carries_the_features_and_scale_mpv_sets(tmp_path: Pat
     track. Leaving either off measures a layout mpv is not drawing."""
     result, ipc, backend = converted_reader(tmp_path)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     state = backend.requests[-1].renderer_state
@@ -2051,14 +2312,17 @@ def test_an_srt_stays_with_the_legacy_renderer_unless_the_config_asks(tmp_path: 
     """The default envelope is the tested one. A track the native path has not been asked to take
     still selects the renderer that can draw its hit boxes."""
     result, _ipc, _backend = reader(tmp_path)
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.native is not None
     source = tmp_path / "episode.srt"
     source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
 
-    result.native_geometry.set_source(source, live=True)
+    result.turn.subtitle_presentation.native.set_source(source, live=True)
 
-    assert result.native_geometry.source_unsupported is True
-    assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
+    assert result.turn.subtitle_presentation.native.source_unsupported is True
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-source-not-authored-ass"
+    )
     result.close()
 
 
@@ -2073,9 +2337,9 @@ def converted_episode(tmp_path: Path, srt: str):
     result, ipc, backend = converted_reader(tmp_path)
     source = tmp_path / "episode.srt"
     source.write_text(srt, encoding="utf-8")
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source, live=True)
-    result.load_sub_index(str(source))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source, live=True)
+    result.turn.subtitle_navigation.load_index(str(source))
     return result, ipc, backend
 
 
@@ -2087,16 +2351,18 @@ def test_a_converted_track_reads_ahead_by_predicting_the_events_mpv_will_report(
     done here — which is what gives the track a lookahead window at all."""
     result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.native_geometry is not None
-    assert result.native_geometry.worker.stats.prefetched >= 1, "nothing was read ahead"
+    assert result.turn.subtitle_presentation.native is not None
+    assert result.turn.subtitle_presentation.native.worker.stats.prefetched >= 1, (
+        "nothing was read ahead"
+    )
     prefetched = backend.requests[-1].ass.decode()
     # The cue's own timings, not its text: by the time it reaches the backend every token carries a
     # reserved color key, so the words are no longer contiguous in the document.
     assert "0:00:04.00,0:00:06.00" in prefetched, "the next cue was not the one prefetched"
-    assert result.native_geometry.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
     result.close()
 
 
@@ -2106,19 +2372,19 @@ def test_a_predicted_cue_is_served_from_the_cache_when_mpv_reports_it(tmp_path: 
     `tests/test_subrip_conversion.py` owns that half against a recorded oracle; this owns the
     wiring, that a matching row is actually served from the cache."""
     result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     rendered = len(backend.requests)
 
     ipc.props["sub-text/ass-full"] = "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,犬を見る"
     ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
-    result.set_subtitle("犬を見る")
+    result.turn.cue_coordinator.set_subtitle("犬を見る")
     settle_jobs(result, ipc)
 
-    assert result.native_geometry is not None
-    assert result.native_geometry.worker.stats.cache_hits >= 1
+    assert result.turn.subtitle_presentation.native is not None
+    assert result.turn.subtitle_presentation.native.worker.stats.cache_hits >= 1
     assert len(backend.requests) == rendered, "the predicted cue was rendered a second time"
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
     result.close()
 
 
@@ -2148,7 +2414,7 @@ def test_a_miss_names_which_part_of_the_key_the_prediction_got_wrong(
         yield _Span(values)
 
     result, ipc, _backend = converted_episode(tmp_path, TWO_CUE_SRT)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     monkeypatch.setattr(otel_metrics, "traced", record)
@@ -2156,7 +2422,7 @@ def test_a_miss_names_which_part_of_the_key_the_prediction_got_wrong(
         "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\b1}犬を見る"
     )
     ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
-    result.set_subtitle("犬を見る")
+    result.turn.cue_coordinator.set_subtitle("犬を見る")
     settle_jobs(result, ipc)
 
     missed = [span for span in spans if span.get("outcome") == "miss"]
@@ -2171,7 +2437,7 @@ def test_a_mispredicted_cue_costs_a_render_and_not_a_wrong_box(tmp_path: Path) -
     a prediction that disagrees with mpv simply never matches — the cue is rebuilt from mpv's own
     row, which is exactly what a converted track did before any of this existed."""
     result, ipc, backend = converted_episode(tmp_path, TWO_CUE_SRT)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     rendered = len(backend.requests)
 
@@ -2180,12 +2446,12 @@ def test_a_mispredicted_cue_costs_a_render_and_not_a_wrong_box(tmp_path: Path) -
         "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\b1}犬を見る"
     )
     ipc.props.update({"sub-start": 4.0, "sub-end": 6.0})
-    result.set_subtitle("犬を見る")
+    result.turn.cue_coordinator.set_subtitle("犬を見る")
     settle_jobs(result, ipc)
 
     assert len(backend.requests) > rendered, "a mismatched prediction was used anyway"
     assert "{\\b1}" in backend.requests[-1].ass.decode(), "the rebuild did not use mpv's own row"
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
     result.close()
 
 
@@ -2198,12 +2464,12 @@ def test_a_cue_srtdec_would_mangle_is_simply_not_read_ahead(tmp_path: Path) -> N
         "1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n\n2\n00:00:04,000 --> 00:00:06,000\na < b > c\n",
     )
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.native_geometry is not None
-    assert result.native_geometry.worker.stats.prefetched == 0
-    assert result.native_geometry.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native is not None
+    assert result.turn.subtitle_presentation.native.worker.stats.prefetched == 0
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
     result.close()
 
 
@@ -2219,14 +2485,15 @@ def test_a_conversion_we_have_not_reproduced_is_refused_by_name(tmp_path: Path, 
     """
     result, _ipc, _backend = converted_reader(tmp_path, codec=codec)
 
-    assert result.native_geometry is not None
-    assert result.native_geometry.source_kind is native_subtitles.SourceKind.NONE
+    assert result.turn.subtitle_presentation.native is not None
+    assert result.turn.subtitle_presentation.native.source_kind is native_subtitles.SourceKind.NONE
     assert (
-        result.native_geometry.status.fallback_reason == "subtitle-source-conversion-unreproduced"
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-source-conversion-unreproduced"
     )
     # A named refusal, and one that selects the renderer that CAN draw the boxes — not a track left
     # with mpv's pixels and nothing to click.
-    assert result.native_geometry.source_unsupported is True
+    assert result.turn.subtitle_presentation.native.source_unsupported is True
     result.close()
 
 
@@ -2237,12 +2504,15 @@ def test_the_sdh_filter_is_refused_because_it_rewrites_the_event(tmp_path: Path)
     result, ipc, _backend = reader(tmp_path)
     ipc.props["options/sub-filter-sdh"] = True
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
-    assert not result.boxes
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-render-input-unsupported"
+    )
+    assert not result.turn.subtitle_presentation.cue.current.boxes
     result.close()
 
 
@@ -2253,10 +2523,10 @@ def test_a_regex_filter_only_drops_a_cue_so_it_is_not_refused(tmp_path: Path) ->
     result, ipc, _backend = reader(tmp_path)
     ipc.props["options/sub-filter-regex"] = ["advert"]
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
     result.close()
 
 
@@ -2305,15 +2575,15 @@ def test_a_face_only_the_subtitle_renderer_has_stands_the_overprint_down(tmp_pat
     right words, wrong glyph shapes. The boxes are still right, so the cue stays interactive; only
     the color stands down, and the demotion is counted rather than silent."""
     result, ipc, backend = reader(tmp_path)
-    assert result.native_geometry is not None
-    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_fonts(attachment_supplying(ipc, "arial"))
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert backend.requests
     assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
-    assert result.boxes  # the hit boxes still land
+    assert result.turn.subtitle_presentation.cue.current.boxes  # the hit boxes still land
     result.close()
 
 
@@ -2338,10 +2608,10 @@ def test_a_face_the_osd_library_cannot_load_is_colored_as_a_raster_instead(tmp_p
     measurement already drew, from the font set mpv's SUBTITLE renderer holds.
     """
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
-    assert result.native_geometry is not None
-    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_fonts(attachment_supplying(ipc, "arial"))
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert not [payload for payload in overlay_payloads(ipc) if "\\fn" in payload], (
@@ -2352,7 +2622,7 @@ def test_a_face_the_osd_library_cannot_load_is_colored_as_a_raster_instead(tmp_p
     # Cropped to the union of the three 50x40 boxes the fake laid out at x=100, 160, 220 — not to
     # the frame, which would be most of a megabyte of transparent pixels per cue.
     assert painted[-1] == (100, 600, 170, 40)
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
     result.close()
 
 
@@ -2364,11 +2634,11 @@ def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path)
     The focus rect had the same hole: arriving at LEGACY emitted no interaction clear at all.
     """
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
-    assert result.native_geometry is not None
-    result.native_geometry.set_fonts(attachment_supplying(ipc, "arial"))
-    result.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_fonts(attachment_supplying(ipc, "arial"))
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     assert presented_overpaints(ipc), "the raster never reached mpv, so the teardown proves nothing"
     ipc.commands.clear()
@@ -2377,7 +2647,7 @@ def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path)
     # says FALSE, which is the proof that hands the pixels to the legacy renderer.
     ipc.set_property_exception = OSError("pipe closed")
     ipc.props["sub-visibility"] = False
-    renderer.resume_after_overlay(result.subtitle_target())
+    renderer.resume_after_overlay(result.turn.subtitle_presentation.target())
 
     assert renderer.ownership_state.owner is PixelOwner.LEGACY
     assert ("overlay-remove", OverlayId.OVERPAINT) in ipc.commands
@@ -2480,7 +2750,7 @@ def test_a_playing_session_still_measures_once_for_the_track(tmp_path: Path) -> 
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
     ipc.props["pause"] = False
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert len(calibration_calls(ipc)) == 1
@@ -2493,14 +2763,14 @@ def test_a_playing_session_does_not_measure_again_after_that(tmp_path: Path) -> 
     stutter through the whole episode."""
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
     ipc.props["pause"] = False
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     assert len(calibration_calls(ipc)) == 1
 
     for _ in range(3):
-        result.set_subtitle("猫を見る")
+        result.turn.cue_coordinator.set_subtitle("猫を見る")
         settle_jobs(result, ipc)
-        result.draw_subtitle()
+        result.turn.subtitle_presentation.draw()
 
     assert len(calibration_calls(ipc)) == 1
     result.close()
@@ -2513,10 +2783,10 @@ def test_the_layout_check_measures_once_per_face_set_while_paused(tmp_path: Path
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
     ipc.props["pause"] = True
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     first = len(calibration_calls(ipc))
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert first == 1
@@ -2537,12 +2807,12 @@ def test_a_refused_layout_check_is_asked_again_rather_than_written_off(tmp_path:
     ipc.props["pause"] = True
     ipc.refused_identities = ("subtitle:calibrate:",)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     assert not calibration_calls(ipc)
 
     ipc.refused_identities = ()
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert len(calibration_calls(ipc)) == 1
@@ -2569,14 +2839,14 @@ def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing
     ipc.props["pause"] = True
     ipc.osd_bounds = osd_box(right=29.0)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert r"\fnArial" in overlay_payloads(ipc)[0], (
         "nothing was drawn as text, so nothing to demote"
     )
-    assert result.native_geometry is not None
-    assert result.native_geometry._measured_unsafe == frozenset({"arial"}), (
+    assert result.turn.subtitle_presentation.native is not None
+    assert result.turn.subtitle_presentation.native._measured_unsafe == frozenset({"arial"}), (
         "no verdict was recorded"
     )
 
@@ -2585,7 +2855,7 @@ def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing
     # has not changed — so without this the family stays uncolored for as long as it is shown.
     settle_geometry(result, ipc)
     settle_jobs(result, ipc)
-    result.draw_subtitle()
+    result.turn.subtitle_presentation.draw()
 
     assert presented_overpaints(ipc), "the color did not step down to the raster after the verdict"
     result.close()
@@ -2598,7 +2868,7 @@ def test_an_agreeing_measurement_leaves_the_text_device_alone(tmp_path: Path) ->
     ipc.props["pause"] = True
     ipc.osd_bounds = osd_box(right=0.0)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert r"\fnArial" in overlay_payloads(ipc)[-1]
@@ -2613,12 +2883,12 @@ def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_pat
     ipc.props["pause"] = True
     ipc.osd_bounds = osd_box(right=29.0)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
     assert backend.requests[-1].keep_coverage is False, "the first cue had no verdict yet"
     # The same cue again, and it is re-rendered rather than served from cache — the verdict
     # invalidates, which is the half that makes the demotion reach the pixels.
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert backend.requests[-1].keep_coverage is True
@@ -2631,7 +2901,7 @@ def test_a_cue_the_text_device_can_draw_publishes_no_raster(tmp_path: Path) -> N
     cannot draw. Two colors over one cue would double every glyph's alpha."""
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
@@ -2658,15 +2928,15 @@ def test_only_the_tokens_in_the_embedded_family_lose_their_color(tmp_path: Path)
             ).encode(),
         )
     )
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.native_geometry.set_fonts(attachment_supplying(ipc, "embedded signs"))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.subtitle_presentation.native.set_fonts(attachment_supplying(ipc, "embedded signs"))
     ipc.props["sub-text/ass-full"] = (
         "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫\n"
         "Dialogue: 1,0:00:01.00,0:00:03.00,Sign,,0000,0000,0000,,犬"
     )
 
-    result.set_subtitle("猫\n犬")
+    result.turn.cue_coordinator.set_subtitle("猫\n犬")
     settle_jobs(result, ipc)
 
     by_event = {
@@ -2690,11 +2960,11 @@ def test_a_document_that_embeds_its_own_fonts_stands_those_families_down(tmp_pat
     source.write_bytes(
         ASS.decode().replace("[V4+ Styles]", util.ass_fonts_section("Arial") + "[V4+ Styles]").encode()
     )  # fmt: skip
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.native_geometry.set_fonts(attachment_supplying(ipc))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.subtitle_presentation.native.set_fonts(attachment_supplying(ipc))
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert {entry.font_name for entry in backend.requests[-1].palette} == {""}
@@ -2711,11 +2981,11 @@ def test_a_document_that_embeds_a_family_nobody_uses_costs_no_color(tmp_path: Pa
         .replace("[V4+ Styles]", util.ass_fonts_section("Embedded Signs") + "[V4+ Styles]")
         .encode()
     )
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
-    result.native_geometry.set_fonts(attachment_supplying(ipc))
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source)
+    result.turn.subtitle_presentation.native.set_fonts(attachment_supplying(ipc))
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert {entry.font_name for entry in backend.requests[-1].palette} == {"Arial"}
@@ -2731,7 +3001,7 @@ def test_the_overprint_reaches_mpv_in_the_measured_face_and_size(tmp_path: Path)
     """
     result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     drawn = [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
@@ -2747,10 +3017,12 @@ def test_an_unmeasured_face_leaves_the_cue_uncolored_rather_than_guessed(tmp_pat
     result, ipc, backend = reader(tmp_path)
     backend.font_name, backend.font_size = "", 0.0
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    assert result.boxes  # the hit boxes still land, so the cue stays interactive
+    assert (
+        result.turn.subtitle_presentation.cue.current.boxes
+    )  # the hit boxes still land, so the cue stays interactive
     assert not [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
     result.close()
 
@@ -2759,17 +3031,26 @@ def test_the_legacy_renderer_can_be_selected_and_given_back(tmp_path: Path) -> N
     """The comparison target has to be selectable. Until now the only route to the legacy renderer
     was catastrophic recovery, and a target you cannot choose is not one."""
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.NATIVE
+    assert (
+        result.turn.subtitle_presentation.pipeline.renderer.ownership_state.owner
+        is PixelOwner.NATIVE
+    )
 
-    assert result.toggle_legacy_renderer() is True
-    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.LEGACY
+    assert result.turn.subtitle_presentation.toggle_renderer() is True
+    assert (
+        result.turn.subtitle_presentation.pipeline.renderer.ownership_state.owner
+        is PixelOwner.LEGACY
+    )
 
-    assert result.toggle_legacy_renderer() is False
-    result.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.toggle_renderer() is False
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert result.subtitle_pipeline.renderer.ownership_state.owner is PixelOwner.NATIVE
+    assert (
+        result.turn.subtitle_presentation.pipeline.renderer.ownership_state.owner
+        is PixelOwner.NATIVE
+    )
     result.close()
 
 
@@ -2777,31 +3058,37 @@ def test_a_forced_legacy_switch_is_told_apart_from_a_failure(tmp_path: Path) -> 
     """Both end with the legacy renderer drawing, and a report has to say which happened: one is a
     user comparing the engines, the other is the native path giving up."""
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
-    result.toggle_legacy_renderer()
+    result.turn.subtitle_presentation.toggle_renderer()
 
-    assert result.subtitle_pipeline.legacy_forced is True
-    assert result.native_geometry is not None
+    assert result.turn.subtitle_presentation.pipeline.legacy_forced is True
+    assert result.turn.subtitle_presentation.native is not None
     # Not a geometry failure: nothing refused a frame, so no fallback reason is latched.
-    assert result.native_geometry.status.fallback_reason != "mpv-sub-visibility-rejected"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        != "mpv-sub-visibility-rejected"
+    )
     result.close()
 
 
 def test_resolving_the_track_again_clears_a_stale_font_environment(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     ipc.props["options/embeddedfonts"] = True
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-font-environment-stale"
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-font-environment-stale"
+    )
 
-    resolve_track_fonts(ipc, ipc.query, result.native_geometry)
-    result.set_subtitle("猫を見る")
+    resolve_track_fonts(ipc, ipc.query, result.turn.subtitle_presentation.native)
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     assert backend.requests
-    assert result.native_geometry.status.fallback_reason is None
+    assert result.turn.subtitle_presentation.native.status.fallback_reason is None
     result.close()
 
 
@@ -2809,12 +3096,14 @@ def test_mpv_empty_style_override_normalization_is_supported(tmp_path: Path) -> 
     result, ipc, backend = reader(tmp_path)
     ipc.props["options/sub-ass-style-overrides"] = [""]
 
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     assert backend.requests
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     result.close()
 
 
@@ -2837,10 +3126,10 @@ def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> Non
     }
     # Through the path production uses: the host adopts a new OSD surface in `refresh_osd`, and the
     # layout follows the host rather than re-reading the property.
-    assert result.refresh_osd()
+    assert result.turn.refresh_osd()
 
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     request = backend.requests[-1]
@@ -2848,7 +3137,9 @@ def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> Non
     assert request.storage_size == (1920, 1080)
     assert request.margins == (98, 99, 0, 0)
     assert request.use_margins is False
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     result.close()
 
 
@@ -2856,8 +3147,8 @@ def test_authored_ass_force_margins_is_forwarded(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     ipc.props["options/sub-ass-force-margins"] = True
 
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     assert backend.requests[-1].use_margins is True
@@ -2866,16 +3157,18 @@ def test_authored_ass_force_margins_is_forwarded(tmp_path: Path) -> None:
 
 def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
 
     before = len(backend.requests)
     assert backend.requests[-1].use_margins is False  # the input the change is about to flip
 
     ipc.props["options/sub-ass-force-margins"] = True
-    result.playback_observation.observe_event(
+    result.turn.playback_observation.observe_event(
         {"name": "options/sub-ass-force-margins", "data": True}
     )
     ipc.fire_runtime_timer("subtitle:geometry-refresh")
@@ -2885,7 +3178,9 @@ def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) ->
     # observation key covers the render profile, so a changed input must produce a new request.
     assert len(backend.requests) > before
     assert backend.requests[-1].use_margins is True
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     result.close()
 
 
@@ -2894,16 +3189,20 @@ def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> 
     the tick; they now share one deadline, so the batch costs one refresh instead of one per
     property."""
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     ipc.timers.clear()
 
-    result.playback_observation.observe_event({"name": "options/sub-pos", "data": 95.0})
+    result.turn.playback_observation.observe_event({"name": "options/sub-pos", "data": 95.0})
     first = ipc.timers["subtitle:geometry-refresh"]
-    result.playback_observation.observe_event({"name": "options/sub-scale", "data": 1.5})
-    result.playback_observation.observe_event({"name": "options/sub-use-margins", "data": True})
+    result.turn.playback_observation.observe_event({"name": "options/sub-scale", "data": 1.5})
+    result.turn.playback_observation.observe_event(
+        {"name": "options/sub-use-margins", "data": True}
+    )
 
     assert ipc.timers["subtitle:geometry-refresh"] is first
     assert list(ipc.timers) == ["subtitle:geometry-refresh"]
@@ -2918,16 +3217,18 @@ def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> No
     guard: a refresh armed for the old track is cancelled rather than left to fire against the
     replacement."""
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
 
     ipc.props["options/sub-pos"] = 95.0
-    result.playback_observation.observe_event({"name": "options/sub-pos", "data": 95.0})
+    result.turn.playback_observation.observe_event({"name": "options/sub-pos", "data": 95.0})
     assert "subtitle:geometry-refresh" in ipc.timers
 
-    result.playback_observation.observe_event({"name": "sid", "data": 3})
+    result.turn.playback_observation.observe_event({"name": "sid", "data": 3})
 
     assert "subtitle:geometry-refresh" not in ipc.timers
     result.close()
@@ -2938,8 +3239,8 @@ def test_osd_and_video_pixel_aspects_are_composed(tmp_path: Path) -> None:
     ipc.props["osd-dimensions"]["par"] = 1.25
     ipc.props["video-out-params"]["par"] = 1.2
 
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
 
     assert backend.requests[-1].pixel_aspect == pytest.approx(1.5)
@@ -2952,11 +3253,14 @@ def test_ass_video_aspect_override_falls_back_with_observed_value(tmp_path: Path
     caplog.clear()
 
     with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
-        result.set_subtitle("猫を見る")
+        result.turn.cue_coordinator.set_subtitle("猫を見る")
 
     assert backend.requests == []
-    assert result.native_geometry is not None
-    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert result.turn.subtitle_presentation.native is not None
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-render-input-unsupported"
+    )
     assert "sub-ass-video-aspect-override=1.85" in caplog.records[-1].getMessage()
     result.close()
 
@@ -2965,14 +3269,19 @@ def test_non_utf8_ass_has_stable_fallback_reason(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     source = tmp_path / "legacy.ass"
     source.write_bytes(ASS + b"\xff")
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source, live=True)
+    assert result.turn.subtitle_presentation.native is not None
+    result.turn.subtitle_presentation.native.set_source(source, live=True)
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    result.native_geometry.apply(result._geometry_observation())
+    result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
-    assert result.native_geometry.status.fallback_reason == "subtitle-source-encoding-unsupported"
+    assert (
+        result.turn.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-source-encoding-unsupported"
+    )
     result.close()
 
 
@@ -2980,16 +3289,18 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     result, ipc, _backend = reader(tmp_path)
     now = [0.0]
     renderer = NativeVisibleRenderer(clock=lambda: now[0])
-    result.subtitle_pipeline.renderer = renderer
+    result.turn.subtitle_presentation.pipeline.renderer = renderer
     ipc.set_property_error = "disconnected"
     ipc.get_property_error = "disconnected"
-    result.sub_text = "猫を見る"
+    result.turn.playback_observation.install_seed({"sub-text": "猫を見る"})
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
-        renderer.cue_changed(result.subtitle_target(), nonempty=True)
+        renderer.cue_changed(result.turn.subtitle_presentation.target(), nonempty=True)
         assert renderer.ownership_state.owner.value == "unknown"
-        result.subtitle_pipeline.draw_current(result.subtitle_target())
+        result.turn.subtitle_presentation.pipeline.draw_current(
+            result.turn.subtitle_presentation.target()
+        )
         # The retry is a named deadline now: nothing happens until it is due.
         assert ipc.timers["subtitle:ownership-retry"][1] == pytest.approx(0.05)
         assert ipc.commands.count(("set_property", "sub-visibility", True)) == 1
@@ -3015,18 +3326,20 @@ def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, tr
     `sub-visibility` from one trigger are what orphan an assertion and strand the pixels.
     """
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     ipc.commands.clear()
 
     if trigger == "empty-cue":
-        renderer.cue_changed(result.subtitle_target(), nonempty=False)
+        renderer.cue_changed(result.turn.subtitle_presentation.target(), nonempty=False)
     elif trigger == "reconnect":
-        renderer.connection_replaced(result.subtitle_target())
+        renderer.connection_replaced(result.turn.subtitle_presentation.target())
     else:
-        result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+        result.turn.subtitle_presentation.pipeline.activate(
+            result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+        )
 
     assert ipc.commands.count(("set_property", "sub-visibility", True)) <= 1
     assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
@@ -3037,10 +3350,12 @@ def test_an_ownership_trigger_asserts_visibility_at_most_once(tmp_path: Path, tr
 
 def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     ipc.command(
         "set_property",
         "sub-visibility",
@@ -3050,24 +3365,34 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     ipc.set_property_error = "disconnected"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    result.turn.subtitle_presentation.pipeline.activate(
+        result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+    )
 
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.boxes
-    box = result.boxes[0]
-    assert result._hit(result.sub_origin[0] + box.x + 1, result.sub_origin[1] + box.y + 1) == 0
+    assert result.turn.subtitle_presentation.cue.current.boxes
+    box = result.turn.subtitle_presentation.cue.current.boxes[0]
+    assert (
+        result.turn.tooltip_controller.hit(
+            result.turn.subtitle_presentation.cue.current.origin[0] + box.x + 1,
+            result.turn.subtitle_presentation.cue.current.origin[1] + box.y + 1,
+        )
+        == 0
+    )
     result.close()
 
 
-def _establish_native(result: SessionController, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
+def _establish_native(result: TestSession, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
     """Own the pixels for `sid`, the way a session that has been playing a track already does."""
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     ipc.props["sid"] = sid
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    result.turn.subtitle_presentation.pipeline.activate(
+        result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+    )
     assert renderer.ownership_state.native_pixels_established
     return renderer
 
@@ -3085,7 +3410,7 @@ def test_a_reconfigure_reasserts_before_mpv_echoes_the_selected_track(tmp_path: 
     before = renderer.ownership_state.context.ownership_epoch
 
     startup = SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
-    result.configure_subtitle_mode(startup)
+    result.turn.cue_coordinator.configure_subtitle_mode(startup)
 
     assert ipc.props["sid"] == 1  # the echo has not landed: reading it back would see the old track
     assert renderer.ownership_state.context.ownership_epoch > before
@@ -3103,7 +3428,7 @@ def test_reconfiguring_the_same_track_spends_nothing(tmp_path: Path) -> None:
     renderer = _establish_native(result, ipc, sid=5)
     before = renderer.ownership_state.context.ownership_epoch
 
-    result.configure_subtitle_mode(
+    result.turn.cue_coordinator.configure_subtitle_mode(
         SubtitleStartup(SubtitleTracks(jp_sid=5, en_sid=None), MAIN_LANG)
     )
 
@@ -3113,14 +3438,14 @@ def test_reconfiguring_the_same_track_spends_nothing(tmp_path: Path) -> None:
 
 def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     ipc.set_property_exception = OSError("pipe closed")
 
-    result.set_subtitle("猫を見る")
-    result.draw_subtitle()
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.draw()
 
-    assert result.boxes
+    assert result.turn.subtitle_presentation.cue.current.boxes
     assert any(command[0] == "overlay-add" for command in ipc.commands)
     assert renderer.ownership_state.owner.value == "legacy"
     result.close()
@@ -3139,14 +3464,16 @@ def test_an_overtaken_subtitle_surface_never_acknowledges_over_the_current_one(
     from saitenka.runtime.surfaces import SurfaceStatus
 
     result, ipc, _backend = reader(tmp_path, correlated_surfaces=True)
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     ipc.correlate_commands = True
 
     def stage():
         return renderer._fallback.draw(
-            result._draw_request(), result.lifecycle_surfaces, result.ipc
+            result.turn.cue_coordinator.draw_request(),
+            result.turn.lifecycle_surfaces,
+            result.turn.ipc,
         )
 
     older, newer = stage(), stage()
@@ -3156,13 +3483,13 @@ def test_an_overtaken_subtitle_surface_never_acknowledges_over_the_current_one(
     assert newer.revision > older.revision
 
     assert ipc.deliver_runtime_mpv(match="overlay-add")  # the older commit, now overtaken
-    snapshot = result.lifecycle_surfaces.snapshot(OverlayId.SUB)
+    snapshot = result.turn.lifecycle_surfaces.snapshot(OverlayId.SUB)
     assert snapshot is not None
     assert snapshot.status is SurfaceStatus.PENDING
     assert snapshot.acknowledged_revision != older.revision
 
     assert ipc.deliver_runtime_mpv(match="overlay-add")  # the newer commit
-    snapshot = result.lifecycle_surfaces.snapshot(OverlayId.SUB)
+    snapshot = result.turn.lifecycle_surfaces.snapshot(OverlayId.SUB)
     assert snapshot is not None
     assert snapshot.status is SurfaceStatus.PRESENT
     assert snapshot.acknowledged_revision == newer.revision
@@ -3178,13 +3505,13 @@ def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: 
     Before this slice `_reply_accepted(draw(...))` was `True` the moment `draw` returned.
     """
     result, ipc, _backend = reader(tmp_path, correlated_surfaces=True)
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     ipc.commands.clear()
 
     ipc.correlate_commands = True
-    renderer.resume_after_overlay(result.subtitle_target())
+    renderer.resume_after_overlay(result.turn.subtitle_presentation.target())
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the visibility write
     ipc.props["sub-visibility"] = False  # mpv refuses to keep its subtitles visible
     assert ipc.deliver_runtime_mpv(match="sub-visibility")  # readback FALSE: hand to legacy
@@ -3201,12 +3528,14 @@ def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: 
 
 def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
     ipc.command(
         "set_property",
         "sub-visibility",
@@ -3217,7 +3546,9 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     ipc.overlay_add_error = "unsupported format"
 
     ipc.props["sid"] = 5  # a track reconfigure: the production trigger for a re-assertion
-    result.subtitle_pipeline.activate(result.subtitle_target(), draw=result.draw_subtitle)
+    result.turn.subtitle_presentation.pipeline.activate(
+        result.turn.subtitle_presentation.target(), draw=result.turn.subtitle_presentation.draw
+    )
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None
@@ -3227,18 +3558,18 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
 
 def test_rejected_legacy_rehandoff_keeps_mpv_visible_and_retries(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     ipc.set_property_exception = OSError("pipe closed")
-    result.set_subtitle("猫を見る")
-    result.draw_subtitle()
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    result.turn.subtitle_presentation.draw()
     assert renderer.ownership_state.owner.value == "legacy"
     ipc.set_property_exception = None
-    renderer.suspend_for_overlay(result.subtitle_target())
+    renderer.suspend_for_overlay(result.turn.subtitle_presentation.target())
     ipc.commands.clear()
     ipc.overlay_add_error = "unsupported format"
 
-    renderer.resume_after_overlay(result.subtitle_target())
+    renderer.resume_after_overlay(result.turn.subtitle_presentation.target())
 
     assert renderer.ownership_state.owner.value == "unknown"
     assert renderer.ownership_state.retry_effect_id is not None
@@ -3269,12 +3600,14 @@ def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
     ipc.set_property_error = "disconnected"
 
-    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
+    assert (
+        result.turn.subtitle_presentation.native.status.geometry_ready
+    )  # the lane terminal published it
 
     failures = [
         attributes
@@ -3283,7 +3616,7 @@ def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
         and attributes.get("reason") == "mpv-sub-visibility-rejected"
     ]
     assert failures == []
-    renderer = result.subtitle_pipeline.renderer
+    renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     assert renderer.ownership_state.owner.value == "native"
     result.close()
@@ -3293,12 +3626,14 @@ def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> Non
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
 
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
+    assert result.turn.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
-    result.native_geometry.apply(result._geometry_observation())
+    result.turn.subtitle_presentation.native.apply(
+        result.turn.cue_coordinator.geometry_observation()
+    )
 
-    assert result._telemetry_gauges() == IsPartialDict(
+    assert result.turn._telemetry_gauges() == IsPartialDict(
         **{
             "subtitle_geometry.submitted": 1.0,
             "subtitle_geometry.completed": 0.0,
@@ -3780,9 +4115,9 @@ def test_the_legacy_renderer_restores_the_visibility_it_found_at_close(tmp_path:
     result, ipc, _backend = reader(tmp_path)
     ipc.props["sub-visibility"] = True
     renderer = SubtitleRenderer()
-    result.subtitle_pipeline.renderer = renderer
+    result.turn.subtitle_presentation.pipeline.renderer = renderer
 
-    assert renderer.activate(result.subtitle_target()) is True
+    assert renderer.activate(result.turn.subtitle_presentation.target()) is True
     assert ("set_property", "sub-visibility", False) in ipc.commands
     ipc.commands.clear()
 
@@ -3828,9 +4163,9 @@ def test_boxes_are_laid_out_in_the_surface_they_are_drawn_onto(
     reading the property directly would not follow it."""
     spans = _decision_spans(monkeypatch)
     result, ipc, _backend = reader(tmp_path)
-    result.osd = surface
+    result.turn.screen.osd = surface
 
-    result.set_subtitle("猫を見る")
+    result.turn.cue_coordinator.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
 
     framed = [s for s in spans if "frame_width" in s]

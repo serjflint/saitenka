@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from saitenka.app.anki import MineConfig
+from saitenka.app.config import MiningOptions
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.mining_controller import (
     MiningController,
@@ -82,9 +83,7 @@ def _controller(tmp_path, monkeypatch):
     controller = MiningController(
         spec,
         MiningLifecycle(seed, _Submitter(), lambda _delay, _due: True, lambda: None, lambda: False),
-        max_bulk=20,
-        anki_ok_ttl=5,
-        anki_ping_timeout=0.1,
+        settings=MiningOptions(max_bulk=20, anki_ok_ttl=5, anki_ping_timeout=0.1),
         encounter=encounters,
         apply=_apply,
     )
@@ -187,9 +186,7 @@ def test_rejected_seed_admission_releases_the_lane(tmp_path, monkeypatch) -> Non
     controller = MiningController(
         MiningSpec(identity, {"deck": "Deck A", "model": "Lapis"}),
         MiningLifecycle(seed, _Submitter(), lambda _delay, _due: True, lambda: None, lambda: False),
-        max_bulk=20,
-        anki_ok_ttl=5,
-        anki_ping_timeout=0.1,
+        settings=MiningOptions(max_bulk=20, anki_ok_ttl=5, anki_ping_timeout=0.1),
         encounter=_EncounterSource(),
         apply=_apply,
     )

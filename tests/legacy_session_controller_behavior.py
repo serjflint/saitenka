@@ -6,10 +6,13 @@ from typing import TYPE_CHECKING
 
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState, InteractionState, PixelState
 
+from saitenka.app.session.lifecycle import LiveState
 from saitenka.app.subtitle_render import SUB_ID
 
 if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
+    from session_builder import TestSession
+
+    from saitenka.app.session.turn import SessionTurn
 
 
 def _visible_surfaces(commands: list[tuple]) -> set[object]:
@@ -29,35 +32,43 @@ def _visible_surfaces(commands: list[tuple]) -> set[object]:
     return visible
 
 
-def _cue(reader: SessionController) -> CueState:
-    if reader.annotation_controller.view.retired and reader._cue_identity_ever_installed:
+def _cue(reader: SessionTurn) -> CueState:
+    if reader.cue_coordinator.command_state(
+        retired=reader.annotation_controller.view.retired
+    ).value == ("retired-after-active"):
         return "retired"
-    if reader.annotation_controller.view.identity is not None or reader.sub_text.strip():
+    if (
+        reader.annotation_controller.view.identity is not None
+        or reader.playback_observation.cue.text.strip()
+    ):
         return "active"
     return "none"
 
 
-def _interaction(reader: SessionController) -> InteractionState:
+def _interaction(reader: SessionTurn) -> InteractionState:
     if reader.tooltip_controller.surface_state().view.rect is not None:
         return "tooltip"
-    if reader.tooltip_controller.observation().selected >= 0 and reader.boxes:
+    if (
+        reader.tooltip_controller.observation().selected >= 0
+        and reader.subtitle_presentation.cue.current.boxes
+    ):
         return "hovered"
-    return "ready" if reader.boxes else "unavailable"
+    return "ready" if reader.subtitle_presentation.cue.current.boxes else "unavailable"
 
 
-def _pixels(reader: SessionController, visible: set[object]) -> PixelState:
+def _pixels(reader: SessionTurn, visible: set[object]) -> PixelState:
     if SUB_ID in visible:
         return "legacy"
     if reader.ipc.props.get("sub-visibility") is True:
         return "native"
-    renderer = reader.subtitle_pipeline.renderer
+    renderer = reader.subtitle_presentation.pipeline.renderer
     ownership = getattr(renderer, "ownership_state", None)
     return "unknown" if ownership is not None and ownership.owner.value == "unknown" else "none"
 
 
 class LegacyReaderTrace:
-    def __init__(self, reader: SessionController) -> None:
-        self.reader = reader
+    def __init__(self, reader: TestSession) -> None:
+        self.reader = reader.turn
         self.trace = BehaviorTrace()
 
     def observe(self, event: str, *, outcome: str) -> None:
@@ -69,7 +80,7 @@ class LegacyReaderTrace:
                 pixels=_pixels(self.reader, visible),
                 interaction=_interaction(self.reader),
                 surfaces="present" if visible else "none",
-                lifecycle="closed" if self.reader._stop.is_set() else "open",
+                lifecycle=("closed" if self.reader.lifecycle.state is LiveState.CLOSED else "open"),
                 outcome=outcome,
             )
         )

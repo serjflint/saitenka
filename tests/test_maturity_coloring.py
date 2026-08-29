@@ -2,13 +2,14 @@
 
 import pytest
 import util
+from session_builder import build_session
 from util import RecordingRasterProvider
 
-import saitenka.app.session.deps as reader_deps
+import saitenka.app.features.profiles.dependencies as reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
 from saitenka.app.fsrs import KnownSnap
 from saitenka.app.scoring import Palette, Scorer
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.tokenize import Token
 from saitenka.app.wordlists import FreqDict, KnownWords
@@ -99,21 +100,28 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
         enable_freq=False,
         enable_jlpt=False,
     )
-    reader = SessionController(
+    reader = build_session(
         _IPC(),
-        scorer=scorer,
+        services=SessionServices(
+            scorer=scorer,
+        ),
         options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")),
     )
-    reader.tokens = [_token()]
-    reader.lines = [[object()]]
-    reader.styles = scorer.score_line(reader.tokens)
-    reader.tooltip_controller.select(0)
-    monkeypatch.setattr(reader.ov, "show", lambda *_args, **_kwargs: None)
+    reader.turn.subtitle_presentation.cue.replace_tokenized(tokens=[_token()])
+    reader.turn.subtitle_presentation.cue.replace_tokenized(lines=[[object()]])
+    reader.turn.subtitle_presentation.cue.replace_tokenized(
+        styles=scorer.score_line(reader.turn.subtitle_presentation.cue.current.tokens)
+    )
+    reader.turn.tooltip_controller.select(0)
+    monkeypatch.setattr(reader.turn.ov, "show", lambda *_args, **_kwargs: None)
     provider = RecordingRasterProvider(size=(10, 10))
-    reader.renderer = SubtitleRenderer(provider)
+    reader.turn.subtitle_presentation.renderer = SubtitleRenderer(provider)
 
-    reader.draw_subtitle()
-    reader.set_annotation_hover(revealed=True)
+    reader.turn.subtitle_presentation.draw()
+    reader.turn.tooltip_controller.set_annotation_hover(revealed=True)
 
-    assert [request.styles for request in provider.requests] == [None, reader.styles]
-    assert reader.styles[0].tag == "learning"
+    assert [request.styles for request in provider.requests] == [
+        None,
+        reader.turn.subtitle_presentation.cue.current.styles,
+    ]
+    assert reader.turn.subtitle_presentation.cue.current.styles[0].tag == "learning"

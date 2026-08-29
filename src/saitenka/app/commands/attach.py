@@ -10,6 +10,7 @@ import cyclopts
 from saitenka import otel_metrics
 from saitenka.app import player_supervisor
 from saitenka.app.config import TooltipOptions, load_config
+from saitenka.app.session.factory import SessionIdentity, prepare_session_controller
 from saitenka.app.subselect import ProviderConfig
 
 log = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def _attach_reslot(ports: ReslotPorts, ipc, path: Path, cfg: ProviderConfig) -> 
     """Re-establish Japanese subs when the user's mpv advances to the next episode in ATTACH mode
     (#100). Reactive only — fired from mpv's ``file-loaded`` (attach never sets ``advance_hook``; the
     user/SyncPlay owns playback, the #62 gate). Closes the finished stats row, rebinds the leak-free
-    EpisodeContext, drops the carried-over external sub, re-runs the attach selection (which prefers JP
+    subtitle navigation state, drops the carried-over external sub, re-runs the attach selection (which prefers JP
     and defers a jimaku fetch when the new file has none — so watching continues in Japanese even when
     the next episode ships no JP track), re-wires the retry/picker, and restarts recorder + prefetch."""
     from dataclasses import replace
@@ -234,9 +235,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
+    from saitenka.app.features.profiles.dependencies import begin_tokenizer_warm
     from saitenka.app.launch.run import setup_session_telemetry
     from saitenka.app.profiles import resolve_launch_identity
-    from saitenka.app.session.deps import begin_tokenizer_warm
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
@@ -342,16 +343,18 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
-    from saitenka.app.session.factory import create_session_controller
 
     with otel_metrics.traced("startup.reader_create"):
-        reader = create_session_controller(
+        prepared = prepare_session_controller(
             ipc,
+            identity=SessionIdentity(
+                profile=active_profile,
+                tokenizer_warm=tokenizer_warm,
+            ),
             options=opts,
-            profile=active_profile,
-            tokenizer_warm=tokenizer_warm,
         )
-    import saitenka.app.session.deps as reader_deps
+        reader = prepared.live
+    import saitenka.app.features.profiles.dependencies as reader_deps
     from saitenka.app.profiles import scope_config
 
     def scoped_for(selected):
@@ -364,7 +367,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
             selected_cfg, language=selected.langs.main
         )
 
-    reader.configure_profiles(
+    prepared.profile.configure(
         profile_cycle,
         dependency_builder_for=dependency_builder_for,
         mining_spec_for=lambda selected, identity: reader_deps.mining_spec_from_config(
@@ -386,14 +389,14 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         tsukihime=bool(th.get("enabled", False)),
     )
     _finish_attach_subtitle_startup(
-        reader.reslot_ports,
+        prepared.reslot,
         ipc,
         subtitle_startup,
         provider_cfg,
         fetch_in_background=fetch_jimaku_in_background,
     )
-    _install_attach_reslot_hook(reader.reslot_ports, reader.watch_ports, ipc, provider_cfg)
-    reader.load_deps_async(cfg)
+    _install_attach_reslot_hook(prepared.reslot, prepared.watch, ipc, provider_cfg)
+    prepared.profile.load(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "
         "Ctrl+C to detach (mpv keeps running).",

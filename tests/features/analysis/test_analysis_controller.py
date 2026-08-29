@@ -3,14 +3,16 @@
 import threading
 
 import pytest
+from session_builder import TestSession, build_session
 from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.features.analysis import analysis_controller
 from saitenka.app.features.analysis.episode_analysis import cue_result
+from saitenka.app.features.profiles.dependencies import DependencyBundle
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.wordlists import KnownWords
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime.events import (
@@ -25,96 +27,102 @@ from saitenka.subtitles import Cue, CueIndex
 def reader():
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc, scorer=Scorer(known=KnownWords.from_set(["本"])))
-    reader.declare_subtitle(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
-    reader.episode.sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
+    reader = build_session(
+        ipc, services=SessionServices(scorer=Scorer(known=KnownWords.from_set(["本"])))
+    )
+    reader.turn.track_commands.declare(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+        [Cue(0, 1, "私は本を読む。")]
+    )
     yield reader
     reader.close()
     gateway.close()
 
 
-def _toggle(reader: SessionController) -> None:
-    reader._handle(ANALYSIS_MSG)
+def _toggle(reader: TestSession) -> None:
+    reader.turn.command_runtime.handle(ANALYSIS_MSG)
 
 
-def _invalidate(reader: SessionController, *, vocabulary_changed: bool = False) -> None:
-    reader.analysis_commands.invalidate(vocabulary_changed=vocabulary_changed)
+def _invalidate(reader: TestSession, *, vocabulary_changed: bool = False) -> None:
+    reader.turn.analysis_commands.invalidate(vocabulary_changed=vocabulary_changed)
 
 
-def _finish(reader: SessionController) -> None:
+def _finish(reader: TestSession) -> None:
     await_ready(
-        lambda: reader.analysis_controller.settled,
+        lambda: reader.turn.analysis_controller.settled,
         "analysis result was not published",
-        pump=reader._drain_events,
+        pump=reader.turn._drain_events,
     )
 
 
 def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader):
     _toggle(reader)
-    assert reader.analysis_controller.status == "Analyzing…"
+    assert reader.turn.analysis_controller.status == "Analyzing…"
     _finish(reader)
 
-    assert reader.analysis_controller.result is not None
-    assert reader.analysis_controller.status == "Ready"
-    assert OverlayId.ANALYSIS in reader.ov._live
+    assert reader.turn.analysis_controller.result is not None
+    assert reader.turn.analysis_controller.status == "Ready"
+    assert OverlayId.ANALYSIS in reader.turn.ov._live
     forbidden = {"sub-seek", "seek"}
-    assert not any(command and command[0] in forbidden for command in reader.ipc.commands)
-    assert not any(command[:2] == ("set_property", "pause") for command in reader.ipc.commands)
+    assert not any(command and command[0] in forbidden for command in reader.turn.ipc.commands)
+    assert not any(command[:2] == ("set_property", "pause") for command in reader.turn.ipc.commands)
 
     _toggle(reader)
-    assert OverlayId.ANALYSIS not in reader.ov._live
+    assert OverlayId.ANALYSIS not in reader.turn.ov._live
 
 
 def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
-    reader.declare_subtitle(SubtitleTracksDiscovered(None, reader.en_sid))
+    reader.turn.track_commands.declare(
+        SubtitleTracksDiscovered(None, reader.turn.track_commands.current().en_sid)
+    )
 
     _toggle(reader)
-    assert reader.analysis_controller.status == "Analyzing…"
+    assert reader.turn.analysis_controller.status == "Analyzing…"
     _finish(reader)
-    assert reader.analysis_controller.status == "Ready"
-    assert reader.analysis_controller.result is not None
+    assert reader.turn.analysis_controller.status == "Ready"
+    assert reader.turn.analysis_controller.result is not None
 
 
 def test_no_index_reports_unavailable(reader):
-    reader.episode.sub_index = None
+    reader.turn.track_commands.navigation.current.sub_index = None
 
     _toggle(reader)
 
-    assert reader.analysis_controller.status == "Japanese track unavailable"
-    assert reader.analysis_controller.settled
+    assert reader.turn.analysis_controller.status == "Japanese track unavailable"
+    assert reader.turn.analysis_controller.settled
 
 
 def test_cache_hit_reopens_with_the_same_result_immediately(reader):
     _toggle(reader)
     _finish(reader)
-    result = reader.analysis_controller.result
+    result = reader.turn.analysis_controller.result
 
     _toggle(reader)
     _toggle(reader)
 
-    assert reader.analysis_controller.status == "Ready"
-    assert reader.analysis_controller.result is result
+    assert reader.turn.analysis_controller.status == "Ready"
+    assert reader.turn.analysis_controller.result is result
 
 
 def test_track_analysis_completes_while_overlay_is_closed(reader):
     _invalidate(reader)
     _finish(reader)
 
-    assert reader.analysis_controller.result is not None
-    assert not reader.analysis_controller.open
-    assert OverlayId.ANALYSIS not in reader.ov._live
+    assert reader.turn.analysis_controller.result is not None
+    assert not reader.turn.analysis_controller.open
+    assert OverlayId.ANALYSIS not in reader.turn.ov._live
 
 
 def test_dependency_loading_defers_analysis_until_vocabulary_arrives(reader):
-    reader._loading = True
+    reader.turn.profile_session.begin_loading()
 
     _invalidate(reader)
-    assert reader.analysis_controller.settled
+    assert reader.turn.analysis_controller.settled
 
-    reader._loading = False
+    reader.turn.profile_session.accept(DependencyBundle(reader.turn.profile_session.identity))
     _invalidate(reader, vocabulary_changed=True)
     _finish(reader)
-    assert reader.analysis_controller.result is not None
+    assert reader.turn.analysis_controller.result is not None
 
 
 def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
@@ -122,13 +130,15 @@ def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
     _finish(reader)
 
     _invalidate(reader, vocabulary_changed=True)
-    assert reader.analysis_controller.status == "Analyzing…"
+    assert reader.turn.analysis_controller.status == "Analyzing…"
     _finish(reader)
 
-    reader.episode.sub_index = CueIndex([Cue(0, 1, "彼は映画を見る。")])
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+        [Cue(0, 1, "彼は映画を見る。")]
+    )
     _invalidate(reader)
     _finish(reader)
-    assert cue_result(reader.analysis_controller.result, 0) is not None
+    assert cue_result(reader.turn.analysis_controller.result, 0) is not None
 
 
 def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
@@ -147,25 +157,25 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
         return analyze_cues(cues, scorer, tokenizer)
 
     monkeypatch.setattr(analysis_controller, "analyze_cues", analyze)
-    reader.episode.sub_index = CueIndex([Cue(0, 1, "古い一")])
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "古い一")])
     _toggle(reader)
     assert old_started[0].wait(1)
 
-    reader.episode.sub_index = CueIndex([Cue(0, 1, "古い二")])
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "古い二")])
     _invalidate(reader)
     assert old_started[1].wait(1)
 
-    reader.episode.sub_index = CueIndex([Cue(0, 1, "新しい")])
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "新しい")])
     _invalidate(reader)
-    assert reader.analysis_controller.status == "Analyzing…"
+    assert reader.turn.analysis_controller.status == "Analyzing…"
 
     old_release.set()
     _finish(reader)
-    current = reader.analysis_controller.result
+    current = reader.turn.analysis_controller.result
     assert current is not None
 
-    drain_for(reader._drain_events)
-    assert reader.analysis_controller.result is current
+    drain_for(reader.turn._drain_events)
+    assert reader.turn.analysis_controller.result is current
     assert newest_calls == 1
 
 
@@ -191,10 +201,10 @@ def test_worker_completion_is_applied_only_when_the_session_thread_drains(reader
 
     release.set()
     assert finished.wait(1)
-    assert reader.analysis_controller.result is None
+    assert reader.turn.analysis_controller.result is None
 
     _finish(reader)
-    assert reader.analysis_controller.result is not None
+    assert reader.turn.analysis_controller.result is not None
     assert worker_thread[0] != session_thread
 
 
@@ -212,20 +222,26 @@ def test_close_preserves_completed_analysis_for_the_session_summary():
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc, scorer=Scorer(known=KnownWords.from_set(["本"])))
+    reader = build_session(
+        ipc, services=SessionServices(scorer=Scorer(known=KnownWords.from_set(["本"])))
+    )
     result = None
     try:
-        reader.declare_subtitle(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
-        reader.episode.sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
-        reader.episode.session_recorder = SessionRecorder(
-            "/anime/Show 01.mkv",
-            clock=lambda: 0.0,
-            wall_clock=lambda: 0.0,
-            writer=Writer(),
+        reader.turn.track_commands.declare(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
+        reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+            [Cue(0, 1, "私は本を読む。")]
+        )
+        reader.turn.history.replace_recorder(
+            SessionRecorder(
+                "/anime/Show 01.mkv",
+                clock=lambda: 0.0,
+                wall_clock=lambda: 0.0,
+                writer=Writer(),
+            )
         )
         _toggle(reader)
         _finish(reader)
-        result = reader.analysis_controller.result
+        result = reader.turn.analysis_controller.result
     finally:
         reader.close()
         gateway.close()
@@ -240,8 +256,8 @@ def test_malformed_success_has_a_terminal_unavailable_state(reader, monkeypatch)
     _toggle(reader)
     _finish(reader)
 
-    assert reader.analysis_controller.result is None
-    assert reader.analysis_controller.status == "Analysis unavailable"
+    assert reader.turn.analysis_controller.result is None
+    assert reader.turn.analysis_controller.status == "Analysis unavailable"
 
 
 def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, caplog):
@@ -253,19 +269,19 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
         _toggle(reader)
         _finish(reader)
 
-    assert reader.analysis_controller.result is None
-    assert reader.analysis_controller.status == "Analysis unavailable"
+    assert reader.turn.analysis_controller.result is None
+    assert reader.turn.analysis_controller.status == "Analysis unavailable"
     assert "episode analysis failed" in caplog.text
 
 
 def test_english_or_missing_japanese_track_is_unavailable(reader):
-    reader.declare_subtitle(SubtitleLanguageChanged("en"))
+    reader.turn.track_commands.declare(SubtitleLanguageChanged("en"))
 
     _toggle(reader)
 
-    assert reader.analysis_controller.status == "Japanese track unavailable"
-    assert reader.analysis_controller.result is None
-    assert reader.analysis_controller.settled
+    assert reader.turn.analysis_controller.status == "Japanese track unavailable"
+    assert reader.turn.analysis_controller.result is None
+    assert reader.turn.analysis_controller.settled
 
 
 def test_ui_scale_enlarges_episode_analysis_window():

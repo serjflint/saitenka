@@ -92,8 +92,11 @@ def test_the_command_graph_closes_every_installed_policy() -> None:
 
 
 def test_the_command_graph_rejects_an_installed_policy_without_a_message() -> None:
+    missing = _bindings()[0].command_type
+    incomplete = tuple(row for row in STATELESS_COMMANDS if not isinstance(row.command, missing))
+
     with pytest.raises(ValueError, match="have no script messages"):
-        StatelessCommandGraph(_bindings(), STATELESS_COMMANDS[:-1])
+        StatelessCommandGraph(_bindings(), incomplete)
 
 
 def test_the_command_graph_rejects_duplicate_messages() -> None:
@@ -115,7 +118,7 @@ def test_stateless_boundaries_do_not_capture_the_session_or_replaceable_episode(
             if annotation is None:
                 continue
             text = ast.unparse(annotation)
-            if "SessionController" in text or "EpisodeContext" in text:
+            if "SessionController" in text or "NavigationState" in text:
                 forbidden.append(f"{path.relative_to(ROOT)}:{node.lineno} {text}")
 
     assert forbidden == []
@@ -136,17 +139,12 @@ def test_stateless_capabilities_do_not_hide_authority_in_opaque_callables() -> N
 
 
 def test_stateless_command_composition_has_no_deferred_session_reads() -> None:
-    path = INTENTS / "session" / "controller.py"
+    path = INTENTS / "session" / "builder.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    controller = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "SessionController"
-    )
     graph = next(
         node
-        for node in controller.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_stateless_commands"
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_assemble_stateless_commands"
     )
 
     assert [node.lineno for node in ast.walk(graph) if isinstance(node, ast.Lambda)] == []

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "saitenka" / "app"
 
 _OWNER = "features/tooltip/tooltip_controller.py"
+_INTERACTION = "session/interaction_adapter.py"
 _PREPARATION_OWNER = "features/tooltip/preparation.py"
 _COMPOSITION = "session/controller.py"
 _ASSEMBLY = "session/assembly.py"
@@ -43,7 +44,6 @@ _LEGACY_SESSION_ATTRIBUTES = {
     "hide_delay",
     "hover",
     "hover_switch_delay",
-    "interaction",
     "pause_on_tooltip",
     "scan_delay",
     "tip",
@@ -107,9 +107,8 @@ _OWNER_DECLARED_RESULTS = {
 _OWNER_RAW_BOUNDARY_MEMBERS = {*_OWNER_MUTABLE_BRIDGES}
 _RETIRED_SESSION_PORTS = {"panel_ports", "tip_ports"}
 _SESSION_PRIVATE_TOOLTIP_PORTS = {"_panel_ports", "_tip_ports"}
-_TOOLTIP_RAW_BRIDGE_SITES = {_OWNER, _COMPOSITION}
+_TOOLTIP_RAW_BRIDGE_SITES = {_OWNER, _INTERACTION}
 _COMPOSITION_RAW_TOOLTIP_METHODS = {
-    "_panel_cache_setdefault",
     "_panel_ports",
     "_render_nested_view",
     "_render_tip_view",
@@ -146,6 +145,18 @@ _PREPARATION_CONSTRUCTORS = {
     "PersistentHeadCache": {_PREPARATION_OWNER, _PREWARM},
     "PrefetchState": {_PREPARATION_OWNER},
     "TooltipPreparationController": {_ASSEMBLY},
+}
+_TOOLTIP_SESSION_PEER_OWNERS = {
+    "CueAnnotationController",
+    "HistoryOwner",
+    "MiningController",
+    "NavigationStore",
+    "PlaybackObservationController",
+    "ProfileSession",
+    "SubtitlePresentation",
+    "SubtitleTrackStore",
+    "TranslationController",
+    "TranslationObservation",
 }
 
 
@@ -528,6 +539,17 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
 
     for node, owner_names, preparation_names in _scoped_nodes(tree, owner_types=owner_types):
         if (
+            site == _OWNER
+            and isinstance(node, ast.ClassDef)
+            and node.name.startswith("TooltipSession")
+        ):
+            findings.extend(
+                Finding(path, field.lineno, "tooltip-session-peer-owner", node.name)
+                for field in node.body
+                if isinstance(field, ast.AnnAssign)
+                and _annotation_mentions_type(field.annotation, _TOOLTIP_SESSION_PEER_OWNERS)
+            )
+        if (
             site == _COMPOSITION
             and isinstance(node, ast.FunctionDef)
             and node.name in _RETIRED_SESSION_PORTS
@@ -540,7 +562,11 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
             and _returned_session_port(node)
         ):
             findings.append(Finding(path, node.lineno, "session-tooltip-port", node.name))
-        if isinstance(node, ast.Attribute) and node.attr in _RETIRED_SESSION_PORTS:
+        if (
+            site == _COMPOSITION
+            and isinstance(node, ast.Attribute)
+            and node.attr in _RETIRED_SESSION_PORTS
+        ):
             findings.append(Finding(path, node.lineno, "session-tooltip-port", node.attr))
         if (
             site == _OWNER

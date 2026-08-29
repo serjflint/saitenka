@@ -1,9 +1,7 @@
-"""Wire the typed reactor into a live session, one migrated owner at a time.
+"""Route typed runtime events to their owning session features.
 
-This is the table D3 grows: a route per (event, owner) pair a feature actually owns, and an
-`owner_of` that answers "nobody yet" for everything else. `OwnerRouter` turns that answer into a
-counted fact instead of an error, so the gap is readable at any point in the migration —
-`gateway.session_ledger.counts`, alongside what the session's reducers reported and controlled.
+`owner_of` returns no owner for events outside the session graph. `OwnerRouter` records those
+events in `gateway.session_ledger.counts` rather than treating them as dispatch errors.
 
 It lives in `app/` rather than `mpvio/` because it names app features; `mpvio` must not import
 `app`. The gateway only exposes the seam (`observe`, `mailbox`, `dispatch_effect`).
@@ -31,6 +29,7 @@ from saitenka.app.bindings import (
     COPY_MSG,
     HOVER_PAUSE_MSG,
     KANJI_MSG,
+    LEGACY_RENDERER_MSG,
     MINE_ALL_MSG,
     MINE_MSG,
     MINE_VIDEO_MSG,
@@ -172,10 +171,10 @@ _SESSION_EVENTS = (
     SessionClosing,
 )
 
-#: Payload types the reactor handles *instead of* the legacy SessionController, not merely as well as it.
+#: Payload types the reactor claims rather than forwarding to the owner-thread turn.
 #:
 #: Declared, never derived from `_SESSION_EVENTS` — routing and claiming answer different
-#: questions, and a payload joins this tuple only when the SessionController has no remaining part in it.
+#: questions, and a payload joins this tuple only when the turn has no remaining part in it.
 #:
 #: What "no remaining part" means is the whole protocol: route the payload, move the act, then
 #: claim. All three connection payloads are here because their acts moved — the stranded cue
@@ -222,7 +221,7 @@ SUBTITLE_DEACTIVATE_RESOURCE = "subtitle-deactivate"
 SUBTITLE_CLEAR_RESOURCE = "subtitle-clear"
 SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
 #: The cue identity a lost transport strands. A *retiring* act, so it goes in the close-verb table
-#: with the rest — nothing about that seam is close-specific, and an act moves off the SessionController by
+#: with the rest — nothing about that seam is close-specific, and an act joins the runtime by
 #: becoming an effect with a registered performer whatever the phase.
 CUE_RETIRE_RESOURCE = "cue-identity-retire"
 #: Re-slotting onto a newly loaded file. A *starting* act — the episode is being established — so it
@@ -359,7 +358,7 @@ def _perform(gateway: MpvGateway, name: str, effect: Effect) -> bool:
     """Hand one effect to its performer, or say it was never registered.
 
     Not isolated, like `_begin` and unlike `_retire`: a command that raises is a bug in the act, and
-    the SessionController's own arm has never swallowed one either.
+    the turn's own arm has never swallowed one either.
     """
     performer = gateway.session_resources.get(name)
     if performer is None:
@@ -520,7 +519,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     hint's. Only the seeding is optional: a screenshot capture must not carry the breadcrumb.
 
     The hint request is handed to the reactor directly rather than published, because it must
-    reach mpv during the file-load window — before a SessionController exists to drain the mailbox. `handle`
+    reach mpv during the file-load window — before the live session drains the mailbox. `handle`
     takes an envelope and reads nothing else, so constructing one here is the whole cost; the
     sequence number is the mailbox's ordering device and unused by the reactor.
     """
@@ -554,7 +553,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
     # Raw observations are claimed at the gateway; the observation owner dispatches the other
-    # playback declarations. Both paths meet in this slice, and SessionController applies the
+    # playback declarations. Both paths meet in this slice, and SessionTurn applies the
     # cross-feature consequences of its typed deltas.
     routes.update({RouteKey(event, Owner.PLAYBACK): playback for event in PLAYBACK_EVENTS})
     # `Owner.SUBTITLE` is not claimed either, and for a sharper reason: every event it takes is a
@@ -563,7 +562,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     routes.update({RouteKey(event, Owner.SUBTITLE): subtitle for event in SUBTITLE_EVENTS})
     # `Owner.INTERACTION` is not claimed for the third reason in the set: its events are
     # *observations*, so the reducer is what decides and the decisions come back through the
-    # slice's outbox for the SessionController to perform. The slot owns the hysteresis; the acts do not move
+    # slice's outbox for SessionTurn to perform. The slot owns the hysteresis; the acts do not move
     # until the tooltip's own state does.
     routes.update({RouteKey(event, Owner.INTERACTION): interaction for event in INTERACTION_EVENTS})
     # `Owner.PRESENTATION` is a declaring slice like SUBTITLE's: the sender has already drawn or
@@ -717,4 +716,7 @@ STATELESS_COMMANDS = (
         COPY_CLICK_MSG, interaction_intents.InteractionCommand.COPY_UNDER_CURSOR
     ),
     StatelessCommandRegistration(OVERLAY_TOGGLE_MSG, session_intents.SessionCommand.TOGGLE_OVERLAY),
+    StatelessCommandRegistration(
+        LEGACY_RENDERER_MSG, session_intents.SessionCommand.TOGGLE_RENDERER
+    ),
 )

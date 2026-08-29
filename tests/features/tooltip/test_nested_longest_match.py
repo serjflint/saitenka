@@ -3,10 +3,11 @@ whole dictionary term, mirroring the base tooltip's forward longest-match on a c
 
 from __future__ import annotations
 
+from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.features.tooltip import nested_popup
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import get_tokenizer
 from saitenka.model import LinkBox, ScanBox
@@ -62,15 +63,14 @@ class _RecordingDS:
 def test_link_query_is_looked_up_whole_not_tokenized():
     # Regression (それにしては → その): a cross-reference link ``?query=それにしては`` must look up the WHOLE
     # compound, not tokenize it and take the first token (それ). Both nav paths build a whole-query token.
-    from saitenka.app.features.tooltip import tooltip
     from saitenka.app.tokenize import query_token
 
     assert query_token("それにしては").surface == "それにしては"
     assert query_token("  ") is None
 
     ds = _RecordingDS()
-    reader = SessionController(FakeIPC(), dict_set=ds)
-    tooltip._navigated_panel(reader.panel_style, "それにしては")
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    reader.turn.tooltip_controller.navigated_panel("それにしては")
     assert ds.seen == ["それにしては"]  # the WHOLE query reached the lookup, not それ
 
 
@@ -78,17 +78,21 @@ def test_open_link_navigates_the_whole_query(monkeypatch):
     from saitenka.app.subtitle_render import NullRenderer
 
     ds = _RecordingDS()
-    reader = SessionController(FakeIPC(), dict_set=ds)
-    reader.osd = (1920, 1080)
-    reader.sub_origin = (0, 0)
-    monkeypatch.setattr(reader, "renderer", NullRenderer())
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    reader.turn.screen.osd = (1920, 1080)
+    reader.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    monkeypatch.setattr(reader.turn.subtitle_presentation, "renderer", NullRenderer())
     lb = LinkBox("それにつけても", 0, 0, 10, 10)
     nested_popup.open_link(
-        reader._tip_ports, reader._panel_ports, lb, (0, 0), 0
+        reader.turn.tooltip_controller.tip_ports,
+        reader.turn.tooltip_controller.panel_ports,
+        lb,
+        (0, 0),
+        0,
     )  # no worker → synchronous open
     assert ds.seen == ["それにつけても"]  # the WHOLE query reached the lookup, not それ
     assert (
-        reader.tooltip_controller.surface_state().nest.word == "それにつけても"
+        reader.turn.tooltip_controller.surface_state().nest.word == "それにつけても"
     )  # …and it's the shown nested word
 
 
@@ -97,20 +101,22 @@ def test_phrase_extra_terms_is_empty_off_a_known_phrase():
 
 
 def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
-    reader = SessionController(FakeIPC(), dict_set=_DS())
-    reader.osd = (1920, 1080)
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
+    reader.turn.screen.osd = (1920, 1080)
     # Decouple from the live unidic split: the scan tail tokenises to コン + サート.
-    monkeypatch.setattr(reader.profile_controller.tokenizer, "tokenize", lambda _s: _SPLIT)
+    monkeypatch.setattr(
+        reader.turn.profile_session.profile.tokenizer, "tokenize", lambda _s: _SPLIT
+    )
 
     nested_popup.show_nested(
-        reader._tip_ports,
-        reader._panel_ports,
-        reader.word_lookup,
+        reader.turn.tooltip_controller.tip_ports,
+        reader.turn.tooltip_controller.panel_ports,
+        reader.turn.tooltip_controller.word_lookup,
         ScanBox("コンサート", 0, 0, 20, 20),
     )
 
-    assert reader.tooltip_controller.surface_state().nest.state is not None, (
+    assert reader.turn.tooltip_controller.surface_state().nest.state is not None, (
         "a nested popup must open"
     )
     # The longest match is stacked on the panel's identity — コンサート, not the bare コン.
-    assert reader.tooltip_controller.surface_state().nest.key.phrase_terms == ("コンサート",)
+    assert reader.turn.tooltip_controller.surface_state().nest.key.phrase_terms == ("コンサート",)

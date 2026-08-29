@@ -1,4 +1,4 @@
-"""WP5.3: hiding and restoring every saitenka surface is an ordered decision."""
+"""Session-wide commands are ordered decisions over current session facts."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from saitenka.app.session.intents import (
     SetSurfacesVisible,
     ShowTranslation,
     SuspendSubtitles,
+    ToggleRenderer,
     reduce,
 )
 
@@ -68,3 +69,7 @@ def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
     reduce(TOGGLE, given)
 
     assert given == SessionInputs(overlay_visible=True, translation_wanted=True)
+
+
+def test_renderer_toggle_is_a_typed_session_effect() -> None:
+    assert reduce(SessionCommand.TOGGLE_RENDERER, SessionInputs()) == (ToggleRenderer(),)

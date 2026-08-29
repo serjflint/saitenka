@@ -6,11 +6,13 @@ from typing import cast
 import pytest
 from legacy_session_controller_behavior import LegacyReaderTrace
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
+from session_builder import build_session
 from util import FakeIPC, runtime_gateway
 
 from saitenka.app import subtitle_adapter
 from saitenka.app.bindings import SUB_PICKER_MSG
-from saitenka.app.session.controller import SessionController
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
@@ -43,11 +45,12 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = SessionController(ipc, renderer=NullRenderer())
+    reader = build_session(ipc, infrastructure=SessionInfrastructure(renderer=NullRenderer()))
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
+    reader.start()
     dispatched: list[bool] = []
     monkeypatch.setattr(
-        reader.picker_controller,
+        reader.turn.picker_controller,
         "open",
         lambda *_args, **_kwargs: dispatched.append(True),
     )
@@ -86,10 +89,18 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
 def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch) -> None:
     ipc = FakeIPC()
     ipc.props.update({"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
-    reader.start_observing()
-    reader.set_subtitle("old")
-    reader.boxes = [WordBox(0, 10, 10, 20, 20)]
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    reader.turn.playback_observation.start_session()
+    reader.turn.cue_coordinator.set_subtitle("old")
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     copied: list[str] = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
     trace = LegacyReaderTrace(reader)
@@ -105,14 +116,14 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
     # conflict phase is observed from inside the drain — after every event in the batch was
     # processed against the retired cue, before the replacement settles. Same three phases, real
     # boundaries; snapshotting after the drain would only ever see the settled state.
-    settle = reader._settle_cue_observation
+    settle = reader.turn.cue_coordinator.settle
 
     def traced_settle() -> None:
         trace.observe("cue-conflict", outcome="input-rejected")
         settle()
 
-    monkeypatch.setattr(reader, "_settle_cue_observation", traced_settle)
-    reader._drain_events()
+    monkeypatch.setattr(reader.turn.cue_coordinator, "settle", traced_settle)
+    reader.turn._drain_events()
     trace.observe("cue-reconciled", outcome="replacement-active")
 
     assert copied == []
@@ -152,23 +163,37 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
     ipc = _VisibilityIPC()
     ipc.props.update({"sid": 2, "sub-visibility": False})
     renderer = NativeVisibleRenderer()
-    reader = SessionController(ipc, prefetch=False, renderer=renderer)
-    reader.sub_text = "active"
-    reader.subtitle_pipeline.cue_changed(reader.subtitle_target(), nonempty=True)
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=renderer,
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    reader.turn.playback_observation.install_seed({"sub-text": "active"})
+    reader.turn.subtitle_presentation.pipeline.cue_changed(
+        reader.turn.subtitle_presentation.target(), nonempty=True
+    )
     trace = LegacyReaderTrace(reader)
     trace.observe("native-cue", outcome="pixels-established")
 
-    reader.boxes = [WordBox(0, 10, 10, 20, 20)]
-    renderer.use_native(reader.subtitle_target())
-    reader.tooltip_controller.select(0)
-    reader.subtitle_pipeline.draw_current(reader.subtitle_target())
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    renderer.use_native(reader.turn.subtitle_presentation.target())
+    reader.turn.tooltip_controller.select(0)
+    reader.turn.subtitle_presentation.pipeline.draw_current(
+        reader.turn.subtitle_presentation.target()
+    )
     trace.observe("geometry-ready", outcome="interaction-ready")
-    reader.boxes = []
-    renderer.degrade_geometry(reader.subtitle_target())
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[])
+    renderer.degrade_geometry(reader.turn.subtitle_presentation.target())
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
-    reader.boxes = [WordBox(0, 10, 10, 20, 20)]
-    renderer.use_native(reader.subtitle_target())
-    reader.subtitle_pipeline.draw_current(reader.subtitle_target())
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    renderer.use_native(reader.turn.subtitle_presentation.target())
+    reader.turn.subtitle_presentation.pipeline.draw_current(
+        reader.turn.subtitle_presentation.target()
+    )
     trace.observe("geometry-recovered", outcome="interaction-ready")
 
     assert [record["pixels"] for record in trace.records()] == [

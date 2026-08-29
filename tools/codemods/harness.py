@@ -2,9 +2,8 @@
 
     uv run --group codemod python tools/codemods/<transform>.py [--check]
 
-The worklist comes from `cluster_map`, not from a text sweep: `--member NAME` resolves the name to
-an *attribute* match, so a same-named parameter and a mention in a comment are not sites — both of
-those showed up in the greps this replaces, and a codemod that trusts them edits them.
+The worklist is built from Python attribute nodes, not text: a same-named parameter and a mention
+in a comment are not sites, so a codemod cannot accidentally edit either.
 
 LibCST rather than a regex or `ast.unparse` because formatting, comments and the goldens survive
 the round trip untouched; a rewrite whose diff is the whole file is not reviewable.
@@ -15,7 +14,7 @@ run must report zero, and a transform that cannot say that has no way to prove i
 
 from __future__ import annotations
 
-import sys
+import ast
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,16 +28,23 @@ ROOT = Path(__file__).resolve().parents[2]
 #: The declaration being retired lives here; rewriting the class body turns a descriptor into a
 #: nonsense assignment. A transform that renames host members excludes it.
 CONTROLLER = ROOT / "src" / "saitenka" / "app" / "session" / "controller.py"
+_SWEPT = ("src", "tests", "tools", "examples", "install", ".agents")
 
 
 def worklist(members: Iterable[str]) -> list[Path]:
-    """Every file holding an attribute site of any of these host members."""
-    sys.path.insert(0, str(ROOT / "tools"))
-    import cluster_map
-
+    """Every Python file holding an attribute site with one of these names."""
+    wanted = set(members)
     found: set[Path] = set()
-    for member in members:
-        found.update(ROOT / path for path in cluster_map.sites(member))
+    for base in _SWEPT:
+        for path in sorted((ROOT / base).rglob("*.py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError:
+                continue
+            if any(
+                isinstance(node, ast.Attribute) and node.attr in wanted for node in ast.walk(tree)
+            ):
+                found.add(path)
     return sorted(found)
 
 

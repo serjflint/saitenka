@@ -10,15 +10,19 @@ gate. The *performance* side of the same scenario lives in examples/bench_respon
 from __future__ import annotations
 
 from driver import Driver
+from session_builder import TestSession, build_session
 from util import FakeIPC
 
 from saitenka.app.config import TooltipOptions
 from saitenka.app.features.tooltip import nested_popup
-from saitenka.app.session.controller import NESTED_ID, TIP_ID, SessionController
+from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
 
 PANEL_CACHE_MAX = TooltipOptions().panel_cache_max
+TIP_ID = OverlayId.TIP
+NESTED_ID = OverlayId.NESTED
 
 
 class _TallDS:
@@ -36,10 +40,10 @@ class _TallDS:
         )
 
 
-def _reader() -> SessionController:
-    r = SessionController(FakeIPC(), dict_set=_TallDS())
-    r.osd = (1920, 1080)
-    r.sub_origin = (0, 0)
+def _reader() -> TestSession:
+    r = build_session(FakeIPC(), services=SessionServices(dictionaries=_TallDS()))
+    r.turn.screen.osd = (1920, 1080)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     return r
 
 
@@ -47,30 +51,33 @@ def _reader() -> SessionController:
 _CORPUS = [f"語{i:03d}" for i in range(PANEL_CACHE_MAX + 24)]
 
 
-def _churn(r: SessionController, term: str) -> bool:
+def _churn(r: TestSession, term: str) -> bool:
     """One cold hover → scroll → nested → scroll → dismiss cycle via the real entry points. Setting
     lines+tokens lets `draw_subtitle` build a consistent box for token 0. Returns whether a nested
     popup actually opened (so a test can assert the nested path was exercised)."""
     tok = Token(term, term, "ご", "名詞", 0, len(term))
-    r.lines = [[tok]]
-    r.tokens = [tok]
+    r.turn.subtitle_presentation.cue.replace_tokenized(lines=[[tok]])
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
     # Draw first, then hover: the boxes have to exist before a cursor has anywhere to land. The old
     # `set_hover(0)` did both at once, which is why it could not be a move.
-    r.draw_subtitle()
+    r.turn.subtitle_presentation.draw()
     ui = Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
         ui.wheel(1)
-    st = r.tooltip_controller.surface_state().view.state
+    st = r.turn.tooltip_controller.surface_state().view.state
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
     if boxes:
         nested_popup.show_nested(
-            r._tip_ports, r._panel_ports, r.word_lookup, boxes[len(boxes) // 3]
+            r.turn.tooltip_controller.tip_ports,
+            r.turn.tooltip_controller.panel_ports,
+            r.turn.tooltip_controller.word_lookup,
+            boxes[len(boxes) // 3],
         )  # nested popup on an inner cell
-        opened = r.tooltip_controller.surface_state().nest.state is not None
+        opened = r.turn.tooltip_controller.surface_state().nest.state is not None
         ui.wheel(1)  # nested is up
-        r._hide_nested()
-    r.retire_hover()  # dismiss the whole stack
+        r.turn.tooltip_controller.hide_nested()
+    r.turn.tooltip_controller.retire_hover()  # dismiss the whole stack
     return opened
 
 
@@ -81,20 +88,20 @@ def test_sustained_churn_evicts_and_stays_clean():
     nested_seen = 0
     for term in _CORPUS:  # fill past the cap → eviction
         nested_seen += _churn(r, term)
-    assert len(r.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
-        f"cache overflowed its LRU cap mid-fill: {len(r.tooltip_controller.surface_state().panel_cache)}"
+    assert len(r.turn.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
+        f"cache overflowed its LRU cap mid-fill: {len(r.turn.tooltip_controller.surface_state().panel_cache)}"
     )
     for term in _CORPUS[:8]:  # revisit the earliest (now-evicted) entries → cold rebuild, no crash
         nested_seen += _churn(r, term)
 
     assert nested_seen > 0, "nested popups never opened — the nested path wasn't exercised"
-    assert len(r.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
-        f"panel cache overflowed its LRU cap: {len(r.tooltip_controller.surface_state().panel_cache)}"
+    assert len(r.turn.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
+        f"panel cache overflowed its LRU cap: {len(r.turn.tooltip_controller.surface_state().panel_cache)}"
     )
     # after the final retire_hover() the whole hover stack must be torn down
-    assert not r.tooltip_controller.hover_view().tip.shown
-    assert not r.tooltip_controller.hover_view().nested.shown  # nested popup cleared
-    assert r.tooltip_controller.observation().selected == -1
+    assert not r.turn.tooltip_controller.hover_view().tip.shown
+    assert not r.turn.tooltip_controller.hover_view().nested.shown  # nested popup cleared
+    assert r.turn.tooltip_controller.observation().selected == -1
 
 
 def test_churn_removes_both_overlays_no_ghost():
@@ -103,7 +110,7 @@ def test_churn_removes_both_overlays_no_ghost():
     r = _reader()
     for term in _CORPUS[:12]:
         _churn(r, term)
-    removed = {c[1] for c in r.ipc.commands if c and c[0] == "overlay-remove"}
-    assert r.ov._oid(TIP_ID) in removed and r.ov._oid(NESTED_ID) in removed, (
+    removed = {c[1] for c in r.turn.ipc.commands if c and c[0] == "overlay-remove"}
+    assert r.turn.ov._oid(TIP_ID) in removed and r.turn.ov._oid(NESTED_ID) in removed, (
         f"tooltip/nested overlays never removed; removes={removed}"
     )

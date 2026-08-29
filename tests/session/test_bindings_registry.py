@@ -10,10 +10,12 @@ merely that saitenka *sent* the bind string (the seam a plain FakeIPC can't cros
 from __future__ import annotations
 
 import pytest
+from session_builder import build_session
 from util import FakeIPC, keybind_registry, press
 
 from saitenka.app.bindings import BINDINGS, active_bindings
-from saitenka.app.session.controller import SessionController
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 
 # --- exhaustive registration: no binding may be gated on a dependency ------------------------------
@@ -25,11 +27,16 @@ def test_every_global_saitenka_binding_registers_without_deps():
     ("anki"/"tts") is advisory metadata, never a registration gate — the handler checks the dep live.
     A future `requires`-gated binding fails here automatically."""
     ipc = FakeIPC()
-    r = SessionController(ipc, anki=None)  # deps absent at registration, exactly like attach mode
-    r._register_keybinds()
+    options = ReaderOptions()
+    r = build_session(
+        ipc, services=SessionServices(anki=None)
+    )  # deps absent at registration, exactly like attach mode
+    r.turn.command_runtime.install_input()
     reg = keybind_registry(ipc)
 
-    expected = {b.key: b.spec.message for b in active_bindings(r.keys, "global") if b.spec.message}
+    expected = {
+        b.key: b.spec.message for b in active_bindings(options.keys, "global") if b.spec.message
+    }
     assert expected, "no global message bindings resolved — the sweep would be vacuous"
     missing = {k: m for k, m in expected.items() if reg.get(k) != m}
     assert not missing, f"global bindings not registered with anki=None: {missing}"
@@ -41,13 +48,14 @@ def test_requires_gated_bindings_still_register_when_the_dep_is_absent():
     still register when the dep is down. This is the exact set a `requires`-gate would have silently
     dropped."""
     ipc = FakeIPC()
-    r = SessionController(ipc, anki=None)  # no anki, no tts
-    r._register_keybinds()
+    options = ReaderOptions()
+    r = build_session(ipc, services=SessionServices(anki=None), options=options)  # no anki, no tts
+    r.turn.command_runtime.install_input()
     reg = keybind_registry(ipc)
 
     gated = [
         b
-        for b in active_bindings(r.keys, "global")
+        for b in active_bindings(options.keys, "global")
         if b.spec.requires != "always" and b.spec.message
     ]
     assert gated, "no requires-gated global bindings found — guard against the filter going empty"
@@ -66,7 +74,7 @@ def test_binding_messages_and_handlers_correspond_exactly():
     slips through. Assert the sets agree both ways so "defined but never wired" (either direction) is
     a red test."""
     binding_msgs = {b.message for b in BINDINGS if b.source == "saitenka" and b.message is not None}
-    handler_msgs = set(SessionController(FakeIPC()).commands.names())
+    handler_msgs = set(build_session(FakeIPC()).turn.command_runtime.names())
 
     unhandled = binding_msgs - handler_msgs
     assert not unhandled, (
@@ -84,10 +92,10 @@ def test_every_command_spec_is_routed_and_keeps_its_owner_and_gates():
     command was routed while some were still imperative; every row read `migrated` long before this,
     so it had stopped being able to fail and went with the machinery it measured.
     """
-    commands = SessionController(FakeIPC()).commands
+    commands = build_session(FakeIPC()).turn.command_runtime
     actual = {
         spec.name: (spec.owner.value, spec.requires_cue, spec.allowed_while_help_open)
-        for spec in commands.policy.specs
+        for spec in commands.specs
     }
     expected = {
         row[0]: (row[1], row[2] == "cue", row[3] == "help")
@@ -147,15 +155,17 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
     `help.open`. Exercises client-message → _drain_events → _handle → router with a genuine state
     mutation, not a spy."""
     ipc = FakeIPC()
-    r = SessionController(ipc)
-    monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.osd = (1920, 1080)
-    r._register_keybinds()
-    assert not r.help.open
+    r = build_session(ipc)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.screen.osd = (1920, 1080)
+    r.turn.command_runtime.install_input()
+    assert not r.turn.help_controller.state.open
 
-    press(r, ipc, r.keys.help_key)
+    press(r, ipc, ReaderOptions().keys.help_key)
 
-    assert r.help.open  # the keypress drove the real handler to mutate real state
+    assert (
+        r.turn.help_controller.state.open
+    )  # the keypress drove the real handler to mutate real state
 
 
 def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypatch):
@@ -165,22 +175,22 @@ def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypat
     from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 
     ipc = FakeIPC()
-    r = SessionController(ipc, anki=None)
-    r._register_keybinds()  # bound while the dep is down
+    r = build_session(ipc, services=SessionServices(anki=None))
+    r.turn.command_runtime.install_input()  # bound while the dep is down
     config = MineConfig()
-    identity = r.mining_controller.desired_spec.identity
-    r.mining_controller.select_mining_spec(
+    identity = r.turn.mining_controller.desired_spec.identity
+    r.turn.mining_controller.select_mining_spec(
         MiningSpec(identity, {"deck": config.deck, "model": config.model})
     )
-    assert r.mining_controller.publish_mining_target(MiningTarget(identity, object(), config))
-    monkeypatch.setattr(r.mining_controller, "mine_target", lambda: 0)
+    assert r.turn.mining_controller.publish_mining_target(MiningTarget(identity, object(), config))
+    monkeypatch.setattr(r.turn.mining_controller, "mine_target", lambda: 0)
     calls: list[tuple[int, object]] = []
     monkeypatch.setattr(
-        r.mining_controller,
+        r.turn.mining_controller,
         "mine_index",
         lambda index, **kwargs: calls.append((index, kwargs["animated"])),
     )
-    press(r, ipc, r.keys.mine_key)
+    press(r, ipc, ReaderOptions().keys.mine_key)
 
     assert calls == [(0, None)]
 
@@ -189,7 +199,7 @@ def test_pressing_an_unbound_key_raises_so_the_fake_cant_pass_silently():
     """Negative control: press must distinguish bound from unbound, or a firing test could pass against
     a dead shortcut. A key never registered raises KeyError."""
     ipc = FakeIPC()
-    SessionController(ipc)._register_keybinds()
+    build_session(ipc).turn.command_runtime.install_input()
     with pytest.raises(KeyError):
         # a plausible-but-unbound key: registration emits real key names, never this sentinel
-        press(SessionController(ipc), ipc, "Ctrl+Alt+NeverBound")
+        press(build_session(ipc), ipc, "Ctrl+Alt+NeverBound")

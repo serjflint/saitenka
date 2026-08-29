@@ -18,6 +18,7 @@ class SessionCommand(StrEnum):
     """The wire names this reducer owns."""
 
     TOGGLE_OVERLAY = "toggle-overlay"
+    TOGGLE_RENDERER = "toggle-renderer"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,12 +57,18 @@ class ShowTranslation:
     """Re-acquire the secondary track and draw it."""
 
 
+@dataclass(frozen=True, slots=True)
+class ToggleRenderer:
+    pass
+
+
 type SessionEffect = (
     SetSurfacesVisible
     | ReleaseSecondarySubtitles
     | SuspendSubtitles
     | ResumeSubtitles
     | ShowTranslation
+    | ToggleRenderer
     | DismissHover
 )
 
@@ -88,8 +95,13 @@ def _toggle_overlay(inputs: SessionInputs) -> tuple[SessionEffect, ...]:
     return (*shown, ShowTranslation()) if inputs.translation_wanted else shown
 
 
+def _toggle_renderer(_inputs: SessionInputs) -> tuple[SessionEffect, ...]:
+    return (ToggleRenderer(),)
+
+
 _REDUCERS = {
     SessionCommand.TOGGLE_OVERLAY: _toggle_overlay,
+    SessionCommand.TOGGLE_RENDERER: _toggle_renderer,
 }
 
 

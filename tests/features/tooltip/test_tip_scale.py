@@ -8,41 +8,58 @@ default.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import util
+from session_builder import build_session
 
+from saitenka.app.config import ReaderOptions
 from saitenka.app.features.tooltip.prefetch import REF_H
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
+
+if TYPE_CHECKING:
+    from saitenka.app.session.turn import SessionTurn
 
 
-def _reader(tip_scale: float, osd_h: int) -> SessionController:
-    r = SessionController(util.FakeIPC(), dict_set=None, tip_scale=tip_scale)
-    r.osd = (round(osd_h * 16 / 9), osd_h)
-    return r
+def _reader(tip_scale: float, osd_h: int) -> SessionTurn:
+    r = build_session(
+        util.FakeIPC(),
+        services=SessionServices(
+            dictionaries=None,
+        ),
+        options=ReaderOptions().with_overrides(tip_scale=tip_scale),
+    )
+    r.turn.screen.osd = (round(osd_h * 16 / 9), osd_h)
+    return r.turn
 
 
 def test_auto_scale_tracks_the_video_viewport_when_tip_scale_is_zero():
-    assert _reader(0.0, REF_H).tip_scale.display == 1.0  # 1080p reference
-    assert _reader(0.0, 2 * REF_H).tip_scale.display == 2.0  # 4K → native 2×
+    assert _reader(0.0, REF_H).tooltip_controller.scale().display == 1.0  # 1080p reference
+    assert _reader(0.0, 2 * REF_H).tooltip_controller.scale().display == 2.0  # 4K → native 2×
 
 
 def test_positive_tip_scale_overrides_the_resolution_derived_scale():
     # A fixed 1.5 wins at BOTH resolutions — the point of the knob is to detach from the OSD.
-    assert _reader(1.5, REF_H).tip_scale.display == 1.5  # larger than native on 1080p
-    assert _reader(1.5, 2 * REF_H).tip_scale.display == 1.5  # smaller than native on 4K
+    assert (
+        _reader(1.5, REF_H).tooltip_controller.scale().display == 1.5
+    )  # larger than native on 1080p
+    assert (
+        _reader(1.5, 2 * REF_H).tooltip_controller.scale().display == 1.5
+    )  # smaller than native on 4K
 
 
 def test_raster_scale_snaps_osd_jitter_to_a_bucket():
     # The one-panel path rasters/composites/hit-tests at the BUCKETED scale, so an osd_h wobble of a few
     # px (scale jitter in the 3rd decimal) reuses cached native bands instead of re-rastering.
-    assert _reader(0.0, 2161).tip_scale.raster == 2.0  # 2.0009 → 2.00
-    assert _reader(0.0, 2159).tip_scale.raster == 2.0  # 1.9991 → 2.00
-    assert _reader(0.0, 1621).tip_scale.raster == 1.5  # 1.5009 → 1.50
+    assert _reader(0.0, 2161).tooltip_controller.scale().raster == 2.0  # 2.0009 → 2.00
+    assert _reader(0.0, 2159).tooltip_controller.scale().raster == 2.0  # 1.9991 → 2.00
+    assert _reader(0.0, 1621).tooltip_controller.scale().raster == 1.5  # 1.5009 → 1.50
 
 
 def test_the_bucket_applies_to_a_hand_set_scale_too():
     """`raster` derives from `display` whichever way `display` was arrived at. A fixed `tip_scale`
     that misses a bucket would otherwise raster at a scale the hit-test never inverts at."""
-    scale = _reader(1.53, REF_H).tip_scale
+    scale = _reader(1.53, REF_H).tooltip_controller.scale()
 
     assert scale.display == 1.53  # the preference is honoured verbatim…
     assert scale.raster == 1.55  # …and still snapped for the band cache

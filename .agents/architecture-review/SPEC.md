@@ -62,8 +62,8 @@ or a feature registration boundary). Excluding policy-only composition modules m
 only that the place most likely to absorb new responsibilities was never inspected.
 
 **Ratchet direction.** `argued` in a censused module may fall freely and rises only with a stated
-reason, the way `poe host-mass` is blessed. There is no `poe` task enforcing this yet — it is a
-review discipline until one run demonstrates it needs to be a gate.
+reason. There is no `poe` task enforcing this yet — it is a review discipline until one run
+demonstrates it needs to be a gate.
 
 ## Cadence
 

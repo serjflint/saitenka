@@ -29,6 +29,7 @@ class SessionCommandPorts:
     tooltip: TooltipController
     translation: TranslationController
     translation_inputs: Callable[[], TranslationInputs]
+    toggle_renderer: Callable[[], object]
     teardown_tip: Callable[[], None]
     subtitle_target: Callable[[], SubtitleTarget]
 
@@ -61,3 +62,5 @@ class SessionCommandCoordinator:
             ports.subtitle_pipeline.resume_after_overlay(ports.subtitle_target())
         elif isinstance(effect, session_intents.ShowTranslation):
             ports.translation.reveal(ports.translation_inputs())
+        elif isinstance(effect, session_intents.ToggleRenderer):
+            ports.toggle_renderer()

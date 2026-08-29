@@ -13,9 +13,11 @@ projection would hide it (it is idempotent) and the deltas would not.
 from __future__ import annotations
 
 import pytest
+from session_builder import build_session
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 
@@ -25,8 +27,16 @@ def _session(*, reactor: bool):
     gateway = runtime_gateway(ipc)
     if reactor:
         install_session_reactor(gateway, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
-    reader.playback_observation.install_seed({})
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    reader.turn.playback_observation.install_seed({})
     return ipc, gateway, reader
 
 
@@ -39,8 +49,11 @@ def test_an_observation_lands_the_same_whether_the_reactor_owns_it(reactor) -> N
     ipc, gateway, reader = _session(reactor=reactor)
     try:
         ipc.emit({"event": "property-change", "name": "sub-text", "data": "いち"})
-        reader._drain_events()
-        text, observed = reader.sub_text, reader.playback_observation.state.value("sub-text")
+        reader.turn._drain_events()
+        text, observed = (
+            reader.turn.playback_observation.cue.text,
+            reader.turn.playback_observation.state.value("sub-text"),
+        )
     finally:
         reader.close()
         gateway.close()
@@ -56,7 +69,7 @@ def test_a_claimed_observation_is_reduced_by_exactly_one_owner() -> None:
     try:
         for text in ("いち", "に", "さん"):
             ipc.emit({"event": "property-change", "name": "sub-text", "data": text})
-        reader._drain_events()
+        reader.turn._drain_events()
         census = gateway.claim_census()["PropertyObserved"]
     finally:
         reader.close()
@@ -75,9 +88,9 @@ def test_the_pointer_is_the_only_observation_that_coalesces_in_a_batch() -> None
         for x in (1, 2, 3):
             ipc.emit({"event": "property-change", "name": "mouse-pos", "data": {"x": x, "y": 0}})
         ipc.emit({"event": "property-change", "name": "pause", "data": True})
-        reader._drain_events()
+        reader.turn._drain_events()
         seen = gateway.claim_census()["PropertyObserved"]
-        pointer = reader.playback_observation.state.value("mouse-pos")
+        pointer = reader.turn.playback_observation.state.value("mouse-pos")
     finally:
         reader.close()
         gateway.close()

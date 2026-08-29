@@ -14,6 +14,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from session_builder import build_session
+
+from saitenka.app.session.factory import SessionServices
 
 DEMO_LINE = "門前の小僧習わぬ経を読む"
 
@@ -75,7 +78,6 @@ def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None =
     ``config_dir`` replaces the default ``--no-config`` with a real mpv config directory, for the one
     question that cannot be asked without a user's own ``input.conf`` present. Everything else wants
     ``--no-config``: a developer's own ``mpv.conf`` would answer a different question."""
-    from saitenka.app.session.controller import SessionController
     from saitenka.app.session.routes import install_session_runtime
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
@@ -108,18 +110,27 @@ def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None =
         # transport routes no replies, so even the OSD-dimensions seed comes back None and nothing
         # downstream draws. No breadcrumb — this harness screenshots.
         gateway = install_session_runtime(ipc, startup_hint=False)
-        reader = SessionController(ipc, dict_set=dict_set if dict_set is not None else MiniDS())
-        reader.refresh_osd()
-        reader.start_observing()
-        reader._register_keybinds()
-        reader.load_sub_index(srt)
+        reader = build_session(
+            ipc,
+            services=SessionServices(dictionaries=dict_set if dict_set is not None else MiniDS()),
+        )
+        reader.turn.refresh_osd()
+        reader.turn.playback_observation.start_session()
+        reader.turn.command_runtime.install_input()
+        reader.turn.subtitle_navigation.load_index(srt)
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
             reader.pump()
-            if reader.tokens and reader.boxes:
+            if (
+                reader.turn.subtitle_presentation.cue.current.tokens
+                and reader.turn.subtitle_presentation.cue.current.boxes
+            ):
                 break
             time.sleep(0.1)
-        assert reader.tokens and reader.boxes, "subtitle never loaded into the reader"
+        assert (
+            reader.turn.subtitle_presentation.cue.current.tokens
+            and reader.turn.subtitle_presentation.cue.current.boxes
+        ), "subtitle never loaded into the reader"
         yield tmp, reader, ipc
     finally:
         try:

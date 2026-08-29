@@ -32,10 +32,7 @@ class PanelCommand(StrEnum):
     CLOSE_CARD_PREVIEW = "close-card-preview"
 
 
-#: Panels whose opening dismisses a shown tooltip. Only the sidebar does today, and that is a
-#: description rather than an endorsement: the picker and the analysis panel are centred modals a
-#: tooltip can float over, which looks like an oversight. Recorded, not silently unified — changing
-#: what the user sees is not this migration's call to make in passing.
+#: Panels whose opening dismisses a shown tooltip; centred modal panels do not share this policy.
 _DISMISSES_HOVER = frozenset({Panel.SIDEBAR})
 
 

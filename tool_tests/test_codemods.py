@@ -19,6 +19,17 @@ import harness
 import move_member
 
 
+def test_worklist_uses_attribute_sites_not_same_named_parameters(tmp_path, monkeypatch):
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / "a.py").write_text("def render(tip_width):\n    return tip_width\n", encoding="utf-8")
+    (tree / "b.py").write_text("def go(r):\n    return r.tip_width\n", encoding="utf-8")
+    monkeypatch.setattr(harness, "ROOT", tmp_path)
+    monkeypatch.setattr(harness, "_SWEPT", ("src",))
+
+    assert harness.worklist(["tip_width"]) == [tree / "b.py"]
+
+
 def test_a_rewrite_preserves_the_formatting_around_it(tmp_path):
     """The reason this is LibCST and not `ast.unparse`: a diff of the whole file is not reviewable."""
     path = tmp_path / "a.py"

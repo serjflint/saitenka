@@ -2,7 +2,7 @@
 
 Saitenka has two runtime packages with different jobs:
 
-- `saitenka.app.runtime` holds the per-command policy `SessionController` consults before dispatch: who owns
+- `saitenka.app.runtime` holds the per-command policy `CommandRuntime` consults before dispatch: who owns
   a command, whether it needs a current cue, whether it survives with the help overlay open.
 - `saitenka.runtime` holds the runtime itself — events, effects, mailbox admission, effect
   lifecycle, timers, the owner slices and the session loop. `app/session/routes.py` composes it, and
@@ -17,8 +17,9 @@ its supported operating envelope are documented in
 
 ## Adding a feature
 
-Paths are relative to `src/saitenka/`. `SessionController` composes the owner-thread session turn;
-it is not a feature capability.
+Paths are relative to `src/saitenka/`. `session.builder` composes the owner-thread graph,
+`SessionTurn` settles it, and `SessionController` drives its live lifecycle. None is a feature
+capability.
 
 Feature-owned policy, adapters, controllers, and presentation live together under
 `app/features/<feature>/`. Shared interaction contracts live under `app/interaction/`; session
@@ -71,15 +72,16 @@ The following gates enforce the boundary:
 | --- | --- |
 | `tests/session/test_stateless_registration.py` | An unregistered policy; an unbound message; broad session/episode capture; an opaque callable authority; or a deferred read in command composition. |
 | `tests/session/test_session_controller_host_contract.py` | A function under `app/` takes a `SessionController` **parameter**. Declare a `Protocol`. |
-| `poe host-mass` | You added a **member** to `SessionController` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
 | `poe reducer-purity` | A registered stateful reducer or stateless policy branches on an ambient reading. |
 | `poe arch` | Feature packages import session composition, interaction primitives import upward, or feature packages form a runtime cycle. |
 | `poe app-package-layout` | A declared feature package disappears, an undeclared package appears, or a retired flat module/import returns. |
 
 ## Production session
 
-`SessionController` composes owner-thread session lifetime, ordered cross-feature conjunctions, and
-physical application. Bounded controllers and stores own feature facts: `TooltipController` owns
+`SessionController` owns the live start/run/stop/close state machine. `SessionTurn` drains one
+owner-thread event turn and applies physical results. `CueCoordinator` owns the cross-feature cue
+and episode transactions; other conjunctions stay named at the composition seam. Bounded
+controllers and stores own feature facts: `TooltipController` owns
 tooltip interaction and engaged work, exposes frozen observations to other features, and releases
 mutable paint state only to the physical presentation seam; `TooltipPreparationController` owns speculative prefetch,
 persistent tooltip heads, and mask-atlas activation; `ProfileController` owns the active reading environment,
@@ -100,12 +102,12 @@ SessionLoop.receive(timeout bounded by the earliest armed timer)
           │  one envelope at a time, in mailbox sequence
           ├──────────────────────┐
           ▼                      ▼
-     SessionReactor.handle    SessionController's turn, unless the reactor claimed it
+     SessionReactor.handle    SessionTurn, unless the reactor claimed it
      (owner slices, effects)   ├─ reconcile subtitles
                                ├─ apply results
 worker result queues ─────────►└─ update interaction
 
-SessionController and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
+SessionTurn and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
 ```
 
 The IPC reader performs blocking transport reads away from the session thread. It appends events to
@@ -121,8 +123,8 @@ takes one turn off the loop. A conflicting subtitle observation retires the acti
 before a later cue-dependent command in the same batch can use its tokens or hit boxes.
 
 `CommandExecutor` splits the command table in two: `CommandPolicy` holds the closed spec set
-(`app/runtime/commands.py`) and rejects a duplicate name; `SessionController` supplies the bound handlers and
-the executor refuses any handler with no spec. So ownership and cue eligibility are decided
+(`app/runtime/commands.py`) and rejects a duplicate name; `CommandRuntime` supplies the bound handlers
+assembled from feature contributions and the executor refuses any handler with no spec. So ownership and cue eligibility are decided
 without a session, and the composition seam adds no second state owner.
 
 ## Background work and publication
@@ -166,8 +168,8 @@ hit boxes while keeping the selected pixel owner stable.
 
 `PlaybackProjection` (`saitenka/runtime/playback.py`) is the sole interpreter of raw mpv property
 observations. `PlaybackObservationController` owns observer registration, initial seeding, and the
-local or reactor-routed projection path. `SessionController` applies the typed deltas it publishes as
-explicit cross-feature conjunctions; nothing downstream compares raw property values or decides what
+local or reactor-routed projection path. `SessionTurn` applies the typed deltas through explicit
+coordinators; nothing downstream compares raw property values or decides what
 a property means.
 
 ```text
@@ -233,7 +235,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 
 | Invariant | Current contract |
 | --- | --- |
-| One live state owner | The `SessionController` thread applies production session and presentation mutations. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
+| One owner thread | `SessionController` drives the live lifecycle and `SessionTurn` applies production mutations on that thread. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
 | One tooltip-preparation owner | `TooltipPreparationController` owns speculative queue state, generations, persistent heads, memory inflation, and mask-atlas activation. Admitted jobs carry immutable panel, dictionary, and scale inputs; headless prewarm composes those capabilities without a session. `poe tooltip-ownership` rejects shell-owned preparation state, escaped construction, and full-session prewarm. |
 | One mining writer | `MiningController` alone owns the selected target, deck-derived index, seed/probe lifecycle, local store, scratch resources, and operation admission. `poe mining-ownership` rejects shadow fields and direct mutator/construction escape routes. |
 | One annotation writer | `CueAnnotationController` alone owns annotation identity, admission, completion refusal, degradation, token-cache generation, and episode warming. `poe annotation-ownership` rejects the retired shell fields/facades, private cache escape, and construction outside session assembly. |
@@ -245,7 +247,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Nonblocking startup clear | Interactive readiness does not wait for the startup OSD clear reply. |
 | Explicit close | Owned surfaces are removed, new work is rejected, and late identity-qualified results cannot republish closed UI. |
 | Closed behavior oracle | `BehaviorTrace` accepts only its enumerated, text-free event, state, and outcome vocabulary. |
-| Exact host inventory | The checked-in per-module count of functions accepting a `SessionController` **parameter** may not grow. The census is currently empty, so any such function under `app/` fails; a removal tightens the baseline in place rather than failing. Separate from `poe host-mass`, which counts `SessionController`'s **members**. |
+| Bounded feature authority | Any function under `app/` that accepts the whole `SessionController` fails the structural contract. Features receive narrow owners, immutable observations, or named acts. |
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
 | Effect interpreter ownership | Effects are applied by the owning adapter/coordinator, never by a generic session callback. Both layers return effects; the interpreter belongs to the feature. |
@@ -258,8 +260,7 @@ The executable sources of truth are:
 - [`tests/runtime_behavior.py`](https://github.com/serjflint/saitenka/blob/main/tests/runtime_behavior.py)
   for the closed behavior-record vocabulary;
 - [`tests/session/test_session_controller_host_contract.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_controller_host_contract.py)
-  and its [inventory](https://github.com/serjflint/saitenka/blob/main/tests/fixtures/session_controller_host_allowlist.json)
-  for `SessionController`-accepting function counts;
+  for the zero-`SessionController` feature boundary;
 - [`tests/session/test_session_runtime.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_runtime.py)
   for mailbox, lifecycle, reconnect, overload, timer, and close contracts;
 - [`tools/mining_ownership_check.py`](https://github.com/serjflint/saitenka/blob/main/tools/mining_ownership_check.py)

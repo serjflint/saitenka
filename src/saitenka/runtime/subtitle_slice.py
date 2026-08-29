@@ -56,8 +56,7 @@ class SubtitleReducer:
             case SubtitleTrackAnnounced(sid=sid):
                 return replace(state, announced_sid=sid)
             # The named reset the slot's episode-safety rests on. A session-lived slot trades
-            # `EpisodeContext`'s rebinding — a structural guarantee — for a procedural one, which
-            # is only as good as the rule; this is the rule, said out loud and asserted.
+            # Navigation-state rebinding is structural; this session-lived slice needs an explicit reset.
             case EpisodeRetired():
                 return SubtitleTrackState()
 

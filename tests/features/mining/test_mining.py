@@ -1,12 +1,14 @@
 """Mining: card builder, dedup query, sentence bolding, media args, toast (no real Anki add)."""
 
 import pytest
+from session_builder import build_session
 
 from saitenka.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
 from saitenka.app.features.mining import miner
 from saitenka.app.features.preview import miner_ui
 from saitenka.app.lookup import card_for
 from saitenka.app.media import AnimatedClip, Timespan, clip_audio
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.toast import render_toast
 from saitenka.app.tokenize import tokenize
 
@@ -204,16 +206,19 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     # end-to-end: an already-mined word is detected under card_format (the both-KeyError/false-negative fix)
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(card_format={"Word": "{expression}"}))
-    r.set_subtitle("本を読む")
+    r = build_session(
+        ipc,
+        services=SessionServices(
+            anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
+        ),
+    )
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
-    assert anki.added == [] and "読む" in r.mining_controller.index_snapshot()
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
+    assert anki.added == [] and "読む" in r.turn.mining_controller.index_snapshot()
 
 
 def test_build_note_card_format_uses_passed_markers():
@@ -357,7 +362,7 @@ def test_dedupe_escapes_special_chars_in_query():
 
 def _ports(reader):
     """One transaction assembled by the production mining owner."""
-    ports = reader.mining_controller._operation()
+    ports = reader.turn.mining_controller._operation()
     assert ports is not None, "reader has no deck to mine into"
     return ports
 
@@ -389,14 +394,12 @@ class _FakeAnki:
 def test_mine_token_adds_note_with_fields(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     ipc = FakeIPC()
     ipc.props["path"] = "/x/[Grp] Show - 03 [1080p].mkv"
     ipc.props["time-pos"] = 63
     anki = _FakeAnki()
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     shown = []
@@ -405,8 +408,8 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
         "preview_mined",
         lambda _ports, _source, card, _tok, _video, _st="mined": shown.append(card.expression),
     )
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     note = anki.added[0]
     assert note["fields"]["Expression"] == "読む"
@@ -418,12 +421,12 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
 def _capture_reader(*, animated_enabled: bool):
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
-    return SessionController(
+    return build_session(
         FakeIPC(),
-        anki=_FakeAnki(),
-        mine_cfg=MineConfig(animated=AnimatedClip(enabled=animated_enabled)),
+        services=SessionServices(
+            anki=_FakeAnki(),
+            mining=MineConfig(animated=AnimatedClip(enabled=animated_enabled)),
+        ),
     )
 
 
@@ -447,7 +450,7 @@ def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
     _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".webp")  # the animated clip becomes the card image
-    captured = r.preview_controller.panel.last_jpg
+    captured = r.turn.preview_controller.panel.last_jpg
     assert captured is not None and str(captured).endswith(
         ".jpg"
     )  # still kept for preview/fallback
@@ -499,17 +502,16 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     from util import FakeIPC
 
     from saitenka.app.lookup import CardData
-    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok, card=chosen)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok, card=chosen)
     assert anki.added[0]["fields"]["Expression"] == "退く"
     assert anki.added[0]["fields"]["ExpressionReading"] == "しりぞく"
 
@@ -517,36 +519,32 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
 def test_mine_token_duplicate_shows_existing(monkeypatch):
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     previewed = []
     monkeypatch.setattr(
         miner_ui,
         "preview_existing",
         lambda _ports, _source, nid, _card, status: previewed.append((nid, status)),
     )
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert anki.added == []  # dedupe: nothing added
     assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r.mining_controller.index_snapshot()
+    assert "読む" in r.turn.mining_controller.index_snapshot()
 
 
 def test_preview_replay_key_is_tooltip_scoped():
     """`p` (replay preview) is bound only while a tooltip is up, so global `p` keeps mpv's pause
     (the Windows collision). It must NOT be a global startup binding."""
-    from util import FakeIPC
-
     from saitenka.app.bindings import PREVIEW_MSG, active_bindings
-    from saitenka.app.session.controller import SessionController
+    from saitenka.app.config import ReaderOptions
 
-    r = SessionController(FakeIPC(), anki=object(), mine_cfg=MineConfig())
-    global_msgs = {b.spec.message for b in active_bindings(r.keys, "global")}
-    tooltip_msgs = {b.spec.message for b in active_bindings(r.keys, "tooltip")}
+    keys = ReaderOptions().keys
+    global_msgs = {b.spec.message for b in active_bindings(keys, "global")}
+    tooltip_msgs = {b.spec.message for b in active_bindings(keys, "tooltip")}
     assert PREVIEW_MSG not in global_msgs
     assert PREVIEW_MSG in tooltip_msgs
 
@@ -558,21 +556,20 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
 
     from saitenka.app.bindings import PREVIEW_CLOSE_MSG
     from saitenka.app.features.preview.card_preview import PreviewData
-    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
-    r = SessionController(ipc, anki=object(), mine_cfg=MineConfig())
+    r = build_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
     # skip the PIL render
     monkeypatch.setattr(miner_ui, "render_preview", lambda *_args: None)
     pv = PreviewData(
         "exists", "読む", "よむ", ["本を読む"], "読む", ["to read"], None, None, "deck"
     )
 
-    miner_ui.show_preview(r.preview_ports, pv, None)
+    miner_ui.show_preview(r.turn.preview_commands.ports(), pv, None)
     assert ("keybind", "ESC", f"script-message {PREVIEW_CLOSE_MSG}") in ipc.commands
 
-    r._handle(PREVIEW_CLOSE_MSG)
-    assert not r.preview_controller.state.open  # Esc dismissed it
+    r.turn.command_runtime.handle(PREVIEW_CLOSE_MSG)
+    assert not r.turn.preview_controller.state.open  # Esc dismissed it
     assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
 
 
@@ -581,12 +578,10 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
     dup_status = []
@@ -595,13 +590,13 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
         "preview_mined",
         lambda _ports, _source, _c, _t, _v, status="mined": dup_status.append(status),
     )
-    tok = next(t for t in r.tokens if t.surface == "読む")
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
 
-    r.mining_controller.mine_token(tok)  # already in deck → nothing added, token remembered
+    r.turn.mining_controller.mine_token(tok)  # already in deck → nothing added, token remembered
     assert anki.added == []
-    assert r.preview_controller.panel.dup_tok is tok
+    assert r.turn.preview_controller.panel.dup_tok is tok
 
-    r.preview_ports.add_duplicate()
+    r.turn.preview_commands.ports().add_duplicate()
     assert len(anki.added) == 1
     assert anki.added[0]["options"]["allowDuplicate"] is True
     assert dup_status == ["duplicate"]  # the new card's preview says "• duplicate" (accurate now)
@@ -646,23 +641,22 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     from util import FakeIPC
 
     from saitenka.app.features.mining import mine_intents
-    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     toasts = []
     monkeypatch.setattr(
-        r.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
+        r.turn.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
     )
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "mark_mined",
         lambda _expr, _apply: None,
     )  # skip the view refresh
-    r._stateless_commands.run(mine_intents.MineCommand.EPISODE)
+    r.turn._stateless_commands.run(mine_intents.MineCommand.EPISODE)
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
     assert any("mined" in t for t in toasts)
 
@@ -686,7 +680,6 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     from util import FakeIPC
 
     from saitenka.app.features.tooltip import tooltip
-    from saitenka.app.session.controller import SessionController
     from saitenka.app.tokenize import Token
     from saitenka.model import LinkBox
 
@@ -699,15 +692,17 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     ipc = FakeIPC()
     ipc.props["path"] = "/x/S - 01.mkv"
     anki = _FakeAnki()
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
-    r.set_subtitle("退いた")
+    r = build_session(
+        ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
+    )
+    r.turn.cue_coordinator.set_subtitle("退いた")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
-        r.profile_controller.dict_set,
-        r.tooltip_controller.observation().metadata.terms,
-        r.mining_controller.mine_token,
+        r.turn.profile_session.profile.dict_set,
+        r.turn.tooltip_controller.observation().metadata.terms,
+        r.turn.mining_controller.mine_token,
         LinkBox("mine:1", 0, 0, 10, 10),
         tok,
     )
@@ -722,8 +717,6 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     furigana, pitch (from the dict), and a cloze-split sentence — not the entity→field map."""
     import dicthelp
     from util import FakeIPC
-
-    from saitenka.app.session.controller import SessionController
 
     d = _make_dict(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
     pz = dicthelp.meta_zip(
@@ -745,12 +738,12 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
             "Freq": "{frequency-rank}",
         }
     )
-    r = SessionController(ipc, anki=anki, mine_cfg=cfg, dict_set=ds)
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg, dictionaries=ds))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     f = anki.added[0]["fields"]
     assert f["Word"] == "読む" and f["Furigana"] == "読[よ]む"
     assert "よむ" in f["Pitch"] and "[1]" in f["Pitch"]  # pitch from the dict, not fabricated
@@ -776,18 +769,16 @@ def _word_audio_pack(tmp_path, term: str, reading: str, filename: str):
 def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path):
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     pack = _word_audio_pack(tmp_path, "読む", "よむ", "yomu.opus")
     ipc = FakeIPC()
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
-    r = SessionController(ipc, anki=anki, mine_cfg=cfg)
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     note = anki.added[0]
     assert note["fields"]["WordAudio"] == "[sound:yomu.opus]"
@@ -798,18 +789,16 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     """The pack has no entry for this word — the field must stay unset, not an empty [sound:] tag."""
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     pack = _word_audio_pack(tmp_path, "書く", "かく", "kaku.opus")  # different word
     ipc = FakeIPC()
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
-    r = SessionController(ipc, anki=anki, mine_cfg=cfg)
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     assert "WordAudio" not in anki.added[0]["fields"]
     assert anki.stored == []  # never stores media for a miss
@@ -823,8 +812,6 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
 
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     secret = tmp_path / "secret.txt"
     secret.write_bytes(b"top-secret")
     pack = tmp_path / "pack"
@@ -837,14 +824,17 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
     )
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = SessionController(
-        ipc, anki=anki, mine_cfg=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
+    r = build_session(
+        ipc,
+        services=SessionServices(
+            anki=anki, mining=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
+        ),
     )
-    r.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     assert "WordAudio" not in anki.added[0]["fields"]  # out-of-pack entry → field unset
     assert not any("secret" in name for name in anki.stored)  # never uploaded the escaping file
@@ -854,16 +844,14 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig())
-    r.set_subtitle("本を読む")
+    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert "WordAudio" not in anki.added[0]["fields"]
     assert anki.stored == []
 
@@ -875,7 +863,6 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     from util import FakeIPC
 
     from saitenka.app.features.tooltip import tooltip_panel
-    from saitenka.app.session.controller import SessionController
     from saitenka.app.tokenize import Token
 
     d = _make_dict(
@@ -884,17 +871,17 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
         [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
     )
     ds = dicthelp.load_set([d])
-    r = SessionController(FakeIPC(), dict_set=ds)
+    r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
         tooltip_panel.group_mined_of(
-            tok, r.mining_controller.index_snapshot(), r.profile_controller.dict_set
+            tok, r.turn.mining_controller.index_snapshot(), r.turn.profile_session.profile.dict_set
         )
         == ()
     )  # nothing mined yet → no per-group flags
-    r.mining_controller.record_mined_expression("退く")
+    r.turn.mining_controller.record_mined_expression("退く")
     assert tooltip_panel.group_mined_of(
-        tok, r.mining_controller.index_snapshot(), r.profile_controller.dict_set
+        tok, r.turn.mining_controller.index_snapshot(), r.turn.profile_session.profile.dict_set
     ) == (
         True,
         True,
@@ -907,19 +894,19 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     import dicthelp
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
     ds = dicthelp.load_set([d])
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = _FakeAnki()
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
-    r.set_subtitle("本を読む")
+    r = build_session(
+        ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
+    )
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert len(anki.added) == 1
     f = anki.added[0]["fields"]
     assert f["Expression"] == "読む"
@@ -934,7 +921,6 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
 
     from saitenka.app.config import DictDbOptions
     from saitenka.app.dictdb import DictionaryDb
-    from saitenka.app.session.controller import SessionController
 
     d = _make_dict(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
     db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
@@ -942,12 +928,14 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = _FakeAnki()
-    r = SessionController(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
-    r.set_subtitle("本を読む")
+    r = build_session(
+        ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
+    )
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.tokens if t.surface == "読む")
-    r.mining_controller.mine_token(tok)
+    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.turn.mining_controller.mine_token(tok)
     assert anki.added[0]["fields"]["ID"] == "1"
 
 

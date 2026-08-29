@@ -17,8 +17,8 @@ from saitenka.app.sub_index import load_index
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.features.subtitle.navigation_state import NavigationState
     from saitenka.app.native_subtitles import NativeSubtitleGeometry
-    from saitenka.app.session.context import EpisodeContext
     from saitenka.subtitles import Cue
 
     PropertyGet = Callable[[str], object]
@@ -34,7 +34,7 @@ class NavPorts:
     so a re-slot cannot leave a stale hint behind.
     """
 
-    episode: EpisodeContext
+    episode: NavigationState
     geometry: NativeSubtitleGeometry | None
     get: PropertyGet
     cue_text: Callable[[], str]

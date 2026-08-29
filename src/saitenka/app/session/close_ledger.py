@@ -1,16 +1,12 @@
-"""Isolate each participant in `SessionController.close` so one failure cannot strand the rest.
+"""Isolate each close participant so one failure cannot strand the rest.
 
 Close is a fixed sequence of ~18 participants — capabilities, job lanes, stores, surfaces, the
 transport. It ran unguarded, so the FIRST one to raise aborted every later one: a capability that
 threw on shutdown left temp dirs, an open transport and a live overlay behind, and the traceback
 named only the thrower.
 
-Participants are a declared `CloseStep` table so the runtime can take them over one at a time. That
-was previously ruled out on the grounds that routing them through a loop would erase the duty
-evidence `tools/runtime_migration_check.py` matches by name AND pairwise order — which turned out
-not to hold: its `Scanner` opens a scope for `FunctionDef` and not for `Lambda`, so a call inside a
-step's lambda is still attributed to the enclosing method, `order:` constraints included. A nested
-`def` *would* lose it, which is why step bodies stay lambdas.
+Participants are a declared `CloseStep` table so their fixed order stays visible while each failure
+is recorded independently.
 """
 
 from __future__ import annotations
@@ -39,14 +35,11 @@ class CloseFailure:
 
 @dataclass(frozen=True, slots=True)
 class CloseStep:
-    """One named participant. `run` is a lambda by contract — see the module docstring."""
+    """One named close participant."""
 
     name: str
     run: Callable[[], object]
-    #: Runtime assertion that `run`'s target exists; the step is skipped when it returns None.
-    #: A lambda cannot hold an `assert`, and the step body must name the attribute literally (the
-    #: migration checker matches `call:self._x.close`, and any wrapper collapses it to `call:close`)
-    #: — so the check lives here and `run` carries a `union-attr` marker pointing at it.
+    #: The step is already complete when its optional collaborator is absent.
     present: Callable[[], object] | None = None
 
 
@@ -122,7 +115,7 @@ class CloseLedger:
             self.completed.append(name)
 
     def run(self, steps: Iterable[CloseStep]) -> None:
-        """Run every step in order, isolating each. The sequence the runtime will eventually own."""
+        """Run every step in order, isolating each."""
         for step in steps:
             if step.present is not None and step.present() is None:
                 # Completed, not skipped: an absent collaborator is a participant with nothing to

@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 
     from saitenka.app.config import KeyOptions
     from saitenka.app.features.help.help_controller import ScreenState
+    from saitenka.app.features.subtitle.navigation_state import NavigationStore
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
-    from saitenka.app.session.context import EpisodeSlot
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.interaction_slice import PickerStore
     from saitenka.runtime.picker import PickerState
@@ -76,12 +76,12 @@ class PickerController:
         video: object,
         *,
         retire_hover: Callable[[], None],
-        episodes: EpisodeSlot,
+        navigation: NavigationStore,
         stop: threading.Event,
         toast: Callable[..., None],
     ) -> None:
         sub_picker.open_picker(
-            self.listing_ports(episodes=episodes, stop=stop, toast=toast),
+            self.listing_ports(navigation=navigation, stop=stop, toast=toast),
             video,
             retire_hover=retire_hover,
         )
@@ -89,7 +89,7 @@ class PickerController:
     def listing_ports(
         self,
         *,
-        episodes: EpisodeSlot,
+        navigation: NavigationStore,
         stop: threading.Event,
         toast: Callable[..., None],
     ) -> sub_picker.ListingPorts:
@@ -99,7 +99,7 @@ class PickerController:
             redraw=self.redraw,
             submit=self.submitter,
             stop=stop,
-            current_episode=episodes.get,
+            current_episode=navigation.get,
             toast=toast,
         )
 

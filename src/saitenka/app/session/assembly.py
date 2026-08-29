@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka.app import subtitle_modes
 from saitenka.app.bindings import HELP_CLOSE_MSG, HELP_NEXT_MSG, HELP_PREV_MSG, HELP_TOGGLE_MSG
 from saitenka.app.feature_bindings import (
     HELP_STATEFUL_BINDING,
@@ -21,6 +23,7 @@ from saitenka.app.features.help.help_controller import (
     ScreenState,
     TooltipKeyContext,
 )
+from saitenka.app.features.history.history_owner import HistoryOwner
 from saitenka.app.features.picker.picker_controller import PickerController
 from saitenka.app.features.preview.preview_controller import PreviewController
 from saitenka.app.features.sidebar.sidebar_controller import SidebarController
@@ -28,18 +31,23 @@ from saitenka.app.features.tooltip.preparation import (
     TooltipPreparationConfig,
     TooltipPreparationController,
 )
+from saitenka.app.interaction.presentation import InteractionSurfaces
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+from saitenka.app.lifecycle_timers import LifecycleTimers
 from saitenka.app.runtime import CommandSpec
+from saitenka.app.toast_controller import ToastController
 from saitenka.mpvio.osd import Overlay
 from saitenka.runtime.effects import Owner
 from saitenka.runtime.help import HelpCommand
+from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from concurrent.futures import Future
 
-    from saitenka.app.config import ReaderOptions
+    from saitenka.app.config import KeyOptions, MiningOptions, ReaderOptions
     from saitenka.mpvio.ipc import MpvIPC
+    from saitenka.runtime.jobs import JobSubmitter
 
 
 class CommandEndpoint(Protocol):
@@ -126,6 +134,15 @@ class SessionAssembly:
     sidebar: SidebarController
     preview: PreviewController
     tooltip_preparation: TooltipPreparationController
+    interaction_surfaces: InteractionSurfaces
+    timers: LifecycleTimers
+    notifications: ToastController
+    history: HistoryOwner
+    subtitle_tracks: SubtitleTrackStore
+    stop: threading.Event
+    subtitle_fetch: JobSubmitter | None
+    keys: KeyOptions
+    mining: MiningOptions
     commands: tuple[CommandRegistration, ...]
     stateful: tuple[InstalledStatefulBinding, ...]
     owner_plans: tuple[OwnerPlan, ...]
@@ -161,9 +178,9 @@ def build_session_assembly(
         runtime_submit=runtime_submit,
     )
     surfaces = LifecycleSurfaces(resolved_overlay)
-    screen = ScreenState()
-    tooltip_keys = TooltipKeyContext()
     ui_scale = max(0.75, min(2.0, float(options.panels.scale)))
+    screen = ScreenState(ui_scale=ui_scale)
+    tooltip_keys = TooltipKeyContext()
     help_owner = HelpController(
         ipc,
         surfaces,
@@ -209,6 +226,7 @@ def build_session_assembly(
             mask_atlas_enabled=options.tooltip.mask_atlas,
         ),
     )
+    timers = LifecycleTimers(ipc)
     commands = tuple(
         CommandRegistration(
             "help",
@@ -237,6 +255,15 @@ def build_session_assembly(
         sidebar=sidebar_owner,
         preview=preview_owner,
         tooltip_preparation=tooltip_preparation,
+        interaction_surfaces=InteractionSurfaces(resolved_overlay),
+        timers=timers,
+        notifications=ToastController(surfaces, screen, timers),
+        history=HistoryOwner(enabled=options.stats.enabled, summary=options.stats.summary),
+        subtitle_tracks=SubtitleTrackStore(ipc),
+        stop=threading.Event(),
+        subtitle_fetch=subtitle_modes.configure_runtime_job(ipc),
+        keys=options.keys,
+        mining=options.mining,
         commands=commands,
         stateful=INTERACTION_STATEFUL_BINDINGS,
         owner_plans=(INTERACTION_OWNER_PLAN,),

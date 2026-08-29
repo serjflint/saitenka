@@ -12,9 +12,6 @@ cd "$skill_dir/../../.."   # -> repo root
 fail=0
 have() { test -e "$1" || { echo "MISSING: $1"; fail=1; }; }
 have tools/arch_map.py             # four of the ten axes come from this one view
-have tools/cluster_map.py          # what a module touches on the host, by fact
-have tools/host_mass.py            # retirement, against which "the migration finished" is checked
-have tools/host_arity.py           # host coupling, the debt side of the same question
 have tools/port_probe_census.py    # a meter the review is told to read before quoting
 have tools/reducer_purity.py       # the meter scoped narrower than its name
 have BENCHMARKS.md                 # where a performance claim is cited from

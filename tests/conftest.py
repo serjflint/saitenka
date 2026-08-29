@@ -93,10 +93,10 @@ def anki_up(monkeypatch):
 def _tts_present(monkeypatch):
     """Default: pretend a Japanese TTS voice exists so the 🔊 button is drawn — existing geometry tests
     assume it, and this keeps them hermetic (no real `say`/PowerShell subprocess). Tests for the
-    hidden-button case patches ``saitenka.app.session.controller.tts_available`` explicitly."""
-    import saitenka.app.session.controller as ctrl
+    hidden-button case patches the turn's capability lookup explicitly."""
+    from saitenka.app.session import builder
 
-    monkeypatch.setattr(ctrl, "tts_available", lambda: True)
+    monkeypatch.setattr(builder, "tts_available", lambda: True)
 
 
 @pytest.fixture(autouse=True)

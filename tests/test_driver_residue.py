@@ -29,10 +29,6 @@ _ARGUED: dict[tuple[str, str], str] = {
         "asserts the seam refuses an argument the input path cannot produce; calling the seam IS "
         "the test"
     ),
-    ("test_session_controller.py", "test_property_change_event_drives_hover"): (
-        "the subject is that hover reads the *observed* property; a `Driver.move` writes "
-        "`ipc.props` directly and would answer the question it is asking"
-    ),
     (
         "test_session_controller.py",
         "test_show_tooltip_renders_only_the_head_then_grows_on_scroll",
@@ -46,11 +42,6 @@ _ARGUED: dict[tuple[str, str], str] = {
     ("test_replay_sessions.py", "_apply"): (
         "replays recorded (action, arg) steps; the corpus records offsets, and the fixture's "
         "tooltip covers words 1-2 so a cursor cannot reach them"
-    ),
-    ("test_tooltip_statemachine.py", "hover"): (
-        "the fixture's tooltip (1280x864 at y=352) covers words 1 and 2, so a cursor that opened "
-        "word 0 can never reach another — correct runtime behaviour, and it collapses the rule to "
-        "one word. The subject is panel geometry across transitions"
     ),
     ("test_tooltip_statemachine.py", "scroll"): (
         "the oracle is scroll *position* vs drawn geometry; the two producers (a wheel notch, a "

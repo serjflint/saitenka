@@ -417,17 +417,8 @@ def command_view() -> dict:
         }
         for row in STATELESS_COMMANDS
     ]
-    rows.extend(
-        (
-            {"message": "**assembly", "target": "SessionAssembly", "kind": "registration"},
-            {
-                "message": "saitenka-toggle-legacy-renderer",
-                "target": "toggle_legacy_renderer",
-                "kind": "legacy",
-            },
-        )
-    )
-    return {"rows": rows, "verbs": sum(r["kind"] == "legacy" for r in rows)}
+    rows.append({"message": "**assembly", "target": "SessionAssembly", "kind": "registration"})
+    return {"rows": rows}
 
 
 # --- rendering ----------------------------------------------------------------------------------

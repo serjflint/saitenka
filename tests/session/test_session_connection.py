@@ -8,9 +8,11 @@ window is the whole reason this state exists.
 
 from __future__ import annotations
 
+from session_builder import build_session
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.connection import ConnectionState, ConnectionStore, reduce_connection
@@ -98,10 +100,18 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
     from saitenka.runtime.events import CommandOutcome, CommandReason, UserCommand
 
     ipc = FakeIPC()
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     try:
-        reader._drain_event(LOST)
-        reader._drain_event(UserCommand("saitenka-help", command_id=7))
+        reader.turn._drain_event(LOST)
+        reader.turn._drain_event(UserCommand("saitenka-help", command_id=7))
     finally:
         reader.close()
 
@@ -159,8 +169,21 @@ def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     reslotted: list[str] = []
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
-    monkeypatch.setattr(reader, "_on_file_loaded", lambda: reslotted.append("reslot"))
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    reader.start()
+    monkeypatch.setattr(
+        reader.turn.episode_watch,
+        "file_loaded",
+        lambda: reslotted.append("reslot"),
+    )
     try:
         gateway.publish_session_event(FileLoaded())
         ipc.drain_events(0.0)

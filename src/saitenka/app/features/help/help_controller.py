@@ -30,6 +30,10 @@ if TYPE_CHECKING:
 @dataclass(slots=True)
 class ScreenState:
     osd: tuple[int, int] = (1280, 720)
+    ui_scale: float = 1.0
+
+    def chrome_scale(self) -> float:
+        return self.ui_scale * max(1.0, self.osd[1] / 1080)
 
 
 @dataclass(slots=True)
@@ -68,7 +72,8 @@ class HelpController:
         self._keys = keys
         self._screen = screen
         self._tooltip_keys = tooltip_keys
-        self._ui_scale = ui_scale
+        if screen.ui_scale != ui_scale:
+            raise ValueError("screen and help UI scales disagree")
         self.store = store
 
     @property
@@ -88,12 +93,11 @@ class HelpController:
 
     def document(self):
         osd = self._screen.osd
-        scale = self._ui_scale * max(1.0, osd[1] / 1080)
         return help_overlay.help_document(
             active_bindings(self._keys, "global", "tooltip", "mpv"),
             osd=osd,
             close_key=self._keys.help_key,
-            scale=scale,
+            scale=self._screen.chrome_scale(),
         )
 
     def run(self, command: HelpCommand) -> None:

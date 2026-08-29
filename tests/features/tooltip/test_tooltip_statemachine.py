@@ -44,14 +44,19 @@ _NAV_QUERY = "見*"  # wildcard → always resolves via LinkingDS.search, so nav
 def _fresh_reader():
     """A hi-dpi reader with three hoverable words (the shared LinkingDS entry backs each), crisp on."""
     r = hidpi_reader(2.0)
-    r.renderer = NullRenderer()  # headless; no real mpv subtitle draw
-    r.tokens = [
-        Token("本命", "本命", "ほんめい", "名詞", 0, 2),
-        Token("掛ける", "掛ける", "かける", "動詞", 2, 5),
-        Token("見る", "見る", "みる", "動詞", 5, 7),
-    ]
-    r.boxes = [WordBox(i, 100, 300 + 60 * i, 40, 40) for i in range(3)]
-    r.tooltip_controller.surface_state().last_mouse = (0, 0)
+    turn = r.turn
+    turn.subtitle_presentation.renderer = NullRenderer()  # headless; no real mpv subtitle draw
+    turn.subtitle_presentation.cue.replace_tokenized(
+        tokens=[
+            Token("本命", "本命", "ほんめい", "名詞", 0, 2),
+            Token("掛ける", "掛ける", "かける", "動詞", 2, 5),
+            Token("見る", "見る", "みる", "動詞", 5, 7),
+        ]
+    )
+    turn.subtitle_presentation.cue.replace_geometry(
+        boxes=[WordBox(i, 100, 300 + 60 * i, 40, 40) for i in range(3)]
+    )
+    turn.tooltip_controller.surface_state().last_mouse = (0, 0)
     return r
 
 
@@ -61,11 +66,12 @@ def _assert_agrees(reader, *, nested: bool) -> None:
     Only the on-screen window is measured + tested — you can only click what's drawn, and a full-panel
     measure per step is too slow across a stateful run (the corners get covered as scroll moves the
     window)."""
+    reader = reader.turn
     panel, s, scroll = tooltip_panel.hit_target(
         reader.tooltip_controller.surface_state().nest,
         reader.tooltip_controller.surface_state().view.state,
         reader.tooltip_controller.surface_state().view.scroll,
-        reader.tip_scale.raster,
+        reader.tooltip_controller.scale().raster,
         nested=nested,
     )
     if panel is None:
@@ -98,7 +104,7 @@ def _assert_agrees(reader, *, nested: bool) -> None:
     link_hit = partial(
         tooltip_panel.link_hit_at,
         reader.tooltip_controller.surface_state(),
-        reader.tip_scale.raster,
+        reader.tooltip_controller.scale().raster,
         nested=nested,
     )
     for lb in panel.windowed.link_boxes():
@@ -115,7 +121,10 @@ def _assert_agrees(reader, *, nested: bool) -> None:
             mx, my = sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s
             assert (
                 tooltip_panel.scan_hit(
-                    reader.tooltip_controller.surface_state(), reader.tip_scale.raster, mx, my
+                    reader.tooltip_controller.surface_state(),
+                    reader.tooltip_controller.scale().raster,
+                    mx,
+                    my,
                 )
                 == b
             ), f"scan mis-hit (scale={s} scroll={scroll}): {b}"
@@ -130,7 +139,8 @@ def _assert_agrees(reader, *, nested: bool) -> None:
 class TooltipSession(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.r = _fresh_reader()
+        self.session = _fresh_reader()
+        self.r = self.session.turn
         self.shown = False
         self.nav_depth = 0
         self.nested_open = False
@@ -141,7 +151,9 @@ class TooltipSession(RuleBasedStateMachine):
         # (1280×864 at y=352) covers words 1 and 2, so a cursor that opened word 0 can never reach
         # another one — correct runtime behaviour, and it collapses this rule to a single word. The
         # subject here is panel geometry across transitions, not which word a cursor can pick.
-        self.r._show_tooltip(idx)  # a fresh hover resets nav history and drops any nested popup
+        self.r.tooltip_controller.show_tooltip(
+            idx
+        )  # a fresh hover resets nav history and drops any nested popup
         self.shown, self.nav_depth, self.nested_open = True, 0, False
         self._check("hover")
 
@@ -151,14 +163,16 @@ class TooltipSession(RuleBasedStateMachine):
         # Below the input seam on purpose: the oracle is scroll *position* vs drawn geometry, and the
         # two producers (a wheel notch, a TIP_UP/DOWN page) only reach a handful of the offsets where
         # clamping and band boundaries live. A notch count would not explore them.
-        self.r.scroll_tip(delta)
+        self.r.tooltip_controller.scroll_tip(delta)
         self._check("scroll")
 
     @precondition(lambda self: self.shown)
     @rule()
     def navigate(self) -> None:
         before = self.r.tooltip_controller.observation().navigation_depth
-        tooltip.navigate_tip(self.r._tip_ports, self.r._panel_ports, _NAV_QUERY)
+        tooltip.navigate_tip(
+            self.r.tooltip_controller.tip_ports, self.r.tooltip_controller.panel_ports, _NAV_QUERY
+        )
         assert (
             self.r.tooltip_controller.observation().navigation_depth == before + 1
         )  # the wildcard target always resolves
@@ -174,7 +188,7 @@ class TooltipSession(RuleBasedStateMachine):
     def back(self) -> None:
         expected = self.nav_depth > 0
         assert (
-            tooltip.tip_back(self.r._tip_ports) == expected
+            tooltip.tip_back(self.r.tooltip_controller.tip_ports) == expected
         )  # False at the root → caller closes the tooltip
         if expected:
             self.nav_depth -= 1
@@ -183,10 +197,10 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule()
     def open_nested(self) -> None:
-        tok = self.r.tokens[0]
+        tok = self.r.subtitle_presentation.cue.current.tokens[0]
         nested_popup.open_nested(
-            self.r._tip_ports,
-            self.r._panel_ports,
+            self.r.tooltip_controller.tip_ports,
+            self.r.tooltip_controller.panel_ports,
             tok,
             tok.surface,
             nested_popup.Anchor(200.0, 200.0, 40.0),
@@ -197,9 +211,12 @@ class TooltipSession(RuleBasedStateMachine):
     @precondition(lambda self: self.shown)
     @rule(scale=st.sampled_from(_SCALES))
     def resize(self, scale: int) -> None:
-        self.r.osd = (round(1920 * scale), round(1080 * scale))  # live → changes tip_scale.raster
+        self.r.screen.osd = (
+            round(1920 * scale),
+            round(1080 * scale),
+        )  # live → changes tip_scale.raster
         tooltip_panel.render_view(
-            self.r._tip_ports, self.r.tooltip_controller.surface_state().view
+            self.r.tooltip_controller.tip_ports, self.r.tooltip_controller.surface_state().view
         )  # re-blit at the new scale
         self._check("resize")
 
@@ -213,10 +230,12 @@ class TooltipSession(RuleBasedStateMachine):
 
     def _check(self, action: str) -> None:
         view = "nested" if self.nested_open else ("nav" if self.nav_depth else "base")
-        event(f"action={action} view={view} scale={self.r.tip_scale.raster}")  # drift-gate signal
-        _assert_agrees(self.r, nested=False)
+        event(
+            f"action={action} view={view} scale={self.r.tooltip_controller.scale().raster}"
+        )  # drift-gate signal
+        _assert_agrees(self.session, nested=False)
         if self.r.tooltip_controller.surface_state().nest.state is not None:
-            _assert_agrees(self.r, nested=True)
+            _assert_agrees(self.session, nested=True)
 
 
 TestTooltipSession = pytest.mark.integration(TooltipSession.TestCase)
@@ -227,13 +246,14 @@ def test_the_agreement_oracle_has_teeth() -> None:
     # Negative control (arm-2 oracle-liveness made permanent): the invariant isn't vacuous. Correct
     # displayed centres round-trip, but a deliberately DRIFTED transform mis-hits — so a real seam
     # regression (a stale scroll / scale / panel after some transition) would turn the state machine red.
-    r = _fresh_reader()
-    Driver(r).move_to_word(0)
+    session = _fresh_reader()
+    r = session.turn
+    Driver(session).move_to_word(0)
     panel, s, scroll = tooltip_panel.hit_target(
         r.tooltip_controller.surface_state().nest,
         r.tooltip_controller.surface_state().view.state,
         r.tooltip_controller.surface_state().view.scroll,
-        r.tip_scale.raster,
+        r.tooltip_controller.scale().raster,
         nested=False,
     )
     panel.windowed.viewport(scroll, r.tooltip_controller.surface_state().view.view_h)
@@ -245,7 +265,7 @@ def test_the_agreement_oracle_has_teeth() -> None:
         assert (
             tooltip_panel.scan_hit(
                 r.tooltip_controller.surface_state(),
-                r.tip_scale.raster,
+                r.tooltip_controller.scale().raster,
                 sx + (b.x + b.w / 2) * s,
                 sy + (b.y + b.h / 2 - scroll) * s,
             )
@@ -254,7 +274,7 @@ def test_the_agreement_oracle_has_teeth() -> None:
     drifted = sum(
         tooltip_panel.scan_hit(
             r.tooltip_controller.surface_state(),
-            r.tip_scale.raster,
+            r.tooltip_controller.scale().raster,
             sx + (b.x + b.w / 2) * s,
             sy + (b.y + b.h / 2 - scroll) * s + 40 * s,
         )

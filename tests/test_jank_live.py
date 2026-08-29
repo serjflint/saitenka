@@ -6,8 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from session_builder import build_session
 
 from saitenka.app.session import surfaces
+from saitenka.app.session.factory import SessionServices
 
 JANK_PATH = Path(__file__).resolve().parent.parent / "examples" / "jank_live.py"
 
@@ -84,16 +86,21 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
 
         def __init__(self):
             self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
-            self.tooltip_controller = SimpleNamespace(surface_state=lambda: self.tip)
-
-        def scroll_tip(self, delta):
-            self.tip.view.scroll += delta
+            self.tooltip_controller = SimpleNamespace(
+                surface_state=lambda: self.tip,
+                scale=lambda: SimpleNamespace(ref_h=1080),
+                scroll_tip=lambda delta: setattr(
+                    self.tip.view,
+                    "scroll",
+                    self.tip.view.scroll + delta,
+                ),
+            )
 
         def pump(self):
             return True
 
     reader = SessionController()
-    mod._scroll_four(reader)
+    mod._scroll_four(reader.tooltip_controller, reader.pump)
     # Through the shared conversion, not a second copy of the arithmetic: a hard-coded fraction
     # here would keep passing after the wheel's step changed.
     assert reader.tip.view.scroll == 4 * surfaces.tip_wheel_pixels(1080, 1)
@@ -114,10 +121,11 @@ def _stuck_controller(mod_state):
                 nest=SimpleNamespace(rect=None, scroll=0),
                 last_mouse=(10.0, 20.0),
             )
-            self.tooltip_controller = SimpleNamespace(surface_state=lambda: self.tip)
-
-        def scroll_tip(self, _delta):
-            pass
+            self.tooltip_controller = SimpleNamespace(
+                surface_state=lambda: self.tip,
+                scale=lambda: SimpleNamespace(ref_h=1080),
+                scroll_tip=lambda _delta: None,
+            )
 
         def pump(self):
             return True
@@ -129,7 +137,7 @@ def test_scroll_workload_rejects_a_non_scrollable_tooltip():
     mod = _jank_module()
     reader = _stuck_controller({"state": SimpleNamespace(full_height=1440), "view_h": 432})
     with pytest.raises(RuntimeError, match="did not advance"):
-        mod._scroll_four(reader)
+        mod._scroll_four(reader.tooltip_controller, reader.pump)
 
 
 @pytest.mark.parametrize(
@@ -144,8 +152,9 @@ def test_scroll_workload_rejects_a_non_scrollable_tooltip():
 )
 def test_the_stuck_scroll_message_names_the_reason(state, expected):
     mod = _jank_module()
+    reader = _stuck_controller(state)
     with pytest.raises(RuntimeError, match="did not advance") as excinfo:
-        mod._scroll_four(_stuck_controller(state))
+        mod._scroll_four(reader.tooltip_controller, reader.pump)
     assert expected in str(excinfo.value)
     # Routing is the third possibility and is invisible from the base view alone: report the nested
     # popup too, or a wheel that landed on it reads identically to one that landed nowhere.
@@ -164,24 +173,26 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
     from driver import Driver
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     mod = _jank_module()
-    reader = SessionController(FakeIPC(), dict_set=mod.TallDS())
-    reader.osd = (1280, 720)
-    reader.set_subtitle("門前の小僧習わぬ経を読む")
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=mod.TallDS()))
+    reader.turn.screen.osd = (1280, 720)
+    reader.turn.cue_coordinator.set_subtitle("門前の小僧習わぬ経を読む")
     word = next(
-        i for i, t in enumerate(reader.tokens) if reader.profile_controller.tokenizer.is_content(t)
+        i
+        for i, t in enumerate(reader.turn.subtitle_presentation.cue.current.tokens)
+        if reader.turn.profile_session.profile.tokenizer.is_content(t)
     )
     Driver(reader).move_to_word(word).leave()  # resolve the cue's entries, as the live harness does
     for _ in range(4):
         reader.pump()
 
     Driver(reader).move_to_word(word)
-    view = reader.tooltip_controller.surface_state().view
+    view = reader.turn.tooltip_controller.surface_state().view
     assert view.state is not None
-    assert view.state.full_height > view.view_h, mod._why_stuck(reader)
-    mod._scroll_four(reader)  # raises if the viewport did not move
+    assert view.state.full_height > view.view_h, mod._why_stuck(reader.turn.tooltip_controller)
+    mod._scroll_four(
+        reader.turn.tooltip_controller, reader.pump
+    )  # raises if the viewport did not move
 
 
 def test_live_latency_boundary_repaints_the_overlay():
@@ -193,9 +204,12 @@ def test_live_latency_boundary_repaints_the_overlay():
         def repaint(self):
             self.repaints += 1
 
-    class SessionController:
+    class Turn:
         ov = Overlay()
 
+    class SessionController:
+        turn = Turn()
+
     reader = SessionController()
-    mod._present_overlay(reader)
-    assert reader.ov.repaints == 1
+    mod._present_overlay(reader.turn.ov)
+    assert reader.turn.ov.repaints == 1
