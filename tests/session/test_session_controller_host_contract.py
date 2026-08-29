@@ -26,21 +26,20 @@ def _turn_graph_collaborators(
             method.name == "_build_entry_runtime"
         ):
             continue
-        assignments = [node for node in ast.walk(method) if isinstance(node, ast.Assign)]
+        assignments = list(_assignments(method))
         aliases = {
-            assignment.value.id
-            for assignment in assignments
-            if any(_is_self_graph(target) for target in assignment.targets)
-            and isinstance(assignment.value, ast.Name)
+            value.id
+            for targets, value in assignments
+            if any(_is_self_graph(target) for target in targets) and isinstance(value, ast.Name)
         }
         changed = True
         while changed:
             changed = False
-            for assignment in assignments:
-                source_is_graph = _is_graph_reference(assignment.value, aliases)
+            for targets, value in assignments:
+                source_is_graph = _is_graph_reference(value, aliases)
                 if not source_is_graph:
                     continue
-                for target in assignment.targets:
+                for target in targets:
                     if isinstance(target, ast.Name) and target.id not in aliases:
                         aliases.add(target.id)
                         changed = True
@@ -56,17 +55,22 @@ def _turn_graph_collaborators(
             parent = parents.get(node)
             if isinstance(parent, ast.Attribute) and parent.value is node:
                 continue
-            if (
-                isinstance(parent, ast.Assign)
-                and parent.value is node
-                and all(
-                    isinstance(target, ast.Name) or _is_self_graph(target)
-                    for target in parent.targets
-                )
-            ):
+            if _is_safe_graph_assignment(parent, node):
                 continue
             collaborators.add("<session-graph-escape>")
     return collaborators
+
+
+def _assignments(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[list[ast.expr], ast.expr]]:
+    assignments = []
+    for node in ast.walk(method):
+        if isinstance(node, ast.Assign):
+            assignments.append((node.targets, node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            assignments.append(([node.target], node.value))
+    return assignments
 
 
 def _is_self_graph(node: ast.AST) -> bool:
@@ -81,6 +85,18 @@ def _is_self_graph(node: ast.AST) -> bool:
 def _is_graph_reference(node: ast.AST, aliases: set[str]) -> bool:
     return (_is_self_graph(node) and isinstance(node.ctx, ast.Load)) or (
         isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in aliases
+    )
+
+
+def _is_safe_graph_assignment(parent: ast.AST | None, node: ast.AST) -> bool:
+    if isinstance(parent, ast.Assign):
+        targets = parent.targets
+    elif isinstance(parent, ast.AnnAssign):
+        targets = [parent.target]
+    else:
+        return False
+    return parent.value is node and all(
+        isinstance(target, ast.Name) or _is_self_graph(target) for target in targets
     )
 
 
@@ -131,6 +147,15 @@ def test_the_live_turn_does_not_reach_new_feature_authority() -> None:
                 "class SessionController:\n"
                 "    def __init__(self, session_graph):\n"
                 "        self._graph = session_graph\n"
+                "        session_graph.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def __init__(self, session_graph):\n"
+                "        self._graph: SessionGraph = session_graph\n"
                 "        session_graph.mining.mine()\n"
             ),
             {"mining"},
