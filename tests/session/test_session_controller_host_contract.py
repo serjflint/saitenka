@@ -26,16 +26,17 @@ def _turn_graph_collaborators(
             method.name == "_build_entry_runtime"
         ):
             continue
-        aliases: set[str] = set()
         assignments = [node for node in ast.walk(method) if isinstance(node, ast.Assign)]
+        aliases = {
+            assignment.value.id
+            for assignment in assignments
+            if any(_is_self_graph(target) for target in assignment.targets)
+            and isinstance(assignment.value, ast.Name)
+        }
         changed = True
         while changed:
             changed = False
             for assignment in assignments:
-                if any(_is_self_graph(target) for target in assignment.targets) and isinstance(
-                    assignment.value, ast.Name
-                ):
-                    aliases.add(assignment.value.id)
                 source_is_graph = _is_graph_reference(assignment.value, aliases)
                 if not source_is_graph:
                     continue
@@ -131,6 +132,16 @@ def test_the_live_turn_does_not_reach_new_feature_authority() -> None:
                 "    def __init__(self, session_graph):\n"
                 "        self._graph = session_graph\n"
                 "        session_graph.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def __init__(self, session_graph):\n"
+                "        g = session_graph\n"
+                "        self._graph = session_graph\n"
+                "        g.mining.mine()\n"
             ),
             {"mining"},
         ),
