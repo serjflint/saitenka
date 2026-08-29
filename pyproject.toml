@@ -823,24 +823,7 @@ annotation-ownership = { shell = "uv run python tools/annotation_ownership_check
 # lifecycle writes behind TooltipController while preserving the existing TipPorts paint helpers.
 # Planted controls: tool_tests/test_tooltip_ownership_check.py.
 tooltip-ownership = { shell = "uv run python tools/tooltip_ownership_check.py" }
-# GATE (in `all`) — the runtime debt's *shape*, which its row count cannot see. Splits the
-# host-taking functions by the arity each would have once the host parameter is gone, counted
-# TRANSITIVELY: a forwarder must receive everything downstream, so 42 local breaches of `max-args`
-# are 116 real ones. Ratchets down like the sibling gate; growth is the failure.
-host-arity = { shell = "uv run python tools/host_arity.py check" }
-host-arity-over = { shell = "uv run python tools/host_arity.py over", help = "Host-taking functions over ruff's max-args once converted, worst first — the WP5 queue" }
-# NOT a gate — the map a migration's design step reads: what a module actually touches on the host,
-# and what those names resolve to underneath (seven names over one owner slice are one port, not
-# seven parameters). `--member` is the step before a codemod; its `--json` is the worklist.
-cluster-map = { shell = "uv run python tools/cluster_map.py", help = "What a module touches on the host, by fact — `--member NAME` for one member and its sites" }
 arch-map = { shell = "uv run --extra full python tools/arch_map.py", help = "The four architecture views ARCHITECTURE.md cannot hold: imports, ownership, commands, seams (`-- --json` for the data)" }
-# GATE (in `all`) — the host's mass, ratcheted. `total` is the anti-laundering number: moving a body
-# into a module function and leaving a thin delegator behind shrinks the substantive split while the
-# host is unchanged, and gating only that would report the growth mode this repo prescribes as
-# progress. Members are discovered live (mixins, import-time attachment), never by parsing one file.
-host-mass = { shell = "uv run --extra full python tools/host_mass.py check" }
-host-mass-census = { shell = "uv run --extra full python tools/host_mass.py", help = "Members on the SessionController by kind — substantive, delegator, property, field" }
-session-assembly-census = { cmd = "uv run --extra full python tools/session_assembly_census.py", help = "Live SessionController assembly sites by migration family" }
 # GATE (in `all`) — `getattr(port, "method", fallback)` where the port ALWAYS has the method, so the
 # fallback is unreachable and the probe's only live effect is making a rename silent (a renamed timer
 # method disarms every lifecycle deadline, with nothing red). Resolves the receiver's type and asks
@@ -938,7 +921,7 @@ hygiene = ["deadcode", "dup"]
 # name to type and one contract. CI splits the two halves across two jobs instead: the suite costs ~128s
 # of a 4-core runner, and running both passes in the same job made the gate the longest job in the run by
 # a wide margin. Both halves sync the same dev env, so the split changes wall-clock, not coverage.
-gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "app-package-layout", "mining-ownership", "analysis-ownership", "annotation-ownership", "tooltip-ownership", "host-arity", "host-mass", "port-probe", "reducer-purity"]
+gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "app-package-layout", "mining-ownership", "analysis-ownership", "annotation-ownership", "tooltip-ownership", "port-probe", "reducer-purity"]
 all = ["gate-no-ft", "test-ft"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not

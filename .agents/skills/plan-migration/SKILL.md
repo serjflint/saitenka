@@ -38,15 +38,16 @@ only to the bug in front of you.
 
     sites × the kind of decision each site needs × the observed rows-per-commit rate = commits
 
-Read mechanical counts from the repository census tools rather than copying them into the plan.
+Read mechanical counts from source navigation or a task-specific census rather than copying them
+into the plan. Delete a one-shot census when the conversion it prices is complete.
 
 For a responsibility migration, also use the architecture-inquiry skill's canonical
 [`authority-reachability.md`](../architecture-inquiry/references/authority-reachability.md). Price decisions
 per authority path, not every textual mention.
 
 If the result exceeds the expected shape by an order of magnitude, that is the signal to **stop and
-look for a shared shape** — not a reason to start early. Sites are rarely independent: several names
-over one owner are one port, and `poe cluster-map` is what says so.
+look for a shared shape** — not a reason to start early. Sites are rarely independent: use symbol
+references and inspect the authoritative owner before counting several names as several facts.
 
 ## 2. Choose a leverage device explicitly, and record the rejection
 
@@ -65,10 +66,10 @@ Name the device you chose and the ones you rejected, each with its reason, in th
 
 ## 3. Declare a retirement meter next to the debt meter
 
-A migration whose success condition is a *retirement* needs a meter that distinguishes "the new thing
-arrived" from "the old thing left". A debt count falling while the retired object keeps growing is
-the failure mode, and only two numbers side by side can see it. `poe host-mass` is the standing
-instance — declare yours on day 1, not after the first surprise.
+A migration whose success condition is a *retirement* needs evidence that distinguishes "the new
+thing arrived" from "the old thing left". A debt count falling while the retired authority remains
+is the failure mode. Declare the retirement proof on day 1 and remove migration-only meters after
+they reach zero; keep only the forward invariant.
 
 **Responsibility migrations need an authority/writer retirement meter.** Moving fields, adding a
 collaborator, reducing LOC, or turning methods into delegators does not prove that ownership moved. When the
@@ -85,7 +86,7 @@ retired semantic path; do not freeze private layout or benign test construction.
 
 Convert a whole family in one commit rather than one member per commit, and drive the mechanical
 edit from a codemod — [`references/codemod-recipe.md`](references/codemod-recipe.md) has the runnable
-handoff (`tools/cluster_map.py --member` → LibCST, under `uv run --group codemod`). Batching the
+handoff (AST attribute worklist → LibCST, under `uv run --group codemod`). Batching the
 family and codemodding its mechanical part retired debt several times faster per commit here, and by
 a wider margin per hour, than converting one function per commit did.
 

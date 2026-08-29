@@ -4,8 +4,7 @@ The stateful half registers: `SliceReducer({name: reducer})` puts a feature's de
 table and a `RouteKey` says what reaches it, so a new stateful feature is a registration. The
 stateless half had no equivalent — its policies are pure `reduce(command, inputs)` functions in
 `app/*_intents.py`, and the two impure ends around them had nowhere to live but `SessionController`. Purity
-relocates impurity; absent a seam it relocates onto the object being retired, which is the growth
-`poe host-mass` measures.
+relocates impurity; absent a seam it relocates onto the session shell.
 
 An adapter is where a feature's host coupling is *allowed* to be. Concentrating it in named objects
 is the point: each one is small, countable, and belongs to its feature.

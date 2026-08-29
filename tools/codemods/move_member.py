@@ -3,14 +3,11 @@
     uv run --group codemod python tools/codemods/move_member.py _tip_state=tip.view.state [--check]
 
 The worked example the recipe points at, and the shape most retirements here take: a `Delegated`
-descriptor exposes one field of one owner under a flat name on the host, and every call site then
-reads as a separate host member. Eight reads of one `tip` count as eight members to every ratchet,
-so the cluster looks far more coupled than it is — the rewrite is what makes the arithmetic honest,
-not a cosmetic rename.
+descriptor exposes one field of one owner under a flat name on the host. The rewrite retires that
+compatibility projection without changing formatting or comments.
 
 The receiver is rewritten wherever the attribute appears, which is sound only when every receiver
-in the tree is the host. Verify that with `cluster_map --member NAME` first: it lists every site,
-and a site whose receiver is something else is the signal to type the receiver instead.
+in the worklist is the host. Inspect the reported attribute sites before applying the transform.
 """
 
 from __future__ import annotations

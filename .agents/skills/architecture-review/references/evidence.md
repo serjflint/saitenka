@@ -19,7 +19,7 @@ recommendation that would have been acted on:
 
 | claimed | inferred from | actually | what settled it |
 | --- | --- | --- | --- |
-| a documentation convention was growing the host | two totals matching | the thing blamed had *fallen*; the growth was a different kind entirely | `poe host-mass-census` — classifying every member by kind, rather than counting |
+| a documentation convention was growing the host | two totals matching | the thing blamed had *fallen*; the growth was a different kind entirely | classifying the changed members from source, rather than counting |
 | two competing runtimes, one unmigrated | one is called synchronously, the other through a mailbox | two *layers* that compose deliberately; the classification was already correct | reading the entry-point signatures |
 | review coverage explained a delivery difference | merged versus unmerged | neither side had ever been reviewed | one `gh pr view --json reviews` query |
 

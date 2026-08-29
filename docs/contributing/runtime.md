@@ -71,7 +71,6 @@ The following gates enforce the boundary:
 | --- | --- |
 | `tests/session/test_stateless_registration.py` | An unregistered policy; an unbound message; broad session/episode capture; an opaque callable authority; or a deferred read in command composition. |
 | `tests/session/test_session_controller_host_contract.py` | A function under `app/` takes a `SessionController` **parameter**. Declare a `Protocol`. |
-| `poe host-mass` | You added a **member** to `SessionController` — a different subject from the row above, which counts parameters. New state belongs in a slice. |
 | `poe reducer-purity` | A registered stateful reducer or stateless policy branches on an ambient reading. |
 | `poe arch` | Feature packages import session composition, interaction primitives import upward, or feature packages form a runtime cycle. |
 | `poe app-package-layout` | A declared feature package disappears, an undeclared package appears, or a retired flat module/import returns. |
@@ -245,7 +244,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Nonblocking startup clear | Interactive readiness does not wait for the startup OSD clear reply. |
 | Explicit close | Owned surfaces are removed, new work is rejected, and late identity-qualified results cannot republish closed UI. |
 | Closed behavior oracle | `BehaviorTrace` accepts only its enumerated, text-free event, state, and outcome vocabulary. |
-| Exact host inventory | The checked-in per-module count of functions accepting a `SessionController` **parameter** may not grow. The census is currently empty, so any such function under `app/` fails; a removal tightens the baseline in place rather than failing. Separate from `poe host-mass`, which counts `SessionController`'s **members**. |
+| Bounded feature authority | Any function under `app/` that accepts the whole `SessionController` fails the structural contract. Features receive narrow owners, immutable observations, or named acts. |
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
 | Effect interpreter ownership | Effects are applied by the owning adapter/coordinator, never by a generic session callback. Both layers return effects; the interpreter belongs to the feature. |
@@ -258,8 +257,7 @@ The executable sources of truth are:
 - [`tests/runtime_behavior.py`](https://github.com/serjflint/saitenka/blob/main/tests/runtime_behavior.py)
   for the closed behavior-record vocabulary;
 - [`tests/session/test_session_controller_host_contract.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_controller_host_contract.py)
-  and its [inventory](https://github.com/serjflint/saitenka/blob/main/tests/fixtures/session_controller_host_allowlist.json)
-  for `SessionController`-accepting function counts;
+  for the zero-`SessionController` feature boundary;
 - [`tests/session/test_session_runtime.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_runtime.py)
   for mailbox, lifecycle, reconnect, overload, timer, and close contracts;
 - [`tools/mining_ownership_check.py`](https://github.com/serjflint/saitenka/blob/main/tools/mining_ownership_check.py)

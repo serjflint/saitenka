@@ -90,15 +90,12 @@ The tools exist so this review is cheap; `poe arch-map` alone feeds four axes.
 
 ```sh
 uv run poe arch-map          # imports + cycles classified, owner->features->events, commands, seams
-uv run poe cluster-map       # what a module touches on the host, by fact; --member NAME for the sites
 ```
 
-The four ratchets have a **gate** form and a **census** form, and the gate form is in `poe all` — so
-it is green whenever a review runs and tells you nothing. Take the census:
+Gate status alone says little about architecture fitness. Read the focused census for the mechanism
+under review:
 
 ```sh
-uv run poe host-mass-census        # members by kind — this is what settled the misdiagnosis in evidence.md
-uv run poe host-arity-over         # the worst-first queue, not the pass/fail
 uv run poe port-probe-census       # the per-site table
 uv run poe reducer-purity-census   # impure readings per reducer
 ```
