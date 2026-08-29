@@ -59,6 +59,7 @@ from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.profiles import profile_intents
 from saitenka.app.features.tooltip import hover_intents
 from saitenka.app.session import interaction_intents, panel_intents
+from saitenka.app.session.resources import ResourceRetirementError
 from saitenka.app.session.stateless import StatelessCommandRegistration, bind_stateless
 from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
@@ -244,22 +245,6 @@ def _begin(gateway: MpvGateway, name: str) -> bool:
     return True
 
 
-class ResourceRetirementError(RuntimeError):
-    """One close phase finished its sequence but could not retire every resource."""
-
-    def __init__(
-        self,
-        *,
-        missing: tuple[str, ...],
-        failed: tuple[tuple[str, BaseException], ...],
-    ) -> None:
-        self.missing = missing
-        self.failed = failed
-        details = [*(f"{name}: missing" for name in missing)]
-        details.extend(f"{name}: {type(error).__name__}" for name, error in failed)
-        super().__init__("session resources failed to retire: " + ", ".join(details))
-
-
 def _retire(
     gateway: MpvGateway,
     names: tuple[str, ...],
@@ -268,8 +253,8 @@ def _retire(
 ) -> bool:
     """Close each named resource in order and report any failures after the sequence.
 
-    The exception is delayed until every peer has run. The controller's `CloseLedger` catches it at
-    the phase boundary, preserving both isolation and caller-visible failure truth.
+    The exception is delayed until every peer has run. The session turn converts it into a failed
+    turn, preserving both isolation and caller-visible failure truth.
     """
     missing: list[str] = []
     failed: list[tuple[str, BaseException]] = []

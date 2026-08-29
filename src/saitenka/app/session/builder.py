@@ -268,13 +268,6 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     sidebar_controller = assembly.sidebar
     preview_controller = assembly.preview
     tooltip_preparation = assembly.tooltip_preparation
-    # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
-    # whoever owns it rather than to a line in a teardown table far away. We keep *using* it;
-    # what moves is when it closes. False means no runtime owns this session, and the close
-    # table's fallback still has to run.
-    # `getattr`, like the job-lane port below: a partial IPC (the benches' fake) constructs a
-    # SessionController without implementing every runtime port, and construction must not demand one.
-
     interaction_surfaces = assembly.interaction_surfaces
     lifecycle_timers = assembly.timers
     notifications = assembly.notifications

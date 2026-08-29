@@ -107,7 +107,7 @@ class CommandReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class CommandHandled:
-    """Typed terminal result of one command-policy or compatibility action."""
+    """Typed terminal result of one command-policy action."""
 
     name: str
     owner: Owner | None

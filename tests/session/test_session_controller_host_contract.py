@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from session_controller_host_contract import session_controller_parameters
@@ -7,6 +8,64 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_new_feature_functions_cannot_accept_session_controller() -> None:
     assert session_controller_parameters(ROOT) == set()
+
+
+def _turn_graph_collaborators(
+    path: Path = ROOT / "src/saitenka/app/session/controller.py",
+) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    controller = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SessionController"
+    )
+    collaborators: set[str] = set()
+    for method in controller.body:
+        if not isinstance(method, ast.FunctionDef) or method.name == "_build_entry_runtime":
+            continue
+        for node in ast.walk(method):
+            if not isinstance(node, ast.Attribute):
+                continue
+            graph_alias = isinstance(node.value, ast.Name) and node.value.id == "graph"
+            controller_graph = (
+                isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "self"
+                and node.value.attr == "_graph"
+            )
+            if graph_alias or controller_graph:
+                collaborators.add(node.attr)
+    return collaborators
+
+
+def test_the_live_turn_does_not_reach_new_feature_authority() -> None:
+    """New feature policy belongs behind its owner or an explicit session conjunction."""
+    assert _turn_graph_collaborators() <= {
+        "annotation",
+        "commands",
+        "connection",
+        "cue",
+        "episode_watch",
+        "interaction",
+        "ipc",
+        "lifecycle",
+        "overlay",
+        "playback",
+        "presentation",
+    }
+
+
+def test_the_live_turn_guard_detects_direct_feature_authority(tmp_path: Path) -> None:
+    controller = tmp_path / "controller.py"
+    controller.write_text(
+        "class SessionController:\n"
+        "    def perform(self):\n"
+        "        graph = self._graph\n"
+        "        graph.mining.mine()\n",
+        encoding="utf-8",
+    )
+
+    assert _turn_graph_collaborators(controller) == {"mining"}
 
 
 def test_session_controller_aliases_and_reader_names_are_detected(tmp_path: Path) -> None:
@@ -41,8 +100,6 @@ def test_session_controller_aliases_and_reader_names_are_detected(tmp_path: Path
 
 
 def _public_methods(path: Path, name: str) -> set[str]:
-    import ast
-
     tree = ast.parse(path.read_text(encoding="utf-8"))
     cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == name)
     return {
@@ -80,8 +137,6 @@ _STANDALONE_IPC_DOUBLES = {
 
 
 def _ipc_doubles() -> list[tuple[str, str, bool]]:
-    import ast
-
     found = []
     transport_methods = {
         "command_async",
