@@ -7,7 +7,7 @@ import time
 
 import pytest
 from session_builder import build_session
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway, session_gateway
 
 from saitenka.app.config import ReaderOptions
 from saitenka.runtime.runner import SessionRunner
@@ -199,7 +199,7 @@ def test_requesting_a_stop_wakes_the_transport(request) -> None:
     """The SessionController half: the flag alone leaves a blocked receiver blocked."""
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     request.addfinalizer(gateway.close)
     woken: list[bool] = []
     ipc.wake_session_runtime = lambda: woken.append(True) or True  # type: ignore[method-assign]
@@ -211,22 +211,15 @@ def test_requesting_a_stop_wakes_the_transport(request) -> None:
         reader.close()
 
 
-def test_the_claim_census_separates_what_the_reactor_owns_from_what_the_reader_still_does(
+def test_the_routing_census_separates_reactor_owned_from_owner_thread_events(
     request,
 ) -> None:
-    """The `session-loop` duty's meter, and the reason it needs one.
-
-    The loop already receives from the mailbox and the reactor already sees every envelope, so
-    neither is what keeps the duty open — what is left is the SessionController still *acting* on the
-    envelopes nothing claimed. That is invisible to the debt census, because an unclaimed envelope
-    is not a debt symbol anywhere: it is a ratio, and the tail of it names the feature to migrate
-    next.
-    """
+    """The census distinguishes reactor-owned observations from owner-thread commands."""
     from saitenka.runtime import EventOrigin, TrafficClass
     from saitenka.runtime.events import RawMpvEvent
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
 
     gateway.mailbox.publish(
@@ -234,7 +227,7 @@ def test_the_claim_census_separates_what_the_reactor_owns_from_what_the_reader_s
     )
     ipc.drain_events()
 
-    census = gateway.claim_census()
+    census = gateway.routing_census()
     claimed, seen = census["RawMpvEvent"]
     assert seen == 1
     assert claimed == 0, "an mpv observation is still the SessionController's to act on"
@@ -244,7 +237,7 @@ def test_an_unrun_session_reports_an_empty_census_rather_than_a_clean_one(reques
     """The negative control. A session that saw nothing must not read as fully migrated — an empty
     census is a statement about the sample, and a ratio over zero would round to whatever suits."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
 
-    assert gateway.claim_census() == {}
+    assert gateway.routing_census() == {}

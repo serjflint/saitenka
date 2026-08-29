@@ -41,11 +41,11 @@ def _targets_for(reader, x, y):
         x,
         y,
         inside=True,
-        tip_rect=reader.tooltip_controller.surface_state().view.rect,
-        nest_rect=reader.tooltip_controller.surface_state().nest.rect,
+        tip_rect=reader.graph.tooltip.surface_state().view.rect,
+        nest_rect=reader.graph.tooltip.surface_state().nest.rect,
         hit=lambda hx, hy: (
-            reader.tooltip_controller.hit(hx, hy)
-            if reader.subtitle_presentation.cue.current.tokens
+            reader.graph.tooltip.hit(hx, hy)
+            if reader.graph.subtitle_presentation.cue.current.tokens
             else -1
         ),
     )
@@ -57,25 +57,27 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
     with _live_reader() as (tmp, reader, ipc):
         # aim a REAL mouse move at the screen centre of a content word
         i = next(
-            k for k, t in enumerate(reader.subtitle_presentation.cue.current.tokens) if t.is_content
+            k
+            for k, t in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
+            if t.is_content
         )
-        box = next(b for b in reader.subtitle_presentation.cue.current.boxes if b.index == i)
-        ox, oy = reader.subtitle_presentation.cue.current.origin
+        box = next(b for b in reader.graph.subtitle_presentation.cue.current.boxes if b.index == i)
+        ox, oy = reader.graph.subtitle_presentation.cue.current.origin
         cx, cy = int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2)
         ipc.command("mouse", cx, cy)
 
         _poll_until(
             reader,
-            lambda: reader.tooltip_controller.surface_state().view.rect is not None,
+            lambda: reader.graph.tooltip.surface_state().view.rect is not None,
             "a real mouse over a word did not show a tooltip",
         )
         ipc.command("screenshot-to-file", str(tmp / "live_hover.png"), "window")
 
         # R1: the hovered word must be the one we aimed at — this is the mouse-pos→OSD alignment the
         # headless tests can't check. A mismatch here is the HiDPI scaling bug.
-        assert reader.tooltip_controller.observation().selected == i, (
-            f"hover misaligned: aimed word {i} ({reader.subtitle_presentation.cue.current.tokens[i].surface!r}), "
-            f"got {reader.tooltip_controller.observation().selected} — mouse-pos→OSD mapping (HiDPI/R1)? screenshot: {tmp / 'live_hover.png'}"
+        assert reader.graph.tooltip.observation().selected == i, (
+            f"hover misaligned: aimed word {i} ({reader.graph.subtitle_presentation.cue.current.tokens[i].surface!r}), "
+            f"got {reader.graph.tooltip.observation().selected} — mouse-pos→OSD mapping (HiDPI/R1)? screenshot: {tmp / 'live_hover.png'}"
         )
 
         # a real keypress must reach the reader (mine key is bound) — drive it and drain
@@ -107,31 +109,33 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
             return False
 
     with _live_reader() as (_tmp, reader, ipc):
-        reader.profile_session.profile.replace_dictionary_set(
+        reader.graph.profile.profile.replace_dictionary_set(
             _TallDS()
         )  # rebuild the next hover's panel as a tall, scrolling tip
-        reader.tooltip_controller.surface_state().panel_cache.clear()
+        reader.graph.tooltip.surface_state().panel_cache.clear()
         i = next(
-            k for k, t in enumerate(reader.subtitle_presentation.cue.current.tokens) if t.is_content
+            k
+            for k, t in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
+            if t.is_content
         )
-        box = next(b for b in reader.subtitle_presentation.cue.current.boxes if b.index == i)
-        ox, oy = reader.subtitle_presentation.cue.current.origin
+        box = next(b for b in reader.graph.subtitle_presentation.cue.current.boxes if b.index == i)
+        ox, oy = reader.graph.subtitle_presentation.cue.current.origin
         ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
         _poll_until(
             reader,
-            lambda: reader.tooltip_controller.surface_state().view.rect is not None,
+            lambda: reader.graph.tooltip.surface_state().view.rect is not None,
             "hover did not show a tooltip",
         )
 
         # occlusion calc: the dead centre of the rendered tooltip must read over_tip (keep the lease),
         # NOT a word beneath it. This checks the windowed-renderer _tip_rect against the same OSD
         # coordinate space mpv reports mouse-pos in — the alignment the headless fakes can't see.
-        tx, ty, tw, th = reader.tooltip_controller.surface_state().view.rect
+        tx, ty, tw, th = reader.graph.tooltip.surface_state().view.rect
         cx, cy = int(tx + tw / 2), int(ty + th / 2)
         over_word, over_tip, _nest = _targets_for(reader, cx, cy)
         assert over_tip and over_word == -1, (
             f"cursor over the tooltip must read over_tip (occlusion); got over_tip={over_tip} "
-            f"over_word={over_word} — _tip_rect={reader.tooltip_controller.surface_state().view.rect} (windowed-renderer rect calc?)"
+            f"over_word={over_word} — _tip_rect={reader.graph.tooltip.surface_state().view.rect} (windowed-renderer rect calc?)"
         )
 
         # real cursor onto the tooltip → the lease holds (hover stays on the aimed word, not hijacked)
@@ -139,9 +143,9 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         for _ in range(5):
             reader.pump()
             time.sleep(0.02)
-        assert reader.tooltip_controller.observation().selected == i, (
-            f"resting on the tooltip must keep its lease; hover={reader.tooltip_controller.observation().selected} aimed={i} "
-            f"(_tip_rect={reader.tooltip_controller.surface_state().view.rect})"
+        assert reader.graph.tooltip.observation().selected == i, (
+            f"resting on the tooltip must keep its lease; hover={reader.graph.tooltip.observation().selected} aimed={i} "
+            f"(_tip_rect={reader.graph.tooltip.surface_state().view.rect})"
         )
 
         # a real left-click on the tooltip body must be captured (tip stays), not fall through
@@ -149,21 +153,21 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         for _ in range(5):
             reader.pump()
             time.sleep(0.02)
-        assert reader.tooltip_controller.surface_state().view.rect is not None, (
+        assert reader.graph.tooltip.surface_state().view.rect is not None, (
             "a click on the tooltip must be captured, not tear it down"
         )
 
         # after scrolling the tall tip (windowed full_height converges here), the rect must still
         # match the drawn tip: its centre must read over_tip, not the word beneath.
-        reader.tooltip_controller.scroll_tip(round(reader.screen.osd[1] * 0.3))
+        reader.graph.tooltip.scroll_tip(round(reader.graph.screen.osd[1] * 0.3))
         for _ in range(3):
             reader.pump()
             time.sleep(0.02)
-        sx, sy, sw, sh = reader.tooltip_controller.surface_state().view.rect
+        sx, sy, sw, sh = reader.graph.tooltip.surface_state().view.rect
         word2, tip2, _ = _targets_for(reader, int(sx + sw / 2), int(sy + sh / 2))
         assert tip2 and word2 == -1, (
             f"after scroll, tooltip centre must still read over_tip; got over_tip={tip2} "
-            f"over_word={word2} — _tip_rect={reader.tooltip_controller.surface_state().view.rect} (post-scroll windowed rect calc?)"
+            f"over_word={word2} — _tip_rect={reader.graph.tooltip.surface_state().view.rect} (post-scroll windowed rect calc?)"
         )
 
 
@@ -194,23 +198,24 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
 
         # hover a word → tooltip up → poll enables saitenka's forced section on top of the rival
         i = next(
-            k for k, t in enumerate(reader.subtitle_presentation.cue.current.tokens) if t.is_content
+            k
+            for k, t in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
+            if t.is_content
         )
-        box = next(b for b in reader.subtitle_presentation.cue.current.boxes if b.index == i)
-        ox, oy = reader.subtitle_presentation.cue.current.origin
+        box = next(b for b in reader.graph.subtitle_presentation.cue.current.boxes if b.index == i)
+        ox, oy = reader.graph.subtitle_presentation.cue.current.origin
         ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
         _poll_until(
             reader,
             lambda: (
-                reader.tooltip_controller.surface_state().view.rect is not None
-                and reader._mouse.held
+                reader.graph.tooltip.surface_state().view.rect is not None and reader._mouse.held
             ),
             "tooltip did not show / mouse section not captured",
         )
 
         # a click on the tooltip must reach saitenka, NOT the rival → pause unchanged
         ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC wire value
-        tx, ty, tw, th = reader.tooltip_controller.surface_state().view.rect
+        tx, ty, tw, th = reader.graph.tooltip.surface_state().view.rect
         ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
         ipc.command("keypress", "MBTN_LEFT")
         for _ in range(5):
@@ -253,7 +258,7 @@ def test_live_sidebar_key_draws_and_removes_sidebar():
         ipc.command("keypress", "\\")
         _poll_until(
             reader,
-            lambda: reader.sidebar_controller.state.open,
+            lambda: reader.graph.sidebar.state.open,
             "sidebar key did not open the sidebar",
         )
         opened = _screenshot(ipc, tmp / "sidebar-open.png")
@@ -261,11 +266,11 @@ def test_live_sidebar_key_draws_and_removes_sidebar():
         ipc.command("keypress", "\\")
         _poll_until(
             reader,
-            lambda: not reader.sidebar_controller.state.open,
+            lambda: not reader.graph.sidebar.state.open,
             "sidebar key did not close the sidebar",
         )
 
-        assert reader.sidebar_controller.panel.rect is None
+        assert reader.graph.sidebar.panel.rect is None
         assert ImageChops.difference(opened, closed).getbbox() is not None
 
 
@@ -276,14 +281,12 @@ def test_live_help_key_draws_and_escape_closes_shortcut_reference():
         closed = _screenshot(ipc, tmp / "help-closed.png")
 
         ipc.command("keypress", "F1")
-        _poll_until(
-            reader, lambda: reader.help_controller.state.open, "F1 did not open shortcut help"
-        )
+        _poll_until(reader, lambda: reader.graph.help.state.open, "F1 did not open shortcut help")
         opened = _screenshot(ipc, tmp / "help-open.png")
 
         ipc.command("keypress", "ESC")
         _poll_until(
-            reader, lambda: not reader.help_controller.state.open, "Esc did not close shortcut help"
+            reader, lambda: not reader.graph.help.state.open, "Esc did not close shortcut help"
         )
 
         assert ImageChops.difference(opened, closed).getbbox() is not None

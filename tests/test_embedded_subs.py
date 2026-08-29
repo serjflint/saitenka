@@ -15,7 +15,7 @@ class FakeIPC(util.FakeIPC):
         super().__init__()
         self.props["track-list"] = tracks or []
         self.props["path"] = path
-        util.runtime_gateway(self)
+        util.bare_gateway(self)
 
 
 def build(ipc) -> list:

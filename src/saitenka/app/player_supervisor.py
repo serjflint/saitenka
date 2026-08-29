@@ -1,11 +1,8 @@
 """The entrypoint's terminal sequence for the mpv process and its transport.
 
-This is the *entrypoint's* duty, not the session's. `ClosePhase` retires what the session owns; the
-player's lifetime and the thread it runs on belong to whoever started — or merely connected to — mpv,
-and there is no phase for "the process is exiting". So the sequence lives here rather than in the
-close ledger, and it is **declared** (`OWNED`, `ATTACHED`) rather than spelled out inline, for the
-same reason the close phases are: two entrypoints hand-writing the same order is one edit away from
-disagreeing, with nothing at the seam to notice.
+This is the entrypoint's duty, not the session's. The player's lifetime and the thread it runs on
+belong to whoever started — or merely connected to — mpv, so the terminal sequence lives here
+rather than in the session close plan.
 
 The two differ by *capability*, not by sequence. An entrypoint that started mpv can quit it, reap it
 and force-kill it; one that attached to a running mpv must not — detaching leaves the user's player

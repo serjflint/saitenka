@@ -13,6 +13,7 @@ is the point: each one is small, countable, and belongs to its feature.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -70,49 +71,12 @@ def bind_stateless[CommandT, InputsT, EffectT](
     return StatelessBinding(feature, command_type, reduce, adapter)
 
 
-class StatelessRouter:
-    """Dispatch a command to the feature owning its vocabulary.
-
-    Keyed by command type, not by a feature name: each feature already owns a closed `StrEnum` of
-    the commands it accepts, so the type *is* the key and no caller can name a feature that was
-    never registered. The stateful half keys on `(event type, owner)` for the same reason.
-    """
-
-    def __init__(self, features: tuple[InstalledStatelessBinding, ...]) -> None:
-        self._features: dict[type, InstalledStatelessBinding] = {}
-        for binding in features:
-            if binding.command_type in self._features:
-                raise ValueError(
-                    f"stateless command type already registered: {binding.command_type.__name__}"
-                )
-            self._features[binding.command_type] = binding
-
-    @property
-    def commands(self) -> frozenset[type]:
-        return frozenset(self._features)
-
-    def run(self, command: object) -> None:
-        entry = self._features.get(type(command))
-        if entry is None:
-            raise KeyError(f"no stateless feature owns {type(command).__name__}")
-        entry.run(command)
-
-
 @dataclass(frozen=True, slots=True)
 class StatelessCommandRegistration:
     """One script message carrying one typed stateless command."""
 
     message: str
     command: object
-
-
-@dataclass(frozen=True, slots=True)
-class StatelessCommandEndpoint:
-    graph: StatelessCommandGraph
-    command: object
-
-    def run(self) -> None:
-        self.graph.run(self.command)
 
 
 class StatelessCommandGraph:
@@ -123,7 +87,13 @@ class StatelessCommandGraph:
         features: tuple[InstalledStatelessBinding, ...],
         commands: tuple[StatelessCommandRegistration, ...],
     ) -> None:
-        self._router = StatelessRouter(features)
+        self._features: dict[type, InstalledStatelessBinding] = {}
+        for binding in features:
+            if binding.command_type in self._features:
+                raise ValueError(
+                    f"stateless command type already registered: {binding.command_type.__name__}"
+                )
+            self._features[binding.command_type] = binding
         self._commands: dict[str, object] = {}
         command_types: set[type] = set()
         for row in commands:
@@ -132,29 +102,32 @@ class StatelessCommandGraph:
             if row.message in self._commands:
                 raise ValueError(f"stateless command already registered: {row.message}")
             command_type = type(row.command)
-            if command_type not in self._router.commands:
+            if command_type not in self._features:
                 raise ValueError(
                     f"stateless command has no installed policy: {command_type.__name__}"
                 )
             command_types.add(command_type)
             self._commands[row.message] = row.command
-        missing = self._router.commands - command_types
+        missing = set(self._features) - command_types
         if missing:
             names = ", ".join(sorted(command_type.__name__ for command_type in missing))
             raise ValueError(f"stateless policies have no script messages: {names}")
 
     @property
     def command_types(self) -> frozenset[type]:
-        return self._router.commands
+        return frozenset(self._features)
 
     def run(self, command: object) -> None:
-        self._router.run(command)
+        entry = self._features.get(type(command))
+        if entry is None:
+            raise KeyError(f"no stateless feature owns {type(command).__name__}")
+        entry.run(command)
 
     def handler(self, command: object) -> Callable[[], None]:
         """Bind a typed command for another bounded capability value."""
-        if type(command) not in self._router.commands:
+        if type(command) not in self._features:
             raise KeyError(f"no stateless feature owns {type(command).__name__}")
-        return StatelessCommandEndpoint(self, command).run
+        return partial(self.run, command)
 
     def handlers(self) -> dict[str, Callable[[], None]]:
         return {message: self.handler(command) for message, command in self._commands.items()}

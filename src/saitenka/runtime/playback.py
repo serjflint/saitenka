@@ -32,7 +32,7 @@ class Revision:
 
 
 class FactDomain(StrEnum):
-    """The projection's ownership units. Legacy-owned domains publish no deltas."""
+    """The projection's ownership units."""
 
     CONNECTION = "connection"
     MEDIA = "media"
@@ -44,13 +44,6 @@ class FactDomain(StrEnum):
     PAUSE = "pause"
     EOF = "eof"
     PRESENTATION = "presentation"
-
-
-#: Domains whose deltas the legacy driver still owns, so publishing one would give a fact two
-#: consumers. `POINTER` left in WP5.1 when hover moved off the interaction tick, and `PAUSE` in
-#: WP5.4 when watch time started accruing on the transition rather than per tick. Empty is the
-#: end state, not an oversight: every fact the projection sees is now published.
-LEGACY_OWNED: frozenset[FactDomain] = frozenset()
 
 
 class RetireReason(StrEnum):
@@ -372,20 +365,8 @@ class Projected:
 class PlaybackProjection:
     """Pure reducer over ordered mpv observations; performs no I/O and holds no state."""
 
-    def __init__(self, *, legacy_owned: frozenset[FactDomain] = LEGACY_OWNED) -> None:
-        unknown = legacy_owned - frozenset(FactDomain)
-        if unknown:
-            raise ValueError(f"unknown legacy-owned domains: {sorted(unknown)!r}")
-        self._legacy_owned = legacy_owned
-
-    @property
-    def legacy_owned(self) -> frozenset[FactDomain]:
-        return self._legacy_owned
-
     def _publish(self, deltas: Iterable[PlaybackDelta]) -> tuple[PlaybackDelta, ...]:
-        return tuple(
-            delta for delta in deltas if _DELTA_DOMAIN[type(delta)] not in self._legacy_owned
-        )
+        return tuple(deltas)
 
     def observe(
         self,

@@ -1,9 +1,9 @@
-"""The runtime's census: what its reducers reported, what it controlled, what nothing claims.
+"""The runtime's census: what reducers reported, what it controlled, and what was unrouted.
 
 Before this existed the reactor was constructed without a `diagnostics` or a `control` sink, so
 `EmitDiagnostic` — which `StartupHintReducer` emits on every hint completion — went nowhere, and a
-`CancelEffect`/`ExpireEffect` would have too. `OwnerRouter.ignored` counted the migration gap and
-had no reader. All three are one fact about a live session, so they are one ledger.
+`CancelEffect`/`ExpireEffect` would have too. All three are one fact about a live session, so they
+share one ledger.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def test_a_live_session_records_what_its_reducers_reported() -> None:
     ledger = gateway.session_ledger
     assert ledger is not None
     try:
-        reader.turn.entry_runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
+        reader.entry.runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
         reader.close()
     finally:
         gateway.close()
@@ -60,8 +60,7 @@ def test_a_live_session_records_what_its_reducers_reported() -> None:
 
 
 def test_an_event_no_owner_claims_is_counted_rather_than_dropped() -> None:
-    """The migration's progress meter. An unrouted event must leave a trace, or "not migrated yet"
-    and "migrated and silent" are the same observation."""
+    """An unrouted event must remain observable instead of disappearing silently."""
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
     reader = build_session(
@@ -78,11 +77,12 @@ def test_an_event_no_owner_claims_is_counted_rather_than_dropped() -> None:
 
     gateway.publish_session_event(RawMpvEvent("seek"))
     try:
-        reader.turn.entry_runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
+        reader.entry.runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
     finally:
+        reader.close()
         gateway.close()
 
-    assert ledger.counts["ignored:-:RawMpvEvent"] == 1
+    assert ledger.counts["unrouted:-:RawMpvEvent"] == 1
 
 
 def test_an_expiry_reaches_the_gateway_that_holds_the_request() -> None:
@@ -108,9 +108,9 @@ def test_an_expiry_reaches_the_gateway_that_holds_the_request() -> None:
 def test_a_cancel_for_an_effect_the_reactor_never_dispatched_is_not_retired() -> None:
     """The same guard `_finish` applies. Retiring is a claim of ownership, and the loser of that
     race never finds out — so a cancel must not be able to retire somebody else's effect."""
-    from saitenka.mpvio.gateway import install_legacy_gateway
+    from saitenka.mpvio.gateway import install_gateway
 
-    gateway = install_legacy_gateway(FakeIPC())
+    gateway = install_gateway(FakeIPC())
     reactor = install_session_reactor(gateway, startup_hint=False)
     ledger = RuntimeLedger()
     sink = ControlSink(gateway, ledger)
@@ -140,12 +140,12 @@ def test_the_census_refuses_to_grow_without_bound() -> None:
     ledger = RuntimeLedger(capacity=2)
 
     for index in range(5):
-        ledger.ignored(f"-:Event{index}")
-    ledger.ignored("-:Event0")
+        ledger.unrouted(f"-:Event{index}")
+    ledger.unrouted("-:Event0")
 
     counts = ledger.counts
     assert len(counts) == 3  # two admitted keys plus the overflow tally
-    assert counts["ignored:-:Event0"] == 2
+    assert counts["unrouted:-:Event0"] == 2
     assert counts["ledger:overflow"] == 3
 
 

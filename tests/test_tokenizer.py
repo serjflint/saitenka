@@ -121,7 +121,7 @@ def test_unidic_merge_dict_compounds_matches_module_function():
 
 def test_reader_owns_unidic_tokenizer_by_default():
     reader = build_session(FakeIPC())
-    assert reader.turn.profile_session.profile.tokenizer.name == "unidic"
+    assert reader.graph.profile.profile.tokenizer.name == "unidic"
 
 
 class _SpyTokenizer(_FakeTokenizer):
@@ -155,15 +155,15 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
 
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
     spy = _SpyTokenizer()
-    reader.turn.profile_session.profile.use_tokenizer(spy)
-    reader.turn.subtitle_presentation.cue.replace_tokenized(
+    reader.graph.profile.profile.use_tokenizer(spy)
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
     )
 
     tooltip.resolve_hover(
-        reader.turn.tooltip_controller.tip_ports,
-        reader.turn.tooltip_controller.word_lookup,
-        reader.turn.tooltip_controller.hover_inputs,
+        reader.graph.tooltip.tip_ports,
+        reader.graph.tooltip.word_lookup,
+        reader.graph.tooltip.hover_inputs,
         0,
     )
 
@@ -178,12 +178,12 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
 
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=object()))
     spy = _SpyTokenizer()
-    reader.turn.profile_session.profile.use_tokenizer(spy)
+    reader.graph.profile.profile.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
 
     nested_popup.open_link(
-        reader.turn.tooltip_controller.tip_ports,
-        reader.turn.tooltip_controller.panel_ports,
+        reader.graph.tooltip.tip_ports,
+        reader.graph.tooltip.panel_ports,
         lb,
         (0, 0),
         0,
@@ -221,16 +221,11 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
 
     jp = build_session(FakeIPC())
     tokens = [particle, noun]
-    assert (
-        mine_target(MineCue(tokens, None, -1, jp.turn.profile_session.profile.tokenizer, 20)) == 1
-    )
+    assert mine_target(MineCue(tokens, None, -1, jp.graph.profile.profile.tokenizer, 20)) == 1
 
     swapped = build_session(FakeIPC())
-    swapped.turn.profile_session.profile.use_tokenizer(_ParticleContentTokenizer())
-    assert (
-        mine_target(MineCue(tokens, None, -1, swapped.turn.profile_session.profile.tokenizer, 20))
-        == 0
-    )
+    swapped.graph.profile.profile.use_tokenizer(_ParticleContentTokenizer())
+    assert mine_target(MineCue(tokens, None, -1, swapped.graph.profile.profile.tokenizer, 20)) == 0
 
 
 def test_use_tokenizer_swaps_strategy_and_clears_cache():
@@ -239,11 +234,11 @@ def test_use_tokenizer_swaps_strategy_and_clears_cache():
             return set()
 
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
-    reader.turn.cue_coordinator.set_subtitle("本")
+    reader.graph.cue.set_subtitle("本")
 
     fake = _FakeTokenizer()
-    reader.turn.profile_session.profile.use_tokenizer(fake)
-    reader.turn.cue_coordinator.set_subtitle("本")
+    reader.graph.profile.profile.use_tokenizer(fake)
+    reader.graph.cue.set_subtitle("本")
 
-    assert reader.turn.profile_session.profile.tokenizer is fake
-    assert reader.turn.subtitle_presentation.cue.current.tokens == []
+    assert reader.graph.profile.profile.tokenizer is fake
+    assert reader.graph.subtitle_presentation.cue.current.tokens == []

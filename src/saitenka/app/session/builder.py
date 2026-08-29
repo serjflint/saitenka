@@ -3,29 +3,39 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import threading
 
     from saitenka.app.anki import Anki, MineConfig
     from saitenka.app.config import MiningOptions, ReaderOptions
+    from saitenka.app.features.analysis.analysis_controller import AnalysisCommandEndpoint
+    from saitenka.app.features.annotation.annotation_controller import CueAnnotationController
+    from saitenka.app.features.history.history_owner import HistoryOwner
+    from saitenka.app.features.picker.picker_controller import PickerController
+    from saitenka.app.features.preview.preview_controller import PreviewController
+    from saitenka.app.features.sidebar.sidebar_controller import SidebarController
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+    from saitenka.app.lifecycle_timers import LifecycleTimers
     from saitenka.app.profiles import Profile
     from saitenka.app.scoring import Scorer
     from saitenka.app.session.assembly import SessionAssembly
     from saitenka.app.session.interaction_adapter import InteractionCommandCoordinator
+    from saitenka.app.subtitle_presentation import CueRenderStore
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
+    from saitenka.app.toast_controller import ToastController
+    from saitenka.mpvio.osd import Overlay
     from saitenka.runtime.jobs import JobSubmitter
+    from saitenka.runtime.subtitle_slice import SubtitleTrackStore
 
 import saitenka.app.features.sidebar.sidebar as sidebar_module
 import saitenka.app.session.resources as session_resources
-import saitenka.app.session.runtime as session_runtime
 from saitenka.app import (
     episode_reslot,
     logsetup,
     session_stats,
-    subtitle_intents,
     subtitle_modes,
 )
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
@@ -61,9 +71,7 @@ from saitenka.app.features.profiles.profile_session import (
 from saitenka.app.features.sidebar.sidebar_controller import SidebarViewOwners
 from saitenka.app.features.subtitle import SubtitleAcquisitionController
 from saitenka.app.features.subtitle.navigation_state import NavigationStore
-from saitenka.app.features.tooltip import (
-    tooltip_controller,
-)
+from saitenka.app.features.tooltip import tooltip_controller as tooltip_module
 from saitenka.app.features.tooltip.hover_adapter import (
     HoverCommandCoordinator,
     HoverCommandPorts,
@@ -85,6 +93,7 @@ from saitenka.app.session import sidebar_coordination, surfaces
 from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
 from saitenka.app.session.command_runtime import CommandRuntime, CommandRuntimePorts
 from saitenka.app.session.cue_coordinator import CueCoordinator, CueOwners
+from saitenka.app.session.graph import SessionGraph
 from saitenka.app.session.interaction_adapter import (
     InteractionCoordinator,
     InteractionPorts,
@@ -103,16 +112,19 @@ from saitenka.app.session.playback_observation import (
     PlaybackStartup,
 )
 from saitenka.app.session.routes import (
-    COMMAND_PERFORMER,
     CUE_RETIRE_RESOURCE,
     PLAYBACK_DELTAS_PERFORMER,
-    RESLOT_PARTICIPANT,
     STATELESS_COMMANDS,
     SUBTITLE_REPLAY_PARTICIPANT,
     stateless_features,
 )
-from saitenka.app.session.runtime import SessionRuntime
 from saitenka.app.session.stateless import StatelessCommandGraph
+from saitenka.app.session.support import (
+    PickerCommandEndpoint,
+    SessionDiagnostics,
+    SessionPresentation,
+    SessionRecurrence,
+)
 from saitenka.app.subtitle_adapter import (
     SubtitleCommandApply,
     SubtitleCommandCoordinator,
@@ -139,17 +151,89 @@ if TYPE_CHECKING:
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.subtitles import GeometryBackend
 
-from saitenka.app.session.turn import SessionTurn
-
 log = logging.getLogger(__name__)
 console_log = logsetup.user_facing_logger()
+
+_UNBOUND = object()
+
+
+class _Required[T]:
+    """One construction-cycle endpoint with a named failure before binding."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._value: T | object = _UNBOUND
+
+    def bind(self, value: T) -> T:
+        if self._value is not _UNBOUND:
+            raise RuntimeError(f"session endpoint already bound: {self._name}")
+        self._value = value
+        return value
+
+    def get(self) -> T:
+        if self._value is _UNBOUND:
+            raise RuntimeError(f"session endpoint is not bound: {self._name}")
+        return cast("T", self._value)
+
+
+@dataclass(frozen=True, slots=True)
+class _StatelessOwners:
+    ipc: MpvIPC
+    profile: ProfileSession
+    tooltip: tooltip_module.TooltipController
+    subtitles: SubtitlePresentation
+    notifications: ToastController
+    mining: MiningController
+    playback: PlaybackObservationController
+    tracks: SubtitleTrackStore
+    translation_observation: TranslationObservation
+    history: HistoryOwner
+    analysis: AnalysisCommandEndpoint
+    surfaces: LifecycleSurfaces
+    sidebar: SidebarController
+    picker: PickerController
+    preview: PreviewCommandEndpoint
+    picker_commands: PickerCommandEndpoint
+    overlay: Overlay
+    translation: TranslationController
+    track_commands: SubtitleTrackCoordinator
+    annotation: CueAnnotationController
+    acquisition: SubtitleAcquisitionController
+    navigation: SubtitleNavigationCoordinator
+
+
+@dataclass(frozen=True, slots=True)
+class _MiningOwners:
+    ipc: MpvIPC
+    notifications: ToastController
+    preview: PreviewController
+    preview_endpoint: Callable[[], PreviewCommandEndpoint]
+    tooltip: tooltip_module.TooltipController
+    sidebar: SidebarController
+    history: HistoryOwner
+    cue: CueRenderStore
+    playback: PlaybackObservationController
+    capability_submit: JobSubmitter | None
+    timers: LifecycleTimers
 
 
 def _discard(_value: object) -> None:
     pass
 
 
-def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is completed below
+def _register_runtime_resources(
+    ipc: MpvIPC,
+    registrations: list[tuple[str, object]],
+) -> None:
+    names = [name for name, _resource in registrations]
+    if len(names) != len(set(names)):
+        raise ValueError("runtime resource names must be unique")
+    for name, resource in registrations:
+        if not ipc.register_session_resource(name, resource):
+            raise RuntimeError(f"session runtime rejected resource: {name}")
+
+
+def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is completed below
     ipc: MpvIPC,
     assembly: SessionAssembly,
     options: ReaderOptions,
@@ -163,31 +247,27 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
     profile: Profile | None = None,
     tts_ok: bool | None = None,
     tooltip_runtime_jobs: Callable[
-        [tooltip_controller.TooltipRuntimeJobs],
-        tooltip_controller.TooltipRuntimeJobs,
+        [tooltip_module.TooltipRuntimeJobs],
+        tooltip_module.TooltipRuntimeJobs,
     ]
     | None = None,
-) -> SessionTurn:
-    """Install an already-resolved session assembly without interpreting compatibility inputs."""
-    turn = object.__new__(SessionTurn)
+) -> SessionGraph:
+    """Build and validate the complete session graph before publishing it."""
     o = options
-    turn._assembly = assembly
-    turn.ipc = ipc
     registrations: list[tuple[str, object]] = []
-    turn._interactive_ready = False
-    turn._connection = ConnectionStore(ipc)
+    connection = ConnectionStore(ipc)
     # Supplied by composition (`create_session_controller`), never probed off `ipc`: which egress the
     # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
-    turn.ov = assembly.overlay
-    turn.lifecycle_surfaces = assembly.surfaces
-    turn.screen = assembly.screen
-    turn.help_controller = assembly.help
-    turn.analysis_controller = assembly.analysis
-    turn.annotation_controller = assembly.annotation
-    turn.picker_controller = assembly.picker
-    turn.sidebar_controller = assembly.sidebar
-    turn.preview_controller = assembly.preview
-    turn.tooltip_preparation = assembly.tooltip_preparation
+    overlay = assembly.overlay
+    lifecycle_surfaces = assembly.surfaces
+    screen = assembly.screen
+    help_controller = assembly.help
+    analysis_controller = assembly.analysis
+    annotation_controller = assembly.annotation
+    picker_controller = assembly.picker
+    sidebar_controller = assembly.sidebar
+    preview_controller = assembly.preview
+    tooltip_preparation = assembly.tooltip_preparation
     # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
     # whoever owns it rather than to a line in a teardown table far away. We keep *using* it;
     # what moves is when it closes. False means no runtime owns this session, and the close
@@ -195,33 +275,39 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
     # `getattr`, like the job-lane port below: a partial IPC (the benches' fake) constructs a
     # SessionController without implementing every runtime port, and construction must not demand one.
 
-    turn.interaction_surfaces = assembly.interaction_surfaces
-    turn.lifecycle_timers = assembly.timers
-    turn.notifications = assembly.notifications
+    interaction_surfaces = assembly.interaction_surfaces
+    lifecycle_timers = assembly.timers
+    notifications = assembly.notifications
     stop = assembly.stop
+    cue_ref = _Required[CueCoordinator]("cue coordinator")
+    presentation_ref = _Required[SessionPresentation]("session presentation")
+    profile_integration_ref = _Required[ProfileIntegration]("profile integration")
+    playback_projection_ref = _Required[PlaybackProjection]("playback projection")
+    stateless_ref = _Required[StatelessCommandGraph]("stateless command graph")
+    preview_ref = _Required[PreviewCommandEndpoint]("preview command endpoint")
+    translation_ref = _Required[TranslationController]("translation controller")
+    navigation_ref = _Required[SubtitleNavigationCoordinator]("subtitle navigation")
 
     def notify(text: str, kind: str = "ok", seconds: float = 2.8) -> None:
-        turn.notifications.show(text, kind, seconds)
+        notifications.show(text, kind, seconds)
 
     def clear_subtitle_interaction() -> None:
-        turn.tooltip_controller.teardown()
-        turn.tooltip_controller.retire_selection()
+        tooltip_controller.teardown()
+        tooltip_controller.retire_selection()
 
-    turn.subtitle_presentation = SubtitlePresentation(
+    subtitle_presentation = SubtitlePresentation(
         ipc,
         settings=o.subtitle_geometry,
         visual=SubtitleVisualSettings.from_options(o.tooltip),
         renderer=renderer,
         backend=geometry_backend,
         ports=SubtitlePresentationPorts(
-            target=lambda pipeline, geometry: turn.cue_coordinator.build_target(pipeline, geometry),
-            geometry=lambda: turn.cue_coordinator.geometry_observation(),
+            target=lambda pipeline, geometry: cue_ref.get().build_target(pipeline, geometry),
+            geometry=lambda: cue_ref.get().geometry_observation(),
             clear_interaction=clear_subtitle_interaction,
-            redraw_cue=lambda: turn.cue_coordinator.set_subtitle(
-                turn.playback_observation.cue.text
-            ),
-            tokenize_lookahead=turn.annotation_controller.captured_lookahead(
-                lambda: turn.cue_coordinator.annotation_inputs()
+            redraw_cue=lambda: cue_ref.get().set_subtitle(playback_ref.get().cue.text),
+            tokenize_lookahead=annotation_controller.captured_lookahead(
+                lambda: cue_ref.get().annotation_inputs()
             ),
         ),
     )
@@ -231,8 +317,8 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
     mining_identity = MiningIdentity(initial_profile_name, 0)
     # Interactive sessions publish this optional subprocess probe later; deterministic
     # demo/screenshot assembly supplies it synchronously through SessionServices.
-    turn._capability_submit = configure_runtime_jobs(ipc)
-    turn._tts_capability = (
+    capability_submit = configure_runtime_jobs(ipc)
+    tts_capability = (
         None
         if tts_ok is not None
         else CapabilityProbe(
@@ -240,24 +326,24 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
             name="tts",
             ttl=3_600.0,
             retry=60.0,
-            submit=turn._capability_submit,
+            submit=capability_submit,
         )
     )
-    tooltip_visual = tooltip_controller.TooltipVisualSettings.from_options(o.tooltip)
-    turn.history = assembly.history
+    tooltip_visual = tooltip_module.TooltipVisualSettings.from_options(o.tooltip)
+    history = assembly.history
     log.info(
         "layout backend: %s (requested %r)",
         tooltip_visual.backend_name,
         o.tooltip.layout_engine,
     )
-    turn.tooltip_controller = tooltip_controller.TooltipController(
+    tooltip_controller = tooltip_module.TooltipController(
         ipc,
-        turn.tooltip_preparation,
-        turn.screen,
-        turn.lifecycle_timers,
+        tooltip_preparation,
+        screen,
+        lifecycle_timers,
         assembly.keys,
-        turn.help_controller,
-        config=tooltip_controller.TooltipControllerConfig(
+        help_controller,
+        config=tooltip_module.TooltipControllerConfig(
             panel_cache_max=o.tooltip.panel_cache_max,
             pause_enabled=o.tooltip.pause_on_tooltip,
             delays=HoverDelays(
@@ -271,95 +357,127 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
         ),
         runtime_jobs=tooltip_runtime_jobs,
     )
-    turn._subtitle_tracks = assembly.subtitle_tracks
-    profile_integration: ProfileIntegration
+    subtitle_tracks = assembly.subtitle_tracks
     profile_controller = ProfileController(
         profile,
         dict_set,
         ProfileInvalidation(
-            invalidate_tokenizer=lambda: profile_integration.invalidate_tokenizer(),
-            invalidate_dictionary=lambda: profile_integration.invalidate_dictionary(),
-            reset_episode_warm=lambda: profile_integration.reset_episode_warm(),
+            invalidate_tokenizer=lambda: profile_integration_ref.get().invalidate_tokenizer(),
+            invalidate_dictionary=lambda: profile_integration_ref.get().invalidate_dictionary(),
+            reset_episode_warm=lambda: profile_integration_ref.get().reset_episode_warm(),
         ),
         ProfileSubtitles(
-            current_subtitle_slang=lambda: turn._subtitle_tracks.current.slang,
-            has_subtitle_track=lambda slang: profile_integration.has_subtitle_track(slang),
-            select_subtitle_track=lambda slang: profile_integration.select_subtitle_track(slang),
-            retokenize_current_cue=lambda: profile_integration.retokenize_current_cue(),
+            current_subtitle_slang=lambda: subtitle_tracks.current.slang,
+            has_subtitle_track=lambda slang: profile_integration_ref.get().has_subtitle_track(
+                slang
+            ),
+            select_subtitle_track=lambda slang: profile_integration_ref.get().select_subtitle_track(
+                slang
+            ),
+            retokenize_current_cue=lambda: profile_integration_ref.get().retokenize_current_cue(),
         ),
         ProfileAftermath(
-            warm_episode=lambda: profile_integration.warm_episode(),
+            warm_episode=lambda: profile_integration_ref.get().warm_episode(),
             notify=notify,
         ),
     )
-    turn._mouse_in = False  # cursor over the video window — an engagement signal
-    turn._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
-    # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
-    playback_projection: PlaybackProjection | None = None
 
     def apply_playback_delta(delta: playback.PlaybackDelta) -> None:
-        if playback_projection is None:
-            raise RuntimeError("playback projection is not bound")
-        playback_projection.apply(delta)
+        playback_projection_ref.get().apply(delta)
 
-    turn.playback_observation = PlaybackObservationController(
-        turn.ipc,
-        apply_playback_delta,
-        PlaybackStartup(
-            reconcile_cue=lambda text: turn.subtitle_navigation.reconcile(text),
-            refresh_render_space=turn.refresh_osd,
-            observe_authored_subtitle=lambda reply: (
-                turn.subtitle_presentation.native.observe_ass_full_reply(reply)
-                if turn.subtitle_presentation.native is not None
-                else None
+    playback_ref = _Required[PlaybackObservationController]("playback observation")
+    playback_observation = playback_ref.bind(
+        PlaybackObservationController(
+            ipc,
+            apply_playback_delta,
+            PlaybackStartup(
+                reconcile_cue=lambda text: navigation_ref.get().reconcile(text),
+                refresh_render_space=lambda: presentation_ref.get().refresh_osd(),
+                observe_authored_subtitle=lambda reply: (
+                    subtitle_presentation.native.observe_ass_full_reply(reply)
+                    if subtitle_presentation.native is not None
+                    else None
+                ),
+                probe_display_sources=lambda reason, osd: (
+                    presentation_ref.get().probe_display_sources(reason, osd)
+                ),
             ),
-            probe_display_sources=turn._probe_display_sources,
-        ),
+        )
+    )
+    presentation = presentation_ref.bind(
+        SessionPresentation(
+            playback=playback_ref.get,
+            screen=screen,
+            subtitles=subtitle_presentation,
+            tooltip=tooltip_controller,
+            help_controller=help_controller,
+            analysis=analysis_controller,
+            sidebar=sidebar_controller,
+            surfaces=lifecycle_surfaces,
+            timers=lifecycle_timers,
+            overlay=overlay,
+        )
     )
     authored_subtitle_probe = AuthoredSubtitleProbe(
-        turn.ipc,
-        turn.playback_observation,
-        turn.subtitle_presentation,
+        ipc,
+        playback_observation,
+        subtitle_presentation,
     )
-    turn.mining_controller = _assemble_mining_controller(
-        turn,
+    mining_controller = _assemble_mining_controller(
         mining_identity,
         anki,
         mine_cfg,
         assembly.mining,
         profile_controller,
         stop,
+        _MiningOwners(
+            ipc,
+            notifications,
+            preview_controller,
+            preview_ref.get,
+            tooltip_controller,
+            sidebar_controller,
+            history,
+            subtitle_presentation.cue,
+            playback_observation,
+            capability_submit,
+            lifecycle_timers,
+        ),
     )
-    turn.preview_commands = PreviewCommandEndpoint(
-        preview=turn.preview_controller,
-        help=turn.help_controller,
-        tip_keys_bound=lambda: turn.tooltip_controller.keybindings_bound,
-        mining=turn.mining_controller,
-        surfaces=turn.lifecycle_surfaces,
-        screen=turn.screen,
-        ipc=turn.ipc,
-        keys=turn._assembly.keys,
-        tip_scale_override=turn.tooltip_controller.visual.scale_override,
-        tip_max_frac=turn.tooltip_controller.visual.base_height_fraction,
-        play_audio=turn.mining_controller.play_audio,
-        cue=turn.subtitle_presentation.cue,
-        playback=turn.playback_observation,
-        toast=notify,
+    preview_commands = preview_ref.bind(
+        PreviewCommandEndpoint(
+            preview=preview_controller,
+            help=help_controller,
+            tip_keys_bound=lambda: tooltip_controller.keybindings_bound,
+            mining=mining_controller,
+            surfaces=lifecycle_surfaces,
+            screen=screen,
+            ipc=ipc,
+            keys=assembly.keys,
+            tip_scale_override=tooltip_controller.visual.scale_override,
+            tip_max_frac=tooltip_controller.visual.base_height_fraction,
+            play_audio=mining_controller.play_audio,
+            cue=subtitle_presentation.cue,
+            playback=playback_observation,
+            toast=notify,
+        )
     )
     navigation = NavigationStore()
-    turn.profile_session = ProfileSession(
+    profile_session = ProfileSession(
         ProfileSessionAssembly(
             profile_controller,
-            turn.mining_controller,
-            turn.lifecycle_timers,
-            turn.lifecycle_surfaces,
+            mining_controller,
+            lifecycle_timers,
+            lifecycle_surfaces,
             ProfileDependencyPorts(
-                enable_async_annotation=lambda: profile_integration.enable_async_annotation(),
-                dependencies_changed=lambda: profile_integration.dependencies_changed(),
-                start_prefetch=turn.tooltip_controller.start_prefetch,
-                warm_episode=lambda: profile_integration.warm_episode(),
+                enable_async_annotation=lambda: (
+                    profile_integration_ref.get().enable_async_annotation()
+                ),
+                dependencies_changed=lambda: profile_integration_ref.get().dependencies_changed(),
+                start_prefetch=tooltip_controller.start_prefetch,
+                warm_episode=lambda: profile_integration_ref.get().warm_episode(),
             ),
-            lambda: turn.tooltip_preparation.worker_count,
+            lambda: tooltip_preparation.worker_count,
             lambda mode, workers: console_log.info(
                 "runtime: %s · %d prefetch worker(s)", mode, workers
             ),
@@ -367,51 +485,40 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
         identity=mining_identity,
         scorer=scorer,
     )
-    turn.analysis_observation = AnalysisObservation(
-        turn._subtitle_tracks,
+    analysis_observation = AnalysisObservation(
+        subtitle_tracks,
         navigation,
-        turn.profile_session,
+        profile_session,
     )
-    turn.analysis_commands = turn.analysis_controller.endpoint(turn.analysis_observation.current)
-    # The subtitle raster, retired at `RENDERING`. `native_geometry` is installed after this
-    # point, so every one of these resolves it when it closes rather than now.
-    # The two connection acts. Registered here with the rest and late-bound for the same
-    # reason: both read collaborators this constructor has not finished building.
+    analysis_commands = analysis_controller.endpoint(analysis_observation.current)
     registrations.append(
         (
             SUBTITLE_REPLAY_PARTICIPANT,
-            # Late-bound like every other registered step: an early-bound method also freezes the
-            # seam a test replaces, and these two are reached only through the effect.
-            session_resources.Starting(lambda: turn._on_ipc_reconnect()),
+            session_resources.Starting(
+                lambda: subtitle_presentation.pipeline.connection_replaced(
+                    subtitle_presentation.target()
+                )
+            ),
         )
     )
-    # `Owner.SUBTITLE`'s slice: which mpv track plays which role. Session-lived like the
-    # playback one, and episode-safe because a re-slot always runs `configure_subtitle_mode`,
-    # whose event resets the whole state.
-    turn.subtitle_acquisition = _assemble_subtitle_acquisition(
-        turn,
-        assembly.subtitle_fetch,
-        stop,
-    )
     surface_router = surfaces.build_surface_router(
-        turn.help_controller,
-        turn.picker_controller,
-        turn.sidebar_controller,
-        turn.preview_controller,
-        turn.tooltip_controller,
+        help_controller,
+        picker_controller,
+        sidebar_controller,
+        preview_controller,
+        tooltip_controller,
     )
-    turn._mouse = mouse_capture.MouseCapture(
+    mouse = mouse_capture.MouseCapture(
         ipc,
-        turn.lifecycle_timers,
+        lifecycle_timers,
         surface_router.wants_mouse_capture,
     )
-    turn.translation_observation = TranslationObservation(
-        turn.ov,
-        turn.tooltip_controller,
-        turn.playback_observation,
-        turn.screen,
+    translation_observation = TranslationObservation(
+        overlay,
+        tooltip_controller,
+        playback_observation,
+        screen,
     )
-    translation_controller: TranslationController
 
     def install_cue(
         text: str,
@@ -419,152 +526,156 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
         revise_session_cue: bool = False,
         provisional_navigation: bool = False,
     ) -> None:
-        turn.cue_coordinator.set_subtitle(
+        cue_ref.get().set_subtitle(
             text,
             revise_session_cue=revise_session_cue,
             provisional_navigation=provisional_navigation,
         )
 
-    turn.track_commands = SubtitleTrackCoordinator(
-        ipc=turn.ipc,
-        tracks=turn._subtitle_tracks,
+    track_commands = SubtitleTrackCoordinator(
+        ipc=ipc,
+        tracks=subtitle_tracks,
         navigation=navigation,
-        playback=turn.playback_observation,
-        property_value=turn.playback_observation.query,
-        notifications=turn.notifications,
-        invalidate=turn.analysis_commands.invalidate,
-        translation_visible=lambda: translation_controller.active(
-            turn.translation_observation.current()
-        ),
-        rebuild_index=lambda: turn.cue_coordinator.rebuild_sub_index(),
+        playback=playback_observation,
+        property_value=playback_observation.query,
+        notifications=notifications,
+        invalidate=analysis_commands.invalidate,
+        translation_visible=lambda: translation_ref.get().active(translation_observation.current()),
+        rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
         install_cue=install_cue,
     )
-    translation_store = TranslationStore(turn.ipc)
-    translation_controller = TranslationController(
-        translation_store,
-        turn.lifecycle_surfaces,
-        turn.track_commands,
-        auto_reveal=o.translation.auto_translate,
-    )
-    turn.translation_controller = translation_controller
-    turn.sidebar_controller.bind_view(
-        SidebarViewOwners(
-            tracks=turn.track_commands,
-            playback=turn.playback_observation,
-            screen=turn.screen,
-            surfaces=turn.lifecycle_surfaces,
-            history=turn.history,
-            mining=turn.mining_controller,
-            profile=turn.profile_session,
-            analysis=turn.analysis_controller,
-            timers=turn.lifecycle_timers,
+    translation_store = TranslationStore(ipc)
+    translation_controller = translation_ref.bind(
+        TranslationController(
+            translation_store,
+            lifecycle_surfaces,
+            track_commands,
+            auto_reveal=o.translation.auto_translate,
         )
     )
-    turn.subtitle_navigation = SubtitleNavigationCoordinator(
-        ipc=turn.ipc,
-        navigation=turn.track_commands.navigation,
-        geometry=lambda: turn.subtitle_presentation.native,
-        get=turn.playback_observation.query,
-        cue_text=lambda: turn.playback_observation.cue.text,
-        cue_retired=lambda: turn.annotation_controller.view.retired,
-        draw_cue=install_cue,
-        replace_source=lambda path=None, *, reason: turn.cue_coordinator.replace_source(
-            path, reason=reason
-        ),
-        invalidate=turn.analysis_commands.invalidate,
-        warm_tokens=lambda: profile_integration.warm_episode(),
-        index_changed=turn.sidebar_controller.index_changed,
-        cue_revision=lambda: turn.cue_coordinator.revision,
-        invalidate_pipeline=turn.subtitle_presentation.pipeline.invalidate,
+    sidebar_controller.bind_view(
+        SidebarViewOwners(
+            tracks=track_commands,
+            playback=playback_observation,
+            screen=screen,
+            surfaces=lifecycle_surfaces,
+            history=history,
+            mining=mining_controller,
+            profile=profile_session,
+            analysis=analysis_controller,
+            timers=lifecycle_timers,
+        )
     )
-    profile_integration = ProfileIntegration(
-        ipc=turn.ipc,
-        profile=turn.profile_session.profile,
-        annotation=turn.annotation_controller,
-        analysis=turn.analysis_commands,
-        preparation=turn.tooltip_preparation,
-        tooltip=turn.tooltip_controller,
-        presentation=turn.subtitle_presentation,
-        tracks=turn._subtitle_tracks,
-        navigation=turn.track_commands.navigation,
-        cue_text=lambda: turn.playback_observation.cue.text,
-        annotation_inputs=lambda: turn.cue_coordinator.annotation_inputs(),
-        apply_annotation=lambda transition: turn.cue_coordinator.apply_annotation_transition(
-            transition, draw=True
-        ),
-        teardown_tooltip=turn.tooltip_controller.teardown,
-        retire_cue=lambda reason: turn.cue_coordinator.retire(reason),
-        configure_subtitle_mode=lambda startup, slang: turn.cue_coordinator.configure_subtitle_mode(
-            startup, slang=slang
-        ),
-        rebuild_index=lambda: turn.cue_coordinator.rebuild_sub_index(),
+    subtitle_navigation = navigation_ref.bind(
+        SubtitleNavigationCoordinator(
+            ipc=ipc,
+            navigation=track_commands.navigation,
+            geometry=lambda: subtitle_presentation.native,
+            get=playback_observation.query,
+            cue_text=lambda: playback_observation.cue.text,
+            cue_retired=lambda: annotation_controller.view.retired,
+            draw_cue=install_cue,
+            replace_source=lambda path=None, *, reason: cue_ref.get().replace_source(
+                path, reason=reason
+            ),
+            invalidate=analysis_commands.invalidate,
+            warm_tokens=lambda: profile_integration_ref.get().warm_episode(),
+            index_changed=sidebar_controller.index_changed,
+            cue_revision=lambda: cue_ref.get().revision,
+            invalidate_pipeline=subtitle_presentation.pipeline.invalidate,
+        )
     )
-    turn.profile_integration = profile_integration
+    profile_integration = profile_integration_ref.bind(
+        ProfileIntegration(
+            ipc=ipc,
+            profile=profile_session.profile,
+            annotation=annotation_controller,
+            analysis=analysis_commands,
+            preparation=tooltip_preparation,
+            tooltip=tooltip_controller,
+            presentation=subtitle_presentation,
+            tracks=subtitle_tracks,
+            navigation=track_commands.navigation,
+            cue_text=lambda: playback_observation.cue.text,
+            annotation_inputs=lambda: cue_ref.get().annotation_inputs(),
+            apply_annotation=lambda transition: cue_ref.get().apply_annotation_transition(
+                transition, draw=True
+            ),
+            teardown_tooltip=tooltip_controller.teardown,
+            retire_cue=lambda reason: cue_ref.get().retire(reason),
+            configure_subtitle_mode=lambda startup, slang: cue_ref.get().configure_subtitle_mode(
+                startup, slang=slang
+            ),
+            rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
+        )
+    )
 
-    stateless_commands: StatelessCommandGraph
+    subtitle_acquisition = _assemble_subtitle_acquisition(
+        ipc,
+        playback_observation,
+        notifications,
+        track_commands.ports,
+        assembly.subtitle_fetch,
+        stop,
+    )
 
     def run_stateless(command: object) -> None:
-        stateless_commands.run(command)
-
-    tts_capability = turn._tts_capability
+        stateless_ref.get().run(command)
 
     def tts_is_available() -> bool:
         return bool(tts_ok) if tts_capability is None else bool(tts_capability.value)
 
     def hide_tooltip() -> None:
-        turn.interaction_surfaces.remove(OverlayId.TIP)
+        interaction_surfaces.remove(OverlayId.TIP)
 
     def observe_tooltip_session() -> TooltipSessionView:
-        navigation = turn.track_commands.navigation.current
+        navigation = track_commands.navigation.current
         return TooltipSessionView(
-            cue=turn.subtitle_presentation.cue.current,
-            annotation=turn.annotation_controller.view,
-            tokenizer=turn.profile_session.profile.tokenizer,
-            dictionary=turn.profile_session.profile.dict_set,
-            scorer=turn.profile_session.scorer,
-            mined=turn.mining_controller.index_snapshot(),
-            mining_target_available=turn.mining_controller.target_available,
-            subtitle_language=turn._subtitle_tracks.current.language,
+            cue=subtitle_presentation.cue.current,
+            annotation=annotation_controller.view,
+            tokenizer=profile_session.profile.tokenizer,
+            dictionary=profile_session.profile.dict_set,
+            scorer=profile_session.scorer,
+            mined=mining_controller.index_snapshot(),
+            mining_target_available=mining_controller.target_available,
+            subtitle_language=subtitle_tracks.current.language,
             navigation=TooltipNavigationView(navigation.sub_index, navigation.nav_idx),
-            playback_cue_text=turn.playback_observation.cue.text,
+            playback_cue_text=playback_observation.cue.text,
         )
 
     def set_annotation_hover(*, revealed: bool) -> None:
-        turn.annotation_controller.set_hover_revealed(revealed=revealed)
-        turn.subtitle_presentation.draw()
+        annotation_controller.set_hover_revealed(revealed=revealed)
+        subtitle_presentation.draw()
 
     def sync_tooltip_translation() -> None:
-        turn.translation_controller.sync_auto_reveal(turn.translation_observation.current)
+        translation_ref.get().sync_auto_reveal(translation_observation.current)
 
-    turn.tooltip_controller.bind_session_context(
+    tooltip_controller.bind_session_context(
         TooltipSessionContext(
             observe=observe_tooltip_session,
-            read_playback=turn.playback_observation.value,
-            query_playback=turn.playback_observation.query,
+            read_playback=playback_observation.value,
+            query_playback=playback_observation.query,
             actions=TooltipSessionActions(
                 hide=hide_tooltip,
                 set_annotation_hover=set_annotation_hover,
-                draw_cue=turn.subtitle_presentation.draw,
-                mine_token=turn.mining_controller.mine_token,
-                preview_click=turn.preview_commands.click,
+                draw_cue=subtitle_presentation.draw,
+                mine_token=mining_controller.mine_token,
+                preview_click=preview_commands.click,
                 run_hover_command=run_stateless,
                 run_mine_command=run_stateless,
                 sync_translation=sync_tooltip_translation,
-                record_lookup=turn.history.record_lookup,
+                record_lookup=history.record_lookup,
                 toast=notify,
                 tts_available=tts_is_available,
             ),
-            surfaces=turn.interaction_surfaces,
+            surfaces=interaction_surfaces,
         )
     )
-    turn.screen.osd = (1280, 720)
-    # Normalized source of a cue drawn PLAIN because its annotation can't complete yet (dicts
-    # loading); reader_deps re-renders it annotated once deps land. None = drawn annotated.
-    turn._nudge_pending = False  # a draw happened while paused → re-flush the OSD next tick (#8172)
+    screen.osd = (1280, 720)
 
     def settle_annotation() -> None:
-        for transition in turn.annotation_controller.settle():
-            turn.cue_coordinator.apply_annotation_transition(transition, draw=transition.publish)
+        for transition in annotation_controller.settle():
+            cue_ref.get().apply_annotation_transition(transition, draw=transition.publish)
 
     def build_sidebar_actions() -> sidebar_module.SidebarActions:
         return sidebar_module.SidebarActions(
@@ -579,115 +690,149 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
             bookmark=lambda: run_stateless(mine_intents.MineCommand.BOOKMARK_CUE),
             mine=lambda: run_stateless(mine_intents.MineCommand.WORD),
             open_mined=lambda note_id: sidebar_coordination.open_mined(
-                turn.sidebar_controller.view(),
+                sidebar_controller.view(),
                 build_sidebar_actions(),
-                turn.preview_commands.ports(),
-                turn.preview_commands.card_source(),
+                preview_commands.ports(),
+                preview_commands.card_source(),
                 note_id,
             ),
         )
 
     def download_ports() -> sub_picker.DownloadPorts:
         return sub_picker.DownloadPorts(
-            turn.notifications.show,
-            turn.subtitle_acquisition.submit,
-            turn.playback_observation.query,
-            turn.lifecycle_surfaces,
+            notifications.show,
+            subtitle_acquisition.submit,
+            playback_observation.query,
+            lifecycle_surfaces,
         )
 
-    turn.interaction = InteractionCoordinator(
+    interaction = InteractionCoordinator(
         InteractionPorts(
-            overlay_visible=lambda: bool(getattr(turn.ov, "visible", True)),
-            playback=turn.playback_observation,
+            overlay_visible=lambda: bool(getattr(overlay, "visible", True)),
+            playback=playback_observation,
             router=surface_router,
-            tooltip=turn.tooltip_controller,
-            sidebar=turn.sidebar_controller,
+            tooltip=tooltip_controller,
+            sidebar=sidebar_controller,
             download=download_ports,
             sidebar_actions=build_sidebar_actions,
-            hide_annotation=lambda: turn.tooltip_controller.set_annotation_hover(revealed=False),
+            hide_annotation=lambda: tooltip_controller.set_annotation_hover(revealed=False),
             settle_annotation=settle_annotation,
-            sync_mouse_capture=turn._mouse.sync,
+            sync_mouse_capture=mouse.sync,
         )
     )
-    stateless_commands = _assemble_stateless_commands(turn, turn.interaction.command_coordinator())
-    turn._stateless_commands = stateless_commands
-    turn.cue_coordinator = CueCoordinator(
-        CueOwners(
-            ipc=turn.ipc,
-            overlay=turn.ov,
-            surfaces=turn.lifecycle_surfaces,
-            screen=turn.screen,
-            playback=turn.playback_observation,
-            presentation=turn.subtitle_presentation,
-            annotation=turn.annotation_controller,
-            tooltip=turn.tooltip_controller,
-            preview=turn.preview_commands,
-            history=turn.history,
-            tracks=turn._subtitle_tracks,
-            track_commands=turn.track_commands,
-            navigation=turn.subtitle_navigation,
-            profile=turn.profile_session,
-            analysis=turn.analysis_commands,
-            interaction=turn.interaction,
-            picker=turn.picker_controller,
-            acquisition=turn.subtitle_acquisition,
-            translation=turn.translation_controller,
+    picker_commands = PickerCommandEndpoint(
+        picker_controller,
+        playback_observation,
+        tooltip_controller,
+        track_commands,
+        stop,
+        notifications,
+    )
+    stateless_commands = stateless_ref.bind(
+        _assemble_stateless_commands(
+            interaction.command_coordinator(),
+            _StatelessOwners(
+                ipc=ipc,
+                profile=profile_session,
+                tooltip=tooltip_controller,
+                subtitles=subtitle_presentation,
+                notifications=notifications,
+                mining=mining_controller,
+                playback=playback_observation,
+                tracks=subtitle_tracks,
+                translation_observation=translation_observation,
+                history=history,
+                analysis=analysis_commands,
+                surfaces=lifecycle_surfaces,
+                sidebar=sidebar_controller,
+                picker=picker_controller,
+                preview=preview_commands,
+                picker_commands=picker_commands,
+                overlay=overlay,
+                translation=translation_controller,
+                track_commands=track_commands,
+                annotation=annotation_controller,
+                acquisition=subtitle_acquisition,
+                navigation=subtitle_navigation,
+            ),
         )
     )
-    turn.episode_watch = episode_reslot.EpisodeWatch(
-        prop=turn.playback_observation.value,
-        replace_source=turn.cue_coordinator.replace_source,
+    cue_coordinator = cue_ref.bind(
+        CueCoordinator(
+            CueOwners(
+                ipc=ipc,
+                overlay=overlay,
+                surfaces=lifecycle_surfaces,
+                screen=screen,
+                playback=playback_observation,
+                presentation=subtitle_presentation,
+                annotation=annotation_controller,
+                tooltip=tooltip_controller,
+                preview=preview_commands,
+                history=history,
+                tracks=subtitle_tracks,
+                track_commands=track_commands,
+                navigation=subtitle_navigation,
+                profile=profile_session,
+                analysis=analysis_commands,
+                picker=picker_controller,
+                acquisition=subtitle_acquisition,
+                translation=translation_controller,
+            )
+        )
+    )
+    episode_watch = episode_reslot.EpisodeWatch(
+        prop=playback_observation.value,
+        replace_source=cue_coordinator.replace_source,
         mark_authored_probe_dirty=authored_subtitle_probe.mark_dirty,
     )
 
     def subtitle_selection_changed(sid: object) -> None:
-        turn.subtitle_presentation.refresh.retire()
-        if turn.subtitle_presentation.native is not None:
-            turn.subtitle_presentation.native.set_source(None, live=True)
+        subtitle_presentation.refresh.retire()
+        if subtitle_presentation.native is not None:
+            subtitle_presentation.native.set_source(None, live=True)
         else:
-            turn.subtitle_presentation.pipeline.invalidate()
-        subtitle_modes.on_primary_changed(turn.track_commands.ports(), sid)
+            subtitle_presentation.pipeline.invalidate()
+        subtitle_modes.on_primary_changed(track_commands.ports(), sid)
 
     def subtitle_timing_changed() -> None:
-        if turn.subtitle_presentation.native is not None:
-            turn.subtitle_presentation.native.record_clock_change(turn.playback_observation.value)
+        if subtitle_presentation.native is not None:
+            subtitle_presentation.native.record_clock_change(playback_observation.value)
 
     def geometry_input_changed() -> None:
-        if turn.subtitle_presentation.native is not None:
-            turn.subtitle_presentation.refresh.arm()
+        if subtitle_presentation.native is not None:
+            subtitle_presentation.refresh.arm()
 
     def pause_changed(*, paused: bool) -> None:
         log.debug("mpv pause -> %s", paused)
         session_stats.accrue(
-            turn.history.recorder,
-            paused=bool(turn.playback_observation.value("pause")),
-            language=turn._subtitle_tracks.current.language,
+            history.recorder,
+            paused=bool(playback_observation.value("pause")),
+            language=subtitle_tracks.current.language,
         )
 
     def secondary_text_changed(value: object) -> None:
-        inputs = turn.translation_observation.current()
-        turn.translation_controller.secondary_text_changed(replace(inputs, secondary_text=value))
+        inputs = translation_observation.current()
+        translation_controller.secondary_text_changed(replace(inputs, secondary_text=value))
 
-    playback_projection = PlaybackProjection(
-        PlaybackApplication(
-            retire_cue=turn.cue_coordinator.retire,
-            probe_authored_subtitle=authored_subtitle_probe.resolve,
-            observe_cue=turn.cue_coordinator.observe,
-            subtitle_selection_changed=subtitle_selection_changed,
-            subtitle_timing_changed=subtitle_timing_changed,
-            geometry_input_changed=geometry_input_changed,
-            render_space_changed=turn._redraw_after_resize,
-            end_of_file_changed=turn.episode_watch.advance_if_reached,
-            pause_changed=pause_changed,
-            secondary_text_changed=secondary_text_changed,
-            pointer_moved=turn.interaction.update_hover,
+    playback_projection = playback_projection_ref.bind(
+        PlaybackProjection(
+            PlaybackApplication(
+                retire_cue=cue_coordinator.retire,
+                probe_authored_subtitle=authored_subtitle_probe.resolve,
+                observe_cue=cue_coordinator.observe,
+                subtitle_selection_changed=subtitle_selection_changed,
+                subtitle_timing_changed=subtitle_timing_changed,
+                geometry_input_changed=geometry_input_changed,
+                render_space_changed=presentation.redraw_after_resize,
+                end_of_file_changed=episode_watch.advance_if_reached,
+                pause_changed=pause_changed,
+                secondary_text_changed=secondary_text_changed,
+                pointer_moved=interaction.update_hover,
+            )
         )
     )
 
-    def file_loaded() -> None:
-        turn.episode_watch.file_loaded()
-
-    registrations.append((RESLOT_PARTICIPANT, session_resources.Starting(file_loaded)))
     registrations.append(
         (
             PLAYBACK_DELTAS_PERFORMER,
@@ -697,191 +842,229 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
     registrations.append(
         (
             CUE_RETIRE_RESOURCE,
-            session_resources.Retiring(lambda: turn.cue_coordinator.retire("connection-lost")),
+            session_resources.Retiring(lambda: cue_coordinator.retire("connection-lost")),
         )
     )
 
-    turn.command_runtime = CommandRuntime(
+    command_runtime = CommandRuntime(
         CommandRuntimePorts(
-            ipc=turn.ipc,
-            keys=turn._assembly.keys,
-            contributed_handlers=turn._assembly.command_handlers(),
-            contributed_specs=turn._assembly.command_specs(),
+            ipc=ipc,
+            keys=assembly.keys,
+            contributed_handlers=assembly.command_handlers(),
+            contributed_specs=assembly.command_specs(),
             stateless=stateless_commands,
-            mining=turn.mining_controller,
-            connection=turn._connection,
-            cue=turn.cue_coordinator,
-            annotation=turn.annotation_controller,
-            help=turn.help_controller,
-            mouse=turn._mouse,
+            mining=mining_controller,
+            connection=connection,
+            cue=cue_coordinator,
+            annotation=annotation_controller,
+            help=help_controller,
+            mouse=mouse,
         )
     )
-    registrations.append(
-        (COMMAND_PERFORMER, session_resources.Performing(turn.command_runtime.run_effect))
+    recurrence = SessionRecurrence(
+        tts_capability,
+        mining_controller,
+        lifecycle_timers,
+        history,
+        playback_observation,
+        subtitle_tracks,
     )
-
-    turn.lifecycle = compose_session_lifecycle(
+    diagnostics = SessionDiagnostics(
+        ipc,
+        playback_observation,
+        annotation_controller,
+        profile_session,
+        tooltip_controller,
+        subtitle_presentation,
+    )
+    lifecycle = compose_session_lifecycle(
         SessionLifecycleOwners(
             ipc,
-            turn._tts_capability,
-            turn.mining_controller,
-            turn.tooltip_controller,
-            turn.tooltip_preparation,
-            turn.annotation_controller,
-            turn.analysis_controller,
-            turn._mouse,
-            turn.subtitle_presentation.refresh,
-            turn.subtitle_presentation,
-            turn.history,
-            turn.lifecycle_timers,
-            turn.lifecycle_surfaces,
-            turn.ov,
+            tts_capability,
+            mining_controller,
+            tooltip_controller,
+            tooltip_preparation,
+            annotation_controller,
+            analysis_controller,
+            mouse,
+            subtitle_presentation.refresh,
+            subtitle_presentation,
+            history,
+            lifecycle_timers,
+            lifecycle_surfaces,
+            overlay,
         ),
         SessionLifecycleActs(
-            render_space=turn.refresh_osd,
-            start_observing=turn.playback_observation.start_session,
-            install_input=turn.command_runtime.install_input,
-            arm_capabilities=turn.arm_capability_refresh,
-            announce_profile=turn.profile_session.announce_if_ready,
-            start_prefetch=turn.tooltip_controller.start_prefetch,
-            finish_mask_atlas=turn.tooltip_preparation.finish_mask_atlas,
-            history_path=lambda: turn.playback_observation.value("path"),
-            arm_history=turn.arm_session_persist,
-            telemetry_gauges=turn._telemetry_gauges,
-            startup_health=turn._check_startup_health,
-            retire_settle_window=turn.subtitle_navigation.retire_settle,
-            finish_history=lambda: turn.history.finish(turn.analysis_controller.result),
-            report_history=turn.history.report,
+            render_space=presentation.refresh_osd,
+            start_observing=playback_observation.start_session,
+            install_input=command_runtime.install_input,
+            arm_capabilities=recurrence.arm_capabilities,
+            announce_profile=profile_session.announce_if_ready,
+            start_prefetch=tooltip_controller.start_prefetch,
+            finish_mask_atlas=tooltip_preparation.finish_mask_atlas,
+            history_path=lambda: playback_observation.value("path"),
+            arm_history=recurrence.arm_history,
+            telemetry_gauges=diagnostics.gauges,
+            startup_health=diagnostics.check_startup_health,
+            retire_settle_window=subtitle_navigation.retire_settle,
+            finish_history=lambda: history.finish(analysis_controller.result),
+            report_history=history.report,
         ),
-        registrations=registrations,
         stop=stop,
     )
-    turn.reslot_ports = episode_reslot.ReslotPorts(
-        ipc=turn.ipc,
-        finish_stats=lambda: turn.history.finish(turn.analysis_controller.result),
-        start_stats=lambda: turn.history.start(
-            path=lambda: turn.playback_observation.value("path"),
-            arm=turn.arm_session_persist,
+    reslot_ports = episode_reslot.ReslotPorts(
+        ipc=ipc,
+        finish_stats=lambda: history.finish(analysis_controller.result),
+        start_stats=lambda: history.start(
+            path=lambda: playback_observation.value("path"),
+            arm=recurrence.arm_history,
         ),
-        rebind_episode=turn.cue_coordinator.rebind_episode,
-        rebuild_index=turn.cue_coordinator.rebuild_sub_index,
-        configure_mode=turn.cue_coordinator.configure_subtitle_mode,
-        configure_retry=turn.subtitle_acquisition.configure_retry,
-        configure_picker=turn.picker_controller.configure_listing,
-        fetch_japanese=turn.subtitle_acquisition.fetch_background,
-        start_prefetch=turn.tooltip_controller.start_prefetch,
+        rebind_episode=cue_coordinator.rebind_episode,
+        rebuild_index=cue_coordinator.rebuild_sub_index,
+        configure_mode=cue_coordinator.configure_subtitle_mode,
+        configure_retry=subtitle_acquisition.configure_retry,
+        configure_picker=picker_controller.configure_listing,
+        fetch_japanese=subtitle_acquisition.fetch_background,
+        start_prefetch=tooltip_controller.start_prefetch,
         toast=notify,
     )
-    turn.watch_ports = turn.episode_watch.ports()
-    facts = session_runtime.SessionFacts(
-        refresh_osd=turn.refresh_osd,
-        prop=turn.playback_observation.value,
-        get=turn.playback_observation.query,
-        tokens=lambda: turn.subtitle_presentation.cue.current.tokens,
-        is_content_token=lambda token: turn.profile_session.profile.tokenizer.is_content(token),
-        osd_height=lambda: turn.screen.osd[1],
-        painted=lambda: turn.lifecycle_surfaces.settled() and turn.interaction_surfaces.settled(),
+    watch_ports = episode_watch.ports()
+    graph = SessionGraph(
+        ipc=ipc,
+        connection=connection,
+        overlay=overlay,
+        lifecycle_surfaces=lifecycle_surfaces,
+        interaction_surfaces=interaction_surfaces,
+        screen=screen,
+        help=help_controller,
+        analysis=analysis_controller,
+        annotation=annotation_controller,
+        picker=picker_controller,
+        sidebar=sidebar_controller,
+        preview=preview_controller,
+        tooltip_preparation=tooltip_preparation,
+        timers=lifecycle_timers,
+        notifications=notifications,
+        subtitle_presentation=subtitle_presentation,
+        capability_submit=capability_submit,
+        tts_capability=tts_capability,
+        history=history,
+        tooltip=tooltip_controller,
+        subtitle_tracks=subtitle_tracks,
+        playback=playback_observation,
+        mining=mining_controller,
+        profile=profile_session,
+        analysis_observation=analysis_observation,
+        analysis_commands=analysis_commands,
+        subtitle_acquisition=subtitle_acquisition,
+        mouse=mouse,
+        translation_observation=translation_observation,
+        track_commands=track_commands,
+        translation=translation_controller,
+        subtitle_navigation=subtitle_navigation,
+        profile_integration=profile_integration,
+        interaction=interaction,
+        stateless_commands=stateless_commands,
+        cue=cue_coordinator,
+        episode_watch=episode_watch,
+        commands=command_runtime,
+        lifecycle=lifecycle,
+        presentation=presentation,
+        recurrence=recurrence,
+        diagnostics=diagnostics,
+        picker_commands=picker_commands,
+        preview_commands=preview_commands,
+        reslot=reslot_ports,
+        watch=watch_ports,
     )
-    acts = session_runtime.SessionActs(
-        drive_annotation_once=turn._drive_annotation_once,
-        prepare_subtitle=turn.prepare_subtitle_blocking,
-        prepare_hover=turn.tooltip_controller.prepare_hover_blocking,
-        mark_ready=turn._mark_interactive_ready,
-        scroll_tip=turn.tooltip_controller.scroll_tip,
-        toggle_translation=turn._stateless_commands.handler(
-            subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION
-        ),
-        mine_current=turn._stateless_commands.handler(mine_intents.MineCommand.WORD),
-        bulk_mine=turn._stateless_commands.handler(mine_intents.MineCommand.EPISODE),
-    )
-    turn.entry_runtime = SessionRuntime(facts, acts, turn.ipc)
-    return turn
+    _register_runtime_resources(ipc, registrations)
+    return graph
 
 
 def _assemble_stateless_commands(
-    turn: SessionTurn,
     interaction: InteractionCommandCoordinator,
+    owners: _StatelessOwners,
 ) -> StatelessCommandGraph:
     """Build the closed synchronous command graph from bounded authorities."""
     hover = HoverCommandCoordinator(
         HoverCommandPorts(
-            profile=turn.profile_session.profile,
-            tooltip=turn.tooltip_controller,
-            cue=turn.subtitle_presentation.cue,
-            copy_token=turn.tooltip_controller.copy_token,
-            open_kanji=turn.tooltip_controller.open_kanji,
-            resume_playback=turn.tooltip_controller.resume_after_hover_pause,
-            notifications=turn.notifications,
+            profile=owners.profile.profile,
+            tooltip=owners.tooltip,
+            cue=owners.subtitles.cue,
+            copy_token=owners.tooltip.copy_token,
+            open_kanji=owners.tooltip.open_kanji,
+            resume_playback=owners.tooltip.resume_after_hover_pause,
+            notifications=owners.notifications,
         )
     )
     mine = MineCommandCoordinator(
         MineCommandPorts(
-            mining=turn.mining_controller,
+            mining=owners.mining,
             bookmark=BookmarkCommandEndpoint(
-                playback=turn.playback_observation,
-                cue=turn.subtitle_presentation.cue,
-                tracks=turn._subtitle_tracks,
-                tooltip=turn.tooltip_controller,
-                store=turn.history.ensure_backlog,
-                property_value=turn.playback_observation.query,
-                number_property=turn.playback_observation.number,
-                sequence_property=turn.playback_observation.sequence,
-                secondary_text=turn.translation_observation.secondary_text,
-                notifications=turn.notifications,
-                record_capture=turn.history.record_capture,
+                playback=owners.playback,
+                cue=owners.subtitles.cue,
+                tracks=owners.tracks,
+                tooltip=owners.tooltip,
+                store=owners.history.ensure_backlog,
+                property_value=owners.playback.query,
+                number_property=owners.playback.number,
+                sequence_property=owners.playback.sequence,
+                secondary_text=owners.translation_observation.secondary_text,
+                notifications=owners.notifications,
+                record_capture=owners.history.record_capture,
             ),
-            notifications=turn.notifications,
+            notifications=owners.notifications,
         )
     )
     panel = PanelCommandCoordinator(
         PanelCommandPorts(
-            analysis=turn.analysis_commands,
-            surfaces=turn.lifecycle_surfaces,
-            sidebar=turn.sidebar_controller,
-            picker=turn.picker_controller,
-            preview=turn.preview_commands,
-            retire_hover=turn.tooltip_controller.retire_hover,
-            show_sidebar=turn.sidebar_controller.show,
-            hide_sidebar=turn.sidebar_controller.hide,
-            open_picker=turn._open_picker_command,
+            analysis=owners.analysis,
+            surfaces=owners.surfaces,
+            sidebar=owners.sidebar,
+            picker=owners.picker,
+            preview=owners.preview,
+            retire_hover=owners.tooltip.retire_hover,
+            show_sidebar=owners.sidebar.show,
+            hide_sidebar=owners.sidebar.hide,
+            open_picker=owners.picker_commands.run,
         )
     )
     session = SessionCommandCoordinator(
         SessionCommandPorts(
-            overlay=turn.ov,
-            surfaces=turn.lifecycle_surfaces,
-            subtitle_pipeline=turn.subtitle_presentation.pipeline,
-            tooltip=turn.tooltip_controller,
-            translation=turn.translation_controller,
-            translation_inputs=turn.translation_observation.current,
-            toggle_renderer=turn.subtitle_presentation.toggle_renderer,
-            teardown_tip=turn.tooltip_controller.teardown,
-            subtitle_target=turn.subtitle_presentation.target,
+            overlay=owners.overlay,
+            surfaces=owners.surfaces,
+            subtitle_pipeline=owners.subtitles.pipeline,
+            tooltip=owners.tooltip,
+            translation=owners.translation,
+            translation_inputs=owners.translation_observation.current,
+            toggle_renderer=owners.subtitles.toggle_renderer,
+            teardown_tip=owners.tooltip.teardown,
+            subtitle_target=owners.subtitles.target,
         )
     )
     subtitle = SubtitleCommandCoordinator(
         SubtitleCommandRead(
-            ipc=turn.ipc,
-            navigation=turn.track_commands.navigation,
-            playback=turn.playback_observation,
-            tracks=turn._subtitle_tracks,
-            cue=turn.subtitle_presentation.cue,
-            annotation=turn.annotation_controller,
-            observed_property=turn.playback_observation.value,
-            property_value=turn.playback_observation.query,
-            text_property=turn.playback_observation.text,
+            ipc=owners.ipc,
+            navigation=owners.track_commands.navigation,
+            playback=owners.playback,
+            tracks=owners.tracks,
+            cue=owners.subtitles.cue,
+            annotation=owners.annotation,
+            observed_property=owners.playback.value,
+            property_value=owners.playback.query,
+            text_property=owners.playback.text,
         ),
         SubtitleCommandApply(
-            ipc=turn.ipc,
-            track=turn.track_commands,
-            acquisition=turn.subtitle_acquisition,
-            set_annotation_mode=turn.annotation_controller.set_mode,
-            draw_subtitle=turn.subtitle_presentation.draw,
-            seek_cue=turn.subtitle_navigation.seek,
-            sentence_lines=turn.preview_commands.sentence_lines,
-            translation=turn.translation_controller,
-            translation_inputs=turn.translation_observation.current,
-            notifications=turn.notifications,
+            ipc=owners.ipc,
+            track=owners.track_commands,
+            acquisition=owners.acquisition,
+            set_annotation_mode=owners.annotation.set_mode,
+            draw_subtitle=owners.subtitles.draw,
+            seek_cue=owners.navigation.seek,
+            sentence_lines=owners.preview.sentence_lines,
+            translation=owners.translation,
+            translation_inputs=owners.translation_observation.current,
+            notifications=owners.notifications,
         ),
     )
     return StatelessCommandGraph(
@@ -889,7 +1072,7 @@ def _assemble_stateless_commands(
             hover,
             mine,
             panel,
-            ProfileCommandEndpoint(turn.profile_session.profile),
+            ProfileCommandEndpoint(owners.profile.profile),
             session,
             subtitle,
             interaction,
@@ -899,45 +1082,48 @@ def _assemble_stateless_commands(
 
 
 def _assemble_subtitle_acquisition(
-    turn: SessionTurn,
+    ipc: MpvIPC,
+    playback: PlaybackObservationController,
+    notifications: ToastController,
+    track_ports: Callable[[], subtitle_modes.TrackPorts],
     submitter: JobSubmitter | None,
     stop: threading.Event,
 ) -> SubtitleAcquisitionController:
     return SubtitleAcquisitionController(
-        ipc=turn.ipc,
+        ipc=ipc,
         stop=stop,
-        get=turn.playback_observation.query,
-        notifications=turn.notifications,
-        track_ports=lambda: turn.track_commands.ports(),
+        get=playback.query,
+        notifications=notifications,
+        track_ports=track_ports,
         submitter=submitter,
     )
 
 
 # --- mining -------------------------------------------------------------------------------
 def _assemble_mining_controller(
-    turn: SessionTurn,
     identity: MiningIdentity,
     anki: Anki | None,
     config: MineConfig | None,
     settings: MiningOptions,
     profile: ProfileController,
     stop: threading.Event,
+    owners: _MiningOwners,
 ) -> MiningController:
     projection = MiningProjection(
-        notifications=turn.notifications,
-        preview=turn.preview_controller,
-        preview_endpoint=lambda: turn.preview_commands,
-        tooltip=turn.tooltip_controller,
-        tooltip_apply=turn.tooltip_controller.apply_context,
-        mined_here=turn.sidebar_controller.mark_active_mined,
-        record_mined=turn.history.record_mined,
+        notifications=owners.notifications,
+        preview=owners.preview,
+        preview_endpoint=owners.preview_endpoint,
+        tooltip=owners.tooltip,
+        tooltip_apply=owners.tooltip.apply_context,
+        mined_here=owners.sidebar.mark_active_mined,
+        record_mined=owners.history.record_mined,
     )
     encounter = MiningEncounterSource(
-        ipc=turn.ipc,
-        cue=turn.subtitle_presentation.cue,
-        tooltip=turn.tooltip_controller,
+        ipc=owners.ipc,
+        cue=owners.cue,
+        tooltip=owners.tooltip,
         profile=profile,
-        playback=turn.playback_observation,
+        playback=owners.playback,
         max_bulk=settings.max_bulk,
     )
     return MiningController.for_session(
@@ -945,9 +1131,9 @@ def _assemble_mining_controller(
         anki,
         config,
         MiningSessionAssembly(
-            ipc=turn.ipc,
-            capability_submit=turn._capability_submit,
-            timers=turn.lifecycle_timers,
+            ipc=owners.ipc,
+            capability_submit=owners.capability_submit,
+            timers=owners.timers,
             stopped=stop.is_set,
             settings=settings,
             encounter=encounter.capture,

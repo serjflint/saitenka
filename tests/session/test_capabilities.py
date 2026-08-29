@@ -4,7 +4,7 @@ import threading
 import time
 
 from session_builder import build_session
-from util import FakeIPC, await_ready, runtime_gateway
+from util import FakeIPC, await_ready, bare_gateway, session_gateway
 
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.features.tooltip.tooltip import panel_key
@@ -102,7 +102,7 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
     reader = build_session(FakeIPC())
     try:
         assert called is False
-        assert reader.turn.tooltip_controller.panel_style.speak_button is False
+        assert reader.graph.tooltip.panel_style.speak_button is False
     finally:
         reader.close()
 
@@ -116,15 +116,20 @@ def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
     reader = build_session(FakeIPC())
     token = Token("猫", "猫", "ネコ", "名詞", 0, 1)
     try:
-        before = panel_key(reader.turn.tooltip_controller.panel_ports, token, "猫")
-        reader.turn._apply_capabilities()
+        before = panel_key(reader.graph.tooltip.panel_ports, token, "猫")
+        reader.graph.recurrence.refresh_capabilities()
         release.set()
+
+        def deliver() -> None:
+            reader.pump()
+            reader.graph.recurrence.refresh_capabilities()
+
         await_ready(
-            lambda: reader.turn.tooltip_controller.panel_style.speak_button,
+            lambda: reader.graph.tooltip.panel_style.speak_button,
             "tts probe never published",
-            pump=reader.turn._apply_capabilities,
+            pump=deliver,
         )
-        after = panel_key(reader.turn.tooltip_controller.panel_ports, token, "猫")
+        after = panel_key(reader.graph.tooltip.panel_ports, token, "猫")
 
         assert before.tts_ok is False
         assert after.tts_ok is True
@@ -142,24 +147,24 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
 
     monkeypatch.setattr("saitenka.app.session.builder.tts_available", probe)
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     reader = build_session(ipc)
     try:
-        reader.turn._apply_capabilities()
+        reader.graph.recurrence.refresh_capabilities()
         assert finished.wait(1.0)
-        assert reader.turn.tooltip_controller.panel_style.speak_button is False
+        assert reader.graph.tooltip.panel_style.speak_button is False
 
         def deliver() -> None:
-            reader.turn._drain_events()
-            reader.turn._apply_capabilities()
+            reader.pump()
+            reader.graph.recurrence.refresh_capabilities()
 
         await_ready(
-            lambda: reader.turn.tooltip_controller.panel_style.speak_button,
+            lambda: reader.graph.tooltip.panel_style.speak_button,
             "capability event never reached the reader",
             pump=deliver,
         )
 
-        assert reader.turn.tooltip_controller.panel_style.speak_button is True
+        assert reader.graph.tooltip.panel_style.speak_button is True
     finally:
         reader.close()
         gateway.close()
@@ -175,7 +180,7 @@ _REPLACEMENT_TIMEOUT = 10.0
 
 def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     submit = configure_runtime_jobs(ipc)
     assert submit is not None
     clock = [0.0]

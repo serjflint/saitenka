@@ -42,8 +42,8 @@ class _TallDS:
 
 def _reader() -> TestSession:
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_TallDS()))
-    r.turn.screen.osd = (1920, 1080)
-    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.graph.screen.osd = (1920, 1080)
+    r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     return r
 
 
@@ -56,28 +56,28 @@ def _churn(r: TestSession, term: str) -> bool:
     lines+tokens lets `draw_subtitle` build a consistent box for token 0. Returns whether a nested
     popup actually opened (so a test can assert the nested path was exercised)."""
     tok = Token(term, term, "ご", "名詞", 0, len(term))
-    r.turn.subtitle_presentation.cue.replace_tokenized(lines=[[tok]])
-    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
+    r.graph.subtitle_presentation.cue.replace_tokenized(lines=[[tok]])
+    r.graph.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
     # Draw first, then hover: the boxes have to exist before a cursor has anywhere to land. The old
     # `set_hover(0)` did both at once, which is why it could not be a move.
-    r.turn.subtitle_presentation.draw()
+    r.graph.subtitle_presentation.draw()
     ui = Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
         ui.wheel(1)
-    st = r.turn.tooltip_controller.surface_state().view.state
+    st = r.graph.tooltip.surface_state().view.state
     boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
     if boxes:
         nested_popup.show_nested(
-            r.turn.tooltip_controller.tip_ports,
-            r.turn.tooltip_controller.panel_ports,
-            r.turn.tooltip_controller.word_lookup,
+            r.graph.tooltip.tip_ports,
+            r.graph.tooltip.panel_ports,
+            r.graph.tooltip.word_lookup,
             boxes[len(boxes) // 3],
         )  # nested popup on an inner cell
-        opened = r.turn.tooltip_controller.surface_state().nest.state is not None
+        opened = r.graph.tooltip.surface_state().nest.state is not None
         ui.wheel(1)  # nested is up
-        r.turn.tooltip_controller.hide_nested()
-    r.turn.tooltip_controller.retire_hover()  # dismiss the whole stack
+        r.graph.tooltip.hide_nested()
+    r.graph.tooltip.retire_hover()  # dismiss the whole stack
     return opened
 
 
@@ -88,20 +88,20 @@ def test_sustained_churn_evicts_and_stays_clean():
     nested_seen = 0
     for term in _CORPUS:  # fill past the cap → eviction
         nested_seen += _churn(r, term)
-    assert len(r.turn.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
-        f"cache overflowed its LRU cap mid-fill: {len(r.turn.tooltip_controller.surface_state().panel_cache)}"
+    assert len(r.graph.tooltip.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
+        f"cache overflowed its LRU cap mid-fill: {len(r.graph.tooltip.surface_state().panel_cache)}"
     )
     for term in _CORPUS[:8]:  # revisit the earliest (now-evicted) entries → cold rebuild, no crash
         nested_seen += _churn(r, term)
 
     assert nested_seen > 0, "nested popups never opened — the nested path wasn't exercised"
-    assert len(r.turn.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
-        f"panel cache overflowed its LRU cap: {len(r.turn.tooltip_controller.surface_state().panel_cache)}"
+    assert len(r.graph.tooltip.surface_state().panel_cache) <= PANEL_CACHE_MAX, (
+        f"panel cache overflowed its LRU cap: {len(r.graph.tooltip.surface_state().panel_cache)}"
     )
     # after the final retire_hover() the whole hover stack must be torn down
-    assert not r.turn.tooltip_controller.hover_view().tip.shown
-    assert not r.turn.tooltip_controller.hover_view().nested.shown  # nested popup cleared
-    assert r.turn.tooltip_controller.observation().selected == -1
+    assert not r.graph.tooltip.hover_view().tip.shown
+    assert not r.graph.tooltip.hover_view().nested.shown  # nested popup cleared
+    assert r.graph.tooltip.observation().selected == -1
 
 
 def test_churn_removes_both_overlays_no_ghost():
@@ -110,7 +110,7 @@ def test_churn_removes_both_overlays_no_ghost():
     r = _reader()
     for term in _CORPUS[:12]:
         _churn(r, term)
-    removed = {c[1] for c in r.turn.ipc.commands if c and c[0] == "overlay-remove"}
-    assert r.turn.ov._oid(TIP_ID) in removed and r.turn.ov._oid(NESTED_ID) in removed, (
+    removed = {c[1] for c in r.graph.ipc.commands if c and c[0] == "overlay-remove"}
+    assert r.graph.overlay._oid(TIP_ID) in removed and r.graph.overlay._oid(NESTED_ID) in removed, (
         f"tooltip/nested overlays never removed; removes={removed}"
     )

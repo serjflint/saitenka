@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 from session_builder import build_session
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
@@ -165,7 +165,7 @@ def test_the_same_stream_decides_the_same_hover_with_or_without_a_reactor(reques
     local = HoverStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = HoverStore(ipc)
@@ -186,7 +186,7 @@ def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None
     """A second writer of a slot the reactor owns is a state the runtime never saw — so it is
     refused rather than silently kept beside the real one."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = HoverStore(ipc)
@@ -211,14 +211,14 @@ def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
         options=ReaderOptions().with_overrides(prefetch=False, hover_switch_delay=10.0),
     )
     try:
-        reader.turn.subtitle_presentation.cue.replace_tokenized(tokens=[object(), object()])
-        reader.turn.tooltip_controller.select(0)
-        reader.turn.tooltip_controller.hit = lambda *_args: 1  # type: ignore[method-assign]
+        reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object(), object()])
+        reader.graph.tooltip.select(0)
+        reader.graph.tooltip.hit = lambda *_args: 1  # type: ignore[method-assign]
 
         Driver(reader, instant=False).move(5, 5)
 
-        assert reader.turn.tooltip_controller.hover_diagnostics().word_target == 1
-        assert reader.turn.tooltip_controller.hover_view().scan_target is None
+        assert reader.graph.tooltip.hover_diagnostics().word_target == 1
+        assert reader.graph.tooltip.hover_view().scan_target is None
     finally:
         reader.close()
 
@@ -234,7 +234,7 @@ def test_help_and_hover_share_the_slot_without_reading_each_other(request) -> No
     anything on the other's vocabulary, one of these two states would not survive the other's turn.
     """
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     hover, help_ = HoverStore(ipc), HelpStore(ipc)
@@ -281,7 +281,7 @@ def test_the_same_commands_decide_the_same_overlay_with_or_without_a_reactor(req
     local = HelpStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = HelpStore(ipc)
@@ -294,7 +294,7 @@ def test_the_same_commands_decide_the_same_overlay_with_or_without_a_reactor(req
 
 def test_a_shrunk_document_is_folded_in_through_the_store(request) -> None:
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = HelpStore(ipc)
@@ -312,7 +312,7 @@ def test_a_shrunk_document_is_folded_in_through_the_store(request) -> None:
 def test_the_three_features_of_the_slot_do_not_read_each_other(request) -> None:
     """The broadcast is what makes this reachable: every event reaches every reducer in the slot."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     hover, help_, picker = HoverStore(ipc), HelpStore(ipc), PickerStore(ipc)
@@ -331,7 +331,7 @@ def test_a_listing_for_the_picker_that_was_up_a_moment_ago_is_refused(request) -
     """The generation is the point of the machine, and the store is where a real listing meets it:
     a result that comes back after a close-and-reopen must not repopulate the picker on screen."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = PickerStore(ipc)
@@ -351,7 +351,7 @@ def test_closing_a_picker_that_is_already_down_publishes_nothing(request) -> Non
     """The caller removes an overlay on the decision, so a second close must not ask for a removal
     at an id something else may since have drawn on."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = PickerStore(ipc)
@@ -373,7 +373,7 @@ def test_the_same_picker_events_decide_the_same_state_with_or_without_a_reactor(
     local = PickerStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = PickerStore(ipc)
@@ -389,7 +389,7 @@ def test_a_manual_scroll_holds_auto_follow_until_the_active_row_is_visible_again
     """The rule three facts argue over: the wheel, the active cue, and a re-render. A hold wins
     while the active row is off-screen, and is dropped — not merely overridden — once it is back."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = SidebarStore(ipc)
@@ -411,7 +411,7 @@ def test_a_hold_that_could_not_be_armed_never_suppresses_a_follow(request) -> No
     would suppress auto-follow for the rest of the session — the reducer decides that, not the
     caller, which is why the arming answer rides on the event."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = SidebarStore(ipc)
@@ -428,7 +428,7 @@ def test_a_re_render_against_a_different_screen_overrides_the_hold(request) -> N
     """`geometry` is opaque and only ever compared. A hold taken against one screen must not keep
     the sidebar off-target after the thing being rendered changed underneath it."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = SidebarStore(ipc)
@@ -442,7 +442,7 @@ def test_the_hold_deadline_landing_only_clears_the_flag(request) -> None:
     """It does not move the list. Yanking rows out from under the pointer the instant a timer fires
     is the jarring version; the follow that comes with it is the caller's next act, not this one."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = SidebarStore(ipc)
@@ -467,7 +467,7 @@ def test_the_same_sidebar_events_decide_the_same_state_with_or_without_a_reactor
     local = SidebarStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = SidebarStore(ipc)
@@ -483,7 +483,7 @@ def test_a_pop_with_nothing_stacked_hands_back_no_decision(request) -> None:
     """Esc has to fall through to closing the tooltip, so "there is nothing to go back to" is an
     answer the slice gives rather than a check the caller makes before asking."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = TipNavStore(ipc)
@@ -494,7 +494,7 @@ def test_a_pop_with_nothing_stacked_hands_back_no_decision(request) -> None:
 
 def test_the_stack_round_trips_a_view_the_slice_never_reads(request) -> None:
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = TipNavStore(ipc)
@@ -510,7 +510,7 @@ def test_the_stack_round_trips_a_view_the_slice_never_reads(request) -> None:
 
 def test_clearing_leaves_nothing_to_restore(request) -> None:
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = TipNavStore(ipc)
@@ -524,7 +524,7 @@ def test_the_back_stack_is_untouched_by_the_slot_s_other_features(request) -> No
     """Broadcast: a hover observation reaches this reducer too. It must leave the stack alone and
     still clear its own outbox, or the next drain replays a restore that was decided a turn ago."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     nav = TipNavStore(ipc)
@@ -549,7 +549,7 @@ def test_the_same_nav_events_decide_the_same_stack_with_or_without_a_reactor(req
     local = TipNavStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = TipNavStore(ipc)
@@ -565,7 +565,7 @@ def test_a_pulse_and_a_pause_claim_are_independent_of_each_other(request) -> Non
     """Both are the tooltip's, and both reach the other's reducer by broadcast. Neither may move
     the other's state, and each still clears its own outbox."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     pulse = PulseStore(ipc)
@@ -592,7 +592,7 @@ def test_the_same_pulse_events_decide_the_same_slot_with_or_without_a_reactor(re
     local = PulseStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = PulseStore(ipc)
@@ -613,7 +613,7 @@ def test_the_same_claim_events_decide_the_same_slot_with_or_without_a_reactor(re
     local = HoverPauseStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = HoverPauseStore(ipc)
@@ -629,7 +629,7 @@ def test_the_hovered_word_slice_declares_and_hands_nothing_back(request) -> None
     """It observes nothing: the lookup has already answered by the time this is told. So there is
     no outbox, and a caller waiting on one would be waiting on a decision nobody makes."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = HoveredWordStore(ipc)
@@ -640,7 +640,7 @@ def test_the_hovered_word_slice_declares_and_hands_nothing_back(request) -> None
 
 def test_the_kanji_cycle_restarts_on_a_new_word_and_survives_a_revision(request) -> None:
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = HoveredWordStore(ipc)
@@ -657,7 +657,7 @@ def test_the_kanji_cycle_restarts_on_a_new_word_and_survives_a_revision(request)
 
 def test_the_hovered_word_is_untouched_by_the_slot_s_other_features(request) -> None:
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     word = HoveredWordStore(ipc)
@@ -681,7 +681,7 @@ def test_the_same_word_events_decide_the_same_slice_with_or_without_a_reactor(re
     local = HoveredWordStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = HoveredWordStore(ipc)
@@ -699,7 +699,7 @@ def test_the_preview_slice_and_its_panel_are_cut_by_lifetime(request) -> None:
     """The slice says what is composed and at what magnification; the rects and the clip's live
     process stay app-side, because a reducer can hold neither one paint's geometry nor a `Popen`."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = PreviewStore(ipc)
@@ -726,7 +726,7 @@ def test_the_same_preview_events_decide_the_same_slice_with_or_without_a_reactor
     local = PreviewStore(FakeIPC())
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = PreviewStore(ipc)

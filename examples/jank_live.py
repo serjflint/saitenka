@@ -185,14 +185,16 @@ def run(*, settle_s: float = 0.4) -> dict:
             action()
             if ready is not None:
                 poll_until(reader, ready, "timed live interaction did not complete")
-            _present_overlay(reader.turn.ov)
+            _present_overlay(reader.graph.ov)
             return (time.perf_counter() - start) * 1000.0
 
         i = next(
-            k for k, t in enumerate(reader.subtitle_presentation.cue.current.tokens) if t.is_content
+            k
+            for k, t in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
+            if t.is_content
         )
-        box = next(b for b in reader.subtitle_presentation.cue.current.boxes if b.index == i)
-        ox, oy = reader.subtitle_presentation.cue.current.origin
+        box = next(b for b in reader.graph.subtitle_presentation.cue.current.boxes if b.index == i)
+        ox, oy = reader.graph.subtitle_presentation.cue.current.origin
         cx, cy = int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2)
 
         # Sustained playback with the subtitle overlay drawn — the primary signal: does compositing our
@@ -206,18 +208,18 @@ def run(*, settle_s: float = 0.4) -> dict:
 
         sample(
             "hover",
-            timed(hover, lambda: reader.tooltip_controller.surface_state().view.rect is not None),
+            timed(hover, lambda: reader.graph.tooltip.surface_state().view.rect is not None),
         )
 
         sample(
             "scroll",
-            timed(lambda: _scroll_four(reader.turn.tooltip_controller, reader.pump)),
+            timed(lambda: _scroll_four(reader.graph.tooltip, reader.pump)),
         )
 
         if (
-            reader.tooltip_controller.surface_state().view.rect is not None
+            reader.graph.tooltip.surface_state().view.rect is not None
         ):  # nested popup over an inner word
-            tx, ty, tw, th = reader.tooltip_controller.surface_state().view.rect
+            tx, ty, tw, th = reader.graph.tooltip.surface_state().view.rect
 
             def nested() -> None:
                 ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
@@ -227,8 +229,8 @@ def run(*, settle_s: float = 0.4) -> dict:
             sample("nested")
 
         def sweep() -> None:
-            for k in range(len(reader.subtitle_presentation.cue.current.boxes)):
-                b = reader.subtitle_presentation.cue.current.boxes[k]
+            for k in range(len(reader.graph.subtitle_presentation.cue.current.boxes)):
+                b = reader.graph.subtitle_presentation.cue.current.boxes[k]
                 ipc.command("mouse", int(ox + b.x + b.w / 2), int(oy + b.y + b.h / 2))
                 reader.pump()
 

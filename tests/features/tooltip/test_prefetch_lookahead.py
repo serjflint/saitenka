@@ -62,9 +62,9 @@ def _reader(
         ),
         options=options,
     )
-    r.turn.screen.osd = (1280, 720)
-    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
-    r.turn.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_SRT))
+    r.graph.screen.osd = (1280, 720)
+    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
+    r.graph.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_SRT))
     return r
 
 
@@ -76,23 +76,23 @@ def _submitted_items(r, monkeypatch):
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
-    r.turn.tooltip_controller.update_prefetch()
+    r.graph.tooltip.update_prefetch()
     return submitted
 
 
 def _upcoming(r, n: int) -> list[str]:
     """The next `n` cue texts, from the function that owns them rather than through the SessionController."""
     return prefetch.upcoming_cue_texts(
-        r.turn.track_commands.navigation.current.sub_index,
+        r.graph.track_commands.navigation.current.sub_index,
         n,
-        text=r.turn.playback_observation.cue.text,
-        preferred=r.turn.track_commands.navigation.current.nav_idx,
+        text=r.graph.playback.cue.text,
+        preferred=r.graph.track_commands.navigation.current.nav_idx,
     )
 
 
 def test_lookahead_warms_the_next_cues_words(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
-    r.turn.cue_coordinator.set_subtitle("本を読む")  # cue 1
+    r.graph.cue.set_subtitle("本を読む")  # cue 1
     surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
     # cue 2 (書く) and cue 3 (水, 飲む) get warmed; を is a particle, skipped.
     assert "書く" in surfaces and "水" in surfaces and "飲む" in surfaces
@@ -100,7 +100,7 @@ def test_lookahead_warms_the_next_cues_words(monkeypatch):
 
 def test_dependency_replacement_readmits_the_unchanged_cue(monkeypatch):
     r = _reader(monkeypatch, lookahead=0)
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     scheduled: list[list[object]] = []
 
     def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
@@ -108,10 +108,10 @@ def test_dependency_replacement_readmits_the_unchanged_cue(monkeypatch):
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
-    r.turn.tooltip_controller.update_prefetch()
+    r.graph.tooltip.update_prefetch()
 
-    r.turn.profile_integration.dependencies_changed()
-    r.turn.tooltip_controller.update_prefetch()
+    r.graph.profile_integration.dependencies_changed()
+    r.graph.tooltip.update_prefetch()
 
     assert len(scheduled) == 2
 
@@ -119,7 +119,7 @@ def test_dependency_replacement_readmits_the_unchanged_cue(monkeypatch):
 def test_lookahead_items_are_warm_only_even_while_engaged(monkeypatch):
     # Paused ⇒ the CURRENT line renders full; a future line is never engaged → always warm/unmined.
     r = _reader(monkeypatch, lookahead=1, props={"pause": True})
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     items = _submitted_items(r, monkeypatch)
     future = [i for i in items if i.token.surface == "書く"]  # only in cue 2
     assert future and all(i.full is False and i.mined is False for i in future)
@@ -129,14 +129,14 @@ def test_lookahead_items_are_warm_only_even_while_engaged(monkeypatch):
 
 def test_lookahead_dedupes_against_the_current_line(monkeypatch):
     r = _reader(monkeypatch, lookahead=1)
-    r.turn.cue_coordinator.set_subtitle("本を読む")  # 本 is also cue 2's first word
+    r.graph.cue.set_subtitle("本を読む")  # 本 is also cue 2's first word
     surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
     assert surfaces.count("本") == 1  # warmed once by the current line, not again for the next
 
 
 def test_no_lookahead_when_disabled(monkeypatch):
     r = _reader(monkeypatch, lookahead=0)
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
     assert "書く" not in surfaces and "水" not in surfaces  # only the current line queued
 
@@ -144,17 +144,17 @@ def test_no_lookahead_when_disabled(monkeypatch):
 def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
     r = _reader(monkeypatch, lookahead=10_000)
     calls = 0
-    tokenize = r.turn.profile_session.profile.tokenizer.tokenize
+    tokenize = r.graph.profile.profile.tokenizer.tokenize
 
     def counted(text):
         nonlocal calls
         calls += 1
         return tokenize(text)
 
-    monkeypatch.setattr(r.turn.profile_session.profile.tokenizer, "tokenize", counted)
+    monkeypatch.setattr(r.graph.profile.profile.tokenizer, "tokenize", counted)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     _submitted_items(r, monkeypatch)
 
     assert calls <= 65  # current cue plus at most 64 future cues
@@ -179,7 +179,7 @@ def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypat
         head_queue_max=4,
         scorer=_Scorer(),
     )
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     calls = 0
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
@@ -205,14 +205,14 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
         return False
 
     r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=4, scorer=_Scorer())
-    r.turn.cue_coordinator.set_subtitle("本を読む")
-    monkeypatch.setattr(r.turn.profile_session.profile.tokenizer, "tokenize", lambda _text: tokens)
-    monkeypatch.setattr(r.turn.profile_session.profile.tokenizer, "is_content", lambda _token: True)
-    monkeypatch.setattr(r.turn.tooltip_controller, "is_mined", is_mined)
+    r.graph.cue.set_subtitle("本を読む")
+    monkeypatch.setattr(r.graph.profile.profile.tokenizer, "tokenize", lambda _text: tokens)
+    monkeypatch.setattr(r.graph.profile.profile.tokenizer, "is_content", lambda _token: True)
+    monkeypatch.setattr(r.graph.tooltip, "is_mined", is_mined)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["long"])
 
     heads = prefetch._head_prefetch_items(
-        r.turn.tooltip_controller.prefetch_ports, r.turn.tooltip_controller.head_probe, 1, set()
+        r.graph.tooltip.prefetch_ports, r.graph.tooltip.head_probe, 1, set()
     )
 
     assert len(heads) == probes == 4
@@ -235,16 +235,16 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
             ][: len(values)]
 
     r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=1, scorer=_Scorer())
-    r.turn.cue_coordinator.set_subtitle("本を読む")
-    monkeypatch.setattr(r.turn.profile_session.profile.tokenizer, "tokenize", lambda _text: tokens)
+    r.graph.cue.set_subtitle("本を読む")
+    monkeypatch.setattr(r.graph.profile.profile.tokenizer, "tokenize", lambda _text: tokens)
     monkeypatch.setattr(
-        r.turn.profile_session.profile.tokenizer, "is_content", lambda token: token.surface == "語"
+        r.graph.profile.profile.tokenizer, "is_content", lambda token: token.surface == "語"
     )
-    monkeypatch.setattr(r.turn.tooltip_controller, "is_mined", lambda _token: False)
+    monkeypatch.setattr(r.graph.tooltip, "is_mined", lambda _token: False)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["ordinary"])
 
     heads = prefetch._head_prefetch_items(
-        r.turn.tooltip_controller.prefetch_ports, r.turn.tooltip_controller.head_probe, 1, set()
+        r.graph.tooltip.prefetch_ports, r.graph.tooltip.head_probe, 1, set()
     )
 
     assert [item.token.surface for _priority, item in heads] == ["語"]
@@ -252,14 +252,14 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
 
 def test_upcoming_cue_texts_bounds_at_the_tail(monkeypatch):
     r = _reader(monkeypatch, lookahead=5)
-    r.turn.cue_coordinator.set_subtitle("水を飲む")  # last cue
+    r.graph.cue.set_subtitle("水を飲む")  # last cue
     assert _upcoming(r, 5) == []
 
 
 def test_upcoming_cue_texts_is_empty_without_an_index(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
-    r.turn.track_commands.navigation.current.sub_index = None
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.track_commands.navigation.current.sub_index = None
+    r.graph.cue.set_subtitle("本を読む")
     assert _upcoming(r, 2) == []
 
 
@@ -276,12 +276,12 @@ def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
         def __init__(self, n):
             self.retained_nbytes = n
 
-    r.turn.tooltip_controller.surface_state().panel_cache.setdefault("a", _Panel(100))
-    r.turn.tooltip_controller.surface_state().panel_cache.setdefault("b", _Panel(250))
+    r.graph.tooltip.surface_state().panel_cache.setdefault("a", _Panel(100))
+    r.graph.tooltip.surface_state().panel_cache.setdefault("b", _Panel(250))
     monkeypatch.setattr(
-        r.turn.profile_session.profile.dict_set, "decoded_entry_count", lambda: 7, raising=False
+        r.graph.profile.profile.dict_set, "decoded_entry_count", lambda: 7, raising=False
     )
-    gauges = r.turn._telemetry_gauges()
+    gauges = r.graph.diagnostics.gauges()
     assert gauges["panel_cache.size"] == 2.0
     assert gauges["panel_cache.bytes"] == 350.0
     assert gauges["dict_cache.size"] == 7.0

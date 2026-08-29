@@ -1,20 +1,14 @@
-"""The seam two reactor implementations share while one migrates into the other.
+"""The loop seam between reduced state and owner-thread session work.
 
-`SessionReactor` (typed) now owns a slice of the session; `EffectCorrelator` (callback-shaped)
-still owns the rest. The seam has two halves, and the tests here pin both:
+`SessionReactor` owns typed state and effects; `EffectCorrelator` owns callback-shaped correlated
+effects: mpv commands, timers, and jobs. The seam has two halves, and the tests here pin both:
 
 * **observe** — the reactor sees every envelope, so it can track epochs and its own completions.
-* **claim** — a payload it owns is withheld from the legacy SessionController, so a migrated duty runs once
-  instead of twice. Claiming is *declared*, never derived from the route table: the two answer
-  different questions, and conflating them is silent.
+* **claim** — an exclusively reduced payload is withheld from `SessionController`, so one duty runs
+  once instead of twice. Claiming is declared rather than derived from routing: observation and
+  exclusive ownership answer different questions.
 
 Every hazard asserted here was found by executing the code, not by reading it.
-
-**Most of this file is scaffolding with a known demolition date.** Everything marked `TRANSITIONAL`
-exists only while two reactor implementations coexist, and D4 — which folds the correlator
-into the loop — deletes it too. It is written down so that removal is a decision someone
-can make quickly, rather than a judgement call they avoid. The `OwnerRouter` test below is the one
-that outlives them.
 """
 
 from __future__ import annotations
@@ -78,11 +72,11 @@ def _drain(consumer, timeout: float | None = 0.0) -> list:
     return events
 
 
-def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
+def test_an_unrouted_event_is_inert_and_counted_not_raised() -> None:
     """`RouteError` subclasses `ValueError`, and `SessionController.pump` reads `ValueError` as "mpv went away".
 
-    So letting one escape would end the session silently the first time an unmigrated event arrived
-    — which, during a migration, is most of them.
+    So letting one escape would end the session silently the first time an extension or diagnostic
+    event arrived.
     """
     router = OwnerRouter(SessionReducer({}), lambda _event: Owner.PLAYBACK)
     state = _state()
@@ -93,7 +87,33 @@ def test_an_unrouted_event_is_ignored_and_counted_not_raised() -> None:
 
     assert result_state is state
     assert effects == ()
-    assert router.ignored == {"playback:RawMpvEvent": 1}
+    assert router.unrouted == {"playback:RawMpvEvent": 1}
+
+
+def test_a_passthrough_event_is_neither_reduced_nor_counted_unrouted() -> None:
+    reduced: list[object] = []
+    router = OwnerRouter(
+        SessionReducer(
+            {
+                RouteKey(RawMpvEvent, Owner.PLAYBACK): lambda state, event: (
+                    reduced.append(event),
+                    ReduceResult(state),
+                )[1]
+            }
+        ),
+        lambda _event: Owner.PLAYBACK,
+        passthrough=(RawMpvEvent,),
+    )
+    state = _state()
+
+    result_state, effects = router(
+        state, RawMpvEvent("property-change", {"event": "property-change"})
+    )
+
+    assert result_state is state
+    assert effects == ()
+    assert reduced == []
+    assert router.unrouted == {}
 
 
 def test_a_claimed_event_is_withheld_from_the_reader() -> None:
@@ -127,7 +147,7 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     raising. So the oracle is composition — every act named by a claimed payload's reducer resolves
     to a name a real session registered.
     """
-    from util import runtime_gateway
+    from util import bare_gateway
 
     from saitenka.app.session.routes import (
         _CLAIMED,
@@ -148,7 +168,7 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     assert owner_of(ConnectionReplaced(1)) is Owner.SESSION
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     reader = build_session(
         ipc,
@@ -180,12 +200,12 @@ def test_a_correlator_owned_completion_is_never_claimed_by_the_reactor() -> None
     The correlator and the reactor both issue effects. Claiming by type would strand every
     correlated command the correlator owns — its terminal would be withheld and its callback never run.
     """
-    from util import runtime_gateway
+    from util import bare_gateway
 
     from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     reactor = install_session_reactor(gateway)
     try:
         correlated = gateway.mailbox.allocate_effect()
@@ -243,8 +263,7 @@ def test_a_completion_reaches_the_correlator_that_issued_it_past_the_observer() 
 
 
 def test_the_observer_sees_domain_events_without_consuming_them() -> None:
-    """TRANSITIONAL (dies with D4). A second observer must cost the SessionController nothing: `handle` takes an envelope, it does not read
-    the mailbox. (`run_until_idle` does, and must not be used while this router exists.)"""
+    """An observer sees an envelope without consuming the session's delivery of it."""
     mailbox = SessionMailbox()
     seen: list[object] = []
     router = OwnerRouter(
@@ -273,49 +292,6 @@ def test_the_observer_sees_domain_events_without_consuming_them() -> None:
     assert events == [
         {"event": "property-change", "name": "pause"}
     ]  # and so did the SessionController
-
-
-def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None:
-    """TRANSITIONAL (dies with D4). D1's exit criterion: observing changes nothing mpv can notice.
-
-    Achievable only because terminals are fenced — an observer that retired them would change the
-    command stream by dropping completions.
-    """
-    from util import runtime_gateway
-
-    from saitenka.app.subtitle_render import NullRenderer
-
-    def commands_for(*, observing: bool) -> list[tuple]:
-        ipc = FakeIPC()
-        gateway = runtime_gateway(ipc)  # the REAL gateway, whose router is the sole consumer
-        reader = build_session(
-            ipc,
-            infrastructure=SessionInfrastructure(
-                renderer=NullRenderer(),
-            ),
-            options=ReaderOptions().with_overrides(
-                prefetch=False,
-            ),
-        )
-        try:
-            if observing:
-                gateway.observe(
-                    SessionReactor(
-                        _state(),
-                        OwnerRouter(SessionReducer({}), lambda _e: None),
-                        gateway.mailbox,
-                        lambda _effect: True,
-                    )
-                )
-            reader.turn.cue_coordinator.set_subtitle("猫を見る")
-            reader.pump()
-            reader.pump()
-            return list(ipc.commands)
-        finally:
-            reader.close()
-            gateway.close()
-
-    assert commands_for(observing=True) == commands_for(observing=False)
 
 
 def test_every_fire_and_forget_effect_reaches_the_dispatcher() -> None:

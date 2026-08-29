@@ -267,7 +267,7 @@ def test_gateway_publishes_legacy_command_terminal_outcome() -> None:
         reason=CommandReason.INTERNAL,
     )
 
-    gateway.publish_legacy_outcome(outcome)
+    gateway.publish_command_outcome(outcome)
 
     envelope = mailbox.receive(timeout=0)
     assert envelope is not None
@@ -296,7 +296,7 @@ def test_command_terminal_slot_survives_normal_lane_saturation(outcome, reason) 
     )
 
     terminal = CommandHandled("mine", Owner.INTERACTION, outcome, command_id=0, reason=reason)
-    gateway.publish_legacy_outcome(terminal)
+    gateway.publish_command_outcome(terminal)
 
     assert mailbox.snapshot.command_reserved == 0
     assert [envelope.payload for envelope in mailbox.receive_ready()] == [

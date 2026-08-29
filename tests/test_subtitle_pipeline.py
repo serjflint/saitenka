@@ -236,14 +236,14 @@ def test_coordinator_delegates_current_renderer() -> None:
             prefetch=False,
         ),
     )
-    coordinator = reader.turn.subtitle_presentation.pipeline
+    coordinator = reader.graph.subtitle_presentation.pipeline
     coordinator.renderer = renderer
 
-    coordinator.draw_current(reader.turn.subtitle_presentation.target())
+    coordinator.draw_current(reader.graph.subtitle_presentation.target())
 
     assert renderer.drawn is not None
     assert renderer.drawn is not reader
-    assert renderer.drawn.osd == reader.turn.screen.osd
+    assert renderer.drawn.osd == reader.graph.screen.osd
     reader.close()
 
 
@@ -572,12 +572,12 @@ def test_a_gatewayed_session_runs_geometry_on_the_broker_lane(request) -> None:
     silently returned None the worker would fall back to its local lane and production geometry
     would never reach the broker — bounded admission and close would both be someone else's.
     """
-    from util import FakeIPC, runtime_gateway
+    from util import FakeIPC, bare_gateway
 
     from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, configure_runtime_job
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     ipc.install_runtime_ingress(lambda *_a: None, lambda *_a: None, None, gateway)
 

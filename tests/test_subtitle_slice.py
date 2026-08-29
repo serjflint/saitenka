@@ -8,7 +8,7 @@ is the one almost every test takes.
 from __future__ import annotations
 
 import pytest
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway
 
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import (
@@ -91,7 +91,7 @@ def test_the_routed_store_and_the_local_one_end_on_the_same_selection(request):
     """The differential: whether the reactor or the store holds it must not change the answer."""
     local = SubtitleTrackStore(FakeIPC())
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     routed = SubtitleTrackStore(ipc)
@@ -105,7 +105,7 @@ def test_the_routed_store_and_the_local_one_end_on_the_same_selection(request):
 
 def test_the_reactor_owned_slice_refuses_a_direct_write(request):
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = SubtitleTrackStore(ipc)

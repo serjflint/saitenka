@@ -9,36 +9,17 @@ from typing import TYPE_CHECKING, Protocol
 from saitenka.runtime.effects import (
     ApplyPlaybackDeltas,
     AsyncEffect,
-    AttachSessionDiagnostics,
     CancelEffect,
-    CancelInteractionWork,
-    CloseCapabilityActors,
-    CloseSessionOverlay,
-    CloseSessionStores,
-    CloseSessionSurfaces,
-    CloseSubtitleRendering,
-    CloseWorkerLanes,
     CoreControl,
-    DetachDiagnostics,
     DispatchedEffect,
     Effect,
     EffectError,
     EffectId,
     EffectOutcome,
     EmitDiagnostic,
-    EstablishRenderSpace,
     ExpireEffect,
-    GuardMainRender,
-    OpenSessionHistory,
-    RegisterInputBindings,
-    ReleaseInputCapture,
-    RemoveSessionArtifacts,
     ReplaySubtitleSelection,
-    ReslotEpisode,
     RetireCueIdentity,
-    RunUserCommand,
-    SeedOptionalCollaborators,
-    StartPropertyObservation,
     StopSession,
 )
 from saitenka.runtime.events import (
@@ -47,7 +28,6 @@ from saitenka.runtime.events import (
     EventEnvelope,
     EventOrigin,
     RuntimeEvent,
-    SessionClosing,
 )
 
 if TYPE_CHECKING:
@@ -60,24 +40,6 @@ class Lifecycle(StrEnum):
     OPEN = "open"
     CLOSING = "closing"
     CLOSED = "closed"
-
-
-class LifecycleEffectError(RuntimeError):
-    """A close turn ran every effect but one or more applications failed."""
-
-    def __init__(self, failures: tuple[tuple[Effect, BaseException], ...]) -> None:
-        self.failures = failures
-        details = ", ".join(
-            f"{type(effect).__name__}: {type(error).__name__}" for effect, error in failures
-        )
-        super().__init__(f"lifecycle effects failed: {details}")
-
-    @property
-    def missing_resources(self) -> frozenset[str]:
-        """Resource names a local fallback may still retire."""
-        return frozenset(
-            name for _effect, error in self.failures for name in getattr(error, "missing", ())
-        )
 
 
 class Reducer[StateT](Protocol):
@@ -213,17 +175,8 @@ class SessionReactor[StateT]:
     def _reduce(self, event: RuntimeEvent) -> bool:
         self._state, effects = self._reducer(self._state, event)
         performed = True
-        failures: list[tuple[Effect, BaseException]] = []
         for effect in effects:
-            if not isinstance(event, SessionClosing):
-                performed = self._apply(effect) and performed
-                continue
-            try:
-                performed = self._apply(effect) and performed
-            except BaseException as error:  # noqa: BLE001  # every close peer must get its turn
-                failures.append((effect, error))
-        if failures:
-            raise LifecycleEffectError(tuple(failures))
+            performed = self._apply(effect) and performed
         return bool(effects) and performed
 
     def _apply(self, effect: Effect) -> bool:
@@ -236,37 +189,9 @@ class SessionReactor[StateT]:
             return True
         if isinstance(
             effect,
-            GuardMainRender
-            | EstablishRenderSpace
-            | StartPropertyObservation
-            | RegisterInputBindings
-            | SeedOptionalCollaborators
-            | OpenSessionHistory
-            | AttachSessionDiagnostics
-            | DetachDiagnostics
-            | ReleaseInputCapture
-            | CloseCapabilityActors
-            | CancelInteractionWork
-            | CloseWorkerLanes
-            | CloseSubtitleRendering
-            | CloseSessionStores
-            | CloseSessionSurfaces
-            | CloseSessionOverlay
-            | RemoveSessionArtifacts
-            | ReplaySubtitleSelection
-            | ReslotEpisode
-            | RetireCueIdentity
-            | RunUserCommand
-            | ApplyPlaybackDeltas,
+            ReplaySubtitleSelection | RetireCueIdentity | ApplyPlaybackDeltas,
         ):
-            # Fire-and-forget, like `StopSession`: a lifecycle effect carries no ID because there
-            # is nothing to correlate a completion to. Reserving a terminal for one would leave a
-            # reservation nothing ever retires, and close is when that matters least and costs most.
-            #
-            # Spelled out rather than read off `FireAndForget`, which would drift: narrowing needs
-            # a literal union here, and the alias' `__value__` defeats it. `test_reactor.py` pins
-            # the two together — an effect that misses this branch falls through to the async path
-            # and dies on the `effect_id` it does not carry.
+            # These owner-thread acts carry no effect ID and therefore reserve no terminal.
             return self._dispatch(effect)
         if isinstance(effect, (CancelEffect, ExpireEffect)):
             if self._control is not None:

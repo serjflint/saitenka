@@ -36,43 +36,28 @@ class FakeIPC(util.FakeIPC):
         self.props.update(props or {})
 
 
-class FakeOverlay:
-    def __init__(self):
-        self.shown = []
-        self.hidden = []
-
-    def show(self, image, x=0, y=0, oid=0):
-        self.shown.append((image, x, y, oid))
-
-    def hide(self, oid=0):
-        self.hidden.append(oid)
-
-
 def _reader(cue_count=20, *, active=0, props=None):
     ipc = FakeIPC(props)
     reader = build_session(ipc)
-    reader.turn.ov = FakeOverlay()
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(cue_count)]
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex(cues)
-    reader.turn.playback_observation.install_seed({"sub-text": f"cue {active}"})
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(cues)
+    reader.graph.playback.install_seed({"sub-text": f"cue {active}"})
     return reader, ipc
 
 
 def _enable_mining(reader: TestSession) -> None:
     config = MineConfig()
-    identity = reader.turn.mining_controller.desired_spec.identity
-    reader.turn.mining_controller.select_mining_spec(
+    identity = reader.graph.mining.desired_spec.identity
+    reader.graph.mining.select_mining_spec(
         MiningSpec(identity, {"deck": config.deck, "model": config.model})
     )
-    assert reader.turn.mining_controller.publish_mining_target(
-        MiningTarget(identity, object(), config)
-    )
-    reader.turn.mining_controller.close_capability()
+    assert reader.graph.mining.publish_mining_target(MiningTarget(identity, object(), config))
+    reader.graph.mining.close_capability()
 
 
 def _view(reader, **overrides):
     """The value production draws from, with the row-level facts a test pins stated explicitly."""
-    return dataclasses.replace(reader.turn.sidebar_controller.view(), **overrides)
+    return dataclasses.replace(reader.graph.sidebar.view(), **overrides)
 
 
 def _capture_render(monkeypatch):
@@ -90,29 +75,27 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
     reader, ipc = _reader(active=12)
     calls = _capture_render(monkeypatch)
 
-    (sidebar.hide if reader.turn.sidebar_controller.state.open else sidebar.show)(
-        reader.turn.sidebar_controller.view()
-    )
+    (sidebar.hide if reader.graph.sidebar.state.open else sidebar.show)(reader.graph.sidebar.view())
 
-    assert reader.turn.sidebar_controller.state.open is True
+    assert reader.graph.sidebar.state.open is True
     assert [row.value for row in calls[-1][0]] == list(range(8, 17))
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
 
 def test_active_row_uses_timing_to_disambiguate_repeated_text():
     reader, _ipc = _reader(props={"sub-start": 5.2, "time-pos": 5.3})
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")]
     )
-    reader.turn.playback_observation.install_seed({"sub-text": "same line"})
+    reader.graph.playback.install_seed({"sub-text": "same line"})
 
     assert (
         sidebar._active_index(
-            reader.turn.track_commands.navigation.current.sub_index,
-            reader.turn.playback_observation.cue.text,
-            sub_start=reader.turn.playback_observation.query("sub-start"),
-            time_pos=reader.turn.playback_observation.query("time-pos"),
-            preferred=reader.turn.track_commands.navigation.current.nav_idx,
+            reader.graph.track_commands.navigation.current.sub_index,
+            reader.graph.playback.cue.text,
+            sub_start=reader.graph.playback.query("sub-start"),
+            time_pos=reader.graph.playback.query("time-pos"),
+            preferred=reader.graph.track_commands.navigation.current.nav_idx,
         )
         == 1
     )
@@ -123,40 +106,35 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     the next `update` would leave the sidebar off-target for as long as the cue happened to last."""
     reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
     calls = _capture_render(monkeypatch)
-    (sidebar.hide if reader.turn.sidebar_controller.state.open else sidebar.show)(
-        reader.turn.sidebar_controller.view()
-    )
-    reader.turn.sidebar_controller.panel.rect = (900, 50, 360, 600)
+    (sidebar.hide if reader.graph.sidebar.state.open else sidebar.show)(reader.graph.sidebar.view())
+    reader.graph.sidebar.panel.rect = (900, 50, 360, 600)
 
-    assert reader.turn.sidebar_controller.scroll(reader.turn.interaction.wheel_step(), -3) is True
-    held_scroll = reader.turn.sidebar_controller.state.scroll
-    reader.turn.playback_observation.install_seed({"sub-text": "cue 18"})
-    sidebar.follow(reader.turn.sidebar_controller.view())
-    assert reader.turn.sidebar_controller.state.scroll == held_scroll
+    assert reader.graph.sidebar.scroll(reader.graph.interaction.wheel_step(), -3) is True
+    held_scroll = reader.graph.sidebar.state.scroll
+    reader.graph.playback.install_seed({"sub-text": "cue 18"})
+    sidebar.follow(reader.graph.sidebar.view())
+    assert reader.graph.sidebar.state.scroll == held_scroll
 
     before_expiry = len(calls)
     assert ipc.fire_runtime_timer("lifecycle:sidebar-manual-hold")
 
-    assert reader.turn.sidebar_controller.state.scroll == 14
+    assert reader.graph.sidebar.state.scroll == 14
     assert len(calls) == before_expiry + 1
 
 
 def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
     reader, ipc = _reader(active=3)
     _capture_render(monkeypatch)
-    reader.turn.sidebar_controller.store.dispatch(
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
-    reader.turn.sidebar_controller.panel.rect = (100, 100, 400, 500)
-    reader.turn.sidebar_controller.panel.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
+    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
 
-    assert (
-        reader.turn.sidebar_controller.on_click(reader.turn.interaction.click_target(), 110, 110)
-        is True
-    )
+    assert reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110) is True
     assert ("set_property", "time-pos", 7.0) in ipc.commands
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
@@ -172,17 +150,17 @@ def test_active_cue_actions_use_registered_mining_commands(kind, command, monkey
     reader, _ipc = _reader(active=3)
     _capture_render(monkeypatch)
     invoked = []
-    monkeypatch.setattr(reader.turn._stateless_commands, "run", invoked.append)
-    reader.turn.sidebar_controller.store.dispatch(
+    monkeypatch.setattr(reader.graph.stateless_commands, "run", invoked.append)
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
-    reader.turn.sidebar_controller.panel.rect = (100, 100, 400, 500)
-    reader.turn.sidebar_controller.panel.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
+    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
 
-    reader.turn.sidebar_controller.on_click(reader.turn.interaction.click_target(), 110, 110)
+    reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110)
 
     assert invoked == [command]
 
@@ -201,19 +179,19 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, command
     reader, _ipc = _reader(active=9)  # the live cue has moved on since the row was drawn
     _capture_render(monkeypatch)
     invoked = []
-    monkeypatch.setattr(reader.turn._stateless_commands, "run", invoked.append)
-    reader.turn.sidebar_controller.store.dispatch(
+    monkeypatch.setattr(reader.graph.stateless_commands, "run", invoked.append)
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
-    reader.turn.sidebar_controller.panel.rect = (100, 100, 400, 500)
-    reader.turn.sidebar_controller.panel.hits = (
+    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
+    reader.graph.sidebar.panel.hits = (
         SidebarHitBox(kind, 3, 0, 0, 40, 40),
     )  # row 3, no longer active
 
-    reader.turn.sidebar_controller.on_click(reader.turn.interaction.click_target(), 110, 110)
+    reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110)
 
     assert invoked == [command]  # not the old silent no-op
 
@@ -230,17 +208,17 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
     invoked = []
     monkeypatch.setattr(backlog, "capture_current", lambda _ports: invoked.append("toggle"))
 
-    reader.turn.command_runtime.handle(BOOKMARK_MSG)  # the Alt+b path
-    reader.turn.sidebar_controller.store.dispatch(
+    reader.command(BOOKMARK_MSG)  # the Alt+b path
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
-    reader.turn.sidebar_controller.panel.rect = (100, 100, 400, 500)
-    reader.turn.sidebar_controller.panel.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
-    reader.turn.sidebar_controller.on_click(
-        reader.turn.interaction.click_target(), 110, 110
+    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
+    reader.graph.sidebar.on_click(
+        reader.graph.interaction.click_target(), 110, 110
     )  # the sidebar-button path
 
     assert invoked == ["toggle", "toggle"]  # one flow, two entry points
@@ -248,10 +226,10 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
 
 def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
-    reader.turn.track_commands.declare(SubtitleLanguageChanged("en"))
+    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
     install_profile_dependencies(reader, scorer=object())
     monkeypatch.setattr(
-        reader.turn.profile_session.profile.tokenizer,
+        reader.graph.profile.profile.tokenizer,
         "tokenize",
         lambda _text: (_ for _ in ()).throw(AssertionError),
     )
@@ -264,15 +242,15 @@ def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
 
 def test_rows_use_shared_episode_analysis_when_ready():
     reader, _ipc = _reader(cue_count=1)
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(0.0, 1.0, "私は本を読む。")]
     )
-    reader.turn.playback_observation.install_seed({"sub-text": "私は本を読む。"})
+    reader.graph.playback.install_seed({"sub-text": "私は本を読む。"})
     install_profile_dependencies(reader, scorer=Scorer(known=KnownWords.from_set(["私", "本"])))
     analysis = analyze_cues(
-        list(reader.turn.track_commands.navigation.current.sub_index.cues),
-        reader.turn.profile_session.scorer,
-        reader.turn.profile_session.profile.tokenizer,
+        list(reader.graph.track_commands.navigation.current.sub_index.cues),
+        reader.graph.profile.scorer,
+        reader.graph.profile.profile.tokenizer,
     )
 
     rows, _total = sidebar._track_rows(_view(reader, active=0, analysis=analysis), 0, 1)
@@ -282,38 +260,38 @@ def test_rows_use_shared_episode_analysis_when_ready():
 
 def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     ipc = FakeIPC()
-    gateway = util.runtime_gateway(ipc)
+    gateway = util.session_gateway(ipc)
     reader = build_session(ipc)
     try:
-        reader.turn.track_commands.declare(
-            SubtitleTracksDiscovered(1, reader.turn.track_commands.current().en_sid)
+        reader.graph.track_commands.declare(
+            SubtitleTracksDiscovered(1, reader.graph.track_commands.current().en_sid)
         )
         install_profile_dependencies(reader, scorer=Scorer(known=KnownWords.from_set(["私", "本"])))
-        reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+        reader.graph.track_commands.navigation.current.sub_index = CueIndex(
             [Cue(0.0, 1.0, "私は本を読む。")]
         )
-        reader.turn.playback_observation.install_seed({"sub-text": "私は本を読む。"})
-        reader.turn.analysis_commands.set_open(open=True)
+        reader.graph.playback.install_seed({"sub-text": "私は本を読む。"})
+        reader.graph.analysis_commands.set_open(open=True)
         util.await_ready(
-            lambda: reader.turn.analysis_controller.settled,
+            lambda: reader.graph.analysis.settled,
             "analysis result was not published",
-            pump=reader.turn._drain_events,
+            pump=reader.pump,
         )
-        assert reader.turn.analysis_controller.result is not None
-        reader.turn.sidebar_controller.store.dispatch(
+        assert reader.graph.analysis.result is not None
+        reader.graph.sidebar.store.dispatch(
             events.SidebarShown(
-                reader.turn.sidebar_controller.view().active,
-                reader.turn.sidebar_controller.view().capacity,
+                reader.graph.sidebar.view().active,
+                reader.graph.sidebar.view().capacity,
             )
         )
-        reader.turn.profile_session.begin_loading()
+        reader.graph.profile.begin_loading()
         calls = _capture_render(monkeypatch)
         monkeypatch.setattr(
             "saitenka.app.subnav.load_index",
             lambda _path: CueIndex([Cue(0.0, 1.0, "猫です。")]),
         )
 
-        reader.turn.subtitle_navigation.load_index("new-track.srt")
+        reader.graph.subtitle_navigation.load_index("new-track.srt")
 
         assert calls[-1][0][0].text == "猫です。"
         assert calls[-1][0][0].status is None
@@ -324,13 +302,13 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
 
 def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):
     reader, ipc = _reader(props={"mouse-pos": {"x": 110, "y": 110}})
-    reader.turn.sidebar_controller.store.dispatch(
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
-    reader.turn.sidebar_controller.panel.rect = (100, 100, 400, 500)
+    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
     monkeypatch.setattr(
         "saitenka.app.features.tooltip.tooltip.update_hover",
         lambda _reader: (_ for _ in ()).throw(AssertionError("tooltip reached")),
@@ -349,9 +327,9 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     entry = store.toggle_capture(
         Capture(str(original), 0.0, 0.8, jp_text="秘密の字幕", en_text="secret subtitle")
     )
-    reader.turn.history.replace_backlog(store)
+    reader.graph.history.replace_backlog(store)
 
-    rows = sidebar._summary_rows(reader.turn.sidebar_controller.view())
+    rows = sidebar._summary_rows(reader.graph.sidebar.view())
 
     candidate = next(row for row in rows if row.actions)
     assert candidate.actions == (SidebarAction("✓", "relink", entry.media_id),)
@@ -359,47 +337,43 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     assert store.entries_for_path(renamed) == []
 
     _capture_render(monkeypatch)
-    reader.turn.sidebar_controller.store.dispatch(
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
-    reader.turn.sidebar_controller.panel.rect = (0, 0, 400, 500)
-    reader.turn.sidebar_controller.panel.hits = (
-        SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),
-    )
-    reader.turn.sidebar_controller.on_click(reader.turn.interaction.click_target(), 10, 10)
+    reader.graph.sidebar.panel.rect = (0, 0, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),)
+    reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 10, 10)
 
     assert store.entries_for_path(renamed) == [entry]
     assert store.media(entry.media_id).original_basename == original.name
-    matched_rows = sidebar._summary_rows(reader.turn.sidebar_controller.view())
+    matched_rows = sidebar._summary_rows(reader.graph.sidebar.view())
     expanded = next(row for row in matched_rows if row.click_kind == "backlog-seek")
     assert (expanded.text, expanded.status) == ("秘密の字幕", "open")
 
-    reader.turn.sidebar_controller.panel.rect = (0, 0, 400, 500)
-    reader.turn.sidebar_controller.panel.hits = (
-        SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),
-    )
-    reader.turn.sidebar_controller.on_click(reader.turn.interaction.click_target(), 10, 10)
-    assert ("set_property", "time-pos", 0.0) in reader.turn.ipc.commands
+    reader.graph.sidebar.panel.rect = (0, 0, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),)
+    reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 10, 10)
+    assert ("set_property", "time-pos", 0.0) in reader.graph.ipc.commands
 
 
 def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, monkeypatch):
     video = tmp_path / "Show - 01.mkv"
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    reader.turn.sidebar_controller.store.dispatch(
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
     store = BacklogStore(tmp_path / "backlog.sqlite")
     entry = store.toggle_capture(Capture(str(video), 0.0, 0.8, jp_text="cue 0"))
-    reader.turn.history.replace_backlog(store)
+    reader.graph.history.replace_backlog(store)
     _capture_render(monkeypatch)
 
-    sidebar.mine_active(reader.turn.sidebar_controller.view())
+    sidebar.mine_active(reader.graph.sidebar.view())
 
     assert store.entry(entry.id).status == "mined"
 
@@ -410,7 +384,7 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path, monkeypatch):
     video = tmp_path / "Show - 03.mkv"
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    store = reader.turn.mining_controller.store
+    store = reader.graph.mining.store
     store.record(
         note_id=111,
         video_path=str(video),
@@ -435,7 +409,7 @@ def test_mine_tab_lists_this_episodes_mined_cards(tmp_path, monkeypatch):
         expression="犬",
         reading="いぬ",
     )
-    rows = sidebar._mine_rows(reader.turn.sidebar_controller.view())
+    rows = sidebar._mine_rows(reader.graph.sidebar.view())
 
     assert [(row.value, row.click_kind, row.status) for row in rows] == [
         (111, "mine-open", "mined"),
@@ -452,8 +426,8 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "absent.sqlite")
 
-    assert sidebar._mine_rows(reader.turn.sidebar_controller.view()) == []
-    assert reader.turn.mining_controller.store_exists is False
+    assert sidebar._mine_rows(reader.graph.sidebar.view()) == []
+    assert reader.graph.mining.store_exists is False
     assert not (tmp_path / "absent.sqlite").exists()
 
 
@@ -463,7 +437,7 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
     video = tmp_path / "Show - 03.mkv"
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     reader, ipc = _reader(cue_count=1, props={"path": str(video)})
-    store = reader.turn.mining_controller.store
+    store = reader.graph.mining.store
     store.record(
         note_id=111,
         video_path=str(video),
@@ -473,17 +447,17 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
         reading="ほん",
     )
     _capture_render(monkeypatch)
-    reader.turn.sidebar_controller.store.dispatch(
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
-    reader.turn.sidebar_controller.store.dispatch(events.SidebarViewSelected("mine"))
-    reader.turn.sidebar_controller.panel.rect = (0, 0, 400, 500)
-    reader.turn.sidebar_controller.panel.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
+    reader.graph.sidebar.store.dispatch(events.SidebarViewSelected("mine"))
+    reader.graph.sidebar.panel.rect = (0, 0, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
 
-    reader.turn.sidebar_controller.on_click(reader.turn.interaction.click_target(), 10, 10)
+    reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 10, 10)
 
     assert ("set_property", "time-pos", 0.0) in ipc.commands  # seeks even with Anki down
 
@@ -495,7 +469,7 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
     video = tmp_path / "Show - 03.mkv"
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    store = reader.turn.mining_controller.store
+    store = reader.graph.mining.store
     store.record(
         note_id=111,
         video_path=str(video),
@@ -513,10 +487,10 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
     )
 
     sidebar_coordination.open_mined(
-        reader.turn.sidebar_controller.view(),
-        reader.turn.interaction.sidebar_actions(),
-        reader.turn.preview_commands.ports(),
-        reader.turn.preview_commands.card_source(),
+        reader.graph.sidebar.view(),
+        reader.graph.interaction.sidebar_actions(),
+        reader.graph.preview_commands.ports(),
+        reader.graph.preview_commands.card_source(),
         111,
     )
 
@@ -633,13 +607,13 @@ def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> 
     statuses come back empty either way, and only the on-disk side effect differs.
     """
     reader, _ipc = _reader(props={"path": ""})
-    reader.turn.sidebar_controller.store.dispatch(
+    reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
-            reader.turn.sidebar_controller.view().active,
-            reader.turn.sidebar_controller.view().capacity,
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
         )
     )
 
-    sidebar.draw(reader.turn.sidebar_controller.view())
+    sidebar.draw(reader.graph.sidebar.view())
 
-    assert reader.turn.history.backlog is None
+    assert reader.graph.history.backlog is None

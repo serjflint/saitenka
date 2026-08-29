@@ -432,7 +432,7 @@ def test_identical_text_under_a_new_track_changes_identity_without_a_cue_delta()
     assert SubtitleSelectionChanged in kinds(projection.observe(state, "sid", 3).deltas)
 
 
-# --- gate: what the legacy route still owns, and what it has handed back ------------------------
+# --- gate: projected playback domains -----------------------------------------------------------
 
 
 def test_a_pointer_move_publishes_now_that_hover_consumes_it() -> None:
@@ -459,29 +459,14 @@ def test_a_pause_change_publishes_now_that_watch_time_accrues_on_it() -> None:
     assert pause.state.paused is True
 
 
-def test_every_projected_domain_publishes() -> None:
-    """`LEGACY_OWNED` is empty, and that is the end state rather than an oversight: a domain listed
-    here is one the legacy driver still owns, and none do."""
-    assert PlaybackProjection().legacy_owned == frozenset()
-
-
-def test_a_composition_projection_publishes_pointer_and_pause() -> None:
-    projection = PlaybackProjection(legacy_owned=frozenset())
+def test_a_projection_publishes_pointer_and_pause() -> None:
+    projection = PlaybackProjection()
 
     pointer = projection.observe(PlaybackState(), "mouse-pos", {"x": 1, "y": 2})
     pause = projection.observe(PlaybackState(), "pause", data=True)
 
     assert kinds(pointer.deltas) == [PointerMoved]
     assert kinds(pause.deltas) == [PauseChanged]
-
-
-def test_unknown_legacy_owned_domains_are_rejected() -> None:
-    try:
-        PlaybackProjection(legacy_owned=frozenset({"tooltip"}))  # type: ignore[arg-type]
-    except ValueError as error:
-        assert "legacy-owned" in str(error)
-    else:  # pragma: no cover - the constructor must reject an unknown domain
-        raise AssertionError("an unknown legacy-owned domain must be rejected")
 
 
 def test_every_fact_domain_is_reachable_from_the_delta_vocabulary() -> None:

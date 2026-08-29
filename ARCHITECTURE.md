@@ -107,17 +107,18 @@ cli.create_app
      -> run: app.launch.run -> app.session.factory.create_session_controller(...)
      -> attach: app.commands.attach -> app.session.factory.create_session_controller(...)
         -> build_session_assembly(...)
-        -> build_session_turn(...)
-        -> SessionController(turn)
+        -> build_session_graph(...)
+        -> SessionController(graph)
 ```
 
 mpv script messages go through a closed `CommandExecutor`: a declared spec per command (owner,
 whether it needs a current cue) separate from the bound handler, so ordering and ownership are
 testable without a session. `SessionAssembly` contributes independently assembled handlers;
 `StatelessCommandGraph` binds the remaining messages to typed policies and purpose-specific
-capabilities. `session.builder` composes the graph; `SessionTurn` settles it on the owner thread;
-`SessionController` owns only the live start/run/stop/close boundary. None is a feature capability.
-This is an internal composition seam, not an open third-party plugin API.
+capabilities. `session.builder` composes the graph; `SessionController` owns the live lifecycle and
+the owner-thread turn, settling the cue and interaction coordinators after each drain. Feature state
+and policy stay in bounded owners. This is an internal composition seam, not an open third-party
+plugin API.
 
 A feature joins the session on one of two layers, and which one follows from whether it needs a
 place to remember that does not exist yet.
@@ -135,7 +136,7 @@ episode state is reached through `EpisodeSlot`. Which files, and in what order, 
 ```mermaid
 flowchart TB
     key(["mpv script-message"]) --> exec["CommandExecutor<br/>spec + bound handler"]
-    exec -->|command type| srouter["StatelessRouter"]
+    exec -->|command type| srouter["StatelessCommandGraph"]
     obs(["mpv property change"]) --> mailbox["SessionMailbox"]
     mailbox --> reactor["SessionReactor"]
     reactor -->|"RouteKey(event, owner)"| slice["SliceReducer"]
@@ -153,10 +154,11 @@ flowchart TB
 
     srouter --> L1
     slice --> L2
-    compose["session.builder<br/>one-shot composition"] --> turn["SessionTurn<br/>owner-thread settlement"]
-    turn --> gather
-    turn --> perform
-    turn --> cue["CueCoordinator<br/>cue + episode conjunctions"]
+    compose["session.builder<br/>one-shot composition"] --> controller["SessionController<br/>lifecycle + owner-thread turn"]
+    controller --> gather
+    controller --> perform
+    controller --> cue["CueCoordinator<br/>cue + episode conjunctions"]
+    controller --> interaction["InteractionCoordinator<br/>interaction settlement"]
     gather -. "bounded owner" .-> mining["MiningController<br/>target + index + transactions"]
     gather -. "bounded owner" .-> playback["PlaybackStore / CueRenderStore"]
     perform -. "named act" .-> sinks["mpv / surfaces / Anki"]
@@ -370,7 +372,8 @@ handled as misses on every read path.
 1. `MpvIPC`'s reader thread buffers observed properties and client messages while resolving correlated
    reply futures directly. `SessionLoop` blocks on the mailbox — bounded by the earliest armed timer,
    so an idle session with nothing armed does not wake at all — and hands each envelope to the
-   session's reactor and then, unless the reactor claimed it, to `SessionTurn`.
+   session's reactor and then, unless the reactor claimed it, to `SessionController`'s owner-thread
+   turn.
 2. A new subtitle line is normalized, tokenized by the active profile, compound-merged against the
    dictionary capability, scored, and cached as a `TokenizedCue`. Subtitle rendering returns the
    visible word boxes used by the hover test.
@@ -667,9 +670,9 @@ baseline instead.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
 - **Composition is explicit at the application boundary.** `cli.py` registers commands and process
   policy; domain commands call launch use cases; `session_factory.py` constructs `SessionController`.
-  Runtime command primitives never receive a god context. `session.builder` owns assembly,
-  `SessionTurn` owns event settlement, `CueCoordinator` owns cue/episode conjunctions, and bounded
-  controllers own feature state and policy. `SessionController` only drives the live lifecycle.
+  Runtime command primitives never receive a god context. `session.builder` owns assembly;
+  `SessionController` owns lifecycle and ordered turn settlement; `CueCoordinator` and
+  `InteractionCoordinator` own their conjunctions; bounded controllers own feature state and policy.
 - **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
   sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`
@@ -681,8 +684,8 @@ baseline instead.
 ## Test doubles (for the mpv boundary)
 
 - **`FakeIPC`** (`tests/util.py`) — in-process double for the mpv IPC client; feeds
-  subtitle/mouse properties and property-change events so `SessionTurn`'s full loop runs without a real
-  mpv.
+  subtitle/mouse properties and property-change events so the session's full owner-thread loop runs
+  without a real mpv.
 - **`Driver`** (`tests/driver.py`) — wraps a prepared session + `FakeIPC`, drives it through the *real*
   input path (mouse moves, clicks, keys) so tests read as interaction scripts while still
   exercising genuine hit-testing.

@@ -72,9 +72,9 @@ class Impurity:
 def _registered() -> dict[str, object]:
     """Every stateful or stateless policy installed by the session composition."""
     sys.path.insert(0, str(ROOT / "tests"))
-    from util import FakeIPC, runtime_gateway  # a tool, not a library
+    from util import FakeIPC, session_gateway  # a tool, not a library
 
-    from saitenka.app.session.routes import install_session_reactor, stateless_features
+    from saitenka.app.session.routes import stateless_features
 
     class _Adapter:
         def inputs(self) -> object:
@@ -83,9 +83,8 @@ def _registered() -> dict[str, object]:
         def apply(self, effect: object, /) -> None:
             pass
 
-    gateway = runtime_gateway(FakeIPC())
+    gateway = session_gateway(FakeIPC())
     try:
-        install_session_reactor(gateway)
         session_reducer = gateway.session_reactor._reducer._reducer
         routes = next(v for v in vars(session_reducer).values() if isinstance(v, dict))
         found: dict[str, object] = {}

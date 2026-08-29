@@ -214,11 +214,11 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
             anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
         ),
     )
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
-    assert anki.added == [] and "読む" in r.turn.mining_controller.index_snapshot()
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
+    assert anki.added == [] and "読む" in r.graph.mining.index_snapshot()
 
 
 def test_build_note_card_format_uses_passed_markers():
@@ -362,7 +362,7 @@ def test_dedupe_escapes_special_chars_in_query():
 
 def _ports(reader):
     """One transaction assembled by the production mining owner."""
-    ports = reader.turn.mining_controller._operation()
+    ports = reader.graph.mining._operation()
     assert ports is not None, "reader has no deck to mine into"
     return ports
 
@@ -399,7 +399,7 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     ipc.props["time-pos"] = 63
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     shown = []
@@ -408,8 +408,8 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
         "preview_mined",
         lambda _ports, _source, card, _tok, _video, _st="mined": shown.append(card.expression),
     )
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert len(anki.added) == 1
     note = anki.added[0]
     assert note["fields"]["Expression"] == "読む"
@@ -450,7 +450,7 @@ def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
     _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
     pic, _audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
     assert pic.endswith(".webp")  # the animated clip becomes the card image
-    captured = r.turn.preview_controller.panel.last_jpg
+    captured = r.graph.preview.panel.last_jpg
     assert captured is not None and str(captured).endswith(
         ".jpg"
     )  # still kept for preview/fallback
@@ -506,12 +506,12 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok, card=chosen)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok, card=chosen)
     assert anki.added[0]["fields"]["Expression"] == "退く"
     assert anki.added[0]["fields"]["ExpressionReading"] == "しりぞく"
 
@@ -522,18 +522,18 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     previewed = []
     monkeypatch.setattr(
         miner_ui,
         "preview_existing",
         lambda _ports, _source, nid, _card, status: previewed.append((nid, status)),
     )
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert anki.added == []  # dedupe: nothing added
     assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r.turn.mining_controller.index_snapshot()
+    assert "読む" in r.graph.mining.index_snapshot()
 
 
 def test_preview_replay_key_is_tooltip_scoped():
@@ -565,11 +565,11 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
         "exists", "読む", "よむ", ["本を読む"], "読む", ["to read"], None, None, "deck"
     )
 
-    miner_ui.show_preview(r.turn.preview_commands.ports(), pv, None)
+    miner_ui.show_preview(r.graph.preview_commands.ports(), pv, None)
     assert ("keybind", "ESC", f"script-message {PREVIEW_CLOSE_MSG}") in ipc.commands
 
-    r.turn.command_runtime.handle(PREVIEW_CLOSE_MSG)
-    assert not r.turn.preview_controller.state.open  # Esc dismissed it
+    r.command(PREVIEW_CLOSE_MSG)
+    assert not r.graph.preview.state.open  # Esc dismissed it
     assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
 
 
@@ -581,7 +581,7 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
     dup_status = []
@@ -590,13 +590,13 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
         "preview_mined",
         lambda _ports, _source, _c, _t, _v, status="mined": dup_status.append(status),
     )
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
 
-    r.turn.mining_controller.mine_token(tok)  # already in deck → nothing added, token remembered
+    r.graph.mining.mine_token(tok)  # already in deck → nothing added, token remembered
     assert anki.added == []
-    assert r.turn.preview_controller.panel.dup_tok is tok
+    assert r.graph.preview.panel.dup_tok is tok
 
-    r.turn.preview_commands.ports().add_duplicate()
+    r.graph.preview_commands.ports().add_duplicate()
     assert len(anki.added) == 1
     assert anki.added[0]["options"]["allowDuplicate"] is True
     assert dup_status == ["duplicate"]  # the new card's preview says "• duplicate" (accurate now)
@@ -645,18 +645,18 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     toasts = []
     monkeypatch.setattr(
-        r.turn.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
+        r.graph.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
     )
     monkeypatch.setattr(
-        r.turn.tooltip_controller,
+        r.graph.tooltip,
         "mark_mined",
         lambda _expr, _apply: None,
     )  # skip the view refresh
-    r.turn._stateless_commands.run(mine_intents.MineCommand.EPISODE)
+    r.graph.stateless_commands.run(mine_intents.MineCommand.EPISODE)
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
     assert any("mined" in t for t in toasts)
 
@@ -695,14 +695,14 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     r = build_session(
         ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
     )
-    r.turn.cue_coordinator.set_subtitle("退いた")
+    r.graph.cue.set_subtitle("退いた")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     handled = tooltip._mine_link(  # cards_for: のく=0, しりぞく=1
-        r.turn.profile_session.profile.dict_set,
-        r.turn.tooltip_controller.observation().metadata.terms,
-        r.turn.mining_controller.mine_token,
+        r.graph.profile.profile.dict_set,
+        r.graph.tooltip.observation().metadata.terms,
+        r.graph.mining.mine_token,
         LinkBox("mine:1", 0, 0, 10, 10),
         tok,
     )
@@ -739,11 +739,11 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
         }
     )
     r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg, dictionaries=ds))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     f = anki.added[0]["fields"]
     assert f["Word"] == "読む" and f["Furigana"] == "読[よ]む"
     assert "よむ" in f["Pitch"] and "[1]" in f["Pitch"]  # pitch from the dict, not fabricated
@@ -774,11 +774,11 @@ def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert len(anki.added) == 1
     note = anki.added[0]
     assert note["fields"]["WordAudio"] == "[sound:yomu.opus]"
@@ -794,11 +794,11 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert len(anki.added) == 1
     assert "WordAudio" not in anki.added[0]["fields"]
     assert anki.stored == []  # never stores media for a miss
@@ -830,11 +830,11 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
             anki=anki, mining=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
         ),
     )
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert len(anki.added) == 1
     assert "WordAudio" not in anki.added[0]["fields"]  # out-of-pack entry → field unset
     assert not any("secret" in name for name in anki.stored)  # never uploaded the escaping file
@@ -847,11 +847,11 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert "WordAudio" not in anki.added[0]["fields"]
     assert anki.stored == []
 
@@ -875,13 +875,13 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
         tooltip_panel.group_mined_of(
-            tok, r.turn.mining_controller.index_snapshot(), r.turn.profile_session.profile.dict_set
+            tok, r.graph.mining.index_snapshot(), r.graph.profile.profile.dict_set
         )
         == ()
     )  # nothing mined yet → no per-group flags
-    r.turn.mining_controller.record_mined_expression("退く")
+    r.graph.mining.record_mined_expression("退く")
     assert tooltip_panel.group_mined_of(
-        tok, r.turn.mining_controller.index_snapshot(), r.turn.profile_session.profile.dict_set
+        tok, r.graph.mining.index_snapshot(), r.graph.profile.profile.dict_set
     ) == (
         True,
         True,
@@ -902,11 +902,11 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     r = build_session(
         ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
     )
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert len(anki.added) == 1
     f = anki.added[0]["fields"]
     assert f["Expression"] == "読む"
@@ -931,11 +931,11 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     r = build_session(
         ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
     )
-    r.turn.cue_coordinator.set_subtitle("本を読む")
+    r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
-    tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.turn.mining_controller.mine_token(tok)
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
     assert anki.added[0]["fields"]["ID"] == "1"
 
 

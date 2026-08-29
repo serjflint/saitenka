@@ -57,9 +57,9 @@ def _reader() -> TestSession:
         options=ReaderOptions(prefetch=True),
     )
     _SUBMITTERS[r] = submitter
-    r.turn.tooltip_controller.surface_state().view.view_h = 300
-    r.turn.tooltip_controller.surface_state().view.scroll = 120
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 120
+    r.graph.tooltip.surface_state().view.view_h = 300
+    r.graph.tooltip.surface_state().view.scroll = 120
+    r.graph.tooltip.surface_state().view.desired_scroll = 120
     return r
 
 
@@ -77,13 +77,11 @@ def _tall_panel() -> Panel:
 
 def test_scroll_keeps_one_newest_pending_request():
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
-    r.turn.tooltip_controller.surface_state().view.scroll = 999
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 999
-    r.turn.tooltip_controller.submit_render_ahead(
-        r.turn.tooltip_controller.surface_state().view, -1
-    )
+    r.graph.tooltip.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
+    r.graph.tooltip.surface_state().view.scroll = 999
+    r.graph.tooltip.surface_state().view.desired_scroll = 999
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, -1)
     _submitter(r).finish()
     req = _submitter(r).calls[0]["request"]
     assert (req.scroll, req.view_h, req.direction) == (999, 300, -1)  # newest scroll won
@@ -92,16 +90,14 @@ def test_scroll_keeps_one_newest_pending_request():
 def test_newest_pending_request_runs_once_after_inflight_completion():
     r = _reader()
     panel = _RecordingPanel()
-    r.turn.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 999
-    r.turn.tooltip_controller.submit_render_ahead(
-        r.turn.tooltip_controller.surface_state().view, -1
-    )
+    r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
+    r.graph.tooltip.surface_state().view.desired_scroll = 999
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, -1)
 
     _submitter(r).finish()
     assert len(_submitter(r).calls) == 1
-    r.turn.tooltip_controller.surface_state().view.scroll = 999
+    r.graph.tooltip.surface_state().view.scroll = 999
     _submitter(r).finish()
 
     assert [call[0] for call in panel.calls if isinstance(call[0], int)] == [999]
@@ -125,16 +121,14 @@ def test_running_stale_request_observes_supersession_before_newest_runs():
     r = _reader()
     old = BlockingPanel()
     new = _RecordingPanel()
-    r.turn.tooltip_controller.surface_state().view.state = old  # type: ignore[assignment]
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
+    r.graph.tooltip.surface_state().view.state = old  # type: ignore[assignment]
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     worker = threading.Thread(target=_submitter(r).finish)
     worker.start()
     assert entered.wait(1)
 
-    r.turn.tooltip_controller.surface_state().view.state = new  # type: ignore[assignment]
-    r.turn.tooltip_controller.submit_render_ahead(
-        r.turn.tooltip_controller.surface_state().view, -1
-    )
+    r.graph.tooltip.surface_state().view.state = new  # type: ignore[assignment]
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, -1)
     release.set()
     worker.join(1)
     _submitter(r).finish()
@@ -145,41 +139,37 @@ def test_running_stale_request_observes_supersession_before_newest_runs():
 
 def test_render_ahead_survives_disabled_speculative_prefetch():
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.state = None
-    assert not r.turn.tooltip_controller.submit_render_ahead(
-        r.turn.tooltip_controller.surface_state().view, 1
-    )
+    r.graph.tooltip.surface_state().view.state = None
+    assert not r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
 
-    r.turn.tooltip_controller.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]
-    assert r.turn.tooltip_controller.submit_render_ahead(
-        r.turn.tooltip_controller.surface_state().view, 1
-    )
+    r.graph.tooltip.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]
+    assert r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
 
 
 def test_broker_completion_warms_the_requested_viewport():
     r = _reader()
     panel = _RecordingPanel()
-    r.turn.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
+    r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     _submitter(r).finish()
     # the landing viewport first (what gates publication), then the lookahead past it — the latter at
     # the (bucketed) display scale, not cancelled: native bands, one panel
     assert panel.calls == [
         ("warm_viewport", 120, 300),
-        (120, 300, 1, False, r.turn.tooltip_controller.scale().raster),
+        (120, 300, 1, False, r.graph.tooltip.scale().raster),
     ]
 
 
 def test_stale_completion_from_a_word_switch_is_not_published():
     r = _reader()
     panel = _RecordingPanel()
-    r.turn.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
-    r.turn.tooltip_preparation.cancel()
-    r.turn.tooltip_controller.cancel_current_work()
-    before = r.turn.tooltip_controller.surface_state().view.scroll
+    r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
+    r.graph.tooltip_preparation.cancel()
+    r.graph.tooltip.cancel_current_work()
+    before = r.graph.tooltip.surface_state().view.scroll
     _submitter(r).finish()
-    assert r.turn.tooltip_controller.surface_state().view.scroll == before
+    assert r.graph.tooltip.surface_state().view.scroll == before
     assert panel.calls == []
 
 
@@ -195,13 +185,13 @@ def test_prefetch_state_cancel_bumps_the_generation():
 
 def test_worker_actually_warms_a_real_panel():
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.scroll = 0
-    r.turn.tooltip_controller.surface_state().view.state = _tall_panel()
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
+    r.graph.tooltip.surface_state().view.scroll = 0
+    r.graph.tooltip.surface_state().view.state = _tall_panel()
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     _submitter(r).finish()
 
     assert (
-        r.turn.tooltip_controller.surface_state().view.state.windowed.cached_blocks > 0
+        r.graph.tooltip.surface_state().view.state.windowed.cached_blocks > 0
     )  # blocks warmed without any viewport() call
 
 
@@ -220,16 +210,16 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
     monkeypatch.setattr(otel_metrics, "traced", traced)
     r = _reader()
     panel = BrokenPanel()
-    r.turn.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r.turn.tooltip_controller.surface_state().view.job_id = (
-        r.turn.tooltip_controller.surface_state().jobs.begin("scroll")
+    r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
+    r.graph.tooltip.surface_state().view.job_id = r.graph.tooltip.surface_state().jobs.begin(
+        "scroll"
     )
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert (
-        r.turn.tooltip_controller.surface_state().view.desired_scroll
-        == r.turn.tooltip_controller.surface_state().view.scroll
+        r.graph.tooltip.surface_state().view.desired_scroll
+        == r.graph.tooltip.surface_state().view.scroll
     )
     assert spans[-1][0] == "scroll_request"
     assert spans[-1][1]["outcome"] == "failed"
@@ -238,41 +228,37 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
 def test_old_failure_cannot_roll_back_a_new_scroll_to_the_same_coordinate() -> None:
     r = _reader()
     panel = _RecordingPanel()
-    r.turn.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 100
-    old_job = r.turn.tooltip_controller.surface_state().jobs.begin("scroll")
-    r.turn.tooltip_controller.surface_state().view.job_id = old_job
-    r.turn.tooltip_controller.submit_render_ahead(
-        r.turn.tooltip_controller.surface_state().view, -1
-    )
+    r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
+    r.graph.tooltip.surface_state().view.desired_scroll = 100
+    old_job = r.graph.tooltip.surface_state().jobs.begin("scroll")
+    r.graph.tooltip.surface_state().view.job_id = old_job
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, -1)
 
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 200
-    r.turn.tooltip_controller.surface_state().view.job_id = (
-        r.turn.tooltip_controller.surface_state().jobs.begin("scroll")
+    r.graph.tooltip.surface_state().view.desired_scroll = 200
+    r.graph.tooltip.surface_state().view.job_id = r.graph.tooltip.surface_state().jobs.begin(
+        "scroll"
     )
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 100
-    current_job = r.turn.tooltip_controller.surface_state().jobs.begin("scroll")
-    r.turn.tooltip_controller.surface_state().view.job_id = current_job
+    r.graph.tooltip.surface_state().view.desired_scroll = 100
+    current_job = r.graph.tooltip.surface_state().jobs.begin("scroll")
+    r.graph.tooltip.surface_state().view.job_id = current_job
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert r.turn.tooltip_controller.surface_state().view.desired_scroll == 100
-    assert r.turn.tooltip_controller.surface_state().view.job_id == current_job
+    assert r.graph.tooltip.surface_state().view.desired_scroll == 100
+    assert r.graph.tooltip.surface_state().view.job_id == current_job
 
 
 def test_close_rejects_new_work_and_quarantines_late_completion() -> None:
     r = _reader()
     panel = _RecordingPanel()
-    r.turn.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
-    before = r.turn.tooltip_controller.surface_state().view.scroll
+    r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
+    before = r.graph.tooltip.surface_state().view.scroll
 
-    r.turn.tooltip_controller.close_render_ahead()
+    r.graph.tooltip.close_render_ahead()
     _submitter(r).finish()
 
-    assert r.turn.tooltip_controller.surface_state().view.scroll == before
-    assert not r.turn.tooltip_controller.submit_render_ahead(
-        r.turn.tooltip_controller.surface_state().view, -1
-    )
+    assert r.graph.tooltip.surface_state().view.scroll == before
+    assert not r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, -1)
 
 
 def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch):
@@ -286,18 +272,18 @@ def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch
     from saitenka.app.features.tooltip import tooltip_panel
 
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]
+    r.graph.tooltip.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]
     swept: list = []
     monkeypatch.setattr(
         tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
     )
 
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     _submitter(r).finish()
 
     assert swept == [
-        id(r.turn.tooltip_controller.surface_state().view),
-        id(r.turn.tooltip_controller.surface_state().nest),
+        id(r.graph.tooltip.surface_state().view),
+        id(r.graph.tooltip.surface_state().nest),
     ]
 
 
@@ -307,13 +293,13 @@ def test_a_failed_terminal_sweeps_nothing(monkeypatch):
     from saitenka.app.features.tooltip import tooltip_panel
 
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]
+    r.graph.tooltip.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]
     swept: list = []
     monkeypatch.setattr(
         tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
     )
 
-    r.turn.tooltip_controller.submit_render_ahead(r.turn.tooltip_controller.surface_state().view, 1)
+    r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert swept == []
@@ -324,20 +310,20 @@ def test_a_wheel_burst_reaches_the_viewport_it_scrolled_to():
     follow. Live this stalled — the worker warmed only the bands PAST each landing, so the gate that
     lets a scroll be published never opened for the one it landed on."""
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.scroll = 0
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 0
-    r.turn.tooltip_controller.surface_state().view.state = _tall_panel()
+    r.graph.tooltip.surface_state().view.scroll = 0
+    r.graph.tooltip.surface_state().view.desired_scroll = 0
+    r.graph.tooltip.surface_state().view.state = _tall_panel()
 
     for _ in range(3):
         tooltip_panel.scroll_view(
-            r.turn.tooltip_controller.tip_ports, r.turn.tooltip_controller.surface_state().view, 150
+            r.graph.tooltip.tip_ports, r.graph.tooltip.surface_state().view, 150
         )
     while _submitter(r).calls:
         _submitter(r).finish()
 
     assert (
-        r.turn.tooltip_controller.surface_state().view.desired_scroll,
-        r.turn.tooltip_controller.surface_state().view.scroll,
+        r.graph.tooltip.surface_state().view.desired_scroll,
+        r.graph.tooltip.surface_state().view.scroll,
     ) == (450, 450)
 
 
@@ -350,28 +336,28 @@ def test_scrolling_down_and_back_up_returns_to_where_it_started(notch):
     back off the clamp, which is where an off-by-a-step in the deferred publish would show.
     """
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.scroll = 0
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = 0
-    r.turn.tooltip_controller.surface_state().view.state = _tall_panel()
+    r.graph.tooltip.surface_state().view.scroll = 0
+    r.graph.tooltip.surface_state().view.desired_scroll = 0
+    r.graph.tooltip.surface_state().view.state = _tall_panel()
 
     def burst(delta):
         for _ in range(4):
             tooltip_panel.scroll_view(
-                r.turn.tooltip_controller.tip_ports,
-                r.turn.tooltip_controller.surface_state().view,
+                r.graph.tooltip.tip_ports,
+                r.graph.tooltip.surface_state().view,
                 delta,
             )
             while _submitter(r).calls:
                 _submitter(r).finish()
-            r.turn.interaction.settle()
+            r.graph.interaction.settle()
 
     burst(notch)
     assert (
-        r.turn.tooltip_controller.surface_state().view.scroll > 0
+        r.graph.tooltip.surface_state().view.scroll > 0
     )  # a negative control that never moved would round-trip too
     burst(-notch)
 
-    assert r.turn.tooltip_controller.surface_state().view.scroll == 0
+    assert r.graph.tooltip.surface_state().view.scroll == 0
 
 
 def test_a_notch_landing_mid_raster_still_leaves_the_destination_warm():
@@ -407,15 +393,15 @@ def test_the_turn_publishes_a_scroll_no_completion_claimed():
     something the popup may wait for: the wheel can stop on a notch whose job was already cancelled.
     Warmth belongs to the panel, not to a job, so the turn asks."""
     r = _reader()
-    r.turn.tooltip_controller.surface_state().view.scroll = 0
-    r.turn.tooltip_controller.surface_state().view.state = _tall_panel()
-    r.turn.tooltip_controller.surface_state().view.state.warm_viewport(
-        300, r.turn.tooltip_controller.surface_state().view.view_h
+    r.graph.tooltip.surface_state().view.scroll = 0
+    r.graph.tooltip.surface_state().view.state = _tall_panel()
+    r.graph.tooltip.surface_state().view.state.warm_viewport(
+        300, r.graph.tooltip.surface_state().view.view_h
     )
-    r.turn.tooltip_controller.surface_state().view.desired_scroll = (
+    r.graph.tooltip.surface_state().view.desired_scroll = (
         300  # warm and wanted, but no job will ever report it
     )
 
-    r.turn.interaction.settle()
+    r.graph.interaction.settle()
 
-    assert r.turn.tooltip_controller.surface_state().view.scroll == 300
+    assert r.graph.tooltip.surface_state().view.scroll == 300

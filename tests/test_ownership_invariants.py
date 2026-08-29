@@ -16,26 +16,22 @@ import dataclasses
 import typing
 
 import pytest
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway
 
 import saitenka.app.session.routes as session_routes
 from saitenka.runtime import Owner
 from saitenka.runtime import events as event_types
 from saitenka.runtime.state import SessionState
 
-#: Payloads the *loop* consumes rather than an owner slice: a stop signal and a command-id
-#: retirement are session-lifecycle facts, not state any feature reduces. Declared, because
-#: "nobody owns it" and "the tier below owns it" are indistinguishable from the router's side.
-_LOOP_TIER = ("CloseRequested", "CommandHandled")
-
-#: The wire shape, carried opaquely for a session with no gateway to name it. Not a payload any
-#: owner can hold: it is the fallback path's input.
-_UNGATEWAYED = ("RawMpvEvent",)
+#: Payloads consumed below the reducer graph. Declared because "another tier owns it" and "nobody
+#: owns it" are indistinguishable from the router's side.
+_LOOP_TIER = ("CloseRequested", "CommandHandled", "RawMpvEvent")
+_CONTROLLER_TIER = tuple(payload.__name__ for payload in session_routes._PASSTHROUGH)
 
 
 @pytest.fixture
 def reactor():
-    gateway = runtime_gateway(FakeIPC())
+    gateway = bare_gateway(FakeIPC())
     session_routes.install_session_reactor(gateway)
     try:
         yield gateway.session_reactor
@@ -77,7 +73,7 @@ def test_every_event_payload_is_routed_broadcast_or_declared_as_a_lower_tier():
     """Exhaustive over the union. An unowned payload is not an error at runtime — `OwnerRouter`
     counts it and returns the state unchanged — so it can be published for months and do nothing.
     This is the assertion that makes that visible at the moment the payload is added."""
-    declared = {*_LOOP_TIER, *_UNGATEWAYED}
+    declared = {*_LOOP_TIER, *_CONTROLLER_TIER}
     broadcast = {t.__name__ for t in session_routes.LIFETIME_EVENTS}
 
     unowned = [
@@ -91,7 +87,7 @@ def test_every_event_payload_is_routed_broadcast_or_declared_as_a_lower_tier():
 
     assert not unowned, (
         f"payloads that route to nobody: {unowned}. Give each an owner in `owner_of`, or declare "
-        "it as loop-tier / un-gatewayed here with the reason."
+        "it as loop-tier / controller-tier here with the reason."
     )
 
 
@@ -102,7 +98,7 @@ def test_the_declared_lower_tiers_are_still_payloads():
     names = {payload.__name__ for payload in _payload_types()}
 
     assert set(_LOOP_TIER) <= names
-    assert set(_UNGATEWAYED) <= names
+    assert set(_CONTROLLER_TIER) <= names
 
 
 def test_every_slot_holds_at_least_one_feature(reactor):
@@ -132,47 +128,13 @@ def test_every_claimed_payload_is_one_the_reactor_routes():
     assert not unroutable, f"claimed from the SessionController but routed to nobody: {unroutable}"
 
 
-def test_no_arm_of_the_session_controllers_fallback_drain_is_still_live_work():
-    """Uplifted from the ledger's `loop_residue`, which lives in a git-ignored scratch file and so
-    has never run in CI.
+def test_owner_thread_events_bypass_reducers_without_being_claimed():
+    """The session loop orders these payloads; the bounded session shell performs them."""
+    forwarded = {event_types.FileLoaded, event_types.UserCommand}
 
-    `SessionController._drain_event` is the no-reactor fallback. An arm whose payload the reactor *claims* is
-    dead in a session that has one; an arm whose payload is unclaimed is a duty the SessionController still
-    performs, and the session-loop migration is not finished while one exists.
-
-    **Arms are a subset of claims, never equal to them** — `_CLAIMED` also carries payloads that are
-    published rather than received (`StartupHintRequested`, `StartupReady`, `SessionClosing`), which
-    have no arm and never will. Written as equality this fails at HEAD and gets "fixed" with a
-    hard-coded exception list, which is how a real invariant becomes a rubber stamp.
-    """
-    import ast
-    from pathlib import Path
-
-    session_controller = Path(session_routes.__file__).with_name("turn.py")
-    drain = next(
-        node
-        for node in ast.walk(ast.parse(session_controller.read_text(encoding="utf-8")))
-        if isinstance(node, ast.FunctionDef) and node.name == "_drain_event"
-    )
-    narrowed = {
-        target.id if isinstance(target, ast.Name) else target.attr
-        for node in ast.walk(drain)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "isinstance"
-        and len(node.args) == 2
-        and isinstance(target := node.args[1], ast.Name | ast.Attribute)
-    }
-    # Filtered against the event vocabulary rather than a stop-list: the drain also narrows `dict`
-    # and `str` on its way into the raw arm, and those are guards, not payloads.
-    arms = {name for name in narrowed if hasattr(event_types, name)}
-    claimed = {payload.__name__ for payload in session_routes._CLAIMED} | {"EffectFinished"}
-
-    assert arms, "no typed arm found in `_drain_event` — the sweep would be vacuous"
-    assert arms <= claimed, (
-        f"arms of the SessionController's fallback drain that the reactor does not claim: {sorted(arms - claimed)}. "
-        "Each is a duty the SessionController still performs for a session that has a runtime."
-    )
+    assert forwarded == set(session_routes._PASSTHROUGH)
+    assert forwarded.isdisjoint(session_routes._SESSION_EVENTS)
+    assert forwarded.isdisjoint(session_routes._CLAIMED)
 
 
 def test_the_payload_sweep_is_not_vacuous():

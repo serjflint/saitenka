@@ -46,96 +46,6 @@ class CloseRequested:
     reason: str = "requested"
 
 
-class ClosePhase(StrEnum):
-    """How far teardown has got. Close is a sequence, so its participants are not interchangeable.
-
-    A phase is defined by what is already gone, because that is the only thing a participant can
-    depend on. Declared in teardown order, and the whole sequence exists up front rather than one
-    phase per migrated duty: a duty picks the phase matching where its step already sits, instead
-    of inventing one and serialising behind the duty that invented the last.
-
-    `SessionController.close` is a sequence, so this ordering *is* the contract — announcing everything at
-    `PARTICIPANTS` would run a participant tens of steps early, removing overlays while a lane can
-    still add one. A phase with no effects yet is legitimate; it marks the seam for the duty that
-    lands there next.
-    """
-
-    #: Optional collaborators are down; everything else is still live.
-    CAPABILITIES = "capabilities"
-    #: The runtime's own participants, while every collaborator and the transport still work.
-    PARTICIPANTS = "participants"
-    #: Every job lane has drained, so no background work can still land.
-    LANES = "lanes"
-    #: Geometry and the subtitle pipeline are closed; nothing renders.
-    RENDERING = "rendering"
-    #: Session stores are flushed and closed.
-    STORES = "stores"
-    #: Nothing can present again, so lifecycle surfaces can go.
-    SURFACES = "surfaces"
-    #: Lifecycle surfaces are gone, so their overlay transport can close.
-    OVERLAY = "overlay"
-    #: Nothing can write any more.
-    ARTIFACTS = "artifacts"
-
-
-@dataclass(frozen=True, slots=True)
-class SessionClosing:
-    """The close sequence has reached the runtime's participants for `phase`.
-
-    Distinct from `CloseRequested`, which is the *stop* signal a disconnect or an overloaded
-    mailbox raises to end the session. This is the session announcing that it is tearing down, so
-    the owners that registered lifetimes can retire them. One event for both would mean claiming
-    `CloseRequested` away from the legacy router, which is what turns a lost transport into a
-    stopped session.
-
-    `scratch` is the session's per-run directory, carried here because the runtime outlives no
-    SessionController and the path is created per SessionController — the *decision* to remove it, once and only after
-    everything that could still write to it has stopped, is what has moved.
-    """
-
-    phase: ClosePhase = ClosePhase.PARTICIPANTS
-    scratch: str | None = None
-
-
-class StartPhase(StrEnum):
-    """How far setup has got — `ClosePhase`'s mirror, and for the same reason.
-
-    A phase is defined by what is already *up*, because that is the only thing a step can depend
-    on. `SessionController.run` is a sequence, so this ordering is the contract: observing properties before
-    the render space is known would seed geometry against dimensions nobody has read.
-
-    Declared whole rather than one phase per migrated duty, exactly as the close half is — a duty
-    picks the phase matching where its step already sits instead of inventing one and serialising
-    behind the duty that invented the last.
-    """
-
-    #: Nothing session-specific yet; the process is what is being pinned.
-    PROCESS = "process"
-    #: The OSD dimensions are known, so anything can be placed.
-    RENDER_SPACE = "render-space"
-    #: Property observation is live; reads are event-driven from here on.
-    OBSERVERS = "observers"
-    #: Sections and keybinds are registered, so input routes to us.
-    INPUT = "input"
-    #: Optional collaborators are seeded and probed.
-    COLLABORATORS = "collaborators"
-    #: The session's history row is open.
-    HISTORY = "history"
-    #: Gauges are attached and the startup-health deadline is armed.
-    DIAGNOSTICS = "diagnostics"
-
-
-@dataclass(frozen=True, slots=True)
-class SessionStarting:
-    """The setup sequence has reached the runtime's steps for `phase`.
-
-    `SessionClosing`'s mirror. Not a claim on startup — the SessionController still announces, and what has
-    moved is which side decides *what* the phase does.
-    """
-
-    phase: StartPhase = StartPhase.PROCESS
-
-
 @dataclass(frozen=True, slots=True)
 class StartupHintRequested:
     """IPC is up: post the one thing that can be seen before any overlay exists."""
@@ -742,8 +652,6 @@ type RuntimeEvent = (
     | ConnectionReplaced
     | CloseRequested
     | FileLoaded
-    | SessionClosing
-    | SessionStarting
     | RawMpvEvent
     | StartupHintRequested
     | StartupReady

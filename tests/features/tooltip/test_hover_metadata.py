@@ -72,19 +72,19 @@ def test_metadata_worker_resolves_off_the_event_thread():
             resolved_thread = threading.get_ident()
             return False
 
-    from util import runtime_gateway
+    from util import session_gateway
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     reader = build_session(ipc, services=SessionServices(dictionaries=Dictionary()))
-    reader.turn.subtitle_presentation.cue.replace_tokenized(
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     )
-    assert reader.turn.tooltip_controller.request_interaction_metadata(_request(0, Dictionary()))
+    assert reader.graph.tooltip.request_interaction_metadata(_request(0, Dictionary()))
     try:
         deadline = time.monotonic() + 1
         while resolved_thread is None and time.monotonic() < deadline:
-            reader.turn._drain_events()
+            reader.pump()
             time.sleep(0.001)
         assert resolved_thread is not None and resolved_thread != event_thread
     finally:
@@ -107,20 +107,18 @@ def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
         nonlocal applied_thread
         applied_thread = threading.get_ident()
 
-    from util import runtime_gateway
+    from util import session_gateway
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     reader = build_session(ipc, services=SessionServices(dictionaries=Dictionary()))
     monkeypatch.setattr(tooltip_controller.tooltip, "apply_hover_metadata", apply_metadata)
 
     try:
-        assert reader.turn.tooltip_controller.request_interaction_metadata(
-            _request(0, Dictionary())
-        )
+        assert reader.graph.tooltip.request_interaction_metadata(_request(0, Dictionary()))
         deadline = time.monotonic() + 1
         while applied_thread is None and time.monotonic() < deadline:
-            reader.turn._drain_events()
+            reader.pump()
             time.sleep(0.001)
 
         assert resolved_thread is not None and resolved_thread != owner_thread
@@ -143,24 +141,24 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
             tooltip_jobs=lambda jobs: replace(jobs, metadata=submitter),
         ),
     )
-    reader.turn.subtitle_presentation.cue.replace_tokenized(
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     )
-    reader.turn.tooltip_controller.select(0)
-    reader.turn.tooltip_controller.surface_state().view.job_id = (
-        reader.turn.tooltip_controller.surface_state().jobs.begin("tooltip")
+    reader.graph.tooltip.select(0)
+    reader.graph.tooltip.surface_state().view.job_id = (
+        reader.graph.tooltip.surface_state().jobs.begin("tooltip")
     )
     tooltip._request_hover_metadata(
-        reader.turn.tooltip_controller.tip_ports,
-        reader.turn.tooltip_controller.word_lookup,
-        reader.turn.tooltip_controller.hover_inputs,
+        reader.graph.tooltip.tip_ports,
+        reader.graph.tooltip.word_lookup,
+        reader.graph.tooltip.hover_inputs,
         0,
     )
     original = submitted[0]["request"]
 
-    reader.turn.mining_controller.record_mined_expression("__newly-mined__")
-    reader.turn.tooltip_preparation.cancel()
-    reader.turn.cue_coordinator.set_subtitle("犬")
+    reader.graph.mining.record_mined_expression("__newly-mined__")
+    reader.graph.tooltip_preparation.cancel()
+    reader.graph.cue.set_subtitle("犬")
     submitted[0]["on_finished"](
         EffectFinished(
             EffectId(1),
@@ -178,8 +176,8 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
     )
 
     assert len(submitted) == 1
-    assert reader.turn.tooltip_controller.observation().metadata.terms == ()
-    assert reader.turn.tooltip_controller.surface_state().view.state is None
+    assert reader.graph.tooltip.observation().metadata.terms == ()
+    assert reader.graph.tooltip.surface_state().view.state is None
 
 
 def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch):
@@ -188,9 +186,9 @@ def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypa
     def unexpected_apply():
         raise AssertionError("uncorrelated completion assembled tooltip apply ports")
 
-    monkeypatch.setattr(reader.turn.tooltip_controller, "apply_context", unexpected_apply)
+    monkeypatch.setattr(reader.graph.tooltip, "apply_context", unexpected_apply)
 
-    reader.turn.tooltip_controller.finish_interaction_metadata(
+    reader.graph.tooltip.finish_interaction_metadata(
         EffectFinished(EffectId(1), Owner.INTERACTION, 999, EffectOutcome.SUCCEEDED)
     )
 
@@ -212,16 +210,16 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
             ),
         ),
     )
-    reader.turn.subtitle_presentation.cue.replace_tokenized(
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     )
-    reader.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
-    monkeypatch.setattr(reader.turn.subtitle_presentation, "draw", lambda: None)
+    reader.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    monkeypatch.setattr(reader.graph.subtitle_presentation, "draw", lambda: None)
 
     # Through the cursor, because the claim is about the *event thread*: the hit-test and the hover
     # decision run there too, and a `set_hover` call skips both of them.
     Driver(reader).move_to_word(0)
 
     assert len(submitted) == 1
-    assert reader.turn.tooltip_controller.surface_state().view.state is None
+    assert reader.graph.tooltip.surface_state().view.state is None

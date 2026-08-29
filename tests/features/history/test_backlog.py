@@ -184,21 +184,21 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
         }
     )
     reader = build_session(ipc)
-    reader.turn.playback_observation.install_seed({"sub-text": "日本語"})
-    reader.turn.track_commands.declare(SubtitleTracksDiscovered(3, 4))
-    reader.turn.subtitle_presentation.cue.replace_tokenized(
+    reader.graph.playback.install_seed({"sub-text": "日本語"})
+    reader.graph.track_commands.declare(SubtitleTracksDiscovered(3, 4))
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[SimpleNamespace(surface="日本", lemma="日本")]
     )
-    reader.turn.tooltip_controller.select(0)
+    reader.graph.tooltip.select(0)
     store = BacklogStore(tmp_path / "reader.sqlite", clock=lambda: 10.0)
-    reader.turn.history.replace_backlog(store)
+    reader.graph.history.replace_backlog(store)
     captures = []
-    reader.turn.history.replace_recorder(
+    reader.graph.history.replace_recorder(
         SimpleNamespace(record_capture=lambda: captures.append(True))
     )
-    monkeypatch.setattr(reader.turn.notifications, "show", lambda *_args: None)
+    monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
 
-    reader.turn.command_runtime.handle(app_bindings.BOOKMARK_MSG)
+    reader.command(app_bindings.BOOKMARK_MSG)
 
     entry = store.entries_for_path(video)[0]
     assert (entry.cue_start, entry.cue_end, entry.jp_text, entry.en_text) == (
@@ -224,11 +224,11 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     }
     assert (entry.hovered_surface, entry.hovered_lemma) == ("日本", "日本")
     assert captures == [True]
-    reader.turn.command_runtime.handle(app_bindings.BOOKMARK_MSG)
+    reader.command(app_bindings.BOOKMARK_MSG)
     assert captures == [True]
     forbidden = {"seek", "sub-seek", "set_property", "screenshot-to-file"}
     assert not any(command[0] in forbidden for command in ipc.commands)
-    reader.turn.history.replace_recorder(None)
+    reader.graph.history.replace_recorder(None)
     reader.close()
 
 
@@ -244,13 +244,13 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
         }
     )
     reader = build_session(ipc)
-    reader.turn.track_commands.declare(SubtitleLanguageChanged("en"))
-    reader.turn.playback_observation.install_seed({"sub-text": "English line"})
+    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
+    reader.graph.playback.install_seed({"sub-text": "English line"})
     store = BacklogStore(tmp_path / "reader.sqlite")
-    reader.turn.history.replace_backlog(store)
-    monkeypatch.setattr(reader.turn.notifications, "show", lambda *_args: None)
+    reader.graph.history.replace_backlog(store)
+    monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
 
-    reader.turn.command_runtime.handle(app_bindings.BOOKMARK_MSG)
+    reader.command(app_bindings.BOOKMARK_MSG)
 
     entry = store.entries_for_path(video)[0]
     assert (entry.jp_text, entry.en_text) == ("日本語", "English line")
@@ -260,13 +260,13 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
 def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
     ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
     reader = build_session(ipc)
-    reader.turn.playback_observation.install_seed({"sub-text": "日本語"})
+    reader.graph.playback.install_seed({"sub-text": "日本語"})
     shown = []
-    monkeypatch.setattr(reader.turn.notifications, "show", lambda *args: shown.append(args))
+    monkeypatch.setattr(reader.graph.notifications, "show", lambda *args: shown.append(args))
 
-    reader.turn.command_runtime.handle(app_bindings.BOOKMARK_MSG)
+    reader.command(app_bindings.BOOKMARK_MSG)
 
-    assert reader.turn.history.backlog is None
+    assert reader.graph.history.backlog is None
     assert shown == [("no active cue to bookmark", "warn")]
 
 
@@ -275,7 +275,7 @@ def test_bookmark_key_is_configurable():
 
     ipc = _IPC({})
     reader = build_session(ipc, options=ReaderOptions(keys=KeyOptions(bookmark_key="Alt+q")))
-    reader.turn.command_runtime.install_input()
+    reader.graph.commands.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"
 

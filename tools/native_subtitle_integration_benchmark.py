@@ -25,8 +25,8 @@ import psutil
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.session.factory import LiveSession, SessionInfrastructure, _compose_session
+from saitenka.app.session.routes import install_session_runtime
 from saitenka.panel import Definition, Entry
-from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import (
     Cue,
     CueIndex,
@@ -42,7 +42,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from saitenka.app.dictionary import DictionarySet
-    from saitenka.app.session.turn import SessionTurn
+    from saitenka.app.session.graph import SessionGraph
+    from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
 
 STYLE = """[Script Info]
@@ -412,11 +413,15 @@ def execute_trials(manifest: dict, library_path: Path | None, output: Path) -> d
     return summarize_trial_records(records, manifest)
 
 
-class _IPC(NoSessionRuntime):
-    """Headless stand-in: no gateway behind it, so it refuses lanes rather than lacking the port."""
+class _IPC:
+    """Headless mpv stand-in wired to the same session runtime as production."""
 
     def __init__(self) -> None:
         self.commands: list[tuple] = []
+        self._session_loop = None
+        self._runtime_gateway = None
+        self.connected_at = None
+        self._bytes_read = 0
         self.props = {
             "sid": 1,
             "sub-text/ass-full": "",
@@ -502,22 +507,108 @@ class _IPC(NoSessionRuntime):
         future.set_result(self.command(*args))
         return IPCRequest(0, 0, future)
 
-    def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
-        """Correlated egress, completed inline. Delivery goes through `command` so this fake's own
-        state simulation sees the write — a fake that skips it reports a stale readback."""
-        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+    @property
+    def session_loop(self):
+        return self._session_loop
 
-        reply = self.command(*command)
-        on_finished(
-            EffectFinished(
-                EffectId(0),
-                Owner.SUBTITLE,
-                identity,
-                EffectOutcome.SUCCEEDED,
-                result=reply.get("data"),
-            )
-        )
+    def install_runtime_ingress(self, event_sink, connection_sink, session_loop, gateway) -> None:
+        del event_sink, connection_sink
+        self._session_loop = session_loop
+        self._runtime_gateway = gateway
+
+    def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
+        gateway = self._runtime_gateway
+        return {} if gateway is None else gateway.register_observers(names)
+
+    def register_runtime_job_lane(self, name, policy, handler) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.register_job_lane(name, policy, handler)
         return True
+
+    def submit_runtime_job(self, **kwargs) -> bool:
+        gateway = self._runtime_gateway
+        return False if gateway is None else gateway.submit_job(**kwargs)
+
+    def close_runtime_job_lane(self, name: str, timeout: float = 2.0) -> bool:
+        gateway = self._runtime_gateway
+        return False if gateway is None else gateway.close_job_lane(name, timeout)
+
+    def register_session_resource(self, name: str, resource: object) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.session_resources[name] = resource
+        return True
+
+    def publish_runtime_event(self, event: object) -> bool:
+        gateway = self._runtime_gateway
+        return False if gateway is None else gateway.publish_session_event(event)
+
+    def deliver_runtime_event(self, event: object) -> bool:
+        gateway = self._runtime_gateway
+        return False if gateway is None else gateway.deliver_session_event(event)
+
+    def submit_runtime_mpv(self, **kwargs) -> bool:
+        gateway = self._runtime_gateway
+        return False if gateway is None else gateway.submit_mpv(**kwargs)
+
+    def schedule_runtime_timer(self, **kwargs) -> bool:
+        gateway = self._runtime_gateway
+        return False if gateway is None else gateway.schedule_timer(**kwargs)
+
+    def cancel_runtime_timer(self, timer: str) -> bool:
+        gateway = self._runtime_gateway
+        return False if gateway is None else gateway.cancel_timer(timer)
+
+    def wake_session_runtime(self) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.mailbox.wake()
+        return True
+
+    def close_session_runtime(self) -> bool:
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return False
+        reactor.close()
+        return True
+
+    def session_runtime_census(self) -> dict[str, int]:
+        gateway = self._runtime_gateway
+        return {} if gateway is None else gateway.runtime_census()
+
+    def receive_session(self, timeout: float | None, handle) -> None:
+        loop = self._session_loop
+        if loop is not None:
+            loop.receive(timeout, handle)
+
+    def _route(self, envelope: object | None, slot: str) -> object | None:
+        gateway = self._runtime_gateway
+        reactor = None if gateway is None else gateway.session_reactor
+        if reactor is None:
+            return None
+        if envelope is not None:
+            reactor.handle(envelope)
+        return getattr(reactor.state, slot)
+
+    def route_session_lifecycle(self, envelope: object | None) -> object | None:
+        return self._route(envelope, "session")
+
+    def route_session_playback(self, envelope: object | None) -> object | None:
+        return self._route(envelope, "playback")
+
+    def route_session_subtitle(self, envelope: object | None) -> object | None:
+        return self._route(envelope, "subtitle")
+
+    def route_session_interaction(self, envelope: object | None) -> object | None:
+        return self._route(envelope, "interaction")
+
+    def route_session_presentation(self, envelope: object | None) -> object | None:
+        return self._route(envelope, "presentation")
 
     def close(self) -> None:
         pass
@@ -526,26 +617,36 @@ class _IPC(NoSessionRuntime):
 @dataclass(slots=True)
 class _BenchmarkSession:
     live: LiveSession
-    turn: SessionTurn
+    graph: SessionGraph
+    gateway: MpvGateway
 
     def close(self):
-        return self.live.close()
+        try:
+            return self.live.close()
+        finally:
+            self.gateway.close()
 
     def __getattr__(self, name: str):
-        return getattr(self.turn, name)
+        return getattr(self.graph, name)
 
 
 def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> _BenchmarkSession:
     geometry = SubtitleGeometryOptions(native_visible=backend is not None, cache_max=3, lookahead=2)
-    live, turn, _prepared = _compose_session(
-        cast("MpvIPC", ipc),
-        infrastructure=SessionInfrastructure(
-            renderer=None,
-            geometry=backend,
-        ),
-        options=ReaderOptions(subtitle_geometry=geometry, prefetch=False),
-    )
-    return _BenchmarkSession(live, turn)
+    typed_ipc = cast("MpvIPC", ipc)
+    gateway = install_session_runtime(typed_ipc, startup_hint=False)
+    try:
+        live, graph, _prepared = _compose_session(
+            typed_ipc,
+            infrastructure=SessionInfrastructure(
+                renderer=None,
+                geometry=backend,
+            ),
+            options=ReaderOptions(subtitle_geometry=geometry, prefetch=False),
+        )
+    except BaseException:
+        gateway.close()
+        raise
+    return _BenchmarkSession(live, graph, gateway)
 
 
 @contextmanager
@@ -605,9 +706,9 @@ def _open_tooltip(reader: _BenchmarkSession, ipc: _IPC, *, native: bool) -> tupl
         return False, False, False
     box = reader.subtitle_presentation.cue.current.boxes[0]
     ox, oy = reader.subtitle_presentation.cue.current.origin
-    hit = reader.tooltip_controller.hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
+    hit = reader.tooltip.hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
     before = len(ipc.commands)
-    reader.tooltip_controller.select(box.index)
+    reader.tooltip.select(box.index)
     reader.subtitle_presentation.draw()
     commands = ipc.commands[before:]
     focus = (
@@ -615,22 +716,22 @@ def _open_tooltip(reader: _BenchmarkSession, ipc: _IPC, *, native: bool) -> tupl
         if native
         else True
     )
-    reader.tooltip_controller.show_tooltip(box.index)
-    opened = reader.tooltip_controller.surface_state().view.state is not None
+    reader.tooltip.show_tooltip(box.index)
+    opened = reader.tooltip.surface_state().view.state is not None
     return hit, focus, opened
 
 
 def _scroll_and_close_tooltip(reader: _BenchmarkSession) -> bool:
-    opened = reader.tooltip_controller.surface_state().view.state is not None
-    reader.tooltip_controller.scroll_tip(1)
+    opened = reader.tooltip.surface_state().view.state is not None
+    reader.tooltip.scroll_tip(1)
     scrolled = (
         opened
         and reader._scrolled_this_tick
-        and reader.tooltip_controller.surface_state().view.state is not None
-        and reader.tooltip_controller.surface_state().view.scroll > 0
+        and reader.tooltip.surface_state().view.state is not None
+        and reader.tooltip.surface_state().view.scroll > 0
     )
-    reader.tooltip_controller.teardown()
-    reader.tooltip_controller.select(-1)
+    reader.tooltip.teardown()
+    reader.tooltip.select(-1)
     return scrolled
 
 
@@ -655,12 +756,8 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         baseline, native = readers
         source_path = Path(raw_workspace) / "integration.ass"
         source_path.write_bytes(source)
-        baseline.profile_session.profile.replace_dictionary_set(
-            cast("DictionarySet", _TallDictionary())
-        )
-        native.profile_session.profile.replace_dictionary_set(
-            cast("DictionarySet", _TallDictionary())
-        )
+        baseline.profile.profile.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
+        native.profile.profile.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
         assert native.subtitle_presentation.native is not None
         native.subtitle_presentation.native.set_source(source_path, live=True)
         # A track load is where mpv's font set is read, and a frame measured against an unresolved
@@ -766,7 +863,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         stats = native.subtitle_presentation.native.worker.stats
         last_error = native.subtitle_presentation.pipeline.last_error
         rss_retained = process.memory_info().rss
-        native.profile_session.profile.use_tokenizer(native.profile_session.profile.tokenizer)
+        native.profile.profile.use_tokenizer(native.profile.profile.tokenizer)
         profile_switch_cache_entries = sum(
             (
                 native.subtitle_presentation.native.worker.stats.result_cache_entries,

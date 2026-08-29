@@ -98,6 +98,9 @@ class NoSessionRuntime:
     def close_session_runtime(self) -> bool:
         return False
 
+    def session_runtime_census(self) -> dict[str, int]:
+        return {}
+
     def wake_session_runtime(self) -> bool:
         return False
 

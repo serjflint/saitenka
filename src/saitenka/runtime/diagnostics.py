@@ -73,13 +73,12 @@ class DiagnosticRecord:
 class RuntimeLedger:
     """What the runtime emitted, controlled and refused to route — as counts, for one session.
 
-    Three namespaces in one census because they answer one question together: `diagnostic:` is what
-    a reducer reported, `control:` is a cancel/expire that reached its port, and `ignored:` is an
-    event no owner claims *yet*. The last is the migration's progress meter, so it has to be
-    readable from a live session rather than inferred from a reducer's silence.
+    Three namespaces answer one runtime-observability question: `diagnostic:` is what a reducer
+    reported, `control:` is a cancel/expire that reached its port, and `unrouted:` is an event
+    outside the declared owner graph.
 
     Bounded, like every other runtime queue: a key set that grows with traffic would make an
-    unmigrated event stream a leak. Past `capacity` distinct keys, new ones are refused and counted
+    unknown event stream a leak. Past `capacity` distinct keys, new ones are refused and counted
     as `ledger:overflow` — a saturated ledger says so instead of lying by omission.
     """
 
@@ -95,8 +94,8 @@ class RuntimeLedger:
     def control(self, key: str) -> None:
         self._bump(f"control:{key}")
 
-    def ignored(self, key: str) -> None:
-        self._bump(f"ignored:{key}")
+    def unrouted(self, key: str) -> None:
+        self._bump(f"unrouted:{key}")
 
     @property
     def counts(self) -> dict[str, int]:

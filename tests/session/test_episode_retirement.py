@@ -8,7 +8,7 @@ that make the procedural guarantee as good as the structural one it replaced.
 from __future__ import annotations
 
 from session_builder import build_session
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import ReaderOptions
@@ -76,7 +76,7 @@ def test_one_event_reaches_every_slice_when_a_reactor_owns_them(request) -> None
     send it four times and hope each reducer is idempotent.
     """
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     subtitle, hover = SubtitleTrackStore(ipc), HoverStore(ipc)
@@ -96,18 +96,18 @@ def test_one_event_reaches_every_slice_when_a_reactor_owns_them(request) -> None
 def test_an_owner_with_no_per_episode_facts_is_not_counted_as_an_unrouted_gap(request) -> None:
     """`Owner.SESSION` registers no route for this event, and that is an answer.
 
-    The ignored counter is how the migration sees what has not moved yet; a permanent entry for a
-    slice that will never want this event would make it lie.
+    Broadcast fan-out offers the event to every owner; lacking per-episode facts is not an unrouted
+    event and must not pollute the routing census.
     """
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     router = gateway.session_reactor._reducer  # the OwnerRouter the reactor was built with
 
     SubtitleTrackStore(ipc).dispatch(EpisodeRetired())
 
-    assert not [key for key in router.ignored if key.endswith("EpisodeRetired")]
+    assert not [key for key in router.unrouted if key.endswith("EpisodeRetired")]
 
 
 def test_rebinding_the_episode_retires_the_slots_with_the_container(request, monkeypatch) -> None:
@@ -116,19 +116,19 @@ def test_rebinding_the_episode_retires_the_slots_with_the_container(request, mon
 
     ipc = FakeIPC()
     ipc.props["secondary-sub-text"] = "old line"
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     reader = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
     request.addfinalizer(reader.close)
     removed: list[int] = []
-    monkeypatch.setattr(reader.turn.lifecycle_surfaces, "remove", removed.append)
-    reader.turn.command_runtime.handle(app_bindings.TRANS_MSG)
-    reader.turn._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
+    monkeypatch.setattr(reader.graph.lifecycle_surfaces, "remove", removed.append)
+    reader.command(app_bindings.TRANS_MSG)
+    reader.graph.subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
     removed.clear()
 
-    reader.turn.reslot_ports.rebind_episode()
+    reader.graph.reslot.rebind_episode()
 
-    assert reader.turn._subtitle_tracks.current == SubtitleTrackState()
-    assert reader.turn.translation_controller.state.held  # the hold is session-lived
+    assert reader.graph.subtitle_tracks.current == SubtitleTrackState()
+    assert reader.graph.translation.state.held  # the hold is session-lived
     assert removed == [OverlayId.TRANS]

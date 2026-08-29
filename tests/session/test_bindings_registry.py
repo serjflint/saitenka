@@ -31,7 +31,7 @@ def test_every_global_saitenka_binding_registers_without_deps():
     r = build_session(
         ipc, services=SessionServices(anki=None)
     )  # deps absent at registration, exactly like attach mode
-    r.turn.command_runtime.install_input()
+    r.graph.commands.install_input()
     reg = keybind_registry(ipc)
 
     expected = {
@@ -50,7 +50,7 @@ def test_requires_gated_bindings_still_register_when_the_dep_is_absent():
     ipc = FakeIPC()
     options = ReaderOptions()
     r = build_session(ipc, services=SessionServices(anki=None), options=options)  # no anki, no tts
-    r.turn.command_runtime.install_input()
+    r.graph.commands.install_input()
     reg = keybind_registry(ipc)
 
     gated = [
@@ -74,7 +74,7 @@ def test_binding_messages_and_handlers_correspond_exactly():
     slips through. Assert the sets agree both ways so "defined but never wired" (either direction) is
     a red test."""
     binding_msgs = {b.message for b in BINDINGS if b.source == "saitenka" and b.message is not None}
-    handler_msgs = set(build_session(FakeIPC()).turn.command_runtime.names())
+    handler_msgs = set(build_session(FakeIPC()).graph.commands.names())
 
     unhandled = binding_msgs - handler_msgs
     assert not unhandled, (
@@ -92,7 +92,7 @@ def test_every_command_spec_is_routed_and_keeps_its_owner_and_gates():
     command was routed while some were still imperative; every row read `migrated` long before this,
     so it had stopped being able to fail and went with the machinery it measured.
     """
-    commands = build_session(FakeIPC()).turn.command_runtime
+    commands = build_session(FakeIPC()).graph.commands
     actual = {
         spec.name: (spec.owner.value, spec.requires_cue, spec.allowed_while_help_open)
         for spec in commands.specs
@@ -156,16 +156,14 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
     mutation, not a spy."""
     ipc = FakeIPC()
     r = build_session(ipc)
-    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
-    r.turn.screen.osd = (1920, 1080)
-    r.turn.command_runtime.install_input()
-    assert not r.turn.help_controller.state.open
+    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
+    r.graph.screen.osd = (1920, 1080)
+    r.graph.commands.install_input()
+    assert not r.graph.help.state.open
 
     press(r, ipc, ReaderOptions().keys.help_key)
 
-    assert (
-        r.turn.help_controller.state.open
-    )  # the keypress drove the real handler to mutate real state
+    assert r.graph.help.state.open  # the keypress drove the real handler to mutate real state
 
 
 def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypatch):
@@ -176,17 +174,17 @@ def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypat
 
     ipc = FakeIPC()
     r = build_session(ipc, services=SessionServices(anki=None))
-    r.turn.command_runtime.install_input()  # bound while the dep is down
+    r.graph.commands.install_input()  # bound while the dep is down
     config = MineConfig()
-    identity = r.turn.mining_controller.desired_spec.identity
-    r.turn.mining_controller.select_mining_spec(
+    identity = r.graph.mining.desired_spec.identity
+    r.graph.mining.select_mining_spec(
         MiningSpec(identity, {"deck": config.deck, "model": config.model})
     )
-    assert r.turn.mining_controller.publish_mining_target(MiningTarget(identity, object(), config))
-    monkeypatch.setattr(r.turn.mining_controller, "mine_target", lambda: 0)
+    assert r.graph.mining.publish_mining_target(MiningTarget(identity, object(), config))
+    monkeypatch.setattr(r.graph.mining, "mine_target", lambda: 0)
     calls: list[tuple[int, object]] = []
     monkeypatch.setattr(
-        r.turn.mining_controller,
+        r.graph.mining,
         "mine_index",
         lambda index, **kwargs: calls.append((index, kwargs["animated"])),
     )
@@ -199,7 +197,11 @@ def test_pressing_an_unbound_key_raises_so_the_fake_cant_pass_silently():
     """Negative control: press must distinguish bound from unbound, or a firing test could pass against
     a dead shortcut. A key never registered raises KeyError."""
     ipc = FakeIPC()
-    build_session(ipc).turn.command_runtime.install_input()
-    with pytest.raises(KeyError):
-        # a plausible-but-unbound key: registration emits real key names, never this sentinel
-        press(build_session(ipc), ipc, "Ctrl+Alt+NeverBound")
+    reader = build_session(ipc)
+    try:
+        reader.graph.commands.install_input()
+        with pytest.raises(KeyError):
+            # a plausible-but-unbound key: registration emits real key names, never this sentinel
+            press(reader, ipc, "Ctrl+Alt+NeverBound")
+    finally:
+        reader.close()
