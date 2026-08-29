@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788022948370,
+  "lastUpdate": 1788022992287,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -12793,6 +12793,48 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 0.913408,
             "range": "3 replicas; min 0.909312; max 1.66707; MAD 0.004096",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "84c6f1d2abcd9e69b4301495dee2c34c00d46c74",
+          "message": "Merge pull request #455 from serjflint/docs/refresh-session-architecture-census\n\nchore: release Saitenka 5.0.0",
+          "timestamp": "2026-08-29T21:58:57+05:00",
+          "tree_id": "7262a816c9bc79002596965b95e2c9536b12da08",
+          "url": "https://github.com/serjflint/saitenka/commit/84c6f1d2abcd9e69b4301495dee2c34c00d46c74"
+        },
+        "date": 1788022991192,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 24.102089,
+            "range": "3 replicas; min 21.736; max 38.416; MAD 2.36613; worst 38.416",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 138.057237,
+            "range": "3 replicas; min 23.3844; max 343.735; MAD 114.673; worst 343.735",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 6.77888,
+            "range": "3 replicas; min 6.52902; max 8.59341; MAD 0.249856",
             "unit": "MB"
           }
         ]
