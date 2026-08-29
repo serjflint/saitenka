@@ -208,7 +208,8 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
         _poll_until(
             reader,
             lambda: (
-                reader.graph.tooltip.surface_state().view.rect is not None and reader._mouse.held
+                reader.graph.tooltip.surface_state().view.rect is not None
+                and reader.graph.mouse.held
             ),
             "tooltip did not show / mouse section not captured",
         )
@@ -233,13 +234,13 @@ def test_live_overlay_toggle_removes_and_restores_saitenka_surfaces():
         shown = _screenshot(ipc, tmp / "overlay-shown.png")
 
         ipc.command("keypress", "Alt+o")
-        _poll_until(reader, lambda: not reader.ov.visible, "Alt+o did not hide Saitenka")
+        _poll_until(reader, lambda: not reader.graph.overlay.visible, "Alt+o did not hide Saitenka")
         assert ipc.command("get_property", "sub-visibility").get("data") is True
         assert ipc.command("get_property", "osd-level").get("data") == 1
         hidden = _screenshot(ipc, tmp / "overlay-hidden.png")
 
         ipc.command("keypress", "Alt+o")
-        _poll_until(reader, lambda: reader.ov.visible, "Alt+o did not restore Saitenka")
+        _poll_until(reader, lambda: reader.graph.overlay.visible, "Alt+o did not restore Saitenka")
         assert ipc.command("get_property", "sub-visibility").get("data") is False
         # osd-level stays at mpv's default (1) in both states — the overlay no longer forces it to 0
         assert ipc.command("get_property", "osd-level").get("data") == 1
