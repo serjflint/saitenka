@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.features.translation import TranslationController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
-    from saitenka.app.session.interaction_adapter import InteractionCoordinator
     from saitenka.app.session.playback_observation import PlaybackObservationController
     from saitenka.app.subtitle_adapter import (
         SubtitleNavigationCoordinator,
@@ -67,7 +66,6 @@ class CueOwners:
     navigation: SubtitleNavigationCoordinator
     profile: ProfileSession
     analysis: AnalysisCommandEndpoint
-    interaction: InteractionCoordinator
     picker: PickerController
     acquisition: SubtitleAcquisitionController
     translation: TranslationController
@@ -100,7 +98,6 @@ class CueCoordinator:
 
     def settle(self) -> None:
         o = self._o
-        o.interaction.settle()
         cue, self._pending = self._pending, None
         if cue is None:
             otel_metrics.record_cue_settle("no-observation")

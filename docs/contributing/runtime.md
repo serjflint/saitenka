@@ -17,9 +17,8 @@ its supported operating envelope are documented in
 
 ## Adding a feature
 
-Paths are relative to `src/saitenka/`. `session.builder` composes the owner-thread graph,
-`SessionTurn` settles it, and `SessionController` drives its live lifecycle. None is a feature
-capability.
+Paths are relative to `src/saitenka/`. `session.builder` composes the owner-thread graph;
+`SessionController` drives lifecycle and ordered turn settlement. Neither is a feature capability.
 
 Feature-owned policy, adapters, controllers, and presentation live together under
 `app/features/<feature>/`. Shared interaction contracts live under `app/interaction/`; session
@@ -78,9 +77,10 @@ The following gates enforce the boundary:
 
 ## Production session
 
-`SessionController` owns the live start/run/stop/close state machine. `SessionTurn` drains one
-owner-thread event turn and applies physical results. `CueCoordinator` owns the cross-feature cue
-and episode transactions; other conjunctions stay named at the composition seam. Bounded
+`SessionController` owns the live start/run/stop/close state machine and drains one owner-thread
+event turn. It delegates settlement to `InteractionCoordinator` and `CueCoordinator`; the latter
+owns cross-feature cue and episode transactions. Other conjunctions stay named at the composition
+seam. Bounded
 controllers and stores own feature facts: `TooltipController` owns
 tooltip interaction and engaged work, exposes frozen observations to other features, and releases
 mutable paint state only to the physical presentation seam; `TooltipPreparationController` owns speculative prefetch,
@@ -102,12 +102,12 @@ SessionLoop.receive(timeout bounded by the earliest armed timer)
           │  one envelope at a time, in mailbox sequence
           ├──────────────────────┐
           ▼                      ▼
-     SessionReactor.handle    SessionTurn, unless the reactor claimed it
-     (owner slices, effects)   ├─ reconcile subtitles
-                               ├─ apply results
-worker result queues ─────────►└─ update interaction
+     SessionReactor.handle    SessionController, unless the reactor claimed it
+     (owner slices, effects)   ├─ FileLoaded / UserCommand
+                               ├─ InteractionCoordinator.settle
+worker result queues ─────────►└─ CueCoordinator.settle
 
-SessionTurn and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
+owners and coordinators ──► bounded command queue ──► sole writer ──► mpv JSON IPC
 ```
 
 The IPC reader performs blocking transport reads away from the session thread. It appends events to
@@ -168,7 +168,8 @@ hit boxes while keeping the selected pixel owner stable.
 
 `PlaybackProjection` (`saitenka/runtime/playback.py`) is the sole interpreter of raw mpv property
 observations. `PlaybackObservationController` owns observer registration, initial seeding, and the
-local or reactor-routed projection path. `SessionTurn` applies the typed deltas through explicit
+local or reactor-routed projection path. The registered playback performer applies typed deltas
+through explicit
 coordinators; nothing downstream compares raw property values or decides what
 a property means.
 
@@ -235,7 +236,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 
 | Invariant | Current contract |
 | --- | --- |
-| One owner thread | `SessionController` drives the live lifecycle and `SessionTurn` applies production mutations on that thread. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
+| One owner thread | `SessionController` drives lifecycle and turn settlement on the session thread. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
 | One tooltip-preparation owner | `TooltipPreparationController` owns speculative queue state, generations, persistent heads, memory inflation, and mask-atlas activation. Admitted jobs carry immutable panel, dictionary, and scale inputs; headless prewarm composes those capabilities without a session. `poe tooltip-ownership` rejects shell-owned preparation state, escaped construction, and full-session prewarm. |
 | One mining writer | `MiningController` alone owns the selected target, deck-derived index, seed/probe lifecycle, local store, scratch resources, and operation admission. `poe mining-ownership` rejects shadow fields and direct mutator/construction escape routes. |
 | One annotation writer | `CueAnnotationController` alone owns annotation identity, admission, completion refusal, degradation, token-cache generation, and episode warming. `poe annotation-ownership` rejects the retired shell fields/facades, private cache escape, and construction outside session assembly. |

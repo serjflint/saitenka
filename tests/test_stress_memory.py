@@ -39,4 +39,4 @@ def test_sustained_churn_stays_within_memory_ceiling():
     for _ in range(_ROUNDS):
         for term in _CORPUS:
             _churn(r, term)
-    assert len(r.tooltip_controller.surface_state().panel_cache) <= PANEL_CACHE_MAX
+    assert len(r.graph.tooltip.surface_state().panel_cache) <= PANEL_CACHE_MAX

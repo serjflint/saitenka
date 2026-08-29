@@ -136,9 +136,14 @@ class MpvGateway:
         must still go through `observe`, since the loop is the only sanctioned consumer."""
         return self._mailbox
 
-    def claim_census(self) -> dict[str, tuple[int, int]]:
+    def routing_census(self) -> dict[str, tuple[int, int]]:
         """What fraction of this session's envelopes the reactor owned — see the loop's copy."""
-        return self._loop.claim_census()
+        return self._loop.routing_census()
+
+    def runtime_census(self) -> dict[str, int]:
+        """A snapshot of runtime diagnostics without exposing the mutable ledger."""
+        ledger = self.session_ledger
+        return {} if ledger is None else ledger.counts
 
     def observe(
         self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
@@ -182,7 +187,7 @@ class MpvGateway:
         return self._loop.announce(event, self._clock(), self.connection_epoch)
 
     def dispatch_effect(self, effect) -> bool:
-        """Perform one reactor-issued effect. Only the kinds an owner has actually migrated."""
+        """Perform one reactor-issued core effect."""
         if isinstance(effect, SendMpvCommand):
             return self.dispatch(effect)
         return False
@@ -197,7 +202,7 @@ class MpvGateway:
         return self._correlator
 
     def submit_mpv(self, **kwargs) -> bool:
-        """Submit one correlated command for a compatibility-owned runtime slice."""
+        """Submit one correlated mpv command through the session effect lifecycle."""
         return self._correlator.submit_mpv(**kwargs)
 
     def schedule_timer(self, **kwargs) -> bool:
@@ -401,8 +406,8 @@ class MpvGateway:
             with self._lock:
                 self._inbound_overloads += 1
 
-    def publish_legacy_outcome(self, outcome: CommandHandled) -> None:
-        """Publish a synchronous compatibility result into the ordered runtime stream."""
+    def publish_command_outcome(self, outcome: CommandHandled) -> None:
+        """Publish a synchronous command result into the ordered runtime stream."""
 
         if outcome.command_id is None:
             self._mailbox.publish(
@@ -608,7 +613,7 @@ class MpvGateway:
             self._stale_outcomes += 1
 
 
-def install_legacy_gateway(ipc: MpvIPC) -> MpvGateway:
+def install_gateway(ipc: MpvIPC) -> MpvGateway:
     return MpvGateway(ipc, SessionMailbox())
 
 

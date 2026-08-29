@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 from session_builder import TestSession, build_session
-from util import FakeIPC, keybind_registry, press, runtime_gateway
+from util import FakeIPC, keybind_registry, press, session_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import ReaderOptions
@@ -94,7 +94,7 @@ def _headless(request, profile=None, profiles=None) -> TestSession:
     leaked session is threads that outlive the test and exhaust the pool at `-n auto`.
     """
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)  # selection issues correlated commands
+    gateway = session_gateway(ipc)  # selection issues correlated commands
     request.addfinalizer(gateway.close)
     reader = build_session(
         ipc,
@@ -107,8 +107,8 @@ def _headless(request, profile=None, profiles=None) -> TestSession:
         reader.close
     )  # LIFO: the SessionController closes before the gateway it publishes to
     if profiles is not None:
-        reader.turn.profile_session.profile.configure_cycle(profiles)
-    reader.turn.screen.osd = (1280, 720)
+        reader.graph.profile.profile.configure_cycle(profiles)
+    reader.graph.screen.osd = (1280, 720)
     return reader
 
 
@@ -119,19 +119,19 @@ def test_cycle_is_a_noop_with_a_single_profile(request):
     """The default path (no ``[profiles.*]``): the key is registered (always-register), but pressing it
     changes nothing — same tokenizer, same languages, same profile. Byte-identical to pre-#254."""
     reader = _headless(request)  # profiles defaults to (DEFAULT_PROFILE,)
-    reader.turn.command_runtime.install_input()
+    reader.graph.commands.install_input()
     before = (
-        reader.turn.profile_session.profile.tokenizer.name,
-        reader.turn.profile_session.profile.langs.main,
-        reader.turn.profile_session.profile.profile,
+        reader.graph.profile.profile.tokenizer.name,
+        reader.graph.profile.profile.langs.main,
+        reader.graph.profile.profile.profile,
     )
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
     assert (
-        reader.turn.profile_session.profile.tokenizer.name,
-        reader.turn.profile_session.profile.langs.main,
-        reader.turn.profile_session.profile.profile,
+        reader.graph.profile.profile.tokenizer.name,
+        reader.graph.profile.profile.langs.main,
+        reader.graph.profile.profile.profile,
     ) == before
 
 
@@ -145,7 +145,7 @@ def test_profile_cycle_key_is_registered_even_on_the_default_path():
         infrastructure=SessionInfrastructure(renderer=NullRenderer()),
         options=options,
     )
-    reader.turn.command_runtime.install_input()
+    reader.graph.commands.install_input()
     assert keybind_registry(ipc).get(options.keys.profile_cycle_key) == "saitenka-cycle-profile"
 
 
@@ -175,14 +175,14 @@ def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
             profile=DEFAULT_PROFILE,
         ),
     )
-    reader.turn.profile_session.profile.configure_cycle([DEFAULT_PROFILE, _FR])
-    reader.turn.screen.osd = (1280, 720)
-    reader.turn.command_runtime.install_input()
+    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, _FR])
+    reader.graph.screen.osd = (1280, 720)
+    reader.graph.commands.install_input()
     assert (
-        reader.turn.profile_session.profile.tokenizer.name == "unidic"
-        and reader.turn.profile_session.profile.langs.main == "jp"
+        reader.graph.profile.profile.tokenizer.name == "unidic"
+        and reader.graph.profile.profile.langs.main == "jp"
     )
-    assert enabled_providers_for(reader.turn.profile_session.profile.langs.main, flags) == (
+    assert enabled_providers_for(reader.graph.profile.profile.langs.main, flags) == (
         "jimaku",
         "universal",
     )
@@ -190,21 +190,21 @@ def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
     press(reader, ipc, options.keys.profile_cycle_key)  # → fr
 
     assert (
-        reader.turn.profile_session.profile.tokenizer.name == "latin"
-        and reader.turn.profile_session.profile.langs.main == "fr"
+        reader.graph.profile.profile.tokenizer.name == "latin"
+        and reader.graph.profile.profile.langs.main == "fr"
     )
-    assert reader.turn.profile_session.profile.profile is _FR
-    assert enabled_providers_for(reader.turn.profile_session.profile.langs.main, flags) == (
+    assert reader.graph.profile.profile.profile is _FR
+    assert enabled_providers_for(reader.graph.profile.profile.langs.main, flags) == (
         "universal",
     )  # jp-only dropped
 
     press(reader, ipc, options.keys.profile_cycle_key)  # wraps → back to the JP default
 
     assert (
-        reader.turn.profile_session.profile.tokenizer.name == "unidic"
-        and reader.turn.profile_session.profile.langs.main == "jp"
+        reader.graph.profile.profile.tokenizer.name == "unidic"
+        and reader.graph.profile.profile.langs.main == "jp"
     )
-    assert enabled_providers_for(reader.turn.profile_session.profile.langs.main, flags) == (
+    assert enabled_providers_for(reader.graph.profile.profile.langs.main, flags) == (
         "jimaku",
         "universal",
     )
@@ -215,27 +215,27 @@ def test_cycle_clears_the_token_cache_so_stale_segmentation_cannot_leak(request)
     """A profile swap must not serve the previous language's cached tokenization."""
     register_tokenizer("latin", lambda: _TaggedTokenizer("new"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])
-    reader.turn.profile_session.profile.replace_dictionary_set(_ExistsDS())
-    reader.turn.profile_session.profile.use_tokenizer(_TaggedTokenizer("old"))
-    reader.turn.cue_coordinator.set_subtitle("本")
+    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
+    reader.graph.profile.profile.use_tokenizer(_TaggedTokenizer("old"))
+    reader.graph.cue.set_subtitle("本")
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.turn.subtitle_presentation.cue.current.tokens[0].lemma == "new"
+    assert reader.graph.subtitle_presentation.cue.current.tokens[0].lemma == "new"
 
 
 def test_dictionary_replacement_retires_tooltip_work_and_cached_panels(request):
     reader = _headless(request)
-    reader.turn.profile_session.profile.replace_dictionary_set(_ExistsDS())
-    reader.turn.profile_integration.dependencies_changed()
-    reader.turn.tooltip_controller.cache_setdefault(("same-token",), object())  # type: ignore[arg-type]
-    generation = reader.turn.tooltip_preparation.generation
+    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
+    reader.graph.profile_integration.dependencies_changed()
+    reader.graph.tooltip.cache_setdefault(("same-token",), object())  # type: ignore[arg-type]
+    generation = reader.graph.tooltip_preparation.generation
 
-    reader.turn.profile_session.profile.replace_dictionary_set(_ExistsDS())
-    reader.turn.profile_integration.dependencies_changed()
+    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
+    reader.graph.profile_integration.dependencies_changed()
 
-    assert reader.turn.tooltip_preparation.generation > generation
-    assert reader.turn.tooltip_controller.cache_totals() == (0, 0)
+    assert reader.graph.tooltip_preparation.generation > generation
+    assert reader.graph.tooltip.cache_totals() == (0, 0)
 
 
 # --- the track re-selection that makes the cycle a FULL switch (the reported gap) ------------------
@@ -248,20 +248,20 @@ def test_cycle_selects_the_new_profiles_language_track(request, monkeypatch):
     it colors + scans) exactly as a ``--profile french`` launch does."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
-    reader.turn.ipc.props["track-list"] = _JA_FR_TRACKS
+    reader.graph.ipc.props["track-list"] = _JA_FR_TRACKS
     retokenized: list[bool] = []
     monkeypatch.setattr(
-        type(reader.turn.profile_integration),
+        type(reader.graph.profile_integration),
         "retokenize_current_cue",
         lambda _self: retokenized.append(True),
     )
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)  # → fr
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)  # → fr
 
-    assert ("set_property", "sid", 6) in reader.turn.ipc.commands  # the fr track is now primary
-    assert reader.turn.track_commands.current().slang == "fr"
+    assert ("set_property", "sid", 6) in reader.graph.ipc.commands  # the fr track is now primary
+    assert reader.graph.track_commands.current().slang == "fr"
     assert (
-        reader.turn.track_commands.current().language == MAIN_LANG
+        reader.graph.track_commands.current().language == MAIN_LANG
     )  # target role → colored + scanned, not the secondary
     assert retokenized == []
 
@@ -275,27 +275,27 @@ def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_t
     so no ``sid`` is set."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
-    reader.turn.ipc.props["track-list"] = [{"type": "sub", "id": 1, "lang": "jpn"}]
+    reader.graph.ipc.props["track-list"] = [{"type": "sub", "id": 1, "lang": "jpn"}]
     retokenized: list[bool] = []
     notices: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        type(reader.turn.profile_integration),
+        type(reader.graph.profile_integration),
         "retokenize_current_cue",
         lambda _self: retokenized.append(True),
     )
     monkeypatch.setattr(
-        reader.turn.notifications,
+        reader.graph.notifications,
         "show",
         lambda text, kind="ok", _seconds=2.8: notices.append((text, kind)),
     )
 
-    outcome = reader.turn.profile_session.profile.switch_to(1)  # fr, but the file has no fr track
+    outcome = reader.graph.profile.profile.switch_to(1)  # fr, but the file has no fr track
 
-    assert reader.turn.profile_session.profile.langs.main == "fr"  # the engine switched
+    assert reader.graph.profile.profile.langs.main == "fr"  # the engine switched
     assert (
-        reader.turn.track_commands.current().slang == "ja,jpn,jp"
+        reader.graph.track_commands.current().slang == "ja,jpn,jp"
     )  # ...the track was left untouched
-    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.turn.ipc.commands)
+    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
     assert retokenized == [True]
     assert outcome.status is ProfileSwitchStatus.DEGRADED
     assert any("no 'fr' subtitle track" in text and kind == "warn" for text, kind in notices)
@@ -307,12 +307,12 @@ def test_same_track_switch_retokenizes_the_current_cue(request, monkeypatch):
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])
     retokenized: list[bool] = []
     monkeypatch.setattr(
-        type(reader.turn.profile_integration),
+        type(reader.graph.profile_integration),
         "retokenize_current_cue",
         lambda _self: retokenized.append(True),
     )
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
     assert retokenized == [True]
 
@@ -323,7 +323,7 @@ def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request):
     proving that the fallback is not hard-coded to the default string."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)  # selection issues correlated commands
+    gateway = session_gateway(ipc)  # selection issues correlated commands
     request.addfinalizer(gateway.close)
     reader = build_session(
         ipc,
@@ -333,21 +333,19 @@ def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request):
         ),
     )
     request.addfinalizer(reader.close)
-    reader.turn.profile_session.profile.configure_cycle(
-        [DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn"
-    )
-    reader.turn.screen.osd = (1280, 720)
-    reader.turn.ipc.props["track-list"] = _JA_FR_TRACKS
+    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn")
+    reader.graph.screen.osd = (1280, 720)
+    reader.graph.ipc.props["track-list"] = _JA_FR_TRACKS
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)  # → fr (sid 6)
-    assert reader.turn.track_commands.current().slang == "fr"
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)  # → fr (sid 6)
+    assert reader.graph.track_commands.current().slang == "fr"
 
-    reader.turn.command_runtime.handle(
+    reader.command(
         app_bindings.PROFILE_CYCLE_MSG
     )  # wraps → JP default; effective slang = base_slang "jpn" → the jpn track
 
-    assert reader.turn.track_commands.current().slang == "jpn"
-    assert ("set_property", "sid", 1) in reader.turn.ipc.commands
+    assert reader.graph.track_commands.current().slang == "jpn"
+    assert ("set_property", "sid", 1) in reader.graph.ipc.commands
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -357,18 +355,18 @@ def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror(requ
     guard would skip re-issuing secondary-sid, so the reveal never comes back (P2 from review)."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
-    reader.turn.ipc.props["track-list"] = _JA_FR_TRACKS
-    reader.turn.ipc.props["secondary-sid"] = 6  # the EN translation is currently revealed
-    reader.turn.track_commands.declare(SubtitleSecondaryLeased(6))
+    reader.graph.ipc.props["track-list"] = _JA_FR_TRACKS
+    reader.graph.ipc.props["secondary-sid"] = 6  # the EN translation is currently revealed
+    reader.graph.track_commands.declare(SubtitleSecondaryLeased(6))
 
-    reader.turn.command_runtime.handle(
+    reader.command(
         app_bindings.PROFILE_CYCLE_MSG
     )  # → fr, re-selects the track (configure runs mid-session)
 
     assert (
-        reader.turn.track_commands.current().secondary_sid is None
+        reader.graph.track_commands.current().secondary_sid is None
     )  # mirror cleared → reveal can re-establish
-    assert ("set_property", "secondary-sid", "no") in reader.turn.ipc.commands
+    assert ("set_property", "secondary-sid", "no") in reader.graph.ipc.commands
 
 
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------
@@ -379,17 +377,17 @@ def test_cycle_reverts_atomically_when_the_new_tokenizer_is_unknown(request):
     tokenizer keeps the old profile fully intact — no half-applied identity."""
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _BROKEN])
 
-    reader.turn.command_runtime.handle(
+    reader.command(
         app_bindings.PROFILE_CYCLE_MSG
     )  # _BROKEN.tokenizer 'nonexistent' is not registered
 
-    assert reader.turn.profile_session.profile.profile is DEFAULT_PROFILE  # unchanged
+    assert reader.graph.profile.profile.profile is DEFAULT_PROFILE  # unchanged
     assert (
-        reader.turn.profile_session.profile.tokenizer.name == "unidic"
-        and reader.turn.profile_session.profile.langs.main == "jp"
+        reader.graph.profile.profile.tokenizer.name == "unidic"
+        and reader.graph.profile.profile.langs.main == "jp"
     )
     assert (
-        reader.turn.profile_session.profile.profile_index == 0
+        reader.graph.profile.profile.profile_index == 0
     )  # cursor did not advance past the failed switch
 
 
@@ -398,19 +396,19 @@ def test_cycle_reverts_atomically_when_dictionary_rescope_fails(request):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE)
     original_dicts = object()
-    reader.turn.profile_session.profile.replace_dictionary_set(original_dicts)
+    reader.graph.profile.profile.replace_dictionary_set(original_dicts)
 
     def fail_scope(_profile):
         raise RuntimeError("broken dictionary")
 
-    reader.turn.profile_session.profile.configure_cycle([DEFAULT_PROFILE, _FR], fail_scope)
+    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, _FR], fail_scope)
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.turn.profile_session.profile.profile is DEFAULT_PROFILE
-    assert reader.turn.profile_session.profile.tokenizer.name == "unidic"
-    assert reader.turn.profile_session.profile.dict_set is original_dicts
-    assert reader.turn.profile_session.profile.profile_index == 0
+    assert reader.graph.profile.profile.profile is DEFAULT_PROFILE
+    assert reader.graph.profile.profile.tokenizer.name == "unidic"
+    assert reader.graph.profile.profile.dict_set is original_dicts
+    assert reader.graph.profile.profile.profile_index == 0
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -422,18 +420,16 @@ def test_late_dependency_result_cannot_overwrite_selected_profile(request):
     reader = _headless(request, profile=DEFAULT_PROFILE)
     active_dicts = object()
     late_launch_dicts = object()
-    reader.turn.profile_session.profile.configure_cycle(
-        [DEFAULT_PROFILE, _FR], lambda _p: active_dicts
-    )
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
-    reader.turn.profile_session.select(_FR)
+    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, _FR], lambda _p: active_dicts)
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
+    reader.graph.profile.select(_FR)
 
-    reader.turn.profile_session.accept(
+    reader.graph.profile.accept(
         DependencyBundle(MiningIdentity(DEFAULT_PROFILE.name, 0), dictionaries=late_launch_dicts)
     )
 
-    assert reader.turn.profile_session.profile.profile is _FR
-    assert reader.turn.profile_session.profile.dict_set is active_dicts
+    assert reader.graph.profile.profile.profile is _FR
+    assert reader.graph.profile.profile.dict_set is active_dicts
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -463,7 +459,7 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
             {"deck": f"Deck::{profile.name}", "model": "Lapis"},
         )
 
-    reader.turn.profile_session.configure(
+    reader.graph.profile.configure(
         [DEFAULT_PROFILE, _FR],
         dependency_builder_for=lambda profile, _identity: (
             {"profile": profile.name},
@@ -472,11 +468,11 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
         mining_spec_for=spec_for,
     )
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
-    selected = reader.turn.mining_controller.desired_spec.identity
+    selected = reader.graph.mining.desired_spec.identity
     assert selected.profile == _FR.name
-    assert reader.turn.mining_controller.active_target is None
+    assert reader.graph.mining.active_target is None
     assert submissions == [(selected, {"profile": _FR.name})]
 
     stale = MiningTarget(
@@ -484,10 +480,10 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
         object(),
         MineConfig(deck=f"Deck::{DEFAULT_PROFILE.name}"),
     )
-    reader.turn.profile_session.accept(DependencyBundle(stale.identity, mining=stale))
+    reader.graph.profile.accept(DependencyBundle(stale.identity, mining=stale))
 
     assert submissions == [(selected, {"profile": _FR.name})]
-    assert reader.turn.mining_controller.active_target is None
+    assert reader.graph.mining.active_target is None
 
     class Anki:
         def __init__(self) -> None:
@@ -508,16 +504,16 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
 
     anki = Anki()
     target = MiningTarget(selected, anki, MineConfig(deck=f"Deck::{_FR.name}"))
-    reader.turn.profile_session.accept(DependencyBundle(selected, mining=target))
+    reader.graph.profile.accept(DependencyBundle(selected, mining=target))
 
-    assert reader.turn.mining_controller.active_target is target
-    reader.turn.profile_session.accept(DependencyBundle(stale.identity, mining=stale))
+    assert reader.graph.mining.active_target is target
+    reader.graph.profile.accept(DependencyBundle(stale.identity, mining=stale))
     assert submissions == [(selected, {"profile": _FR.name})]
-    assert reader.turn.mining_controller.active_target is target
+    assert reader.graph.mining.active_target is target
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
-    reader.turn.cue_coordinator.set_subtitle("chat")
+    reader.graph.cue.set_subtitle("chat")
 
-    reader.turn.command_runtime.handle(MINE_MSG)
+    reader.command(MINE_MSG)
 
     assert anki.added[0]["deckName"] == f"Deck::{_FR.name}"
 
@@ -530,7 +526,7 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     config = MineConfig(deck="Deck::default")
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     request.addfinalizer(gateway.close)
     reader = build_session(
         ipc,
@@ -552,19 +548,19 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
             raise ValueError("invalid profile mining config")
         return MiningSpec(identity, {"deck": config.deck, "model": config.model})
 
-    reader.turn.profile_session.configure(
+    reader.graph.profile.configure(
         [DEFAULT_PROFILE, _FR],
         dependency_builder_for=lambda _profile, _identity: ({}, lambda: ()),
         mining_spec_for=spec_for,
     )
-    assert reader.turn.mining_controller.active_target is not None
+    assert reader.graph.mining.active_target is not None
 
-    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.turn.profile_session.profile.profile is _FR
-    assert reader.turn.mining_controller.desired_spec.enabled is False
-    assert reader.turn.mining_controller.active_target is None
-    assert reader.turn.mining_controller.index_snapshot().values == set()
+    assert reader.graph.profile.profile.profile is _FR
+    assert reader.graph.mining.desired_spec.enabled is False
+    assert reader.graph.mining.active_target is None
+    assert reader.graph.mining.index_snapshot().values == set()
 
 
 def test_matching_failed_dependency_bundle_clears_the_active_mining_target(request):
@@ -573,7 +569,7 @@ def test_matching_failed_dependency_bundle_clears_the_active_mining_target(reque
     from saitenka.app.features.profiles.dependencies import DependencyBundle
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     request.addfinalizer(gateway.close)
     reader = build_session(
         ipc,
@@ -586,13 +582,13 @@ def test_matching_failed_dependency_bundle_clears_the_active_mining_target(reque
         ),
     )
     request.addfinalizer(reader.close)
-    identity = reader.turn.mining_controller.desired_spec.identity
-    reader.turn.mining_controller.record_mined_expression("old")
+    identity = reader.graph.mining.desired_spec.identity
+    reader.graph.mining.record_mined_expression("old")
 
-    reader.turn.profile_session.accept(DependencyBundle(identity, failed=True))
+    reader.graph.profile.accept(DependencyBundle(identity, failed=True))
 
-    snapshot = reader.turn.mining_controller.index_snapshot()
-    assert reader.turn.mining_controller.active_target is None
+    snapshot = reader.graph.mining.index_snapshot()
+    assert reader.graph.mining.active_target is None
     assert snapshot.values == set()
     assert snapshot.seed_status is SeedStatus.DEGRADED
 
@@ -633,7 +629,7 @@ class _SwapMidWarmTokenizer(_MinimalTokenizer):
         toks = super().tokenize(line, strip_furigana=strip_furigana, merge=merge)
         if not self._swapped:
             self._swapped = True
-            self._reader.turn.profile_session.profile.use_tokenizer(
+            self._reader.graph.profile.profile.use_tokenizer(
                 self._replacement
             )  # the swap lands mid-warm
         return toks
@@ -641,8 +637,8 @@ class _SwapMidWarmTokenizer(_MinimalTokenizer):
 
 def _warm_reader(request) -> TestSession:
     reader = _headless(request)
-    reader.turn.profile_session.profile.replace_dictionary_set(_ExistsDS())
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_SRT))
+    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_SRT))
     return reader
 
 
@@ -652,40 +648,38 @@ def test_swap_during_warm_drops_the_stale_language_entry(request, monkeypatch):
     Without the gate this cue's put would survive (len == 1), so this asserts the guard has teeth."""
     reader = _warm_reader(request)
     new = _TaggedTokenizer("new")
-    reader.turn.profile_session.profile.use_tokenizer(
-        _SwapMidWarmTokenizer(reader, new)
-    )  # active = OLD
+    reader.graph.profile.profile.use_tokenizer(_SwapMidWarmTokenizer(reader, new))  # active = OLD
     monkeypatch.setattr(
         "saitenka.app.features.annotation.annotation_controller.threading.Thread",
         _ImmediateThread,
     )
 
-    reader.turn.profile_integration.warm_episode()  # swaps to NEW mid-loop
-    reader.turn.cue_coordinator.set_subtitle("AAA")
+    reader.graph.profile_integration.warm_episode()  # swaps to NEW mid-loop
+    reader.graph.cue.set_subtitle("AAA")
 
-    assert reader.turn.profile_session.profile.tokenizer is new  # the swap took effect
-    assert reader.turn.subtitle_presentation.cue.current.tokens[0].lemma == "new"
+    assert reader.graph.profile.profile.tokenizer is new  # the swap took effect
+    assert reader.graph.subtitle_presentation.cue.current.tokens[0].lemma == "new"
 
 
 def test_warm_under_the_new_generation_stores_cleanly_after_a_swap(request, monkeypatch):
     """Positive control: once the swap has settled, warming under the current generation caches every
     cue normally — the generation gate drops only the stale in-flight put, not all future work."""
     reader = _warm_reader(request)
-    reader.turn.profile_session.profile.use_tokenizer(_TaggedTokenizer("new"))  # settled generation
+    reader.graph.profile.profile.use_tokenizer(_TaggedTokenizer("new"))  # settled generation
     monkeypatch.setattr(
         "saitenka.app.features.annotation.annotation_controller.threading.Thread",
         _ImmediateThread,
     )
 
-    reader.turn.profile_integration.warm_episode()
+    reader.graph.profile_integration.warm_episode()
     monkeypatch.setattr(
-        reader.turn.profile_session.profile.tokenizer,
+        reader.graph.profile.profile.tokenizer,
         "tokenize",
         lambda _line, **_kwargs: (_ for _ in ()).throw(AssertionError("re-tokenized")),
     )
-    reader.turn.cue_coordinator.set_subtitle("BBB")
+    reader.graph.cue.set_subtitle("BBB")
 
-    assert reader.turn.subtitle_presentation.cue.current.tokens[0].lemma == "new"
+    assert reader.graph.subtitle_presentation.cue.current.tokens[0].lemma == "new"
 
 
 def _stub_provider(name, languages):

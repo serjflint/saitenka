@@ -9,19 +9,8 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
-from saitenka.app.session import resources as session_resources
 from saitenka.app.session.close_ledger import CloseLedger, CloseStep
 from saitenka.app.session.close_plan import Retirable, SessionClosePlan
-from saitenka.app.session.routes import (
-    COLLABORATORS_PARTICIPANT,
-    DIAGNOSTICS_PARTICIPANT,
-    HISTORY_PARTICIPANT,
-    INPUT_PARTICIPANT,
-    OBSERVERS_PARTICIPANT,
-    RENDER_GUARD_PARTICIPANT,
-    RENDER_SPACE_PARTICIPANT,
-)
-from saitenka.runtime import events
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +47,6 @@ class LiveState(Enum):
 @dataclass(frozen=True, slots=True)
 class StartContribution:
     name: str
-    phase: events.StartPhase
     run: Callable[[], object]
 
 
@@ -124,52 +112,22 @@ def start_sequence(*actions: Callable[[], object]) -> Callable[[], None]:
     return run
 
 
-_START_PARTICIPANTS = {
-    events.StartPhase.PROCESS: RENDER_GUARD_PARTICIPANT,
-    events.StartPhase.RENDER_SPACE: RENDER_SPACE_PARTICIPANT,
-    events.StartPhase.OBSERVERS: OBSERVERS_PARTICIPANT,
-    events.StartPhase.INPUT: INPUT_PARTICIPANT,
-    events.StartPhase.COLLABORATORS: COLLABORATORS_PARTICIPANT,
-    events.StartPhase.HISTORY: HISTORY_PARTICIPANT,
-    events.StartPhase.DIAGNOSTICS: DIAGNOSTICS_PARTICIPANT,
-}
-
-
 class SessionStartPlan:
-    """Own startup contributions, runtime registration, and the fixed phase order."""
+    """Own startup contributions and their fixed order."""
 
     def __init__(
         self,
         *,
-        deliver: Callable[[object], bool],
         contributions: Iterable[StartContribution],
     ) -> None:
-        self._deliver = deliver
         self._contributions = tuple(contributions)
-        installed = {(row.phase, row.name) for row in self._contributions}
-        expected = set(_START_PARTICIPANTS.items())
-        if installed != expected:
-            raise ValueError(
-                f"startup contribution mismatch: missing={sorted(expected - installed)!r}, "
-                f"unexpected={sorted(installed - expected)!r}"
-            )
-        self._by_phase = {row.phase: row.run for row in self._contributions}
-
-    def registrations(self) -> tuple[tuple[str, object], ...]:
-        def begin(row: StartContribution) -> Callable[[], None]:
-            def run() -> None:
-                row.run()
-
-            return run
-
-        return tuple(
-            (row.name, session_resources.Starting(begin(row))) for row in self._contributions
-        )
+        names = [row.name for row in self._contributions]
+        if len(names) != len(set(names)):
+            raise ValueError("startup contribution names must be unique")
 
     def start(self) -> None:
-        for phase in events.StartPhase:
-            if not self._deliver(events.SessionStarting(phase)):
-                self._by_phase[phase]()
+        for contribution in self._contributions:
+            contribution.run()
 
 
 def guard_main_render() -> None:
@@ -187,8 +145,6 @@ class SessionLifecycle:
         self,
         *,
         startup: Iterable[Callable[[], None]],
-        registrations: Iterable[tuple[str, object]] = (),
-        register: Callable[[str, object], None] | None = None,
         close_steps: Callable[[], Iterable[CloseStep]],
         wake: Callable[[], None],
         stop: threading.Event | None = None,
@@ -196,8 +152,6 @@ class SessionLifecycle:
         report_close: Callable[[str], None] | None = None,
     ) -> None:
         self._startup = tuple(startup)
-        self._registrations = tuple(registrations)
-        self._register = register
         self._close_steps = close_steps
         self._wake = wake
         self._before_close = before_close
@@ -225,9 +179,6 @@ class SessionLifecycle:
         if self._state is not LiveState.NEW:
             raise RuntimeError(f"cannot start a {self._state.name.lower()} session")
         try:
-            if self._register is not None:
-                for name, participant in self._registrations:
-                    self._register(name, participant)
             for step in self._startup:
                 step()
         except BaseException:
@@ -259,51 +210,24 @@ def assemble_session_lifecycle(
     ipc: MpvIPC,
     *,
     actions: SessionStartActions,
-    registrations: Iterable[tuple[str, object]],
     close_plan: SessionClosePlan,
     stop: threading.Event,
     before_close: Callable[[], None],
 ) -> SessionLifecycle:
     """Bind the fixed session phases to their already-owned actions."""
     start_plan = SessionStartPlan(
-        deliver=ipc.deliver_runtime_event,
         contributions=(
-            StartContribution(
-                RENDER_GUARD_PARTICIPANT,
-                events.StartPhase.PROCESS,
-                guard_main_render,
-            ),
-            StartContribution(
-                RENDER_SPACE_PARTICIPANT,
-                events.StartPhase.RENDER_SPACE,
-                actions.render_space,
-            ),
-            StartContribution(
-                OBSERVERS_PARTICIPANT,
-                events.StartPhase.OBSERVERS,
-                actions.observers,
-            ),
-            StartContribution(INPUT_PARTICIPANT, events.StartPhase.INPUT, actions.input),
-            StartContribution(
-                COLLABORATORS_PARTICIPANT,
-                events.StartPhase.COLLABORATORS,
-                actions.collaborators,
-            ),
-            StartContribution(HISTORY_PARTICIPANT, events.StartPhase.HISTORY, actions.history),
-            StartContribution(
-                DIAGNOSTICS_PARTICIPANT,
-                events.StartPhase.DIAGNOSTICS,
-                actions.diagnostics,
-            ),
+            StartContribution("render-guard", guard_main_render),
+            StartContribution("render-space", actions.render_space),
+            StartContribution("observers", actions.observers),
+            StartContribution("input", actions.input),
+            StartContribution("collaborators", actions.collaborators),
+            StartContribution("history", actions.history),
+            StartContribution("diagnostics", actions.diagnostics),
         ),
     )
-    all_registrations = (*registrations, *start_plan.registrations(), *close_plan.registrations())
     return SessionLifecycle(
         startup=(start_plan.start,),
-        registrations=all_registrations,
-        register=lambda name, participant: _discard(
-            ipc.register_session_resource(name, participant)
-        ),
         close_steps=close_plan.steps,
         wake=lambda: _discard(ipc.wake_session_runtime()),
         stop=stop,
@@ -316,7 +240,6 @@ def compose_session_lifecycle(
     owners: SessionLifecycleOwners,
     acts: SessionLifecycleActs,
     *,
-    registrations: Iterable[tuple[str, object]],
     stop: threading.Event,
 ) -> SessionLifecycle:
     """Compose the fixed live-session lifetime from bounded owner capabilities."""
@@ -326,7 +249,6 @@ def compose_session_lifecycle(
         owners.ipc.wake_session_runtime()
 
     close_plan = SessionClosePlan(
-        deliver=owners.ipc.deliver_runtime_event,
         request_stop=request_close_stop,
         close_lane=lambda name, timeout: owners.ipc.close_runtime_job_lane(name, timeout),
         tts_capability=owners.tts_capability,
@@ -345,6 +267,7 @@ def compose_session_lifecycle(
         timers=owners.timers,
         surfaces=owners.surfaces,
         overlay=owners.overlay,
+        detach_diagnostics=lambda: _detach_diagnostics(owners.ipc),
         close_runtime=owners.ipc.close_session_runtime,
     )
     start = SessionStartActions(
@@ -374,7 +297,6 @@ def compose_session_lifecycle(
     return assemble_session_lifecycle(
         owners.ipc,
         actions=start,
-        registrations=registrations,
         close_plan=close_plan,
         stop=stop,
         before_close=owners.mining.invalidate,
@@ -385,6 +307,15 @@ def _install_gauge_provider(provider: Callable[[], dict[str, float]]) -> None:
     from saitenka.app import telemetry
 
     telemetry.set_gauge_provider(provider)
+
+
+def _detach_diagnostics(ipc: MpvIPC) -> None:
+    from saitenka.app import telemetry
+
+    telemetry.set_gauge_provider(None)
+    census = ipc.session_runtime_census()
+    if census:
+        log.debug("runtime census: %s", census)
 
 
 def _startup_health_kind():

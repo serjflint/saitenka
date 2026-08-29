@@ -69,20 +69,16 @@ def test_every_stateless_policy_is_registered_or_named_as_residue() -> None:
     assert _policy_types() == registered
 
 
-def test_the_router_refuses_a_command_no_feature_owns() -> None:
+def test_the_command_graph_refuses_a_command_no_feature_owns() -> None:
     """The negative control: registration is a real key, not a lookup that falls through."""
-    from saitenka.app.session.stateless import StatelessRouter
-
     with pytest.raises(KeyError, match="no stateless feature owns"):
-        StatelessRouter(()).run("toggle-sidebar")
+        StatelessCommandGraph(_bindings(), STATELESS_COMMANDS).run("toggle-sidebar")
 
 
-def test_the_router_rejects_duplicate_command_types() -> None:
-    from saitenka.app.session.stateless import StatelessRouter
-
+def test_the_command_graph_rejects_duplicate_command_types() -> None:
     binding = _bindings()[0]
     with pytest.raises(ValueError, match="already registered"):
-        StatelessRouter((binding, binding))
+        StatelessCommandGraph((binding, binding), ())
 
 
 def test_the_command_graph_closes_every_installed_policy() -> None:

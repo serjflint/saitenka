@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from saitenka.app.scoring import Scorer
     from saitenka.app.session.close_ledger import CloseLedger
     from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.graph import SessionGraph
     from saitenka.app.session.runtime import SessionEntry
-    from saitenka.app.session.turn import SessionTurn
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.mpvio.osd import Overlay
@@ -124,13 +124,16 @@ def _compose_session(
     options: ReaderOptions | None = None,
     infrastructure: SessionInfrastructure | None = None,
     identity: SessionIdentity | None = None,
-) -> tuple[SessionController, SessionTurn, PreparedSession]:
-    """Return the live object, internal turn, and public pre-start capabilities."""
+) -> tuple[SessionController, SessionGraph, PreparedSession]:
+    """Return the live object, validated graph, and public pre-start capabilities."""
     from saitenka.app.config import ReaderOptions
     from saitenka.app.session.assembly import build_session_assembly
-    from saitenka.app.session.builder import build_session_turn
+    from saitenka.app.session.builder import build_session_graph
     from saitenka.app.session.controller import SessionController
     from saitenka.app.session.runtime import SessionEntry
+
+    if ipc.session_loop is None:
+        raise RuntimeError("prepare_session_controller requires install_session_runtime(ipc) first")
 
     resolved = services or SessionServices()
     resolved_options = options or ReaderOptions()
@@ -143,7 +146,7 @@ def _compose_session(
         overlay=physical.overlay,
         tokenizer_warm=session_identity.tokenizer_warm,
     )
-    turn = build_session_turn(
+    graph = build_session_graph(
         ipc,
         resolved_assembly,
         resolved_options,
@@ -167,17 +170,17 @@ def _compose_session(
             else _geometry_backend(resolved_options.subtitle_geometry)
         ),
     )
-    controller = SessionController(turn)
+    controller = SessionController(graph)
     prepared = PreparedSession(
         live=controller,
-        profile=turn.profile_session,
-        rebuild_sub_index=turn.cue_coordinator.rebuild_sub_index,
-        configure_subtitle_mode=turn.cue_coordinator.configure_subtitle_mode,
-        reslot=turn.reslot_ports,
-        watch=turn.watch_ports,
-        entry=SessionEntry(runtime=turn.entry_runtime, run=controller.run),
+        profile=graph.profile,
+        rebuild_sub_index=graph.cue.rebuild_sub_index,
+        configure_subtitle_mode=graph.cue.configure_subtitle_mode,
+        reslot=graph.reslot,
+        watch=graph.watch,
+        entry=SessionEntry(runtime=controller.entry_runtime, run=controller.run),
     )
-    return controller, turn, prepared
+    return controller, graph, prepared
 
 
 def _inline_tooltip_jobs(jobs: TooltipRuntimeJobs) -> TooltipRuntimeJobs:

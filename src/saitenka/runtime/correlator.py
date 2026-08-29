@@ -231,7 +231,7 @@ class EffectCorrelator:
         """When the earliest pending timer is due, or ``None`` when none is armed.
 
         The bound a blocked receiver waits under. Without it the loop has to guess an interval and
-        wake that often to ask whether a timer has come due — the tick this migration removes.
+        wake that often to ask whether a timer has come due.
         """
         with self._lock:
             return self._timers.next_deadline

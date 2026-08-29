@@ -162,21 +162,21 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
             util.FakeIPC(),
             options=ReaderOptions(tooltip=TooltipOptions(bottom_margin_frac=frac)),
         )
-        reader.turn.screen.osd = (1920, 1080)
-        reader.turn.subtitle_presentation.cue.replace_geometry(
+        reader.graph.screen.osd = (1920, 1080)
+        reader.graph.subtitle_presentation.cue.replace_geometry(
             origin=(999, 999)
         )  # a stale origin the draw has to replace
-        reader.turn.cue_coordinator.set_subtitle("猫を見る")
+        reader.graph.cue.set_subtitle("猫を見る")
         result = SubtitleRenderer().draw(
-            reader.turn.cue_coordinator.draw_request(),
-            reader.turn.lifecycle_surfaces,
-            reader.turn.ipc,
+            reader.graph.cue.draw_request(),
+            reader.graph.lifecycle_surfaces,
+            reader.graph.ipc,
         )
         assert result is not None
-        reader.turn.subtitle_presentation.cue.replace_geometry(
+        reader.graph.subtitle_presentation.cue.replace_geometry(
             origin=result.origin
         )  # the coordinator's write-back, done here by hand
-        return reader.turn.subtitle_presentation.cue.current.origin
+        return reader.graph.subtitle_presentation.cue.current.origin
 
     low, high = origin_for(0.05), origin_for(0.15)
 

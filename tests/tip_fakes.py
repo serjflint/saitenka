@@ -37,11 +37,11 @@ def hidpi_reader(scale: float) -> TestSession:
         ),
         options=ReaderOptions().with_overrides(scan_delay=0.0),
     )
-    r.turn.screen.osd = (round(1920 * scale), round(1080 * scale))
-    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.turn.subtitle_presentation.cue.replace_tokenized(
+    r.graph.screen.osd = (round(1920 * scale), round(1080 * scale))
+    r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     )
-    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
-    r.turn.tooltip_controller.visual.crisp = True
+    r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    r.graph.tooltip.visual.crisp = True
     return r

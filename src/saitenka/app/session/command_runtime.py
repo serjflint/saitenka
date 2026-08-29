@@ -21,7 +21,6 @@ from saitenka.runtime import (
     Owner,
     UserCommand,
 )
-from saitenka.runtime.effects import RunUserCommand
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -112,10 +111,6 @@ class CommandRuntime:
     def names(self) -> frozenset[str]:
         return self._commands.names()
 
-    def run_effect(self, effect: object) -> None:
-        assert isinstance(effect, RunUserCommand)
-        self.perform(effect.command)
-
     def perform(self, command: UserCommand) -> None:
         if not self._ports.connection.current.ready:
             self._publish(
@@ -150,4 +145,4 @@ class CommandRuntime:
             log.error("script-message failed (%s): %s", result.error_type, command.name)
 
     def _publish(self, event: CommandHandled) -> None:
-        self._ports.ipc.publish_legacy_command_outcome(event)
+        self._ports.ipc.publish_command_outcome(event)

@@ -75,7 +75,6 @@ _STANDALONE_IPC_DOUBLES = {
     # The shared fake is gateway-wired; these test the gateway itself, so inheriting it would mean
     # testing a gateway through a gateway.
     ("test_mpv_gateway.py", "FakeIPC"),
-    ("test_legacy_runtime.py", "FakeIPC"),
     ("test_loading.py", "FakeIPC"),
 }
 
@@ -84,6 +83,13 @@ def _ipc_doubles() -> list[tuple[str, str, bool]]:
     import ast
 
     found = []
+    transport_methods = {
+        "command_async",
+        "install_runtime_ingress",
+        "probe",
+        "query",
+        "receive_session",
+    }
     for path in sorted((ROOT / "tests").rglob("*.py")):
         if path.name == "util.py":
             continue
@@ -94,7 +100,10 @@ def _ipc_doubles() -> list[tuple[str, str, bool]]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
                 continue
-            if "command" not in {m.name for m in node.body if isinstance(m, ast.FunctionDef)}:
+            methods = {m.name for m in node.body if isinstance(m, ast.FunctionDef)}
+            if "command" not in methods:
+                continue
+            if "ipc" not in node.name.lower() and methods.isdisjoint(transport_methods):
                 continue
             inherits = any("FakeIPC" in ast.unparse(base) for base in node.bases)
             found.append((path.name, node.name, inherits))

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from session_builder import build_session
 
 from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 from saitenka.app.toast_controller import ToastController
@@ -127,18 +126,20 @@ def test_cancelled_lifecycle_timer_cannot_apply_late() -> None:
 def test_toast_expiry_removes_the_lifecycle_surface() -> None:
     from util import FakeIPC
 
+    from saitenka.app.features.help.help_controller import ScreenState
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.overlay_ids import OverlayId
+    from saitenka.mpvio.osd import Overlay
 
     ipc = FakeIPC()
-    reader = build_session(ipc)
     port = FakeTimerPort()
-    reader.turn.notifications = ToastController(
-        reader.turn.lifecycle_surfaces,
-        reader.turn.screen,
+    notifications = ToastController(
+        LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv)),
+        ScreenState(),
         LifecycleTimers(port),
     )
 
-    reader.turn.notifications.show("saved", seconds=1.0)
+    notifications.show("saved", seconds=1.0)
     port.finish(port.history[-1])
 
     assert ("overlay-remove", OverlayId.TOAST) in ipc.commands

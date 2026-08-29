@@ -4,10 +4,10 @@ from concurrent.futures import Future
 from typing import cast
 
 import pytest
-from legacy_session_controller_behavior import LegacyReaderTrace
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
+from session_behavior_trace import SessionTrace, _visible_surfaces
 from session_builder import build_session
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, await_ready, bare_gateway
 
 from saitenka.app import subtitle_adapter
 from saitenka.app.bindings import SUB_PICKER_MSG
@@ -39,9 +39,24 @@ class _AsyncHintIPC(FakeIPC):
         return request
 
 
+def _runtime_settled(reader) -> bool:
+    loop = reader.graph.ipc.session_loop
+    assert loop is not None
+    snapshot = loop.mailbox.snapshot
+    return (
+        snapshot.normal == 0
+        and snapshot.lifecycle == 0
+        and snapshot.terminal == 0
+        and snapshot.terminal_reserved == 0
+        and snapshot.command_reserved == 0
+        and reader.graph.lifecycle_surfaces.settled()
+        and reader.graph.interaction_surfaces.settled()
+    )
+
+
 def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, request) -> None:
     ipc = _AsyncHintIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
@@ -50,12 +65,12 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
     reader.start()
     dispatched: list[bool] = []
     monkeypatch.setattr(
-        reader.turn.picker_controller,
+        reader.graph.picker,
         "open",
         lambda *_args, **_kwargs: dispatched.append(True),
     )
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
-    trace = LegacyReaderTrace(reader)
+    trace = SessionTrace(reader)
 
     assert reader.pump()
     trace.observe("first-input", outcome="dispatched-before-ready-clear")
@@ -98,32 +113,28 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
             prefetch=False,
         ),
     )
-    reader.turn.playback_observation.start_session()
-    reader.turn.cue_coordinator.set_subtitle("old")
-    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    reader.graph.playback.start_session()
+    reader.graph.cue.set_subtitle("old")
+    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     copied: list[str] = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
-    trace = LegacyReaderTrace(reader)
+    trace = SessionTrace(reader)
     trace.observe("cue-installed", outcome="interactive")
 
-    ipc.events.extend(
-        (
-            {"event": "property-change", "name": "sub-text", "data": "new"},
-            {"event": "client-message", "args": ["saitenka-copy-line"]},
-        )
-    )
+    ipc.set_prop("sub-text", "new")
+    ipc.emit({"event": "client-message", "args": ["saitenka-copy-line"]})
     # Reconciliation now runs at the drain's batch boundary rather than on the next tick, so the
     # conflict phase is observed from inside the drain — after every event in the batch was
     # processed against the retired cue, before the replacement settles. Same three phases, real
     # boundaries; snapshotting after the drain would only ever see the settled state.
-    settle = reader.turn.cue_coordinator.settle
+    settle = reader.graph.cue.settle
 
     def traced_settle() -> None:
         trace.observe("cue-conflict", outcome="input-rejected")
         settle()
 
-    monkeypatch.setattr(reader.turn.cue_coordinator, "settle", traced_settle)
-    reader.turn._drain_events()
+    monkeypatch.setattr(reader.graph.cue, "settle", traced_settle)
+    reader.pump()
     trace.observe("cue-reconciled", outcome="replacement-active")
 
     assert copied == []
@@ -172,27 +183,47 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
             prefetch=False,
         ),
     )
-    reader.turn.playback_observation.install_seed({"sub-text": "active"})
-    reader.turn.subtitle_presentation.pipeline.cue_changed(
-        reader.turn.subtitle_presentation.target(), nonempty=True
+    reader.graph.playback.install_seed({"sub-text": "active"})
+    reader.graph.subtitle_presentation.pipeline.cue_changed(
+        reader.graph.subtitle_presentation.target(), nonempty=True
     )
-    trace = LegacyReaderTrace(reader)
+    await_ready(
+        lambda: _runtime_settled(reader),
+        "native subtitle setup did not settle",
+        pump=reader.pump,
+    )
+    trace = SessionTrace(reader)
     trace.observe("native-cue", outcome="pixels-established")
 
-    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
-    renderer.use_native(reader.turn.subtitle_presentation.target())
-    reader.turn.tooltip_controller.select(0)
-    reader.turn.subtitle_presentation.pipeline.draw_current(
-        reader.turn.subtitle_presentation.target()
+    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    renderer.use_native(reader.graph.subtitle_presentation.target())
+    reader.graph.tooltip.select(0)
+    reader.graph.subtitle_presentation.pipeline.draw_current(
+        reader.graph.subtitle_presentation.target()
+    )
+    await_ready(
+        lambda: bool(_visible_surfaces(ipc.commands)),
+        "native subtitle surface did not settle after the geometry became interactive",
+        pump=reader.pump,
     )
     trace.observe("geometry-ready", outcome="interaction-ready")
-    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[])
-    renderer.degrade_geometry(reader.turn.subtitle_presentation.target())
+    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[])
+    renderer.degrade_geometry(reader.graph.subtitle_presentation.target())
+    await_ready(
+        lambda: not _visible_surfaces(ipc.commands),
+        "degraded subtitle surface did not settle",
+        pump=reader.pump,
+    )
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
-    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
-    renderer.use_native(reader.turn.subtitle_presentation.target())
-    reader.turn.subtitle_presentation.pipeline.draw_current(
-        reader.turn.subtitle_presentation.target()
+    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    renderer.use_native(reader.graph.subtitle_presentation.target())
+    reader.graph.subtitle_presentation.pipeline.draw_current(
+        reader.graph.subtitle_presentation.target()
+    )
+    await_ready(
+        lambda: bool(_visible_surfaces(ipc.commands)),
+        "recovered subtitle surface did not settle",
+        pump=reader.pump,
     )
     trace.observe("geometry-recovered", outcome="interaction-ready")
 

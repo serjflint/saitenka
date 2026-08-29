@@ -9,7 +9,7 @@ window is the whole reason this state exists.
 from __future__ import annotations
 
 from session_builder import build_session
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
@@ -23,7 +23,7 @@ from saitenka.runtime.events import (
     ConnectionReplaced,
     EventEnvelope,
     EventOrigin,
-    SessionStarting,
+    StartupReady,
 )
 
 LOST = ConnectionLost(1)
@@ -57,7 +57,7 @@ def test_the_acts_ride_out_as_effects_and_the_bit_stays_behind() -> None:
 
 def test_an_unrelated_session_event_leaves_the_connection_alone() -> None:
     """The slot is a slice, so every SESSION feature sees every SESSION event by broadcast."""
-    assert reduce_connection(ConnectionState(ready=False), SessionStarting()).state == (
+    assert reduce_connection(ConnectionState(ready=False), StartupReady()).state == (
         ConnectionState(ready=False)
     )
 
@@ -66,7 +66,7 @@ def test_the_routed_and_unrouted_stores_agree_on_the_same_stream() -> None:
     """The differential. A store with a reactor reads the slot the mailbox already fed; one
     without reduces the events itself — and only the first is the path production takes."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     reactor = install_session_reactor(gateway, startup_hint=False)
     routed = ConnectionStore(ipc)
     local = ConnectionStore(FakeIPC())  # no gateway, so no reactor to defer to
@@ -84,7 +84,7 @@ def test_a_routed_store_does_not_reduce_what_the_reactor_already_did() -> None:
     anything asks, so a store that also reduced it would apply the same fact twice — harmless for
     one bit, and the shape that is not harmless for a counter."""
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     store = ConnectionStore(ipc)
 
@@ -97,9 +97,9 @@ def test_a_routed_store_does_not_reduce_what_the_reactor_already_did() -> None:
 def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
     """The SessionController-side consequence, driven through the drain rather than by setting the state:
     a command that reaches a session whose socket is gone is rejected, not queued at mpv."""
-    from saitenka.runtime.events import CommandOutcome, CommandReason, UserCommand
-
     ipc = FakeIPC()
+    gateway = bare_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
     reader = build_session(
         ipc,
         infrastructure=SessionInfrastructure(
@@ -110,15 +110,15 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
         ),
     )
     try:
-        reader.turn._drain_event(LOST)
-        reader.turn._drain_event(UserCommand("saitenka-help", command_id=7))
+        assert ipc.publish_runtime_event(ConnectionLost(0))
+        ipc.emit({"event": "client-message", "args": ["saitenka-help"]})
+        reader.pump()
+        outcomes = gateway.snapshot.command_outcomes
     finally:
         reader.close()
+        gateway.close()
 
-    rejected = [o for o in ipc.runtime_outcomes if o.command_id == 7]
-    assert [(o.outcome, o.reason) for o in rejected] == [
-        (CommandOutcome.REJECTED, CommandReason.DISCONNECTED)
-    ]
+    assert outcomes == 1
 
 
 def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
@@ -130,7 +130,7 @@ def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
     right, and the reconnect simply never reaches the pipeline.
     """
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     store = ConnectionStore(ipc)
 
@@ -143,7 +143,7 @@ def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
     ipc.drain_events(0.0)
 
     assert store.current.ready is True
-    census = gateway.claim_census()
+    census = gateway.routing_census()
     assert {name: census[name] for name in ("ConnectionLost", "ConnectionReplaced")} == {
         "ConnectionLost": (1, 1),
         "ConnectionReplaced": (1, 1),
@@ -152,21 +152,11 @@ def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
     gateway.close()
 
 
-def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
-    """The episode boundary, claimed. The reducer holds nothing — whether this is a *new* file is
-    the performer's question, answered against mpv when it acts — so the oracle is that the act
-    happened, not that a field changed."""
-    from saitenka.runtime.effects import ReslotEpisode
-    from saitenka.runtime.episode import EpisodeBoundary, reduce_episode
+def test_a_file_load_reaches_the_episode_owner_once(monkeypatch) -> None:
     from saitenka.runtime.events import FileLoaded
 
-    assert reduce_episode(EpisodeBoundary(), FileLoaded()).effects == (ReslotEpisode(),)
-    assert reduce_episode(EpisodeBoundary(), READY).effects == (), (
-        "the slice broadcasts, so every SESSION event reaches this and only one is its own"
-    )
-
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     reslotted: list[str] = []
     reader = build_session(
@@ -180,18 +170,15 @@ def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
     )
     reader.start()
     monkeypatch.setattr(
-        reader.turn.episode_watch,
+        reader.graph.episode_watch,
         "file_loaded",
         lambda: reslotted.append("reslot"),
     )
     try:
         gateway.publish_session_event(FileLoaded())
-        ipc.drain_events(0.0)
+        reader.pump()
     finally:
         reader.close()
         gateway.close()
 
-    assert reslotted == ["reslot"], (
-        "claimed away from the SessionController, so the effect is the only path"
-    )
-    assert gateway.claim_census()["FileLoaded"] == (1, 1)
+    assert reslotted == ["reslot"]

@@ -10,15 +10,11 @@ It lives in `app/` rather than `mpvio/` because it names app features; `mpvio` m
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 from typing import TYPE_CHECKING
 
 import saitenka.app.session.intents as session_intents
-from saitenka.app import (
-    subtitle_intents,
-    telemetry,
-)
+from saitenka.app import subtitle_intents
 from saitenka.app.bindings import (
     ANALYSIS_MSG,
     ANNOTATION_MSG,
@@ -62,41 +58,18 @@ from saitenka.app.feature_bindings import (
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.profiles import profile_intents
 from saitenka.app.features.tooltip import hover_intents
-from saitenka.app.features.tooltip.preparation import (
-    TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
-)
 from saitenka.app.session import interaction_intents, panel_intents
 from saitenka.app.session.stateless import StatelessCommandRegistration, bind_stateless
 from saitenka.runtime.connection import ConnectionState, reduce_connection
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
     ApplyPlaybackDeltas,
-    AttachSessionDiagnostics,
-    CancelInteractionWork,
-    CloseCapabilityActors,
-    CloseSessionOverlay,
-    CloseSessionStores,
-    CloseSessionSurfaces,
-    CloseSubtitleRendering,
-    CloseWorkerLanes,
-    DetachDiagnostics,
     EffectOutcome,
-    EstablishRenderSpace,
     ExpireEffect,
-    GuardMainRender,
-    OpenSessionHistory,
     Owner,
-    RegisterInputBindings,
-    ReleaseInputCapture,
-    RemoveSessionArtifacts,
     ReplaySubtitleSelection,
-    ReslotEpisode,
     RetireCueIdentity,
-    RunUserCommand,
-    SeedOptionalCollaborators,
-    StartPropertyObservation,
 )
-from saitenka.runtime.episode import EPISODE_FEATURE, EpisodeBoundary, reduce_episode
 from saitenka.runtime.events import (
     INTERACTION_EVENTS,
     PLAYBACK_EVENTS,
@@ -111,15 +84,11 @@ from saitenka.runtime.events import (
     EventOrigin,
     FileLoaded,
     PropertyObserved,
-    SessionClosing,
-    SessionStarting,
     StartupHintRequested,
     StartupReady,
     UserCommand,
 )
 from saitenka.runtime.interaction_slice import interaction_slice_reducer
-from saitenka.runtime.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
-from saitenka.runtime.lifecycle_start import LifecycleStartState, reduce_lifecycle_start
 from saitenka.runtime.playback_slice import (
     PLAYBACK_FEATURE,
     PlaybackSlice,
@@ -136,7 +105,6 @@ from saitenka.runtime.startup_hint import StartupHintReducer, StartupHintState
 from saitenka.runtime.state import RouteKey, SessionReducer, SessionState, SliceReducer
 from saitenka.runtime.subtitle import SubtitleTrackState
 from saitenka.runtime.subtitle_slice import SUBTITLE_FEATURE, subtitle_slice_reducer
-from saitenka.runtime.user_command import COMMAND_FEATURE, CommandIntake, reduce_user_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -159,124 +127,42 @@ log = logging.getLogger(__name__)
 
 #: Events `Owner.SESSION` owns. Everything absent here routes to nobody and is counted.
 _SESSION_EVENTS = (
-    SessionStarting,
     StartupHintRequested,
     StartupReady,
     ConnectionLost,
     ConnectionReady,
     ConnectionReplaced,
-    FileLoaded,
-    UserCommand,
     EffectFinished,
-    SessionClosing,
 )
+
+#: Owner-thread facts that share mailbox order with reactor events but have no reduced state.
+_PASSTHROUGH = (FileLoaded, UserCommand)
 
 #: Payload types the reactor claims rather than forwarding to the owner-thread turn.
 #:
 #: Declared, never derived from `_SESSION_EVENTS` — routing and claiming answer different
 #: questions, and a payload joins this tuple only when the turn has no remaining part in it.
 #:
-#: What "no remaining part" means is the whole protocol: route the payload, move the act, then
-#: claim. All three connection payloads are here because their acts moved — the stranded cue
-#: identity and the track-selection replay are registered performers now, reached through an effect
-#: rather than through a branch in the drain. `ConnectionReady` needed only the first two steps: it
-#: decides nothing but the bit.
-#:
-#: `UserCommand` is here on the same protocol and is the one whose act carries a subject: the
-#: binding table does not move, only the decision to consult it.
-#:
-#: `PropertyObserved` is the first claim outside `Owner.SESSION`. With a reactor, claiming sends the
-#: raw observation straight to the playback slice. Without one, `PlaybackObservationController`
-#: drives the same reducer locally. Letting a routed observation fall through would reduce it twice.
+#: Connection and property observations are fully owned by their stateful slices.
 _CLAIMED = (
     StartupHintRequested,
     StartupReady,
-    SessionClosing,
     ConnectionLost,
     ConnectionReady,
     ConnectionReplaced,
-    FileLoaded,
-    UserCommand,
     PropertyObserved,
 )
 
 #: Feature keys inside `Owner.SESSION`'s slice. Named once so a reader of the slot does not spell
 #: a key itself and drift from the registration.
 STARTUP_HINT = "startup-hint"
-LIFECYCLE_CLOSE = "lifecycle-close"
-LIFECYCLE_START = "lifecycle-start"
 CONNECTION = "connection"
-EPISODE = EPISODE_FEATURE
-COMMAND = COMMAND_FEATURE
-
-#: Names in `gateway.session_resources`. Spelled once for the same reason the feature keys are:
-#: the owner that registers and the dispatcher that closes must not drift apart.
-SURFACES_RESOURCE = "lifecycle-surfaces"
-OVERLAY_RESOURCE = "overlay-transport"
-INPUT_CAPTURE_RESOURCE = "input-capture"
-SESSION_SUMMARY_RESOURCE = "session-summary"
-BACKLOG_RESOURCE = "backlog-store"
-MINED_RESOURCE = "mined-store"
-SUBTITLE_DEACTIVATE_RESOURCE = "subtitle-deactivate"
-SUBTITLE_CLEAR_RESOURCE = "subtitle-clear"
-SUBTITLE_CLOSE_RESOURCE = "subtitle-close"
 #: The cue identity a lost transport strands. A *retiring* act, so it goes in the close-verb table
 #: with the rest — nothing about that seam is close-specific, and an act joins the runtime by
 #: becoming an effect with a registered performer whatever the phase.
 CUE_RETIRE_RESOURCE = "cue-identity-retire"
-#: Re-slotting onto a newly loaded file. A *starting* act — the episode is being established — so it
-#: goes in the start table beside the subtitle replay.
-RESLOT_PARTICIPANT = "start:episode-reslot"
-#: Running one arrived command. Neither verb fits: it starts nothing and retires nothing, and its
-#: effect has to say what it is about.
-COMMAND_PERFORMER = "run:user-command"
 #: Applying what one reduced observation published. `Owner.PLAYBACK`'s outbox, delivered.
 PLAYBACK_DELTAS_PERFORMER = "apply:playback-deltas"
-
-#: The optional collaborators' probes, and the interaction work that outlives a cancelled hover.
-CAPABILITY_PARTICIPANTS = ("capability:tts", "capability:anki")
-INTERACTION_WORK_PARTICIPANTS = ("interaction-jobs", "hover-metadata")
-
-#: Every worker and job lane, in the one order that is safe. Declared here rather than derived from
-#: the lane registry: the registry knows the lanes, not that the geometry executor must stop before
-#: the state it renders against, nor that the atlas is uninstalled only after its lane has drained.
-#:
-#: The trailing four have no ordering constraint at all — whatever owns their state closed in an
-#: earlier phase — so they go last, where they cannot spend the shared lane budget the constrained
-#: chain above them needs. A lane closes by *cancelling* first and joining second, so a starved
-#: budget still stops the work; it only stops waiting for it.
-WORKER_LANE_PARTICIPANTS = (
-    "lanes:stop-workers",
-    "lanes:subtitle-fetch",
-    "lanes:subtitle-picker",
-    "lanes:geometry",
-    "lanes:annotation",
-    "lanes:cue-annotation",
-    "lanes:tooltip-raster",
-    "lanes:tooltip-render-ahead",
-    "lanes:tooltip-engaged-worker",
-    "lanes:tooltip-engaged",
-    *TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
-    "lanes:capabilities",
-    "lanes:interaction-metadata",
-    "lanes:mined-seed",
-    "lanes:episode-analysis",
-    # Dead last, once every lane above has cancelled the work it owns. On a free-threaded build the
-    # shared render pool is a ThreadPoolExecutor whose workers are NOT daemons, so the interpreter's
-    # own atexit joins them: a raster still running here holds the process open after mpv is gone
-    # and the terminal never comes back. Measured at 6.1s for a single 6s task.
-    "lanes:render-pool",
-)
-
-#: Setup participants. Prefixed because the two halves are separate contracts, not two uses of one:
-#: a startup participant answers `start()` and a close participant answers `close()`.
-RENDER_GUARD_PARTICIPANT = "start:render-guard"
-RENDER_SPACE_PARTICIPANT = "start:render-space"
-OBSERVERS_PARTICIPANT = "start:observers"
-INPUT_PARTICIPANT = "start:input"
-COLLABORATORS_PARTICIPANT = "start:collaborators"
-HISTORY_PARTICIPANT = "start:history"
-DIAGNOSTICS_PARTICIPANT = "start:diagnostics"
 #: Re-asserting the track selection against a replacement connection. In the *start* table, not the
 #: close one: the connection that has never heard the selection needs it established, and a verb
 #: that meant both would be a lie in the one place this vocabulary has to stay readable.
@@ -313,35 +199,13 @@ def owner_of(event: RuntimeEvent) -> Owner | None:
 #: `isinstance`, so adding a duty is a row and cannot pick the wrong branch by falling through.
 #: The names are a tuple because a duty can have several participants that retire together; the
 #: order inside one is the contract, exactly as it is between two effects in one phase.
-_RESOURCE_OF: dict[type, tuple[str, ...]] = {
-    RetireCueIdentity: (CUE_RETIRE_RESOURCE,),
-    CloseSessionSurfaces: (SURFACES_RESOURCE,),
-    CloseSessionOverlay: (OVERLAY_RESOURCE,),
-    ReleaseInputCapture: (INPUT_CAPTURE_RESOURCE,),
-    CloseCapabilityActors: CAPABILITY_PARTICIPANTS,
-    CancelInteractionWork: INTERACTION_WORK_PARTICIPANTS,
-    CloseWorkerLanes: WORKER_LANE_PARTICIPANTS,
-    CloseSessionStores: (SESSION_SUMMARY_RESOURCE, BACKLOG_RESOURCE, MINED_RESOURCE),
-    CloseSubtitleRendering: (
-        SUBTITLE_DEACTIVATE_RESOURCE,
-        SUBTITLE_CLEAR_RESOURCE,
-        SUBTITLE_CLOSE_RESOURCE,
-    ),
-}
+_RESOURCE_OF: dict[type, tuple[str, ...]] = {RetireCueIdentity: (CUE_RETIRE_RESOURCE,)}
 
 
 #: Which registered participant each setup effect brings up. Separate table from `_RESOURCE_OF`
 #: because the verbs differ; sharing one would be the widening this vocabulary avoids.
 _PARTICIPANT_OF: dict[type, str] = {
     ReplaySubtitleSelection: SUBTITLE_REPLAY_PARTICIPANT,
-    ReslotEpisode: RESLOT_PARTICIPANT,
-    GuardMainRender: RENDER_GUARD_PARTICIPANT,
-    EstablishRenderSpace: RENDER_SPACE_PARTICIPANT,
-    StartPropertyObservation: OBSERVERS_PARTICIPANT,
-    RegisterInputBindings: INPUT_PARTICIPANT,
-    SeedOptionalCollaborators: COLLABORATORS_PARTICIPANT,
-    OpenSessionHistory: HISTORY_PARTICIPANT,
-    AttachSessionDiagnostics: DIAGNOSTICS_PARTICIPANT,
 }
 
 
@@ -349,7 +213,6 @@ _PARTICIPANT_OF: dict[type, str] = {
 #: verb takes an argument: `start()` and `close()` answer for the session itself, and an act about
 #: something the effect carries cannot be spelled as either.
 _PERFORMER_OF: dict[type, str] = {
-    RunUserCommand: COMMAND_PERFORMER,
     ApplyPlaybackDeltas: PLAYBACK_DELTAS_PERFORMER,
 }
 
@@ -425,7 +288,7 @@ def _retire(
     return not missing
 
 
-def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect], bool]:
+def _dispatcher(gateway: MpvGateway) -> Callable[[Effect], bool]:
     """Perform an effect, app-side kinds first and the gateway's own kinds after.
 
     The composition lives here because `mpvio` must not import `app`: the gateway can perform an
@@ -433,13 +296,6 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
     """
 
     def dispatch(effect: Effect) -> bool:
-        if isinstance(effect, DetachDiagnostics):
-            telemetry.set_gauge_provider(None)
-            # The session's last chance to say what it routed and what it dropped. Detaching
-            # diagnostics is where the session stops being observable, so the census goes out
-            # here or nowhere.
-            log.debug("runtime census: %s", ledger.counts)
-            return True
         performer = _PERFORMER_OF.get(type(effect))
         if performer is not None:
             return _perform(gateway, performer, effect)
@@ -453,9 +309,6 @@ def _dispatcher(gateway: MpvGateway, ledger: RuntimeLedger) -> Callable[[Effect]
                 names,
                 missing_is_failure=not isinstance(effect, RetireCueIdentity),
             )
-        if isinstance(effect, RemoveSessionArtifacts):
-            shutil.rmtree(effect.path, ignore_errors=True)
-            return True
         return gateway.dispatch_effect(effect)
 
     return dispatch
@@ -505,9 +358,9 @@ def install_session_runtime(ipc: MpvIPC, *, startup_hint: bool = True) -> MpvGat
     duties never run, which is what `attach` silently was. Entrypoints ask for a session runtime,
     not for the two halves in the right order.
     """
-    from saitenka.mpvio.gateway import install_legacy_gateway
+    from saitenka.mpvio.gateway import install_gateway
 
-    gateway = install_legacy_gateway(ipc)
+    gateway = install_gateway(ipc)
     install_session_reactor(gateway, startup_hint=startup_hint)
     return gateway
 
@@ -532,11 +385,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     session = SliceReducer(
         {
             STARTUP_HINT: hint,
-            LIFECYCLE_CLOSE: reduce_lifecycle_close,
-            LIFECYCLE_START: reduce_lifecycle_start,
             CONNECTION: reduce_connection,
-            EPISODE: reduce_episode,
-            COMMAND: reduce_user_command,
         }
     )
     playback = playback_slice_reducer()
@@ -553,7 +402,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
         RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
     # Raw observations are claimed at the gateway; the observation owner dispatches the other
-    # playback declarations. Both paths meet in this slice, and SessionTurn applies the
+    # playback declarations. Both paths meet in this slice, and the playback projection applies the
     # cross-feature consequences of its typed deltas.
     routes.update({RouteKey(event, Owner.PLAYBACK): playback for event in PLAYBACK_EVENTS})
     # `Owner.SUBTITLE` is not claimed either, and for a sharper reason: every event it takes is a
@@ -562,7 +411,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
     routes.update({RouteKey(event, Owner.SUBTITLE): subtitle for event in SUBTITLE_EVENTS})
     # `Owner.INTERACTION` is not claimed for the third reason in the set: its events are
     # *observations*, so the reducer is what decides and the decisions come back through the
-    # slice's outbox for SessionTurn to perform. The slot owns the hysteresis; the acts do not move
+    # slice's outbox for the interaction owner to perform. The slot owns the hysteresis; the acts do not move
     # until the tooltip's own state does.
     routes.update({RouteKey(event, Owner.INTERACTION): interaction for event in INTERACTION_EVENTS})
     # `Owner.PRESENTATION` is a declaring slice like SUBTITLE's: the sender has already drawn or
@@ -588,11 +437,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             session=session.initial(
                 {
                     STARTUP_HINT: StartupHintState(),
-                    LIFECYCLE_CLOSE: LifecycleCloseState(),
-                    LIFECYCLE_START: LifecycleStartState(),
                     CONNECTION: ConnectionState(),
-                    EPISODE: EpisodeBoundary(),
-                    COMMAND: CommandIntake(),
                 }
             ),
             playback=playback.initial({PLAYBACK_FEATURE: PlaybackSlice()}),
@@ -602,9 +447,15 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
             ),
             presentation=presentation.initial({PRESENTATION_FEATURE: TranslationState()}),
         ),
-        OwnerRouter(SessionReducer(routes), owner_of, ledger=ledger, broadcast=LIFETIME_EVENTS),
+        OwnerRouter(
+            SessionReducer(routes),
+            owner_of,
+            ledger=ledger,
+            broadcast=LIFETIME_EVENTS,
+            passthrough=_PASSTHROUGH,
+        ),
         gateway.mailbox,
-        _dispatcher(gateway, ledger),
+        _dispatcher(gateway),
         diagnostics=ledger.diagnostic,
         control=control,
     )

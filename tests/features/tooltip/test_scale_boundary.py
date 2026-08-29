@@ -20,10 +20,10 @@ _SCALES = [1.5, 2.0]
 
 
 def _reader(scale: float, monkeypatch):
-    r = hidpi_reader(scale).turn
+    r = hidpi_reader(scale).graph
     monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.select(0)
-    r.tooltip_controller.show_tooltip(0)
+    r.tooltip.select(0)
+    r.tooltip.show_tooltip(0)
     return r
 
 
@@ -31,50 +31,45 @@ def _reader(scale: float, monkeypatch):
 def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
     panel, s, scroll = tooltip_panel.hit_target(
-        r.tooltip_controller.surface_state().nest,
-        r.tooltip_controller.surface_state().view.state,
-        r.tooltip_controller.surface_state().view.scroll,
-        r.tooltip_controller.scale().raster,
+        r.tooltip.surface_state().nest,
+        r.tooltip.surface_state().view.state,
+        r.tooltip.surface_state().view.scroll,
+        r.tooltip.scale().raster,
         nested=False,
     )
     assert (
-        panel is r.tooltip_controller.surface_state().view.state
+        panel is r.tooltip.surface_state().view.state
     )  # the ONE reference panel — there is no second native panel
-    assert (
-        s == r.tooltip_controller.scale().raster
-    )  # inverse == the (bucketed) scale the blit drew at
-    assert scroll == r.tooltip_controller.surface_state().view.scroll
+    assert s == r.tooltip.scale().raster  # inverse == the (bucketed) scale the blit drew at
+    assert scroll == r.tooltip.surface_state().view.scroll
 
 
 @pytest.mark.parametrize("scale", _SCALES)
 def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
     panel, s, scroll = tooltip_panel.hit_target(
-        r.tooltip_controller.surface_state().nest,
-        r.tooltip_controller.surface_state().view.state,
-        r.tooltip_controller.surface_state().view.scroll,
-        r.tooltip_controller.scale().raster,
+        r.tooltip.surface_state().nest,
+        r.tooltip.surface_state().view.state,
+        r.tooltip.surface_state().view.scroll,
+        r.tooltip.scale().raster,
         nested=False,
     )
     panel.windowed.viewport(0, 1_000_000)  # force every block measured → full geometry
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    sx, sy = r.tooltip.surface_state().view.xy
     scans = panel.windowed.scan_boxes()
     links = panel.windowed.link_boxes()
     assert scans and links
     for b in scans:
         mx, my = sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s
         assert (
-            tooltip_panel.scan_hit(
-                r.tooltip_controller.surface_state(), r.tooltip_controller.scale().raster, mx, my
-            )
-            == b
+            tooltip_panel.scan_hit(r.tooltip.surface_state(), r.tooltip.scale().raster, mx, my) == b
         )
     for lb in links:
         mx, my = sx + (lb.x + lb.w / 2) * s, sy + (lb.y + lb.h / 2 - scroll) * s
         assert (
             tooltip_panel.link_hit_at(
-                r.tooltip_controller.surface_state(),
-                r.tooltip_controller.scale().raster,
+                r.tooltip.surface_state(),
+                r.tooltip.scale().raster,
                 mx,
                 my,
                 nested=False,
@@ -89,47 +84,47 @@ def test_cold_paint_is_soft_then_upgrades_to_crisp_when_bands_warm(scale, monkey
     # native), flags a pending upgrade, and the poll loop swaps to crisp once a worker warms the bands.
     r = _reader(scale, monkeypatch)  # no worker in the test → the show paints soft
     assert (
-        r.tooltip_controller.surface_state().view.crisp_miss == "warming"
-        and r.tooltip_controller.surface_state().view.crisp_pending
+        r.tooltip.surface_state().view.crisp_miss == "warming"
+        and r.tooltip.surface_state().view.crisp_pending
     )  # cold → soft, upgrade pending
 
-    st = r.tooltip_controller.surface_state().view.state
-    vh = min(r.tooltip_controller.surface_state().view.view_h, st.full_height)
-    y0 = max(0, min(r.tooltip_controller.surface_state().view.scroll, max(0, st.full_height - vh)))
+    st = r.tooltip.surface_state().view.state
+    vh = min(r.tooltip.surface_state().view.view_h, st.full_height)
+    y0 = max(0, min(r.tooltip.surface_state().view.scroll, max(0, st.full_height - vh)))
     st.viewport(
-        y0, vh, scale=r.tooltip_controller.scale().raster
+        y0, vh, scale=r.tooltip.scale().raster
     )  # simulate the worker warming the native viewport
     tooltip_panel.apply_pending_crisp(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.surface_state().view
+        r.tooltip.tip_ports, r.tooltip.surface_state().view
     )  # the poll-loop upgrade
 
     assert (
-        r.tooltip_controller.surface_state().view.crisp_miss == ""
-        and not r.tooltip_controller.surface_state().view.crisp_pending
+        r.tooltip.surface_state().view.crisp_miss == ""
+        and not r.tooltip.surface_state().view.crisp_pending
     )  # now composited crisp
-    assert r.tooltip_controller.surface_state().view.rect is not None
-    assert r.tooltip_controller.surface_state().view.rect[2] == round(
-        r.tooltip_controller.scale().width * r.tooltip_controller.scale().raster
+    assert r.tooltip.surface_state().view.rect is not None
+    assert r.tooltip.surface_state().view.rect[2] == round(
+        r.tooltip.scale().width * r.tooltip.scale().raster
     )  # native display width
 
 
 @pytest.mark.parametrize("scale", _SCALES)
 def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
     # When the bands are already warm (worker ran ahead), the show composites crisp on the first paint.
-    r = hidpi_reader(scale).turn
+    r = hidpi_reader(scale).graph
     monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.select(0)
-    r.tooltip_controller.show_tooltip(0)  # first paint (soft) also measures the panel
-    st = r.tooltip_controller.surface_state().view.state
-    vh = min(r.tooltip_controller.surface_state().view.view_h, st.full_height)
-    y0 = max(0, min(r.tooltip_controller.surface_state().view.scroll, max(0, st.full_height - vh)))
-    st.viewport(y0, vh, scale=r.tooltip_controller.scale().raster)  # warm the native viewport
+    r.tooltip.select(0)
+    r.tooltip.show_tooltip(0)  # first paint (soft) also measures the panel
+    st = r.tooltip.surface_state().view.state
+    vh = min(r.tooltip.surface_state().view.view_h, st.full_height)
+    y0 = max(0, min(r.tooltip.surface_state().view.scroll, max(0, st.full_height - vh)))
+    st.viewport(y0, vh, scale=r.tooltip.scale().raster)  # warm the native viewport
     tooltip_panel.render_view(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.surface_state().view
+        r.tooltip.tip_ports, r.tooltip.surface_state().view
     )  # re-blit with warm bands
     assert (
-        r.tooltip_controller.surface_state().view.crisp_miss == ""
-        and not r.tooltip_controller.surface_state().view.crisp_pending
+        r.tooltip.surface_state().view.crisp_miss == ""
+        and not r.tooltip.surface_state().view.crisp_pending
     )
 
 
@@ -137,25 +132,20 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
     # A link-navigated view builds no second panel — it composites native from its own reference panel
     # and the seam still holds, with no synthetic key.
     r = _reader(2.0, monkeypatch)
-    tooltip.navigate_tip(r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "見る")
-    assert (
-        r.tooltip_controller.surface_state().view.key is None
-    )  # no synthetic nav key needed — one panel
+    tooltip.navigate_tip(r.tooltip.tip_ports, r.tooltip.panel_ports, "見る")
+    assert r.tooltip.surface_state().view.key is None  # no synthetic nav key needed — one panel
     panel, s, scroll = tooltip_panel.hit_target(
-        r.tooltip_controller.surface_state().nest,
-        r.tooltip_controller.surface_state().view.state,
-        r.tooltip_controller.surface_state().view.scroll,
-        r.tooltip_controller.scale().raster,
+        r.tooltip.surface_state().nest,
+        r.tooltip.surface_state().view.state,
+        r.tooltip.surface_state().view.scroll,
+        r.tooltip.scale().raster,
         nested=False,
     )
-    assert panel is r.tooltip_controller.surface_state().view.state
+    assert panel is r.tooltip.surface_state().view.state
     panel.windowed.viewport(0, 1_000_000)
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    sx, sy = r.tooltip.surface_state().view.xy
     for b in panel.windowed.scan_boxes():
         mx, my = sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s
         assert (
-            tooltip_panel.scan_hit(
-                r.tooltip_controller.surface_state(), r.tooltip_controller.scale().raster, mx, my
-            )
-            == b
+            tooltip_panel.scan_hit(r.tooltip.surface_state(), r.tooltip.scale().raster, mx, my) == b
         )

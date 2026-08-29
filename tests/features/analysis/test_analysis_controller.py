@@ -4,7 +4,7 @@ import threading
 
 import pytest
 from session_builder import TestSession, build_session
-from util import FakeIPC, await_ready, drain_for, runtime_gateway
+from util import FakeIPC, await_ready, drain_for, session_gateway
 
 from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.features.analysis import analysis_controller
@@ -26,12 +26,12 @@ from saitenka.subtitles import Cue, CueIndex
 @pytest.fixture
 def reader():
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     reader = build_session(
         ipc, services=SessionServices(scorer=Scorer(known=KnownWords.from_set(["本"])))
     )
-    reader.turn.track_commands.declare(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+    reader.graph.track_commands.declare(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(0, 1, "私は本を読む。")]
     )
     yield reader
@@ -40,89 +40,106 @@ def reader():
 
 
 def _toggle(reader: TestSession) -> None:
-    reader.turn.command_runtime.handle(ANALYSIS_MSG)
+    reader.command(ANALYSIS_MSG)
 
 
 def _invalidate(reader: TestSession, *, vocabulary_changed: bool = False) -> None:
-    reader.turn.analysis_commands.invalidate(vocabulary_changed=vocabulary_changed)
+    reader.graph.analysis_commands.invalidate(vocabulary_changed=vocabulary_changed)
 
 
 def _finish(reader: TestSession) -> None:
     await_ready(
-        lambda: reader.turn.analysis_controller.settled,
+        lambda: reader.graph.analysis.settled,
         "analysis result was not published",
-        pump=reader.turn._drain_events,
+        pump=reader.pump,
     )
 
 
-def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader):
+def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    analyze_cues = analysis_controller.analyze_cues
+
+    def analyze(cues, scorer, tokenizer):
+        started.set()
+        release.wait(1)
+        return analyze_cues(cues, scorer, tokenizer)
+
+    monkeypatch.setattr(analysis_controller, "analyze_cues", analyze)
     _toggle(reader)
-    assert reader.turn.analysis_controller.status == "Analyzing…"
+    assert started.wait(1)
+    assert reader.graph.analysis.status == "Analyzing…"
+    release.set()
     _finish(reader)
 
-    assert reader.turn.analysis_controller.result is not None
-    assert reader.turn.analysis_controller.status == "Ready"
-    assert OverlayId.ANALYSIS in reader.turn.ov._live
+    assert reader.graph.analysis.result is not None
+    assert reader.graph.analysis.status == "Ready"
+    assert OverlayId.ANALYSIS in reader.graph.overlay._live
     forbidden = {"sub-seek", "seek"}
-    assert not any(command and command[0] in forbidden for command in reader.turn.ipc.commands)
-    assert not any(command[:2] == ("set_property", "pause") for command in reader.turn.ipc.commands)
+    assert not any(command and command[0] in forbidden for command in reader.graph.ipc.commands)
+    assert not any(
+        command[:2] == ("set_property", "pause") for command in reader.graph.ipc.commands
+    )
 
     _toggle(reader)
-    assert OverlayId.ANALYSIS not in reader.turn.ov._live
+    await_ready(
+        lambda: OverlayId.ANALYSIS not in reader.graph.overlay._live,
+        "analysis overlay did not retire",
+        pump=reader.pump,
+    )
 
 
 def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
-    reader.turn.track_commands.declare(
-        SubtitleTracksDiscovered(None, reader.turn.track_commands.current().en_sid)
+    reader.graph.track_commands.declare(
+        SubtitleTracksDiscovered(None, reader.graph.track_commands.current().en_sid)
     )
 
     _toggle(reader)
-    assert reader.turn.analysis_controller.status == "Analyzing…"
     _finish(reader)
-    assert reader.turn.analysis_controller.status == "Ready"
-    assert reader.turn.analysis_controller.result is not None
+    assert reader.graph.analysis.status == "Ready"
+    assert reader.graph.analysis.result is not None
 
 
 def test_no_index_reports_unavailable(reader):
-    reader.turn.track_commands.navigation.current.sub_index = None
+    reader.graph.track_commands.navigation.current.sub_index = None
 
     _toggle(reader)
 
-    assert reader.turn.analysis_controller.status == "Japanese track unavailable"
-    assert reader.turn.analysis_controller.settled
+    assert reader.graph.analysis.status == "Japanese track unavailable"
+    assert reader.graph.analysis.settled
 
 
 def test_cache_hit_reopens_with_the_same_result_immediately(reader):
     _toggle(reader)
     _finish(reader)
-    result = reader.turn.analysis_controller.result
+    result = reader.graph.analysis.result
 
     _toggle(reader)
     _toggle(reader)
 
-    assert reader.turn.analysis_controller.status == "Ready"
-    assert reader.turn.analysis_controller.result is result
+    assert reader.graph.analysis.status == "Ready"
+    assert reader.graph.analysis.result is result
 
 
 def test_track_analysis_completes_while_overlay_is_closed(reader):
     _invalidate(reader)
     _finish(reader)
 
-    assert reader.turn.analysis_controller.result is not None
-    assert not reader.turn.analysis_controller.open
-    assert OverlayId.ANALYSIS not in reader.turn.ov._live
+    assert reader.graph.analysis.result is not None
+    assert not reader.graph.analysis.open
+    assert OverlayId.ANALYSIS not in reader.graph.overlay._live
 
 
 def test_dependency_loading_defers_analysis_until_vocabulary_arrives(reader):
-    reader.turn.profile_session.begin_loading()
+    reader.graph.profile.begin_loading()
 
     _invalidate(reader)
-    assert reader.turn.analysis_controller.settled
+    assert reader.graph.analysis.settled
 
-    reader.turn.profile_session.accept(DependencyBundle(reader.turn.profile_session.identity))
+    reader.graph.profile.accept(DependencyBundle(reader.graph.profile.identity))
     _invalidate(reader, vocabulary_changed=True)
     _finish(reader)
-    assert reader.turn.analysis_controller.result is not None
+    assert reader.graph.analysis.result is not None
 
 
 def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
@@ -130,15 +147,15 @@ def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
     _finish(reader)
 
     _invalidate(reader, vocabulary_changed=True)
-    assert reader.turn.analysis_controller.status == "Analyzing…"
+    assert reader.graph.analysis.status == "Analyzing…"
     _finish(reader)
 
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(0, 1, "彼は映画を見る。")]
     )
     _invalidate(reader)
     _finish(reader)
-    assert cue_result(reader.turn.analysis_controller.result, 0) is not None
+    assert cue_result(reader.graph.analysis.result, 0) is not None
 
 
 def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
@@ -157,25 +174,25 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
         return analyze_cues(cues, scorer, tokenizer)
 
     monkeypatch.setattr(analysis_controller, "analyze_cues", analyze)
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "古い一")])
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "古い一")])
     _toggle(reader)
     assert old_started[0].wait(1)
 
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "古い二")])
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "古い二")])
     _invalidate(reader)
     assert old_started[1].wait(1)
 
-    reader.turn.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "新しい")])
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex([Cue(0, 1, "新しい")])
     _invalidate(reader)
-    assert reader.turn.analysis_controller.status == "Analyzing…"
+    assert reader.graph.analysis.status == "Analyzing…"
 
     old_release.set()
     _finish(reader)
-    current = reader.turn.analysis_controller.result
+    current = reader.graph.analysis.result
     assert current is not None
 
-    drain_for(reader.turn._drain_events)
-    assert reader.turn.analysis_controller.result is current
+    drain_for(reader.pump)
+    assert reader.graph.analysis.result is current
     assert newest_calls == 1
 
 
@@ -201,10 +218,10 @@ def test_worker_completion_is_applied_only_when_the_session_thread_drains(reader
 
     release.set()
     assert finished.wait(1)
-    assert reader.turn.analysis_controller.result is None
+    assert reader.graph.analysis.result is None
 
     _finish(reader)
-    assert reader.turn.analysis_controller.result is not None
+    assert reader.graph.analysis.result is not None
     assert worker_thread[0] != session_thread
 
 
@@ -221,17 +238,17 @@ def test_close_preserves_completed_analysis_for_the_session_summary():
             pass
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = session_gateway(ipc)
     reader = build_session(
         ipc, services=SessionServices(scorer=Scorer(known=KnownWords.from_set(["本"])))
     )
     result = None
     try:
-        reader.turn.track_commands.declare(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
-        reader.turn.track_commands.navigation.current.sub_index = CueIndex(
+        reader.graph.track_commands.declare(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
+        reader.graph.track_commands.navigation.current.sub_index = CueIndex(
             [Cue(0, 1, "私は本を読む。")]
         )
-        reader.turn.history.replace_recorder(
+        reader.graph.history.replace_recorder(
             SessionRecorder(
                 "/anime/Show 01.mkv",
                 clock=lambda: 0.0,
@@ -241,7 +258,7 @@ def test_close_preserves_completed_analysis_for_the_session_summary():
         )
         _toggle(reader)
         _finish(reader)
-        result = reader.turn.analysis_controller.result
+        result = reader.graph.analysis.result
     finally:
         reader.close()
         gateway.close()
@@ -256,8 +273,8 @@ def test_malformed_success_has_a_terminal_unavailable_state(reader, monkeypatch)
     _toggle(reader)
     _finish(reader)
 
-    assert reader.turn.analysis_controller.result is None
-    assert reader.turn.analysis_controller.status == "Analysis unavailable"
+    assert reader.graph.analysis.result is None
+    assert reader.graph.analysis.status == "Analysis unavailable"
 
 
 def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, caplog):
@@ -269,19 +286,19 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
         _toggle(reader)
         _finish(reader)
 
-    assert reader.turn.analysis_controller.result is None
-    assert reader.turn.analysis_controller.status == "Analysis unavailable"
+    assert reader.graph.analysis.result is None
+    assert reader.graph.analysis.status == "Analysis unavailable"
     assert "episode analysis failed" in caplog.text
 
 
 def test_english_or_missing_japanese_track_is_unavailable(reader):
-    reader.turn.track_commands.declare(SubtitleLanguageChanged("en"))
+    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
 
     _toggle(reader)
 
-    assert reader.turn.analysis_controller.status == "Japanese track unavailable"
-    assert reader.turn.analysis_controller.result is None
-    assert reader.turn.analysis_controller.settled
+    assert reader.graph.analysis.status == "Japanese track unavailable"
+    assert reader.graph.analysis.result is None
+    assert reader.graph.analysis.settled
 
 
 def test_ui_scale_enlarges_episode_analysis_window():

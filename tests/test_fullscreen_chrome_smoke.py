@@ -42,8 +42,10 @@ class FakeOverlay:
     def __init__(self):
         self.shown: list = []
         self.lifecycle_oids: set[int] = set()
+        self.ops = 0
 
     def prepare(self, image, x=0, y=0, *, oid=0, revision=0):  # noqa: ARG002
+        self.ops += 1
         self.shown.append((image, x, y, oid))
         self.lifecycle_oids.add(oid)
         return SimpleNamespace(oid=oid, path=None, tail=(), command=("overlay-add", oid))
@@ -84,29 +86,27 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> TestSession:
         options=options,
         infrastructure=SessionInfrastructure(overlay=overlay),
     )
-    r.turn.screen.osd = osd
+    r.graph.screen.osd = osd
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(12)]
-    r.turn.track_commands.navigation.current.sub_index = CueIndex(cues)
-    r.turn.playback_observation.install_seed({"sub-text": "cue 0"})
+    r.graph.track_commands.navigation.current.sub_index = CueIndex(cues)
+    r.graph.playback.install_seed({"sub-text": "cue 0"})
     return r
 
 
 def _draw_help(r: TestSession) -> None:
-    r.turn.help_controller.store.dispatch(HelpCommand.TOGGLE)
-    r.turn.help_controller.redraw()
+    r.graph.help.store.dispatch(HelpCommand.TOGGLE)
+    r.graph.help.redraw()
 
 
 def _draw_sidebar(r: TestSession) -> None:
-    r.turn.sidebar_controller.store.dispatch(
-        events.SidebarShown(
-            r.turn.sidebar_controller.view().active, r.turn.sidebar_controller.view().capacity
-        )
+    r.graph.sidebar.store.dispatch(
+        events.SidebarShown(r.graph.sidebar.view().active, r.graph.sidebar.view().capacity)
     )
-    sidebar.draw(r.turn.sidebar_controller.view())
+    sidebar.draw(r.graph.sidebar.view())
 
 
 def _draw_stats(r: TestSession) -> None:
-    r.turn.command_runtime.handle(ANALYSIS_MSG)
+    r.command(ANALYSIS_MSG)
 
 
 CHROME = [("help", _draw_help), ("sidebar", _draw_sidebar), ("stats", _draw_stats)]
@@ -116,7 +116,7 @@ CHROME = [("help", _draw_help), ("sidebar", _draw_sidebar), ("stats", _draw_stat
 def test_chrome_overlay_stays_on_screen_at_fullscreen_hidpi(name, draw):
     r = _reader(FULLSCREEN_HIDPI)
     draw(r)
-    img, x, y, _oid = r.turn.ov.shown[-1]  # the last (current) upload for this overlay
+    img, x, y, _oid = r.graph.overlay.shown[-1]  # the last (current) upload for this overlay
     w, h = img.size
     ow, oh = FULLSCREEN_HIDPI
     assert w > 0 and h > 0, f"{name} drew an empty image"
@@ -131,8 +131,8 @@ def test_chrome_overlay_grows_from_1080p_to_hidpi(name, draw):
     draw(small)
     big = _reader(FULLSCREEN_HIDPI)
     draw(big)
-    (sw, sh) = small.turn.ov.shown[-1][0].size
-    (bw, bh) = big.turn.ov.shown[-1][0].size
+    (sw, sh) = small.graph.overlay.shown[-1][0].size
+    (bw, bh) = big.graph.overlay.shown[-1][0].size
     assert bw > sw or bh > sh, f"{name} did not scale up on the hi-dpi osd ({sw}x{sh} → {bw}x{bh})"
 
 
@@ -145,8 +145,8 @@ def test_hidpi_chrome_matches_a_manual_ui_scale_bump_at_1080p():
     factor = FULLSCREEN_HIDPI[1] / 1080
     faked = _reader(BASELINE_1080, ui_scale=factor)  # old way: inflate ui_scale to compensate
     _draw_help(faked)
-    hw = hidpi.turn.ov.shown[-1][0].size[0]
-    fw = faked.turn.ov.shown[-1][0].size[0]
+    hw = hidpi.graph.overlay.shown[-1][0].size[0]
+    fw = faked.graph.overlay.shown[-1][0].size[0]
     assert abs(hw - fw) <= 2  # same font/layout scale → same panel width (± rounding)
 
 
@@ -157,8 +157,8 @@ def test_chrome_left_open_is_swept_by_close(name, draw):
     on a detached mpv's screen, since nothing knew it was there."""
     r = _reader(FULLSCREEN_HIDPI)
     draw(r)
-    assert r.turn.ov.lifecycle_oids, f"{name} staged nothing the close sweep could find"
+    assert r.graph.overlay.lifecycle_oids, f"{name} staged nothing the close sweep could find"
 
-    r.turn.lifecycle_surfaces.close()
+    r.graph.lifecycle_surfaces.close()
 
-    assert not r.turn.ov.lifecycle_oids
+    assert not r.graph.overlay.lifecycle_oids

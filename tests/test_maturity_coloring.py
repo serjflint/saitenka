@@ -107,21 +107,21 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
         ),
         options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")),
     )
-    reader.turn.subtitle_presentation.cue.replace_tokenized(tokens=[_token()])
-    reader.turn.subtitle_presentation.cue.replace_tokenized(lines=[[object()]])
-    reader.turn.subtitle_presentation.cue.replace_tokenized(
-        styles=scorer.score_line(reader.turn.subtitle_presentation.cue.current.tokens)
+    reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[_token()])
+    reader.graph.subtitle_presentation.cue.replace_tokenized(lines=[[object()]])
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
+        styles=scorer.score_line(reader.graph.subtitle_presentation.cue.current.tokens)
     )
-    reader.turn.tooltip_controller.select(0)
-    monkeypatch.setattr(reader.turn.ov, "show", lambda *_args, **_kwargs: None)
+    reader.graph.tooltip.select(0)
+    monkeypatch.setattr(reader.graph.overlay, "show", lambda *_args, **_kwargs: None)
     provider = RecordingRasterProvider(size=(10, 10))
-    reader.turn.subtitle_presentation.renderer = SubtitleRenderer(provider)
+    reader.graph.subtitle_presentation.renderer = SubtitleRenderer(provider)
 
-    reader.turn.subtitle_presentation.draw()
-    reader.turn.tooltip_controller.set_annotation_hover(revealed=True)
+    reader.graph.subtitle_presentation.draw()
+    reader.graph.tooltip.set_annotation_hover(revealed=True)
 
     assert [request.styles for request in provider.requests] == [
         None,
-        reader.turn.subtitle_presentation.cue.current.styles,
+        reader.graph.subtitle_presentation.cue.current.styles,
     ]
-    assert reader.turn.subtitle_presentation.cue.current.styles[0].tag == "learning"
+    assert reader.graph.subtitle_presentation.cue.current.styles[0].tag == "learning"

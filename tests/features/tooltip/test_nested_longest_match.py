@@ -70,7 +70,7 @@ def test_link_query_is_looked_up_whole_not_tokenized():
 
     ds = _RecordingDS()
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
-    reader.turn.tooltip_controller.navigated_panel("それにしては")
+    reader.graph.tooltip.navigated_panel("それにしては")
     assert ds.seen == ["それにしては"]  # the WHOLE query reached the lookup, not それ
 
 
@@ -79,20 +79,20 @@ def test_open_link_navigates_the_whole_query(monkeypatch):
 
     ds = _RecordingDS()
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
-    reader.turn.screen.osd = (1920, 1080)
-    reader.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    monkeypatch.setattr(reader.turn.subtitle_presentation, "renderer", NullRenderer())
+    reader.graph.screen.osd = (1920, 1080)
+    reader.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    monkeypatch.setattr(reader.graph.subtitle_presentation, "renderer", NullRenderer())
     lb = LinkBox("それにつけても", 0, 0, 10, 10)
     nested_popup.open_link(
-        reader.turn.tooltip_controller.tip_ports,
-        reader.turn.tooltip_controller.panel_ports,
+        reader.graph.tooltip.tip_ports,
+        reader.graph.tooltip.panel_ports,
         lb,
         (0, 0),
         0,
     )  # no worker → synchronous open
     assert ds.seen == ["それにつけても"]  # the WHOLE query reached the lookup, not それ
     assert (
-        reader.turn.tooltip_controller.surface_state().nest.word == "それにつけても"
+        reader.graph.tooltip.surface_state().nest.word == "それにつけても"
     )  # …and it's the shown nested word
 
 
@@ -102,21 +102,17 @@ def test_phrase_extra_terms_is_empty_off_a_known_phrase():
 
 def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
-    reader.turn.screen.osd = (1920, 1080)
+    reader.graph.screen.osd = (1920, 1080)
     # Decouple from the live unidic split: the scan tail tokenises to コン + サート.
-    monkeypatch.setattr(
-        reader.turn.profile_session.profile.tokenizer, "tokenize", lambda _s: _SPLIT
-    )
+    monkeypatch.setattr(reader.graph.profile.profile.tokenizer, "tokenize", lambda _s: _SPLIT)
 
     nested_popup.show_nested(
-        reader.turn.tooltip_controller.tip_ports,
-        reader.turn.tooltip_controller.panel_ports,
-        reader.turn.tooltip_controller.word_lookup,
+        reader.graph.tooltip.tip_ports,
+        reader.graph.tooltip.panel_ports,
+        reader.graph.tooltip.word_lookup,
         ScanBox("コンサート", 0, 0, 20, 20),
     )
 
-    assert reader.turn.tooltip_controller.surface_state().nest.state is not None, (
-        "a nested popup must open"
-    )
+    assert reader.graph.tooltip.surface_state().nest.state is not None, "a nested popup must open"
     # The longest match is stacked on the panel's identity — コンサート, not the bare コン.
-    assert reader.turn.tooltip_controller.surface_state().nest.key.phrase_terms == ("コンサート",)
+    assert reader.graph.tooltip.surface_state().nest.key.phrase_terms == ("コンサート",)

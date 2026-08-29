@@ -38,10 +38,11 @@ if TYPE_CHECKING:
 
         def register_observers(self, names: tuple[str, ...]) -> dict[str, dict]: ...
 
-        def publish_legacy_outcome(self, outcome: CommandHandled) -> None: ...
+        def publish_command_outcome(self, outcome: CommandHandled) -> None: ...
 
         def publish_session_event(self, event) -> bool: ...
         def deliver_session_event(self, event) -> bool: ...
+        def runtime_census(self) -> dict[str, int]: ...
 
         session_resources: dict[str, object]
 
@@ -631,7 +632,7 @@ class MpvIPC:
         session_loop: SessionLoop,
         gateway: RuntimeGateway,
     ) -> None:
-        """Switch event ownership to a mailbox while the legacy consumer still drives policy."""
+        """Install the mailbox-backed session ingress and transfer buffered events to it."""
         with self._events_lock:
             buffered, self._events = self._events, []
             for event in buffered:
@@ -643,10 +644,10 @@ class MpvIPC:
         if self._closed.is_set() and not self._intentional:
             connection_sink("lost", self._connection_epoch)
 
-    def publish_legacy_command_outcome(self, outcome: CommandHandled) -> None:
+    def publish_command_outcome(self, outcome: CommandHandled) -> None:
         gateway = self._runtime_gateway
         if gateway is not None:
-            gateway.publish_legacy_outcome(outcome)
+            gateway.publish_command_outcome(outcome)
 
     def publish_runtime_event(self, event) -> bool:
         """Announce a session fact to the runtime. False when no gateway owns this session."""
@@ -667,12 +668,7 @@ class MpvIPC:
         return gateway.deliver_session_event(event)
 
     def register_session_resource(self, name: str, resource: object) -> bool:
-        """Hand a resource's teardown to the runtime. False when no gateway owns this session.
-
-        The owner keeps using it; what moves is *when it closes*. A False here is what keeps the
-        caller's own fallback teardown honest — a `SessionController` built without a runtime still has to
-        close what it made.
-        """
+        """Hand a resource's teardown to the runtime; false when no gateway owns the session."""
         gateway = self._runtime_gateway
         if gateway is None:
             return False
@@ -741,6 +737,11 @@ class MpvIPC:
             return False
         reactor.close()  # type: ignore[attr-defined]  # `object` by design — see RuntimeGateway
         return True
+
+    def session_runtime_census(self) -> dict[str, int]:
+        """Return the runtime ledger without exposing the transport's gateway object."""
+        gateway = self._runtime_gateway
+        return {} if gateway is None else gateway.runtime_census()
 
     def route_session_playback(self, envelope: object | None) -> object | None:
         """Route one envelope to the session's reactor and hand back `SessionState.playback`.

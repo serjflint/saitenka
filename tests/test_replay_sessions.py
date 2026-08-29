@@ -60,22 +60,20 @@ SCENARIOS: dict[str, list[Step]] = {
 def _apply(reader, action: str, arg: object) -> None:
     # `hover` and `scroll` enter below the input seam, for the reasons the state machine's own rules
     # give: the fixture's tooltip covers words 1–2, and a scroll offset is what the oracle is about.
-    reader = reader.turn
+    reader = reader.graph
     if action == "hover":
-        reader.tooltip_controller.show_tooltip(int(arg))  # type: ignore[arg-type]
+        reader.tooltip.show_tooltip(int(arg))  # type: ignore[arg-type]
     elif action == "scroll":
-        reader.tooltip_controller.scroll_tip(int(arg))  # type: ignore[arg-type]
+        reader.tooltip.scroll_tip(int(arg))  # type: ignore[arg-type]
     elif action == "navigate":
-        tooltip.navigate_tip(
-            reader.tooltip_controller.tip_ports, reader.tooltip_controller.panel_ports, _NAV_QUERY
-        )
+        tooltip.navigate_tip(reader.tooltip.tip_ports, reader.tooltip.panel_ports, _NAV_QUERY)
     elif action == "back":
-        tooltip.tip_back(reader.tooltip_controller.tip_ports)
+        tooltip.tip_back(reader.tooltip.tip_ports)
     elif action == "open_nested":
         tok = reader.subtitle_presentation.cue.current.tokens[0]
         nested_popup.open_nested(
-            reader.tooltip_controller.tip_ports,
-            reader.tooltip_controller.panel_ports,
+            reader.tooltip.tip_ports,
+            reader.tooltip.panel_ports,
             tok,
             tok.surface,
             nested_popup.Anchor(200.0, 200.0, 40.0),
@@ -86,9 +84,7 @@ def _apply(reader, action: str, arg: object) -> None:
             round(1920 * scale),
             round(1080 * scale),
         )  # live → changes tip_scale.raster
-        tooltip_panel.render_view(
-            reader.tooltip_controller.tip_ports, reader.tooltip_controller.surface_state().view
-        )
+        tooltip_panel.render_view(reader.tooltip.tip_ports, reader.tooltip.surface_state().view)
     else:  # pragma: no cover - guards a typo in a scenario table
         raise AssertionError(f"unknown action {action!r}")
 
@@ -103,13 +99,13 @@ def _apply(reader, action: str, arg: object) -> None:
 @pytest.mark.parametrize("scenario", list(SCENARIOS), ids=list(SCENARIOS))
 def test_session_replay_keeps_the_seam_under_each_backend(scenario, backend_name, backend):
     reader = _fresh_reader()
-    reader.turn.tooltip_controller.visual.backend = (
+    reader.graph.tooltip.visual.backend = (
         backend  # every Panel.from_rows now builds via this engine
     )
-    reader.turn.tooltip_controller.visual.backend_name = backend_name
+    reader.graph.tooltip.visual.backend_name = backend_name
     for action, arg in SCENARIOS[scenario]:
         _apply(reader, action, arg)
         # The render↔hit-test agreement holds after every transition, base panel and (when open) nested.
         _assert_agrees(reader, nested=False)
-        if reader.turn.tooltip_controller.surface_state().nest.state is not None:
+        if reader.graph.tooltip.surface_state().nest.state is not None:
             _assert_agrees(reader, nested=True)

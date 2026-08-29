@@ -37,7 +37,7 @@ class _FakeIPC(util.FakeIPC):
         super().__init__()
         self.props["track-list"] = tracks or []
         self.props["path"] = path
-        util.runtime_gateway(self)
+        util.session_gateway(self)
 
     @property
     def calls(self) -> list[tuple]:
@@ -108,8 +108,8 @@ def _resolve_identity(cfg: dict) -> tuple[str, str, tuple[str, ...]]:
         subselect.AttachSubtitleOptions(jimaku=True, tsukihime=True, language=profile.langs.main),
     )
     return (
-        reader.turn.profile_session.profile.tokenizer.name,
-        reader.turn.profile_session.profile.langs.main,
+        reader.graph.profile.profile.tokenizer.name,
+        reader.graph.profile.profile.langs.main,
         providers,
     )
 

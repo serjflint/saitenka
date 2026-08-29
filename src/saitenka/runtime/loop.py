@@ -69,13 +69,8 @@ class SessionLoop:
         must still go through `observe`, since this loop is the only sanctioned one."""
         return self._mailbox
 
-    def claim_census(self) -> dict[str, tuple[int, int]]:
-        """`{payload type: (claimed, seen)}` for this session — the `session-loop` duty's meter.
-
-        A ratio, not a row count: an envelope the session still acts on is not a debt symbol
-        anywhere, so nothing else can see this. Empty on a session that never ran, which is a fact
-        about the sample and not about the migration.
-        """
+    def routing_census(self) -> dict[str, tuple[int, int]]:
+        """`{payload type: (reactor-owned, seen)}` for this session."""
         return {name: (self._claimed[name], seen) for name, seen in self._seen.items()}
 
     def observe(
@@ -91,12 +86,10 @@ class SessionLoop:
         Terminals are safe to fan out because the reactor retires only what it dispatched; an
         effect it never issued is not its to complete.
 
-        `claims` is the migration's fallthrough seam: a payload it accepts is the reactor's alone
-        and is withheld from the session, so a migrated duty runs once rather than twice.
-        Everything else falls through untouched. **It is a declared set, never derived from the
-        route table** — the two are not the same question. `ConnectionReplaced` is routed to the
-        startup-hint reducer *and* still needed by `subtitle_pipeline.connection_replaced`;
-        inferring "routed implies claimed" would silently stop reconnects reaching the pipeline.
+        A payload accepted by `claims` is the reactor's alone and is withheld from the owner-thread
+        controller, so one duty runs once. The claim set is declared rather than inferred from the
+        route table: routing says which reducer observes an event; claiming says whether any
+        owner-thread work remains after that observation.
         """
         if self._reactor is not None:
             raise RuntimeError("reactor already observing")

@@ -6,7 +6,7 @@ from concurrent.futures import Future
 
 import pytest
 from session_builder import build_session
-from util import await_ready, runtime_gateway
+from util import await_ready, bare_gateway
 
 from saitenka.app.loading import SPINNER, loading_image
 from saitenka.mpvio.ipc import IPCRequest
@@ -27,29 +27,17 @@ def test_frames_cycle_through_spinner_glyphs():
 # --- the controller lifecycle: the spinner actually shows while loading, and stops when deps land ---
 
 
-class _RecOv:
-    def __init__(self):
-        self.shown: list = []
-        self.hidden: list = []
-
-    def show(self, _img, *_a, oid=None, **_kw):
-        self.shown.append(oid)
-
-    def hide(self, oid):
-        self.hidden.append(oid)
-
-
 def test_draw_loading_paints_one_timer_authorized_frame():
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
 
     r = build_session(FakeIPC())
-    r.turn.profile_session.begin_loading()
-    assert r.turn.ipc.fire_runtime_timer("lifecycle:loading-frame")
+    r.graph.profile.begin_loading()
+    assert r.graph.ipc.fire_runtime_timer("lifecycle:loading-frame")
     adds = [
         command
-        for command in r.turn.ipc.commands
+        for command in r.graph.ipc.commands
         if command[:2] == ("overlay-add", OverlayId.LOADING)
     ]
     assert len(adds) == 1
@@ -67,7 +55,7 @@ def test_draw_loading_paints_one_timer_authorized_frame():
 def _install(ipc):
     from saitenka.app.session.routes import install_session_reactor
 
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     return gateway, install_session_reactor(gateway)
 
 
@@ -116,7 +104,7 @@ def test_show_startup_hint_skipped_for_screenshot(request):
     from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     reactor = install_session_reactor(gateway, startup_hint=False)
     assert ipc.commands == []
@@ -140,15 +128,13 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
     _install(ipc)
     r = build_session(ipc)
     ipc.drain_events()
-    r.turn.ov = _RecOv()
     # plain path -> no dict/tokenize deps needed to raster a cue
-    r.turn.track_commands.declare(SubtitleLanguageChanged("en"))
-    r.turn.cue_coordinator.set_subtitle("hello")
-    assert r.turn.subtitle_presentation.renderer.logged_first
+    r.graph.track_commands.declare(SubtitleLanguageChanged("en"))
+    r.graph.cue.set_subtitle("hello")
+    assert r.graph.subtitle_presentation.renderer.logged_first
     assert ("show-text", "", 1) not in ipc.commands
 
-    r.turn._mark_interactive_ready()
-    ipc.drain_events()
+    r.pump()
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
 
@@ -160,15 +146,13 @@ def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
     _install(ipc)
     r = build_session(ipc)
     ipc.drain_events()
-    r.turn.playback_observation.install_seed({"osd-dimensions": unavailable})
+    r.graph.playback.install_seed({"osd-dimensions": unavailable})
 
-    r.turn._mark_interactive_ready()
-    ipc.drain_events()
+    r.pump()
     assert ("show-text", "", 1) not in ipc.commands
 
-    r.turn.playback_observation.install_seed({"osd-dimensions": {"w": 1920, "h": 1080}})
-    r.turn._mark_interactive_ready()
-    ipc.drain_events()
+    r.graph.playback.install_seed({"osd-dimensions": {"w": 1920, "h": 1080}})
+    r.pump()
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
 
@@ -289,10 +273,10 @@ def test_apply_deps_stops_the_spinner():
     from saitenka.app.overlay_ids import OverlayId
 
     r = build_session(FakeIPC())
-    r.turn.profile_session.begin_loading()
-    r.turn.profile_session.accept(DependencyBundle(r.turn.profile_session.identity))
-    assert r.turn.profile_session.loading is False
-    assert ("overlay-remove", OverlayId.LOADING) in r.turn.ipc.commands
+    r.graph.profile.begin_loading()
+    r.graph.profile.accept(DependencyBundle(r.graph.profile.identity))
+    assert r.graph.profile.loading is False
+    assert ("overlay-remove", OverlayId.LOADING) in r.graph.ipc.commands
 
 
 def test_load_deps_async_uses_a_custom_build():
@@ -302,19 +286,18 @@ def test_load_deps_async_uses_a_custom_build():
     from util import FakeIPC
 
     r = build_session(FakeIPC())
-    r.turn.ov = _RecOv()
     called = {"n": 0}
 
     def _build():
         called["n"] += 1
         return "SCORER", None, None, None
 
-    r.turn.profile_session.load({}, build=_build)
-    assert r.turn.profile_session.loading is True  # spinner armed immediately (subs draw meanwhile)
-    await_ready(lambda: r.turn.profile_session.ready, "the build thread never published deps")
+    r.graph.profile.load({}, build=_build)
+    assert r.graph.profile.loading is True  # spinner armed immediately (subs draw meanwhile)
+    await_ready(lambda: r.graph.profile.ready, "the build thread never published deps")
     assert called["n"] == 1
-    r.turn.profile_session.drain()
-    assert r.turn.profile_session.scorer == "SCORER" and r.turn.profile_session.loading is False
+    r.graph.profile.drain()
+    assert r.graph.profile.scorer == "SCORER" and r.graph.profile.loading is False
 
 
 def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
@@ -333,14 +316,13 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
 
     fut = rd.begin_deps_build({}, _build)  # hoisted: runs before the reader exists
     r = build_session(FakeIPC())
-    r.turn.ov = _RecOv()
-    r.turn.profile_session.load({}, prebuilt=fut)  # consume the in-flight build, don't restart it
-    await_ready(lambda: r.turn.profile_session.ready, "the build thread never published deps")
+    r.graph.profile.load({}, prebuilt=fut)  # consume the in-flight build, don't restart it
+    await_ready(lambda: r.graph.profile.ready, "the build thread never published deps")
     assert (
         built["n"] == 1
     )  # built exactly once — by begin_deps_build, not re-run by load_deps_async
-    r.turn.profile_session.drain()
-    assert r.turn.profile_session.scorer == "SCORER"
+    r.graph.profile.drain()
+    assert r.graph.profile.scorer == "SCORER"
 
 
 def test_each_entrypoint_declares_its_own_startup_hint() -> None:

@@ -16,23 +16,25 @@ _INSTANT_DWELLS = ("lifecycle:hover-switch", "lifecycle:scan-open")
 
 class Driver:
     def __init__(self, reader, *, instant: bool = True):
-        self.r = reader.turn
+        self.session = reader
+        self.r = reader.graph
         self.ipc = self.r.ipc
         self._instant = instant
         if instant:  # deterministic tests: no hover-switch or scan dwell to wait out
-            self.r.tooltip_controller.configure_delays(switch=0.0)
-            self.r.tooltip_controller.configure_delays(scan=0.0)
+            self.r.tooltip.configure_delays(switch=0.0)
+            self.r.tooltip.configure_delays(scan=0.0)
 
     # --- moves (mouse-pos property → _update_hover) ------------------------------------------------
     def move(self, x: float, y: float, *, hover: bool = True) -> Driver:
         """Move the cursor to screen ``(x, y)`` and let the reader react (hover / scan / linger)."""
-        self.ipc.props["mouse-pos"] = {"hover": hover, "x": x, "y": y}
-        self.r.interaction.update_hover()
+        self.ipc.set_prop("mouse-pos", {"hover": hover, "x": x, "y": y})
+        self.session.pump()
         if self._instant:
             # A zero delay used to mean the next clock comparison passed. A dwell is a deadline
             # now, so the equivalent is delivering it — zero-delay is still a timer.
             for timer in _INSTANT_DWELLS:
                 self.ipc.fire_runtime_timer(timer)
+        self.session.pump()
         return self
 
     def leave(self) -> Driver:
@@ -52,43 +54,42 @@ class Driver:
     def move_into_tip(self, dx: float = 0.5, dy: float = 0.5) -> Driver:
         """Move to a point inside the shown tooltip (fractions of its rect) — e.g. to scan an inner
         word or hit a body region."""
-        x, y, w, h = self.r.tooltip_controller.surface_state().view.rect
+        x, y, w, h = self.r.tooltip.surface_state().view.rect
         return self.move(x + w * dx, y + h * dy)
 
     # --- clicks / wheel / keys (client-message path) ----------------------------------------------
     def click(self) -> Driver:
         """Left-click at the current cursor (the ``MBTN_LEFT`` → ``saitenka-click`` path)."""
         self.r.interaction.route_click()
+        self.session.pump()
         return self
 
     def right_click(self) -> Driver:
         """Right-click at the current cursor (copies the word under it)."""
-        self.r.tooltip_controller.copy_click()
+        self.r.tooltip.copy_click()
         return self
 
     def wheel(self, steps: int) -> Driver:
         """Scroll the popup under the cursor by ``steps`` notches (down positive)."""
         from saitenka.app.session import surfaces
 
-        self.r.tooltip_controller.scroll_tip(
-            surfaces.tip_wheel_pixels(self.r.tooltip_controller.scale().ref_h, steps)
-        )
+        self.r.tooltip.scroll_tip(surfaces.tip_wheel_pixels(self.r.tooltip.scale().ref_h, steps))
         return self
 
     def key(self, msg: str) -> Driver:
         """Dispatch a tooltip client-message (e.g. ``controller.MINE_MSG``)."""
-        self.r.command_runtime.handle(msg)
+        self.session.command(msg)
         return self
 
     # --- observed state ---------------------------------------------------------------------------
     @property
     def hover(self) -> int:
-        return self.r.tooltip_controller.observation().selected
+        return self.r.tooltip.observation().selected
 
     @property
     def tip_shown(self) -> bool:
-        return self.r.tooltip_controller.surface_state().view.rect is not None
+        return self.r.tooltip.surface_state().view.rect is not None
 
     @property
     def nested_shown(self) -> bool:
-        return self.r.tooltip_controller.surface_state().nest.state is not None
+        return self.r.tooltip.surface_state().nest.state is not None

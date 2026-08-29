@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from saitenka.app.features.tooltip.preparation import TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS
 from saitenka.app.session.close_plan import CloseContributions, assemble_close_participants
-from saitenka.app.session.routes import TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS
 
 
 def test_feature_close_contribution_cannot_replace_another_participant() -> None:

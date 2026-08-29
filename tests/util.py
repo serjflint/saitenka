@@ -89,8 +89,18 @@ GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
 
 
-def runtime_gateway(ipc) -> MpvGateway:
+def bare_gateway(ipc) -> MpvGateway:
+    """Construct transport runtime machinery without an application reactor."""
     return MpvGateway(ipc, SessionMailbox())
+
+
+def session_gateway(ipc) -> MpvGateway:
+    """Construct the complete runtime required by a composed study session."""
+    from saitenka.app.session.routes import install_session_reactor
+
+    gateway = bare_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
+    return gateway
 
 
 # Goldens are blessed on macOS (canonical, committed at golden/<name>). Text-heavy panels can render a
@@ -530,11 +540,11 @@ class FakeIPC:
         )
         return True
 
-    def publish_legacy_command_outcome(self, outcome) -> None:
+    def publish_command_outcome(self, outcome) -> None:
         if self._runtime_gateway is None:
             self.runtime_outcomes.append(outcome)
         else:
-            self._runtime_gateway.publish_legacy_outcome(outcome)
+            self._runtime_gateway.publish_command_outcome(outcome)
 
     def register_runtime_job_lane(self, name, policy, handler) -> bool:
         if self._runtime_gateway is None:
@@ -564,6 +574,10 @@ class FakeIPC:
             return False
         reactor.close()
         return True
+
+    def session_runtime_census(self) -> dict[str, int]:
+        gateway = self._runtime_gateway
+        return {} if gateway is None else gateway.runtime_census()
 
     def route_session_playback(self, envelope) -> object | None:
         """Mirror the transport's `Owner.PLAYBACK` port, including its no-reactor refusal.
@@ -643,16 +657,15 @@ def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
 
 def press(reader, ipc: FakeIPC, key: str) -> None:
     """Fire the handler bound to ``key`` through the REAL dispatch chain — a synthetic mpv
-    ``client-message`` drained by ``reader._drain_events()`` → ``_handle`` → the command table — the way an
-    actual keypress does. This is the hop FakeIPC can't simulate on its own (it echoes the bind, never
-    fires it), so a test that only checks ``ipc.commands`` proves saitenka *sent* the bind, not that a
-    press *runs* the action. Raises :class:`KeyError` if ``key`` isn't currently bound — a dead shortcut
-    is exactly the bug this catches (attach-mode mine keys, #244)."""
+    ``client-message`` published to the session mailbox and settled by the owner-thread turn. This
+    is the hop FakeIPC cannot infer from a recorded bind, so a test that only checks
+    ``ipc.commands`` proves saitenka sent the bind, not that a press runs the action. Raises
+    :class:`KeyError` if ``key`` is not currently bound."""
     reg = keybind_registry(ipc)
     if key not in reg:
         raise KeyError(f"{key!r} is not bound (registered: {sorted(reg)})")
-    ipc.events.append({"event": "client-message", "args": [reg[key]]})
-    reader.turn._drain_events()
+    ipc.emit({"event": "client-message", "args": [reg[key]]})
+    reader.pump()
 
 
 class FakeTransport:

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 from session_builder import build_session
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
@@ -22,11 +22,10 @@ from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 
 
-def _session(*, reactor: bool):
+def _session():
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
-    if reactor:
-        install_session_reactor(gateway, startup_hint=False)
+    gateway = bare_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
     reader = build_session(
         ipc,
         infrastructure=SessionInfrastructure(
@@ -36,23 +35,20 @@ def _session(*, reactor: bool):
             prefetch=False,
         ),
     )
-    reader.turn.playback_observation.install_seed({})
+    reader.graph.playback.install_seed({})
     return ipc, gateway, reader
 
 
-@pytest.mark.parametrize("reactor", [True, False])
 @pytest.mark.timeout(5)
-def test_an_observation_lands_the_same_whether_the_reactor_owns_it(reactor) -> None:
-    """The differential. With a reactor the payload is claimed and its deltas ride an effect; with
-    only a gateway the same typed payload falls through to the SessionController's arm. The cue on screen is
-    the observable both paths owe, and it must not depend on which one ran."""
-    ipc, gateway, reader = _session(reactor=reactor)
+def test_an_observation_reaches_the_playback_owner_and_its_application() -> None:
+    """The playback slice decides the observation; its typed delta updates the visible cue."""
+    ipc, gateway, reader = _session()
     try:
         ipc.emit({"event": "property-change", "name": "sub-text", "data": "いち"})
-        reader.turn._drain_events()
+        reader.pump()
         text, observed = (
-            reader.turn.playback_observation.cue.text,
-            reader.turn.playback_observation.state.value("sub-text"),
+            reader.graph.playback.cue.text,
+            reader.graph.playback.state.value("sub-text"),
         )
     finally:
         reader.close()
@@ -65,12 +61,12 @@ def test_an_observation_lands_the_same_whether_the_reactor_owns_it(reactor) -> N
 def test_a_claimed_observation_is_reduced_by_exactly_one_owner() -> None:
     """Claimed as often as it is seen — the equality is what forbids the fall-through, and the
     fall-through is what would apply the turn's deltas twice."""
-    ipc, gateway, reader = _session(reactor=True)
+    ipc, gateway, reader = _session()
     try:
         for text in ("いち", "に", "さん"):
             ipc.emit({"event": "property-change", "name": "sub-text", "data": text})
-        reader.turn._drain_events()
-        census = gateway.claim_census()["PropertyObserved"]
+        reader.pump()
+        census = gateway.routing_census()["PropertyObserved"]
     finally:
         reader.close()
         gateway.close()
@@ -83,14 +79,14 @@ def test_the_pointer_is_the_only_observation_that_coalesces_in_a_batch() -> None
     """mpv reports the cursor faster than a turn can consume it, so the mailbox keeps the newest.
     Every other observation is a fact a later one may depend on having been seen, which is why the
     allowlist is one name and not a type."""
-    ipc, gateway, reader = _session(reactor=True)
+    ipc, gateway, reader = _session()
     try:
         for x in (1, 2, 3):
             ipc.emit({"event": "property-change", "name": "mouse-pos", "data": {"x": x, "y": 0}})
         ipc.emit({"event": "property-change", "name": "pause", "data": True})
-        reader.turn._drain_events()
-        seen = gateway.claim_census()["PropertyObserved"]
-        pointer = reader.turn.playback_observation.state.value("mouse-pos")
+        reader.pump()
+        seen = gateway.routing_census()["PropertyObserved"]
+        pointer = reader.graph.playback.state.value("mouse-pos")
     finally:
         reader.close()
         gateway.close()

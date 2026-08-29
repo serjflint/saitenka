@@ -23,7 +23,7 @@ from saitenka.render.help import render_page
 def _entries(reader: TestSession):
     return [
         (section.title, entry)
-        for page in reader.turn.help_controller.document().pages
+        for page in reader.graph.help.document().pages
         for section in page.sections
         for entry in section.entries
     ]
@@ -31,12 +31,12 @@ def _entries(reader: TestSession):
 
 def test_default_and_configured_help_keys_are_registered():
     default_ipc = FakeIPC()
-    build_session(default_ipc).turn.command_runtime.install_input()
+    build_session(default_ipc).graph.commands.install_input()
     assert keybind_registry(default_ipc)["F1"] == "saitenka-toggle-help"
 
     custom_ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(help_key="Ctrl+h"))
-    build_session(custom_ipc, options=options).turn.command_runtime.install_input()
+    build_session(custom_ipc, options=options).graph.commands.install_input()
     custom_binds = keybind_registry(custom_ipc)
     assert custom_binds["Ctrl+h"] == "saitenka-toggle-help"
     assert "F1" not in custom_binds
@@ -84,16 +84,16 @@ def test_help_document_uses_effective_catalog_and_context_labels():
     expected = {
         (binding.key, binding.spec.message) for binding in active_bindings(options.keys, "global")
     }
-    reader.turn.command_runtime.install_input()
+    reader.graph.commands.install_input()
     # The registry spans the global section AND the forced mouse one, so compare against the
     # global scope alone — this asserts the catalog, not which section a key landed in.
-    assert set(keybind_registry(reader.turn.ipc).items()) >= expected
+    assert set(keybind_registry(reader.graph.ipc).items()) >= expected
 
 
 def test_small_osd_pages_and_repeats_navigation_hints():
     reader = build_session(FakeIPC(), services=SessionServices(anki=object()))
-    reader.turn.screen.osd = (480, 220)
-    document = reader.turn.help_controller.document()
+    reader.graph.screen.osd = (480, 220)
+    document = reader.graph.help.document()
 
     assert len(document.pages) > 1
     assert all(page.footer == "F1 / Esc close  ·  PgUp/PgDn or wheel" for page in document.pages)
@@ -106,17 +106,17 @@ def test_small_osd_pages_and_repeats_navigation_hints():
             total=len(document.pages),
         )
         assert image.size == (document.width, document.height)
-        assert image.width <= reader.turn.screen.osd[0]
-        assert image.height <= reader.turn.screen.osd[1]
+        assert image.width <= reader.graph.screen.osd[0]
+        assert image.height <= reader.graph.screen.osd[1]
 
 
 def test_ui_scale_enlarges_help_document():
     normal = build_session(FakeIPC(), options=ReaderOptions())
     enlarged = build_session(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
-    normal.turn.screen.osd = enlarged.turn.screen.osd = (1920, 1080)
+    normal.graph.screen.osd = enlarged.graph.screen.osd = (1920, 1080)
 
-    normal_document = normal.turn.help_controller.document()
-    enlarged_document = enlarged.turn.help_controller.document()
+    normal_document = normal.graph.help.document()
+    enlarged_document = enlarged.graph.help.document()
 
     assert enlarged_document.width > normal_document.width
     assert enlarged_document.height > normal_document.height
@@ -126,16 +126,16 @@ def test_ui_scale_enlarges_help_document():
 def test_toggle_navigation_and_escape_are_playback_neutral():
     ipc = FakeIPC()
     reader = build_session(ipc, services=SessionServices(anki=object()))
-    reader.turn.screen.osd = (480, 220)
+    reader.graph.screen.osd = (480, 220)
 
-    reader.turn.command_runtime.handle(HELP_TOGGLE_MSG)
+    reader.command(HELP_TOGGLE_MSG)
     assert any(command[:2] == ("keybind", "ESC") for command in ipc.commands)
     assert any(command[:2] == ("overlay-add", OverlayId.HELP) for command in ipc.commands)
 
     adds_before = sum(command[0] == "overlay-add" for command in ipc.commands)
-    reader.turn.command_runtime.handle(HELP_NEXT_MSG)
+    reader.command(HELP_NEXT_MSG)
     assert sum(command[0] == "overlay-add" for command in ipc.commands) == adds_before + 1
-    reader.turn.command_runtime.handle(HELP_CLOSE_MSG)
+    reader.command(HELP_CLOSE_MSG)
     assert any(command[:2] == ("overlay-remove", OverlayId.HELP) for command in ipc.commands)
 
     forbidden = {"add", "sub-add", "sub-seek", "loadfile", "seek", "set_property"}
@@ -149,7 +149,7 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     actions: list[str] = []
     monkeypatch.setattr(tooltip, "update_hover", lambda *_a: hover_updates.append("hover"))
     monkeypatch.setattr(
-        reader.turn._stateless_commands, "run", lambda _command: actions.append("mine")
+        reader.graph.stateless_commands, "run", lambda _command: actions.append("mine")
     )
 
     ui = Driver(reader, instant=False)
@@ -159,17 +159,17 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     assert actions == []
     assert not [command for command in ipc.commands if command[0] == "sub-seek"]
 
-    ui.key(HELP_CLOSE_MSG).move(5, 5)
+    ui.key(HELP_CLOSE_MSG).move(6, 5)
     assert hover_updates == ["hover"]
 
 
 def test_closing_help_restores_active_tooltip_escape_binding():
     ipc = FakeIPC()
     reader = build_session(ipc)
-    reader.turn.tooltip_controller.bind_keybindings()
+    reader.graph.tooltip.bind_keybindings()
 
-    reader.turn.command_runtime.handle(HELP_TOGGLE_MSG)
-    reader.turn.command_runtime.handle(HELP_CLOSE_MSG)
+    reader.command(HELP_TOGGLE_MSG)
+    reader.command(HELP_CLOSE_MSG)
 
     esc_commands = [command for command in ipc.commands if command[:2] == ("keybind", "ESC")]
     assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-tip-close")
@@ -178,14 +178,14 @@ def test_closing_help_restores_active_tooltip_escape_binding():
 def test_tooltip_teardown_does_not_steal_escape_while_help_is_open():
     ipc = FakeIPC()
     reader = build_session(ipc)
-    reader.turn.tooltip_controller.bind_keybindings()
+    reader.graph.tooltip.bind_keybindings()
 
-    reader.turn.command_runtime.handle(HELP_TOGGLE_MSG)
-    reader.turn.tooltip_controller.unbind_keybindings()
+    reader.command(HELP_TOGGLE_MSG)
+    reader.graph.tooltip.unbind_keybindings()
 
     esc_commands = [command for command in ipc.commands if command[:2] == ("keybind", "ESC")]
     assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-help-close")
-    reader.turn.command_runtime.handle(HELP_CLOSE_MSG)
+    reader.command(HELP_CLOSE_MSG)
     assert any(command[:2] == ("overlay-remove", OverlayId.HELP) for command in ipc.commands)
 
 

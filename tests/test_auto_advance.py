@@ -12,7 +12,7 @@ from saitenka.app.config import ReaderOptions
 from saitenka.app.launch import run as cli_run
 from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.runtime.events import SubtitleTracksDiscovered
+from saitenka.runtime.events import ConnectionReplaced, SubtitleTracksDiscovered
 
 
 class FakeIPC(util.FakeIPC):
@@ -23,7 +23,6 @@ class FakeIPC(util.FakeIPC):
 
     def __init__(self):
         super().__init__()
-        self.pending_events: list[dict] = []
 
     def command(self, *args):
         reply = super().command(*args)
@@ -55,16 +54,11 @@ class FakeIPC(util.FakeIPC):
             self.props["sid"] = args[2]
         return reply
 
-    def receive_session(self, _timeout, handle) -> None:
-        evs, self.pending_events = self.pending_events, []
-        for event in evs:
-            handle(event)
-
 
 def _observe_eof(reader, *, reached: bool) -> None:
     """Drive EOF the way mpv does. The advance is delta-driven now, so a test that poked a method
     and a clock would be exercising a path production no longer has."""
-    reader.turn.playback_observation.observe("eof-reached", reached)
+    reader.graph.playback.observe("eof-reached", reached)
 
 
 def test_advance_fires_once_per_eof_edge():
@@ -72,7 +66,7 @@ def test_advance_fires_once_per_eof_edge():
     mpv sitting paused at EOF republishing True is silence rather than a repeat advance."""
     reader = build_session(FakeIPC())
     calls: list[int] = []
-    reader.turn.episode_watch.set_advance_hook(lambda: bool(calls.append(1)))
+    reader.graph.episode_watch.set_advance_hook(lambda: bool(calls.append(1)))
 
     _observe_eof(reader, reached=True)
     _observe_eof(reader, reached=True)  # still at EOF → must NOT re-fire
@@ -95,8 +89,8 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
     ipc = FakeIPC()
     reader = build_session(ipc)
     # dirty episode state that the re-slot must reset
-    reader.turn.track_commands.declare(SubtitleTracksDiscovered(5, None))
-    episode_before = reader.turn.track_commands.navigation.current
+    reader.graph.track_commands.declare(SubtitleTracksDiscovered(5, None))
+    episode_before = reader.graph.track_commands.navigation.current
     cur = tmp_path / "Show 04.mkv"
     ipc.props["path"] = str(cur)
 
@@ -105,7 +99,7 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
     monkeypatch.setattr(session_stats, "start", lambda *, path, **_kw: started.append(str(path())))
 
     cli_run.reslot_to_current(
-        reader.turn.reslot_ports,
+        reader.graph.reslot,
         {},
         cur,
         tmp_path,
@@ -114,9 +108,9 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
     )
 
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)  # mpv already loaded it
-    assert reader.turn.track_commands.navigation.current is not episode_before
+    assert reader.graph.track_commands.navigation.current is not episode_before
     assert (
-        reader.turn.track_commands.current().jp_sid is None
+        reader.graph.track_commands.current().jp_sid is None
     )  # …so prior-episode state cannot leak
     assert started == [str(cur)]  # a new stats row started against the current file
 
@@ -150,7 +144,7 @@ def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
     monkeypatch.setattr(session_stats, "start", lambda *_a, **_kw: None)
 
     cli_run.reslot_to_current(
-        reader.turn.reslot_ports,
+        reader.graph.reslot,
         {},
         cur,
         tmp_path,
@@ -170,7 +164,7 @@ def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
     selected = [t for t in ipc.props["track-list"] if t.get("selected")]
     assert len(selected) == 1 and selected[0]["external-filename"] == str(ep3_srt)
     assert (
-        reader.turn.track_commands.current().jp_sid == selected[0]["id"]
+        reader.graph.track_commands.current().jp_sid == selected[0]["id"]
     )  # …and it's the Japanese track the overlay reads
 
 
@@ -181,15 +175,15 @@ def test_on_file_loaded_reslots_once_per_distinct_file(tmp_path):
     ipc = FakeIPC()
     reader = build_session(ipc)
     seen = []
-    reader.turn.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
+    reader.graph.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
 
     ipc.props["path"] = str(tmp_path / "Show 01.mkv")
-    reader.turn.episode_watch.file_loaded()  # the initial file is already slotted → skip
+    reader.graph.episode_watch.file_loaded()  # the initial file is already slotted → skip
     assert seen == []
 
     ipc.props["path"] = str(tmp_path / "Show 02.mkv")
-    reader.turn.episode_watch.file_loaded()  # a new file → re-slot
-    reader.turn.episode_watch.file_loaded()  # same file again → no re-slot
+    reader.graph.episode_watch.file_loaded()  # a new file → re-slot
+    reader.graph.episode_watch.file_loaded()  # same file again → no re-slot
     assert seen == [tmp_path / "Show 02.mkv"]
 
 
@@ -207,20 +201,17 @@ def test_reconnect_reslots_file_changed_while_disconnected(tmp_path):
             prefetch=False,
         ),
     )
-    reader.turn.playback_observation.start_session()
-    reader.turn.cue_coordinator.set_subtitle("同じ字幕")
+    reader.graph.playback.start_session()
+    reader.graph.cue.set_subtitle("同じ字幕")
     seen = []
-    reader.turn.episode_watch.install_reslot_hook(seen.append, initial=first)
-    ipc.props["path"] = str(second)
-
-    reader.turn._on_ipc_reconnect()
-    reader.turn.playback_observation.observe_event(
-        {"event": "property-change", "name": "path", "data": str(second)}
-    )
-    reader.turn.episode_watch.file_loaded()
+    reader.graph.episode_watch.install_reslot_hook(seen.append, initial=first)
+    assert ipc.publish_runtime_event(ConnectionReplaced(1))
+    ipc.set_prop("path", str(second))
+    ipc.emit({"event": "file-loaded"})
+    reader.pump()
 
     assert seen == [second]
-    assert reader.turn.annotation_controller.view.retired is True
+    assert reader.graph.annotation.view.retired is True
 
 
 def test_on_file_loaded_reslots_same_basename_from_a_different_parent(tmp_path):
@@ -229,10 +220,10 @@ def test_on_file_loaded_reslots_same_basename_from_a_different_parent(tmp_path):
     first = tmp_path / "season-1" / "Episode.mkv"
     second = tmp_path / "season-2" / "Episode.mkv"
     seen = []
-    reader.turn.episode_watch.install_reslot_hook(seen.append, initial=first)
+    reader.graph.episode_watch.install_reslot_hook(seen.append, initial=first)
 
     ipc.props["path"] = str(second)
-    reader.turn.episode_watch.file_loaded()
+    reader.graph.episode_watch.file_loaded()
 
     assert seen == [second]
 
@@ -241,11 +232,11 @@ def test_on_file_loaded_resolves_relative_path_against_working_directory(tmp_pat
     ipc = FakeIPC()
     reader = build_session(ipc)
     seen = []
-    reader.turn.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
+    reader.graph.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
 
     ipc.props["working-directory"] = str(tmp_path)
     ipc.props["path"] = "Show 02.mkv"
-    reader.turn.episode_watch.file_loaded()
+    reader.graph.episode_watch.file_loaded()
 
     assert seen == [tmp_path / "Show 02.mkv"]
 
@@ -256,10 +247,10 @@ def test_on_file_loaded_expands_tilde_before_reslot(monkeypatch, tmp_path):
     ipc = FakeIPC()
     reader = build_session(ipc)
     seen = []
-    reader.turn.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
+    reader.graph.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
 
     ipc.props["path"] = "~/Show 02.mkv"
-    reader.turn.episode_watch.file_loaded()
+    reader.graph.episode_watch.file_loaded()
 
     assert seen == [tmp_path / "Show 02.mkv"]
 
@@ -269,11 +260,11 @@ def test_on_file_loaded_dispatched_from_drain_events(tmp_path):
     ipc = FakeIPC()
     reader = build_session(ipc)
     seen = []
-    reader.turn.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
+    reader.graph.episode_watch.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
 
     ipc.props["path"] = str(tmp_path / "Show 02.mkv")
-    ipc.pending_events = [{"event": "file-loaded"}]
-    reader.turn._drain_events()
+    ipc.emit({"event": "file-loaded"})
+    reader.pump()
     assert seen == [tmp_path / "Show 02.mkv"]
 
 
@@ -287,9 +278,9 @@ def test_advance_defers_to_mpv_when_a_playlist_entry_is_next():
 
     assert (
         cli_run._advance_at_eof(
-            reader.turn.playback_observation.value,
-            reader.turn.episode_watch.current_media_path,
-            reader.turn.ipc,
+            reader.graph.playback.value,
+            reader.graph.episode_watch.current_media_path,
+            reader.graph.ipc,
         )
         is True
     )
@@ -307,9 +298,9 @@ def test_advance_loadfiles_the_next_sibling_without_a_playlist(tmp_path):
 
     assert (
         cli_run._advance_at_eof(
-            reader.turn.playback_observation.value,
-            reader.turn.episode_watch.current_media_path,
-            reader.turn.ipc,
+            reader.graph.playback.value,
+            reader.graph.episode_watch.current_media_path,
+            reader.graph.ipc,
         )
         is True
     )
@@ -325,9 +316,9 @@ def test_advance_holds_when_no_playlist_and_no_sibling(tmp_path):
 
     assert (
         cli_run._advance_at_eof(
-            reader.turn.playback_observation.value,
-            reader.turn.episode_watch.current_media_path,
-            reader.turn.ipc,
+            reader.graph.playback.value,
+            reader.graph.episode_watch.current_media_path,
+            reader.graph.ipc,
         )
         is False
     )  # hold the last frame (keep-open)
@@ -340,8 +331,8 @@ def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path):
     ipc = FakeIPC()
     reader = build_session(ipc)
     cli_run._install_watch_hooks(
-        reader.turn.reslot_ports,
-        reader.turn.watch_ports,
+        reader.graph.reslot,
+        reader.graph.watch,
         {},
         tmp_path / "Show 01.mkv",
         tmp_path,
@@ -350,16 +341,16 @@ def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path):
         interactive=True,
         auto_advance=False,
     )
-    assert reader.turn.episode_watch.reslot_hook is not None  # follows file-loaded / playlists
-    assert reader.turn.episode_watch.advance_hook is None  # but never drives its own advance
+    assert reader.graph.episode_watch.reslot_hook is not None  # follows file-loaded / playlists
+    assert reader.graph.episode_watch.advance_hook is None  # but never drives its own advance
 
 
 def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path):
     ipc = FakeIPC()
     reader = build_session(ipc)
     cli_run._install_watch_hooks(
-        reader.turn.reslot_ports,
-        reader.turn.watch_ports,
+        reader.graph.reslot,
+        reader.graph.watch,
         {},
         tmp_path / "Show 01.mkv",
         tmp_path,
@@ -369,8 +360,8 @@ def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path):
         auto_advance=False,
     )
     assert (
-        reader.turn.episode_watch.reslot_hook is None
-        and reader.turn.episode_watch.advance_hook is None
+        reader.graph.episode_watch.reslot_hook is None
+        and reader.graph.episode_watch.advance_hook is None
     )
 
 

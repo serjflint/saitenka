@@ -201,13 +201,10 @@ def _session():
     """A wired session, the way `reducer_purity` gets one — the route table is only assembled by
     `install_session_reactor`, so there is no static form of it to read."""
     sys.path.insert(0, str(ROOT / "tests"))
-    from util import FakeIPC, runtime_gateway  # a tool, not a library
+    from util import FakeIPC, session_gateway  # a tool, not a library
 
-    from saitenka.app.session.routes import install_session_reactor
-
-    gateway = runtime_gateway(FakeIPC())
+    gateway = session_gateway(FakeIPC())
     try:
-        install_session_reactor(gateway)
         yield gateway
     finally:
         gateway.close()

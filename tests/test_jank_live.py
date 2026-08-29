@@ -171,28 +171,39 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
     is that something is there to scroll, not how much.
     """
     from driver import Driver
-    from util import FakeIPC
+    from util import FakeIPC, await_ready
 
     mod = _jank_module()
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=mod.TallDS()))
-    reader.turn.screen.osd = (1280, 720)
-    reader.turn.cue_coordinator.set_subtitle("門前の小僧習わぬ経を読む")
-    word = next(
-        i
-        for i, t in enumerate(reader.turn.subtitle_presentation.cue.current.tokens)
-        if reader.turn.profile_session.profile.tokenizer.is_content(t)
-    )
-    Driver(reader).move_to_word(word).leave()  # resolve the cue's entries, as the live harness does
-    for _ in range(4):
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    reader = build_session(ipc, services=SessionServices(dictionaries=mod.TallDS()))
+    try:
+        reader.start()
         reader.pump()
+        reader.graph.cue.set_subtitle("門前の小僧習わぬ経を読む")
+        word = next(
+            i
+            for i, t in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
+            if reader.graph.profile.profile.tokenizer.is_content(t)
+        )
+        Driver(reader).move_to_word(
+            word
+        ).leave()  # resolve the cue's entries, as the live harness does
+        for _ in range(4):
+            reader.pump()
 
-    Driver(reader).move_to_word(word)
-    view = reader.turn.tooltip_controller.surface_state().view
-    assert view.state is not None
-    assert view.state.full_height > view.view_h, mod._why_stuck(reader.turn.tooltip_controller)
-    mod._scroll_four(
-        reader.turn.tooltip_controller, reader.pump
-    )  # raises if the viewport did not move
+        Driver(reader).move_to_word(word)
+        await_ready(
+            lambda: reader.graph.tooltip.surface_state().view.state is not None,
+            "tooltip panel was not published",
+            pump=reader.pump,
+        )
+        view = reader.graph.tooltip.surface_state().view
+        assert view.state is not None
+        assert view.state.full_height > view.view_h, mod._why_stuck(reader.graph.tooltip)
+        mod._scroll_four(reader.graph.tooltip, reader.pump)  # raises if the viewport did not move
+    finally:
+        reader.close()
 
 
 def test_live_latency_boundary_repaints_the_overlay():
@@ -204,12 +215,12 @@ def test_live_latency_boundary_repaints_the_overlay():
         def repaint(self):
             self.repaints += 1
 
-    class Turn:
-        ov = Overlay()
+    class Graph:
+        overlay = Overlay()
 
     class SessionController:
-        turn = Turn()
+        graph = Graph()
 
     reader = SessionController()
-    mod._present_overlay(reader.turn.ov)
-    assert reader.turn.ov.repaints == 1
+    mod._present_overlay(reader.graph.overlay)
+    assert reader.graph.overlay.repaints == 1

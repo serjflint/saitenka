@@ -1,8 +1,7 @@
 """INTERACTION's claim on mpv's clicks and wheel: the forced mouse section.
 
-Its own object because it is a *resource with a lifetime*, not three flags on the host. The runtime
-retires it at `ClosePhase.PARTICIPANTS`, and an effect can only retire something the dispatcher can
-find — a session resource, like the surfaces and the overlay transport beside it.
+Its own object because it is a resource with a lifetime, not three flags on the session shell.
+The direct close plan releases it while mpv transport still works.
 """
 
 from __future__ import annotations

@@ -27,45 +27,47 @@ def _reader(scale: float) -> TestSession:
 
 def test_chrome_scale_is_flat_ui_scale_at_or_below_1080p():
     r = _reader(1.2)
-    r.turn.screen.osd = (1920, 1080)
+    r.graph.screen.osd = (1920, 1080)
     assert (
-        r.turn.screen.chrome_scale() == 1.2
+        r.graph.screen.chrome_scale() == 1.2
     )  # factor 1.0 at REF_H → unchanged (goldens pinned here stay valid)
-    r.turn.screen.osd = (1280, 720)
+    r.graph.screen.osd = (1280, 720)
     assert (
-        r.turn.screen.chrome_scale() == 1.2
+        r.graph.screen.chrome_scale() == 1.2
     )  # clamped: never shrinks the chrome below the ui_scale baseline
 
 
 def test_chrome_scale_grows_with_a_hi_dpi_osd():
     r = _reader(1.2)
-    r.turn.screen.osd = (3024, 1898)  # 2x Retina fullscreen — the reported setup
-    assert r.turn.screen.chrome_scale() == 1.2 * (
+    r.graph.screen.osd = (3024, 1898)  # 2x Retina fullscreen — the reported setup
+    assert r.graph.screen.chrome_scale() == 1.2 * (
         1898 / REF_H
     )  # tracks osd_h like the tooltip/subtitle
-    assert r.turn.screen.chrome_scale() > 2.0  # visibly larger than the flat 1.2 that drew it small
+    assert (
+        r.graph.screen.chrome_scale() > 2.0
+    )  # visibly larger than the flat 1.2 that drew it small
 
 
 def test_help_panel_is_larger_on_a_hi_dpi_osd_than_at_1080p():
     """The end-to-end oracle for the fix: the same help overlay uploads bigger pixels on the Retina OSD
     than at 1080p, instead of staying at the flat-ui_scale size that read as 'small'."""
     r = _reader(1.2)
-    r.turn.screen.osd = (1920, 1080)
-    base = r.turn.help_controller.document()
-    r.turn.screen.osd = (3024, 1898)
-    hidpi = r.turn.help_controller.document()
+    r.graph.screen.osd = (1920, 1080)
+    base = r.graph.help.document()
+    r.graph.screen.osd = (3024, 1898)
+    hidpi = r.graph.help.document()
     assert hidpi.width > base.width and hidpi.height > base.height
 
 
 def test_subtitle_picker_is_larger_on_a_hi_dpi_osd_than_at_1080p():
     r = _reader(1.0)
-    r.turn.picker_controller.store.dispatch(events.PickerOpened())
-    r.turn.screen.osd = (1920, 1080)
-    r.turn.picker_controller.redraw()
-    assert r.turn.picker_controller.panel.rect is not None
-    base_width = r.turn.picker_controller.panel.rect[2]
+    r.graph.picker.store.dispatch(events.PickerOpened())
+    r.graph.screen.osd = (1920, 1080)
+    r.graph.picker.redraw()
+    assert r.graph.picker.panel.rect is not None
+    base_width = r.graph.picker.panel.rect[2]
 
-    r.turn.screen.osd = (3840, 2160)
-    r.turn.picker_controller.redraw()
-    assert r.turn.picker_controller.panel.rect is not None
-    assert r.turn.picker_controller.panel.rect[2] == base_width * 2
+    r.graph.screen.osd = (3840, 2160)
+    r.graph.picker.redraw()
+    assert r.graph.picker.panel.rect is not None
+    assert r.graph.picker.panel.rect[2] == base_width * 2

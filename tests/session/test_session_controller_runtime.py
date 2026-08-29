@@ -1,6 +1,6 @@
 import pytest
 from session_builder import build_session
-from util import FakeIPC, runtime_gateway
+from util import FakeIPC, bare_gateway
 
 from saitenka.app.bindings import SCROLL_UP_MSG
 from saitenka.app.config import ReaderOptions
@@ -146,15 +146,29 @@ def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request, monk
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     spec = CommandSpec("fail", Owner.SESSION, requires_cue=False)
     monkeypatch.setattr(
-        reader.turn.command_runtime,
+        reader.graph.commands,
         "_commands",
         CommandExecutor({"fail": fail}, policy=CommandPolicy((spec,))),
     )
+    outcomes: list[CommandHandled] = []
+    publish = ipc.publish_command_outcome
 
-    reader.turn.command_runtime.handle(UserCommand("fail"))
+    def capture(outcome: CommandHandled) -> None:
+        outcomes.append(outcome)
+        publish(outcome)
 
-    assert ipc.runtime_outcomes == [
-        CommandHandled("fail", Owner.SESSION, CommandOutcome.FAILED, reason=CommandReason.INTERNAL)
+    monkeypatch.setattr(ipc, "publish_command_outcome", capture)
+
+    reader.command("fail")
+
+    assert outcomes == [
+        CommandHandled(
+            "fail",
+            Owner.SESSION,
+            CommandOutcome.FAILED,
+            command_id=0,
+            reason=CommandReason.INTERNAL,
+        )
     ]
 
 
@@ -164,36 +178,45 @@ def test_inline_tooltip_work_is_selected_at_session_construction(request):
     )
     request.addfinalizer(reader.close)
 
-    assert not reader.turn.tooltip_controller.metadata_deferred
+    assert not reader.graph.tooltip.metadata_deferred
 
 
 def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request):
     ipc = FakeIPC()
     reader = build_session(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
-    reader.turn.help_controller.store.dispatch(HelpCommand.TOGGLE)
+    reader.graph.help.store.dispatch(HelpCommand.TOGGLE)
     calls: list[int] = []
     monkeypatch.setattr(
-        reader.turn.interaction.router,
+        reader.graph.interaction.router,
         "route_scroll",
         lambda _wheel, steps: calls.append(steps),
     )
+    outcomes: list[CommandHandled] = []
+    publish = ipc.publish_command_outcome
 
-    reader.turn.command_runtime.handle(UserCommand(SCROLL_UP_MSG))
+    def capture(outcome: CommandHandled) -> None:
+        outcomes.append(outcome)
+        publish(outcome)
+
+    monkeypatch.setattr(ipc, "publish_command_outcome", capture)
+
+    reader.command(SCROLL_UP_MSG)
 
     assert calls == [-1]
-    assert ipc.runtime_outcomes == [
+    assert outcomes == [
         CommandHandled(
             SCROLL_UP_MSG,
             Owner.INTERACTION,
             CommandOutcome.EXECUTED,
+            command_id=0,
         )
     ]
 
 
 def test_gateway_translates_adjacent_scroll_messages_into_one_command():
     ipc = FakeIPC()
-    gateway = runtime_gateway(ipc)
+    gateway = bare_gateway(ipc)
     commands: list[object] = []
 
     try:
@@ -207,13 +230,23 @@ def test_gateway_translates_adjacent_scroll_messages_into_one_command():
         gateway.close()
 
 
-def test_reader_finishes_every_command_folded_into_a_scroll(request):
+def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch):
     ipc = FakeIPC()
     reader = build_session(ipc)
     request.addfinalizer(reader.close)
-    reader.turn.command_runtime.handle(UserCommand(SCROLL_UP_MSG, command_id=1, coalesced_ids=(0,)))
+    outcomes: list[CommandHandled] = []
+    publish = ipc.publish_command_outcome
 
-    assert ipc.runtime_outcomes == [
+    def capture(outcome: CommandHandled) -> None:
+        outcomes.append(outcome)
+        publish(outcome)
+
+    monkeypatch.setattr(ipc, "publish_command_outcome", capture)
+    ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
+    ipc.emit({"event": "client-message", "args": [SCROLL_UP_MSG]})
+    reader.pump()
+
+    assert outcomes == [
         CommandHandled(
             SCROLL_UP_MSG,
             Owner.INTERACTION,
@@ -246,20 +279,20 @@ def test_composition_threads_grouped_optional_services(request):
 
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
 
-    target = reader.turn.mining_controller.active_target
+    target = reader.graph.mining.active_target
     assert target is not None
     assert (
-        reader.turn.profile_session.scorer,
+        reader.graph.profile.scorer,
         target.anki,
         target.config,
-        reader.turn.profile_session.profile.dict_set,
+        reader.graph.profile.profile.dict_set,
     ) == (
         scorer,
         anki,
         mining,
         "dict",
     )
-    assert reader.turn.tooltip_controller.panel_style.speak_button is True
+    assert reader.graph.tooltip.panel_style.speak_button is True
 
 
 def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() -> None:
@@ -282,8 +315,8 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() 
 
     # The factory-selected provider receives the request. This deliberately incomplete probe is
     # rejected by the provider; a missing provider would return without recording an error.
-    assert direct.turn.subtitle_presentation.pipeline.render(_probe_request(direct)) is None
-    assert direct.turn.subtitle_presentation.pipeline.last_error is not None
+    assert direct.graph.subtitle_presentation.pipeline.render(_probe_request(direct)) is None
+    assert direct.graph.subtitle_presentation.pipeline.last_error is not None
     direct.close()
 
 
@@ -298,7 +331,7 @@ def _probe_request(reader):
     track_id = SubtitleTrackId("probe")
     event_id = SubtitleEventId(track_id, 0, 1_000, 0, 0)
     return GeometryRequest(
-        generation=reader.turn.subtitle_presentation.pipeline.generation,
+        generation=reader.graph.subtitle_presentation.pipeline.generation,
         track_id=track_id,
         frame_id=SubtitleFrameId(track_id, (event_id,)),
         timestamp_ms=0,
