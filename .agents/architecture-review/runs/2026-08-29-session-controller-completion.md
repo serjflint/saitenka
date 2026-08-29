@@ -10,7 +10,7 @@ enough to close as a bounded program. No remaining code responsibility appears s
 `SessionController`; further decomposition would be a new architecture program, not completion of this
 migration. I found no P0 or P1 issues.
 
-## Evidence
+## What is genuinely good
 
 - `SessionController` is now a 140-line lifecycle/ordered-turn boundary. Its live path starts, pumps,
   stops, closes, settles `InteractionCoordinator`/`CueCoordinator`, and routes only file-load/user-command
@@ -36,6 +36,7 @@ migration. I found no P0 or P1 issues.
 
 ### P2 — The durable claim census is stale after the completed migration
 
+- Axis: declared/enforced/true alignment and causal traceability.
 - Scenario: a later cadence treats R1/R2 as live defects and T1 as merely argued, re-investigating or
   redesigning behavior already replaced/enforced.
 - Discriminator: T1 now has `poe tooltip-ownership` in `all` with planted writer/constructor controls;
@@ -71,6 +72,13 @@ No P3 findings.
   settlement, but its timed cue/tooltip operations call graph owners directly and do not isolate
   adapter-forwarding overhead.
 
+## What I would cut
+
+Nothing in this bounded scope should be cut merely to finish the migration. The first candidate for a
+separate simplification experiment is the dual stateful/stateless routing vocabulary. Its loss would be
+the explicit distinction between persistent feature transitions and pure command policies, so it should
+only be removed if a traced scenario becomes easier to follow without weakening routing or settlement.
+
 ## Strongest case against the principles
 
 This is one local user and one process, yet maintainers must learn owner slices, routes, reducers, effects,
@@ -78,15 +86,17 @@ stateless intents, adapters, endpoints, capability values, assembly, graph, and 
 owner-thread loop calling bounded feature controllers directly could preserve identity-qualified worker
 publication with fewer concepts.
 
-I still land in favor of the current core principles: ordered owner-thread settlement, bounded feature
+## Principles answer
+
+I land in favor of the current core principles: ordered owner-thread settlement, bounded feature
 owners, stale-result refusal, and explicit teardown directly protect hover/mining correctness and playback
 stability. The appropriate restraint is to stop the migration now and require new machinery to justify a
 new ordering/state/lifecycle need.
 
 ## Could not verify
 
-| Claim | What would settle it |
-| --- | --- |
-| P1 profile sole writer remains stable | A structural writer-census control with a planted second writer |
-| P4 all profile application is owner-thread confined | An off-owner negative control at the application boundary |
-| S1 forwarding latency is negligible | A benchmark isolating adapter-forwarding overhead from cue and tooltip work |
+| Claim | Why it could not be settled | What would settle it |
+| --- | --- | --- |
+| P1 profile sole writer remains stable | The source census is a snapshot and has no planted second-writer control | A structural writer-census control with a planted second writer |
+| P4 all profile application is owner-thread confined | Current callers are owner-threaded, but no test proves off-owner application is refused | An off-owner negative control at the application boundary |
+| S1 forwarding latency is negligible | The benchmark calls graph owners directly and does not isolate forwarding | A benchmark isolating adapter-forwarding overhead from cue and tooltip work |
