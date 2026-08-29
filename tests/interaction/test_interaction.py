@@ -8,11 +8,10 @@ These use the :class:`Driver` (tests/driver.py) so they read as interaction scri
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 import pytest
 from driver import Driver
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC, ManualRenderAheadSubmitter
 
 from saitenka.app.anki import MineConfig
@@ -24,9 +23,6 @@ from saitenka.app.session.factory import (
     SessionServices,
 )
 from saitenka.panel import Definition, Entry
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 
 class _FakeDS:
@@ -80,7 +76,7 @@ def _content_word(r) -> int:
     )
 
 
-def _enable_mining(reader: SessionController) -> None:
+def _enable_mining(reader: TestSession) -> None:
     mining = reader.turn.mining_controller
     identity = mining.desired_spec.identity
     config = MineConfig()

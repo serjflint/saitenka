@@ -9,10 +9,8 @@ for a real subprocess/socket/filesystem — none touched here; mirrors test_toke
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC, keybind_registry, press, runtime_gateway
 
 from saitenka.app import bindings as app_bindings
@@ -31,9 +29,6 @@ from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import register_tokenizer
 from saitenka.runtime.events import SubtitleSecondaryLeased
 from saitenka.subtitles import CueIndex, parse_srt
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 _FR = Profile(name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenizer="latin")
 # A real French profile carries its own slang (resolve_profile derives "fr" from the language) — that is
@@ -91,7 +86,7 @@ def _restore_tokenizer_registry():
     mod._FACTORIES.update(saved)
 
 
-def _headless(request, profile=None, profiles=None) -> SessionController:
+def _headless(request, profile=None, profiles=None) -> TestSession:
     """A headless SessionController with a gateway behind it, both closed when the test ends.
 
     Takes `request` because the helper builds the resources, so the helper registers their teardown
@@ -630,7 +625,7 @@ class _SwapMidWarmTokenizer(_MinimalTokenizer):
     profile swap (``use_tokenizer``), so the warm's ``put`` for that cue lands AFTER the cache was
     cleared+bumped — exactly the window a background worker hits."""
 
-    def __init__(self, reader: SessionController, replacement) -> None:
+    def __init__(self, reader: TestSession, replacement) -> None:
         super().__init__("old")
         self._reader, self._replacement, self._swapped = reader, replacement, False
 
@@ -644,7 +639,7 @@ class _SwapMidWarmTokenizer(_MinimalTokenizer):
         return toks
 
 
-def _warm_reader(request) -> SessionController:
+def _warm_reader(request) -> TestSession:
     reader = _headless(request)
     reader.turn.profile_session.profile.replace_dictionary_set(_ExistsDS())
     reader.turn.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_SRT))

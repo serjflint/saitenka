@@ -1,7 +1,7 @@
 """In-player help uses effective bindings and remains playback-neutral."""
 
 from driver import Driver
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC, keybind_registry
 
 from saitenka.app.bindings import (
@@ -16,12 +16,11 @@ from saitenka.app.bindings import (
 from saitenka.app.config import KeyOptions, PanelOptions, ReaderOptions
 from saitenka.app.features.tooltip import tooltip
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session.controller import SessionController
 from saitenka.app.session.factory import SessionServices
 from saitenka.render.help import render_page
 
 
-def _entries(reader: SessionController):
+def _entries(reader: TestSession):
     return [
         (section.title, entry)
         for page in reader.turn.help_controller.document().pages

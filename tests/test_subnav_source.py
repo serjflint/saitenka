@@ -8,22 +8,17 @@ the overlay blank for the rest of the cue. Only `poe smoke-live` saw it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.subtitle_render import NullRenderer
 
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
-
 CUE = "門前の小僧習わぬ経を読む"
 
 
-def _reader_showing_the_cue() -> SessionController:
+def _reader_showing_the_cue() -> TestSession:
     """A session with the cue on screen, established the way mpv establishes it."""
     ipc = FakeIPC()
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}

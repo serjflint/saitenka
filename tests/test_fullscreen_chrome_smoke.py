@@ -10,11 +10,10 @@ was that it did not). Real renderers, no subprocess/socket → default tier.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import pytest
 import util
-from session_builder import build_session
+from session_builder import TestSession, build_session
 
 from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.config import PanelOptions, ReaderOptions
@@ -23,9 +22,6 @@ from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.runtime import events
 from saitenka.runtime.help import HelpCommand
 from saitenka.subtitles import Cue, CueIndex
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 BASELINE_1080 = (1920, 1080)
 FULLSCREEN_HIDPI = (3024, 1898)  # 16" MacBook Pro Retina, fullscreen (hidpi_scale 2.0)
@@ -79,7 +75,7 @@ class FakeOverlay:
         pass
 
 
-def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> SessionController:
+def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> TestSession:
     ipc = FakeIPC()
     options = ReaderOptions(panels=PanelOptions(scale=ui_scale))
     overlay = FakeOverlay()
@@ -95,12 +91,12 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> SessionController
     return r
 
 
-def _draw_help(r: SessionController) -> None:
+def _draw_help(r: TestSession) -> None:
     r.turn.help_controller.store.dispatch(HelpCommand.TOGGLE)
     r.turn.help_controller.redraw()
 
 
-def _draw_sidebar(r: SessionController) -> None:
+def _draw_sidebar(r: TestSession) -> None:
     r.turn.sidebar_controller.store.dispatch(
         events.SidebarShown(
             r.turn.sidebar_controller.view().active, r.turn.sidebar_controller.view().capacity
@@ -109,7 +105,7 @@ def _draw_sidebar(r: SessionController) -> None:
     sidebar.draw(r.turn.sidebar_controller.view())
 
 
-def _draw_stats(r: SessionController) -> None:
+def _draw_stats(r: TestSession) -> None:
     r.turn.command_runtime.handle(ANALYSIS_MSG)
 
 

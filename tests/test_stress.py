@@ -9,10 +9,8 @@ gate. The *performance* side of the same scenario lives in examples/bench_respon
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from driver import Driver
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC
 
 from saitenka.app.config import TooltipOptions
@@ -25,9 +23,6 @@ from saitenka.panel import Definition, Entry
 PANEL_CACHE_MAX = TooltipOptions().panel_cache_max
 TIP_ID = OverlayId.TIP
 NESTED_ID = OverlayId.NESTED
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 
 class _TallDS:
@@ -45,7 +40,7 @@ class _TallDS:
         )
 
 
-def _reader() -> SessionController:
+def _reader() -> TestSession:
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_TallDS()))
     r.turn.screen.osd = (1920, 1080)
     r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
@@ -56,7 +51,7 @@ def _reader() -> SessionController:
 _CORPUS = [f"語{i:03d}" for i in range(PANEL_CACHE_MAX + 24)]
 
 
-def _churn(r: SessionController, term: str) -> bool:
+def _churn(r: TestSession, term: str) -> bool:
     """One cold hover → scroll → nested → scroll → dismiss cycle via the real entry points. Setting
     lines+tokens lets `draw_subtitle` build a consistent box for token 0. Returns whether a nested
     popup actually opened (so a test can assert the nested path was exercised)."""

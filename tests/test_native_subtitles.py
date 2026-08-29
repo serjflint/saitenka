@@ -9,7 +9,7 @@ import pytest
 import util
 from dirty_equals import IsPartialDict
 from driver import Driver
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import record_spans
 
 from saitenka.app import native_subtitles, subtitle_fonts, subtitle_render
@@ -43,8 +43,6 @@ from saitenka.subtitles import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from saitenka.app.session.controller import SessionController
 
 ASS = """[Script Info]
 ScriptType: v4.00+
@@ -392,7 +390,7 @@ def reader(
     scorer=None,
     annotation_jobs: bool = False,
     annotations_ready: bool = True,
-) -> tuple[SessionController, FakeIPC, FakeBackend]:
+) -> tuple[TestSession, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
     ipc = FakeIPC(annotation_jobs=annotation_jobs)
@@ -427,7 +425,7 @@ def reader(
     return result, ipc, backend
 
 
-def settle_jobs(result: SessionController, ipc: FakeIPC) -> None:
+def settle_jobs(result: TestSession, ipc: FakeIPC) -> None:
     """Let the geometry lane finish and deliver its terminals.
 
     Two steps because they are two facts: the work completing, and the host being told. The broker
@@ -466,7 +464,7 @@ def visible_pixel_changes(ipc: FakeIPC) -> list[tuple[object, object]]:
     return changes
 
 
-def settle_geometry(result: SessionController, ipc: FakeIPC) -> None:
+def settle_geometry(result: TestSession, ipc: FakeIPC) -> None:
     """Advance past the batch boundary the way the next drain would.
 
     Geometry-input changes arm one zero-delay deadline rather than refreshing per observation, so
@@ -3385,7 +3383,7 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     result.close()
 
 
-def _establish_native(result: SessionController, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
+def _establish_native(result: TestSession, ipc: FakeIPC, sid: int) -> NativeVisibleRenderer:
     """Own the pixels for `sid`, the way a session that has been playing a track already does."""
     renderer = result.turn.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)

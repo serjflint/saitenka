@@ -68,7 +68,12 @@ from saitenka.app.features.tooltip.hover_adapter import (
     HoverCommandCoordinator,
     HoverCommandPorts,
 )
-from saitenka.app.features.tooltip.tooltip_controller import TooltipSessionContext
+from saitenka.app.features.tooltip.tooltip_controller import (
+    TooltipNavigationView,
+    TooltipSessionActions,
+    TooltipSessionContext,
+    TooltipSessionView,
+)
 from saitenka.app.features.translation import TranslationController, TranslationObservation
 from saitenka.app.interaction import mouse_capture
 from saitenka.app.media import (
@@ -509,27 +514,46 @@ def build_session_turn(  # noqa: PLR0913 -- resolved graph conversion is complet
     def hide_tooltip() -> None:
         turn.interaction_surfaces.remove(OverlayId.TIP)
 
+    def observe_tooltip_session() -> TooltipSessionView:
+        navigation = turn.track_commands.navigation.current
+        return TooltipSessionView(
+            cue=turn.subtitle_presentation.cue.current,
+            annotation=turn.annotation_controller.view,
+            tokenizer=turn.profile_session.profile.tokenizer,
+            dictionary=turn.profile_session.profile.dict_set,
+            scorer=turn.profile_session.scorer,
+            mined=turn.mining_controller.index_snapshot(),
+            mining_target_available=turn.mining_controller.target_available,
+            subtitle_language=turn._subtitle_tracks.current.language,
+            navigation=TooltipNavigationView(navigation.sub_index, navigation.nav_idx),
+            playback_cue_text=turn.playback_observation.cue.text,
+        )
+
+    def set_annotation_hover(*, revealed: bool) -> None:
+        turn.annotation_controller.set_hover_revealed(revealed=revealed)
+        turn.subtitle_presentation.draw()
+
+    def sync_tooltip_translation() -> None:
+        turn.translation_controller.sync_auto_reveal(turn.translation_observation.current)
+
     turn.tooltip_controller.bind_session_context(
         TooltipSessionContext(
-            hide_tooltip=hide_tooltip,
+            observe=observe_tooltip_session,
+            read_playback=turn.playback_observation.value,
+            actions=TooltipSessionActions(
+                hide=hide_tooltip,
+                set_annotation_hover=set_annotation_hover,
+                draw_cue=turn.subtitle_presentation.draw,
+                mine_token=turn.mining_controller.mine_token,
+                preview_click=turn.preview_commands.click,
+                run_hover_command=run_stateless,
+                run_mine_command=run_stateless,
+                sync_translation=sync_tooltip_translation,
+                record_lookup=turn.history.record_lookup,
+                toast=notify,
+                tts_available=tts_is_available,
+            ),
             surfaces=turn.interaction_surfaces,
-            screen=turn.screen,
-            preparation=turn.tooltip_preparation,
-            annotation=turn.annotation_controller,
-            presentation=turn.subtitle_presentation,
-            profile=turn.profile_session,
-            mining=turn.mining_controller,
-            playback=turn.playback_observation,
-            translation=turn.translation_controller,
-            translation_observation=turn.translation_observation,
-            history=turn.history,
-            notifications=turn.notifications,
-            tracks=turn._subtitle_tracks,
-            navigation=turn.track_commands.navigation,
-            preview_click=turn.preview_commands.click,
-            run_hover_command=run_stateless,
-            run_mine_command=run_stateless,
-            tts_available=tts_is_available,
         )
     )
     turn.screen.osd = (1280, 720)

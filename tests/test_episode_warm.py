@@ -3,17 +3,12 @@ playback, so no cue pays cold tokenization mid-episode (a track switch supersede
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC
 
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.subtitles import CueIndex, parse_srt
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 _SRT = (
     "1\n00:00:01,000 --> 00:00:03,000\n本を読む\n\n"
@@ -37,7 +32,7 @@ class _ImmediateThread:
         self._target(*self._args)
 
 
-def _reader(*, dict_set=None) -> SessionController:
+def _reader(*, dict_set=None) -> TestSession:
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=dict_set))
     reader.turn.screen.osd = (1280, 720)
     reader.turn.subtitle_presentation.renderer = NullRenderer()

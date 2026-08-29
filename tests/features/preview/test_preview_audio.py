@@ -7,18 +7,13 @@ handle never needs a real pid — we assert the *wiring* routes the handle to th
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC
 
 from saitenka.app.features.preview import miner_ui
 from saitenka.app.features.preview.card_preview import PreviewData
 from saitenka.runtime import events
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 
 class _FakeProc:
@@ -69,21 +64,21 @@ def test_second_play_press_replaces_the_clip_never_stacks(reader_with_clip, monk
     assert first in killed and r.turn.preview_controller.panel.audio_proc is second
 
 
-def _close_button(r: SessionController) -> None:
+def _close_button(r: TestSession) -> None:
     miner_ui.click_preview(r.turn.preview_commands.ports(), 65, 15)  # ✕ → hide_preview
 
 
-def _esc(r: SessionController) -> None:
+def _esc(r: TestSession) -> None:
     r.turn.preview_commands.hide()
 
 
-def _new_cue(r: SessionController) -> None:
+def _new_cue(r: TestSession) -> None:
     r.turn.cue_coordinator.set_subtitle(
         "次のセリフ"
     )  # a cue change auto-dismisses the last preview
 
 
-def _replay(r: SessionController) -> None:
+def _replay(r: TestSession) -> None:
     r.turn.preview_commands.replay()  # P → re-show, which silences the current clip
 
 

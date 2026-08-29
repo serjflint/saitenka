@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import TYPE_CHECKING
 
 import pytest
 import util
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
@@ -32,9 +31,6 @@ from saitenka.runtime import (
     picker,
 )
 
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
-
 
 class FakeIPC(util.FakeIPC):
     def __init__(self, **props):
@@ -48,7 +44,7 @@ class FakeIPC(util.FakeIPC):
         return super().command(*args)
 
 
-def _reader(**props) -> tuple[SessionController, FakeIPC]:
+def _reader(**props) -> tuple[TestSession, FakeIPC]:
     ipc = FakeIPC(**props)
     reader = build_session(ipc)
     reader.turn.screen.osd = (1920, 1080)
@@ -69,12 +65,12 @@ def _lister(candidates, warnings=()):
     return lambda _video: (list(candidates), list(warnings))
 
 
-def _open(reader: SessionController) -> None:
+def _open(reader: TestSession) -> None:
     """Put the picker up the way production does: through the slice that owns "open"."""
     reader.turn.picker_controller.store.dispatch(events.PickerOpened())
 
 
-def _adopt(reader: SessionController, *, candidates=(), warnings=(), error=None) -> None:
+def _adopt(reader: TestSession, *, candidates=(), warnings=(), error=None) -> None:
     """Land a listing on the picker's current generation."""
     sub_picker.apply_listing(
         reader.turn.picker_controller.store,
@@ -84,11 +80,11 @@ def _adopt(reader: SessionController, *, candidates=(), warnings=(), error=None)
     )
 
 
-def _listed(reader: SessionController) -> sub_picker.ListingResult:
+def _listed(reader: TestSession) -> sub_picker.ListingResult:
     return sub_picker.listing_of(reader.turn.picker_controller.state)
 
 
-def _close(reader: SessionController) -> None:
+def _close(reader: TestSession) -> None:
     sub_picker.close_picker(
         reader.turn.picker_controller.store,
         reader.turn.picker_controller.panel,
@@ -96,7 +92,7 @@ def _close(reader: SessionController) -> None:
     )
 
 
-def _listing_ports(reader: SessionController) -> sub_picker.ListingPorts:
+def _listing_ports(reader: TestSession) -> sub_picker.ListingPorts:
     return reader.turn.picker_controller.listing_ports(
         navigation=reader.turn.track_commands.navigation,
         stop=reader.turn.lifecycle.stop_signal,
@@ -108,7 +104,7 @@ def _picker_adds(ipc: FakeIPC) -> list[tuple]:
     return [c for c in ipc.commands if c[:2] == ("overlay-add", OverlayId.PICKER)]
 
 
-def _drain_until(reader: SessionController, predicate) -> None:
+def _drain_until(reader: TestSession, predicate) -> None:
     deadline = time.monotonic() + 1
     while not predicate() and time.monotonic() < deadline:
         reader.turn._drain_events()

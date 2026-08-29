@@ -146,6 +146,18 @@ _PREPARATION_CONSTRUCTORS = {
     "PrefetchState": {_PREPARATION_OWNER},
     "TooltipPreparationController": {_ASSEMBLY},
 }
+_TOOLTIP_SESSION_PEER_OWNERS = {
+    "CueAnnotationController",
+    "HistoryOwner",
+    "MiningController",
+    "NavigationStore",
+    "PlaybackObservationController",
+    "ProfileSession",
+    "SubtitlePresentation",
+    "SubtitleTrackStore",
+    "TranslationController",
+    "TranslationObservation",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -526,6 +538,17 @@ def inspect_source(source: str, path: Path) -> list[Finding]:
     }
 
     for node, owner_names, preparation_names in _scoped_nodes(tree, owner_types=owner_types):
+        if (
+            site == _OWNER
+            and isinstance(node, ast.ClassDef)
+            and node.name.startswith("TooltipSession")
+        ):
+            findings.extend(
+                Finding(path, field.lineno, "tooltip-session-peer-owner", node.name)
+                for field in node.body
+                if isinstance(field, ast.AnnAssign)
+                and _annotation_mentions_type(field.annotation, _TOOLTIP_SESSION_PEER_OWNERS)
+            )
         if (
             site == _COMPOSITION
             and isinstance(node, ast.FunctionDef)

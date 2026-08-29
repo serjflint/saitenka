@@ -10,7 +10,9 @@ from saitenka.app.session.lifecycle import LiveState
 from saitenka.app.subtitle_render import SUB_ID
 
 if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
+    from session_builder import TestSession
+
+    from saitenka.app.session.turn import SessionTurn
 
 
 def _visible_surfaces(commands: list[tuple]) -> set[object]:
@@ -30,7 +32,7 @@ def _visible_surfaces(commands: list[tuple]) -> set[object]:
     return visible
 
 
-def _cue(reader: SessionController) -> CueState:
+def _cue(reader: SessionTurn) -> CueState:
     if reader.cue_coordinator.command_state(
         retired=reader.annotation_controller.view.retired
     ).value == ("retired-after-active"):
@@ -43,7 +45,7 @@ def _cue(reader: SessionController) -> CueState:
     return "none"
 
 
-def _interaction(reader: SessionController) -> InteractionState:
+def _interaction(reader: SessionTurn) -> InteractionState:
     if reader.tooltip_controller.surface_state().view.rect is not None:
         return "tooltip"
     if (
@@ -54,7 +56,7 @@ def _interaction(reader: SessionController) -> InteractionState:
     return "ready" if reader.subtitle_presentation.cue.current.boxes else "unavailable"
 
 
-def _pixels(reader: SessionController, visible: set[object]) -> PixelState:
+def _pixels(reader: SessionTurn, visible: set[object]) -> PixelState:
     if SUB_ID in visible:
         return "legacy"
     if reader.ipc.props.get("sub-visibility") is True:
@@ -65,7 +67,7 @@ def _pixels(reader: SessionController, visible: set[object]) -> PixelState:
 
 
 class LegacyReaderTrace:
-    def __init__(self, reader: SessionController) -> None:
+    def __init__(self, reader: TestSession) -> None:
         self.reader = reader.turn
         self.trace = BehaviorTrace()
 

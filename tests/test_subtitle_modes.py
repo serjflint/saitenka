@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC as RuntimeFakeIPC
 from util import RecordingRasterProvider, runtime_gateway
 
@@ -14,7 +14,6 @@ from saitenka.app import bindings as app_bindings
 from saitenka.app import subtitle_modes, subtitle_selection
 from saitenka.app.features.translation import TranslationInputs
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
-from saitenka.app.session.controller import SessionController
 from saitenka.app.session.lifecycle import LiveState
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
@@ -66,7 +65,7 @@ JP = {"id": 2, "type": "sub", "lang": "jpn"}
 EN = {"id": 1, "type": "sub", "lang": "eng"}
 
 
-def hold_translation(reader: SessionController) -> None:
+def hold_translation(reader: TestSession) -> None:
     reader.turn.translation_controller.toggle(
         TranslationInputs(
             surfaces_visible=False,
@@ -99,13 +98,13 @@ class FetchJobs:
         )
 
 
-def reader_with_fetch_jobs(ipc, monkeypatch) -> tuple[SessionController, FetchJobs]:
+def reader_with_fetch_jobs(ipc, monkeypatch) -> tuple[TestSession, FetchJobs]:
     jobs = FetchJobs()
     monkeypatch.setattr(subtitle_modes, "configure_runtime_job", lambda _ipc: jobs.submit)
     return build_session(ipc), jobs
 
 
-def _drain_until(reader: SessionController, predicate) -> None:
+def _drain_until(reader: TestSession, predicate) -> None:
     deadline = time.monotonic() + 1
     while not predicate() and time.monotonic() < deadline:
         reader.turn._drain_events()

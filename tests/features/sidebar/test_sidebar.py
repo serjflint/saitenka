@@ -6,7 +6,7 @@ import pytest
 import util
 from driver import Driver
 from PIL import Image
-from session_builder import build_session, install_profile_dependencies
+from session_builder import TestSession, build_session, install_profile_dependencies
 
 from saitenka.app import backlog
 from saitenka.app.anki import MineConfig
@@ -17,7 +17,6 @@ from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTar
 from saitenka.app.features.sidebar import sidebar
 from saitenka.app.scoring import Scorer
 from saitenka.app.session import sidebar_coordination
-from saitenka.app.session.controller import SessionController
 from saitenka.app.subtitles import (
     SidebarAction,
     SidebarHitBox,
@@ -59,7 +58,7 @@ def _reader(cue_count=20, *, active=0, props=None):
     return reader, ipc
 
 
-def _enable_mining(reader: SessionController) -> None:
+def _enable_mining(reader: TestSession) -> None:
     config = MineConfig()
     identity = reader.turn.mining_controller.desired_spec.identity
     reader.turn.mining_controller.select_mining_spec(

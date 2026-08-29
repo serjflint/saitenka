@@ -3,7 +3,7 @@
 import threading
 
 import pytest
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC, await_ready, drain_for, runtime_gateway
 
 from saitenka.app.bindings import ANALYSIS_MSG
@@ -12,7 +12,6 @@ from saitenka.app.features.analysis.episode_analysis import cue_result
 from saitenka.app.features.profiles.dependencies import DependencyBundle
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Scorer
-from saitenka.app.session.controller import SessionController
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.wordlists import KnownWords
 from saitenka.render.analysis import render_analysis
@@ -40,15 +39,15 @@ def reader():
     gateway.close()
 
 
-def _toggle(reader: SessionController) -> None:
+def _toggle(reader: TestSession) -> None:
     reader.turn.command_runtime.handle(ANALYSIS_MSG)
 
 
-def _invalidate(reader: SessionController, *, vocabulary_changed: bool = False) -> None:
+def _invalidate(reader: TestSession, *, vocabulary_changed: bool = False) -> None:
     reader.turn.analysis_commands.invalidate(vocabulary_changed=vocabulary_changed)
 
 
-def _finish(reader: SessionController) -> None:
+def _finish(reader: TestSession) -> None:
     await_ready(
         lambda: reader.turn.analysis_controller.settled,
         "analysis result was not published",

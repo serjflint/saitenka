@@ -1,19 +1,4 @@
-"""The composition seam the noninteractive entry modes drive.
-
-Demo and screenshot used to reach straight into `SessionController` and the IPC transport: a cue read was
-`reader._get("sub-text")`, a capture was `ipc.command("screenshot-to-file", ...)`. That coupling is
-why they could not be switched to the blocking runner with `run`/`attach` — they did not share a
-driver with it, they shared a *host object*, and every private they touched was one more thing WP6
-would have to keep alive.
-
-So the entry modes name operations here instead. What each one costs today (a SessionController call, a
-correlated command) is this module's business; when WP6 repoints them at reducers and ports, the
-entry modes do not change. The seam is the point.
-
-It held a `SessionController` for exactly one reason — it *drives* one — and that read as composition until the
-members were counted: three facts and a dozen acts, which is a feature value. `SessionFacts` and
-`SessionActs` are that value, split the way every feature here splits.
-"""
+"""The explicit facts and blocking acts driven by noninteractive entry modes."""
 
 from __future__ import annotations
 
@@ -99,7 +84,7 @@ def choose_demo_token(tokens: Sequence[Any], target: str, is_content: Callable[[
 
 
 class SessionRuntime:
-    """Drive one session through named operations instead of `SessionController` internals."""
+    """Drive one prepared session through named operations."""
 
     def __init__(
         self,
@@ -146,7 +131,7 @@ class SessionRuntime:
         """Pump until mpv publishes its window geometry. `False` if the deadline passed first.
 
         A demo used to sleep here instead. What the nap was standing in for is exactly this fact,
-        and the two are not the same: `SessionController.osd` falls back to a 720p default that is never
+        and the two are not the same: the screen observation falls back to a 720p default that is never
         obviously wrong and never right either, so a demo that composed its tooltip before the real
         geometry landed produced a screenshot of a panel sized for a window that does not exist —
         with nothing failing anywhere. A fixed nap is also the wrong instrument twice over: too

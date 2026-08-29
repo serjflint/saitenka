@@ -8,12 +8,11 @@ from __future__ import annotations
 import json
 import zipfile
 from dataclasses import replace
-from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
 
 import dicthelp
 from driver import Driver
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC
 
 from saitenka.app.config import ReaderOptions
@@ -27,10 +26,7 @@ from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
-
-_SUBMITTERS: WeakKeyDictionary[SessionController, _DeferredEngagedSubmitter]
+_SUBMITTERS: WeakKeyDictionary[TestSession, _DeferredEngagedSubmitter]
 
 
 class _DeferredEngagedSubmitter:
@@ -45,7 +41,7 @@ class _DeferredEngagedSubmitter:
         self.calls.append(kwargs)
         return True
 
-    def enable(self, reader: SessionController) -> None:
+    def enable(self, reader: TestSession) -> None:
         self.run = reader.turn.tooltip_controller.run_engaged
         self.enabled = True
 
@@ -86,7 +82,7 @@ def _fixture_ds(tmp_path):
 _SUBMITTERS = WeakKeyDictionary()
 
 
-def _submitter(reader: SessionController) -> _DeferredEngagedSubmitter:
+def _submitter(reader: TestSession) -> _DeferredEngagedSubmitter:
     return _SUBMITTERS[reader]
 
 

@@ -63,9 +63,6 @@ from saitenka.app import (
     logsetup,
     session_stats,
 )
-from saitenka.app.features.tooltip.popups import (
-    PopupView,
-)
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.runtime import (
     ConnectionLost,
@@ -106,11 +103,6 @@ _DISPLAY_PROBE_PROPS = (
 
 def _discard(_value: object) -> None:
     pass
-
-
-# Popup view/panel classes live in the tooltip feature; the _Nested alias is kept because the controller
-# internals and the test-suite reference the old private name.
-_Nested = PopupView
 
 
 class SessionTurn:

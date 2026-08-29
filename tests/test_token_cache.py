@@ -9,10 +9,9 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
 
 import pytest
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC, RecordingRasterProvider
 
 from saitenka.app.session.factory import SessionServices
@@ -20,9 +19,6 @@ from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 
 def _tok(surface: str) -> Token:
@@ -81,7 +77,7 @@ def test_lru_evicts_oldest_beyond_capacity():
 # --- controller seam: plain-then-upgrade + cache hit ----------------------------------------------
 
 
-def _reader(dict_set=None) -> SessionController:
+def _reader(dict_set=None) -> TestSession:
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=dict_set))
     reader.turn.screen.osd = (1920, 1080)
     reader.turn.subtitle_presentation.renderer = NullRenderer()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import (
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 @dataclass(eq=False, slots=True, weakref_slot=True)
 class TestSession:
+    __test__: ClassVar[bool] = False
+
     live: LiveSession
     turn: SessionTurn
 

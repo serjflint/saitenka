@@ -5,12 +5,11 @@ from __future__ import annotations
 import contextlib
 import threading
 from dataclasses import replace
-from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
 
 import pytest
 import util
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import ManualRenderAheadSubmitter
 
 from saitenka import otel_metrics
@@ -22,12 +21,9 @@ from saitenka.panel import Definition, Entry, panel_rows
 from saitenka.render.banded import WindowedPanel
 from saitenka.runtime import EffectOutcome
 
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
-
 WIDTH = 384
 
-_SUBMITTERS: WeakKeyDictionary[SessionController, ManualRenderAheadSubmitter] = WeakKeyDictionary()
+_SUBMITTERS: WeakKeyDictionary[TestSession, ManualRenderAheadSubmitter] = WeakKeyDictionary()
 
 
 class _FakeIPC(util.FakeIPC):
@@ -51,7 +47,7 @@ class _RecordingPanel:
         return len(self.calls)
 
 
-def _reader() -> SessionController:
+def _reader() -> TestSession:
     submitter = ManualRenderAheadSubmitter()
     r = build_session(
         _FakeIPC(),
@@ -67,7 +63,7 @@ def _reader() -> SessionController:
     return r
 
 
-def _submitter(reader: SessionController) -> ManualRenderAheadSubmitter:
+def _submitter(reader: TestSession) -> ManualRenderAheadSubmitter:
     return _SUBMITTERS[reader]
 
 

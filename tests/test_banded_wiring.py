@@ -7,19 +7,14 @@ windowed viewport vs a one-shot render_panel crop lives in ``tests/test_windowed
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from driver import Driver
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.tooltip import tooltip_panel
 from saitenka.app.session.factory import SessionServices
 from saitenka.panel import Definition, Entry
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 
 class _FakeDS:
@@ -40,7 +35,7 @@ class _FakeDS:
         return True
 
 
-def _reader() -> SessionController:
+def _reader() -> TestSession:
     r = build_session(
         FakeIPC(),
         services=SessionServices(
@@ -53,7 +48,7 @@ def _reader() -> SessionController:
     return r
 
 
-def _content_word(r: SessionController) -> int:
+def _content_word(r: TestSession) -> int:
     return next(
         i
         for i, t in enumerate(r.turn.subtitle_presentation.cue.current.tokens)

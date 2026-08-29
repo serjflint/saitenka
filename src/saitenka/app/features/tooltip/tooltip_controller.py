@@ -58,16 +58,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Collection
 
     from saitenka.app.config import KeyOptions, TooltipOptions
-    from saitenka.app.features.annotation.annotation_controller import CueAnnotationController
+    from saitenka.app.dictionary import DictionarySet
+    from saitenka.app.features.annotation.annotation_controller import AnnotationView
     from saitenka.app.features.help.help_controller import (
         HelpController,
         ScreenState,
         TooltipKeyContext,
     )
-    from saitenka.app.features.history.history_owner import HistoryOwner
-    from saitenka.app.features.mining.mining_controller import MiningController
-    from saitenka.app.features.profiles.profile_session import ProfileSession
-    from saitenka.app.features.subtitle.navigation_state import NavigationStore
+    from saitenka.app.features.mining.mining_controller import MiningIndexSnapshot
     from saitenka.app.features.tooltip.popups import (
         HoverMetadata as HoverMetadataView,
     )
@@ -78,20 +76,19 @@ if TYPE_CHECKING:
     from saitenka.app.features.tooltip.prefetch import TipScale
     from saitenka.app.features.tooltip.preparation import TooltipPreparationController
     from saitenka.app.features.tooltip.tooltip_panel import PanelKey, PanelPorts, PanelStyle
-    from saitenka.app.features.translation import TranslationController, TranslationObservation
     from saitenka.app.interaction.presentation import InteractionSurfaces
     from saitenka.app.lifecycle_timers import LifecycleTimers
     from saitenka.app.render_cache import LoadedView
-    from saitenka.app.session.playback_observation import PlaybackObservationController
-    from saitenka.app.subtitle_presentation import SubtitlePresentation
-    from saitenka.app.toast_controller import NotificationSink
+    from saitenka.app.scoring import Scorer
+    from saitenka.app.subtitle_presentation import CueRenderState
+    from saitenka.app.tokenizer import Tokenizer
     from saitenka.render.layout_backend import LayoutBackend
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
     from saitenka.runtime.hover_pause import PauseClaim
     from saitenka.runtime.jobs import JobSubmitter
     from saitenka.runtime.pulse import PulseState, Repaint
-    from saitenka.runtime.subtitle_slice import SubtitleTrackStore
+    from saitenka.subtitles import CueIndex
 
 log = logging.getLogger(__name__)
 
@@ -207,28 +204,52 @@ class TooltipPresentation:
 
 
 @dataclass(frozen=True, slots=True)
-class TooltipSessionContext:
-    """The bounded owners sampled by tooltip policy during one live session."""
+class TooltipNavigationView:
+    sub_index: CueIndex | None
+    nav_idx: int
 
-    hide_tooltip: Callable[[], None]
-    surfaces: InteractionSurfaces
-    screen: ScreenState
-    preparation: TooltipPreparationController
-    annotation: CueAnnotationController
-    presentation: SubtitlePresentation
-    profile: ProfileSession
-    mining: MiningController
-    playback: PlaybackObservationController
-    translation: TranslationController
-    translation_observation: TranslationObservation
-    history: HistoryOwner
-    notifications: NotificationSink
-    tracks: SubtitleTrackStore
-    navigation: NavigationStore
+
+@dataclass(frozen=True, slots=True)
+class TooltipSessionView:
+    """Immutable peer facts sampled together for one tooltip operation."""
+
+    cue: CueRenderState
+    annotation: AnnotationView
+    tokenizer: Tokenizer
+    dictionary: DictionarySet | None
+    scorer: Scorer | None
+    mined: MiningIndexSnapshot
+    mining_target_available: bool
+    subtitle_language: str
+    navigation: TooltipNavigationView
+    playback_cue_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class TooltipSessionActions:
+    """The named cross-feature effects tooltip policy may request."""
+
+    hide: Callable[[], None]
+    set_annotation_hover: Callable[..., None]
+    draw_cue: Callable[[], None]
+    mine_token: Callable[..., None]
     preview_click: Callable[[float, float], bool]
     run_hover_command: Callable[[object], None]
     run_mine_command: Callable[[object], None]
+    sync_translation: Callable[[], None]
+    record_lookup: Callable[..., None]
+    toast: Callable[..., None]
     tts_available: Callable[[], bool]
+
+
+@dataclass(frozen=True, slots=True)
+class TooltipSessionContext:
+    """Fresh observations, bounded effects, and the tooltip's physical surface."""
+
+    observe: Callable[[], TooltipSessionView]
+    read_playback: Callable[[str], object]
+    actions: TooltipSessionActions
+    surfaces: InteractionSurfaces
 
 
 class TooltipController:
@@ -311,14 +332,13 @@ class TooltipController:
 
     def hit(self, mx: float, my: float) -> int:
         context = self._session()
-        cue = context.presentation.cue.current
+        view = context.observe()
+        cue = view.cue
         return subtitles.token_at(
             cue.boxes,
             (mx, my),
             cue.origin,
-            is_skippable=lambda index: context.profile.profile.tokenizer.is_skippable(
-                cue.tokens[index]
-            ),
+            is_skippable=lambda index: view.tokenizer.is_skippable(cue.tokens[index]),
         )
 
     def set_hover(self, index: int) -> None:
@@ -343,22 +363,26 @@ class TooltipController:
 
     def set_annotation_hover(self, *, revealed: bool) -> None:
         context = self._session()
+        view = context.observe()
         target = bool(
             revealed
-            and context.annotation.view.mode == "hover"
-            and context.tracks.current.language == MAIN_LANG
-            and context.presentation.cue.current.tokens
+            and view.annotation.mode == "hover"
+            and view.subtitle_language == MAIN_LANG
+            and view.cue.tokens
         )
-        if target == context.annotation.view.hover_revealed:
+        if target == view.annotation.hover_revealed:
             return
-        context.annotation.set_hover_revealed(revealed=target)
-        context.presentation.draw()
+        context.actions.set_annotation_hover(revealed=target)
 
     def copy_token(self, token) -> None:
-        tooltip.copy_token(self._session().notifications.show, token)
+        tooltip.copy_token(self._session().actions.toast, token)
 
     def copy_click(self) -> None:
         tooltip.copy_click(self.tip_ports, self.click_ports, self.hover_inputs)
+
+    def _mouse_position(self) -> dict | None:
+        value = self._session().read_playback("mouse-pos")
+        return value if isinstance(value, dict) else None
 
     @property
     def hover_actions(self) -> HoverActions:
@@ -382,20 +406,22 @@ class TooltipController:
     def click_ports(self) -> ClickPorts:
         context = self._session()
         return ClickPorts(
-            mine_token=context.mining.mine_token,
-            mine_current=lambda: context.run_mine_command(mine_intents.MineCommand.WORD),
-            speak_hovered=lambda: context.run_hover_command(hover_intents.HoverCommand.SPEAK),
-            click_preview=context.preview_click,
-            cursor=lambda: context.playback.mapping("mouse-pos") or None,
-            paused=lambda: context.playback.value("pause"),
+            mine_token=context.actions.mine_token,
+            mine_current=lambda: context.actions.run_mine_command(mine_intents.MineCommand.WORD),
+            speak_hovered=lambda: context.actions.run_hover_command(
+                hover_intents.HoverCommand.SPEAK
+            ),
+            click_preview=context.actions.preview_click,
+            cursor=self._mouse_position,
+            paused=lambda: context.read_playback("pause"),
         )
 
     @property
     def hover_inputs(self) -> HoverInputs:
         context = self._session()
-        cue = context.presentation.cue.current
+        cue = context.observe().cue
         return HoverInputs(
-            mouse_pos=lambda: context.playback.value("mouse-pos"),
+            mouse_pos=self._mouse_position,
             hit=self.hit,
             hover=lambda: self.observation().selected,
             cue_state=self.cue_state,
@@ -406,13 +432,13 @@ class TooltipController:
 
     @property
     def word_lookup(self) -> WordLookup:
-        context = self._session()
-        annotation = context.annotation.view
+        view = self._session().observe()
+        annotation = view.annotation
         return WordLookup(
-            tokenizer=context.profile.profile.tokenizer,
-            dict_set=context.profile.profile.dict_set,
-            mined=context.mining.index_snapshot(),
-            prefetch_gen=context.preparation.generation,
+            tokenizer=view.tokenizer,
+            dict_set=view.dictionary,
+            mined=view.mined,
+            prefetch_gen=self._preparation.generation,
             dependency_gen=annotation.dependency_generation,
             cue_identity=annotation.identity,
             deferred=self.metadata_deferred,
@@ -420,14 +446,13 @@ class TooltipController:
         )
 
     def apply_context(self) -> TooltipApply:
-        context = self._session()
         return TooltipApply(
             ports=self.tip_ports,
             panel=self.panel_ports,
             lookup=self.word_lookup,
             hover=self.hover_inputs,
             show=self.show_actions,
-            generation=context.preparation.generation,
+            generation=self._preparation.generation,
         )
 
     @property
@@ -435,30 +460,28 @@ class TooltipController:
         context = self._session()
         return ShowActions(
             select=self.select,
-            draw_cue=context.presentation.draw,
+            draw_cue=context.actions.draw_cue,
             teardown=self.teardown,
             bind_keys=self.bind_keybindings,
-            seed_precomposed=lambda panel, key, cap: context.preparation.cache.seed_precomposed(
+            seed_precomposed=lambda panel, key, cap: self._preparation.cache.seed_precomposed(
                 self.preparation_inputs, panel, key, cap
             ),
             freeze=lambda *, already_paused: tooltip._freeze_frame(
                 self._ipc,
-                context.playback.value,
+                context.read_playback,
                 enabled=self.observation().pause_enabled,
                 already_paused=already_paused,
             ),
             inflected=self.inflected_surface,
-            sync_translation=lambda: context.translation.sync_auto_reveal(
-                context.translation_observation.current
-            ),
-            record_lookup=context.history.record_lookup,
+            sync_translation=context.actions.sync_translation,
+            record_lookup=context.actions.record_lookup,
         )
 
     def cue_state(self) -> str:
-        context = self._session()
-        if not context.playback.cue.text.strip():
+        view = self._session().observe()
+        if not view.playback_cue_text.strip():
             return "empty"
-        annotation = context.annotation.view
+        annotation = view.annotation
         if annotation.retired:
             return "retired"
         return "pending" if annotation.pending_text is not None else "ready"
@@ -466,12 +489,12 @@ class TooltipController:
     def teardown(self) -> None:
         context = self._session()
         self.cancel_jobs()
-        context.hide_tooltip()
+        context.actions.hide()
         self.hide_nested()
         self.unbind_keybindings()
         self.retire_state()
         self.resume_after_hover_pause()
-        context.translation.sync_auto_reveal(context.translation_observation.current)
+        context.actions.sync_translation()
 
     def resume_after_hover_pause(self) -> None:
         if not self.release_pause_claim():
@@ -510,36 +533,37 @@ class TooltipController:
     @property
     def panel_style(self) -> PanelStyle:
         context = self._session()
+        view = context.observe()
         return tooltip_panel.PanelStyle(
             width=self.scale().width,
             band_cache_max=self.visual.band_limit,
             raw_band_ceiling=self.visual.raw_band_bytes,
             layout_backend=self.visual.backend,
             layout_engine=self.visual.backend_name,
-            add_button=context.mining.target_available,
-            speak_button=context.tts_available(),
-            dict_set=context.profile.profile.dict_set,
-            scorer=context.profile.scorer,
-            tokenizer=context.profile.profile.tokenizer,
+            add_button=view.mining_target_available,
+            speak_button=context.actions.tts_available(),
+            dict_set=view.dictionary,
+            scorer=view.scorer,
+            tokenizer=view.tokenizer,
             kanji_stroke_order=self.visual.stroke_order,
         )
 
     @property
     def panel_ports(self) -> PanelPorts:
-        context = self._session()
+        view = self._session().observe()
         return self.build_panel_ports(
             style=self.panel_style,
-            mined_set=context.mining.index_snapshot(),
+            mined_set=view.mined,
             during_scroll=self._scrolled_this_turn,
             cap=self.scale().cap,
         )
 
     @property
     def preparation_inputs(self) -> TooltipPreparationInputs:
-        context = self._session()
+        view = self._session().observe()
         return TooltipPreparationInputs(
             panels=self.panel_ports,
-            dictionary=context.profile.profile.dict_set,
+            dictionary=view.dictionary,
         )
 
     def panel_for(
@@ -565,54 +589,51 @@ class TooltipController:
         )
 
     def is_mined(self, token) -> bool:
-        return tooltip_panel.is_mined(token, self._session().mining.index_snapshot())
+        return tooltip_panel.is_mined(token, self._session().observe().mined)
 
     @property
     def prefetch_ports(self) -> prefetch.PrefetchPorts:
-        context = self._session()
-        navigation = context.navigation.current
-        cue = context.presentation.cue.current
+        view = self._session().observe()
+        navigation = view.navigation
+        cue = view.cue
         return prefetch.PrefetchPorts(
-            enabled=bool(
-                context.preparation.config.enabled and context.profile.profile.dict_set is not None
-            ),
-            engaged=bool(context.playback.value("pause")) or self._mouse_engaged,
+            enabled=bool(self._preparation.config.enabled and view.dictionary is not None),
+            engaged=bool(self._session().read_playback("pause")) or self._mouse_engaged,
             cues=prefetch.LookaheadCues(
                 navigation.sub_index,
-                context.playback.cue.text,
+                view.playback_cue_text,
                 navigation.nav_idx,
-                context.preparation.config.cue_lookahead,
+                self._preparation.config.cue_lookahead,
             ),
             tokens=cue.tokens,
             styles=cue.styles,
-            tokenizer=context.profile.profile.tokenizer,
+            tokenizer=view.tokenizer,
             inflected=self.inflected_surface,
             is_mined=self.is_mined,
         )
 
     @property
     def head_probe(self) -> prefetch.HeadProbe:
-        context = self._session()
+        view = self._session().observe()
         return prefetch.HeadProbe(
-            scorer=context.profile.scorer,
+            scorer=view.scorer,
             panel_key=self.panel_key,
             panel_present=self.has_cached_panel,
-            lookahead=context.preparation.config.head_lookahead,
-            queue_max=context.preparation.config.head_queue_max,
+            lookahead=self._preparation.config.head_lookahead,
+            queue_max=self._preparation.config.head_queue_max,
         )
 
     def start_prefetch(self) -> int:
-        context = self._session()
-        context.preparation.start(
+        view = self._session().observe()
+        self._preparation.start(
             self._ipc,
-            context.profile.profile.tokenizer,
-            dictionary_available=context.profile.profile.dict_set is not None,
+            view.tokenizer,
+            dictionary_available=view.dictionary is not None,
         )
-        return context.preparation.worker_count
+        return self._preparation.worker_count
 
     def update_prefetch(self) -> None:
-        context = self._session()
-        if context.preparation.update(
+        if self._preparation.update(
             self.prefetch_ports,
             self.head_probe,
             self.preparation_inputs,
@@ -621,14 +642,11 @@ class TooltipController:
             self.cancel_current_work()
 
     def finish_speculative_prefetch(self, completion: EffectFinished) -> None:
-        context = self._session()
-        context.preparation.finish(completion, self.finish_speculative_prefetch)
+        self._preparation.finish(completion, self.finish_speculative_prefetch)
 
     def inflected_surface(self, index: int) -> str:
-        context = self._session()
-        return context.profile.profile.tokenizer.inflected_in(
-            context.presentation.cue.current.tokens, index
-        )
+        view = self._session().observe()
+        return view.tokenizer.inflected_in(view.cue.tokens, index)
 
     @property
     def navigation_endpoint(self) -> TooltipNavigationEndpoint:
@@ -648,13 +666,13 @@ class TooltipController:
                 scale=self.navigation_endpoint.scale(),
                 surfaces=context.surfaces,
                 request_render_ahead=self.submit_render_ahead,
-                osd=context.screen.osd,
+                osd=self._screen.osd,
                 nested_max_frac=self.visual.nested_height_fraction,
-                peek_render_cache=lambda key: context.preparation.cache.peek(
+                peek_render_cache=lambda key: self._preparation.cache.peek(
                     self.preparation_inputs, key
                 ),
                 schedule_flash_expiry=self.schedule_flash_expiry,
-                toast=context.notifications.show,
+                toast=context.actions.toast,
                 request_engaged_tooltip=self.request_engaged_tooltip,
             )
         )
@@ -670,17 +688,15 @@ class TooltipController:
         )
 
     def submit_render_ahead(self, view: PopupView, direction: int) -> bool:
-        context = self._session()
         return self.request_render_ahead(
             view,
             direction,
-            generation=context.preparation.generation,
+            generation=self._preparation.generation,
             scale=self.scale().raster,
             on_finished=self.finish_render_ahead_completion,
         )
 
     def request_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> bool:
-        context = self._session()
         scale = self.scale()
         if isinstance(request, tooltip_engaged.HoverRequest):
             request = replace(
@@ -694,24 +710,22 @@ class TooltipController:
             request = replace(request, scale=scale)
         return self.request_engaged(
             request,
-            generation=context.preparation.generation,
+            generation=self._preparation.generation,
             on_finished=self.finish_engaged_tooltip,
         )
 
     def finish_engaged_tooltip(self, completion: EffectFinished) -> None:
-        context = self._session()
         self.finish_engaged(
             completion,
-            generation=context.preparation.generation,
+            generation=self._preparation.generation,
             apply_factory=self.apply_context,
             on_finished=self.finish_engaged_tooltip,
         )
 
     def finish_render_ahead_completion(self, completion: EffectFinished) -> None:
-        context = self._session()
         self.finish_render_ahead(
             completion,
-            generation=context.preparation.generation,
+            generation=self._preparation.generation,
             ports=self.tip_ports,
             on_finished=self.finish_render_ahead_completion,
         )
@@ -792,7 +806,7 @@ class TooltipController:
         nested_popup.open_kanji(self.tip_ports, self.panel_ports, char, x, y, height)
 
     def kanji_current(self) -> None:
-        self._session().run_hover_command(hover_intents.HoverCommand.KANJI)
+        self._session().actions.run_hover_command(hover_intents.HoverCommand.KANJI)
 
     def hide_nested(self) -> None:
         nested_popup.hide_nested(self.tip_ports)

@@ -8,16 +8,11 @@ only ever grows (an OSD at/under 1080p is unchanged — the goldens stay valid).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import util
-from session_builder import build_session
+from session_builder import TestSession, build_session
 
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.runtime import events
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 REF_H = 1080
 
@@ -26,7 +21,7 @@ class FakeIPC(util.FakeIPC):
     pass
 
 
-def _reader(scale: float) -> SessionController:
+def _reader(scale: float) -> TestSession:
     return build_session(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=scale)))
 
 

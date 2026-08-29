@@ -2,13 +2,14 @@
 
 import functools
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from driver import Driver
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from session_builder import build_session
+from session_builder import TestSession, build_session
 from util import FakeIPC as RuntimeFakeIPC
 from util import await_ready, keybind_registry, runtime_gateway
 
@@ -30,7 +31,6 @@ from saitenka.app.features.tooltip import (
 )
 from saitenka.app.features.tooltip.tooltip_panel import PanelKey
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session.controller import SessionController
 from saitenka.app.session.factory import (
     SessionInfrastructure,
     SessionServices,
@@ -53,7 +53,7 @@ class FakeIPC(RuntimeFakeIPC):
         return None
 
 
-def _enable_mining(r: SessionController, anki=None, config: MineConfig | None = None) -> None:
+def _enable_mining(r: TestSession, anki=None, config: MineConfig | None = None) -> None:
     target_config = config or MineConfig()
     identity = r.turn.mining_controller.desired_spec.identity
     r.turn.mining_controller.select_mining_spec(
@@ -65,7 +65,7 @@ def _enable_mining(r: SessionController, anki=None, config: MineConfig | None = 
     r.turn.mining_controller.close_capability()
 
 
-def _captured_prefetch_items(r: SessionController, monkeypatch) -> list[prefetch.PrefetchItem]:
+def _captured_prefetch_items(r: TestSession, monkeypatch) -> list[prefetch.PrefetchItem]:
     items: list[prefetch.PrefetchItem] = []
 
     def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
@@ -568,7 +568,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
         fabricates is host state, and `activate` receives a `SubtitleTarget` — deliberately narrower
         than a host, so a stub that needs one says so instead of taking it from the protocol."""
 
-        def __init__(self, reader: SessionController) -> None:
+        def __init__(self, reader: TestSession) -> None:
             self._reader = reader
 
         def draw(self, _request=None, _surfaces=None, _ipc=None, /, **_ports) -> None:
@@ -2197,8 +2197,17 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     _fire_dwell(ipc, "scan-open")
     assert r.turn.tooltip_controller.hover_view().nested.has_token
     mined = []
+    context = r.turn.tooltip_controller._session()
     monkeypatch.setattr(
-        r.turn.mining_controller, "mine_token", lambda tok: mined.append(tok.surface)
+        r.turn.tooltip_controller,
+        "_session_context",
+        replace(
+            context,
+            actions=replace(
+                context.actions,
+                mine_token=lambda tok: mined.append(tok.surface),
+            ),
+        ),
     )
     px, py, pw, ph = header_add_rect(r.turn.tooltip_controller.scale().width)
     nx, ny = r.turn.tooltip_controller.surface_state().nest.xy
@@ -3720,9 +3729,6 @@ def test_prefetch_queue_items_are_typed_dataclasses(monkeypatch):
     assert isinstance(item.gen, int) and isinstance(item.mined, bool)
 
 
-# --- controller split — popups.py (PopupView/Panel) + miner.py (Miner) ---------------------------
-
-
 def test_popups_module_unifies_popup_view_state():
     from saitenka.app.features.tooltip.popups import Panel, PopupView
     from saitenka.panel import Definition, Entry, panel_rows
@@ -3730,7 +3736,6 @@ def test_popups_module_unifies_popup_view_state():
     pv = PopupView()
     # the unified per-popup view state (nested popup; base tip keeps its own exploded state)
     assert pv.state is None and pv.scroll == 0 and pv.rect is None
-    assert C._Nested is PopupView
     r = build_session(FakeIPC())
     assert isinstance(r.turn.tooltip_controller.surface_state().nest, PopupView)
     # Panel wraps the windowed engine and is constructible from rows
@@ -3795,7 +3800,7 @@ def test_a_reader_with_no_deck_has_no_active_mining_target(monkeypatch):
     )  # must be a no-op, not an AttributeError on the missing client
 
 
-def _accrual_reader(ipc, monkeypatch) -> tuple[SessionController, list]:
+def _accrual_reader(ipc, monkeypatch) -> tuple[TestSession, list]:
     ipc.props.update({"osd-dimensions": {"w": 1280, "h": 720}, "pause": False, "path": "/a.mkv"})
     reader = build_session(
         ipc,

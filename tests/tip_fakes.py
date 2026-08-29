@@ -6,16 +6,11 @@ for the handful of tests that drive the real tooltip pipeline through ``FakeIPC`
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import util
-from session_builder import build_session
+from session_builder import TestSession, build_session
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionServices
-
-if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
 
 
 class LinkingDS:
@@ -29,7 +24,7 @@ class LinkingDS:
         return util.cjk_links_entry(2)
 
 
-def hidpi_reader(scale: float) -> SessionController:
+def hidpi_reader(scale: float) -> TestSession:
     """A headless reader whose OSD pins ``tip_scale.display`` to ~``scale`` (osd_h / REF_H(1080)),
     one content token shown, crisp enabled — the fixture the crisp/native path needs."""
     from saitenka.app.subtitles import WordBox

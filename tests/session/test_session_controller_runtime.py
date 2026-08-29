@@ -309,12 +309,7 @@ def _probe_request(reader):
 
 
 def test_an_idle_session_blocks_instead_of_polling():
-    """WP6's whole point: with nothing happening, a turn costs a wait — not a spin.
-
-    The old loop woke `1/poll_interval` times a second to ask whether anything had happened. This
-    asserts the shape that replaced it: `pump` with a timeout returns only once the wait elapses,
-    so an idle runtime does no domain work at all.
-    """
+    """An idle turn waits for input instead of polling domain state."""
     import time
 
     from util import FakeIPC

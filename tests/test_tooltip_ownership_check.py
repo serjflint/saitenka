@@ -258,6 +258,15 @@ def test_preparation_controllers_can_only_be_built_by_session_assembly():
     assert "preparation-constructor" in rules
 
 
+def test_tooltip_session_contract_cannot_capture_mutable_peer_owners():
+    rules = _rules(
+        "class TooltipSessionContext:\n    annotation: CueAnnotationController\n",
+        "features/tooltip/tooltip_controller.py",
+    )
+
+    assert "tooltip-session-peer-owner" in rules
+
+
 def test_aliased_preparation_construction_cannot_escape_the_assembly():
     rules = _rules(
         "from saitenka.app.features.tooltip.preparation import "
