@@ -1,50 +1,92 @@
-# Completed `SessionController` responsibility migration
+# Post-merge session architecture review
 
-## Scope
-
-Post-merge review of the session composition boundary at `d0bd53cc`. This closes the bounded
-`Reader`/`SessionController` responsibility-migration program; it is not a whole-repository fitness
-verdict.
+Scope: exact clean artifact `90062a97542ed4b0708299ea9ab8708e94ee73b1`; `app/session` plus direct runtime,
+feature, mpv, tests, and docs.
 
 ## Verdict
 
-The responsibility migration is complete. `SessionController` is now a small owner-thread boundary:
-it pumps accepted session work, delegates cue settlement to the composed graph, orders lifecycle
-start/close, and reports failures. Feature policy, mutable feature state, background-work admission,
-and presentation decisions belong to feature owners or session collaborators.
-
-This does not prove that every resulting owner is optimally sized or that the session package cannot
-be simplified further. Builder decomposition, capability narrowing, and owner-specific reviews are
-independent architecture work, not unfinished migration compatibility.
+The responsibility migration is complete, and the SessionController/composition refactor is complete
+enough to close as a bounded program. No remaining code responsibility appears stranded on
+`SessionController`; further decomposition would be a new architecture program, not completion of this
+migration. I found no P0 or P1 issues.
 
 ## Evidence
 
-- `src/saitenka/app/session/controller.py` is 140 lines; the former 4,574-line controller and its
-  migration facades, host-taking functions, codemods, and host-mass ratchets are gone.
-- `SessionGraph` is a frozen composition value. The host-contract test refuses feature policy on the
-  shell, aggregate escape, aliases, and passing the controller into feature owners.
-- `poe arch-map` reports 303 modules, 1,377 import edges, no real cycles, 34 command rows, 14 stateful
-  reducers, and seven stateless policies.
-- `poe reducer-purity-census` reports 21 registered reducers with no branch-affecting injected reads.
-- `poe port-probe-census` reports no dead probes; unresolved protocol receivers remain review evidence,
-  not a proof of unsafe authority.
-- The exact merged head passed the full deterministic and free-threaded gates. The locked native
-  benchmark exercised 101 cues through the composed session runtime.
+- `SessionController` is now a 140-line lifecycle/ordered-turn boundary. Its live path starts, pumps,
+  stops, closes, settles `InteractionCoordinator`/`CueCoordinator`, and routes only file-load/user-command
+  conjunctions (`src/saitenka/app/session/controller.py`).
+- Public post-composition authority is the five-method `LiveSession`; pre-start exceptions are explicitly
+  named in `PreparedSession` (`src/saitenka/app/session/factory.py`).
+- `SessionGraph` is large—42 collaborators—but it is a frozen composition product, not a public runtime
+  capability, and construction publishes no partially bound graph (`src/saitenka/app/session/graph.py`).
+- `poe arch-map`: 303 modules, 1,377 import edges, zero real cycles; 21 registered reducers/policies with
+  zero branch-affecting ambient reads; 34 closed command rows; no same-shape feature methods left on the
+  host.
+- The live-turn structural guard forbids new feature authority and graph escape; the repository-wide host
+  contract finds zero functions accepting `SessionController`
+  (`tests/session/test_session_controller_host_contract.py`).
+- Lifecycle truth is explicit: ordinary close records every participant in `CloseLedger`; runtime
+  cue-retirement failure raises through the reactor and makes `pump()` return false
+  (`src/saitenka/app/session/lifecycle.py`, `tests/session/test_session_connection.py`).
+- Focused verification: 86 tests passed across controller boundaries, stateless registration,
+  close/failure behavior, profile switching, tooltip ownership, and architecture-map controls. Both
+  required architecture-review smoke checks passed.
 
-## Claim-census delta
+## Findings
 
-- `T1` is gated by `poe tooltip-ownership` and planted negative controls.
-- Obsolete reactor-era close claims `R1` and `R2` now name the direct `SessionLifecycle` ledger and
-  cue-retirement failure contracts, both covered by scenario tests.
-- `P2` is narrowed to the structurally gated shell boundary. The separate owner-thread claim `P4`
-  remains argued.
-- `P1`, `P4`, and `S1` remain argued: sole profile-state writing, universal owner-thread application,
-  and negligible forwarding latency still lack their stated discriminators.
+### P2 — The durable claim census is stale after the completed migration
 
-## Remaining risks
+- Scenario: a later cadence treats R1/R2 as live defects and T1 as merely argued, re-investigating or
+  redesigning behavior already replaced/enforced.
+- Discriminator: T1 now has `poe tooltip-ownership` in `all` with planted writer/constructor controls;
+  direct close-ledger tests prove failed participants cannot be reported clean; cue-retirement failure
+  propagation is tested through the production turn.
+- Age: census rows date from `46b0c2d2` on 2026-08-24; drift was introduced by the 2026-08-29
+  completion/closure work.
+- Remedy: mark T1 gated; replace R1 with the direct `SessionLifecycle`/`CloseLedger` contract; delete or
+  rewrite R2 around the current cue-retirement exception contract.
 
-- Profile ownership is behaviorally strong but lacks a structural writer census and an off-owner
-  negative control.
-- No isolated measurement attributes owner-thread latency to the forwarding seams.
-- Large feature owners may merit their own scoped reviews; their size alone is not migration debt.
+No P3 findings.
 
+## Claim status
+
+| Claim | Declared | Enforced | True |
+| --- | --- | --- | --- |
+| P1 profile sole writer | yes | no structural negative-control gate | yes by current source census |
+| P2 controller has no profile policy | yes | live-turn/host boundary enforced; thread half not | yes |
+| P4 profile application on owner thread | yes | no off-owner negative control | production paths support it |
+| T1 tooltip mutable ownership | yes | yes, in `poe all` with planted controls | yes |
+| R1/R2 lifecycle truth | census is obsolete | yes through focused tests | yes in current design |
+| S1 forwarding latency | yes | no | not verified |
+
+## Remaining work classification
+
+- Migration/assurance debt, non-blocking: refresh the census; add a profile writer-census control and an
+  off-owner profile-application negative control if those argued invariants are worth permanent
+  enforcement.
+- Independent future improvement: split or simplify the 1,135-line composition builder, narrow the widest
+  capability records, or reconsider the dual stateful/stateless vocabulary. None is evidence that
+  controller responsibility remains unmigrated.
+- S1 remains measurement debt: the native integration benchmark now uses a real composed session for
+  settlement, but its timed cue/tooltip operations call graph owners directly and do not isolate
+  adapter-forwarding overhead.
+
+## Strongest case against the principles
+
+This is one local user and one process, yet maintainers must learn owner slices, routes, reducers, effects,
+stateless intents, adapters, endpoints, capability values, assembly, graph, and lifecycle plans. A single
+owner-thread loop calling bounded feature controllers directly could preserve identity-qualified worker
+publication with fewer concepts.
+
+I still land in favor of the current core principles: ordered owner-thread settlement, bounded feature
+owners, stale-result refusal, and explicit teardown directly protect hover/mining correctness and playback
+stability. The appropriate restraint is to stop the migration now and require new machinery to justify a
+new ordering/state/lifecycle need.
+
+## Could not verify
+
+| Claim | What would settle it |
+| --- | --- |
+| P1 profile sole writer remains stable | A structural writer-census control with a planted second writer |
+| P4 all profile application is owner-thread confined | An off-owner negative control at the application boundary |
+| S1 forwarding latency is negligible | A benchmark isolating adapter-forwarding overhead from cue and tooltip work |

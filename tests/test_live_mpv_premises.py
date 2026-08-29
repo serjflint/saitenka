@@ -246,20 +246,25 @@ def _two_track_mpv(tmp_path: Path):
         f"--sub-file={fixtures / 'external.ass'}",
         str(clip),
     )
-    for index, name in enumerate(("sid", "sub-text"), start=1):
-        ipc.command("observe_property", index, name)
-    ipc.command("sub-add", str(fixtures / "generated.ass"), "auto", "generated", "jpn")
-    ipc.command("set_property", "time-pos", 1.0)
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        tracks = ipc.command("get_property", "track-list").get("data") or []
-        generated = next(
-            (track.get("id") for track in tracks if track.get("title") == "generated"), None
-        )
-        if generated is not None:
-            return proc, ipc, generated
-        time.sleep(0.01)
-    pytest.fail("mpv did not admit the generated subtitle track")
+    try:
+        for index, name in enumerate(("sid", "sub-text"), start=1):
+            ipc.command("observe_property", index, name)
+        ipc.command("sub-add", str(fixtures / "generated.ass"), "auto", "generated", "jpn")
+        ipc.command("set_property", "time-pos", 1.0)
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            tracks = ipc.command("get_property", "track-list").get("data") or []
+            generated = next(
+                (track.get("id") for track in tracks if track.get("title") == "generated"), None
+            )
+            if generated is not None:
+                return proc, ipc, generated
+            time.sleep(0.01)
+        pytest.fail("mpv did not admit the generated subtitle track")
+    except BaseException:
+        ipc.close()
+        proc.terminate()
+        raise
 
 
 def _drain_until_quiet(ipc, *, quiet: float = 0.4, limit: float = 5.0) -> list[dict]:
