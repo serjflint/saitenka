@@ -1,15 +1,17 @@
 """The one event that belongs to no owner: an episode ending.
 
-`EpisodeContext` resets its facts by being rebound, which cannot be got wrong. An owner slot is
+Subtitle navigation resets its facts by rebinding. An owner slot is
 session-lived and has no such guarantee — so the reset is an event, and these are the assertions
 that make the procedural guarantee as good as the structural one it replaced.
 """
 
 from __future__ import annotations
 
+from session_builder import build_session
 from util import FakeIPC, runtime_gateway
 
 from saitenka.app import bindings as app_bindings
+from saitenka.app.config import ReaderOptions
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.runtime.events import (
@@ -68,7 +70,7 @@ def test_the_drawn_translation_goes_but_the_manual_hold_stays() -> None:
 
 
 def test_one_event_reaches_every_slice_when_a_reactor_owns_them(request) -> None:
-    """The atomicity `EpisodeContext` gets from being one object: a single turn, every owner.
+    """One routed retirement turn reaches every owner.
 
     Routed through one store on purpose — the reactor fans out, so the caller must not have to
     send it four times and hope each reducer is idempotent.
@@ -111,22 +113,21 @@ def test_an_owner_with_no_per_episode_facts_is_not_counted_as_an_unrouted_gap(re
 def test_rebinding_the_episode_retires_the_slots_with_the_container(request, monkeypatch) -> None:
     """Both halves move together or the slots keep the last episode's facts — silently, because
     nothing at the seam reads them until the next cue arrives."""
-    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
     ipc.props["secondary-sub-text"] = "old line"
     gateway = runtime_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False)
+    reader = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
     request.addfinalizer(reader.close)
     removed: list[int] = []
     monkeypatch.setattr(reader.lifecycle_surfaces, "remove", removed.append)
-    reader._handle(app_bindings.TRANS_MSG)
+    reader.command_runtime.handle(app_bindings.TRANS_MSG)
     reader._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
     removed.clear()
 
-    reader.rebind_episode()
+    reader.reslot_ports.rebind_episode()
 
     assert reader._subtitle_tracks.current == SubtitleTrackState()
     assert reader.translation_controller.state.held  # the hold is session-lived

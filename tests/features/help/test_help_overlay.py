@@ -1,6 +1,7 @@
 """In-player help uses effective bindings and remains playback-neutral."""
 
 from driver import Driver
+from session_builder import build_session
 from util import FakeIPC, keybind_registry
 
 from saitenka.app.bindings import (
@@ -16,6 +17,7 @@ from saitenka.app.config import KeyOptions, PanelOptions, ReaderOptions
 from saitenka.app.features.tooltip import tooltip
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.render.help import render_page
 
 
@@ -30,12 +32,12 @@ def _entries(reader: SessionController):
 
 def test_default_and_configured_help_keys_are_registered():
     default_ipc = FakeIPC()
-    SessionController(default_ipc)._register_keybinds()
+    build_session(default_ipc).command_runtime.install_input()
     assert keybind_registry(default_ipc)["F1"] == "saitenka-toggle-help"
 
     custom_ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(help_key="Ctrl+h"))
-    SessionController(custom_ipc, options=options)._register_keybinds()
+    build_session(custom_ipc, options=options).command_runtime.install_input()
     custom_binds = keybind_registry(custom_ipc)
     assert custom_binds["Ctrl+h"] == "saitenka-toggle-help"
     assert "F1" not in custom_binds
@@ -51,7 +53,13 @@ def test_help_document_uses_effective_catalog_and_context_labels():
             mine_key="Ctrl+x",
         )
     )
-    reader = SessionController(FakeIPC(), anki=object(), options=options)
+    reader = build_session(
+        FakeIPC(),
+        services=SessionServices(
+            anki=object(),
+        ),
+        options=options,
+    )
     entries = _entries(reader)
     by_label = {entry.label: entry for _section, entry in entries}
     sections = {section for section, _entry in entries}
@@ -75,17 +83,17 @@ def test_help_document_uses_effective_catalog_and_context_labels():
     } <= sections
 
     expected = {
-        (binding.key, binding.spec.message) for binding in active_bindings(reader.keys, "global")
+        (binding.key, binding.spec.message) for binding in active_bindings(options.keys, "global")
     }
-    reader._register_keybinds()
+    reader.command_runtime.install_input()
     # The registry spans the global section AND the forced mouse one, so compare against the
     # global scope alone — this asserts the catalog, not which section a key landed in.
     assert set(keybind_registry(reader.ipc).items()) >= expected
 
 
 def test_small_osd_pages_and_repeats_navigation_hints():
-    reader = SessionController(FakeIPC(), anki=object())
-    reader.osd = (480, 220)
+    reader = build_session(FakeIPC(), services=SessionServices(anki=object()))
+    reader.screen.osd = (480, 220)
     document = reader.help_controller.document()
 
     assert len(document.pages) > 1
@@ -99,14 +107,14 @@ def test_small_osd_pages_and_repeats_navigation_hints():
             total=len(document.pages),
         )
         assert image.size == (document.width, document.height)
-        assert image.width <= reader.osd[0]
-        assert image.height <= reader.osd[1]
+        assert image.width <= reader.screen.osd[0]
+        assert image.height <= reader.screen.osd[1]
 
 
 def test_ui_scale_enlarges_help_document():
-    normal = SessionController(FakeIPC(), options=ReaderOptions())
-    enlarged = SessionController(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
-    normal.osd = enlarged.osd = (1920, 1080)
+    normal = build_session(FakeIPC(), options=ReaderOptions())
+    enlarged = build_session(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
+    normal.screen.osd = enlarged.screen.osd = (1920, 1080)
 
     normal_document = normal.help_controller.document()
     enlarged_document = enlarged.help_controller.document()
@@ -118,17 +126,17 @@ def test_ui_scale_enlarges_help_document():
 
 def test_toggle_navigation_and_escape_are_playback_neutral():
     ipc = FakeIPC()
-    reader = SessionController(ipc, anki=object())
-    reader.osd = (480, 220)
+    reader = build_session(ipc, services=SessionServices(anki=object()))
+    reader.screen.osd = (480, 220)
 
-    reader._handle(HELP_TOGGLE_MSG)
+    reader.command_runtime.handle(HELP_TOGGLE_MSG)
     assert any(command[:2] == ("keybind", "ESC") for command in ipc.commands)
     assert any(command[:2] == ("overlay-add", OverlayId.HELP) for command in ipc.commands)
 
     adds_before = sum(command[0] == "overlay-add" for command in ipc.commands)
-    reader._handle(HELP_NEXT_MSG)
+    reader.command_runtime.handle(HELP_NEXT_MSG)
     assert sum(command[0] == "overlay-add" for command in ipc.commands) == adds_before + 1
-    reader._handle(HELP_CLOSE_MSG)
+    reader.command_runtime.handle(HELP_CLOSE_MSG)
     assert any(command[:2] == ("overlay-remove", OverlayId.HELP) for command in ipc.commands)
 
     forbidden = {"add", "sub-add", "sub-seek", "loadfile", "seek", "set_property"}
@@ -137,7 +145,7 @@ def test_toggle_navigation_and_escape_are_playback_neutral():
 
 def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     ipc = FakeIPC()
-    reader = SessionController(ipc, anki=object())
+    reader = build_session(ipc, services=SessionServices(anki=object()))
     hover_updates: list[str] = []
     actions: list[str] = []
     monkeypatch.setattr(tooltip, "update_hover", lambda *_a: hover_updates.append("hover"))
@@ -156,11 +164,11 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
 
 def test_closing_help_restores_active_tooltip_escape_binding():
     ipc = FakeIPC()
-    reader = SessionController(ipc)
-    reader._bind_tip_keys()
+    reader = build_session(ipc)
+    reader.tooltip_controller.bind_keybindings()
 
-    reader._handle(HELP_TOGGLE_MSG)
-    reader._handle(HELP_CLOSE_MSG)
+    reader.command_runtime.handle(HELP_TOGGLE_MSG)
+    reader.command_runtime.handle(HELP_CLOSE_MSG)
 
     esc_commands = [command for command in ipc.commands if command[:2] == ("keybind", "ESC")]
     assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-tip-close")
@@ -168,15 +176,15 @@ def test_closing_help_restores_active_tooltip_escape_binding():
 
 def test_tooltip_teardown_does_not_steal_escape_while_help_is_open():
     ipc = FakeIPC()
-    reader = SessionController(ipc)
-    reader._bind_tip_keys()
+    reader = build_session(ipc)
+    reader.tooltip_controller.bind_keybindings()
 
-    reader._handle(HELP_TOGGLE_MSG)
-    reader._unbind_tip_keys()
+    reader.command_runtime.handle(HELP_TOGGLE_MSG)
+    reader.tooltip_controller.unbind_keybindings()
 
     esc_commands = [command for command in ipc.commands if command[:2] == ("keybind", "ESC")]
     assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-help-close")
-    reader._handle(HELP_CLOSE_MSG)
+    reader.command_runtime.handle(HELP_CLOSE_MSG)
     assert any(command[:2] == ("overlay-remove", OverlayId.HELP) for command in ipc.commands)
 
 

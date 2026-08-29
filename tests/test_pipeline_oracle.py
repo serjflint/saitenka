@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import pytest
 from dicthelp import AT, db, term_zip
+from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.features.tooltip.tooltip import entry_for_tok, resolve_hover
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.launch.run import RunDepsRequest, _build_run_deps
 from saitenka.app.profiles import resolve_launch_identity
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionIdentity, SessionServices
 from saitenka.render.sc_adapter import _text_of
 from saitenka.runtime.events import SubtitleLanguageChanged
 
@@ -185,21 +186,32 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     _import_fixture(fixture, tmp_path)
     ident = resolve_launch_identity(_cfg_for(profile), profile_override=None, slang="ja,jpn,jp")
     dict_set = _dict_set_via_run(ident)
-    reader = SessionController(FakeIPC(), dict_set=dict_set, profile=ident.profile)
-    reader.osd = (1920, 1080)
+    reader = build_session(
+        FakeIPC(),
+        services=SessionServices(
+            dictionaries=dict_set,
+        ),
+        identity=SessionIdentity(
+            profile=ident.profile,
+        ),
+    )
+    reader.screen.osd = (1920, 1080)
     # main track → tokenize (not the plain secondary path)
-    reader.declare_subtitle(SubtitleLanguageChanged(MAIN_LANG))
+    reader.track_commands.declare(SubtitleLanguageChanged(MAIN_LANG))
     reader.set_subtitle(cue)
-    idx = _index_at(reader.tokens, at)
+    idx = _index_at(reader.subtitle_presentation.cue.current.tokens, at)
     resolve_hover(
-        reader._tip_ports, reader.word_lookup, reader.hover_inputs, idx
+        reader.tooltip_controller.tip_ports,
+        reader.tooltip_controller.word_lookup,
+        reader.tooltip_controller.hover_inputs,
+        idx,
     )  # forward longest-match → _hover_meta.terms (the phrase/prefix seam)
-    tok = reader.tokens[idx]
+    tok = reader.subtitle_presentation.cue.current.tokens[idx]
     entry = entry_for_tok(
         tok,
-        reader._inflected_surface(idx),
-        dict_set=reader.profile_controller.dict_set,
-        scorer=reader.scorer,
+        reader.tooltip_controller.inflected_surface(idx),
+        dict_set=reader.profile_session.profile.dict_set,
+        scorer=reader.profile_session.scorer,
         extra_terms=reader.tooltip_controller.observation().metadata.terms,
     )
     return dict_set, tok, reader.tooltip_controller.observation().metadata.terms, entry

@@ -11,17 +11,19 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import pytest
 import util
+from session_builder import build_session
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app import subtitle_modes
+from saitenka.app.config import ReaderOptions
 from saitenka.app.features.picker import sub_picker
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session.controller import SessionController
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.runtime import (
     EffectOutcome,
@@ -29,6 +31,9 @@ from saitenka.runtime import (
     events,
     picker,
 )
+
+if TYPE_CHECKING:
+    from saitenka.app.session.controller import SessionController
 
 
 class FakeIPC(util.FakeIPC):
@@ -45,8 +50,8 @@ class FakeIPC(util.FakeIPC):
 
 def _reader(**props) -> tuple[SessionController, FakeIPC]:
     ipc = FakeIPC(**props)
-    reader = SessionController(ipc)
-    reader.osd = (1920, 1080)
+    reader = build_session(ipc)
+    reader.screen.osd = (1920, 1080)
     return reader, ipc
 
 
@@ -74,13 +79,13 @@ def _adopt(reader: SessionController, *, candidates=(), warnings=(), error=None)
     sub_picker.apply_listing(
         reader.picker_controller.store,
         reader.picker_controller.redraw,
-        reader.sub_picker.generation,
+        reader.picker_controller.state.generation,
         sub_picker.ListingResult(tuple(candidates), tuple(warnings), error),
     )
 
 
 def _listed(reader: SessionController) -> sub_picker.ListingResult:
-    return sub_picker.listing_of(reader.sub_picker)
+    return sub_picker.listing_of(reader.picker_controller.state)
 
 
 def _close(reader: SessionController) -> None:
@@ -105,8 +110,8 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
     ipc = RuntimeFakeIPC()
     ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc)
-    reader.osd = (1920, 1080)
+    reader = build_session(ipc)
+    reader.screen.osd = (1920, 1080)
     old_started = threading.Event()
     old_release = threading.Event()
     calls = 0
@@ -120,15 +125,19 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
             return [_candidate("old.ass")], []
         return [_candidate("current.ass")], []
 
-    reader.configure_sub_picker(lister)
+    reader.picker_controller.configure_listing(lister)
     try:
         sub_picker.open_picker(
-            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+            reader.listing_ports,
+            reader.playback_observation.query("path"),
+            retire_hover=reader.tooltip_controller.retire_hover,
         )
         assert old_started.wait(1)
         _close(reader)
         sub_picker.open_picker(
-            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+            reader.listing_ports,
+            reader.playback_observation.query("path"),
+            retire_hover=reader.tooltip_controller.retire_hover,
         )
         _drain_until(reader, lambda: bool(_listed(reader).candidates))
         assert _listed(reader).candidates[0].name == "current.ass"
@@ -147,7 +156,7 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
 def test_subtitle_picker_lane_rejects_work_beyond_its_bound():
     ipc = RuntimeFakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc)
+    reader = build_session(ipc)
     release = threading.Event()
     started = [threading.Event(), threading.Event()]
     start_lock = threading.Lock()
@@ -190,8 +199,8 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
     ipc = RuntimeFakeIPC()
     ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc)
-    reader.osd = (1920, 1080)
+    reader = build_session(ipc)
+    reader.screen.osd = (1920, 1080)
     started = threading.Event()
     release = threading.Event()
 
@@ -200,14 +209,16 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
         assert release.wait(1)
         return [_candidate("old.ass")], []
 
-    reader.configure_sub_picker(lister)
+    reader.picker_controller.configure_listing(lister)
     try:
         sub_picker.open_picker(
-            reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+            reader.listing_ports,
+            reader.playback_observation.query("path"),
+            retire_hover=reader.tooltip_controller.retire_hover,
         )
         assert started.wait(1)
-        reader.rebind_episode()
-        assert reader.sub_picker.open is False
+        reader.reslot_ports.rebind_episode()
+        assert reader.picker_controller.state.open is False
 
         release.set()
         for _ in range(10):
@@ -222,9 +233,9 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
 def test_toggle_without_a_provider_configured_warns_and_stays_closed():
     reader, ipc = _reader(path="/v/ep01.mkv")
 
-    reader._handle(app_bindings.SUB_PICKER_MSG)
+    reader.command_runtime.handle(app_bindings.SUB_PICKER_MSG)
 
-    assert reader.sub_picker.open is False
+    assert reader.picker_controller.state.open is False
     assert not _picker_adds(ipc)
 
 
@@ -234,21 +245,23 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
         _candidate("Show 01 [1080p].srt", provider="jimaku", size=2000, match=True),
         _candidate("Show - 01 (Release).ass", provider="tsukihime", size=0),
     ]
-    reader.configure_sub_picker(_lister(candidates))
+    reader.picker_controller.configure_listing(_lister(candidates))
     monkeypatch.setattr(
         sub_picker, "_start_listing", lambda _v, _ports: None
     )  # no real search thread
 
     sub_picker.open_picker(
-        reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+        reader.listing_ports,
+        reader.playback_observation.query("path"),
+        retire_hover=reader.tooltip_controller.retire_hover,
     )
-    assert reader.sub_picker.open and reader.sub_picker.loading
+    assert reader.picker_controller.state.open and reader.picker_controller.state.loading
 
     _adopt(reader, candidates=candidates)
 
-    assert reader.sub_picker.loading is False
+    assert reader.picker_controller.state.loading is False
     assert _listed(reader).candidates == tuple(candidates)
-    rows = sub_picker._rows(reader.sub_picker)
+    rows = sub_picker._rows(reader.picker_controller.state)
     assert [row.text for row in rows] == [c.name for c in candidates]
     assert rows[0].status == "jimaku · srt · match"  # provider · format · resolution-match
     assert rows[1].status == "tsukihime · ass"
@@ -258,7 +271,7 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
 
 def test_provider_warnings_are_shown_in_the_footer():
     reader, _ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
+    reader.picker_controller.configure_listing(_lister([]))
     _open(reader)
 
     _adopt(
@@ -268,25 +281,27 @@ def test_provider_warnings_are_shown_in_the_footer():
     )
 
     assert _listed(reader).warnings == ("tsukihime: search truncated",)
-    footer = sub_picker._footer(reader.sub_picker, reader.keys.sub_picker_key, 1, 1)
+    footer = sub_picker._footer(
+        reader.picker_controller.state, ReaderOptions().keys.sub_picker_key, 1, 1
+    )
     assert "tsukihime: search truncated" in footer
 
 
 def test_listing_error_is_shown_and_leaves_no_candidates():
     reader, _ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
+    reader.picker_controller.configure_listing(_lister([]))
     _open(reader)
 
     _adopt(reader, error="subtitle search failed: boom")
 
     assert _listed(reader).error == "subtitle search failed: boom"
     assert _listed(reader).candidates == ()
-    assert sub_picker._message(reader.sub_picker) == "subtitle search failed: boom"
+    assert sub_picker._message(reader.picker_controller.state) == "subtitle search failed: boom"
 
 
 def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     reader, ipc = _reader(path="/v/ep01.mkv")
-    reader.configure_sub_picker(_lister([]))
+    reader.picker_controller.configure_listing(_lister([]))
     ran: list[str] = []
     chosen = _candidate(
         "[Nekomoe] Show - 01 [WebRip].srt",
@@ -307,8 +322,10 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     hit = next(h for h in panel.hits if h.kind == "picker-download" and h.value == 1)
     gx, gy = rect[0] + hit.x + hit.w / 2, rect[1] + hit.y + hit.h / 2
 
-    assert reader.picker_controller.on_click(reader._click_target, gx, gy) is True
-    assert reader.sub_picker.open is False  # panel closes; the swap lands from broker completion
+    assert reader.picker_controller.on_click(reader.interaction.click_target(), gx, gy) is True
+    assert (
+        reader.picker_controller.state.open is False
+    )  # panel closes; the swap lands from broker completion
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
     assert len(fetches) == 1
     do, kwargs = fetches[0]
@@ -321,17 +338,17 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
 
 def test_click_outside_the_panel_is_not_captured():
     reader, _ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
+    reader.picker_controller.configure_listing(_lister([]))
     _open(reader)
     _adopt(reader, candidates=(_candidate("a.srt"),))
     reader.picker_controller.redraw()
 
-    assert reader.picker_controller.on_click(reader._click_target, 0, 0) is False
+    assert reader.picker_controller.on_click(reader.interaction.click_target(), 0, 0) is False
 
 
 def test_scroll_only_fires_with_the_pointer_over_the_panel():
     reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
+    reader.picker_controller.configure_listing(_lister([]))
     _open(reader)
     _adopt(reader, candidates=tuple(_candidate(f"{i}.srt") for i in range(20)))
     reader.picker_controller.redraw()
@@ -339,17 +356,17 @@ def test_scroll_only_fires_with_the_pointer_over_the_panel():
     assert rect is not None
 
     ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
-    assert reader.picker_controller.scroll(reader.wheel_step, 1) is False
-    assert reader.sub_picker.scroll == 0
+    assert reader.picker_controller.scroll(reader.interaction.wheel_step(), 1) is False
+    assert reader.picker_controller.state.scroll == 0
 
     ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
-    assert reader.picker_controller.scroll(reader.wheel_step, 1) is True
-    assert reader.sub_picker.scroll == picker.ROWS_PER_WHEEL_STEP
+    assert reader.picker_controller.scroll(reader.interaction.wheel_step(), 1) is True
+    assert reader.picker_controller.state.scroll == picker.ROWS_PER_WHEEL_STEP
 
 
 def test_suppress_hover_only_over_the_panel():
     reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
+    reader.picker_controller.configure_listing(_lister([]))
     _open(reader)
     _adopt(reader, candidates=(_candidate("a.srt"),))
     reader.picker_controller.redraw()
@@ -357,32 +374,34 @@ def test_suppress_hover_only_over_the_panel():
     assert rect is not None
 
     ipc.props["mouse-pos"] = {"hover": True, "x": rect[0] + 5, "y": rect[1] + 5}
-    assert reader.picker_controller.suppress_hover(reader.hover_suppression) is True
+    assert reader.picker_controller.suppress_hover(reader.interaction.hover_suppression()) is True
 
     ipc.props["mouse-pos"] = {"hover": True, "x": 0, "y": 0}
-    assert reader.picker_controller.suppress_hover(reader.hover_suppression) is False
+    assert reader.picker_controller.suppress_hover(reader.interaction.hover_suppression()) is False
 
 
 def test_open_picker_wants_the_forced_mouse_section():
     """An open picker must own clicks/wheel (forced section) so they don't fall through to mpv or a
     rival script — same occlusion contract as the tooltip/sidebar."""
     reader, _ipc = _reader(path="/v/ep.mkv")
-    assert reader._wants_mouse_capture() is False
+    assert reader.interaction.router.wants_mouse_capture() is False
 
     _open(reader)
-    assert reader._wants_mouse_capture() is True
+    assert reader.interaction.router.wants_mouse_capture() is True
 
 
 def test_toggle_closes_an_open_picker():
     reader, ipc = _reader(path="/v/ep.mkv")
-    reader.configure_sub_picker(_lister([]))
+    reader.picker_controller.configure_listing(_lister([]))
     _open(reader)
 
-    _close(reader) if reader.sub_picker.open else sub_picker.open_picker(
-        reader.listing_ports, reader._get("path"), retire_hover=reader.retire_hover
+    _close(reader) if reader.picker_controller.state.open else sub_picker.open_picker(
+        reader.listing_ports,
+        reader.playback_observation.query("path"),
+        retire_hover=reader.tooltip_controller.retire_hover,
     )
 
-    assert reader.sub_picker.open is False
+    assert reader.picker_controller.state.open is False
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
 
 

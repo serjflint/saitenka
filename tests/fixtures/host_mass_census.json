@@ -1,13 +1,13 @@
 {
   "counts": {
-    "delegator": 89,
-    "derived": 47,
-    "init_lines": 328,
-    "self_delegator": 2,
-    "slice": 18,
-    "substantive": 108,
-    "substantive_lines": 1453,
-    "total": 264
+    "delegator": 76,
+    "derived": 33,
+    "init_lines": 325,
+    "self_delegator": 1,
+    "slice": 2,
+    "substantive": 66,
+    "substantive_lines": 1103,
+    "total": 178
   },
-  "reason": "mining outcomes are explicit contributions while their policy moved to feature owners"
+  "reason": ""
 }

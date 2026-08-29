@@ -8,19 +8,27 @@ from __future__ import annotations
 import json
 import zipfile
 from dataclasses import replace
+from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
 
 import dicthelp
 from driver import Driver
+from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.tooltip import nested_popup, tooltip
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import (
+    SessionInfrastructure,
+    SessionServices,
+)
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
+
+if TYPE_CHECKING:
+    from saitenka.app.session.controller import SessionController
 
 _SUBMITTERS: WeakKeyDictionary[SessionController, _DeferredEngagedSubmitter]
 
@@ -84,21 +92,29 @@ def _submitter(reader: SessionController) -> _DeferredEngagedSubmitter:
 
 def _reader(tmp_path, *, worker: bool):
     submitter = _DeferredEngagedSubmitter()
-    r = SessionController(
+    r = build_session(
         FakeIPC(),
-        dict_set=_fixture_ds(tmp_path),
+        services=SessionServices(
+            dictionaries=_fixture_ds(tmp_path),
+        ),
+        infrastructure=SessionInfrastructure(
+            tooltip_jobs=lambda jobs: replace(jobs, engaged=submitter),
+        ),
         options=ReaderOptions(prefetch=True),
-        tooltip_runtime_jobs=lambda jobs: replace(jobs, engaged=submitter),
     )
     _SUBMITTERS[r] = submitter
-    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.sub_origin = (0, 0)
-    r.tokens = [
-        Token("読む", "読む", "よむ", "動詞", 0, 2),
-        Token("見る", "見る", "みる", "動詞", 2, 4),
-    ]
-    r.boxes = [WordBox(0, 100, 300, 40, 40), WordBox(1, 420, 300, 40, 40)]
-    r.renderer = NullRenderer()
+    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.subtitle_presentation.cue.replace_tokenized(
+        tokens=[
+            Token("読む", "読む", "よむ", "動詞", 0, 2),
+            Token("見る", "見る", "みる", "動詞", 2, 4),
+        ]
+    )
+    r.subtitle_presentation.cue.replace_geometry(
+        boxes=[WordBox(0, 100, 300, 40, 40), WordBox(1, 420, 300, 40, 40)]
+    )
+    r.subtitle_presentation.renderer = NullRenderer()
     # Warm both base panels while there's NO worker (else a cold base show would itself defer, #293), so
     # the base tooltip is up + switchable synchronously and the tests isolate the nested-open defer.
     Driver(r).move_to_word(0).move_to_word(1).move_to_word(0)  # end on 読む, both panels cached
@@ -110,7 +126,9 @@ def _reader(tmp_path, *, worker: bool):
 def test_no_worker_opens_kanji_synchronously(tmp_path):
     # Negative control: with no prefetch worker, the open builds + shows on the calling tick (unchanged).
     r = _reader(tmp_path, worker=False)
-    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(
+        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+    )
     assert (
         r.tooltip_controller.surface_state().nest.state is not None
         and r.tooltip_controller.surface_state().nest.word == "読"
@@ -120,7 +138,9 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
 
 def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path):
     r = _reader(tmp_path, worker=True)
-    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(
+        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+    )
     assert (
         r.tooltip_controller.surface_state().nest.state is None
     )  # deferred — nothing shown on the click tick
@@ -138,7 +158,9 @@ def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path)
 
 def test_kanji_open_worker_failure_uses_current_origin_sync_fallback(tmp_path):
     r = _reader(tmp_path, worker=True)
-    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(
+        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+    )
 
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
@@ -153,7 +175,7 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
     # the new word.
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(
-        r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0
+        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
     )  # origin = id(読む panel)
     submitter = _submitter(r)
     call = submitter.calls.pop(0)
@@ -172,12 +194,14 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
 
 def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     r = _reader(tmp_path, worker=True)
-    nested_popup.open_kanji(r._tip_ports, r._panel_ports, "読", 100.0, 300.0, 40.0)
+    nested_popup.open_kanji(
+        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+    )
     Driver(r).move_to_word(1)
     rebuilt = []
     monkeypatch.setattr(
-        r,
-        "_engaged_open_panel",
+        r.tooltip_controller,
+        "engaged_open_panel",
         lambda source, query, **kwargs: rebuilt.append((source, query, kwargs)),
     )
 
@@ -191,7 +215,7 @@ def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
     toasts: list = []
     monkeypatch.setattr(r.notifications, "show", lambda text, _k="ok", _s=2.8: toasts.append(text))
     nested_popup.open_kanji(
-        r._tip_ports, r._panel_ports, "犬", 100.0, 300.0, 40.0
+        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "犬", 100.0, 300.0, 40.0
     )  # 犬 isn't in the kanji bank
     assert toasts and "犬" in toasts[0]  # the no-entry toast fired on the tick…
     assert _submitter(r).calls == [] and r.tooltip_controller.surface_state().nest.state is None
@@ -204,8 +228,8 @@ def test_cross_reference_link_open_defers(tmp_path):
     r = _reader(tmp_path, worker=True)
     lb = LinkBox("見る", 10, 20, 40, 40)
     tooltip.nested_popup.open_link(
-        r._tip_ports,
-        r._panel_ports,
+        r.tooltip_controller.tip_ports,
+        r.tooltip_controller.panel_ports,
         lb,
         r.tooltip_controller.surface_state().view.xy,
         r.tooltip_controller.surface_state().view.scroll,

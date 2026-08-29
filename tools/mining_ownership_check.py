@@ -12,17 +12,18 @@ APP = ROOT / "src" / "saitenka" / "app"
 
 _OWNER = "features/mining/mining_controller.py"
 _COMPOSITION = "session/controller.py"
+_PROFILE_SESSION = "features/profiles/profile_session.py"
 _CONSTRUCTORS = {
     "MinedCardStore": {_OWNER},
     "MinedSet": {_OWNER},
     "MiningIndexState": {_OWNER},
-    "MiningSpec": {_OWNER, "session/deps.py"},
-    "MiningTarget": {_OWNER, "session/deps.py"},
+    "MiningSpec": {_OWNER, "features/profiles/dependencies.py"},
+    "MiningTarget": {_OWNER, "features/profiles/dependencies.py"},
     "MiningTransaction": {_OWNER},
 }
 _OWNER_MUTATORS = {
-    "clear_mining_target": {_OWNER, _COMPOSITION},
-    "publish_mining_target": {_OWNER, _COMPOSITION},
+    "clear_mining_target": {_OWNER, _COMPOSITION, _PROFILE_SESSION},
+    "publish_mining_target": {_OWNER, _COMPOSITION, _PROFILE_SESSION},
     "record_mined_expression": {_OWNER},
     "select_mining_spec": {_OWNER, _COMPOSITION},
 }

@@ -11,9 +11,10 @@ import zipfile
 
 import dicthelp
 from driver import Driver
+from session_builder import build_session
 from util import FakeIPC
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -65,12 +66,14 @@ def _fixture_ds(tmp_path):
 
 
 def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
-    r = SessionController(FakeIPC(), dict_set=_fixture_ds(tmp_path))
-    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.sub_origin = (0, 0)
-    r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]
-    r.boxes = [WordBox(0, 100, 300, 40, 40)]
-    monkeypatch.setattr(r, "renderer", NullRenderer())
+    r = build_session(FakeIPC(), services=SessionServices(dictionaries=_fixture_ds(tmp_path)))
+    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("読む", "読む", "よむ", "動詞", 0, 2)]
+    )
+    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
     ui = Driver(r)
     ui.move_to_word(0)  # base tooltip for 読む, through hit-testing rather than a poke
 
@@ -104,5 +107,5 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     # Reversible: back restores the base 読む tooltip.
     from saitenka.app.features.tooltip import tooltip
 
-    assert tooltip.tip_back(r._tip_ports) is True
+    assert tooltip.tip_back(r.tooltip_controller.tip_ports) is True
     assert r.tooltip_controller.surface_state().view.state is base

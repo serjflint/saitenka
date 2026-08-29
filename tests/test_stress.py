@@ -10,11 +10,13 @@ gate. The *performance* side of the same scenario lives in examples/bench_respon
 from __future__ import annotations
 
 from driver import Driver
+from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.config import TooltipOptions
 from saitenka.app.features.tooltip import nested_popup
 from saitenka.app.session.controller import NESTED_ID, TIP_ID, SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
 
@@ -37,9 +39,9 @@ class _TallDS:
 
 
 def _reader() -> SessionController:
-    r = SessionController(FakeIPC(), dict_set=_TallDS())
-    r.osd = (1920, 1080)
-    r.sub_origin = (0, 0)
+    r = build_session(FakeIPC(), services=SessionServices(dictionaries=_TallDS()))
+    r.screen.osd = (1920, 1080)
+    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     return r
 
 
@@ -52,11 +54,11 @@ def _churn(r: SessionController, term: str) -> bool:
     lines+tokens lets `draw_subtitle` build a consistent box for token 0. Returns whether a nested
     popup actually opened (so a test can assert the nested path was exercised)."""
     tok = Token(term, term, "ご", "名詞", 0, len(term))
-    r.lines = [[tok]]
-    r.tokens = [tok]
+    r.subtitle_presentation.cue.replace_tokenized(lines=[[tok]])
+    r.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
     # Draw first, then hover: the boxes have to exist before a cursor has anywhere to land. The old
     # `set_hover(0)` did both at once, which is why it could not be a move.
-    r.draw_subtitle()
+    r.subtitle_presentation.draw()
     ui = Driver(r, instant=False).move_to_word(0)
     for _ in range(4):  # scroll toward the bottom of the tall entry
         ui.wheel(1)
@@ -65,12 +67,15 @@ def _churn(r: SessionController, term: str) -> bool:
     opened = False
     if boxes:
         nested_popup.show_nested(
-            r._tip_ports, r._panel_ports, r.word_lookup, boxes[len(boxes) // 3]
+            r.tooltip_controller.tip_ports,
+            r.tooltip_controller.panel_ports,
+            r.tooltip_controller.word_lookup,
+            boxes[len(boxes) // 3],
         )  # nested popup on an inner cell
         opened = r.tooltip_controller.surface_state().nest.state is not None
         ui.wheel(1)  # nested is up
-        r._hide_nested()
-    r.retire_hover()  # dismiss the whole stack
+        r.tooltip_controller.hide_nested()
+    r.tooltip_controller.retire_hover()  # dismiss the whole stack
     return opened
 
 

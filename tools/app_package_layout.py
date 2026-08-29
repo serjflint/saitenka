@@ -16,6 +16,7 @@ FEATURE_PACKAGES = frozenset(
         "analysis",
         "annotation",
         "help",
+        "history",
         "mining",
         "picker",
         "preview",

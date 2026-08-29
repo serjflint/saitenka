@@ -26,6 +26,10 @@ from saitenka.app.profiles import (
     resolve_profile,
     scope_config,
 )
+from saitenka.app.session.factory import (
+    SessionIdentity,
+    SessionInfrastructure,
+)
 from saitenka.app.session.runtime import SessionEntry, SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
 from saitenka.mpvio.launch import MpvLaunchOptions
@@ -44,7 +48,7 @@ DEMO_LINE = "門前の小僧習わぬ経を読む"
 def _dict_scoper_for(cfg: dict, profile_cycle):
     """The live dict re-scoper (#254 W3) for the profile switcher — only when there's more than one
     profile to cycle through (else a switch is inert, so no need to open a DB handle for it)."""
-    from saitenka.app.session.deps import make_dict_scoper
+    from saitenka.app.features.profiles.dependencies import make_dict_scoper
 
     return make_dict_scoper(cfg) if len(profile_cycle) > 1 else None
 
@@ -718,7 +722,7 @@ def reslot_to_current(
     """Re-index the overlay onto mpv's CURRENT (already-loaded) file — the reactive #100 re-slot fired
     from ``file-loaded``, so it covers a native autoload/playlist advance and our own eof loadfile
     alike (NO loadfile here; mpv already loaded the file). Closes the finished episode's stats row,
-    rebinds the leak-free ``EpisodeContext``, drops the carried-over launch ``--sub-file`` and re-adds
+    rebinds the subtitle navigation state, drops the carried-over launch ``--sub-file`` and re-adds
     the current episode's srt language-tagged (so selection can't latch onto a stale sibling's subs),
     rebuilds the sub-index, restarts the
     recorder + prefetch, and warms N+1's subs. Session-scoped state (deck-mined set, backlog, render
@@ -832,7 +836,7 @@ def _build_run_deps(req: RunDepsRequest):
     here: the plain ``--known word1,word2`` fallback list and this command's console feedback
     lines, both threaded through as callbacks/post-processing rather than duplicating the logic
     that produces them."""
-    import saitenka.app.session.deps as reader_deps
+    import saitenka.app.features.profiles.dependencies as reader_deps
 
     def _on_anki_unreachable(*, launched: bool) -> None:
         if launched:
@@ -1005,7 +1009,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     profile: str | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
-    from saitenka.app.session.deps import begin_deps_build, begin_tokenizer_warm
+    from saitenka.app.features.profiles.dependencies import begin_deps_build, begin_tokenizer_warm
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift.
@@ -1164,33 +1168,40 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             from saitenka.app.session.factory import (
                 SessionServices,
                 TooltipWorkMode,
-                create_session_controller,
+                prepare_session_controller,
             )
 
-            reader = create_session_controller(
+            prepared = prepare_session_controller(
                 ipc,
                 services=SessionServices(scorer, anki, mine_conf, dict_set, tts_available()),
+                infrastructure=SessionInfrastructure(
+                    tooltip_work=TooltipWorkMode.INLINE,
+                ),
+                identity=SessionIdentity(
+                    profile=active_profile,
+                    tokenizer_warm=tokenizer_warm,
+                ),
                 options=opts,
-                profile=active_profile,
-                tokenizer_warm=tokenizer_warm,
-                tooltip_work=TooltipWorkMode.INLINE,
             )
         else:
-            from saitenka.app.session.factory import create_session_controller
+            from saitenka.app.session.factory import prepare_session_controller
 
-            reader = create_session_controller(
+            prepared = prepare_session_controller(
                 ipc,
+                identity=SessionIdentity(
+                    profile=active_profile,
+                    tokenizer_warm=tokenizer_warm,
+                ),
                 options=opts,
-                profile=active_profile,
-                tokenizer_warm=tokenizer_warm,
             )
-        import saitenka.app.session.deps as reader_deps
+        reader = prepared.live
+        import saitenka.app.features.profiles.dependencies as reader_deps
 
         def dependency_builder_for(selected, _identity):
             request = _request_for(selected)
             return _scoped_for(selected), lambda: _build_run_deps(request)
 
-        reader.configure_profiles(
+        prepared.profile.configure(
             profile_cycle,
             dependency_builder_for=dependency_builder_for,
             mining_spec_for=lambda selected, identity: reader_deps.mining_spec_from_config(
@@ -1203,15 +1214,15 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         with otel_metrics.traced("startup.subtitle_index"):
-            reader.rebuild_sub_index()
-        reader.load_deps_async(
+            prepared.rebuild_sub_index()
+        prepared.profile.load(
             cfg, prebuilt=deps_future
         )  # the build has been running since pre-launch
 
     with otel_metrics.traced("startup.subtitle_mode_configure"):
-        reader.configure_subtitle_mode(subtitle_startup, slang=slang)
+        prepared.configure_subtitle_mode(subtitle_startup, slang=slang)
     _start_run_provider_fetch(
-        reader.reslot_ports,
+        prepared.reslot,
         cfg,
         video_path,
         subs,
@@ -1222,8 +1233,8 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     )
 
     _install_watch_hooks(
-        reader.reslot_ports,
-        reader.watch_ports,
+        prepared.reslot,
+        prepared.watch,
         cfg,
         video_path,
         tmp,
@@ -1235,7 +1246,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     try:
         _execute_reader_session(
-            reader.session_entry,
+            prepared.entry,
             DemoSpec(
                 demo_word=demo_word,
                 screenshot=screenshot,

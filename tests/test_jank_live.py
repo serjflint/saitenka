@@ -6,8 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from session_builder import build_session
 
 from saitenka.app.session import surfaces
+from saitenka.app.session.factory import SessionServices
 
 JANK_PATH = Path(__file__).resolve().parent.parent / "examples" / "jank_live.py"
 
@@ -84,10 +86,15 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
 
         def __init__(self):
             self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
-            self.tooltip_controller = SimpleNamespace(surface_state=lambda: self.tip)
-
-        def scroll_tip(self, delta):
-            self.tip.view.scroll += delta
+            self.tooltip_controller = SimpleNamespace(
+                surface_state=lambda: self.tip,
+                scale=lambda: SimpleNamespace(ref_h=1080),
+                scroll_tip=lambda delta: setattr(
+                    self.tip.view,
+                    "scroll",
+                    self.tip.view.scroll + delta,
+                ),
+            )
 
         def pump(self):
             return True
@@ -114,10 +121,11 @@ def _stuck_controller(mod_state):
                 nest=SimpleNamespace(rect=None, scroll=0),
                 last_mouse=(10.0, 20.0),
             )
-            self.tooltip_controller = SimpleNamespace(surface_state=lambda: self.tip)
-
-        def scroll_tip(self, _delta):
-            pass
+            self.tooltip_controller = SimpleNamespace(
+                surface_state=lambda: self.tip,
+                scale=lambda: SimpleNamespace(ref_h=1080),
+                scroll_tip=lambda _delta: None,
+            )
 
         def pump(self):
             return True
@@ -164,14 +172,14 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
     from driver import Driver
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     mod = _jank_module()
-    reader = SessionController(FakeIPC(), dict_set=mod.TallDS())
-    reader.osd = (1280, 720)
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=mod.TallDS()))
+    reader.screen.osd = (1280, 720)
     reader.set_subtitle("門前の小僧習わぬ経を読む")
     word = next(
-        i for i, t in enumerate(reader.tokens) if reader.profile_controller.tokenizer.is_content(t)
+        i
+        for i, t in enumerate(reader.subtitle_presentation.cue.current.tokens)
+        if reader.profile_session.profile.tokenizer.is_content(t)
     )
     Driver(reader).move_to_word(word).leave()  # resolve the cue's entries, as the live harness does
     for _ in range(4):

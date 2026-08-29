@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.features.analysis.episode_analysis import EpisodeAnalysis
-    from saitenka.app.session.context import EpisodeContext
 
 log = logging.getLogger(__name__)
 _DB_PATH_OVERRIDE: Path | None = None
@@ -330,25 +329,26 @@ class SessionRecorder:
 
 
 def start(
-    episode: EpisodeContext,
     *,
+    current: SessionRecorder | None,
     enabled: bool,
     path: Callable[[], object],
     arm: Callable[[float], object],
-) -> None:
+) -> SessionRecorder | None:
     """Open this episode's history row, if history is on and one is not open already.
 
     `path` is a callable so that a disabled session never asks mpv for it — the identity read is
     behind the same guard the row is.
     """
-    if episode.session_recorder is not None or not enabled:
-        return
+    if current is not None or not enabled:
+        return current
     try:
-        episode.session_recorder = SessionRecorder(str(path() or ""))
+        recorder = SessionRecorder(str(path() or ""))
     except (OSError, sqlite3.Error):
         log.warning("session history unavailable", exc_info=True)
-        return
+        return None
     arm(PERSIST_INTERVAL)
+    return recorder
 
 
 def accrue(recorder: SessionRecorder | None, *, paused: bool, language: str) -> None:

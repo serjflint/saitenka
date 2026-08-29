@@ -7,12 +7,19 @@ windowed viewport vs a one-shot render_panel crop lives in ``tests/test_windowed
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from driver import Driver
+from session_builder import build_session
 from util import FakeIPC
 
+from saitenka.app.config import ReaderOptions
 from saitenka.app.features.tooltip import tooltip_panel
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.panel import Definition, Entry
+
+if TYPE_CHECKING:
+    from saitenka.app.session.controller import SessionController
 
 
 class _FakeDS:
@@ -34,14 +41,24 @@ class _FakeDS:
 
 
 def _reader() -> SessionController:
-    r = SessionController(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
-    r.osd = (1920, 1080)
+    r = build_session(
+        FakeIPC(),
+        services=SessionServices(
+            dictionaries=_FakeDS(),
+        ),
+        options=ReaderOptions().with_overrides(tip_max_frac=0.5),
+    )
+    r.screen.osd = (1920, 1080)
     r.set_subtitle("本命を読む")
     return r
 
 
 def _content_word(r: SessionController) -> int:
-    return next(i for i, t in enumerate(r.tokens) if r.profile_controller.tokenizer.is_content(t))
+    return next(
+        i
+        for i, t in enumerate(r.subtitle_presentation.cue.current.tokens)
+        if r.profile_session.profile.tokenizer.is_content(t)
+    )
 
 
 def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
@@ -70,7 +87,7 @@ def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
 
     # Hit-testing: a point over a real scan cell resolves to that cell through the windowed path.
     r.tooltip_controller.surface_state().view.scroll = 0
-    r._render_tip_view()  # materialise the top blocks' geometry
+    r.tooltip_controller.render_tip_view()  # materialise the top blocks' geometry
     cells = [
         b for b in wp.scan_boxes() if b.y < r.tooltip_controller.surface_state().view.view_h
     ]  # a cell in the top viewport
@@ -79,7 +96,7 @@ def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
     sx, sy = r.tooltip_controller.surface_state().view.xy
     hit = tooltip_panel.scan_hit(
         r.tooltip_controller.surface_state(),
-        r.tip_scale.raster,
+        r.tooltip_controller.scale().raster,
         sx + cell.x + cell.w // 2,
         sy + cell.y + cell.h // 2,
     )

@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import pytest
+from session_builder import build_session
 
 from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 from saitenka.app.toast_controller import ToastController
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+if TYPE_CHECKING:
+    from saitenka.app.features.mining.mining_controller import MiningController
 
 
 @dataclass
@@ -33,6 +38,62 @@ class FakeTimerPort:
     @staticmethod
     def finish(item: _Scheduled, outcome: EffectOutcome = EffectOutcome.SUCCEEDED) -> None:
         item.callback(EffectFinished(EffectId(1), Owner.SESSION, item.identity, outcome))
+
+
+class _ProfileMining:
+    def select_mining_spec(self, _spec) -> None:
+        pass
+
+    def close_capability(self) -> None:
+        pass
+
+    def clear_mining_target(self, _identity) -> None:
+        pass
+
+    def publish_mining_target(self, _target) -> None:
+        pass
+
+
+def _profile_session(ipc, port: FakeTimerPort):
+    from saitenka.app.features.mining.mining_controller import MiningIdentity
+    from saitenka.app.features.profiles.profile_controller import (
+        ProfileAftermath,
+        ProfileController,
+        ProfileInvalidation,
+        ProfileSubtitles,
+    )
+    from saitenka.app.features.profiles.profile_session import (
+        ProfileDependencyPorts,
+        ProfileSession,
+        ProfileSessionAssembly,
+    )
+    from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+    from saitenka.app.profiles import DEFAULT_PROFILE
+    from saitenka.mpvio.osd import Overlay
+
+    def nothing() -> None:
+        pass
+
+    profile = ProfileController(
+        DEFAULT_PROFILE,
+        None,
+        ProfileInvalidation(nothing, nothing, nothing),
+        ProfileSubtitles(lambda: "ja", lambda _slang: False, lambda _slang: None, nothing),
+        ProfileAftermath(nothing, lambda _text, _kind: None),
+    )
+    return ProfileSession(
+        ProfileSessionAssembly(
+            profile,
+            cast("MiningController", _ProfileMining()),
+            LifecycleTimers(port),
+            LifecycleSurfaces(Overlay(ipc)),
+            ProfileDependencyPorts(nothing, nothing, lambda: 0, nothing),
+            lambda: 0,
+            lambda _mode, _workers: None,
+        ),
+        identity=MiningIdentity(DEFAULT_PROFILE.name, 0),
+        scorer=None,
+    )
 
 
 def test_replaced_lifecycle_timer_cannot_apply_after_new_revision() -> None:
@@ -67,10 +128,9 @@ def test_toast_expiry_removes_the_lifecycle_surface() -> None:
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
-    reader = SessionController(ipc)
+    reader = build_session(ipc)
     port = FakeTimerPort()
     reader.notifications = ToastController(
         reader.lifecycle_surfaces,
@@ -88,20 +148,19 @@ def test_loading_frames_are_timer_driven_and_stop_when_loading_finishes() -> Non
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session.controller import SessionController
 
     ipc = FakeIPC()
-    reader = SessionController(ipc)
     port = FakeTimerPort()
-    reader.lifecycle_timers = LifecycleTimers(port)
-    reader._loading = True
-    reader._schedule_loading_frame(delay_s=0.0)
+    profile = _profile_session(ipc, port)
+    profile.begin_loading()
 
     port.finish(port.history[-1])
     assert any(command[:2] == ("overlay-add", OverlayId.LOADING) for command in ipc.commands)
     assert len(port.history) == 2
 
-    reader._loading = False
+    from saitenka.app.features.profiles.dependencies import DependencyBundle
+
+    profile.accept(DependencyBundle(profile.identity, failed=True))
     port.finish(port.history[-1])
     assert len(port.history) == 2
 
@@ -109,17 +168,14 @@ def test_loading_frames_are_timer_driven_and_stop_when_loading_finishes() -> Non
 def test_completed_dependencies_suppress_a_pending_loading_frame() -> None:
     from util import FakeIPC
 
+    from saitenka.app.features.profiles.dependencies import DependencyBundle
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session.controller import SessionController
-    from saitenka.app.session.deps import DependencyBundle
 
     ipc = FakeIPC()
-    reader = SessionController(ipc)
     port = FakeTimerPort()
-    reader.lifecycle_timers = LifecycleTimers(port)
-    reader._loading = True
-    reader.profile_dependencies.publish(DependencyBundle(reader.profile_dependencies.identity))
-    reader._schedule_loading_frame(delay_s=0.0)
+    profile = _profile_session(ipc, port)
+    profile.begin_loading()
+    profile.publish(DependencyBundle(profile.identity))
 
     port.finish(port.history[-1])
 

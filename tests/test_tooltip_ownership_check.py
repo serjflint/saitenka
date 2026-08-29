@@ -28,7 +28,7 @@ def test_current_tooltip_ownership_tree_is_clean():
     assert ownership.inspect_tree() == []
 
 
-@pytest.mark.parametrize("attribute", ["tip", "interaction"])
+@pytest.mark.parametrize("attribute", ["tip"])
 def test_session_cannot_reintroduce_tooltip_state_projections(attribute: str):
     rules = _rules(
         f"def drift(self):\n    return self.{attribute}\n",

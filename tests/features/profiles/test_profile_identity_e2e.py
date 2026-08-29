@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import pytest
 import util
+from session_builder import build_session
 
 from saitenka.app import subselect
 from saitenka.app.profiles import resolve_profile
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionIdentity
 from saitenka.app.subtitle_providers import (
     ProviderContext,
     SubtitleProvider,
@@ -98,15 +99,19 @@ def _resolve_identity(cfg: dict) -> tuple[str, str, tuple[str, ...]]:
     enabled attach providers). ``resolve_profile`` → the real ``SessionController`` construction line → the real
     ``prepare_attach_startup`` provider gate, all keyed on the one resolved ``langs.main``."""
     profile = resolve_profile(cfg)  # exactly what run_impl / attach do after load_config
-    reader = SessionController(
-        _FakeIPC(), profile=profile
+    reader = build_session(
+        _FakeIPC(), identity=SessionIdentity(profile=profile)
     )  # the real SessionController(ipc, options, profile=…) line
     ipc = _FakeIPC(tracks=[EN], path="/v/Show - 01.mkv")  # no JP track → the provider gate fires
     _startup, _status, providers = subselect.prepare_attach_startup(
         ipc,
         subselect.AttachSubtitleOptions(jimaku=True, tsukihime=True, language=profile.langs.main),
     )
-    return reader.profile_controller.tokenizer.name, reader.profile_controller.langs.main, providers
+    return (
+        reader.profile_session.profile.tokenizer.name,
+        reader.profile_session.profile.langs.main,
+        providers,
+    )
 
 
 # --- 1. default scenario: the JP identity resolves consistently, byte-identical to today ----------

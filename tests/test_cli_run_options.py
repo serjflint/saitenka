@@ -80,7 +80,7 @@ def test_run_options_read_mine_preview_toggle():
 def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
     # The RUN path rebuilds a synthetic effective_cfg dict from the CLI kwargs; the animated flag must
     # survive it or it silently no-ops on `run` while working on `attach` (the both-seams trap).
-    import saitenka.app.session.deps as reader_deps
+    import saitenka.app.features.profiles.dependencies as reader_deps
     from saitenka.app.launch import run as cli_run
 
     captured: dict = {}
@@ -129,7 +129,7 @@ def test_resolve_mine_model_prefers_explicit_then_preset_then_lapis():
 def test_run_threads_field_map_and_card_kind(monkeypatch):
     # #101 field-map/card-kind have no CLI flag — they must ride through the RUN seam purely via the
     # raw [mine] table (the both-seams trap), or they'd work on attach but silently no-op on run.
-    import saitenka.app.session.deps as reader_deps
+    import saitenka.app.features.profiles.dependencies as reader_deps
     from saitenka.app.launch import run as cli_run
 
     captured: dict = {}
@@ -163,7 +163,7 @@ def test_run_threads_field_map_and_card_kind(monkeypatch):
 
 def test_run_threads_card_format(monkeypatch):
     # [mine.card_format] has no CLI flag — like fields/card_kind it must ride the RUN seam via raw [mine].
-    import saitenka.app.session.deps as reader_deps
+    import saitenka.app.features.profiles.dependencies as reader_deps
     from saitenka.app.launch import run as cli_run
 
     captured: dict = {}

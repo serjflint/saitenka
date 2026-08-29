@@ -6,9 +6,10 @@ import zipfile
 
 import dicthelp
 from driver import Driver
+from session_builder import build_session
 from util import FakeIPC, assert_golden, keybind_registry
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
@@ -164,11 +165,17 @@ def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path):
     from saitenka.app.config import ReaderOptions, TooltipOptions
 
     assert TooltipOptions().kanji_stroke_order is True  # on by default
-    r = SessionController(FakeIPC(), dict_set=_fixture_ds(tmp_path))
-    assert r.kanji_stroke_order is True
+    r = build_session(FakeIPC(), services=SessionServices(dictionaries=_fixture_ds(tmp_path)))
+    assert r.tooltip_controller.visual.stroke_order is True
     off_opts = replace(ReaderOptions(), tooltip=TooltipOptions(kanji_stroke_order=False))
-    off = SessionController(FakeIPC(), dict_set=_fixture_ds(tmp_path), options=off_opts)
-    assert off.kanji_stroke_order is False
+    off = build_session(
+        FakeIPC(),
+        services=SessionServices(
+            dictionaries=_fixture_ds(tmp_path),
+        ),
+        options=off_opts,
+    )
+    assert off.tooltip_controller.visual.stroke_order is False
 
 
 # --- `k` key: open / cycle the hovered word's kanji ------------------------------------------------
@@ -176,46 +183,50 @@ def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path):
 
 def _kanji_reader(tmp_path):
     ds = _fixture_ds(tmp_path)
-    r = SessionController(FakeIPC(), dict_set=ds)
-    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.sub_origin = (0, 0)
-    r.tokens = [Token("読本", "読本", "とくほん", "名詞", 0, 2)]
-    r.boxes = [WordBox(0, 100, 300, 40, 40)]
+    r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("読本", "読本", "とくほん", "名詞", 0, 2)]
+    )
+    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
     return r
 
 
 def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
-    monkeypatch.setattr(r, "renderer", NullRenderer())
+    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
     r.tooltip_controller.select(0)
-    r._handle("saitenka-kanji")
+    r.command_runtime.handle("saitenka-kanji")
     assert r.tooltip_controller.hover_view().nested.shown
     assert r.tooltip_controller.hover_view().nested.word == "読"  # first kanji of the hovered word
-    r._handle("saitenka-kanji")
+    r.command_runtime.handle("saitenka-kanji")
     assert r.tooltip_controller.hover_view().nested.word == "本"  # repeat cycles to the next kanji
-    r._handle("saitenka-kanji")
+    r.command_runtime.handle("saitenka-kanji")
     assert r.tooltip_controller.hover_view().nested.word == "読"  # …and wraps around
 
 
 def test_k_key_bound_globally():
     ipc = FakeIPC()
-    SessionController(ipc)._register_keybinds()
+    build_session(ipc).command_runtime.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert "k" in binds and binds["k"].startswith("script-message ")
 
 
 def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
-    monkeypatch.setattr(r, "renderer", NullRenderer())
+    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
     toasts = []
     monkeypatch.setattr(
         r.notifications, "show", lambda text, _kind="ok", _seconds=2.8: toasts.append(text)
     )
-    r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
+    r.command_runtime.handle("saitenka-kanji")  # nothing hovered → no crash, no popup
     assert not r.tooltip_controller.hover_view().nested.shown
-    r.tokens = [Token("よむ", "よむ", "よむ", "動詞", 0, 2)]
+    r.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("よむ", "よむ", "よむ", "動詞", 0, 2)]
+    )
     r.tooltip_controller.select(0)
-    r._handle("saitenka-kanji")  # kana-only word → warn toast
+    r.command_runtime.handle("saitenka-kanji")  # kana-only word → warn toast
     assert not r.tooltip_controller.hover_view().nested.shown and toasts
 
 
@@ -226,12 +237,14 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     # the def body contains 本 (an ideograph that IS in the kanji bank but the tokenized cell has
     # no useful term context) — clicking its scan cell opens the KANJI entry in the nested popup.
     ds = _fixture_ds(tmp_path, terms=(("読む", "よむ", ["本のことだ。"]),))
-    r = SessionController(FakeIPC(), dict_set=ds)
-    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.sub_origin = (0, 0)
-    r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]
-    r.boxes = [WordBox(0, 100, 300, 40, 40)]
-    monkeypatch.setattr(r, "renderer", NullRenderer())
+    r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("読む", "読む", "よむ", "動詞", 0, 2)]
+    )
+    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
     ui = Driver(r)
     ui.move_to_word(0)  # base tooltip through hit-testing, not a poke
     # find the scan cell whose tail starts with 本

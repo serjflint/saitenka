@@ -1,8 +1,10 @@
 """MVP: subtitle rendering (multi-line) + per-word hitbox geometry."""
 
 import pytest
+from session_builder import build_session
 from util import assert_golden
 
+from saitenka.app.config import ReaderOptions, TooltipOptions
 from saitenka.app.subtitles import render_subtitle
 from saitenka.app.tokenize import tokenize
 
@@ -153,21 +155,26 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
     """
     import util
 
-    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import SubtitleRenderer
 
     def origin_for(frac: float) -> tuple[int, int]:
-        reader = SessionController(util.FakeIPC())
-        reader.osd = (1920, 1080)
-        reader.bottom_margin_frac = frac
-        reader.sub_origin = (999, 999)  # a stale origin the draw has to replace
+        reader = build_session(
+            util.FakeIPC(),
+            options=ReaderOptions(tooltip=TooltipOptions(bottom_margin_frac=frac)),
+        )
+        reader.screen.osd = (1920, 1080)
+        reader.subtitle_presentation.cue.replace_geometry(
+            origin=(999, 999)
+        )  # a stale origin the draw has to replace
         reader.set_subtitle("猫を見る")
         result = SubtitleRenderer().draw(
             reader._draw_request(), reader.lifecycle_surfaces, reader.ipc
         )
         assert result is not None
-        reader.sub_origin = result.origin  # the coordinator's write-back, done here by hand
-        return reader.sub_origin
+        reader.subtitle_presentation.cue.replace_geometry(
+            origin=result.origin
+        )  # the coordinator's write-back, done here by hand
+        return reader.subtitle_presentation.cue.current.origin
 
     low, high = origin_for(0.05), origin_for(0.15)
 

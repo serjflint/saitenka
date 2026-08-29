@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from saitenka.mpvio.gateway import register_observer_set
@@ -13,6 +15,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from saitenka.mpvio.ipc import MpvIPC
+
+log = logging.getLogger(__name__)
 
 
 # One initial read seeds each property; subsequent values arrive as ordered observations.
@@ -70,6 +74,14 @@ OBSERVED_PROPERTIES = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class PlaybackStartup:
+    reconcile_cue: Callable[[str], None]
+    refresh_render_space: Callable[[], object]
+    observe_authored_subtitle: Callable[[dict], None]
+    probe_display_sources: Callable[[str, dict], None]
+
+
 class PlaybackObservationController:
     """Own raw property observation and the resulting playback projection.
 
@@ -81,9 +93,11 @@ class PlaybackObservationController:
         self,
         ipc: MpvIPC,
         apply: Callable[[playback.PlaybackDelta], None],
+        startup: PlaybackStartup,
     ) -> None:
         self._ipc = ipc
         self._apply = apply
+        self._startup = startup
         self._store = PlaybackStore(ipc, reducer=PlaybackReducer())
         self._observing = False
 
@@ -158,6 +172,28 @@ class PlaybackObservationController:
         else:
             self.install_seed(values)
         return replies
+
+    def start_session(self, *, connection_replaced: bool = False) -> None:
+        replies = self.start(connection_replaced=connection_replaced)
+        self._startup.observe_authored_subtitle(replies["sub-text/ass-full"])
+        self._startup.reconcile_cue(str(self.value("sub-text") or ""))
+        osd = self.value("osd-dimensions")
+        log.info(
+            "observing mpv props; seed osd-dimensions=%r sub-text=%r",
+            osd,
+            self.value("sub-text"),
+        )
+        self._startup.refresh_render_space()
+        if osd is None:
+            log.warning(
+                "osd-dimensions seed is None — mpv isn't returning get_property replies; "
+                "the overlay won't draw until that recovers"
+            )
+        else:
+            self._startup.probe_display_sources(
+                "seed",
+                osd if isinstance(osd, dict) else {},
+            )
 
     def retire_episode(self) -> None:
         self.dispatch(events.EpisodeRetired())

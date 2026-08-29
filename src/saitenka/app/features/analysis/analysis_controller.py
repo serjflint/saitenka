@@ -24,10 +24,13 @@ if TYPE_CHECKING:
 
     from saitenka.app.config import KeyOptions
     from saitenka.app.features.help.help_controller import ScreenState
+    from saitenka.app.features.profiles.profile_session import ProfileSession
+    from saitenka.app.features.subtitle.navigation_state import NavigationStore
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.scoring import Scorer
     from saitenka.app.tokenizer import Tokenizer
     from saitenka.mpvio.ipc import MpvIPC
+    from saitenka.runtime.subtitle_slice import SubtitleTrackStore
     from saitenka.subtitles import Cue, CueIndex
 
 log = logging.getLogger(__name__)
@@ -43,6 +46,24 @@ class AnalysisInputs:
     loading: bool
     scorer: Scorer | None
     tokenizer: Tokenizer
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisObservation:
+    """Capture the profile, track, and episode facts for one analysis admission."""
+
+    tracks: SubtitleTrackStore
+    navigation: NavigationStore
+    profile: ProfileSession
+
+    def current(self) -> AnalysisInputs:
+        return AnalysisInputs(
+            language=self.tracks.current.language,
+            index=self.navigation.current.sub_index,
+            loading=self.profile.loading,
+            scorer=self.profile.scorer,
+            tokenizer=self.profile.profile.tokenizer,
+        )
 
 
 @dataclass(frozen=True, slots=True)

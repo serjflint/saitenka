@@ -2,12 +2,12 @@
 
 import util
 from PIL import Image
+from session_builder import build_session
 from util import keybind_registry
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import KeyOptions, ReaderOptions
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.session.controller import SessionController
 from saitenka.mpvio.osd import Overlay
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleTracksDiscovered
 
@@ -58,13 +58,13 @@ def test_showing_overlay_restores_latest_hidden_draw():
 
 def test_alt_o_hides_saitenka_and_restores_native_subs():
     ipc = FakeIPC()
-    reader = SessionController(ipc)
+    reader = build_session(ipc)
     reader.ov.show(_image(), oid=OverlayId.SUB)
-    reader._register_keybinds()
+    reader.command_runtime.install_input()
     bindings = keybind_registry(ipc)
     ipc.commands.clear()
 
-    reader._handle(bindings["Alt+o"])
+    reader.command_runtime.handle(bindings["Alt+o"])
 
     assert ("overlay-remove", OverlayId.SUB) in ipc.commands
     assert ("set_property", "sub-visibility", True) in ipc.commands
@@ -75,10 +75,10 @@ def test_alt_o_hides_saitenka_and_restores_native_subs():
 
 def test_showing_overlay_restores_saitenka_subtitle_policy():
     ipc = FakeIPC()
-    reader = SessionController(ipc)
+    reader = build_session(ipc)
 
-    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
-    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
 
     assert ipc.props["sub-visibility"] is False
     assert "osd-level" not in ipc.props  # toggle never manages osd-level anymore
@@ -88,7 +88,7 @@ def test_overlay_toggle_key_is_configurable():
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(overlay_toggle_key="Ctrl+o"))
 
-    SessionController(ipc, options=options)._register_keybinds()
+    build_session(ipc, options=options).command_runtime.install_input()
 
     bindings = set(keybind_registry(ipc))
     assert "Ctrl+o" in bindings and "Alt+o" not in bindings
@@ -96,16 +96,16 @@ def test_overlay_toggle_key_is_configurable():
 
 def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling():
     ipc = FakeIPC()
-    reader = SessionController(ipc)
-    reader.declare_subtitle(SubtitleTracksDiscovered(2, 1))
+    reader = build_session(ipc)
+    reader.track_commands.declare(SubtitleTracksDiscovered(2, 1))
     reader.playback_observation.install_seed({"sid": 2})
-    reader._handle(app_bindings.TRANS_MSG)
-    reader.declare_subtitle(SubtitleSecondaryLeased(1))
+    reader.command_runtime.handle(app_bindings.TRANS_MSG)
+    reader.track_commands.declare(SubtitleSecondaryLeased(1))
     ipc.commands.clear()
 
-    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
     assert reader.translation_controller.state.drawn is None
-    reader._handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
 
     secondary = [
         command[2] for command in ipc.commands if command[:2] == ("set_property", "secondary-sid")

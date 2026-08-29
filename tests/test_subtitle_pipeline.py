@@ -4,7 +4,10 @@ import threading
 from dataclasses import FrozenInstanceError
 
 import pytest
+from session_builder import build_session
 
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_pipeline import (
     GeometryResolution,
@@ -223,18 +226,24 @@ def test_coordinator_delegates_current_renderer() -> None:
     """
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     renderer = FakeCurrentRenderer()
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=renderer)
-    coordinator = reader.subtitle_pipeline
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            renderer=renderer,
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    coordinator = reader.subtitle_presentation.pipeline
     coordinator.renderer = renderer
 
-    coordinator.draw_current(reader.subtitle_target())
+    coordinator.draw_current(reader.subtitle_presentation.target())
 
     assert renderer.drawn is not None
     assert renderer.drawn is not reader
-    assert renderer.drawn.osd == reader.osd
+    assert renderer.drawn.osd == reader.screen.osd
     reader.close()
 
 

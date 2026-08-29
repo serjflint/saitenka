@@ -75,7 +75,7 @@ class CardSource:
     lines: list[list[Token]]
     provenance: Callable[[object], str]
     video_path: Callable[[], object]
-    toast: Callable[..., None]
+    toast: Callable[[str, str], None]
 
 
 def duplicate_token(panel: PreviewPanel) -> Token | None:

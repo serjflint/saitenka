@@ -393,7 +393,7 @@ max-args = 8
 "src/saitenka/app/yomitan_import.py" = ["print"]
 # T201: pre-logging bootstrap — runs before configure_logging() attaches handlers, so log.*
 # has nowhere to go yet; matches no-print-in-lib.yml.
-"src/saitenka/app/session/deps.py" = ["print"]
+"src/saitenka/app/features/profiles/dependencies.py" = ["print"]
 "src/saitenka/app/crashlog.py" = ["print"]
 # media.py dispatches on sys.platform with a `return` per branch; the explicit `else` is a DELIBERATE
 # mypy platform-narrowing guard (without it, mypy flags the fall-through as unreachable on the build

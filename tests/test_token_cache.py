@@ -9,15 +9,20 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING
 
 import pytest
+from session_builder import build_session
 from util import FakeIPC, RecordingRasterProvider
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+
+if TYPE_CHECKING:
+    from saitenka.app.session.controller import SessionController
 
 
 def _tok(surface: str) -> Token:
@@ -77,9 +82,9 @@ def test_lru_evicts_oldest_beyond_capacity():
 
 
 def _reader(dict_set=None) -> SessionController:
-    reader = SessionController(FakeIPC(), dict_set=dict_set)
-    reader.osd = (1920, 1080)
-    reader.renderer = NullRenderer()
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=dict_set))
+    reader.screen.osd = (1920, 1080)
+    reader.subtitle_presentation.renderer = NullRenderer()
     return reader
 
 
@@ -119,9 +124,11 @@ def test_cue_while_dicts_load_draws_plain_then_upgrades_on_deps_ready():
     assert (
         reader.annotation_controller.view.pending_text == "猫を見る"
     )  # renderer draws plain while set
-    assert reader.tokens  # tokens ARE populated (fast) for hover/mining — only the DRAW is plain
+    assert (
+        reader.subtitle_presentation.cue.current.tokens
+    )  # tokens ARE populated (fast) for hover/mining — only the DRAW is plain
 
-    reader.profile_controller.replace_dictionary_set(
+    reader.profile_session.profile.replace_dictionary_set(
         _ExistsDS()
     )  # deps land → reader_deps re-renders the on-screen cue
     reader.set_subtitle("猫を見る")
@@ -136,12 +143,14 @@ def test_upgrade_re_attempts_rather_than_serving_the_incomplete_result(monkeypat
     reader.set_subtitle("本を読む")
 
     calls: list[str] = []
-    real = reader.profile_controller.tokenizer.tokenize
+    real = reader.profile_session.profile.tokenizer.tokenize
     monkeypatch.setattr(
-        reader.profile_controller.tokenizer, "tokenize", lambda ln: calls.append(ln) or real(ln)
+        reader.profile_session.profile.tokenizer,
+        "tokenize",
+        lambda ln: calls.append(ln) or real(ln),
     )
 
-    reader.profile_controller.replace_dictionary_set(_ExistsDS())
+    reader.profile_session.profile.replace_dictionary_set(_ExistsDS())
     reader.set_subtitle("本を読む")
 
     assert calls == ["本を読む"]  # re-attempted (a cached miss would have skipped tokenize)
@@ -153,13 +162,16 @@ def test_repeated_line_is_a_cache_hit_and_skips_tokenization(monkeypatch):
     assert reader.annotation_controller.view.pending_text is None
 
     monkeypatch.setattr(
-        reader.profile_controller.tokenizer,
+        reader.profile_session.profile.tokenizer,
         "tokenize",
         lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a cached line")),
     )
     reader.set_subtitle("水を飲む")  # hit → no tokenize
 
-    assert reader.annotation_controller.view.pending_text is None and reader.tokens
+    assert (
+        reader.annotation_controller.view.pending_text is None
+        and reader.subtitle_presentation.cue.current.tokens
+    )
 
 
 # --- renderer: plain vs annotated follows the owner's pending state -------------------------------
@@ -168,10 +180,10 @@ def test_repeated_line_is_a_cache_hit_and_skips_tokenization(monkeypatch):
 def test_renderer_draws_plain_while_a_cue_is_pending():
     reader = _reader(dict_set=None)
     provider = RecordingRasterProvider()
-    reader.renderer = SubtitleRenderer(provider)
+    reader.subtitle_presentation.renderer = SubtitleRenderer(provider)
 
     reader.set_subtitle("猫")
-    reader.profile_controller.replace_dictionary_set(_ExistsDS())
+    reader.profile_session.profile.replace_dictionary_set(_ExistsDS())
     reader.set_subtitle("猫")
 
     assert provider.styles == ["plain", "styled"]
@@ -179,22 +191,24 @@ def test_renderer_draws_plain_while_a_cue_is_pending():
 
 @pytest.mark.timeout(5)
 def test_annotation_failure_keeps_plain_subtitle_on_later_redraw():
-    reader = SessionController(_InlineAnnotationIPC(), dict_set=_ExistsDS())
-    reader.osd = (1920, 1080)
+    reader = build_session(
+        _InlineAnnotationIPC(), services=SessionServices(dictionaries=_ExistsDS())
+    )
+    reader.screen.osd = (1920, 1080)
     provider = RecordingRasterProvider()
-    reader.renderer = SubtitleRenderer(provider)
+    reader.subtitle_presentation.renderer = SubtitleRenderer(provider)
 
     class FailingTokenizer:
         def tokenize(self, _line: str):
             raise ValueError("broken tokenizer")
 
-    reader.profile_controller.use_tokenizer(FailingTokenizer())
+    reader.profile_session.profile.use_tokenizer(FailingTokenizer())
 
-    reader._enable_async_annotation()
-    reader._dependencies_changed()
+    reader.profile_integration.enable_async_annotation()
+    reader.profile_integration.dependencies_changed()
     reader.set_subtitle("猫")
-    reader._settle_interaction()
-    reader.draw_subtitle()
+    reader.interaction.settle()
+    reader.subtitle_presentation.draw()
     reader.close()
 
     assert provider.styles == ["plain", "plain"]

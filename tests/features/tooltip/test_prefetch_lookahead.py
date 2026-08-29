@@ -2,12 +2,14 @@
 RSS gauges the telemetry interval sampler reports."""
 
 import util
+from session_builder import build_session
 
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.features.tooltip import prefetch
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
+from saitenka.app.wordlists import KnownWords
 from saitenka.panel import Definition, Entry
 from saitenka.subtitles import CueIndex, parse_srt
 
@@ -42,6 +44,7 @@ def _reader(
     props=None,
     head_lookahead: int = 0,
     head_queue_max: int = 4,
+    scorer=None,
 ):
     ipc = _FakeIPC(props)
     options = ReaderOptions(
@@ -51,10 +54,17 @@ def _reader(
             head_prefetch_queue_max=head_queue_max,
         )
     )
-    r = SessionController(ipc, dict_set=_FakeDS(), options=options)
-    r.osd = (1280, 720)
-    monkeypatch.setattr(r, "renderer", NullRenderer())
-    r.episode.sub_index = CueIndex(parse_srt(_SRT))
+    r = build_session(
+        ipc,
+        services=SessionServices(
+            scorer=scorer,
+            dictionaries=_FakeDS(),
+        ),
+        options=options,
+    )
+    r.screen.osd = (1280, 720)
+    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_SRT))
     return r
 
 
@@ -66,14 +76,17 @@ def _submitted_items(r, monkeypatch):
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
-    r._update_prefetch()
+    r.tooltip_controller.update_prefetch()
     return submitted
 
 
 def _upcoming(r, n: int) -> list[str]:
     """The next `n` cue texts, from the function that owns them rather than through the SessionController."""
     return prefetch.upcoming_cue_texts(
-        r.episode.sub_index, n, text=r.sub_text, preferred=r.episode.nav_idx
+        r.track_commands.navigation.current.sub_index,
+        n,
+        text=r.playback_observation.cue.text,
+        preferred=r.track_commands.navigation.current.nav_idx,
     )
 
 
@@ -95,10 +108,10 @@ def test_dependency_replacement_readmits_the_unchanged_cue(monkeypatch):
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
-    r._update_prefetch()
+    r.tooltip_controller.update_prefetch()
 
-    r._dependencies_changed()
-    r._update_prefetch()
+    r.profile_integration.dependencies_changed()
+    r.tooltip_controller.update_prefetch()
 
     assert len(scheduled) == 2
 
@@ -131,14 +144,14 @@ def test_no_lookahead_when_disabled(monkeypatch):
 def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
     r = _reader(monkeypatch, lookahead=10_000)
     calls = 0
-    tokenize = r.profile_controller.tokenizer.tokenize
+    tokenize = r.profile_session.profile.tokenizer.tokenize
 
     def counted(text):
         nonlocal calls
         calls += 1
         return tokenize(text)
 
-    monkeypatch.setattr(r.profile_controller.tokenizer, "tokenize", counted)
+    monkeypatch.setattr(r.profile_session.profile.tokenizer, "tokenize", counted)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
     r.set_subtitle("本を読む")
@@ -148,17 +161,26 @@ def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
 
 
 def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypatch):
-    r = _reader(monkeypatch, lookahead=0, head_lookahead=10_000, head_queue_max=4)
-    r.set_subtitle("本を読む")
     calls = 0
 
     class _Scorer:
+        known = KnownWords.from_set([])
+        fsrs_snap = None
+
         def score_line(self, tokens):
             nonlocal calls
             calls += 1
             return [type("Style", (), {"tag": "known"})() for _token in tokens]
 
-    r.scorer = _Scorer()
+    r = _reader(
+        monkeypatch,
+        lookahead=0,
+        head_lookahead=10_000,
+        head_queue_max=4,
+        scorer=_Scorer(),
+    )
+    r.set_subtitle("本を読む")
+    calls = 0
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, n, **_kw: ["本"] * n)
 
     _submitted_items(r, monkeypatch)
@@ -167,12 +189,13 @@ def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypat
 
 
 def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypatch):
-    r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=4)
-    r.set_subtitle("本を読む")
     tokens = [Token(f"語{i}", f"語{i}", f"ご{i}", "名詞", i, i + 1) for i in range(100)]
     probes = 0
 
     class _Scorer:
+        known = KnownWords.from_set([])
+        fsrs_snap = None
+
         def score_line(self, values):
             return [type("Style", (), {"tag": "n+1"})() for _value in values]
 
@@ -181,41 +204,48 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
         probes += 1
         return False
 
-    r.scorer = _Scorer()
-    monkeypatch.setattr(r.profile_controller.tokenizer, "tokenize", lambda _text: tokens)
-    monkeypatch.setattr(r.profile_controller.tokenizer, "is_content", lambda _token: True)
-    monkeypatch.setattr(r, "_is_mined", is_mined)
+    r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=4, scorer=_Scorer())
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r.profile_session.profile.tokenizer, "tokenize", lambda _text: tokens)
+    monkeypatch.setattr(r.profile_session.profile.tokenizer, "is_content", lambda _token: True)
+    monkeypatch.setattr(r.tooltip_controller, "is_mined", is_mined)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["long"])
 
-    heads = prefetch._head_prefetch_items(r.prefetch_ports, r.head_probe, 1, set())
+    heads = prefetch._head_prefetch_items(
+        r.tooltip_controller.prefetch_ports, r.tooltip_controller.head_probe, 1, set()
+    )
 
     assert len(heads) == probes == 4
 
 
 def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_prefix(monkeypatch):
-    r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=1)
-    r.set_subtitle("本を読む")
     tokens = [
         Token("は", "は", "は", "助詞", 0, 1),
         Token("語", "語", "ご", "名詞", 1, 2),
     ]
 
     class _Scorer:
+        known = KnownWords.from_set([])
+        fsrs_snap = None
+
         def score_line(self, values):
             return [
                 type("Style", (), {"tag": "known"})(),
                 type("Style", (), {"tag": "n+1"})(),
             ][: len(values)]
 
-    r.scorer = _Scorer()
-    monkeypatch.setattr(r.profile_controller.tokenizer, "tokenize", lambda _text: tokens)
+    r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=1, scorer=_Scorer())
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r.profile_session.profile.tokenizer, "tokenize", lambda _text: tokens)
     monkeypatch.setattr(
-        r.profile_controller.tokenizer, "is_content", lambda token: token.surface == "語"
+        r.profile_session.profile.tokenizer, "is_content", lambda token: token.surface == "語"
     )
-    monkeypatch.setattr(r, "_is_mined", lambda _token: False)
+    monkeypatch.setattr(r.tooltip_controller, "is_mined", lambda _token: False)
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["ordinary"])
 
-    heads = prefetch._head_prefetch_items(r.prefetch_ports, r.head_probe, 1, set())
+    heads = prefetch._head_prefetch_items(
+        r.tooltip_controller.prefetch_ports, r.tooltip_controller.head_probe, 1, set()
+    )
 
     assert [item.token.surface for _priority, item in heads] == ["語"]
 
@@ -228,7 +258,7 @@ def test_upcoming_cue_texts_bounds_at_the_tail(monkeypatch):
 
 def test_upcoming_cue_texts_is_empty_without_an_index(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
-    r.episode.sub_index = None
+    r.track_commands.navigation.current.sub_index = None
     r.set_subtitle("本を読む")
     assert _upcoming(r, 2) == []
 
@@ -249,7 +279,7 @@ def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
     r.tooltip_controller.surface_state().panel_cache.setdefault("a", _Panel(100))
     r.tooltip_controller.surface_state().panel_cache.setdefault("b", _Panel(250))
     monkeypatch.setattr(
-        r.profile_controller.dict_set, "decoded_entry_count", lambda: 7, raising=False
+        r.profile_session.profile.dict_set, "decoded_entry_count", lambda: 7, raising=False
     )
     gauges = r._telemetry_gauges()
     assert gauges["panel_cache.size"] == 2.0

@@ -50,7 +50,7 @@ Scope = Literal["global", "tooltip", "help", "mpv", "preview", "mouse"]
 Requirement = Literal["always", "anki", "tts"]
 
 # "mouse"-scoped bindings live in this FORCED mpv input section, enabled only while a saitenka surface
-# is up (controller._sync_mouse_capture) so clicks/wheel outrank other scripts' forced MBTN_LEFT.
+# is up (MouseCapture.sync) so clicks/wheel outrank other scripts' forced MBTN_LEFT.
 MOUSE_SECTION = "saitenka-mouse"
 
 # "global"-scoped bindings live in this FORCED mpv input section. One `define-section` rather than a

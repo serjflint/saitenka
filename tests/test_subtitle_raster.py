@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from session_builder import build_session
 from util import FakeIPC
 
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_raster import (
     AnnotationOverlay,
     PillowRasterProvider,
@@ -209,16 +211,15 @@ def _finish_captured_annotation(ipc) -> None:
 
 
 def _reader(recorder, *, dict_set=None, annotation_async: bool = False):
-    from saitenka.app.session.controller import SessionController
     from saitenka.app.subtitle_render import SubtitleRenderer
 
     ipc = _CapturingAnnotationIPC() if annotation_async else FakeIPC()
-    reader = SessionController(ipc, dict_set=dict_set)
-    reader.osd = (1920, 1080)
-    reader.renderer = SubtitleRenderer(recorder)
+    reader = build_session(ipc, services=SessionServices(dictionaries=dict_set))
+    reader.screen.osd = (1920, 1080)
+    reader.subtitle_presentation.renderer = SubtitleRenderer(recorder)
     if annotation_async:
-        reader._enable_async_annotation()
-        reader._dependencies_changed()
+        reader.profile_integration.enable_async_annotation()
+        reader.profile_integration.dependencies_changed()
     return reader
 
 
@@ -229,7 +230,7 @@ def test_a_cue_publishes_plain_immediately_and_styled_onto_the_same_identity(rec
     reader = _reader(recorder)
 
     reader.set_subtitle("猫を見る")
-    reader.profile_controller.replace_dictionary_set(_ExistsDS())
+    reader.profile_session.profile.replace_dictionary_set(_ExistsDS())
     reader.set_subtitle("猫を見る")
 
     assert recorder.styles == ["plain", "styled"]
@@ -249,10 +250,10 @@ def test_an_annotation_for_a_replaced_cue_never_restyles_the_current_one(recorde
     published = len(recorder.requests)
 
     _finish_captured_annotation(reader.ipc)
-    reader._settle_interaction()
+    reader.interaction.settle()
 
     assert len(recorder.requests) == published
-    assert reader.sub_text == "犬を見る"
+    assert reader.playback_observation.cue.text == "犬を見る"
 
 
 def test_a_closed_subtitle_surface_publishes_no_pixels_and_releases_its_provider(recorder) -> None:
@@ -262,7 +263,7 @@ def test_a_closed_subtitle_surface_publishes_no_pixels_and_releases_its_provider
     reader.set_subtitle("猫を見る")
     published = len(recorder.requests)
 
-    reader.subtitle_pipeline.close()
+    reader.subtitle_presentation.pipeline.close()
     reader.set_subtitle("犬を見る")
 
     assert len(recorder.requests) == published
@@ -276,7 +277,7 @@ def test_a_draw_onto_a_closed_surface_settles_its_caller_as_uncommitted(recorder
 
     reader = _reader(recorder, dict_set=_ExistsDS())
     reader.set_subtitle("猫を見る")
-    renderer = reader.renderer
+    renderer = reader.subtitle_presentation.renderer
     assert isinstance(renderer, SubtitleRenderer)
     settled: list[bool] = []
 

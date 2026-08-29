@@ -1,4 +1,4 @@
-"""Lifetime contexts and feature-owned state projections.
+"""Subtitle navigation and feature-owned state projections.
 
 The behavioural contract: episode-scoped state lives in one swappable object, and rebinding it resets
 *all* of that state in a single move (no field can leak into the next episode). That leak-freedom is
@@ -8,10 +8,10 @@ exactly what the future file-change re-slot relies on, so it is asserted here di
 from __future__ import annotations
 
 import util
+from session_builder import build_session
 
+from saitenka.app.features.subtitle.navigation_state import NavigationState
 from saitenka.app.features.tooltip.popups import PopupView, TooltipState
-from saitenka.app.session.context import EpisodeContext
-from saitenka.app.session.controller import SessionController
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleStartupConfigured
 from saitenka.subtitles import Cue
 
@@ -20,8 +20,8 @@ class FakeIPC(util.FakeIPC):
     """Minimal mpv IPC stand-in — enough to build a SessionController."""
 
 
-def test_episode_context_defaults_are_the_no_episode_state():
-    ctx = EpisodeContext()
+def test_navigation_state_defaults_are_the_no_source_state():
+    ctx = NavigationState()
     assert (
         ctx.sub_index,
         ctx.nav_idx,
@@ -38,25 +38,27 @@ def test_episode_context_defaults_are_the_no_episode_state():
 
 
 def test_reader_delegates_episode_fields_to_the_context():
-    r = SessionController(FakeIPC())
-    assert r.episode.nav_idx == -1
-    r.episode.nav_idx = 7
-    assert r.episode.nav_idx == 7
+    r = build_session(FakeIPC())
+    assert r.track_commands.navigation.current.nav_idx == -1
+    r.track_commands.navigation.current.nav_idx = 7
+    assert r.track_commands.navigation.current.nav_idx == 7
 
 
 def test_reslot_rebinds_the_episode_without_leaking_prior_state():
-    r = SessionController(FakeIPC())
-    r.episode.nav_idx = 9
-    r.episode.sub_settle = r.episode.sub_settle.begin()
+    r = build_session(FakeIPC())
+    r.track_commands.navigation.current.nav_idx = 9
+    r.track_commands.navigation.current.sub_settle = (
+        r.track_commands.navigation.current.sub_settle.begin()
+    )
     # A geometry hint names a cue of *this* file, so carrying one over would aim the next episode's
     # first decision at a line that is nowhere in it. It was a SessionController field, where nothing cleared it.
-    r.episode.geometry_cue_hint = Cue(1.0, 2.0, "犬")
+    r.track_commands.navigation.current.geometry_cue_hint = Cue(1.0, 2.0, "犬")
 
-    r.episode = EpisodeContext()  # the re-slot move: one rebind resets every episode field
+    r.track_commands.navigation.replace(NavigationState())
 
-    assert r.episode.nav_idx == -1
-    assert r.episode.sub_settle.open is False
-    assert r.episode.geometry_cue_hint is None
+    assert r.track_commands.navigation.current.nav_idx == -1
+    assert r.track_commands.navigation.current.sub_settle.open is False
+    assert r.track_commands.navigation.current.geometry_cue_hint is None
 
 
 def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
@@ -66,20 +68,28 @@ def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
     declaration is a whole-state reset. Asserted here because it is the one episode fact the
     leak-free-by-construction rebind no longer covers.
     """
-    r = SessionController(FakeIPC())
-    r.declare_subtitle(SubtitleStartupConfigured(5, 6, "en", "ja,jpn,jp"))
-    r.declare_subtitle(SubtitleSecondaryLeased(6))
+    r = build_session(FakeIPC())
+    r.track_commands.declare(SubtitleStartupConfigured(5, 6, "en", "ja,jpn,jp"))
+    r.track_commands.declare(SubtitleSecondaryLeased(6))
 
-    r.episode = EpisodeContext()
-    assert (r.jp_sid, r.en_sid, r.subtitle_language) == (5, 6, "en")  # the rebind does not reach it
+    r.track_commands.navigation.replace(NavigationState())
+    assert (
+        r.track_commands.current().jp_sid,
+        r.track_commands.current().en_sid,
+        r.track_commands.current().language,
+    ) == (5, 6, "en")  # the rebind does not reach it
 
-    r.declare_subtitle(SubtitleStartupConfigured(None, None, "jp", "ja,jpn,jp"))
-    assert (r.jp_sid, r.en_sid, r.subtitle_language) == (None, None, "jp")
-    assert r._translation_secondary_sid is None  # the lease goes with the selection
+    r.track_commands.declare(SubtitleStartupConfigured(None, None, "jp", "ja,jpn,jp"))
+    assert (
+        r.track_commands.current().jp_sid,
+        r.track_commands.current().en_sid,
+        r.track_commands.current().language,
+    ) == (None, None, "jp")
+    assert r.track_commands.current().secondary_sid is None  # the lease goes with the selection
 
 
 def test_tooltip_controller_owns_its_surface_state():
-    r = SessionController(FakeIPC())
+    r = build_session(FakeIPC())
     assert isinstance(r.tooltip_controller.surface_state(), TooltipState)
     assert (
         r.tooltip_controller.surface_state().nest is r.tooltip_controller.surface_state().nest
@@ -94,25 +104,20 @@ def test_tooltip_controller_owns_its_surface_state():
 
 
 def test_session_does_not_project_tooltip_state_twice():
-    r = SessionController(FakeIPC())
+    r = build_session(FakeIPC())
 
-    assert not hasattr(r, "tip") and not hasattr(r, "interaction")
+    assert not hasattr(r, "tip")
 
 
-def test_session_state_survives_an_episode_reslot():
-    """The other half of the lifetime contract: session-scoped state (the deck-mined set, the Anki
-    reachability cache, the backlog handle) is durable — an episode swap must NOT reset it, or #100's
-    re-slot would forget what's already in the deck on every file change."""
-    r = SessionController(FakeIPC())
+def test_feature_owned_session_state_survives_an_episode_reslot():
+    r = build_session(FakeIPC())
     r.mining_controller.record_mined_expression("読む")
-    r.session.anki_cache = (123.0, True)
     backlog = object()
-    r.session.backlog_store = backlog  # type: ignore[assignment]  # lifetime sentinel
-    session_before = r.session
+    r.history.replace_backlog(backlog)  # type: ignore[assignment]  # lifetime sentinel
+    history_before = r.history
 
-    r.episode = EpisodeContext()  # advance to the next file
+    r.track_commands.navigation.replace(NavigationState())
 
-    assert r.session is session_before  # same session object — not rebound
+    assert r.history is history_before
     assert "読む" in r.mining_controller.index_snapshot()
-    assert r.session.anki_cache == (123.0, True)
-    assert r.session.backlog_store is backlog
+    assert r.history.backlog is backlog

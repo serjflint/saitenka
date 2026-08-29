@@ -10,18 +10,22 @@ was that it did not). Real renderers, no subprocess/socket → default tier.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 import util
+from session_builder import build_session
 
 from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.features.sidebar import sidebar
-from saitenka.app.session.assembly import build_session_assembly
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.runtime import events
 from saitenka.runtime.help import HelpCommand
 from saitenka.subtitles import Cue, CueIndex
+
+if TYPE_CHECKING:
+    from saitenka.app.session.controller import SessionController
 
 BASELINE_1080 = (1920, 1080)
 FULLSCREEN_HIDPI = (3024, 1898)  # 16" MacBook Pro Retina, fullscreen (hidpi_scale 2.0)
@@ -79,12 +83,15 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> SessionController
     ipc = FakeIPC()
     options = ReaderOptions(panels=PanelOptions(scale=ui_scale))
     overlay = FakeOverlay()
-    assembly = build_session_assembly(ipc, options, runtime_submit=None, overlay=overlay)
-    r = SessionController(ipc, options=options, assembly=assembly)
-    r.osd = osd
+    r = build_session(
+        ipc,
+        options=options,
+        infrastructure=SessionInfrastructure(overlay=overlay),
+    )
+    r.screen.osd = osd
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(12)]
-    r.episode.sub_index = CueIndex(cues)
-    r.sub_text = "cue 0"
+    r.track_commands.navigation.current.sub_index = CueIndex(cues)
+    r.playback_observation.install_seed({"sub-text": "cue 0"})
     return r
 
 
@@ -95,13 +102,15 @@ def _draw_help(r: SessionController) -> None:
 
 def _draw_sidebar(r: SessionController) -> None:
     r.sidebar_controller.store.dispatch(
-        events.SidebarShown(r.sidebar_view.active, r.sidebar_view.capacity)
+        events.SidebarShown(
+            r.sidebar_controller.view().active, r.sidebar_controller.view().capacity
+        )
     )
-    sidebar.draw(r.sidebar_view)
+    sidebar.draw(r.sidebar_controller.view())
 
 
 def _draw_stats(r: SessionController) -> None:
-    r._handle(ANALYSIS_MSG)
+    r.command_runtime.handle(ANALYSIS_MSG)
 
 
 CHROME = [("help", _draw_help), ("sidebar", _draw_sidebar), ("stats", _draw_stats)]

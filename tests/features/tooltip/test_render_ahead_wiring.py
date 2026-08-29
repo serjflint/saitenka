@@ -5,20 +5,25 @@ from __future__ import annotations
 import contextlib
 import threading
 from dataclasses import replace
+from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
 
 import pytest
 import util
+from session_builder import build_session
 from util import ManualRenderAheadSubmitter
 
 from saitenka import otel_metrics
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.tooltip import prefetch, tooltip_panel, tooltip_raster
 from saitenka.app.features.tooltip.popups import Panel
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.panel import Definition, Entry, panel_rows
 from saitenka.render.banded import WindowedPanel
 from saitenka.runtime import EffectOutcome
+
+if TYPE_CHECKING:
+    from saitenka.app.session.controller import SessionController
 
 WIDTH = 384
 
@@ -48,10 +53,12 @@ class _RecordingPanel:
 
 def _reader() -> SessionController:
     submitter = ManualRenderAheadSubmitter()
-    r = SessionController(
+    r = build_session(
         _FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            tooltip_jobs=lambda jobs: replace(jobs, render_ahead=submitter),
+        ),
         options=ReaderOptions(prefetch=True),
-        tooltip_runtime_jobs=lambda jobs: replace(jobs, render_ahead=submitter),
     )
     _SUBMITTERS[r] = submitter
     r.tooltip_controller.surface_state().view.view_h = 300
@@ -75,10 +82,10 @@ def _tall_panel() -> Panel:
 def test_scroll_keeps_one_newest_pending_request():
     r = _reader()
     r.tooltip_controller.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     r.tooltip_controller.surface_state().view.scroll = 999
     r.tooltip_controller.surface_state().view.desired_scroll = 999
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, -1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, -1)
     _submitter(r).finish()
     req = _submitter(r).calls[0]["request"]
     assert (req.scroll, req.view_h, req.direction) == (999, 300, -1)  # newest scroll won
@@ -88,9 +95,9 @@ def test_newest_pending_request_runs_once_after_inflight_completion():
     r = _reader()
     panel = _RecordingPanel()
     r.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     r.tooltip_controller.surface_state().view.desired_scroll = 999
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, -1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, -1)
 
     _submitter(r).finish()
     assert len(_submitter(r).calls) == 1
@@ -119,13 +126,13 @@ def test_running_stale_request_observes_supersession_before_newest_runs():
     old = BlockingPanel()
     new = _RecordingPanel()
     r.tooltip_controller.surface_state().view.state = old  # type: ignore[assignment]
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     worker = threading.Thread(target=_submitter(r).finish)
     worker.start()
     assert entered.wait(1)
 
     r.tooltip_controller.surface_state().view.state = new  # type: ignore[assignment]
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, -1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, -1)
     release.set()
     worker.join(1)
     _submitter(r).finish()
@@ -137,23 +144,25 @@ def test_running_stale_request_observes_supersession_before_newest_runs():
 def test_render_ahead_survives_disabled_speculative_prefetch():
     r = _reader()
     r.tooltip_controller.surface_state().view.state = None
-    assert not r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    assert not r.tooltip_controller.submit_render_ahead(
+        r.tooltip_controller.surface_state().view, 1
+    )
 
     r.tooltip_controller.surface_state().view.state = _RecordingPanel()  # type: ignore[assignment]
-    assert r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    assert r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
 
 
 def test_broker_completion_warms_the_requested_viewport():
     r = _reader()
     panel = _RecordingPanel()
     r.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     _submitter(r).finish()
     # the landing viewport first (what gates publication), then the lookahead past it — the latter at
     # the (bucketed) display scale, not cancelled: native bands, one panel
     assert panel.calls == [
         ("warm_viewport", 120, 300),
-        (120, 300, 1, False, r.tip_scale.raster),
+        (120, 300, 1, False, r.tooltip_controller.scale().raster),
     ]
 
 
@@ -161,7 +170,7 @@ def test_stale_completion_from_a_word_switch_is_not_published():
     r = _reader()
     panel = _RecordingPanel()
     r.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     r.tooltip_preparation.cancel()
     r.tooltip_controller.cancel_current_work()
     before = r.tooltip_controller.surface_state().view.scroll
@@ -184,7 +193,7 @@ def test_worker_actually_warms_a_real_panel():
     r = _reader()
     r.tooltip_controller.surface_state().view.scroll = 0
     r.tooltip_controller.surface_state().view.state = _tall_panel()
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     _submitter(r).finish()
 
     assert (
@@ -211,7 +220,7 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
     r.tooltip_controller.surface_state().view.job_id = (
         r.tooltip_controller.surface_state().jobs.begin("scroll")
     )
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert (
@@ -229,7 +238,7 @@ def test_old_failure_cannot_roll_back_a_new_scroll_to_the_same_coordinate() -> N
     r.tooltip_controller.surface_state().view.desired_scroll = 100
     old_job = r.tooltip_controller.surface_state().jobs.begin("scroll")
     r.tooltip_controller.surface_state().view.job_id = old_job
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, -1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, -1)
 
     r.tooltip_controller.surface_state().view.desired_scroll = 200
     r.tooltip_controller.surface_state().view.job_id = (
@@ -248,14 +257,16 @@ def test_close_rejects_new_work_and_quarantines_late_completion() -> None:
     r = _reader()
     panel = _RecordingPanel()
     r.tooltip_controller.surface_state().view.state = panel  # type: ignore[assignment]
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     before = r.tooltip_controller.surface_state().view.scroll
 
     r.tooltip_controller.close_render_ahead()
     _submitter(r).finish()
 
     assert r.tooltip_controller.surface_state().view.scroll == before
-    assert not r._request_render_ahead(r.tooltip_controller.surface_state().view, -1)
+    assert not r.tooltip_controller.submit_render_ahead(
+        r.tooltip_controller.surface_state().view, -1
+    )
 
 
 def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch):
@@ -275,7 +286,7 @@ def test_a_successful_terminal_sweeps_every_view_for_a_crisp_upgrade(monkeypatch
         tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
     )
 
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     _submitter(r).finish()
 
     assert swept == [
@@ -296,7 +307,7 @@ def test_a_failed_terminal_sweeps_nothing(monkeypatch):
         tooltip_panel, "apply_pending_crisp", lambda _r, view: swept.append(id(view))
     )
 
-    r._request_render_ahead(r.tooltip_controller.surface_state().view, 1)
+    r.tooltip_controller.submit_render_ahead(r.tooltip_controller.surface_state().view, 1)
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert swept == []
@@ -312,7 +323,9 @@ def test_a_wheel_burst_reaches_the_viewport_it_scrolled_to():
     r.tooltip_controller.surface_state().view.state = _tall_panel()
 
     for _ in range(3):
-        tooltip_panel.scroll_view(r._tip_ports, r.tooltip_controller.surface_state().view, 150)
+        tooltip_panel.scroll_view(
+            r.tooltip_controller.tip_ports, r.tooltip_controller.surface_state().view, 150
+        )
     while _submitter(r).calls:
         _submitter(r).finish()
 
@@ -338,11 +351,11 @@ def test_scrolling_down_and_back_up_returns_to_where_it_started(notch):
     def burst(delta):
         for _ in range(4):
             tooltip_panel.scroll_view(
-                r._tip_ports, r.tooltip_controller.surface_state().view, delta
+                r.tooltip_controller.tip_ports, r.tooltip_controller.surface_state().view, delta
             )
             while _submitter(r).calls:
                 _submitter(r).finish()
-            r._settle_interaction()
+            r.interaction.settle()
 
     burst(notch)
     assert (
@@ -395,6 +408,6 @@ def test_the_turn_publishes_a_scroll_no_completion_claimed():
         300  # warm and wanted, but no job will ever report it
     )
 
-    r._settle_interaction()
+    r.interaction.settle()
 
     assert r.tooltip_controller.surface_state().view.scroll == 300

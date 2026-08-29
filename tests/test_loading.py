@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import Future
 
 import pytest
+from session_builder import build_session
 from util import await_ready, runtime_gateway
 
 from saitenka.app.loading import SPINNER, loading_image
@@ -42,16 +43,14 @@ def test_draw_loading_paints_one_timer_authorized_frame():
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session.controller import SessionController
 
-    r = SessionController(FakeIPC())
-    r._loading = True
-    r._draw_loading()
+    r = build_session(FakeIPC())
+    r.profile_session.begin_loading()
+    assert r.ipc.fire_runtime_timer("lifecycle:loading-frame")
     adds = [
         command for command in r.ipc.commands if command[:2] == ("overlay-add", OverlayId.LOADING)
     ]
     assert len(adds) == 1
-    assert r._load_frame == 1
 
 
 # --- the mpv-native startup breadcrumb (the only feedback during mpv's pre-overlay file-load) --------
@@ -135,17 +134,15 @@ def test_ready_startup_hint_empties_the_osd_text():
 def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     ipc = FakeIPC()
     _install(ipc)
-    r = SessionController(ipc)
+    r = build_session(ipc)
     ipc.drain_events()
     r.ov = _RecOv()
     # plain path -> no dict/tokenize deps needed to raster a cue
-    r.declare_subtitle(SubtitleLanguageChanged("en"))
+    r.track_commands.declare(SubtitleLanguageChanged("en"))
     r.set_subtitle("hello")
-    assert r._first_sub_logged
+    assert r.subtitle_presentation.renderer.logged_first
     assert ("show-text", "", 1) not in ipc.commands
 
     r._mark_interactive_ready()
@@ -157,11 +154,9 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
 def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
     ipc = FakeIPC()
     _install(ipc)
-    r = SessionController(ipc)
+    r = build_session(ipc)
     ipc.drain_events()
     r.playback_observation.install_seed({"osd-dimensions": unavailable})
 
@@ -288,14 +283,13 @@ def test_lost_clear_reply_is_retried_once_on_the_replacement_connection():
 def test_apply_deps_stops_the_spinner():
     from util import FakeIPC
 
+    from saitenka.app.features.profiles.dependencies import DependencyBundle
     from saitenka.app.overlay_ids import OverlayId
-    from saitenka.app.session.controller import SessionController
-    from saitenka.app.session.deps import DependencyBundle
 
-    r = SessionController(FakeIPC())
-    r._loading = True
-    r._apply_deps(DependencyBundle(r.profile_dependencies.identity))
-    assert r._loading is False
+    r = build_session(FakeIPC())
+    r.profile_session.begin_loading()
+    r.profile_session.accept(DependencyBundle(r.profile_session.identity))
+    assert r.profile_session.loading is False
     assert ("overlay-remove", OverlayId.LOADING) in r.ipc.commands
 
 
@@ -305,9 +299,7 @@ def test_load_deps_async_uses_a_custom_build():
 
     from util import FakeIPC
 
-    from saitenka.app.session.controller import SessionController
-
-    r = SessionController(FakeIPC())
+    r = build_session(FakeIPC())
     r.ov = _RecOv()
     called = {"n": 0}
 
@@ -315,13 +307,12 @@ def test_load_deps_async_uses_a_custom_build():
         called["n"] += 1
         return "SCORER", None, None, None
 
-    r.load_deps_async({}, build=_build)
-    assert r._loading is True  # spinner armed immediately (subs draw meanwhile)
-    await_ready(lambda: r.profile_dependencies.ready, "the build thread never published deps")
+    r.profile_session.load({}, build=_build)
+    assert r.profile_session.loading is True  # spinner armed immediately (subs draw meanwhile)
+    await_ready(lambda: r.profile_session.ready, "the build thread never published deps")
     assert called["n"] == 1
-    assert r.profile_dependencies.pending[0].scorer == "SCORER"
-    r._apply_pending_deps()
-    assert r.scorer == "SCORER" and r._loading is False
+    r.profile_session.drain()
+    assert r.profile_session.scorer == "SCORER" and r.profile_session.loading is False
 
 
 def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
@@ -330,8 +321,7 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
 
     from util import FakeIPC
 
-    import saitenka.app.session.deps as rd
-    from saitenka.app.session.controller import SessionController
+    import saitenka.app.features.profiles.dependencies as rd
 
     built = {"n": 0}
 
@@ -340,14 +330,15 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
         return "SCORER", None, None, None
 
     fut = rd.begin_deps_build({}, _build)  # hoisted: runs before the reader exists
-    r = SessionController(FakeIPC())
+    r = build_session(FakeIPC())
     r.ov = _RecOv()
-    r.load_deps_async({}, prebuilt=fut)  # consume the in-flight build, don't restart it
-    await_ready(lambda: r.profile_dependencies.ready, "the build thread never published deps")
+    r.profile_session.load({}, prebuilt=fut)  # consume the in-flight build, don't restart it
+    await_ready(lambda: r.profile_session.ready, "the build thread never published deps")
     assert (
         built["n"] == 1
     )  # built exactly once — by begin_deps_build, not re-run by load_deps_async
-    assert r.profile_dependencies.pending[0].scorer == "SCORER"
+    r.profile_session.drain()
+    assert r.profile_session.scorer == "SCORER"
 
 
 def test_each_entrypoint_declares_its_own_startup_hint() -> None:

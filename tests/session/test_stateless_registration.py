@@ -115,7 +115,7 @@ def test_stateless_boundaries_do_not_capture_the_session_or_replaceable_episode(
             if annotation is None:
                 continue
             text = ast.unparse(annotation)
-            if "SessionController" in text or "EpisodeContext" in text:
+            if "SessionController" in text or "NavigationState" in text:
                 forbidden.append(f"{path.relative_to(ROOT)}:{node.lineno} {text}")
 
     assert forbidden == []
@@ -146,7 +146,7 @@ def test_stateless_command_composition_has_no_deferred_session_reads() -> None:
     graph = next(
         node
         for node in controller.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_stateless_commands"
+        if isinstance(node, ast.FunctionDef) and node.name == "_assemble_stateless_commands"
     )
 
     assert [node.lineno for node in ast.walk(graph) if isinstance(node, ast.Lambda)] == []

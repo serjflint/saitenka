@@ -27,7 +27,7 @@ class Driver:
     def move(self, x: float, y: float, *, hover: bool = True) -> Driver:
         """Move the cursor to screen ``(x, y)`` and let the reader react (hover / scan / linger)."""
         self.ipc.props["mouse-pos"] = {"hover": hover, "x": x, "y": y}
-        self.r._update_hover()
+        self.r.interaction.update_hover()
         if self._instant:
             # A zero delay used to mean the next clock comparison passed. A dwell is a deadline
             # now, so the equivalent is delivering it — zero-delay is still a timer.
@@ -42,8 +42,8 @@ class Driver:
     def word_center(self, index: int) -> tuple[float, float]:
         """Screen coords of subtitle word ``index`` (its box + the subtitle origin) — what a real
         cursor over that word would report."""
-        b = next(b for b in self.r.boxes if b.index == index)
-        ox, oy = self.r.sub_origin
+        b = next(b for b in self.r.subtitle_presentation.cue.current.boxes if b.index == index)
+        ox, oy = self.r.subtitle_presentation.cue.current.origin
         return (ox + b.x + b.w / 2, oy + b.y + b.h / 2)
 
     def move_to_word(self, index: int) -> Driver:
@@ -58,24 +58,26 @@ class Driver:
     # --- clicks / wheel / keys (client-message path) ----------------------------------------------
     def click(self) -> Driver:
         """Left-click at the current cursor (the ``MBTN_LEFT`` → ``saitenka-click`` path)."""
-        self.r.on_click()
+        self.r.interaction.route_click()
         return self
 
     def right_click(self) -> Driver:
         """Right-click at the current cursor (copies the word under it)."""
-        self.r.copy_click()
+        self.r.tooltip_controller.copy_click()
         return self
 
     def wheel(self, steps: int) -> Driver:
         """Scroll the popup under the cursor by ``steps`` notches (down positive)."""
         from saitenka.app.session import surfaces
 
-        self.r.scroll_tip(surfaces.tip_wheel_pixels(self.r.tip_scale.ref_h, steps))
+        self.r.tooltip_controller.scroll_tip(
+            surfaces.tip_wheel_pixels(self.r.tooltip_controller.scale().ref_h, steps)
+        )
         return self
 
     def key(self, msg: str) -> Driver:
         """Dispatch a tooltip client-message (e.g. ``controller.MINE_MSG``)."""
-        self.r._handle(msg)
+        self.r.command_runtime.handle(msg)
         return self
 
     # --- observed state ---------------------------------------------------------------------------

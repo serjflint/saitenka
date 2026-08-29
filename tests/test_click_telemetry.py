@@ -8,11 +8,12 @@ assert the span fires with its low-cardinality attribute, via the sanctioned tra
 from __future__ import annotations
 
 import util
+from session_builder import build_session
 from util import record_spans
 
 from saitenka.app import backlog
 from saitenka.app.features.sidebar import sidebar
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitles import SidebarHitBox
 from saitenka.runtime import events
 
@@ -31,9 +32,11 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     # A sidebar click emits a sidebar_click span tagged with the action kind — the click-latency signal.
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
-    reader = SessionController(_FakeIPC({}))
+    reader = build_session(_FakeIPC({}))
     reader.sidebar_controller.store.dispatch(
-        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+        events.SidebarShown(
+            reader.sidebar_controller.view().active, reader.sidebar_controller.view().capacity
+        )
     )
     reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
     reader.sidebar_controller.panel.hits = (
@@ -45,7 +48,7 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
         seek=lambda *_a: None, bookmark=lambda: None, mine=lambda: None, open_mined=lambda _n: None
     )
 
-    assert sidebar.click(reader.sidebar_view, inert, 10, 10) is True
+    assert sidebar.click(reader.sidebar_controller.view(), inert, 10, 10) is True
     (attrs,) = _named(spans, "sidebar_click")
     assert attrs["kind"] == "bookmark"
 
@@ -53,9 +56,11 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
 def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
     spans = record_spans(monkeypatch)
-    reader = SessionController(_FakeIPC({}))
+    reader = build_session(_FakeIPC({}))
     reader.sidebar_controller.store.dispatch(
-        events.SidebarShown(reader.sidebar_view.active, reader.sidebar_view.capacity)
+        events.SidebarShown(
+            reader.sidebar_controller.view().active, reader.sidebar_controller.view().capacity
+        )
     )
     reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
     reader.sidebar_controller.panel.hits = (
@@ -63,7 +68,7 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     )
 
     assert (
-        reader.sidebar_controller.on_click(reader._click_target, 50, 50) is True
+        reader.sidebar_controller.on_click(reader.interaction.click_target(), 50, 50) is True
     )  # inside the panel, off every hitbox
     assert _named(spans, "sidebar_click") == []
 
@@ -73,11 +78,11 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     spans = record_spans(monkeypatch)
     video = tmp_path / "Show - 01.mkv"
     video.write_bytes(b"v")
-    reader = SessionController(
+    reader = build_session(
         _FakeIPC({"path": str(video), "sub-start": 1.0, "sub-end": 3.0, "track-list": []})
     )
-    reader.sub_text = "猫です"
-    reader.session.backlog_store = backlog.BacklogStore(tmp_path / "backlog.sqlite")
+    reader.playback_observation.install_seed({"sub-text": "猫です"})
+    reader.history.replace_backlog(backlog.BacklogStore(tmp_path / "backlog.sqlite"))
 
     backlog.capture_current(reader.capture_ports)
     (attrs,) = _named(spans, "backlog_write")
@@ -93,10 +98,12 @@ def test_mined_store_write_is_spanned(monkeypatch, tmp_path):
 
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
-    reader = SessionController(
+    reader = build_session(
         _FakeIPC({"sub-start": 1.0, "sub-end": 3.0}),
-        anki=SimpleNamespace(),
-        mine_cfg=MineConfig(deck="Mining"),
+        services=SessionServices(
+            anki=SimpleNamespace(),
+            mining=MineConfig(deck="Mining"),
+        ),
     )
     card = SimpleNamespace(expression="猫", reading="ねこ")
 

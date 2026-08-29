@@ -30,6 +30,23 @@ class TranslationSurface(Protocol):
     def remove(self, oid: int) -> object: ...
 
 
+class OverlayVisibility(Protocol):
+    visible: bool
+
+
+class TooltipSelection(Protocol):
+    @property
+    def selected_index(self) -> int: ...
+
+
+class PlaybackProperties(Protocol):
+    def value(self, name: str) -> object: ...
+
+
+class ScreenObservation(Protocol):
+    osd: tuple[int, int]
+
+
 @dataclass(frozen=True, slots=True)
 class TranslationInputs:
     """Volatile facts sampled together for one reveal decision."""
@@ -38,6 +55,28 @@ class TranslationInputs:
     tooltip_selected: bool
     secondary_text: object
     osd: tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class TranslationObservation:
+    """Sample the independent facts used by one translation decision."""
+
+    overlay: OverlayVisibility
+    tooltip: TooltipSelection
+    playback: PlaybackProperties
+    screen: ScreenObservation
+
+    def current(self) -> TranslationInputs:
+        selected = self.tooltip.selected_index
+        return TranslationInputs(
+            surfaces_visible=self.overlay.visible,
+            tooltip_selected=selected >= 0,
+            secondary_text=self.playback.value("secondary-sub-text"),
+            osd=self.screen.osd,
+        )
+
+    def secondary_text(self) -> str:
+        return translation.clean_secondary(self.playback.value("secondary-sub-text"))
 
 
 class TranslationController:

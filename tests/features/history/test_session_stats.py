@@ -178,16 +178,14 @@ def test_analysis_snapshot_reuses_shared_result_without_cues():
 
 
 def test_disabled_stats_does_not_touch_ipc():
-    episode = SimpleNamespace(session_recorder=None)
-
-    start(
-        episode,
+    recorder = start(
+        current=None,
         enabled=False,
         path=lambda: (_ for _ in ()).throw(AssertionError("IPC touched")),
         arm=lambda _seconds: None,
     )
 
-    assert episode.session_recorder is None
+    assert recorder is None
 
 
 def test_stats_command_lists_complete_and_incomplete_sessions(tmp_path, monkeypatch, capsys):

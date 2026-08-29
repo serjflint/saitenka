@@ -8,11 +8,19 @@ with a traceback naming only the thrower.
 from __future__ import annotations
 
 import pytest
+from session_builder import build_session as build_inert_session
 from util import FakeIPC, runtime_gateway
 
+from saitenka.app.config import ReaderOptions
 from saitenka.app.session.close_ledger import CloseLedger
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.subtitle_render import NullRenderer
+
+
+def build_session(*args, **kwargs):
+    session = build_inert_session(*args, **kwargs)
+    session.start()
+    return session
 
 
 def test_a_failing_participant_does_not_strand_the_ones_after_it() -> None:
@@ -73,7 +81,15 @@ def test_an_interrupt_during_teardown_still_runs_the_rest() -> None:
 
 def test_close_returns_a_clean_ledger_for_a_healthy_reader() -> None:
     """Against the real `SessionController`, so the participant list cannot drift away from the wrapper."""
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     ledger = reader.close()
     assert ledger.report() is None
     assert "transport" in ledger.completed
@@ -82,7 +98,15 @@ def test_close_returns_a_clean_ledger_for_a_healthy_reader() -> None:
 
 def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
     """The end-to-end claim: one broken collaborator cannot cost us the transport."""
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
 
     class Wedged:
         def close(self) -> None:
@@ -103,14 +127,22 @@ def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
 
 @pytest.mark.parametrize("attribute", ["lifecycle_timers", "lifecycle_surfaces"])
 def test_a_late_participant_failing_does_not_lose_the_scratch_directory(attribute: str) -> None:
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
 
     class Wedged:
         def close(self) -> None:
             raise RuntimeError("wedged")
 
-    setattr(reader, attribute, Wedged())
+    getattr(reader, attribute).close = Wedged().close
     ledger = reader.close()
 
     assert ledger.report() is not None
@@ -124,21 +156,39 @@ def test_the_lane_budget_is_armed_after_the_capabilities_come_down() -> None:
     Hoisting it would spend that window on capability teardown, and the only symptom is lanes
     getting less time to drain on a slow machine — invisible until a close silently truncates.
     """
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
-    assert reader._lane_deadline == 0.0  # negative control: unarmed before close
-
+    ipc = FakeIPC()
+    lane_timeouts: list[tuple[str, float]] = []
+    ipc.close_runtime_job_lane = lambda name, timeout: bool(lane_timeouts.append((name, timeout)))
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     order = reader.close().completed
 
     assert order.index("capability:anki") < order.index("lanes:stop-workers")
     assert order.index("lanes:stop-workers") < order.index("lanes:subtitle-fetch")
-    assert reader._lane_deadline > 0.0  # armed by the step, not by building the table
+    subtitle_fetch = next(timeout for name, timeout in lane_timeouts if name == "subtitle-fetch")
+    assert 0.0 < subtitle_fetch <= 2.0
 
 
 def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
     """The table is a sequence, not a set: the checker pins several pairs by order, and the
     hazards it pins are real (a geometry job admitted after its provider closed, a lane drained
     after the store it writes to went away)."""
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
 
     ledger = reader.close()
 
@@ -171,7 +221,15 @@ def test_closing_a_session_detaches_the_diagnostic_gauges_through_the_runtime() 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     telemetry.set_gauge_provider(lambda: {"panel_cache.size": 1.0})
     try:
         assert telemetry._gauge_provider is not None  # negative control: the oracle can fail
@@ -201,10 +259,18 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
-    reader._register_keybinds()
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    reader.command_runtime.install_input()
     reader.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
-    reader._sync_mouse_capture()
+    reader._mouse.sync()
     try:
         assert reader._mouse_captured  # negative control: there is a capture to hand back
         ledger = reader.close()
@@ -219,7 +285,15 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
 def test_a_session_without_a_runtime_still_closes_cleanly() -> None:
     """`deliver_runtime_event` returns False rather than raising when no gateway owns the session —
     a screenshot capture and most unit tests are exactly that, and close must not care."""
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
 
     ledger = reader.close()
 
@@ -268,7 +342,15 @@ def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() ->
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
     assert scratch.exists()  # negative control
     try:
@@ -310,7 +392,15 @@ def test_the_runtime_closes_the_surfaces_it_was_handed() -> None:
 
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     closed: list[str] = []
     gateway.session_resources[SURFACES_RESOURCE] = _RecordingSurfaces(closed)
     try:
@@ -338,9 +428,17 @@ def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
     """The negative control for the seam: the fallback is what makes the duty safe to migrate at
     all, so it has to be exercised, not assumed."""
     ipc = FakeIPC()  # no gateway, so no runtime owns anything
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     closed: list[str] = []
-    reader.lifecycle_surfaces = _RecordingSurfaces(closed)  # type: ignore[assignment]  # local fake
+    reader.lifecycle_surfaces.close = _RecordingSurfaces(closed).close  # type: ignore[method-assign]
 
     reader.close()
 
@@ -378,7 +476,15 @@ def test_composing_a_session_runtime_leaves_its_close_duties_reachable(
     monkeypatch.setattr(telemetry, "_gauge_provider", lambda: {"cache": 1.0})
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=startup_hint)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     try:
         ledger = reader.close()
     finally:
@@ -408,7 +514,15 @@ def test_close_announces_every_phase_in_teardown_order() -> None:
 
     ipc = RecordingIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     try:
         reader.close()
     finally:
@@ -433,7 +547,15 @@ def test_a_closed_session_reactor_rejects_further_work() -> None:
 
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
 
     assert reader.close().report() is None
 
@@ -577,13 +699,21 @@ def test_a_runtime_resource_failure_reaches_the_returned_close_ledger() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     retired: list[str] = []
 
     def fail_backlog() -> None:
         raise RuntimeError("backlog close failed")
 
-    reader._close_backlog_store = fail_backlog  # type: ignore[method-assign]
+    reader.history.close_backlog = fail_backlog  # type: ignore[method-assign]
     reader.mining_controller.close_store = lambda: retired.append("mined")  # type: ignore[method-assign]
     try:
         ledger = reader.close()
@@ -606,7 +736,15 @@ def test_a_failing_close_effect_does_not_skip_the_rest_of_its_phase() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     retired: list[str] = []
 
     def fail_interaction() -> None:
@@ -637,7 +775,15 @@ def test_a_failing_surface_remove_does_not_skip_the_overlay_transport() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     retired: list[str] = []
 
     def fail_surfaces() -> None:
@@ -664,9 +810,19 @@ def test_a_missing_surface_resource_falls_back_before_the_overlay_transport_clos
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     order: list[str] = []
-    reader.lifecycle_surfaces = _RecordingSurfaces(order, "surfaces")  # type: ignore[assignment]
+    reader.lifecycle_surfaces.close = _RecordingSurfaces(  # type: ignore[method-assign]
+        order, "surfaces"
+    ).close
     gateway.session_resources[OVERLAY_RESOURCE] = _RecordingSurfaces(order, "overlay")
     del gateway.session_resources[SURFACES_RESOURCE]
     try:
@@ -685,14 +841,18 @@ def test_a_missing_runtime_resource_is_reported_as_refused_close_work() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     released: list[str] = []
 
-    class _LocalCapture:
-        def release(self) -> None:
-            released.append("capture")
-
-    reader._mouse = _LocalCapture()  # type: ignore[assignment]
+    reader._mouse.release = lambda: released.append("capture")  # type: ignore[method-assign]
     del gateway.session_resources[INPUT_CAPTURE_RESOURCE]
     try:
         ledger = reader.close()
@@ -715,9 +875,17 @@ def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     closed: list[str] = []
-    reader._close_backlog_store = lambda: closed.append("backlog")  # type: ignore[method-assign]
+    reader.history.close_backlog = lambda: closed.append("backlog")  # type: ignore[method-assign]
     reader.mining_controller.close_store = lambda: closed.append("mined")  # type: ignore[method-assign]
     try:
         ledger = reader.close()
@@ -737,10 +905,18 @@ def test_a_runtime_owned_session_closes_the_subtitle_raster_exactly_once() -> No
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     closed: list[str] = []
-    reader._clear_subtitle_pixels = lambda: closed.append("clear")  # type: ignore[method-assign]
-    reader._close_subtitle_raster = lambda: closed.append("close")  # type: ignore[method-assign]
+    reader.subtitle_presentation.clear_pixels = lambda: closed.append("clear")  # type: ignore[method-assign]
+    reader.subtitle_presentation.close_raster = lambda: closed.append("close")  # type: ignore[method-assign]
     try:
         ledger = reader.close()
     finally:
@@ -783,7 +959,15 @@ def test_a_gateway_without_a_reactor_still_runs_every_close_participant() -> Non
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)  # a gateway, deliberately without `install_session_reactor`
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     lanes: list[str] = []
     ipc.close_runtime_job_lane = lambda name, _timeout: bool(lanes.append(name)) or True
     try:
@@ -807,7 +991,15 @@ def test_every_registered_participant_is_named_by_an_effect_and_the_reverse() ->
 
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     try:
         registered = set(gateway.session_resources)
     finally:
@@ -848,7 +1040,15 @@ def test_every_lane_the_session_opens_the_session_closes_by_name() -> None:
 
     ipc = RecordingIPC()
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     try:
         reader.close()
     finally:

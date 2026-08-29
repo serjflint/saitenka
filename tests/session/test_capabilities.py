@@ -3,11 +3,11 @@ from __future__ import annotations
 import threading
 import time
 
+from session_builder import build_session
 from util import FakeIPC, await_ready, runtime_gateway
 
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.features.tooltip.tooltip import panel_key
-from saitenka.app.session.controller import SessionController
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
@@ -99,10 +99,10 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
         return True
 
     monkeypatch.setattr("saitenka.app.session.controller.tts_available", probe)
-    reader = SessionController(FakeIPC())
+    reader = build_session(FakeIPC())
     try:
         assert called is False
-        assert reader._tts_ok is False
+        assert reader.tooltip_controller.panel_style.speak_button is False
     finally:
         reader.close()
 
@@ -113,16 +113,18 @@ def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
         "saitenka.app.session.controller.tts_available",
         lambda: release.wait(1) or True,
     )
-    reader = SessionController(FakeIPC())
+    reader = build_session(FakeIPC())
     token = Token("猫", "猫", "ネコ", "名詞", 0, 1)
     try:
-        before = panel_key(reader._panel_ports, token, "猫")
+        before = panel_key(reader.tooltip_controller.panel_ports, token, "猫")
         reader._apply_capabilities()
         release.set()
         await_ready(
-            lambda: reader._tts_ok, "tts probe never published", pump=reader._apply_capabilities
+            lambda: reader.tooltip_controller.panel_style.speak_button,
+            "tts probe never published",
+            pump=reader._apply_capabilities,
         )
-        after = panel_key(reader._panel_ports, token, "猫")
+        after = panel_key(reader.tooltip_controller.panel_ports, token, "猫")
 
         assert before.tts_ok is False
         assert after.tts_ok is True
@@ -141,21 +143,23 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
     monkeypatch.setattr("saitenka.app.session.controller.tts_available", probe)
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
-    reader = SessionController(ipc)
+    reader = build_session(ipc)
     try:
         reader._apply_capabilities()
         assert finished.wait(1.0)
-        assert reader._tts_ok is False
+        assert reader.tooltip_controller.panel_style.speak_button is False
 
         def deliver() -> None:
             reader._drain_events()
             reader._apply_capabilities()
 
         await_ready(
-            lambda: reader._tts_ok, "capability event never reached the reader", pump=deliver
+            lambda: reader.tooltip_controller.panel_style.speak_button,
+            "capability event never reached the reader",
+            pump=deliver,
         )
 
-        assert reader._tts_ok is True
+        assert reader.tooltip_controller.panel_style.speak_button is True
     finally:
         reader.close()
         gateway.close()

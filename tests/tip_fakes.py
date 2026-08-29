@@ -6,9 +6,16 @@ for the handful of tests that drive the real tooltip pipeline through ``FakeIPC`
 
 from __future__ import annotations
 
-import util
+from typing import TYPE_CHECKING
 
-from saitenka.app.session.controller import SessionController
+import util
+from session_builder import build_session
+
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionServices
+
+if TYPE_CHECKING:
+    from saitenka.app.session.controller import SessionController
 
 
 class LinkingDS:
@@ -28,10 +35,18 @@ def hidpi_reader(scale: float) -> SessionController:
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
 
-    r = SessionController(util.FakeIPC(), dict_set=LinkingDS(), scan_delay=0.0)
-    r.osd = (round(1920 * scale), round(1080 * scale))
-    r.sub_origin = (0, 0)
-    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
-    r.boxes = [WordBox(0, 100, 300, 40, 40)]
-    r._crisp_on = True
+    r = build_session(
+        util.FakeIPC(),
+        services=SessionServices(
+            dictionaries=LinkingDS(),
+        ),
+        options=ReaderOptions().with_overrides(scan_delay=0.0),
+    )
+    r.screen.osd = (round(1920 * scale), round(1080 * scale))
+    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
+    )
+    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    r.tooltip_controller.visual.crisp = True
     return r

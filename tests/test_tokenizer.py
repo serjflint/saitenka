@@ -2,8 +2,9 @@
 
 import pytest
 import util
+from session_builder import build_session
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.session.factory import SessionServices
 from saitenka.app.tokenize import (
     Token,
     inflected_in,
@@ -119,8 +120,8 @@ def test_unidic_merge_dict_compounds_matches_module_function():
 
 
 def test_reader_owns_unidic_tokenizer_by_default():
-    reader = SessionController(FakeIPC())
-    assert reader.profile_controller.tokenizer.name == "unidic"
+    reader = build_session(FakeIPC())
+    assert reader.profile_session.profile.tokenizer.name == "unidic"
 
 
 class _SpyTokenizer(_FakeTokenizer):
@@ -152,12 +153,19 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
         def has_term(self, *_forms):
             return True
 
-    reader = SessionController(FakeIPC(), dict_set=_DS())
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
     spy = _SpyTokenizer()
-    reader.profile_controller.use_tokenizer(spy)
-    reader.tokens = [Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
+    reader.profile_session.profile.use_tokenizer(spy)
+    reader.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
+    )
 
-    tooltip.resolve_hover(reader._tip_ports, reader.word_lookup, reader.hover_inputs, 0)
+    tooltip.resolve_hover(
+        reader.tooltip_controller.tip_ports,
+        reader.tooltip_controller.word_lookup,
+        reader.tooltip_controller.hover_inputs,
+        0,
+    )
 
     assert "phrase_terms" in spy.calls
 
@@ -168,12 +176,14 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     from saitenka.app.features.tooltip import nested_popup
     from saitenka.model import LinkBox
 
-    reader = SessionController(FakeIPC(), dict_set=object())
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=object()))
     spy = _SpyTokenizer()
-    reader.profile_controller.use_tokenizer(spy)
+    reader.profile_session.profile.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
 
-    nested_popup.open_link(reader._tip_ports, reader._panel_ports, lb, (0, 0), 0)
+    nested_popup.open_link(
+        reader.tooltip_controller.tip_ports, reader.tooltip_controller.panel_ports, lb, (0, 0), 0
+    )
 
     assert "query_token" in spy.calls
 
@@ -205,15 +215,17 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
     particle = Token("は", "は", "は", "助詞", 0, 1)
     noun = Token("本", "本", "ほん", "名詞", 1, 2)
 
-    jp = SessionController(FakeIPC())
+    jp = build_session(FakeIPC())
     jp.tokens = [particle, noun]
-    assert mine_target(MineCue(jp.tokens, None, -1, jp.profile_controller.tokenizer, 20)) == 1
+    assert mine_target(MineCue(jp.tokens, None, -1, jp.profile_session.profile.tokenizer, 20)) == 1
 
-    swapped = SessionController(FakeIPC())
-    swapped.profile_controller.use_tokenizer(_ParticleContentTokenizer())
+    swapped = build_session(FakeIPC())
+    swapped.profile_session.profile.use_tokenizer(_ParticleContentTokenizer())
     swapped.tokens = [particle, noun]
     assert (
-        mine_target(MineCue(swapped.tokens, None, -1, swapped.profile_controller.tokenizer, 20))
+        mine_target(
+            MineCue(swapped.tokens, None, -1, swapped.profile_session.profile.tokenizer, 20)
+        )
         == 0
     )
 
@@ -223,12 +235,12 @@ def test_use_tokenizer_swaps_strategy_and_clears_cache():
         def terms_exist(self, _forms):
             return set()
 
-    reader = SessionController(FakeIPC(), dict_set=_DS())
+    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
     reader.set_subtitle("本")
 
     fake = _FakeTokenizer()
-    reader.profile_controller.use_tokenizer(fake)
+    reader.profile_session.profile.use_tokenizer(fake)
     reader.set_subtitle("本")
 
-    assert reader.profile_controller.tokenizer is fake
-    assert reader.tokens == []
+    assert reader.profile_session.profile.tokenizer is fake
+    assert reader.subtitle_presentation.cue.current.tokens == []

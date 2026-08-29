@@ -162,18 +162,14 @@ class MiningController:
         spec: MiningSpec,
         lifecycle: MiningLifecycle,
         *,
-        max_bulk: int,
-        anki_ok_ttl: float,
-        anki_ping_timeout: float,
+        settings: MiningOptions,
         encounter: Callable[[], miner.MiningEncounter],
         apply: Callable[[], miner.MiningApply],
     ) -> None:
         self._mining_spec = spec
         self._mining_target: MiningTarget | None = None
         self._lifecycle = lifecycle
-        self._max_bulk = max_bulk
-        self._anki_ok_ttl = anki_ok_ttl
-        self._anki_ping_timeout = anki_ping_timeout
+        self._settings = settings
         self._encounter = encounter
         self._apply = apply
         self._mined_seed = mined_seed.MinedSeedLane()
@@ -210,9 +206,7 @@ class MiningController:
                 cancel_retry=lambda: assembly.timers.cancel(LifecycleTimerKind.MINED_SEED_RETRY),
                 stopped=assembly.stopped,
             ),
-            max_bulk=assembly.settings.max_bulk,
-            anki_ok_ttl=assembly.settings.anki_ok_ttl,
-            anki_ping_timeout=assembly.settings.anki_ping_timeout,
+            settings=assembly.settings,
             encounter=assembly.encounter,
             apply=assembly.apply,
         )
@@ -234,6 +228,18 @@ class MiningController:
     @property
     def configured(self) -> bool:
         return self.active_target is not None
+
+    @property
+    def max_bulk(self) -> int:
+        return self._settings.max_bulk
+
+    @property
+    def play_audio(self) -> bool:
+        return self._settings.play_audio
+
+    @property
+    def show_preview(self) -> bool:
+        return self._settings.show_preview
 
     @property
     def target_available(self) -> bool:
@@ -335,12 +341,12 @@ class MiningController:
         from saitenka.app.anki import anki_reachable
 
         self._anki_probe = CapabilityProbe(
-            lambda: anki_reachable(timeout=self._anki_ping_timeout),
+            lambda: anki_reachable(timeout=self._settings.anki_ping_timeout),
             name="anki",
-            ttl=self._anki_ok_ttl,
-            retry=min(self._anki_ok_ttl, 1.0),
-            timeout=max(self._anki_ping_timeout * 2, 0.1),
-            max_retry=max(self._anki_ok_ttl, 8.0),
+            ttl=self._settings.anki_ok_ttl,
+            retry=min(self._settings.anki_ok_ttl, 1.0),
+            timeout=max(self._settings.anki_ping_timeout * 2, 0.1),
+            max_retry=max(self._settings.anki_ok_ttl, 8.0),
             submit=self._lifecycle.capability_submit,
         )
         self._anki_probe.request(force=True)
@@ -452,7 +458,7 @@ class MiningController:
             encounter.cue.styles,
             encounter.cue.hover,
             encounter.cue.tokenizer,
-            self._max_bulk,
+            self._settings.max_bulk,
         )
         encounter = miner.MiningEncounter(
             cue,

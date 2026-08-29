@@ -8,15 +8,16 @@ had no reader. All three are one fact about a live session, so they are one ledg
 
 from __future__ import annotations
 
+from session_builder import build_session
 from util import FakeIPC
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import (
     ControlSink,
     install_session_reactor,
     install_session_runtime,
 )
-from saitenka.app.session.runtime import SessionRuntime
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.diagnostics import RuntimeLedger
 from saitenka.runtime.effects import (
@@ -37,13 +38,19 @@ def test_a_live_session_records_what_its_reducers_reported() -> None:
     """
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     ledger = gateway.session_ledger
     assert ledger is not None
     try:
-        SessionRuntime(reader.session_facts, reader.session_acts, ipc).run_until(
-            lambda: bool(ledger.counts), timeout=1.0
-        )
+        reader._entry.runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
         reader.close()
     finally:
         gateway.close()
@@ -57,15 +64,21 @@ def test_an_event_no_owner_claims_is_counted_rather_than_dropped() -> None:
     and "migrated and silent" are the same observation."""
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     ledger = gateway.session_ledger
     assert ledger is not None
 
     gateway.publish_session_event(RawMpvEvent("seek"))
     try:
-        SessionRuntime(reader.session_facts, reader.session_acts, ipc).run_until(
-            lambda: bool(ledger.counts), timeout=1.0
-        )
+        reader._entry.runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
     finally:
         gateway.close()
 

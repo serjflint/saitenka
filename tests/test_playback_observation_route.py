@@ -13,9 +13,11 @@ projection would hide it (it is idempotent) and the deltas would not.
 from __future__ import annotations
 
 import pytest
+from session_builder import build_session
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 
@@ -25,7 +27,15 @@ def _session(*, reactor: bool):
     gateway = runtime_gateway(ipc)
     if reactor:
         install_session_reactor(gateway, startup_hint=False)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     reader.playback_observation.install_seed({})
     return ipc, gateway, reader
 
@@ -40,7 +50,10 @@ def test_an_observation_lands_the_same_whether_the_reactor_owns_it(reactor) -> N
     try:
         ipc.emit({"event": "property-change", "name": "sub-text", "data": "いち"})
         reader._drain_events()
-        text, observed = reader.sub_text, reader.playback_observation.state.value("sub-text")
+        text, observed = (
+            reader.playback_observation.cue.text,
+            reader.playback_observation.state.value("sub-text"),
+        )
     finally:
         reader.close()
         gateway.close()

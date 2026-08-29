@@ -7,9 +7,11 @@ lifetime was split between the subsystem that owns it and a line in a setup sequ
 from __future__ import annotations
 
 import pytest
+from session_builder import build_session
 from util import FakeIPC, runtime_gateway
 
-from saitenka.app.session.controller import SessionController
+from saitenka.app.config import ReaderOptions
+from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.effects import STARTUP_EFFECTS
@@ -64,11 +66,18 @@ def test_setup_brings_the_same_session_up_with_or_without_a_runtime(
         gateway = runtime_gateway(ipc)
         request.addfinalizer(gateway.close)
         install_session_reactor(gateway)
-    reader = SessionController(ipc, prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     request.addfinalizer(reader.close)
 
-    for phase in StartPhase:
-        reader._announce_start(phase)
+    reader.start()
 
     assert reader.playback_observation.observing  # reads are event-driven from here on
     assert any(c and c[0] == "define-section" for c in ipc.commands)  # input routes to us
@@ -124,9 +133,17 @@ def test_the_render_guard_is_disarmed_by_the_session_that_armed_it() -> None:
     """
     from saitenka.render import banded
 
-    reader = SessionController(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
     try:
-        reader._announce_start(StartPhase.PROCESS)
+        reader.start()
         assert banded._GUARD_MAIN_RENDER  # negative control: the oracle can fail
     finally:
         reader.close()
