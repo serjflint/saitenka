@@ -22,14 +22,20 @@ def _turn_graph_collaborators(
     )
     collaborators: set[str] = set()
     for method in controller.body:
-        if not isinstance(method, ast.FunctionDef) or method.name == "_build_entry_runtime":
+        if not isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef) or (
+            method.name == "_build_entry_runtime"
+        ):
             continue
-        aliases = {"graph"} if method.name == "__init__" else set()
+        aliases: set[str] = set()
         assignments = [node for node in ast.walk(method) if isinstance(node, ast.Assign)]
         changed = True
         while changed:
             changed = False
             for assignment in assignments:
+                if any(_is_self_graph(target) for target in assignment.targets) and isinstance(
+                    assignment.value, ast.Name
+                ):
+                    aliases.add(assignment.value.id)
                 source_is_graph = _is_graph_reference(assignment.value, aliases)
                 if not source_is_graph:
                     continue
@@ -95,24 +101,57 @@ def test_the_live_turn_does_not_reach_new_feature_authority() -> None:
 
 
 @pytest.mark.parametrize(
-    ("body", "expected"),
+    ("source", "expected"),
     [
-        ("g = self._graph\ng.mining.mine()", {"mining"}),
-        ("consume(self._graph)", {"<session-graph-escape>"}),
-        ("graph = object()\nconsume(graph)", set()),
+        (
+            (
+                "class SessionController:\n"
+                "    def perform(self):\n"
+                "        g = self._graph\n"
+                "        g.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            ("class SessionController:\n    def perform(self):\n        consume(self._graph)\n"),
+            {"<session-graph-escape>"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def perform(self):\n"
+                "        graph = object()\n"
+                "        consume(graph)\n"
+            ),
+            set(),
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def __init__(self, session_graph):\n"
+                "        self._graph = session_graph\n"
+                "        session_graph.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    async def perform(self):\n"
+                "        graph = self._graph\n"
+                "        graph.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
     ],
 )
 def test_the_live_turn_guard_detects_authority_without_name_heuristics(
     tmp_path: Path,
-    body: str,
+    source: str,
     expected: set[str],
 ) -> None:
     controller = tmp_path / "controller.py"
-    indented = "\n".join(f"        {line}" for line in body.splitlines())
-    controller.write_text(
-        f"class SessionController:\n    def perform(self):\n{indented}\n",
-        encoding="utf-8",
-    )
+    controller.write_text(source, encoding="utf-8")
 
     assert _turn_graph_collaborators(controller) == expected
 
