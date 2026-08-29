@@ -1,6 +1,6 @@
 [project]
 name = "saitenka"
-version = "5.0.0"
+version = "4.2.0"
 description = "Learn Japanese from the video you're watching: FSRS-aware subtitle coloring + one-key Anki mining, drawn inside mpv"
 readme = "PYPI.md"
 license = "Apache-2.0"  # SPDX expression (PEP 639); the GPL deinflect add-on is a separate opt-in dist
