@@ -88,29 +88,29 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> SessionController
         options=options,
         infrastructure=SessionInfrastructure(overlay=overlay),
     )
-    r.screen.osd = osd
+    r.turn.screen.osd = osd
     cues = [Cue(float(i), float(i) + 0.8, f"cue {i}") for i in range(12)]
-    r.track_commands.navigation.current.sub_index = CueIndex(cues)
-    r.playback_observation.install_seed({"sub-text": "cue 0"})
+    r.turn.track_commands.navigation.current.sub_index = CueIndex(cues)
+    r.turn.playback_observation.install_seed({"sub-text": "cue 0"})
     return r
 
 
 def _draw_help(r: SessionController) -> None:
-    r.help_controller.store.dispatch(HelpCommand.TOGGLE)
-    r.help_controller.redraw()
+    r.turn.help_controller.store.dispatch(HelpCommand.TOGGLE)
+    r.turn.help_controller.redraw()
 
 
 def _draw_sidebar(r: SessionController) -> None:
-    r.sidebar_controller.store.dispatch(
+    r.turn.sidebar_controller.store.dispatch(
         events.SidebarShown(
-            r.sidebar_controller.view().active, r.sidebar_controller.view().capacity
+            r.turn.sidebar_controller.view().active, r.turn.sidebar_controller.view().capacity
         )
     )
-    sidebar.draw(r.sidebar_controller.view())
+    sidebar.draw(r.turn.sidebar_controller.view())
 
 
 def _draw_stats(r: SessionController) -> None:
-    r.command_runtime.handle(ANALYSIS_MSG)
+    r.turn.command_runtime.handle(ANALYSIS_MSG)
 
 
 CHROME = [("help", _draw_help), ("sidebar", _draw_sidebar), ("stats", _draw_stats)]
@@ -120,7 +120,7 @@ CHROME = [("help", _draw_help), ("sidebar", _draw_sidebar), ("stats", _draw_stat
 def test_chrome_overlay_stays_on_screen_at_fullscreen_hidpi(name, draw):
     r = _reader(FULLSCREEN_HIDPI)
     draw(r)
-    img, x, y, _oid = r.ov.shown[-1]  # the last (current) upload for this overlay
+    img, x, y, _oid = r.turn.ov.shown[-1]  # the last (current) upload for this overlay
     w, h = img.size
     ow, oh = FULLSCREEN_HIDPI
     assert w > 0 and h > 0, f"{name} drew an empty image"
@@ -135,8 +135,8 @@ def test_chrome_overlay_grows_from_1080p_to_hidpi(name, draw):
     draw(small)
     big = _reader(FULLSCREEN_HIDPI)
     draw(big)
-    (sw, sh) = small.ov.shown[-1][0].size
-    (bw, bh) = big.ov.shown[-1][0].size
+    (sw, sh) = small.turn.ov.shown[-1][0].size
+    (bw, bh) = big.turn.ov.shown[-1][0].size
     assert bw > sw or bh > sh, f"{name} did not scale up on the hi-dpi osd ({sw}x{sh} → {bw}x{bh})"
 
 
@@ -149,8 +149,8 @@ def test_hidpi_chrome_matches_a_manual_ui_scale_bump_at_1080p():
     factor = FULLSCREEN_HIDPI[1] / 1080
     faked = _reader(BASELINE_1080, ui_scale=factor)  # old way: inflate ui_scale to compensate
     _draw_help(faked)
-    hw = hidpi.ov.shown[-1][0].size[0]
-    fw = faked.ov.shown[-1][0].size[0]
+    hw = hidpi.turn.ov.shown[-1][0].size[0]
+    fw = faked.turn.ov.shown[-1][0].size[0]
     assert abs(hw - fw) <= 2  # same font/layout scale → same panel width (± rounding)
 
 
@@ -161,8 +161,8 @@ def test_chrome_left_open_is_swept_by_close(name, draw):
     on a detached mpv's screen, since nothing knew it was there."""
     r = _reader(FULLSCREEN_HIDPI)
     draw(r)
-    assert r.ov.lifecycle_oids, f"{name} staged nothing the close sweep could find"
+    assert r.turn.ov.lifecycle_oids, f"{name} staged nothing the close sweep could find"
 
-    r.lifecycle_surfaces.close()
+    r.turn.lifecycle_surfaces.close()
 
-    assert not r.ov.lifecycle_oids
+    assert not r.turn.ov.lifecycle_oids

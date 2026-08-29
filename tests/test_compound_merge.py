@@ -210,34 +210,37 @@ class _ExistsDS:
 
 def test_controller_tokens_carry_the_merged_compound(monkeypatch):
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_ExistsDS("応急処置")))
-    reader.screen.osd = (1920, 1080)
-    monkeypatch.setattr(reader.subtitle_presentation, "renderer", NullRenderer())
+    reader.turn.screen.osd = (1920, 1080)
+    monkeypatch.setattr(reader.turn.subtitle_presentation, "renderer", NullRenderer())
     # decouple from the live unidic split: the cue tokenises to 応急 + 処置
     monkeypatch.setattr(
-        reader.profile_session.profile.tokenizer,
+        reader.turn.profile_session.profile.tokenizer,
         "tokenize",
         lambda _ln: [_at("応急", 0), _at("処置", 2)],
     )
-    reader.set_subtitle("応急処置")
-    assert [t.surface for t in reader.subtitle_presentation.cue.current.tokens] == [
+    reader.turn.set_subtitle("応急処置")
+    assert [t.surface for t in reader.turn.subtitle_presentation.cue.current.tokens] == [
         "応急処置"
     ]  # ONE hover/hit-test/mine unit
-    assert reader.subtitle_presentation.cue.current.tokens[0].lemma == "応急処置"
+    assert reader.turn.subtitle_presentation.cue.current.tokens[0].lemma == "応急処置"
 
 
 def test_controller_leaves_fragments_when_dict_set_has_no_probe(monkeypatch):
     reader = build_session(
         FakeIPC(), services=SessionServices(dictionaries=object())
     )  # no terms_exist → merge is skipped
-    reader.screen.osd = (1920, 1080)
-    monkeypatch.setattr(reader.subtitle_presentation, "renderer", NullRenderer())
+    reader.turn.screen.osd = (1920, 1080)
+    monkeypatch.setattr(reader.turn.subtitle_presentation, "renderer", NullRenderer())
     monkeypatch.setattr(
-        reader.profile_session.profile.tokenizer,
+        reader.turn.profile_session.profile.tokenizer,
         "tokenize",
         lambda _ln: [_at("応急", 0), _at("処置", 2)],
     )
-    reader.set_subtitle("応急処置")
-    assert [t.surface for t in reader.subtitle_presentation.cue.current.tokens] == ["応急", "処置"]
+    reader.turn.set_subtitle("応急処置")
+    assert [t.surface for t in reader.turn.subtitle_presentation.cue.current.tokens] == [
+        "応急",
+        "処置",
+    ]
 
 
 # --- the batch existence probe against a real imported dictionary ---------------------------------

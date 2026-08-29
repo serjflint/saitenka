@@ -33,13 +33,14 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
     reader = build_session(_FakeIPC({}))
-    reader.sidebar_controller.store.dispatch(
+    reader.turn.sidebar_controller.store.dispatch(
         events.SidebarShown(
-            reader.sidebar_controller.view().active, reader.sidebar_controller.view().capacity
+            reader.turn.sidebar_controller.view().active,
+            reader.turn.sidebar_controller.view().capacity,
         )
     )
-    reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
-    reader.sidebar_controller.panel.hits = (
+    reader.turn.sidebar_controller.panel.rect = (0, 0, 100, 100)
+    reader.turn.sidebar_controller.panel.hits = (
         SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),
     )
     # Inert actions instead of a stubbed internal: the port is the seam, so isolating the span
@@ -48,7 +49,7 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
         seek=lambda *_a: None, bookmark=lambda: None, mine=lambda: None, open_mined=lambda _n: None
     )
 
-    assert sidebar.click(reader.sidebar_controller.view(), inert, 10, 10) is True
+    assert sidebar.click(reader.turn.sidebar_controller.view(), inert, 10, 10) is True
     (attrs,) = _named(spans, "sidebar_click")
     assert attrs["kind"] == "bookmark"
 
@@ -57,18 +58,20 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
     spans = record_spans(monkeypatch)
     reader = build_session(_FakeIPC({}))
-    reader.sidebar_controller.store.dispatch(
+    reader.turn.sidebar_controller.store.dispatch(
         events.SidebarShown(
-            reader.sidebar_controller.view().active, reader.sidebar_controller.view().capacity
+            reader.turn.sidebar_controller.view().active,
+            reader.turn.sidebar_controller.view().capacity,
         )
     )
-    reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
-    reader.sidebar_controller.panel.hits = (
+    reader.turn.sidebar_controller.panel.rect = (0, 0, 100, 100)
+    reader.turn.sidebar_controller.panel.hits = (
         SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),
     )
 
     assert (
-        reader.sidebar_controller.on_click(reader.interaction.click_target(), 50, 50) is True
+        reader.turn.sidebar_controller.on_click(reader.turn.interaction.click_target(), 50, 50)
+        is True
     )  # inside the panel, off every hitbox
     assert _named(spans, "sidebar_click") == []
 
@@ -81,10 +84,10 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     reader = build_session(
         _FakeIPC({"path": str(video), "sub-start": 1.0, "sub-end": 3.0, "track-list": []})
     )
-    reader.playback_observation.install_seed({"sub-text": "猫です"})
-    reader.history.replace_backlog(backlog.BacklogStore(tmp_path / "backlog.sqlite"))
+    reader.turn.playback_observation.install_seed({"sub-text": "猫です"})
+    reader.turn.history.replace_backlog(backlog.BacklogStore(tmp_path / "backlog.sqlite"))
 
-    backlog.capture_current(reader.capture_ports)
+    backlog.capture_current(reader.turn.capture_ports)
     (attrs,) = _named(spans, "backlog_write")
     assert attrs["op"] == "toggle"
 
@@ -107,7 +110,7 @@ def test_mined_store_write_is_spanned(monkeypatch, tmp_path):
     )
     card = SimpleNamespace(expression="猫", reading="ねこ")
 
-    ports = reader.mining_controller._operation()  # transaction write under test
+    ports = reader.turn.mining_controller._operation()  # transaction write under test
     assert ports is not None
     miner._persist_mined(ports, note_id=42, card=card, video="/x/Show - 01.mkv")
     assert len(_named(spans, "mined_store_write")) == 1

@@ -66,7 +66,7 @@ def _pixels(reader: SessionController, visible: set[object]) -> PixelState:
 
 class LegacyReaderTrace:
     def __init__(self, reader: SessionController) -> None:
-        self.reader = reader
+        self.reader = reader.turn
         self.trace = BehaviorTrace()
 
     def observe(self, event: str, *, outcome: str) -> None:

@@ -49,7 +49,7 @@ and enumerating it is free once the transform runs with `--check`.
 
 ## Not a leverage device: a ratchet
 
-A ratchet (`poe host-arity`, `poe host-mass`, `poe runtime-migration`) refuses regression and makes
+A ratchet (`poe host-arity`, `poe host-mass`) refuses regression and makes
 progress visible. It is a **safety device**. It does not make one site cheaper to convert, and a plan
 that lists it as its answer to "how will this get cheaper" has not answered the question.
 

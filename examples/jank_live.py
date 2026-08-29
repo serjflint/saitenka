@@ -93,7 +93,7 @@ def _counter(ipc, prop: str) -> int:
     return int(data) if isinstance(data, (int, float)) else 0
 
 
-def _why_stuck(reader) -> str:
+def _why_stuck(tooltip) -> str:
     """The state that decides whether a wheel event can move the base viewport at all.
 
     ``scroll_view`` refuses in three distinguishable ways — no rendered panel, a panel no taller than
@@ -101,38 +101,33 @@ def _why_stuck(reader) -> str:
     bare "did not advance" this replaces reports only that one of them happened, which is not enough to
     act on from a CI log.
     """
-    view, nest = (
-        reader.tooltip_controller.surface_state().view,
-        reader.tooltip_controller.surface_state().nest,
-    )
+    view, nest = tooltip.surface_state().view, tooltip.surface_state().nest
     state = view.state
     full_h = getattr(state, "full_height", None)
     return (
         f"state={'present' if state is not None else 'MISSING'} "
         f"full_h={full_h} view_h={view.view_h} scrollable={full_h is not None and full_h > view.view_h} "
         f"desired={view.desired_scroll} rect={view.rect} "
-        f"nest_rect={nest.rect} nest_scroll={nest.scroll} mouse={reader.tooltip_controller.surface_state().last_mouse}"
+        f"nest_rect={nest.rect} nest_scroll={nest.scroll} mouse={tooltip.surface_state().last_mouse}"
     )
 
 
-def _scroll_four(reader) -> None:
+def _scroll_four(tooltip, pump) -> None:
     from saitenka.app.session import surfaces
 
-    before = reader.tooltip_controller.surface_state().view.scroll
+    before = tooltip.surface_state().view.scroll
     for _ in range(4):
-        reader.tooltip_controller.scroll_tip(
-            surfaces.tip_wheel_pixels(reader.tooltip_controller.scale().ref_h, 1)
-        )
-        reader.pump()
-    if reader.tooltip_controller.surface_state().view.scroll == before:
+        tooltip.scroll_tip(surfaces.tip_wheel_pixels(tooltip.scale().ref_h, 1))
+        pump()
+    if tooltip.surface_state().view.scroll == before:
         raise RuntimeError(
-            f"live scroll workload did not advance the tooltip viewport ({_why_stuck(reader)})"
+            f"live scroll workload did not advance the tooltip viewport ({_why_stuck(tooltip)})"
         )
 
 
-def _present_overlay(reader) -> None:
+def _present_overlay(overlay) -> None:
     """Synchronously ask mpv to re-composite the changed paused overlay."""
-    reader.ov.repaint()
+    overlay.repaint()
 
 
 class TallDS:
@@ -190,7 +185,7 @@ def run(*, settle_s: float = 0.4) -> dict:
             action()
             if ready is not None:
                 poll_until(reader, ready, "timed live interaction did not complete")
-            _present_overlay(reader)
+            _present_overlay(reader.turn.ov)
             return (time.perf_counter() - start) * 1000.0
 
         i = next(
@@ -214,7 +209,10 @@ def run(*, settle_s: float = 0.4) -> dict:
             timed(hover, lambda: reader.tooltip_controller.surface_state().view.rect is not None),
         )
 
-        sample("scroll", timed(lambda: _scroll_four(reader)))
+        sample(
+            "scroll",
+            timed(lambda: _scroll_four(reader.turn.tooltip_controller, reader.pump)),
+        )
 
         if (
             reader.tooltip_controller.surface_state().view.rect is not None

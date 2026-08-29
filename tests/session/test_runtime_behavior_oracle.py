@@ -50,7 +50,7 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
     reader.start()
     dispatched: list[bool] = []
     monkeypatch.setattr(
-        reader.picker_controller,
+        reader.turn.picker_controller,
         "open",
         lambda *_args, **_kwargs: dispatched.append(True),
     )
@@ -98,9 +98,9 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
             prefetch=False,
         ),
     )
-    reader.playback_observation.start_session()
-    reader.set_subtitle("old")
-    reader.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    reader.turn.playback_observation.start_session()
+    reader.turn.set_subtitle("old")
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     copied: list[str] = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
     trace = LegacyReaderTrace(reader)
@@ -116,14 +116,14 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
     # conflict phase is observed from inside the drain — after every event in the batch was
     # processed against the retired cue, before the replacement settles. Same three phases, real
     # boundaries; snapshotting after the drain would only ever see the settled state.
-    settle = reader._cue.settle
+    settle = reader.turn._cue.settle
 
     def traced_settle() -> None:
         trace.observe("cue-conflict", outcome="input-rejected")
         settle()
 
-    monkeypatch.setattr(reader._cue, "settle", traced_settle)
-    reader._drain_events()
+    monkeypatch.setattr(reader.turn._cue, "settle", traced_settle)
+    reader.turn._drain_events()
     trace.observe("cue-reconciled", outcome="replacement-active")
 
     assert copied == []
@@ -172,24 +172,28 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
             prefetch=False,
         ),
     )
-    reader.playback_observation.install_seed({"sub-text": "active"})
-    reader.subtitle_presentation.pipeline.cue_changed(
-        reader.subtitle_presentation.target(), nonempty=True
+    reader.turn.playback_observation.install_seed({"sub-text": "active"})
+    reader.turn.subtitle_presentation.pipeline.cue_changed(
+        reader.turn.subtitle_presentation.target(), nonempty=True
     )
     trace = LegacyReaderTrace(reader)
     trace.observe("native-cue", outcome="pixels-established")
 
-    reader.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
-    renderer.use_native(reader.subtitle_presentation.target())
-    reader.tooltip_controller.select(0)
-    reader.subtitle_presentation.pipeline.draw_current(reader.subtitle_presentation.target())
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    renderer.use_native(reader.turn.subtitle_presentation.target())
+    reader.turn.tooltip_controller.select(0)
+    reader.turn.subtitle_presentation.pipeline.draw_current(
+        reader.turn.subtitle_presentation.target()
+    )
     trace.observe("geometry-ready", outcome="interaction-ready")
-    reader.subtitle_presentation.cue.replace_geometry(boxes=[])
-    renderer.degrade_geometry(reader.subtitle_presentation.target())
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[])
+    renderer.degrade_geometry(reader.turn.subtitle_presentation.target())
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
-    reader.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
-    renderer.use_native(reader.subtitle_presentation.target())
-    reader.subtitle_presentation.pipeline.draw_current(reader.subtitle_presentation.target())
+    reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    renderer.use_native(reader.turn.subtitle_presentation.target())
+    reader.turn.subtitle_presentation.pipeline.draw_current(
+        reader.turn.subtitle_presentation.target()
+    )
     trace.observe("geometry-recovered", outcome="interaction-ready")
 
     assert [record["pixels"] for record in trace.records()] == [

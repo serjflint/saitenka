@@ -42,12 +42,12 @@ def reader_with_clip(tmp_path, monkeypatch):
     clip = tmp_path / "clip.opus"
     clip.write_bytes(b"x")
     r = build_session(FakeIPC())
-    r.preview_controller.store.dispatch(events.PreviewShown(_preview_data(), clip))
-    panel = r.preview_controller.panel
+    r.turn.preview_controller.store.dispatch(events.PreviewShown(_preview_data(), clip))
+    panel = r.turn.preview_controller.panel
     panel.rect = (0, 0, 200, 200)
     panel.audio_rect = (10, 10, 40, 40)
     panel.close_rect = (60, 10, 20, 20)
-    miner_ui.click_preview(r.preview_commands.ports(), 20, 20)  # ▶ → retains the handle
+    miner_ui.click_preview(r.turn.preview_commands.ports(), 20, 20)  # ▶ → retains the handle
     assert panel.audio_proc is proc  # precondition: a clip is 'playing'
     return r, proc, killed
 
@@ -55,7 +55,7 @@ def reader_with_clip(tmp_path, monkeypatch):
 def test_play_button_retains_the_player_handle(reader_with_clip):
     r, proc, _killed = reader_with_clip
     assert (
-        r.preview_controller.panel.audio_proc is proc
+        r.turn.preview_controller.panel.audio_proc is proc
     )  # the fire-and-forget Popen is now stoppable
 
 
@@ -64,25 +64,25 @@ def test_second_play_press_replaces_the_clip_never_stacks(reader_with_clip, monk
     second = _FakeProc()
     monkeypatch.setattr(miner_ui, "play_audio", lambda _p: second)
     miner_ui.click_preview(
-        r.preview_commands.ports(), 20, 20
+        r.turn.preview_commands.ports(), 20, 20
     )  # ▶ again while the first still plays
-    assert first in killed and r.preview_controller.panel.audio_proc is second
+    assert first in killed and r.turn.preview_controller.panel.audio_proc is second
 
 
 def _close_button(r: SessionController) -> None:
-    miner_ui.click_preview(r.preview_commands.ports(), 65, 15)  # ✕ → hide_preview
+    miner_ui.click_preview(r.turn.preview_commands.ports(), 65, 15)  # ✕ → hide_preview
 
 
 def _esc(r: SessionController) -> None:
-    r.preview_commands.hide()
+    r.turn.preview_commands.hide()
 
 
 def _new_cue(r: SessionController) -> None:
-    r.set_subtitle("次のセリフ")  # a cue change auto-dismisses the last preview
+    r.turn.set_subtitle("次のセリフ")  # a cue change auto-dismisses the last preview
 
 
 def _replay(r: SessionController) -> None:
-    r.preview_commands.replay()  # P → re-show, which silences the current clip
+    r.turn.preview_commands.replay()  # P → re-show, which silences the current clip
 
 
 @pytest.mark.parametrize(
@@ -92,4 +92,4 @@ def test_every_dismiss_path_stops_the_clip(reader_with_clip, dismiss):
     r, proc, killed = reader_with_clip
     dismiss(r)
     assert proc in killed  # the clip was stopped, not left playing (#251)
-    assert r.preview_controller.panel.audio_proc is None  # handle cleared → nothing lingers
+    assert r.turn.preview_controller.panel.audio_proc is None  # handle cleared → nothing lingers

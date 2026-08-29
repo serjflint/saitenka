@@ -59,12 +59,12 @@ def test_showing_overlay_restores_latest_hidden_draw():
 def test_alt_o_hides_saitenka_and_restores_native_subs():
     ipc = FakeIPC()
     reader = build_session(ipc)
-    reader.ov.show(_image(), oid=OverlayId.SUB)
-    reader.command_runtime.install_input()
+    reader.turn.ov.show(_image(), oid=OverlayId.SUB)
+    reader.turn.command_runtime.install_input()
     bindings = keybind_registry(ipc)
     ipc.commands.clear()
 
-    reader.command_runtime.handle(bindings["Alt+o"])
+    reader.turn.command_runtime.handle(bindings["Alt+o"])
 
     assert ("overlay-remove", OverlayId.SUB) in ipc.commands
     assert ("set_property", "sub-visibility", True) in ipc.commands
@@ -77,8 +77,8 @@ def test_showing_overlay_restores_saitenka_subtitle_policy():
     ipc = FakeIPC()
     reader = build_session(ipc)
 
-    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
-    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader.turn.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader.turn.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
 
     assert ipc.props["sub-visibility"] is False
     assert "osd-level" not in ipc.props  # toggle never manages osd-level anymore
@@ -88,7 +88,7 @@ def test_overlay_toggle_key_is_configurable():
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(overlay_toggle_key="Ctrl+o"))
 
-    build_session(ipc, options=options).command_runtime.install_input()
+    build_session(ipc, options=options).turn.command_runtime.install_input()
 
     bindings = set(keybind_registry(ipc))
     assert "Ctrl+o" in bindings and "Alt+o" not in bindings
@@ -97,15 +97,15 @@ def test_overlay_toggle_key_is_configurable():
 def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling():
     ipc = FakeIPC()
     reader = build_session(ipc)
-    reader.track_commands.declare(SubtitleTracksDiscovered(2, 1))
-    reader.playback_observation.install_seed({"sid": 2})
-    reader.command_runtime.handle(app_bindings.TRANS_MSG)
-    reader.track_commands.declare(SubtitleSecondaryLeased(1))
+    reader.turn.track_commands.declare(SubtitleTracksDiscovered(2, 1))
+    reader.turn.playback_observation.install_seed({"sid": 2})
+    reader.turn.command_runtime.handle(app_bindings.TRANS_MSG)
+    reader.turn.track_commands.declare(SubtitleSecondaryLeased(1))
     ipc.commands.clear()
 
-    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
-    assert reader.translation_controller.state.drawn is None
-    reader.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    reader.turn.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
+    assert reader.turn.translation_controller.state.drawn is None
+    reader.turn.command_runtime.handle(app_bindings.OVERLAY_TOGGLE_MSG)
 
     secondary = [
         command[2] for command in ipc.commands if command[:2] == ("set_property", "secondary-sid")

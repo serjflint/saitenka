@@ -20,7 +20,7 @@ _SCALES = [1.5, 2.0]
 
 
 def _reader(scale: float, monkeypatch):
-    r = hidpi_reader(scale)
+    r = hidpi_reader(scale).turn
     monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
     r.tooltip_controller.select(0)
     r.tooltip_controller.show_tooltip(0)
@@ -116,7 +116,7 @@ def test_cold_paint_is_soft_then_upgrades_to_crisp_when_bands_warm(scale, monkey
 @pytest.mark.parametrize("scale", _SCALES)
 def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
     # When the bands are already warm (worker ran ahead), the show composites crisp on the first paint.
-    r = hidpi_reader(scale)
+    r = hidpi_reader(scale).turn
     monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
     r.tooltip_controller.select(0)
     r.tooltip_controller.show_tooltip(0)  # first paint (soft) also measures the panel

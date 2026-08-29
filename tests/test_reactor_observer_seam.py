@@ -307,7 +307,7 @@ def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None
                         lambda _effect: True,
                     )
                 )
-            reader.set_subtitle("猫を見る")
+            reader.turn.set_subtitle("猫を見る")
             reader.pump()
             reader.pump()
             return list(ipc.commands)

@@ -98,11 +98,11 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
         called = True
         return True
 
-    monkeypatch.setattr("saitenka.app.session.controller.tts_available", probe)
+    monkeypatch.setattr("saitenka.app.session.turn.tts_available", probe)
     reader = build_session(FakeIPC())
     try:
         assert called is False
-        assert reader.tooltip_controller.panel_style.speak_button is False
+        assert reader.turn.tooltip_controller.panel_style.speak_button is False
     finally:
         reader.close()
 
@@ -110,21 +110,21 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
 def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
     release = threading.Event()
     monkeypatch.setattr(
-        "saitenka.app.session.controller.tts_available",
+        "saitenka.app.session.turn.tts_available",
         lambda: release.wait(1) or True,
     )
     reader = build_session(FakeIPC())
     token = Token("猫", "猫", "ネコ", "名詞", 0, 1)
     try:
-        before = panel_key(reader.tooltip_controller.panel_ports, token, "猫")
-        reader._apply_capabilities()
+        before = panel_key(reader.turn.tooltip_controller.panel_ports, token, "猫")
+        reader.turn._apply_capabilities()
         release.set()
         await_ready(
-            lambda: reader.tooltip_controller.panel_style.speak_button,
+            lambda: reader.turn.tooltip_controller.panel_style.speak_button,
             "tts probe never published",
-            pump=reader._apply_capabilities,
+            pump=reader.turn._apply_capabilities,
         )
-        after = panel_key(reader.tooltip_controller.panel_ports, token, "猫")
+        after = panel_key(reader.turn.tooltip_controller.panel_ports, token, "猫")
 
         assert before.tts_ok is False
         assert after.tts_ok is True
@@ -140,26 +140,26 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
         finished.set()
         return True
 
-    monkeypatch.setattr("saitenka.app.session.controller.tts_available", probe)
+    monkeypatch.setattr("saitenka.app.session.turn.tts_available", probe)
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
     reader = build_session(ipc)
     try:
-        reader._apply_capabilities()
+        reader.turn._apply_capabilities()
         assert finished.wait(1.0)
-        assert reader.tooltip_controller.panel_style.speak_button is False
+        assert reader.turn.tooltip_controller.panel_style.speak_button is False
 
         def deliver() -> None:
-            reader._drain_events()
-            reader._apply_capabilities()
+            reader.turn._drain_events()
+            reader.turn._apply_capabilities()
 
         await_ready(
-            lambda: reader.tooltip_controller.panel_style.speak_button,
+            lambda: reader.turn.tooltip_controller.panel_style.speak_button,
             "capability event never reached the reader",
             pump=deliver,
         )
 
-        assert reader.tooltip_controller.panel_style.speak_button is True
+        assert reader.turn.tooltip_controller.panel_style.speak_button is True
     finally:
         reader.close()
         gateway.close()

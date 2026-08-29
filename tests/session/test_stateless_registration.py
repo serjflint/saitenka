@@ -136,12 +136,10 @@ def test_stateless_capabilities_do_not_hide_authority_in_opaque_callables() -> N
 
 
 def test_stateless_command_composition_has_no_deferred_session_reads() -> None:
-    path = INTENTS / "session" / "controller.py"
+    path = INTENTS / "session" / "turn.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     controller = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "SessionController"
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SessionTurn"
     )
     graph = next(
         node

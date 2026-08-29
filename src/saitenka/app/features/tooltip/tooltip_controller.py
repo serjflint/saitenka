@@ -85,7 +85,6 @@ if TYPE_CHECKING:
     from saitenka.app.session.playback_observation import PlaybackObservationController
     from saitenka.app.subtitle_presentation import SubtitlePresentation
     from saitenka.app.toast_controller import NotificationSink
-    from saitenka.mpvio.osd import Overlay
     from saitenka.render.layout_backend import LayoutBackend
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
@@ -211,7 +210,7 @@ class TooltipPresentation:
 class TooltipSessionContext:
     """The bounded owners sampled by tooltip policy during one live session."""
 
-    overlay: Overlay
+    hide_tooltip: Callable[[], None]
     surfaces: InteractionSurfaces
     screen: ScreenState
     preparation: TooltipPreparationController
@@ -467,7 +466,7 @@ class TooltipController:
     def teardown(self) -> None:
         context = self._session()
         self.cancel_jobs()
-        context.overlay.hide_interactive(OverlayId.TIP)
+        context.hide_tooltip()
         self.hide_nested()
         self.unbind_keybindings()
         self.retire_state()

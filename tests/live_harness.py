@@ -114,22 +114,22 @@ def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None =
             ipc,
             services=SessionServices(dictionaries=dict_set if dict_set is not None else MiniDS()),
         )
-        reader.refresh_osd()
-        reader.playback_observation.start_session()
-        reader.command_runtime.install_input()
-        reader.subtitle_navigation.load_index(srt)
+        reader.turn.refresh_osd()
+        reader.turn.playback_observation.start_session()
+        reader.turn.command_runtime.install_input()
+        reader.turn.subtitle_navigation.load_index(srt)
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
             reader.pump()
             if (
-                reader.subtitle_presentation.cue.current.tokens
-                and reader.subtitle_presentation.cue.current.boxes
+                reader.turn.subtitle_presentation.cue.current.tokens
+                and reader.turn.subtitle_presentation.cue.current.boxes
             ):
                 break
             time.sleep(0.1)
         assert (
-            reader.subtitle_presentation.cue.current.tokens
-            and reader.subtitle_presentation.cue.current.boxes
+            reader.turn.subtitle_presentation.cue.current.tokens
+            and reader.turn.subtitle_presentation.cue.current.boxes
         ), "subtitle never loaded into the reader"
         yield tmp, reader, ipc
     finally:

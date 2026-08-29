@@ -652,7 +652,7 @@ def press(reader, ipc: FakeIPC, key: str) -> None:
     if key not in reg:
         raise KeyError(f"{key!r} is not bound (registered: {sorted(reg)})")
     ipc.events.append({"event": "client-message", "args": [reg[key]]})
-    reader._drain_events()
+    reader.turn._drain_events()
 
 
 class FakeTransport:

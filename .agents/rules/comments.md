@@ -15,7 +15,7 @@ Treat comment bloat the way you treat cognitive complexity — something to cut,
   each is a claim about the rest of the tree that nothing keeps true.
 - **Counts of anything that moves.** A member count, a row count, a port width. Two such numbers
   went stale inside a single session here. If a generator prints it (`poe arch-map`,
-  `poe host-mass`, `poe runtime-status`), point at the generator; if none does and the number
+  `poe host-mass`), point at the generator; if none does and the number
   matters, that is an argument for a meter, not for a comment.
 
 - **Anything the code already is.** If a value, a rule or a list is stated in code, a test, a

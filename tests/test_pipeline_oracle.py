@@ -195,26 +195,26 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
             profile=ident.profile,
         ),
     )
-    reader.screen.osd = (1920, 1080)
+    reader.turn.screen.osd = (1920, 1080)
     # main track → tokenize (not the plain secondary path)
-    reader.track_commands.declare(SubtitleLanguageChanged(MAIN_LANG))
-    reader.set_subtitle(cue)
-    idx = _index_at(reader.subtitle_presentation.cue.current.tokens, at)
+    reader.turn.track_commands.declare(SubtitleLanguageChanged(MAIN_LANG))
+    reader.turn.set_subtitle(cue)
+    idx = _index_at(reader.turn.subtitle_presentation.cue.current.tokens, at)
     resolve_hover(
-        reader.tooltip_controller.tip_ports,
-        reader.tooltip_controller.word_lookup,
-        reader.tooltip_controller.hover_inputs,
+        reader.turn.tooltip_controller.tip_ports,
+        reader.turn.tooltip_controller.word_lookup,
+        reader.turn.tooltip_controller.hover_inputs,
         idx,
     )  # forward longest-match → _hover_meta.terms (the phrase/prefix seam)
-    tok = reader.subtitle_presentation.cue.current.tokens[idx]
+    tok = reader.turn.subtitle_presentation.cue.current.tokens[idx]
     entry = entry_for_tok(
         tok,
-        reader.tooltip_controller.inflected_surface(idx),
-        dict_set=reader.profile_session.profile.dict_set,
-        scorer=reader.profile_session.scorer,
-        extra_terms=reader.tooltip_controller.observation().metadata.terms,
+        reader.turn.tooltip_controller.inflected_surface(idx),
+        dict_set=reader.turn.profile_session.profile.dict_set,
+        scorer=reader.turn.profile_session.scorer,
+        extra_terms=reader.turn.tooltip_controller.observation().metadata.terms,
     )
-    return dict_set, tok, reader.tooltip_controller.observation().metadata.terms, entry
+    return dict_set, tok, reader.turn.tooltip_controller.observation().metadata.terms, entry
 
 
 def _all_text(entry) -> str:

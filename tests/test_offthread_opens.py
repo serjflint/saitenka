@@ -46,7 +46,7 @@ class _DeferredEngagedSubmitter:
         return True
 
     def enable(self, reader: SessionController) -> None:
-        self.run = reader.tooltip_controller.run_engaged
+        self.run = reader.turn.tooltip_controller.run_engaged
         self.enabled = True
 
     def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
@@ -103,18 +103,18 @@ def _reader(tmp_path, *, worker: bool):
         options=ReaderOptions(prefetch=True),
     )
     _SUBMITTERS[r] = submitter
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[
             Token("読む", "読む", "よむ", "動詞", 0, 2),
             Token("見る", "見る", "みる", "動詞", 2, 4),
         ]
     )
-    r.subtitle_presentation.cue.replace_geometry(
+    r.turn.subtitle_presentation.cue.replace_geometry(
         boxes=[WordBox(0, 100, 300, 40, 40), WordBox(1, 420, 300, 40, 40)]
     )
-    r.subtitle_presentation.renderer = NullRenderer()
+    r.turn.subtitle_presentation.renderer = NullRenderer()
     # Warm both base panels while there's NO worker (else a cold base show would itself defer, #293), so
     # the base tooltip is up + switchable synchronously and the tests isolate the nested-open defer.
     Driver(r).move_to_word(0).move_to_word(1).move_to_word(0)  # end on 読む, both panels cached
@@ -127,11 +127,16 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
     # Negative control: with no prefetch worker, the open builds + shows on the calling tick (unchanged).
     r = _reader(tmp_path, worker=False)
     nested_popup.open_kanji(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
+        "読",
+        100.0,
+        300.0,
+        40.0,
     )
     assert (
-        r.tooltip_controller.surface_state().nest.state is not None
-        and r.tooltip_controller.surface_state().nest.word == "読"
+        r.turn.tooltip_controller.surface_state().nest.state is not None
+        and r.turn.tooltip_controller.surface_state().nest.word == "読"
     )
     assert _submitter(r).calls == []  # nothing deferred
 
@@ -139,34 +144,44 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
 def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
+        "読",
+        100.0,
+        300.0,
+        40.0,
     )
     assert (
-        r.tooltip_controller.surface_state().nest.state is None
+        r.turn.tooltip_controller.surface_state().nest.state is None
     )  # deferred — nothing shown on the click tick
     assert _submitter(r).calls
 
     _submitter(r).finish()
 
     assert (
-        r.tooltip_controller.surface_state().nest.state is not None
-        and r.tooltip_controller.surface_state().nest.word == "読"
+        r.turn.tooltip_controller.surface_state().nest.state is not None
+        and r.turn.tooltip_controller.surface_state().nest.word == "読"
     )
     # the place composited from worker-warmed bands — zero synchronous glyph rasters on this tick
-    assert r.tooltip_controller.surface_state().nest.state.windowed.last_frame_rasters == 0
+    assert r.turn.tooltip_controller.surface_state().nest.state.windowed.last_frame_rasters == 0
 
 
 def test_kanji_open_worker_failure_uses_current_origin_sync_fallback(tmp_path):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
+        "読",
+        100.0,
+        300.0,
+        40.0,
     )
 
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert (
-        r.tooltip_controller.surface_state().nest.state is not None
-        and r.tooltip_controller.surface_state().nest.word == "読"
+        r.turn.tooltip_controller.surface_state().nest.state is not None
+        and r.turn.tooltip_controller.surface_state().nest.word == "読"
     )
 
 
@@ -175,7 +190,12 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
     # the new word.
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
+        "読",
+        100.0,
+        300.0,
+        40.0,
     )  # origin = id(読む panel)
     submitter = _submitter(r)
     call = submitter.calls.pop(0)
@@ -188,37 +208,51 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
         )
     )
     assert (
-        r.tooltip_controller.surface_state().nest.state is None
+        r.turn.tooltip_controller.surface_state().nest.state is None
     )  # the stale open was dropped, not opened onto 見る
 
 
 def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "読", 100.0, 300.0, 40.0
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
+        "読",
+        100.0,
+        300.0,
+        40.0,
     )
     Driver(r).move_to_word(1)
     rebuilt = []
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "engaged_open_panel",
         lambda source, query, **kwargs: rebuilt.append((source, query, kwargs)),
     )
 
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
-    assert rebuilt == [] and r.tooltip_controller.surface_state().nest.state is None
+    assert rebuilt == [] and r.turn.tooltip_controller.surface_state().nest.state is None
 
 
 def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
     r = _reader(tmp_path, worker=True)
     toasts: list = []
-    monkeypatch.setattr(r.notifications, "show", lambda text, _k="ok", _s=2.8: toasts.append(text))
+    monkeypatch.setattr(
+        r.turn.notifications, "show", lambda text, _k="ok", _s=2.8: toasts.append(text)
+    )
     nested_popup.open_kanji(
-        r.tooltip_controller.tip_ports, r.tooltip_controller.panel_ports, "犬", 100.0, 300.0, 40.0
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
+        "犬",
+        100.0,
+        300.0,
+        40.0,
     )  # 犬 isn't in the kanji bank
     assert toasts and "犬" in toasts[0]  # the no-entry toast fired on the tick…
-    assert _submitter(r).calls == [] and r.tooltip_controller.surface_state().nest.state is None
+    assert (
+        _submitter(r).calls == [] and r.turn.tooltip_controller.surface_state().nest.state is None
+    )
 
 
 def test_cross_reference_link_open_defers(tmp_path):
@@ -228,15 +262,15 @@ def test_cross_reference_link_open_defers(tmp_path):
     r = _reader(tmp_path, worker=True)
     lb = LinkBox("見る", 10, 20, 40, 40)
     tooltip.nested_popup.open_link(
-        r.tooltip_controller.tip_ports,
-        r.tooltip_controller.panel_ports,
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
         lb,
-        r.tooltip_controller.surface_state().view.xy,
-        r.tooltip_controller.surface_state().view.scroll,
+        r.turn.tooltip_controller.surface_state().view.xy,
+        r.turn.tooltip_controller.surface_state().view.scroll,
     )
-    assert r.tooltip_controller.surface_state().nest.state is None and _submitter(r).calls
+    assert r.turn.tooltip_controller.surface_state().nest.state is None and _submitter(r).calls
     _submitter(r).finish()
     assert (
-        r.tooltip_controller.surface_state().nest.state is not None
-        and r.tooltip_controller.surface_state().nest.word == "見る"
+        r.turn.tooltip_controller.surface_state().nest.state is not None
+        and r.turn.tooltip_controller.surface_state().nest.word == "見る"
     )

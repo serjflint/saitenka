@@ -14,7 +14,7 @@ For each disputed fact or policy, record:
 - whether the path observes an immutable fact, requests an intent, performs a physical apply, or preserves
   policy/write authority.
 
-Existing arity, host-mass, runtime-status, and cluster-map outputs are mechanical evidence. They do not see
+Existing arity, host-mass, and cluster-map outputs are mechanical evidence. They do not see
 every Protocol, callback, endpoint, wrapper, or nested value and cannot prove authority retirement alone.
 Use symbol references and a focused AST/source guard when the claimed boundary warrants enforcement.
 

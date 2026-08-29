@@ -91,7 +91,6 @@ The tools exist so this review is cheap; `poe arch-map` alone feeds four axes.
 ```sh
 uv run poe arch-map          # imports + cycles classified, owner->features->events, commands, seams
 uv run poe cluster-map       # what a module touches on the host, by fact; --member NAME for the sites
-uv run poe runtime-status
 ```
 
 The four ratchets have a **gate** form and a **census** form, and the gate form is in `poe all` — so

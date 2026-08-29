@@ -36,11 +36,11 @@ def _reader_showing_the_cue() -> SessionController:
             prefetch=False,
         ),
     )
-    reader.refresh_osd()
+    reader.turn.refresh_osd()
     ipc.props["sub-text"] = CUE
-    reader.playback_observation.observe("sub-text", CUE)
+    reader.turn.playback_observation.observe("sub-text", CUE)
     reader.pump()
-    assert reader.subtitle_presentation.cue.current.tokens, (
+    assert reader.turn.subtitle_presentation.cue.current.tokens, (
         "the observed cue should be tokenized before the source changes"
     )
     return reader
@@ -55,10 +55,10 @@ def _srt(tmp_path, name: str = "line.srt"):
 def test_loading_a_subtitle_index_keeps_the_cue_already_on_screen(tmp_path) -> None:
     reader = _reader_showing_the_cue()
 
-    reader.subtitle_navigation.load_index(_srt(tmp_path))
+    reader.turn.subtitle_navigation.load_index(_srt(tmp_path))
 
-    assert [token.surface for token in reader.subtitle_presentation.cue.current.tokens] != []
-    assert reader.playback_observation.cue.text == CUE
+    assert [token.surface for token in reader.turn.subtitle_presentation.cue.current.tokens] != []
+    assert reader.turn.playback_observation.cue.text == CUE
     reader.close()
 
 
@@ -66,11 +66,13 @@ def test_an_unreadable_index_leaves_the_cue_untouched(tmp_path) -> None:
     """The negative control: a fail-soft load returns before replacing the source, so the cue is
     never retired and the reinstall is not what kept it."""
     reader = _reader_showing_the_cue()
-    before = [token.surface for token in reader.subtitle_presentation.cue.current.tokens]
+    before = [token.surface for token in reader.turn.subtitle_presentation.cue.current.tokens]
 
     empty = tmp_path / "empty.srt"
     empty.write_text("", encoding="utf-8")
-    reader.subtitle_navigation.load_index(empty)
+    reader.turn.subtitle_navigation.load_index(empty)
 
-    assert [token.surface for token in reader.subtitle_presentation.cue.current.tokens] == before
+    assert [
+        token.surface for token in reader.turn.subtitle_presentation.cue.current.tokens
+    ] == before
     reader.close()

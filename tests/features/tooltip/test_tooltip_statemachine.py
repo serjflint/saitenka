@@ -44,18 +44,19 @@ _NAV_QUERY = "見*"  # wildcard → always resolves via LinkingDS.search, so nav
 def _fresh_reader():
     """A hi-dpi reader with three hoverable words (the shared LinkingDS entry backs each), crisp on."""
     r = hidpi_reader(2.0)
-    r.subtitle_presentation.renderer = NullRenderer()  # headless; no real mpv subtitle draw
-    r.subtitle_presentation.cue.replace_tokenized(
+    turn = r.turn
+    turn.subtitle_presentation.renderer = NullRenderer()  # headless; no real mpv subtitle draw
+    turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[
             Token("本命", "本命", "ほんめい", "名詞", 0, 2),
             Token("掛ける", "掛ける", "かける", "動詞", 2, 5),
             Token("見る", "見る", "みる", "動詞", 5, 7),
         ]
     )
-    r.subtitle_presentation.cue.replace_geometry(
+    turn.subtitle_presentation.cue.replace_geometry(
         boxes=[WordBox(i, 100, 300 + 60 * i, 40, 40) for i in range(3)]
     )
-    r.tooltip_controller.surface_state().last_mouse = (0, 0)
+    turn.tooltip_controller.surface_state().last_mouse = (0, 0)
     return r
 
 
@@ -65,6 +66,7 @@ def _assert_agrees(reader, *, nested: bool) -> None:
     Only the on-screen window is measured + tested — you can only click what's drawn, and a full-panel
     measure per step is too slow across a stateful run (the corners get covered as scroll moves the
     window)."""
+    reader = reader.turn
     panel, s, scroll = tooltip_panel.hit_target(
         reader.tooltip_controller.surface_state().nest,
         reader.tooltip_controller.surface_state().view.state,
@@ -137,7 +139,8 @@ def _assert_agrees(reader, *, nested: bool) -> None:
 class TooltipSession(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.r = _fresh_reader()
+        self.session = _fresh_reader()
+        self.r = self.session.turn
         self.shown = False
         self.nav_depth = 0
         self.nested_open = False
@@ -230,9 +233,9 @@ class TooltipSession(RuleBasedStateMachine):
         event(
             f"action={action} view={view} scale={self.r.tooltip_controller.scale().raster}"
         )  # drift-gate signal
-        _assert_agrees(self.r, nested=False)
+        _assert_agrees(self.session, nested=False)
         if self.r.tooltip_controller.surface_state().nest.state is not None:
-            _assert_agrees(self.r, nested=True)
+            _assert_agrees(self.session, nested=True)
 
 
 TestTooltipSession = pytest.mark.integration(TooltipSession.TestCase)
@@ -243,8 +246,9 @@ def test_the_agreement_oracle_has_teeth() -> None:
     # Negative control (arm-2 oracle-liveness made permanent): the invariant isn't vacuous. Correct
     # displayed centres round-trip, but a deliberately DRIFTED transform mis-hits — so a real seam
     # regression (a stale scroll / scale / panel after some transition) would turn the state machine red.
-    r = _fresh_reader()
-    Driver(r).move_to_word(0)
+    session = _fresh_reader()
+    r = session.turn
+    Driver(session).move_to_word(0)
     panel, s, scroll = tooltip_panel.hit_target(
         r.tooltip_controller.surface_state().nest,
         r.tooltip_controller.surface_state().view.state,

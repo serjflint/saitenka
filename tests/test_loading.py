@@ -45,10 +45,12 @@ def test_draw_loading_paints_one_timer_authorized_frame():
     from saitenka.app.overlay_ids import OverlayId
 
     r = build_session(FakeIPC())
-    r.profile_session.begin_loading()
-    assert r.ipc.fire_runtime_timer("lifecycle:loading-frame")
+    r.turn.profile_session.begin_loading()
+    assert r.turn.ipc.fire_runtime_timer("lifecycle:loading-frame")
     adds = [
-        command for command in r.ipc.commands if command[:2] == ("overlay-add", OverlayId.LOADING)
+        command
+        for command in r.turn.ipc.commands
+        if command[:2] == ("overlay-add", OverlayId.LOADING)
     ]
     assert len(adds) == 1
 
@@ -138,14 +140,14 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
     _install(ipc)
     r = build_session(ipc)
     ipc.drain_events()
-    r.ov = _RecOv()
+    r.turn.ov = _RecOv()
     # plain path -> no dict/tokenize deps needed to raster a cue
-    r.track_commands.declare(SubtitleLanguageChanged("en"))
-    r.set_subtitle("hello")
-    assert r.subtitle_presentation.renderer.logged_first
+    r.turn.track_commands.declare(SubtitleLanguageChanged("en"))
+    r.turn.set_subtitle("hello")
+    assert r.turn.subtitle_presentation.renderer.logged_first
     assert ("show-text", "", 1) not in ipc.commands
 
-    r._mark_interactive_ready()
+    r.turn._mark_interactive_ready()
     ipc.drain_events()
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
@@ -158,14 +160,14 @@ def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
     _install(ipc)
     r = build_session(ipc)
     ipc.drain_events()
-    r.playback_observation.install_seed({"osd-dimensions": unavailable})
+    r.turn.playback_observation.install_seed({"osd-dimensions": unavailable})
 
-    r._mark_interactive_ready()
+    r.turn._mark_interactive_ready()
     ipc.drain_events()
     assert ("show-text", "", 1) not in ipc.commands
 
-    r.playback_observation.install_seed({"osd-dimensions": {"w": 1920, "h": 1080}})
-    r._mark_interactive_ready()
+    r.turn.playback_observation.install_seed({"osd-dimensions": {"w": 1920, "h": 1080}})
+    r.turn._mark_interactive_ready()
     ipc.drain_events()
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
@@ -287,10 +289,10 @@ def test_apply_deps_stops_the_spinner():
     from saitenka.app.overlay_ids import OverlayId
 
     r = build_session(FakeIPC())
-    r.profile_session.begin_loading()
-    r.profile_session.accept(DependencyBundle(r.profile_session.identity))
-    assert r.profile_session.loading is False
-    assert ("overlay-remove", OverlayId.LOADING) in r.ipc.commands
+    r.turn.profile_session.begin_loading()
+    r.turn.profile_session.accept(DependencyBundle(r.turn.profile_session.identity))
+    assert r.turn.profile_session.loading is False
+    assert ("overlay-remove", OverlayId.LOADING) in r.turn.ipc.commands
 
 
 def test_load_deps_async_uses_a_custom_build():
@@ -300,19 +302,19 @@ def test_load_deps_async_uses_a_custom_build():
     from util import FakeIPC
 
     r = build_session(FakeIPC())
-    r.ov = _RecOv()
+    r.turn.ov = _RecOv()
     called = {"n": 0}
 
     def _build():
         called["n"] += 1
         return "SCORER", None, None, None
 
-    r.profile_session.load({}, build=_build)
-    assert r.profile_session.loading is True  # spinner armed immediately (subs draw meanwhile)
-    await_ready(lambda: r.profile_session.ready, "the build thread never published deps")
+    r.turn.profile_session.load({}, build=_build)
+    assert r.turn.profile_session.loading is True  # spinner armed immediately (subs draw meanwhile)
+    await_ready(lambda: r.turn.profile_session.ready, "the build thread never published deps")
     assert called["n"] == 1
-    r.profile_session.drain()
-    assert r.profile_session.scorer == "SCORER" and r.profile_session.loading is False
+    r.turn.profile_session.drain()
+    assert r.turn.profile_session.scorer == "SCORER" and r.turn.profile_session.loading is False
 
 
 def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
@@ -331,14 +333,14 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
 
     fut = rd.begin_deps_build({}, _build)  # hoisted: runs before the reader exists
     r = build_session(FakeIPC())
-    r.ov = _RecOv()
-    r.profile_session.load({}, prebuilt=fut)  # consume the in-flight build, don't restart it
-    await_ready(lambda: r.profile_session.ready, "the build thread never published deps")
+    r.turn.ov = _RecOv()
+    r.turn.profile_session.load({}, prebuilt=fut)  # consume the in-flight build, don't restart it
+    await_ready(lambda: r.turn.profile_session.ready, "the build thread never published deps")
     assert (
         built["n"] == 1
     )  # built exactly once — by begin_deps_build, not re-run by load_deps_async
-    r.profile_session.drain()
-    assert r.profile_session.scorer == "SCORER"
+    r.turn.profile_session.drain()
+    assert r.turn.profile_session.scorer == "SCORER"
 
 
 def test_each_entrypoint_declares_its_own_startup_hint() -> None:

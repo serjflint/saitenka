@@ -60,6 +60,7 @@ SCENARIOS: dict[str, list[Step]] = {
 def _apply(reader, action: str, arg: object) -> None:
     # `hover` and `scroll` enter below the input seam, for the reasons the state machine's own rules
     # give: the fixture's tooltip covers words 1–2, and a scroll offset is what the oracle is about.
+    reader = reader.turn
     if action == "hover":
         reader.tooltip_controller.show_tooltip(int(arg))  # type: ignore[arg-type]
     elif action == "scroll":
@@ -102,13 +103,13 @@ def _apply(reader, action: str, arg: object) -> None:
 @pytest.mark.parametrize("scenario", list(SCENARIOS), ids=list(SCENARIOS))
 def test_session_replay_keeps_the_seam_under_each_backend(scenario, backend_name, backend):
     reader = _fresh_reader()
-    reader.tooltip_controller.visual.backend = (
+    reader.turn.tooltip_controller.visual.backend = (
         backend  # every Panel.from_rows now builds via this engine
     )
-    reader.tooltip_controller.visual.backend_name = backend_name
+    reader.turn.tooltip_controller.visual.backend_name = backend_name
     for action, arg in SCENARIOS[scenario]:
         _apply(reader, action, arg)
         # The render↔hit-test agreement holds after every transition, base panel and (when open) nested.
         _assert_agrees(reader, nested=False)
-        if reader.tooltip_controller.surface_state().nest.state is not None:
+        if reader.turn.tooltip_controller.surface_state().nest.state is not None:
             _assert_agrees(reader, nested=True)

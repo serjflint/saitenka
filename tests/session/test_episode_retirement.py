@@ -122,13 +122,13 @@ def test_rebinding_the_episode_retires_the_slots_with_the_container(request, mon
     reader = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
     request.addfinalizer(reader.close)
     removed: list[int] = []
-    monkeypatch.setattr(reader.lifecycle_surfaces, "remove", removed.append)
-    reader.command_runtime.handle(app_bindings.TRANS_MSG)
-    reader._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
+    monkeypatch.setattr(reader.turn.lifecycle_surfaces, "remove", removed.append)
+    reader.turn.command_runtime.handle(app_bindings.TRANS_MSG)
+    reader.turn._subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
     removed.clear()
 
-    reader.reslot_ports.rebind_episode()
+    reader.turn.reslot_ports.rebind_episode()
 
-    assert reader._subtitle_tracks.current == SubtitleTrackState()
-    assert reader.translation_controller.state.held  # the hold is session-lived
+    assert reader.turn._subtitle_tracks.current == SubtitleTrackState()
+    assert reader.turn.translation_controller.state.held  # the hold is session-lived
     assert removed == [OverlayId.TRANS]

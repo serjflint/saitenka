@@ -63,11 +63,11 @@ def test_a_command_reaches_its_handler_once_through_the_reactor(monkeypatch) -> 
     reader.start()
     handled: list[str] = []
     monkeypatch.setattr(
-        reader.command_runtime, "handle", lambda command: handled.append(command.name)
+        reader.turn.command_runtime, "handle", lambda command: handled.append(command.name)
     )
     try:
         ipc.emit({"event": "client-message", "args": ["saitenka-help"]})
-        reader._drain_events()
+        reader.turn._drain_events()
     finally:
         reader.close()
         gateway.close()
@@ -101,13 +101,13 @@ def test_the_transport_decides_whether_a_claimed_command_runs(monkeypatch, trans
     reader.start()
     handled: list[str] = []
     monkeypatch.setattr(
-        reader.command_runtime, "handle", lambda command: handled.append(command.name)
+        reader.turn.command_runtime, "handle", lambda command: handled.append(command.name)
     )
     try:
         if transport_lost:
             gateway.publish_session_event(ConnectionLost(0))
         ipc.emit({"event": "client-message", "args": ["saitenka-help"]})
-        reader._drain_events()
+        reader.turn._drain_events()
         outcomes = gateway.snapshot.command_outcomes
     finally:
         reader.close()

@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from saitenka.app.config import ReaderOptions, load_config
 from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
-from saitenka.app.session.factory import SessionServices, create_session_controller
+from saitenka.app.session.factory import (
+    LiveSession,
+    SessionServices,
+    _compose_session,
+)
 from saitenka.app.tokenize import Token, tokenize
 from saitenka.mpvio.osd import to_bgra, to_bgra_array
 from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
@@ -38,6 +42,7 @@ from saitenka.runtime.jobs import NoSessionRuntime
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
+    from saitenka.app.session.turn import SessionTurn
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
 
@@ -48,6 +53,34 @@ _STRESS_CACHE_CAP = 24
 _SCROLL_JANK_STEPS = (
     40  # --scroll-jank: wheel steps DOWN into each entry (bounds tall-entry render time)
 )
+
+
+@dataclass(slots=True)
+class BenchmarkSession:
+    live: LiveSession
+    turn: SessionTurn
+
+    def pump(self, timeout: float | None = 0.0) -> bool:
+        return self.live.pump(timeout)
+
+    def run(self) -> None:
+        self.live.run()
+
+    def request_stop(self) -> None:
+        self.live.request_stop()
+
+    def close(self):
+        return self.live.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.turn, name)
+
+
+def create_session_controller(*args: Any, **kwargs: Any) -> BenchmarkSession:
+    """Expose the internal graph only inside this structural benchmark."""
+    live, turn, _prepared = _compose_session(*args, **kwargs)
+    return BenchmarkSession(live, turn)
+
 
 # Hand-picked multi-sense words Serj still sees pathological first lookups on: very polysemous
 # common words whose monolingual entries are enormous (手 alone is ~100 senses in a big monolingual dict).
@@ -1736,7 +1769,7 @@ def run_timeline(
             # update_prefetch renders the CURRENT line's words as engaged HEADS (prefetch_decode
             # kind="head") — the path a real session (see the report) spends most prefetch time on.
             # Passive (mouse-away) cues stay decode-only WARM, matching idle watching.
-            reader._mouse_in = i % hover_every == 0
+            reader.turn._mouse_in = i % hover_every == 0
             reader.tooltip_controller.update_prefetch()
             time.sleep(dwell_s)  # idle: the real background prefetch threads run during this window
             if head_prefetch > 0:
@@ -2013,7 +2046,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
                 if ev["kind"] == "cue":
                     ci = (ci + 1) % len(cues)
                     reader.set_subtitle(cues[ci].text)
-                    reader._mouse_in = True
+                    reader.turn._mouse_in = True
                     reader.tooltip_controller.update_prefetch()  # engaged: workers warm the current line's heads
                     rss_peak = max(rss_peak, _rss_mb())
                 elif ev["kind"] == "hover":

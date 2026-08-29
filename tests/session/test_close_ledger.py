@@ -115,7 +115,7 @@ def test_a_wedged_participant_is_reported_and_close_still_finishes() -> None:
         def cancel_all(self) -> None:
             raise RuntimeError("wedged")
 
-    reader.tooltip_controller.surface_state().jobs = Wedged()  # type: ignore[assignment]
+    reader.turn.tooltip_controller.surface_state().jobs = Wedged()  # type: ignore[assignment]
     ledger = reader.close()
 
     report = ledger.report()
@@ -136,13 +136,13 @@ def test_a_late_participant_failing_does_not_lose_the_scratch_directory(attribut
             prefetch=False,
         ),
     )
-    scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
+    scratch = reader.turn.mining_controller._scratch_dir  # lifecycle artifact under test
 
     class Wedged:
         def close(self) -> None:
             raise RuntimeError("wedged")
 
-    getattr(reader, attribute).close = Wedged().close
+    getattr(reader.turn, attribute).close = Wedged().close
     ledger = reader.close()
 
     assert ledger.report() is not None
@@ -268,11 +268,11 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
             prefetch=False,
         ),
     )
-    reader.command_runtime.install_input()
-    reader.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
-    reader._mouse.sync()
+    reader.turn.command_runtime.install_input()
+    reader.turn.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
+    reader.turn._mouse.sync()
     try:
-        assert reader._mouse_captured  # negative control: there is a capture to hand back
+        assert reader.turn._mouse_captured  # negative control: there is a capture to hand back
         ledger = reader.close()
     finally:
         gateway.close()
@@ -351,7 +351,7 @@ def test_the_runtime_removes_the_scratch_directory_when_it_owns_the_session() ->
             prefetch=False,
         ),
     )
-    scratch = reader.mining_controller._scratch_dir  # lifecycle artifact under test
+    scratch = reader.turn.mining_controller._scratch_dir  # lifecycle artifact under test
     assert scratch.exists()  # negative control
     try:
         ledger = reader.close()
@@ -438,7 +438,7 @@ def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
         ),
     )
     closed: list[str] = []
-    reader.lifecycle_surfaces.close = _RecordingSurfaces(closed).close  # type: ignore[method-assign]
+    reader.turn.lifecycle_surfaces.close = _RecordingSurfaces(closed).close  # type: ignore[method-assign]
 
     reader.close()
 
@@ -713,8 +713,8 @@ def test_a_runtime_resource_failure_reaches_the_returned_close_ledger() -> None:
     def fail_backlog() -> None:
         raise RuntimeError("backlog close failed")
 
-    reader.history.close_backlog = fail_backlog  # type: ignore[method-assign]
-    reader.mining_controller.close_store = lambda: retired.append("mined")  # type: ignore[method-assign]
+    reader.turn.history.close_backlog = fail_backlog  # type: ignore[method-assign]
+    reader.turn.mining_controller.close_store = lambda: retired.append("mined")  # type: ignore[method-assign]
     try:
         ledger = reader.close()
     finally:
@@ -820,7 +820,7 @@ def test_a_missing_surface_resource_falls_back_before_the_overlay_transport_clos
         ),
     )
     order: list[str] = []
-    reader.lifecycle_surfaces.close = _RecordingSurfaces(  # type: ignore[method-assign]
+    reader.turn.lifecycle_surfaces.close = _RecordingSurfaces(  # type: ignore[method-assign]
         order, "surfaces"
     ).close
     gateway.session_resources[OVERLAY_RESOURCE] = _RecordingSurfaces(order, "overlay")
@@ -852,7 +852,7 @@ def test_a_missing_runtime_resource_is_reported_as_refused_close_work() -> None:
     )
     released: list[str] = []
 
-    reader._mouse.release = lambda: released.append("capture")  # type: ignore[method-assign]
+    reader.turn._mouse.release = lambda: released.append("capture")  # type: ignore[method-assign]
     del gateway.session_resources[INPUT_CAPTURE_RESOURCE]
     try:
         ledger = reader.close()
@@ -885,8 +885,8 @@ def test_a_runtime_owned_session_closes_its_stores_exactly_once() -> None:
         ),
     )
     closed: list[str] = []
-    reader.history.close_backlog = lambda: closed.append("backlog")  # type: ignore[method-assign]
-    reader.mining_controller.close_store = lambda: closed.append("mined")  # type: ignore[method-assign]
+    reader.turn.history.close_backlog = lambda: closed.append("backlog")  # type: ignore[method-assign]
+    reader.turn.mining_controller.close_store = lambda: closed.append("mined")  # type: ignore[method-assign]
     try:
         ledger = reader.close()
     finally:
@@ -915,8 +915,8 @@ def test_a_runtime_owned_session_closes_the_subtitle_raster_exactly_once() -> No
         ),
     )
     closed: list[str] = []
-    reader.subtitle_presentation.clear_pixels = lambda: closed.append("clear")  # type: ignore[method-assign]
-    reader.subtitle_presentation.close_raster = lambda: closed.append("close")  # type: ignore[method-assign]
+    reader.turn.subtitle_presentation.clear_pixels = lambda: closed.append("clear")  # type: ignore[method-assign]
+    reader.turn.subtitle_presentation.close_raster = lambda: closed.append("close")  # type: ignore[method-assign]
     try:
         ledger = reader.close()
     finally:

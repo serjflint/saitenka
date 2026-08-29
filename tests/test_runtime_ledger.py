@@ -50,7 +50,7 @@ def test_a_live_session_records_what_its_reducers_reported() -> None:
     ledger = gateway.session_ledger
     assert ledger is not None
     try:
-        reader._entry.runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
+        reader.turn.entry_runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
         reader.close()
     finally:
         gateway.close()
@@ -78,7 +78,7 @@ def test_an_event_no_owner_claims_is_counted_rather_than_dropped() -> None:
 
     gateway.publish_session_event(RawMpvEvent("seek"))
     try:
-        reader._entry.runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
+        reader.turn.entry_runtime.run_until(lambda: bool(ledger.counts), timeout=1.0)
     finally:
         gateway.close()
 

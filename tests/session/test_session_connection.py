@@ -110,8 +110,8 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
         ),
     )
     try:
-        reader._drain_event(LOST)
-        reader._drain_event(UserCommand("saitenka-help", command_id=7))
+        reader.turn._drain_event(LOST)
+        reader.turn._drain_event(UserCommand("saitenka-help", command_id=7))
     finally:
         reader.close()
 
@@ -179,7 +179,7 @@ def test_a_file_load_reaches_the_reslot_through_an_effect(monkeypatch) -> None:
         ),
     )
     reader.start()
-    monkeypatch.setattr(reader, "_on_file_loaded", lambda: reslotted.append("reslot"))
+    monkeypatch.setattr(reader.turn, "_on_file_loaded", lambda: reslotted.append("reslot"))
     try:
         gateway.publish_session_event(FileLoaded())
         ipc.drain_events(0.0)

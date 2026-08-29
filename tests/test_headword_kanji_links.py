@@ -67,45 +67,45 @@ def _fixture_ds(tmp_path):
 
 def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_fixture_ds(tmp_path)))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("読む", "読む", "よむ", "動詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     ui = Driver(r)
     ui.move_to_word(0)  # base tooltip for 読む, through hit-testing rather than a poke
 
     lb = next(
         b
-        for b in r.tooltip_controller.surface_state().view.state.windowed.link_boxes()
+        for b in r.turn.tooltip_controller.surface_state().view.state.windowed.link_boxes()
         if b.query == "kanji:読"
     )
-    sx, sy = r.tooltip_controller.surface_state().view.xy
-    base = r.tooltip_controller.surface_state().view.state
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
+    base = r.turn.tooltip_controller.surface_state().view.state
     ui.move(
         sx + lb.x + lb.w / 2,
-        sy + (lb.y - r.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
+        sy + (lb.y - r.turn.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
     ).click()
 
     # A click must NEVER spawn a nested popup (hover-governed → self-dismisses unless the cursor chases
     # it); a headword kanji navigates the base tooltip IN PLACE, Yomitan-style.
-    assert not r.tooltip_controller.hover_view().nested.shown
+    assert not r.turn.tooltip_controller.hover_view().nested.shown
     # Content swapped to 読's kanji entry, previous view pushed for back. len==1 is only reached when
     # kanji_for('読') resolved and installed — a dead/missing kanji would leave the stack empty.
     assert (
-        r.tooltip_controller.surface_state().view.state is not None
-        and r.tooltip_controller.surface_state().view.state is not base
+        r.turn.tooltip_controller.surface_state().view.state is not None
+        and r.turn.tooltip_controller.surface_state().view.state is not base
     )
-    assert r.tooltip_controller.observation().navigation_depth == 1
+    assert r.turn.tooltip_controller.observation().navigation_depth == 1
     # A navigated view is keyless — not a subtitle token, so scroll won't rebuild it from a token.
     assert (
-        r.tooltip_controller.surface_state().view.key is None
-        and r.tooltip_controller.surface_state().tip_tok is None
+        r.turn.tooltip_controller.surface_state().view.key is None
+        and r.turn.tooltip_controller.surface_state().tip_tok is None
     )
     # Reversible: back restores the base 読む tooltip.
     from saitenka.app.features.tooltip import tooltip
 
-    assert tooltip.tip_back(r.tooltip_controller.tip_ports) is True
-    assert r.tooltip_controller.surface_state().view.state is base
+    assert tooltip.tip_back(r.turn.tooltip_controller.tip_ports) is True
+    assert r.turn.tooltip_controller.surface_state().view.state is base

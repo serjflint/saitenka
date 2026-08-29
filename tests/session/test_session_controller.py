@@ -12,7 +12,7 @@ from session_builder import build_session
 from util import FakeIPC as RuntimeFakeIPC
 from util import await_ready, keybind_registry, runtime_gateway
 
-import saitenka.app.session.controller as C
+import saitenka.app.session.turn as C
 from saitenka.app import bindings, subtitle_adapter
 from saitenka.app import bindings as app_bindings
 from saitenka.app.anki import MineConfig
@@ -55,14 +55,14 @@ class FakeIPC(RuntimeFakeIPC):
 
 def _enable_mining(r: SessionController, anki=None, config: MineConfig | None = None) -> None:
     target_config = config or MineConfig()
-    identity = r.mining_controller.desired_spec.identity
-    r.mining_controller.select_mining_spec(
+    identity = r.turn.mining_controller.desired_spec.identity
+    r.turn.mining_controller.select_mining_spec(
         MiningSpec(identity, {"deck": target_config.deck, "model": target_config.model})
     )
-    assert r.mining_controller.publish_mining_target(
+    assert r.turn.mining_controller.publish_mining_target(
         MiningTarget(identity, anki or object(), target_config)
     )
-    r.mining_controller.close_capability()
+    r.turn.mining_controller.close_capability()
 
 
 def _captured_prefetch_items(r: SessionController, monkeypatch) -> list[prefetch.PrefetchItem]:
@@ -73,21 +73,21 @@ def _captured_prefetch_items(r: SessionController, monkeypatch) -> list[prefetch
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
-    r.tooltip_controller.update_prefetch()
+    r.turn.tooltip_controller.update_prefetch()
     return items
 
 
 def test_hover_view_snapshots_the_hover_stack():
     r = _reader_with_word(FakeIPC())
     Driver(r).move_to_word(0)
-    r.track_commands.navigation.current.nav_idx = 4
-    r.tooltip_controller.surface_state().nest.word = "読"
-    view = r.tooltip_controller.hover_view()
+    r.turn.track_commands.navigation.current.nav_idx = 4
+    r.turn.tooltip_controller.surface_state().nest.word = "読"
+    view = r.turn.tooltip_controller.hover_view()
     assert view.paused is True
-    assert r.track_commands.navigation.current.nav_idx == 4
+    assert r.turn.track_commands.navigation.current.nav_idx == 4
     assert view.nested.word == "読"
     # a frozen point-in-time copy: later mutation of the reader must not leak into a taken snapshot
-    r.tooltip_controller.release_pause_claim()
+    r.turn.tooltip_controller.release_pause_claim()
     assert view.paused is True
 
 
@@ -97,7 +97,7 @@ def test_every_global_binding_reaches_mpv_as_one_command_string():
     for the section lines that replaced it — each line is `KEY script-message <msg>`.
     """
     ipc = FakeIPC()
-    build_session(ipc, services=SessionServices(anki=object())).command_runtime.install_input()
+    build_session(ipc, services=SessionServices(anki=object())).turn.command_runtime.install_input()
 
     contents = _section(ipc, bindings.GLOBAL_SECTION)[0]
     assert contents, "no global bindings registered"
@@ -147,7 +147,7 @@ def test_the_global_bindings_register_as_one_forced_section():
     """
     ipc = FakeIPC()
 
-    build_session(ipc).command_runtime.install_input()
+    build_session(ipc).turn.command_runtime.install_input()
 
     contents, flags = _section(ipc, bindings.GLOBAL_SECTION)
     assert flags == "force"
@@ -162,7 +162,7 @@ def test_mouse_controls_live_in_a_separate_forced_section():
     Separate from the global one precisely because that must NOT be forced."""
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.command_runtime.install_input()
+    r.turn.command_runtime.install_input()
     contents, flags = _section(ipc, bindings.MOUSE_SECTION)
     name = bindings.MOUSE_SECTION
     assert flags == "force"
@@ -170,13 +170,13 @@ def test_mouse_controls_live_in_a_separate_forced_section():
     assert "WHEEL_UP script-message saitenka-scroll-up" in contents
 
     # no surface up → not enabled; a tooltip up → enabled; gone → disabled
-    r._mouse.sync()
+    r.turn._mouse.sync()
     assert not any(c[0] == "enable-section" and c[1] == name for c in ipc.commands)
-    r.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
-    r._mouse.sync()
+    r.turn.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
+    r.turn._mouse.sync()
     assert ipc.commands[-1][:2] == ("enable-section", name)
-    r.tooltip_controller.surface_state().view.rect = None
-    r._mouse.sync()
+    r.turn.tooltip_controller.surface_state().view.rect = None
+    r.turn._mouse.sync()
     assert ipc.commands[-1] == ("disable-section", name)
 
 
@@ -198,17 +198,19 @@ def test_hover_reacts_to_the_pointer_observation_not_to_a_tick():
     from saitenka.app.subtitles import WordBox
     from saitenka.app.tokenize import Token
 
-    r.subtitle_presentation.cue.replace_tokenized(tokens=[Token("猫", "猫", "ねこ", "名詞", 0, 1)])
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 0, 0, 40, 40)])
-    r.playback_observation.start_session()
-    assert r.tooltip_controller.observation().selected == -1
+    r.turn.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("猫", "猫", "ねこ", "名詞", 0, 1)]
+    )
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 0, 0, 40, 40)])
+    r.turn.playback_observation.start_session()
+    assert r.turn.tooltip_controller.observation().selected == -1
 
     ipc.emit(
         {"event": "property-change", "name": "mouse-pos", "data": {"hover": True, "x": 20, "y": 20}}
     )
-    r._drain_events()
+    r.turn._drain_events()
 
-    assert r.tooltip_controller.observation().selected == 0  # the observation alone moved it
+    assert r.turn.tooltip_controller.observation().selected == 0  # the observation alone moved it
     r.close()
 
 
@@ -218,9 +220,9 @@ def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
     went down would take the mouse back from mpv for nothing."""
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.command_runtime.install_input()
-    r.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
-    r._mouse.sync()
+    r.turn.command_runtime.install_input()
+    r.turn.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
+    r.turn._mouse.sync()
     forced = ipc.commands.count(
         ("enable-section", bindings.MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging")
     )
@@ -236,8 +238,8 @@ def test_mouse_capture_reasserts_itself_until_the_surface_goes_down():
     from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
     identity, due = ipc.timers["lifecycle:mouse-capture-reassert"]  # captured in flight
-    r.tooltip_controller.surface_state().view.rect = None
-    r._mouse.sync()  # surface down → released, and the re-assertion retired with it
+    r.turn.tooltip_controller.surface_state().view.rect = None
+    r.turn._mouse.sync()  # surface down → released, and the re-assertion retired with it
     assert ipc.commands[-1] == ("disable-section", bindings.MOUSE_SECTION)
 
     due(EffectFinished(EffectId(0), Owner.SESSION, identity, EffectOutcome.SUCCEEDED))
@@ -253,7 +255,7 @@ def test_hover_pause_key_is_configurable():
 
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(hover_pause_key="Alt+q"))
-    build_session(ipc, options=options).command_runtime.install_input()
+    build_session(ipc, options=options).turn.command_runtime.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-hover-pause"
 
@@ -264,11 +266,13 @@ def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch):
     ipc = FakeIPC()
     reader = build_session(ipc, options=ReaderOptions(keys=KeyOptions(subtitle_retry_key="Ctrl+r")))
     messages = []
-    monkeypatch.setattr(reader.notifications, "show", lambda text, *_args: messages.append(text))
-    reader.command_runtime.install_input()
+    monkeypatch.setattr(
+        reader.turn.notifications, "show", lambda text, *_args: messages.append(text)
+    )
+    reader.turn.command_runtime.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
 
-    reader.command_runtime.handle(binds["Ctrl+r"].removeprefix("script-message "))
+    reader.turn.command_runtime.handle(binds["Ctrl+r"].removeprefix("script-message "))
 
     assert messages == ["No media loaded for subtitle search"]
 
@@ -281,7 +285,7 @@ def test_sub_nav_keybinds_registered_with_single_string():
     gotcha: split args = key silently dead). z/Z/x are NOT ours — they pass through to mpv's builtin
     repeatable sub-delay bindings, so we must not shadow them."""
     ipc = FakeIPC()
-    build_session(ipc).command_runtime.install_input()
+    build_session(ipc).turn.command_runtime.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     for key in ("Alt+LEFT", "Alt+RIGHT", "Alt+DOWN"):
         assert key in binds, f"{key} not registered; binds={list(binds)}"
@@ -294,25 +298,25 @@ def test_sub_seek_prev_sends_ipc_command():
     """Receiving the sub-prev client-message must send sub-seek -1 to mpv IPC."""
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.command_runtime.install_input()
+    r.turn.command_runtime.install_input()
     binds = keybind_registry(ipc)
     sub_prev_msg = binds.get("Alt+LEFT")
     assert sub_prev_msg, "no Alt+LEFT keybind"
     # Dispatch the message and verify sub-seek -1 was sent
-    r.command_runtime.handle(sub_prev_msg)
+    r.turn.command_runtime.handle(sub_prev_msg)
     assert ("sub-seek", "-1") in [(c[0], c[1]) for c in ipc.commands], (
         f"sub-seek -1 not sent; commands={ipc.commands}"
     )
-    assert r.subtitle_presentation.pipeline.generation == 1
+    assert r.turn.subtitle_presentation.pipeline.generation == 1
 
 
 def test_sub_seek_next_sends_ipc_command():
     """Receiving the sub-next client-message must send sub-seek 1 to mpv IPC."""
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.command_runtime.install_input()
+    r.turn.command_runtime.install_input()
     binds = keybind_registry(ipc)
-    r.command_runtime.handle(binds["Alt+RIGHT"])
+    r.turn.command_runtime.handle(binds["Alt+RIGHT"])
     assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]
 
 
@@ -339,17 +343,17 @@ def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch):
             prefetch=False,
         ),
     )
-    r.set_subtitle("猫を見る")
-    stale = SeekCue(1, r.cue_revision)
-    r.set_subtitle("犬も見る")  # the cue the step was decided against is gone
+    r.turn.set_subtitle("猫を見る")
+    stale = SeekCue(1, r.turn.cue_revision)
+    r.turn.set_subtitle("犬も見る")  # the cue the step was decided against is gone
 
-    assert not r.subtitle_navigation.seek(stale)
+    assert not r.turn.subtitle_navigation.seek(stale)
 
     assert not any(command and command[0] == "sub-seek" for command in ipc.commands)
     (decision,) = [span["attrs"] for span in spans if span["name"] == "sub_nav_identity"]
     assert decision["outcome"] == "superseded"  # dropped out loud, not silently
-    assert r.subtitle_navigation.seek(
-        SeekCue(1, r.cue_revision)
+    assert r.turn.subtitle_navigation.seek(
+        SeekCue(1, r.turn.cue_revision)
     )  # and the current cue still navigates
 
 
@@ -357,9 +361,9 @@ def test_sub_seek_replay_sends_ipc_command():
     """Receiving the sub-replay client-message must send sub-seek 0 to mpv IPC."""
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.command_runtime.install_input()
+    r.turn.command_runtime.install_input()
     binds = keybind_registry(ipc)
-    r.command_runtime.handle(binds["Alt+DOWN"])
+    r.turn.command_runtime.handle(binds["Alt+DOWN"])
     assert ("sub-seek", "0") in [(c[0], c[1]) for c in ipc.commands]
 
 
@@ -372,7 +376,7 @@ def test_sub_nav_config_knobs_respected():
             sub_prev_key="Alt+a", sub_next_key="Alt+d", sub_replay_key="Alt+s"
         ),
     )
-    r.command_runtime.install_input()
+    r.turn.command_runtime.install_input()
     binds = set(keybind_registry(ipc))
     assert "Alt+a" in binds
     assert "Alt+d" in binds
@@ -395,12 +399,12 @@ def _reader_with_index(monkeypatch):
     # schedule/cancel ledger, which is the only place "retired exactly once" is observable.
     ipc = RuntimeFakeIPC()
     r = build_session(ipc)
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     monkeypatch.setattr(
-        r.subtitle_presentation, "renderer", NullRenderer()
+        r.turn.subtitle_presentation, "renderer", NullRenderer()
     )  # skip the raster; assert state only
-    r.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_NAV_SRT))
-    r.command_runtime.install_input()
+    r.turn.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_NAV_SRT))
+    r.turn.command_runtime.install_input()
     return r, ipc
 
 
@@ -414,11 +418,11 @@ def test_anchor_snaps_the_nearest_cue_start_to_the_playhead(monkeypatch):
     # One-press manual re-time: at playhead 9s the nearest cue is さん (@10s), so sub-delay shifts by
     # -1s to land it here — every later cue follows by the same offset (fixes residual auto-sync drift).
     r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r.notifications, "show", lambda *_a, **_k: None)
+    monkeypatch.setattr(r.turn.notifications, "show", lambda *_a, **_k: None)
     ipc.props["time-pos"] = 9.0
     ipc.props["sub-delay"] = 0.0
 
-    r.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
+    r.turn.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
 
     assert ("set_property", "sub-delay", "-1.000") in ipc.commands
 
@@ -427,11 +431,11 @@ def test_anchor_is_cumulative_from_the_current_delay(monkeypatch):
     # A second anchor refines a first: from an existing +2s delay, snapping さん (@10s) to playhead 13s
     # sets an absolute delay of +3s (13 - 10), not +2 plus a fresh guess.
     r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r.notifications, "show", lambda *_a, **_k: None)
+    monkeypatch.setattr(r.turn.notifications, "show", lambda *_a, **_k: None)
     ipc.props["time-pos"] = 13.0
     ipc.props["sub-delay"] = 2.0
 
-    r.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
+    r.turn.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
 
     assert ("set_property", "sub-delay", "3.000") in ipc.commands
 
@@ -440,10 +444,10 @@ def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch):
     ipc = FakeIPC()
     r = build_session(ipc)
     messages: list[str] = []
-    monkeypatch.setattr(r.notifications, "show", lambda text, *_a: messages.append(text))
-    r.track_commands.navigation.current.sub_index = None
+    monkeypatch.setattr(r.turn.notifications, "show", lambda text, *_a: messages.append(text))
+    r.turn.track_commands.navigation.current.sub_index = None
 
-    r.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
+    r.turn.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
 
     assert messages == ["No subtitle track to anchor"]
     assert not [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
@@ -465,21 +469,23 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
 
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.toast = lambda *_a, **_k: None  # instance-shadow the toast; assert the delay, not the OSD
-    r.track_commands.navigation.current.sub_index = CueIndex(
+    r.turn.toast = lambda *_a, **_k: (
+        None
+    )  # instance-shadow the toast; assert the delay, not the OSD
+    r.turn.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(s / 1000, s / 1000 + 1.0, "x") for s in sorted(starts_ms)]
     )
     playhead, delay = playhead_ms / 1000, delay_ms / 1000
     ipc.props["time-pos"] = playhead
     ipc.props["sub-delay"] = delay
 
-    r.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
+    r.turn.command_runtime.handle(app_bindings.SUB_ANCHOR_MSG)
 
     emitted = [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
     assert emitted, "anchor must set sub-delay"
     new_delay = float(emitted[-1][2])
     nearest = min(
-        r.track_commands.navigation.current.sub_index.cues,
+        r.turn.track_commands.navigation.current.sub_index.cues,
         key=lambda c: abs((c.start + delay) - playhead),
     )
     assert abs((nearest.start + new_delay) - playhead) < 1e-3  # ±the 3-decimal delay quantisation
@@ -489,10 +495,12 @@ def test_mine_current_video_forces_the_animated_clip(monkeypatch):
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
     _enable_mining(r)
-    r.tooltip_controller.select(0)
+    r.turn.tooltip_controller.select(0)
     captured: dict = {}
-    monkeypatch.setattr(r.mining_controller, "mine_index", lambda _index, **k: captured.update(k))
-    r.command_runtime.handle(bindings.MINE_VIDEO_MSG)
+    monkeypatch.setattr(
+        r.turn.mining_controller, "mine_index", lambda _index, **k: captured.update(k)
+    )
+    r.turn.command_runtime.handle(bindings.MINE_VIDEO_MSG)
     assert captured == {
         "animated": True
     }  # the video-mine shortcut forces a motion clip for this mine
@@ -508,7 +516,7 @@ def test_mine_keybinds_register_even_when_anki_absent():
     ipc = FakeIPC()
     build_session(
         ipc, services=SessionServices(anki=None)
-    ).command_runtime.install_input()  # Anki not up yet (the attach-mode reality)
+    ).turn.command_runtime.install_input()  # Anki not up yet (the attach-mode reality)
     assert _msg_for(ipc, "Ctrl+m") == MINE_MSG
     assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG
     assert _msg_for(ipc, "Shift+m") == MINE_ALL_MSG
@@ -520,17 +528,17 @@ def test_mine_video_key_registers_and_routes_to_the_video_mine(monkeypatch):
     ipc = FakeIPC()
     reader = _reader_with_word(ipc)
     _enable_mining(reader)
-    reader.tooltip_controller.select(0)
-    reader.command_runtime.install_input()  # mine bindings require anki
+    reader.turn.tooltip_controller.select(0)
+    reader.turn.command_runtime.install_input()  # mine bindings require anki
     assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG  # default shortcut is bound
     # and the message routes to the video-mine action (not the still mine)
     calls: list = []
     monkeypatch.setattr(
-        reader.mining_controller,
+        reader.turn.mining_controller,
         "mine_index",
         lambda _index, **kwargs: calls.append(kwargs),
     )
-    reader.command_runtime.handle(MINE_VIDEO_MSG)
+    reader.turn.command_runtime.handle(MINE_VIDEO_MSG)
     assert calls == [{"animated": True}]
 
 
@@ -539,11 +547,11 @@ def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
     sub-seek so the video catches up behind it."""
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
-    r.set_subtitle("いち")  # currently on cue 1
+    r.turn.set_subtitle("いち")  # currently on cue 1
     ipc.props["sub-start"] = 1.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert (
-        r.playback_observation.cue.text == "に"
+        r.turn.playback_observation.cue.text == "に"
     )  # cue 2 rendered instantly, before any seek settles
     assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]  # video seek still fired
 
@@ -572,22 +580,22 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
         def activate(self, _target=None, _sid=None, /) -> bool:
             reader = self._reader
             track_id = SubtitleTrackId("track-1")
-            source_order = {"いち": 1, "に": 2}[reader.playback_observation.cue.text]
+            source_order = {"いち": 1, "に": 2}[reader.turn.playback_observation.cue.text]
             event_id = SubtitleEventId(
                 track_id, source_order * 1_000, source_order * 1_000 + 500, 0, source_order
             )
             request = GeometryRequest(
-                reader.subtitle_presentation.pipeline.generation,
+                reader.turn.subtitle_presentation.pipeline.generation,
                 track_id,
                 SubtitleFrameId(track_id, (event_id,)),
                 source_order * 1_000,
-                reader.screen.osd,
-                reader.screen.osd,
+                reader.turn.screen.osd,
+                reader.turn.screen.osd,
                 b"[Script Info]\n",
             )
-            ticket = reader.subtitle_presentation.pipeline.prepare(request)
+            ticket = reader.turn.subtitle_presentation.pipeline.prepare(request)
             assert ticket is not None
-            assert reader.subtitle_presentation.pipeline.publish(
+            assert reader.turn.subtitle_presentation.pipeline.publish(
                 ticket,
                 GeometrySnapshot(
                     request.generation,
@@ -601,42 +609,44 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
             return True
 
     r, ipc = _reader_with_index(monkeypatch)
-    r.subtitle_presentation.renderer = PublishingRenderer(r)
+    r.turn.subtitle_presentation.renderer = PublishingRenderer(r)
     ipc.props["sub-text"] = "いち"
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
 
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
 
-    assert r.subtitle_presentation.pipeline.current is not None
-    assert r.subtitle_presentation.pipeline.current.frame_id.active_event_ids[0].source_order == 2
+    assert r.turn.subtitle_presentation.pipeline.current is not None
+    assert (
+        r.turn.subtitle_presentation.pipeline.current.frame_id.active_event_ids[0].source_order == 2
+    )
 
 
 def test_sub_nav_prev_and_replay(monkeypatch):
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("に")  # cue 2
+    r.turn.set_subtitle("に")  # cue 2
     ipc.props["sub-start"] = 4.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+LEFT"))
-    assert r.playback_observation.cue.text == "いち" and ("sub-seek", "-1") in [
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+LEFT"))
+    assert r.turn.playback_observation.cue.text == "いち" and ("sub-seek", "-1") in [
         (c[0], c[1]) for c in ipc.commands
     ]
-    r.set_subtitle("に")
+    r.turn.set_subtitle("に")
     ipc.props["sub-start"] = 4.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+DOWN"))  # replay → same cue
-    assert r.playback_observation.cue.text == "に"
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+DOWN"))  # replay → same cue
+    assert r.turn.playback_observation.cue.text == "に"
 
 
 def test_sub_nav_chains_forward_with_stale_position(monkeypatch):
     """Rapid next/next while the seek is still in flight (sub-start/time-pos stale) must keep
     stepping forward, resolved by the rendered text + the _nav_idx hint."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0  # stale for the whole burst (video hasn't caught up)
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.playback_observation.cue.text == "に"
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.turn.playback_observation.cue.text == "に"
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert (
-        r.playback_observation.cue.text == "さん"
+        r.turn.playback_observation.cue.text == "さん"
     )  # advanced past cue 2 despite the stale sub-start
 
 
@@ -644,10 +654,10 @@ def test_sub_nav_from_a_gap_opens_the_upcoming_cue(monkeypatch):
     """Navigating NEXT while no sub is on screen (a gap) must land ON the upcoming cue — matching
     mpv's sub-seek 1 — not skip past it."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("")  # nothing showing (between cues)
+    r.turn.set_subtitle("")  # nothing showing (between cues)
     ipc.props["time-pos"] = 8.5  # gap before cue 3 (starts at 10.0)
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.playback_observation.cue.text == "さん"  # cue 3, the upcoming one — not skipped
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.turn.playback_observation.cue.text == "さん"  # cue 3, the upcoming one — not skipped
 
 
 def test_sub_nav_records_otel_sub_seek_metric(monkeypatch):
@@ -658,14 +668,14 @@ def test_sub_nav_records_otel_sub_seek_metric(monkeypatch):
 
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
-        r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+        r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
         snap = otel_metrics.snapshot()
         assert snap["saitenka.sub_seek.duration_ms"]["count"] == 1
         # cue_redraw fires from set_subtitle nested inside the sub_seek span above (the initial
@@ -691,7 +701,7 @@ def test_sub_nav_span_and_cue_redraw_span_share_a_trace(monkeypatch, tmp_path):
 
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
 
     trace_path = tmp_path / "trace.json"
@@ -710,7 +720,7 @@ def test_sub_nav_span_and_cue_redraw_span_share_a_trace(monkeypatch, tmp_path):
     set_tracer_provider(provider)
     span_gate.set(value=True)
     try:
-        r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+        r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
         processor.force_flush()
     finally:
         span_gate.set(value=False)
@@ -734,13 +744,13 @@ def test_reconcile_records_otel_sub_text_reconcile_metric(monkeypatch):
     from saitenka import otel_metrics
 
     r, _ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
-        r.subtitle_navigation.reconcile(
+        r.turn.subtitle_navigation.reconcile(
             "に"
         )  # a genuine mpv-driven change, not a no-op/settle-guard swallow
         snap = otel_metrics.snapshot()
@@ -754,12 +764,12 @@ def test_reconcile_records_otel_sub_text_reconcile_metric(monkeypatch):
 def test_sub_nav_without_index_only_seeks(monkeypatch):
     ipc = FakeIPC()
     r = build_session(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.set_subtitle("いち")
-    r.command_runtime.install_input()
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.set_subtitle("いち")
+    r.turn.command_runtime.install_input()
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert (
-        r.playback_observation.cue.text == "いち"
+        r.turn.playback_observation.cue.text == "いち"
     )  # no index → overlay unchanged; mpv drives it via the seek
     assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]
 
@@ -768,25 +778,27 @@ def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch):
     """After a nav render, an empty sub-text within the settle window is ignored (no blank flash);
     a non-empty mpv value (source of truth) reconciles and disarms the guard."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.playback_observation.cue.text == "に"  # rendered target
-    r.subtitle_navigation.reconcile("")  # mpv's mid-seek blank
-    assert r.playback_observation.cue.text == "に"  # swallowed — overlay didn't flash to nothing
-    r.subtitle_navigation.reconcile("に")  # mpv settled on the matching cue
-    assert r.playback_observation.cue.text == "に"
-    r.subtitle_navigation.reconcile("さん")  # a genuine later change still adopts mpv's truth
-    assert r.playback_observation.cue.text == "さん"
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.turn.playback_observation.cue.text == "に"  # rendered target
+    r.turn.subtitle_navigation.reconcile("")  # mpv's mid-seek blank
+    assert (
+        r.turn.playback_observation.cue.text == "に"
+    )  # swallowed — overlay didn't flash to nothing
+    r.turn.subtitle_navigation.reconcile("に")  # mpv settled on the matching cue
+    assert r.turn.playback_observation.cue.text == "に"
+    r.turn.subtitle_navigation.reconcile("さん")  # a genuine later change still adopts mpv's truth
+    assert r.turn.playback_observation.cue.text == "さん"
 
 
 def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     """Outside the settle window an empty sub-text is honoured (a real gap between cues clears it)."""
     r, _ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("に")
-    r.subtitle_navigation.retire_settle()  # window already closed
-    r.subtitle_navigation.reconcile("")
-    assert r.playback_observation.cue.text == ""
+    r.turn.set_subtitle("に")
+    r.turn.subtitle_navigation.retire_settle()  # window already closed
+    r.turn.subtitle_navigation.reconcile("")
+    assert r.turn.playback_observation.cue.text == ""
 
 
 # --- WP4.5 gate: the settle timer is retired exactly once, by each of its four triggers ---------
@@ -797,10 +809,10 @@ _SETTLE = "subtitle:navigation-settle"
 def _navigated(monkeypatch):
     """A reader mid-navigation: the settle window is open and its deadline is scheduled."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.track_commands.navigation.current.sub_settle.open
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.turn.track_commands.navigation.current.sub_settle.open
     assert ipc.timer_calls(_SETTLE) == ["schedule"]
     return r, ipc
 
@@ -808,20 +820,20 @@ def _navigated(monkeypatch):
 def test_a_reconcile_cancels_the_settle_timer_exactly_once(monkeypatch):
     r, ipc = _navigated(monkeypatch)
 
-    r.subtitle_navigation.reconcile("さん")  # a genuine later cue closes the window
-    r.subtitle_navigation.reconcile(
+    r.turn.subtitle_navigation.reconcile("さん")  # a genuine later cue closes the window
+    r.turn.subtitle_navigation.reconcile(
         "よん"
     )  # a second reconcile must not cancel a window that is gone
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
-    assert not r.track_commands.navigation.current.sub_settle.open
+    assert not r.turn.track_commands.navigation.current.sub_settle.open
 
 
 def test_a_source_replacement_cancels_the_settle_timer_exactly_once(monkeypatch):
     r, ipc = _navigated(monkeypatch)
 
-    r._cue.replace_source("/media/next.srt", reason="test")
-    r._cue.replace_source("/media/third.srt", reason="test")
+    r.turn._cue.replace_source("/media/next.srt", reason="test")
+    r.turn._cue.replace_source("/media/third.srt", reason="test")
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
 
@@ -833,20 +845,20 @@ def test_close_cancels_the_settle_timer(monkeypatch):
     r.close()
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
-    assert not r.track_commands.navigation.current.sub_settle.open
+    assert not r.turn.track_commands.navigation.current.sub_settle.open
 
 
 def test_a_late_due_from_a_superseded_navigation_leaves_the_new_window_open(monkeypatch):
     """The classic race: the first nav's deadline arrives after a second nav opened its own."""
     r, ipc = _navigated(monkeypatch)
     stale = ipc.timers[_SETTLE][0]
-    r.command_runtime.handle(
+    r.turn.command_runtime.handle(
         _msg_for(ipc, "Alt+RIGHT")
     )  # supersede: a second nav, a second deadline
 
-    r.subtitle_navigation.settle_due(stale)
+    r.turn.subtitle_navigation.settle_due(stale)
 
-    assert r.track_commands.navigation.current.sub_settle.open
+    assert r.turn.track_commands.navigation.current.sub_settle.open
 
 
 def test_the_matching_due_closes_the_window_without_a_cancel(monkeypatch):
@@ -855,7 +867,7 @@ def test_the_matching_due_closes_the_window_without_a_cancel(monkeypatch):
 
     assert ipc.fire_runtime_timer(_SETTLE)
 
-    assert not r.track_commands.navigation.current.sub_settle.open
+    assert not r.turn.track_commands.navigation.current.sub_settle.open
     assert ipc.timer_calls(_SETTLE) == ["schedule"]
 
 
@@ -867,19 +879,20 @@ def test_repeated_empty_observation_is_idempotent(monkeypatch):
     from saitenka import otel_metrics
 
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("に")
+    r.turn.set_subtitle("に")
     metric_reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[metric_reader])
     otel_metrics.register(metric_reader, provider.get_meter("test"))
     try:
-        r.subtitle_navigation.reconcile("")
+        r.turn.subtitle_navigation.reconcile("")
         commands_after_transition = tuple(ipc.commands)
         for _ in range(1_000):
-            r.subtitle_navigation.reconcile("")
+            r.turn.subtitle_navigation.reconcile("")
 
         snap = otel_metrics.snapshot()
         assert (
-            r.playback_observation.cue.text == "" and r.annotation_controller.view.retired is True
+            r.turn.playback_observation.cue.text == ""
+            and r.turn.annotation_controller.view.retired is True
         )
         assert tuple(ipc.commands) == commands_after_transition
         assert snap["saitenka.sub_text_reconcile.duration_ms"]["count"] == 1
@@ -896,67 +909,70 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
     (any set_subtitle call does), breaking next/next/next chaining even though the render was already
     correct at the real target."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")  # cue 1
+    r.turn.set_subtitle("いち")  # cue 1
     ipc.props["sub-start"] = 1.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert (
-        r.playback_observation.cue.text == "に" and r.track_commands.navigation.current.nav_idx == 1
+        r.turn.playback_observation.cue.text == "に"
+        and r.turn.track_commands.navigation.current.nav_idx == 1
     )  # rendered target, chaining hint set
-    r._cue.retire("sub-start")  # seek timing landed after the instant target render
-    r.subtitle_navigation.reconcile("いち")  # mpv transiently re-reports the pre-nav cue mid-seek
-    assert r.playback_observation.cue.text == "に"  # swallowed — no revert flash
+    r.turn._cue.retire("sub-start")  # seek timing landed after the instant target render
+    r.turn.subtitle_navigation.reconcile(
+        "いち"
+    )  # mpv transiently re-reports the pre-nav cue mid-seek
+    assert r.turn.playback_observation.cue.text == "に"  # swallowed — no revert flash
     assert (
-        r.track_commands.navigation.current.nav_idx == 1
+        r.turn.track_commands.navigation.current.nav_idx == 1
     )  # and, unlike a real set_subtitle call, chaining survives
-    r.subtitle_navigation.reconcile(
+    r.turn.subtitle_navigation.reconcile(
         "に"
     )  # mpv settles; identity is reinstalled with the landed timing
     assert (
-        r.playback_observation.cue.text == "に"
-        and r.track_commands.navigation.current.nav_idx == 1
-        and not r.annotation_controller.view.retired
+        r.turn.playback_observation.cue.text == "に"
+        and r.turn.track_commands.navigation.current.nav_idx == 1
+        and not r.turn.annotation_controller.view.retired
     )  # the settled cue is interactive without losing the chaining hint
 
 
 def test_the_settle_deadline_retires_the_window_exactly_once(monkeypatch):
     """The window closes on its named due event, not on a wall clock the reconcile polls."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.track_commands.navigation.current.sub_settle.open
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.turn.track_commands.navigation.current.sub_settle.open
     assert "subtitle:navigation-settle" in ipc.timers
 
     assert ipc.fire_runtime_timer("subtitle:navigation-settle")
 
-    assert r.track_commands.navigation.current.sub_settle.open is False
-    r.subtitle_navigation.reconcile("")  # no longer guarded: a real gap now clears the overlay
-    assert r.playback_observation.cue.text == ""
+    assert r.turn.track_commands.navigation.current.sub_settle.open is False
+    r.turn.subtitle_navigation.reconcile("")  # no longer guarded: a real gap now clears the overlay
+    assert r.turn.playback_observation.cue.text == ""
 
 
 def test_a_superseded_navigation_deadline_cannot_close_the_current_window(monkeypatch):
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    stale = r.track_commands.navigation.current.sub_settle.identity
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))  # a second nav opens its own window
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    stale = r.turn.track_commands.navigation.current.sub_settle.identity
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))  # a second nav opens its own window
 
-    r.subtitle_navigation.settle_due(stale)
+    r.turn.subtitle_navigation.settle_due(stale)
 
-    assert r.track_commands.navigation.current.sub_settle.open
+    assert r.turn.track_commands.navigation.current.sub_settle.open
 
 
 def test_replacing_the_subtitle_source_retires_the_settle_window(monkeypatch):
     r, ipc = _reader_with_index(monkeypatch)
-    r.set_subtitle("いち")
+    r.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
-    r.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.track_commands.navigation.current.sub_settle.open
+    r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.turn.track_commands.navigation.current.sub_settle.open
 
-    r._cue.replace_source("/media/next.mkv", reason="test")
+    r.turn._cue.replace_source("/media/next.mkv", reason="test")
 
-    assert r.track_commands.navigation.current.sub_settle.open is False
+    assert r.turn.track_commands.navigation.current.sub_settle.open is False
     assert "subtitle:navigation-settle" not in ipc.timers
 
 
@@ -972,19 +988,19 @@ def test_settle_guard_reinstalls_retired_identity_for_same_text():
             prefetch=False,
         ),
     )
-    reader.set_subtitle("同じ字幕")
-    reader.track_commands.navigation.current.nav_prev_text = "同じ字幕"
-    reader.track_commands.navigation.current.nav_idx = 1
-    reader.track_commands.navigation.current.sub_settle = (
-        reader.track_commands.navigation.current.sub_settle.begin()
+    reader.turn.set_subtitle("同じ字幕")
+    reader.turn.track_commands.navigation.current.nav_prev_text = "同じ字幕"
+    reader.turn.track_commands.navigation.current.nav_idx = 1
+    reader.turn.track_commands.navigation.current.sub_settle = (
+        reader.turn.track_commands.navigation.current.sub_settle.begin()
     )
-    reader._cue.retire("sub-start")
+    reader.turn._cue.retire("sub-start")
 
-    reader.subtitle_navigation.reconcile("同じ字幕")
+    reader.turn.subtitle_navigation.reconcile("同じ字幕")
 
-    assert reader.annotation_controller.view.retired is False
-    assert reader.annotation_controller.view.identity is not None
-    assert reader.track_commands.navigation.current.nav_idx == 1
+    assert reader.turn.annotation_controller.view.retired is False
+    assert reader.turn.annotation_controller.view.identity is not None
+    assert reader.turn.track_commands.navigation.current.nav_idx == 1
 
 
 def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch):
@@ -998,7 +1014,7 @@ def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch)
             pass
 
     reader, ipc = _reader_with_index(monkeypatch)
-    reader.history.replace_recorder(
+    reader.turn.history.replace_recorder(
         SessionRecorder(
             "/anime/Show 01.mkv",
             clock=lambda: 0.0,
@@ -1006,15 +1022,15 @@ def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch)
             writer=Writer(),
         )
     )
-    reader.set_subtitle("いち")
+    reader.turn.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
-    reader.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
-    count_after_instant_render = reader.history.recorder.snapshot.cue_count
-    reader._cue.retire("sub-start")
+    reader.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
+    count_after_instant_render = reader.turn.history.recorder.snapshot.cue_count
+    reader.turn._cue.retire("sub-start")
 
-    reader.subtitle_navigation.reconcile("に")
+    reader.turn.subtitle_navigation.reconcile("に")
 
-    assert reader.history.recorder.snapshot.cue_count == count_after_instant_render
+    assert reader.turn.history.recorder.snapshot.cue_count == count_after_instant_render
 
 
 def test_identical_text_navigation_counts_the_landed_cue():
@@ -1039,10 +1055,10 @@ def test_identical_text_navigation_counts_the_landed_cue():
             prefetch=False,
         ),
     )
-    reader.track_commands.navigation.current.sub_index = CueIndex(
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(1.0, 2.0, "同じ"), Cue(3.0, 4.0, "同じ")]
     )
-    reader.history.replace_recorder(
+    reader.turn.history.replace_recorder(
         SessionRecorder(
             "/anime/Show 01.mkv",
             clock=lambda: 0.0,
@@ -1050,15 +1066,15 @@ def test_identical_text_navigation_counts_the_landed_cue():
             writer=Writer(),
         )
     )
-    reader.set_subtitle("同じ")
-    reader.subtitle_navigation.navigate(1)
-    assert reader.history.recorder.snapshot.cue_count == 1
+    reader.turn.set_subtitle("同じ")
+    reader.turn.subtitle_navigation.navigate(1)
+    assert reader.turn.history.recorder.snapshot.cue_count == 1
     ipc.props.update({"sub-start": 3.0, "sub-end": 4.0})
-    reader._cue.retire("sub-start")
+    reader.turn._cue.retire("sub-start")
 
-    reader.subtitle_navigation.reconcile("同じ")
+    reader.turn.subtitle_navigation.reconcile("同じ")
 
-    assert reader.history.recorder.snapshot.cue_count == 2
+    assert reader.turn.history.recorder.snapshot.cue_count == 2
 
 
 def test_navigation_hands_a_filtered_episode_back_to_mpv():
@@ -1079,13 +1095,13 @@ def test_navigation_hands_a_filtered_episode_back_to_mpv():
             prefetch=False,
         ),
     )
-    reader.track_commands.navigation.current.sub_index = CueIndex(
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")]
     )
-    reader.set_subtitle("いち")
+    reader.turn.set_subtitle("いち")
 
-    assert reader.subtitle_navigation.navigate(1) is False
-    assert reader.playback_observation.cue.text == "いち", (
+    assert reader.turn.subtitle_navigation.navigate(1) is False
+    assert reader.turn.playback_observation.cue.text == "いち", (
         "the overlay was moved onto a cue mpv may not show"
     )
 
@@ -1106,21 +1122,21 @@ def test_navigation_stays_instant_without_a_filter():
             prefetch=False,
         ),
     )
-    reader.track_commands.navigation.current.sub_index = CueIndex(
+    reader.turn.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")]
     )
-    reader.set_subtitle("いち")
+    reader.turn.set_subtitle("いち")
 
-    assert reader.subtitle_navigation.navigate(1) is True
-    assert reader.playback_observation.cue.text == "に"
+    assert reader.turn.subtitle_navigation.navigate(1) is True
+    assert reader.turn.playback_observation.cue.text == "に"
 
 
 def test_reader_has_subtitle_state_before_any_cue():
     r = build_session(FakeIPC())
     assert (
-        r.playback_observation.cue.text == ""
-        and r.subtitle_presentation.cue.current.tokens == []
-        and r.tooltip_controller.observation().selected == -1
+        r.turn.playback_observation.cue.text == ""
+        and r.turn.subtitle_presentation.cue.current.tokens == []
+        and r.turn.tooltip_controller.observation().selected == -1
     )
 
 
@@ -1142,18 +1158,18 @@ def test_paused_draw_schedules_and_fires_an_osd_nudge():
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     ipc.props["pause"] = True
     r = build_session(ipc)
-    r.refresh_osd()
+    r.turn.refresh_osd()
     ipc.props["sub-text"] = "いち"
     # mpv reports the cue; the drain reconciles it
-    r.playback_observation.observe("sub-text", "いち")
+    r.turn.playback_observation.observe("sub-text", "いち")
     r.pump()  # adopts the cue → draws SUB_ID while paused → arms the nudge
-    assert r._nudge_pending is True
+    assert r.turn._nudge_pending is True
     before = _count_adds(ipc)
 
     assert ipc.fire_runtime_timer("lifecycle:paused-repaint")
 
     assert _count_adds(ipc) > before  # repaint re-issued the live overlay(s)
-    assert r._nudge_pending is False
+    assert r.turn._nudge_pending is False
 
 
 def test_a_burst_of_paused_draws_repaints_once():
@@ -1163,11 +1179,11 @@ def test_a_burst_of_paused_draws_repaints_once():
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     ipc.props["pause"] = True
     r = build_session(ipc)
-    r.refresh_osd()
+    r.turn.refresh_osd()
     ipc.props["sub-text"] = "いち"
-    r.playback_observation.observe("sub-text", "いち")
+    r.turn.playback_observation.observe("sub-text", "いち")
     r.pump()
-    r.playback_observation.observe("sub-text", "に")
+    r.turn.playback_observation.observe("sub-text", "に")
     r.pump()  # a second paused draw, before the first nudge was ever delivered
     before = _count_adds(ipc)
 
@@ -1175,7 +1191,7 @@ def test_a_burst_of_paused_draws_repaints_once():
     assert not ipc.fire_runtime_timer("lifecycle:paused-repaint")  # only one was ever pending
 
     assert _count_adds(ipc) > before
-    assert r._nudge_pending is False
+    assert r.turn._nudge_pending is False
 
 
 def test_playing_draw_does_not_nudge():
@@ -1184,14 +1200,14 @@ def test_playing_draw_does_not_nudge():
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     ipc.props["pause"] = False
     r = build_session(ipc)
-    r.refresh_osd()
+    r.turn.refresh_osd()
     ipc.props["sub-text"] = "いち"
-    r.playback_observation.observe("sub-text", "いち")
+    r.turn.playback_observation.observe("sub-text", "いち")
     r.pump()
     assert (
-        r.playback_observation.cue.text == "いち"
+        r.turn.playback_observation.cue.text == "いち"
     )  # the cue really did draw — otherwise the nudge check is vacuous
-    assert r._nudge_pending is False
+    assert r.turn._nudge_pending is False
 
 
 def test_overlay_repaint_reissues_live_overlays():
@@ -1220,14 +1236,14 @@ def test_paused_nudge_records_otel_counters():
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     ipc.props["pause"] = True
     r = build_session(ipc)
-    r.refresh_osd()
+    r.turn.refresh_osd()
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
         ipc.props["sub-text"] = "いち"
         # mpv reports the cue; the drain reconciles it
-        r.playback_observation.observe("sub-text", "いち")
+        r.turn.playback_observation.observe("sub-text", "いち")
         r.pump()  # a draw lands while paused → osd.paused_draw, arms the nudge
         assert ipc.fire_runtime_timer("lifecycle:paused-repaint")  # → osd.paused_nudge
         snap = otel_metrics.snapshot()
@@ -1248,7 +1264,7 @@ def test_stall_stays_quiet_when_ipc_alive_but_no_subs(caplog):
     ipc._bytes_read = 500  # mpv's replies ARE arriving
     r = build_session(ipc)
     with caplog.at_level(logging.WARNING):
-        r._check_startup_health()
+        r.turn._check_startup_health()
     assert not [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
 
 
@@ -1262,23 +1278,23 @@ def test_stall_warns_when_read_direction_is_dead(caplog):
     ipc._bytes_read = 0  # dead read direction
     r = build_session(ipc)
     with caplog.at_level(logging.WARNING):
-        r._check_startup_health()
+        r.turn._check_startup_health()
     assert any("IPC looks dead" in rec.message for rec in caplog.records)
 
 
 def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.subtitle_presentation.cue.replace_tokenized(tokens=["a", "b"])
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=["a", "b"])
     seen = []
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "set_hover",
-        lambda i: (seen.append(i), r.tooltip_controller.select(i)),
+        lambda i: (seen.append(i), r.turn.tooltip_controller.select(i)),
     )
     # word 0 near (5,5), word 1 near (5,50); tooltip is off elsewhere
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "hit",
         lambda _x, y: 0 if y < 10 else (1 if y < 60 else -1),
     )
@@ -1289,15 +1305,15 @@ def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
         Driver(r, instant=False).move(x, y)
 
     mouse(5, 5)  # first hover → opens INSTANTLY (no dwell)
-    assert seen == [0] and r.tooltip_controller.observation().selected == 0
+    assert seen == [0] and r.turn.tooltip_controller.observation().selected == 0
     mouse(5, 50)  # transit onto word 1 en route to the tooltip
     assert (
-        r.tooltip_controller.observation().selected == 0
+        r.turn.tooltip_controller.observation().selected == 0
     )  # …does NOT switch yet: the dwell is armed, not elapsed
     mouse(5, 50)  # still resting there — re-arming the same word must not re-fire
-    assert r.tooltip_controller.observation().selected == 0
+    assert r.turn.tooltip_controller.observation().selected == 0
     assert _fire_dwell(ipc, "hover-switch")  # rested long enough on word 1
-    assert r.tooltip_controller.observation().selected == 1  # …now it switches
+    assert r.turn.tooltip_controller.observation().selected == 1  # …now it switches
 
 
 def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
@@ -1313,8 +1329,8 @@ def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
     """
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.configure_delays(scan=0.25)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.configure_delays(scan=0.25)
     _hover_base_word(r)
     _hover_first_scan_cell(r)  # arms the scan dwell
 
@@ -1326,19 +1342,19 @@ def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
 
     due(EffectFinished(EffectId(0), Owner.INTERACTION, identity, EffectOutcome.SUCCEEDED))
 
-    assert not r.tooltip_controller.hover_view().nested.shown  # the revision fence rejected it
-    assert r.tooltip_controller.hover_view().scan_target is None
+    assert not r.turn.tooltip_controller.hover_view().nested.shown  # the revision fence rejected it
+    assert r.turn.tooltip_controller.hover_view().scan_target is None
 
 
 def test_transit_over_word_does_not_switch(monkeypatch):
     # dragging up to the tooltip: brush word 1, then reach the tooltip — tooltip must stay on word 0
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.subtitle_presentation.cue.replace_tokenized(tokens=["a", "b"])
-    r.tooltip_controller.surface_state().view.rect = (100, 100, 80, 60)
-    monkeypatch.setattr(r.tooltip_controller, "set_hover", r.tooltip_controller.select)
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=["a", "b"])
+    r.turn.tooltip_controller.surface_state().view.rect = (100, 100, 80, 60)
+    monkeypatch.setattr(r.turn.tooltip_controller, "set_hover", r.turn.tooltip_controller.select)
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "hit",
         lambda _x, y: 0 if y < 10 else (1 if y < 60 else -1),
     )
@@ -1355,26 +1371,26 @@ def test_transit_over_word_does_not_switch(monkeypatch):
     assert _fire_dwell(ipc, "hover-switch")  # the dwell for the brushed word lands late…
 
     assert (
-        r.tooltip_controller.observation().selected == 0
-        and not r.tooltip_controller.hover_view().tip.hide_pending
+        r.turn.tooltip_controller.observation().selected == 0
+        and not r.turn.tooltip_controller.hover_view().tip.hide_pending
     )  # …and is ignored
 
 
 def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.subtitle_presentation.cue.replace_tokenized(tokens=["x"])
-    r.tooltip_controller.surface_state().view.rect = (100, 100, 60, 40)
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=["x"])
+    r.turn.tooltip_controller.surface_state().view.rect = (100, 100, 60, 40)
     # Both halves of the hover fact are stubbed: this test is about the DWELL, not about what a
     # build or a teardown does — the panel build needs a dictionary this SessionController has no use for.
-    monkeypatch.setattr(r.tooltip_controller, "set_hover", r.tooltip_controller.select)
+    monkeypatch.setattr(r.turn.tooltip_controller, "set_hover", r.turn.tooltip_controller.select)
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "retire_hover",
-        r.tooltip_controller.retire_selection,
+        r.turn.tooltip_controller.retire_selection,
     )
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "hit",
         lambda x, y: 0 if (x < 10 and y < 10) else -1,
     )
@@ -1386,26 +1402,26 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
 
     mouse(5, 5)  # on the word → hovered, no pending hide
     assert (
-        r.tooltip_controller.observation().selected == 0
-        and not r.tooltip_controller.hover_view().tip.hide_pending
+        r.turn.tooltip_controller.observation().selected == 0
+        and not r.turn.tooltip_controller.hover_view().tip.hide_pending
     )
 
     mouse(300, 300)  # left the word → schedule hide, still shown
     assert (
-        r.tooltip_controller.observation().selected == 0
-        and r.tooltip_controller.hover_view().tip.hide_pending
+        r.turn.tooltip_controller.observation().selected == 0
+        and r.turn.tooltip_controller.hover_view().tip.hide_pending
     )
 
     mouse(120, 120)  # reached the tooltip in time → stays alive
     assert (
-        not r.tooltip_controller.hover_view().tip.hide_pending
-        and r.tooltip_controller.observation().selected == 0
+        not r.turn.tooltip_controller.hover_view().tip.hide_pending
+        and r.turn.tooltip_controller.observation().selected == 0
     )
 
     mouse(300, 300)  # leave everything → reschedule hide
-    assert r.tooltip_controller.hover_view().tip.hide_pending
+    assert r.turn.tooltip_controller.hover_view().tip.hide_pending
     assert _fire_dwell(ipc, "tooltip-hide")  # …and let it elapse
-    assert r.tooltip_controller.observation().selected == -1  # hidden only after the delay
+    assert r.turn.tooltip_controller.observation().selected == -1  # hidden only after the delay
 
 
 def test_tooltip_capped_and_inside_safe_area():
@@ -1413,21 +1429,23 @@ def test_tooltip_capped_and_inside_safe_area():
     from saitenka.app.tokenize import tokenize
 
     r = build_session(FakeIPC(), options=ReaderOptions().with_overrides(tip_max_frac=0.5))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(tokens=tokenize("本"))
-    r.subtitle_presentation.cue.replace_geometry(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=tokenize("本"))
+    r.turn.subtitle_presentation.cue.replace_geometry(
         boxes=[WordBox(0, 900, 1000, 40, 40)]
     )  # word near the bottom (like a subtitle)
     Driver(r).move_to_word(0)
 
     # osd == REFERENCE (1080p) so tip_scale.display == 1.0 → viewport px are display px.
     margin = max(16, round(1080 * 0.05))
-    assert r.tooltip_controller.surface_state().view.view_h <= round(1080 * 0.5)  # height capped
-    _tx, ty = r.tooltip_controller.surface_state().view.xy
+    assert r.turn.tooltip_controller.surface_state().view.view_h <= round(
+        1080 * 0.5
+    )  # height capped
+    _tx, ty = r.turn.tooltip_controller.surface_state().view.xy
     assert ty >= margin  # top clears the header margin
     assert (
-        ty + r.tooltip_controller.surface_state().view.view_h <= 1080 - margin
+        ty + r.turn.tooltip_controller.surface_state().view.view_h <= 1080 - margin
     )  # bottom stays inside the window
 
 
@@ -1444,18 +1462,18 @@ def test_panel_cache_avoids_rerender_on_revisit(monkeypatch):
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=FakeDS()))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[
             Token("本命", "本命", "ほんめい", "名詞", 0, 2),
             Token("読む", "読む", "よむ", "動詞", 2, 4),
         ]
     )
-    r.subtitle_presentation.cue.replace_geometry(
+    r.turn.subtitle_presentation.cue.replace_geometry(
         boxes=[WordBox(0, 100, 100, 40, 40), WordBox(1, 200, 100, 40, 40)]
     )
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())  # keep our boxes
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())  # keep our boxes
     ui = Driver(r)
     ui.move_to_word(0)
     ui.move_to_word(1)
@@ -1477,20 +1495,20 @@ def test_panel_cache_records_otel_render_and_cache_metrics(monkeypatch):
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=FakeDS()))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     # Two words, because a hit needs a *revisit*: hovering the word already hovered is not a second
     # lookup on the real input path — the cursor has to leave and come back for the cache to answer.
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[
             Token("本命", "本命", "ほんめい", "名詞", 0, 2),
             Token("読む", "読む", "よむ", "動詞", 2, 4),
         ]
     )
-    r.subtitle_presentation.cue.replace_geometry(
+    r.turn.subtitle_presentation.cue.replace_geometry(
         boxes=[WordBox(0, 100, 100, 40, 40), WordBox(1, 200, 100, 40, 40)]
     )
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())  # keep our boxes
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())  # keep our boxes
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
@@ -1527,12 +1545,12 @@ def _reader_with_word(ipc):
         ),
         options=ReaderOptions().with_overrides(pause_on_tooltip=True),
     )
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
     return r
 
 
@@ -1540,11 +1558,11 @@ def test_pause_on_tooltip_pauses_then_resumes(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())  # keep our boxes
-    r.tooltip_controller.show_tooltip(0)  # tooltip shown → pause
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())  # keep our boxes
+    r.turn.tooltip_controller.show_tooltip(0)  # tooltip shown → pause
     assert ("set_property", "pause", True) in ipc.commands
-    r.tooltip_controller.select(0)
-    r.tooltip_controller.retire_hover()  # tooltip hidden → resume
+    r.turn.tooltip_controller.select(0)
+    r.turn.tooltip_controller.retire_hover()  # tooltip hidden → resume
     assert ("set_property", "pause", False) in ipc.commands
 
 
@@ -1556,9 +1574,9 @@ def test_set_hover_refuses_the_nothing_hovered_sentinel():
     next caller re-introduce it.
     """
     r = _reader_with_word(FakeIPC())
-    r.tooltip_controller.select(0)
+    r.turn.tooltip_controller.select(0)
     with pytest.raises(ValueError, match="retire_hover"):
-        r.tooltip_controller.set_hover(-1)
+        r.turn.tooltip_controller.set_hover(-1)
 
 
 def test_pause_on_tooltip_respects_manual_pause():
@@ -1566,7 +1584,7 @@ def test_pause_on_tooltip_respects_manual_pause():
     ipc.props["pause"] = True  # user already paused
     r = _reader_with_word(ipc)
     Driver(r).move_to_word(0)
-    assert not r.tooltip_controller.hover_view().paused  # never took ownership → won't resume
+    assert not r.turn.tooltip_controller.hover_view().paused  # never took ownership → won't resume
 
 
 def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
@@ -1574,22 +1592,24 @@ def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
     Driver(r).move_to_word(0)
-    monkeypatch.setattr(r.notifications, "show", lambda *_args: None)
-    r.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
+    monkeypatch.setattr(r.turn.notifications, "show", lambda *_args: None)
+    r.turn.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
     assert ("set_property", "pause", False) in ipc.commands
 
 
 def test_hover_pause_toggle_changes_state_and_reports_it(monkeypatch):
     r = _reader_with_word(FakeIPC())
     messages = []
-    monkeypatch.setattr(r.notifications, "show", lambda text, _kind="ok": messages.append(text))
-    r.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
-    assert (r.tooltip_controller.observation().pause_enabled, messages) == (
+    monkeypatch.setattr(
+        r.turn.notifications, "show", lambda text, _kind="ok": messages.append(text)
+    )
+    r.turn.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
+    assert (r.turn.tooltip_controller.observation().pause_enabled, messages) == (
         False,
         ["hover auto-pause: off"],
     )
-    r.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
-    assert (r.tooltip_controller.observation().pause_enabled, messages) == (
+    r.turn.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
+    assert (r.turn.tooltip_controller.observation().pause_enabled, messages) == (
         True,
         ["hover auto-pause: off", "hover auto-pause: on"],
     )
@@ -1599,8 +1619,8 @@ def test_hover_pause_toggle_preserves_external_pause(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r.notifications, "show", lambda *_args: None)
-    r.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
+    monkeypatch.setattr(r.turn.notifications, "show", lambda *_args: None)
+    r.turn.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
     assert ("set_property", "pause", False) not in ipc.commands
 
 
@@ -1608,8 +1628,8 @@ def test_hover_pause_toggle_disables_future_hover_pause(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r.notifications, "show", lambda *_args: None)
-    r.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
+    monkeypatch.setattr(r.turn.notifications, "show", lambda *_args: None)
+    r.turn.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG)
     Driver(r).move_to_word(0)
     assert ("set_property", "pause", True) not in ipc.commands
 
@@ -1618,7 +1638,7 @@ def test_prefetch_queues_full_render_when_paused(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
-    r.playback_observation.install_seed({"sub-text": "本命"})
+    r.turn.playback_observation.install_seed({"sub-text": "本命"})
     queued = _captured_prefetch_items(r, monkeypatch)
     assert [i.token.surface for i in queued] == ["本命"]  # the content word got queued
     assert all(i.full for i in queued)  # engaged → a hover is imminent, full panel render
@@ -1632,9 +1652,9 @@ def test_prefetch_queues_cheap_warm_while_just_playing(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False  # playing, not engaged
     r = _reader_with_word(ipc)
-    g0 = r.tooltip_preparation.generation
+    g0 = r.turn.tooltip_preparation.generation
     item = _captured_prefetch_items(r, monkeypatch)[0]
-    assert r.tooltip_preparation.generation == g0 + 1
+    assert r.turn.tooltip_preparation.generation == g0 + 1
     assert item.token.surface == "本命"
     assert item.full is False  # idle-time warm only, no layout/drawing
 
@@ -1644,24 +1664,24 @@ def test_prefetch_worker_warms_cache_then_close_joins():
     gateway = runtime_gateway(ipc)
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
-    r.tooltip_controller.start_prefetch()
+    r.turn.tooltip_controller.start_prefetch()
     try:
-        r.tooltip_controller.update_prefetch()  # queue 本命 for the worker
+        r.turn.tooltip_controller.update_prefetch()  # queue 本命 for the worker
         key = PanelKey(
             lemma="本命",
             surface="本命",
             reading="ほんめい",
             inflected="本命",
-            width=r.tooltip_controller.scale().width,
+            width=r.turn.tooltip_controller.scale().width,
             anki_ok=False,  # no anki configured
             mined=False,
         )
         await_ready(
-            lambda: key in r.tooltip_controller.surface_state().panel_cache,
+            lambda: key in r.turn.tooltip_controller.surface_state().panel_cache,
             "the prefetch never warmed the panel",
         )
         assert (
-            key in r.tooltip_controller.surface_state().panel_cache
+            key in r.turn.tooltip_controller.surface_state().panel_cache
         )  # prefetched in the background, no hover needed
     finally:
         r.close()
@@ -1671,13 +1691,13 @@ def test_prefetch_worker_warms_cache_then_close_joins():
 def test_hover_off_window_still_lingers(monkeypatch):
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.subtitle_presentation.cue.replace_tokenized(tokens=["x"])
-    r.tooltip_controller.select(0)
-    monkeypatch.setattr(r.tooltip_controller, "set_hover", r.tooltip_controller.select)
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=["x"])
+    r.turn.tooltip_controller.select(0)
+    monkeypatch.setattr(r.turn.tooltip_controller, "set_hover", r.turn.tooltip_controller.select)
     Driver(r, instant=False).leave()  # cursor left the window
     assert (
-        r.tooltip_controller.observation().selected == 0
-        and r.tooltip_controller.hover_view().tip.hide_pending
+        r.turn.tooltip_controller.observation().selected == 0
+        and r.turn.tooltip_controller.hover_view().tip.hide_pending
     )  # scheduled, not instant
 
 
@@ -1703,12 +1723,12 @@ def _tall_reader(ipc, *, tts: bool | None = None):
     from saitenka.app.tokenize import Token
 
     r = build_session(ipc, services=SessionServices(dictionaries=_TallDS(), tts=tts))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
     return r
 
 
@@ -1716,20 +1736,21 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     # Viewport-first, windowed: a tall entry measures only the head that fills the viewport on show;
     # the windowed engine composites (and measures) the deferred tail as the user scrolls down.
     r = _tall_reader(FakeIPC())
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     Driver(r).move_to_word(0)
-    wp = r.tooltip_controller.surface_state().view.state.windowed
+    wp = r.turn.tooltip_controller.surface_state().view.state.windowed
     assert wp.measured < wp.count  # head only — the whole tall panel was NOT rendered up front
     assert (
-        r.tooltip_controller.surface_state().view.view_h >= r.tooltip_controller.scale().cap - 1
+        r.turn.tooltip_controller.surface_state().view.view_h
+        >= r.turn.tooltip_controller.scale().cap - 1
     )  # …but the viewport is fully covered
     assert (
-        r.tooltip_controller.hover_view().tip.full_height
-        >= r.tooltip_controller.surface_state().view.view_h
+        r.turn.tooltip_controller.hover_view().tip.full_height
+        >= r.turn.tooltip_controller.surface_state().view.view_h
     )  # estimate at least fills the viewport
     before = wp.measured
-    r.tooltip_controller.scroll_tip(
-        r.tooltip_controller.surface_state().view.state.full_height
+    r.turn.tooltip_controller.scroll_tip(
+        r.turn.tooltip_controller.surface_state().view.state.full_height
     )  # wheel toward the bottom
     assert wp.measured > before  # scrolling measured more blocks (the deferred tail)
 
@@ -1738,9 +1759,11 @@ def _add_button_center(r) -> tuple[float, float]:
     """Screen coords of the ⊕ in the card header."""
     from saitenka.panel import header_add_rect
 
-    px, py, pw, ph = header_add_rect(r.tooltip_controller.scale().width)
-    sx, sy = r.tooltip_controller.surface_state().view.xy
-    return sx + px + pw / 2, sy + (py - r.tooltip_controller.surface_state().view.scroll) + ph / 2
+    px, py, pw, ph = header_add_rect(r.turn.tooltip_controller.scale().width)
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
+    return sx + px + pw / 2, sy + (
+        py - r.turn.tooltip_controller.surface_state().view.scroll
+    ) + ph / 2
 
 
 def _point_at_add_button(r) -> Driver:
@@ -1753,12 +1776,12 @@ def test_header_add_button_click_mines_hovered_word(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc, tts=True)
     _enable_mining(r)
-    r.tooltip_controller.select(0)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.show_tooltip(0)
+    r.turn.tooltip_controller.select(0)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.show_tooltip(0)
     events = []
     monkeypatch.setattr(
-        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+        r.turn.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
     )
     monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
     _point_at_add_button(r).click()
@@ -1770,15 +1793,15 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)
     _enable_mining(r)
-    r.tooltip_controller.select(0)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.show_tooltip(0)
+    r.turn.tooltip_controller.select(0)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.show_tooltip(0)
     events = []
     monkeypatch.setattr(
-        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+        r.turn.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
     )
     monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
-    tx, ty, tw, th = r.tooltip_controller.surface_state().view.rect
+    tx, ty, tw, th = r.turn.tooltip_controller.surface_state().view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + th - 5).click()  # low in the body
     assert events == []  # neither speaks nor mines
 
@@ -1788,15 +1811,15 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
 
     ipc = FakeIPC()
     r = _tall_reader(ipc, tts=True)
-    r.tooltip_controller.select(0)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.show_tooltip(0)
+    r.turn.tooltip_controller.select(0)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.show_tooltip(0)
     events = []
     monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
-    px, py, pw, ph = header_speaker_rect(r.tooltip_controller.scale().width)
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    px, py, pw, ph = header_speaker_rect(r.turn.tooltip_controller.scale().width)
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
     Driver(r, instant=False).move(
-        sx + px + pw / 2, sy + (py - r.tooltip_controller.surface_state().view.scroll) + ph / 2
+        sx + px + pw / 2, sy + (py - r.turn.tooltip_controller.surface_state().view.scroll) + ph / 2
     ).click()
     assert events == ["speak"]  # only the 🔊 button plays audio
 
@@ -1804,15 +1827,15 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
 def test_header_add_button_absent_without_anki(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)  # no anki
-    r.tooltip_controller.select(0)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.show_tooltip(0)
+    r.turn.tooltip_controller.select(0)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.show_tooltip(0)
     cx, cy = _add_button_center(r)
     assert not tooltip.hit_header_add(
         tooltip.chrome_for(
-            r.tooltip_controller.surface_state().view,
-            scale=r.tooltip_controller.scale(),
-            style=r.tooltip_controller.panel_style,
+            r.turn.tooltip_controller.surface_state().view,
+            scale=r.turn.tooltip_controller.scale(),
+            style=r.turn.tooltip_controller.panel_style,
         ),
         cx,
         cy,
@@ -1847,12 +1870,12 @@ def _scan_reader(ipc, *, tts: bool | None = None):
         ),
         options=ReaderOptions().with_overrides(scan_delay=0.0),
     )  # open immediately; dwell has its own tests
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
     return r
 
 
@@ -1882,27 +1905,27 @@ def _hover_first_scan_cell(r):
     the path a cursor takes. `instant=False` because these tests deliver their own dwells; an
     arrival that also fired them could not express "just arrived, nothing opens yet".
     """
-    sb = r.tooltip_controller.surface_state().view.state.windowed.scan_boxes()[0]
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    sb = r.turn.tooltip_controller.surface_state().view.state.windowed.scan_boxes()[0]
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
     Driver(r, instant=False).move(
         sx + sb.x + sb.w / 2,
-        sy + (sb.y - r.tooltip_controller.surface_state().view.scroll) + sb.h / 2,
+        sy + (sb.y - r.turn.tooltip_controller.surface_state().view.scroll) + sb.h / 2,
     )
     return sb
 
 
 def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     r = _scan_reader(FakeIPC())
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.select(0)
-    r.tooltip_controller.show_tooltip(0)
-    boxes = r.tooltip_controller.surface_state().view.state.windowed.scan_boxes()
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.select(0)
+    r.turn.tooltip_controller.show_tooltip(0)
+    boxes = r.turn.tooltip_controller.surface_state().view.state.windowed.scan_boxes()
     assert boxes
     sb = boxes[0]
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
     hit = tooltip_panel.scan_hit(
-        r.tooltip_controller.surface_state(),
-        r.tooltip_controller.scale().raster,
+        r.turn.tooltip_controller.surface_state(),
+        r.turn.tooltip_controller.scale().raster,
         sx + sb.x + sb.w / 2,
         sy + sb.y + sb.h / 2,
     )
@@ -1921,12 +1944,15 @@ def _tall_nested_reader(ipc):
         ),
         options=ReaderOptions().with_overrides(scan_delay=0.0),
     )
-    r.screen.osd = (3840, 2160)  # 4K → the hi-dpi native compose path the report was captured on
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (
+        3840,
+        2160,
+    )  # 4K → the hi-dpi native compose path the report was captured on
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
     return r
 
 
@@ -1937,32 +1963,34 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     # composites the SAME panel on every scroll, so each notch measures more of the tail (full_height
     # grows) and the wheel reaches the true bottom. Driven at 4K to exercise the native compose path.
     r = _tall_nested_reader(FakeIPC())
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    tok = r.subtitle_presentation.cue.current.tokens[0]
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    tok = r.turn.subtitle_presentation.cue.current.tokens[0]
     nested_popup.open_nested(
-        r.tooltip_controller.tip_ports,
-        r.tooltip_controller.panel_ports,
+        r.turn.tooltip_controller.tip_ports,
+        r.turn.tooltip_controller.panel_ports,
         tok,
         tok.surface,
         nested_popup.Anchor(300.0, 2000.0, 40.0),
     )  # anchor low → nested_view_h keeps full height
-    st = r.tooltip_controller.surface_state().nest.state
+    st = r.turn.tooltip_controller.surface_state().nest.state
     assert st is not None
     assert st.windowed.measured < st.windowed.count  # head only on open — the tall tail is deferred
     # Wheel toward the bottom until the clamp stops moving; each notch grows the converging estimate.
     prev = -1
     for _ in range(200):
         tooltip_panel.scroll_view(
-            r.tooltip_controller.tip_ports, r.tooltip_controller.surface_state().nest, 10_000
+            r.turn.tooltip_controller.tip_ports,
+            r.turn.tooltip_controller.surface_state().nest,
+            10_000,
         )
-        if r.tooltip_controller.surface_state().nest.scroll == prev:
+        if r.turn.tooltip_controller.surface_state().nest.scroll == prev:
             break
-        prev = r.tooltip_controller.surface_state().nest.scroll
+        prev = r.turn.tooltip_controller.surface_state().nest.scroll
     assert (
         st.windowed.measured == st.windowed.count
     )  # whole panel measured — the estimate never froze
-    assert r.tooltip_controller.surface_state().nest.scroll == max(
-        0, st.full_height - r.tooltip_controller.surface_state().nest.view_h
+    assert r.turn.tooltip_controller.surface_state().nest.scroll == max(
+        0, st.full_height - r.turn.tooltip_controller.surface_state().nest.view_h
     )  # reached the true bottom
 
 
@@ -1971,19 +1999,19 @@ def test_tooltip_geometry_is_resolution_independent():
     # is IDENTICAL at 1080p and 4K. Only tip_scale.display changes, so a 1080p prewarm hits at any
     # playback resolution.
     r = _scan_reader(FakeIPC())
-    r.screen.osd = (1920, 1080)
+    r.turn.screen.osd = (1920, 1080)
     w_ref, cap_ref, scale_ref = (
-        r.tooltip_controller.scale().width,
-        r.tooltip_controller.scale().cap,
-        r.tooltip_controller.scale().display,
+        r.turn.tooltip_controller.scale().width,
+        r.turn.tooltip_controller.scale().cap,
+        r.turn.tooltip_controller.scale().display,
     )
-    r.screen.osd = (3840, 2160)
-    assert (r.tooltip_controller.scale().width, r.tooltip_controller.scale().cap) == (
+    r.turn.screen.osd = (3840, 2160)
+    assert (r.turn.tooltip_controller.scale().width, r.turn.tooltip_controller.scale().cap) == (
         w_ref,
         cap_ref,
     )  # geometry unchanged by resolution
     assert (
-        scale_ref == 1.0 and r.tooltip_controller.scale().display == 2.0
+        scale_ref == 1.0 and r.turn.tooltip_controller.scale().display == 2.0
     )  # only the DISPLAY scale changes
 
 
@@ -2003,13 +2031,17 @@ def test_tooltip_geometry_ignores_ui_scale():
         ),
     )
     assert (
-        r.screen.ui_scale == 1.5
+        r.turn.screen.ui_scale == 1.5
     )  # a large interface scale (for the sidebar / help / analysis panels)
-    r.screen.osd = (1920, 1080)
-    assert r.tooltip_controller.scale().width == 640  # reference width, NOT 640 × 1.5
-    r.screen.osd = (3840, 2160)  # 4K → displayed width tracks the vertical viewport, not ui_scale
+    r.turn.screen.osd = (1920, 1080)
+    assert r.turn.tooltip_controller.scale().width == 640  # reference width, NOT 640 × 1.5
+    r.turn.screen.osd = (
+        3840,
+        2160,
+    )  # 4K → displayed width tracks the vertical viewport, not ui_scale
     assert (
-        r.tooltip_controller.scale().width == 640 and r.tooltip_controller.scale().display == 2.0
+        r.turn.tooltip_controller.scale().width == 640
+        and r.turn.tooltip_controller.scale().display == 2.0
     )  # displayed ≈ 1280px, not 1920 (the bug)
 
 
@@ -2025,21 +2057,21 @@ def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
     # At 4K the composited tooltip is upscaled 2×; a click at a scan cell's DISPLAYED centre must invert
     # that scale and still land on the cell (the hit-test must undo the upload's upscale).
     r = _scan_reader(FakeIPC())
-    r.screen.osd = (3840, 2160)  # scale 2.0
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.tooltip_controller.select(0)
-    r.tooltip_controller.show_tooltip(0)
-    boxes = r.tooltip_controller.surface_state().view.state.windowed.scan_boxes()
+    r.turn.screen.osd = (3840, 2160)  # scale 2.0
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.select(0)
+    r.turn.tooltip_controller.show_tooltip(0)
+    boxes = r.turn.tooltip_controller.surface_state().view.state.windowed.scan_boxes()
     assert boxes
     sb = boxes[0]
-    s = r.tooltip_controller.scale().display
+    s = r.turn.tooltip_controller.scale().display
     assert s == 2.0
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
     hit = tooltip_panel.scan_hit(
-        r.tooltip_controller.surface_state(),
-        r.tooltip_controller.scale().raster,
+        r.turn.tooltip_controller.surface_state(),
+        r.turn.tooltip_controller.scale().raster,
         sx + (sb.x + sb.w / 2) * s,
-        sy + (sb.y + sb.h / 2 - r.tooltip_controller.surface_state().view.scroll) * s,
+        sy + (sb.y + sb.h / 2 - r.turn.tooltip_controller.surface_state().view.scroll) * s,
     )
     assert hit is not None and hit.text == sb.text
 
@@ -2047,13 +2079,13 @@ def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
 def test_hover_inner_word_opens_nested_popup(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)  # base tooltip on the subtitle word
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.shown  # a nested popup opened…
-    assert r.tooltip_controller.hover_view().nested.rect is not None
-    assert r.tooltip_controller.hover_view().nested.word.startswith(
+    assert r.turn.tooltip_controller.hover_view().nested.shown  # a nested popup opened…
+    assert r.turn.tooltip_controller.hover_view().nested.rect is not None
+    assert r.turn.tooltip_controller.hover_view().nested.word.startswith(
         "追"
     )  # …for the inner word under the cursor
 
@@ -2063,27 +2095,33 @@ def test_nested_scan_waits_for_dwell(monkeypatch):
     same cell must not re-arm, or a cursor jittering inside one cell would never settle."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.tooltip_controller.configure_delays(scan=0.25)  # require the cursor to settle before opening
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.configure_delays(
+        scan=0.25
+    )  # require the cursor to settle before opening
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
-    assert not r.tooltip_controller.hover_view().nested.shown  # just arrived — nothing opens yet
+    assert (
+        not r.turn.tooltip_controller.hover_view().nested.shown
+    )  # just arrived — nothing opens yet
     _hover_first_scan_cell(r)  # re-arriving on the same cell must not re-arm
-    assert not r.tooltip_controller.hover_view().nested.shown  # still settling on the same cell
+    assert (
+        not r.turn.tooltip_controller.hover_view().nested.shown
+    )  # still settling on the same cell
 
     assert _fire_dwell(ipc, "scan-open")  # the cursor rested it out
 
-    assert r.tooltip_controller.hover_view().nested.shown
+    assert r.turn.tooltip_controller.hover_view().nested.shown
 
 
 def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.tooltip_controller.configure_delays(scan=0.25)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.configure_delays(scan=0.25)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
-    boxes = r.tooltip_controller.surface_state().view.state.windowed.scan_boxes()
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    boxes = r.turn.tooltip_controller.surface_state().view.state.windowed.scan_boxes()
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
 
     ui = Driver(r, instant=False)
 
@@ -2091,15 +2129,15 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
         ui.move(sx + sb.x + sb.w / 2, sy + sb.y + sb.h / 2)
 
     hover(boxes[0])
-    assert r.tooltip_controller.hover_view().scan_target == boxes[0].text
+    assert r.turn.tooltip_controller.hover_view().scan_target == boxes[0].text
     hover(boxes[1])  # drift to a different cell before the dwell elapses
 
     assert (
-        r.tooltip_controller.hover_view().scan_target == boxes[1].text
+        r.turn.tooltip_controller.hover_view().scan_target == boxes[1].text
     )  # the dwell restarted on the new cell
-    assert not r.tooltip_controller.hover_view().nested.shown  # no popup fired mid-drift
+    assert not r.turn.tooltip_controller.hover_view().nested.shown  # no popup fired mid-drift
     assert _fire_dwell(ipc, "scan-open")  # and when it does elapse, it opens the NEW cell
-    assert r.tooltip_controller.hover_view().nested.shown
+    assert r.turn.tooltip_controller.hover_view().nested.shown
 
 
 def test_switch_base_word_drops_nested(monkeypatch):
@@ -2108,41 +2146,45 @@ def test_switch_base_word_drops_nested(monkeypatch):
 
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[
             Token("本命", "本命", "ほんめい", "名詞", 0, 2),
             Token("読む", "読む", "よむ", "動詞", 2, 4),
         ]
     )
-    r.subtitle_presentation.cue.replace_geometry(
+    r.turn.subtitle_presentation.cue.replace_geometry(
         boxes=[WordBox(0, 100, 300, 40, 40), WordBox(1, 500, 300, 40, 40)]
     )
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.shown
+    assert r.turn.tooltip_controller.hover_view().nested.shown
     # a real switch: the cursor moves to the other word and its switch dwell comes due
     Driver(r).move_to_word(1)
-    assert not r.tooltip_controller.hover_view().nested.shown  # the stale scan popup is dropped
+    assert (
+        not r.turn.tooltip_controller.hover_view().nested.shown
+    )  # the stale scan popup is dropped
 
 
 def test_nested_lingers_then_dismisses(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.shown
+    assert r.turn.tooltip_controller.hover_view().nested.shown
     Driver(r, instant=False).move(5, 5)  # leave the whole stack
-    assert r.tooltip_controller.hover_diagnostics().nested_hide_pending  # scheduled, not instant
+    assert (
+        r.turn.tooltip_controller.hover_diagnostics().nested_hide_pending
+    )  # scheduled, not instant
 
     assert _fire_dwell(ipc, "nested-hide")
 
-    assert not r.tooltip_controller.hover_view().nested.shown  # dismissed after the linger
+    assert not r.turn.tooltip_controller.hover_view().nested.shown  # dismissed after the linger
 
 
 @pytest.mark.usefixtures("anki_up")  # the ⊕ button only draws when AnkiConnect is reachable
@@ -2152,17 +2194,19 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc, tts=True)
     _enable_mining(r)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().nested.has_token
+    assert r.turn.tooltip_controller.hover_view().nested.has_token
     mined = []
-    monkeypatch.setattr(r.mining_controller, "mine_token", lambda tok: mined.append(tok.surface))
-    px, py, pw, ph = header_add_rect(r.tooltip_controller.scale().width)
-    nx, ny = r.tooltip_controller.surface_state().nest.xy
+    monkeypatch.setattr(
+        r.turn.mining_controller, "mine_token", lambda tok: mined.append(tok.surface)
+    )
+    px, py, pw, ph = header_add_rect(r.turn.tooltip_controller.scale().width)
+    nx, ny = r.turn.tooltip_controller.surface_state().nest.xy
     Driver(r, instant=False).move(
-        nx + px + pw / 2, ny + (py - r.tooltip_controller.surface_state().nest.scroll) + ph / 2
+        nx + px + pw / 2, ny + (py - r.turn.tooltip_controller.surface_state().nest.scroll) + ph / 2
     ).click()
     assert mined and mined[0].startswith("追")  # ⊕ mined the scanned inner word
 
@@ -2188,12 +2232,12 @@ def _link_reader(ipc):
     from saitenka.app.tokenize import Token
 
     r = build_session(ipc, services=SessionServices(dictionaries=_LinkDS()))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("観る", "観る", "みる", "動詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
     return r
 
 
@@ -2202,12 +2246,12 @@ def _point_at_link(r) -> Driver:
 
     The header's per-kanji `kanji:` links sit first and are skipped — this is the body link.
     """
-    tip = r.tooltip_controller.hover_view().tip
+    tip = r.turn.tooltip_controller.hover_view().tip
     lb = next(b for b in tip.links if not b.query.startswith("kanji:"))
     sx, sy = tip.xy
     return Driver(r, instant=False).move(
         sx + lb.x + lb.w / 2,
-        sy + (lb.y - r.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
+        sy + (lb.y - r.turn.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
     )
 
 
@@ -2218,20 +2262,20 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
 
     ipc = FakeIPC()
     r = _link_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
-    assert r.tooltip_controller.hover_view().tip.links  # the def body exposed a clickable link
-    base = r.tooltip_controller.surface_state().view.state
+    assert r.turn.tooltip_controller.hover_view().tip.links  # the def body exposed a clickable link
+    base = r.turn.tooltip_controller.surface_state().view.state
     _point_at_link(r).click()
-    assert not r.tooltip_controller.hover_view().nested.shown  # NOT a nested popup
+    assert not r.turn.tooltip_controller.hover_view().nested.shown  # NOT a nested popup
     assert (
-        r.tooltip_controller.hover_view().tip.shown
-        and r.tooltip_controller.hover_view().tip.panel_id != id(base)
+        r.turn.tooltip_controller.hover_view().tip.shown
+        and r.turn.tooltip_controller.hover_view().tip.panel_id != id(base)
     )
     assert tooltip.tip_back(
-        r.tooltip_controller.tip_ports
-    ) is True and r.tooltip_controller.hover_view().tip.panel_id == id(base)
-    assert tooltip.tip_back(r.tooltip_controller.tip_ports) is False
+        r.turn.tooltip_controller.tip_ports
+    ) is True and r.turn.tooltip_controller.hover_view().tip.panel_id == id(base)
+    assert tooltip.tip_back(r.turn.tooltip_controller.tip_ports) is False
 
 
 class _WildcardDS:
@@ -2260,32 +2304,32 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
 
     ipc = FakeIPC()
     r = build_session(ipc, services=SessionServices(dictionaries=_WildcardDS()))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("観る", "観る", "みる", "動詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     # the wildcard cross-ref in the body (skip the header's per-kanji `kanji:` links)
     lb = next(
         b
-        for b in r.tooltip_controller.surface_state().view.state.windowed.link_boxes()
+        for b in r.turn.tooltip_controller.surface_state().view.state.windowed.link_boxes()
         if not b.query.startswith("kanji:")
     )
     assert "*" in lb.query  # the cross-ref is a wildcard pattern
-    sx, sy = r.tooltip_controller.surface_state().view.xy
+    sx, sy = r.turn.tooltip_controller.surface_state().view.xy
     Driver(r, instant=False).move(
         sx + lb.x + lb.w / 2,
-        sy + (lb.y - r.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
+        sy + (lb.y - r.turn.tooltip_controller.surface_state().view.scroll) + lb.h / 2,
     ).click()
     # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
-    assert not r.tooltip_controller.hover_view().nested.shown
-    assert r.tooltip_controller.observation().navigation_depth == 1
+    assert not r.turn.tooltip_controller.hover_view().nested.shown
+    assert r.turn.tooltip_controller.observation().navigation_depth == 1
     results = [
         b
-        for b in r.tooltip_controller.surface_state().view.state.windowed.link_boxes()
+        for b in r.turn.tooltip_controller.surface_state().view.state.windowed.link_boxes()
         if not b.query.startswith("kanji:")
     ]
     assert (
@@ -2311,16 +2355,18 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
             return Entry(headword=tok.surface, reading="みる", defs=[Definition("Bilingual", body)])
 
     r = build_session(ipc, services=SessionServices(dictionaries=_ExternalDS()))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("観る", "観る", "みる", "動詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     body_links = [
-        b for b in r.tooltip_controller.hover_view().tip.links if not b.query.startswith("kanji:")
+        b
+        for b in r.turn.tooltip_controller.hover_view().tip.links
+        if not b.query.startswith("kanji:")
     ]
     assert body_links == []  # external link → no clickable body region (header kanji links aside)
 
@@ -2356,45 +2402,57 @@ def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
 
     ipc = FakeIPC()
     r = build_session(ipc, services=SessionServices(dictionaries=_RubyLinkDS()))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("考え", "考え", "かんがえ", "名詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
-    links = r.tooltip_controller.surface_state().view.state.windowed.link_boxes()
+    links = r.turn.tooltip_controller.surface_state().view.state.windowed.link_boxes()
     assert any(lb.query == "思し召し" for lb in links)  # the furigana'd cross-ref IS clickable
 
 
 def test_nested_popup_shrinks_to_stay_above_inner_word():
     r = build_session(FakeIPC())
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     margin = max(16, round(1080 * 0.05))  # reference-height margin (cap_for uses REF_H × ui_scale)
     # a TALL entry anchored to an inner word in the upper-middle: default would drop below (more room
     # below), but the nested popup shrinks its viewport to the room above and stays ABOVE the word.
     wy = 220
     view_h = nested_popup.nested_view_h(
-        800, wy, osd_h=1080, max_frac=r.tooltip_controller.visual.nested_height_fraction
+        800, wy, osd_h=1080, max_frac=r.turn.tooltip_controller.visual.nested_height_fraction
     )
     above_room = wy - nested_popup.TIP_GAP - margin
     assert view_h == above_room  # shrunk to fit above
     _, ty = tooltip_panel.place_panel(
-        300, 100, wy, 40, view_h, scale=r.tooltip_controller.scale().display, osd=r.screen.osd
+        300,
+        100,
+        wy,
+        40,
+        view_h,
+        scale=r.turn.tooltip_controller.scale().display,
+        osd=r.turn.screen.osd,
     )
     assert ty + view_h <= wy  # …so it sits entirely above the inner word
 
 
 def test_nested_popup_drops_below_when_no_room_above():
     r = build_session(FakeIPC())
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     wy = 90  # inner word near the very top → can't fit above
     view_h = nested_popup.nested_view_h(
-        800, wy, osd_h=1080, max_frac=r.tooltip_controller.visual.nested_height_fraction
+        800, wy, osd_h=1080, max_frac=r.turn.tooltip_controller.visual.nested_height_fraction
     )
     _, ty = tooltip_panel.place_panel(
-        300, 100, wy, 40, view_h, scale=r.tooltip_controller.scale().display, osd=r.screen.osd
+        300,
+        100,
+        wy,
+        40,
+        view_h,
+        scale=r.turn.tooltip_controller.scale().display,
+        osd=r.turn.screen.osd,
     )
     assert ty >= wy  # falls back to below (safe)
 
@@ -2403,33 +2461,35 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     # links are click-to-open, not hover-scan → scrolling/reading over a cross-ref doesn't clutter
     ipc = FakeIPC()
     r = _link_reader(ipc)
-    r.tooltip_controller.configure_delays(scan=0.0)  # would fire immediately if not suppressed
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.configure_delays(scan=0.0)  # would fire immediately if not suppressed
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     ui = _point_at_link(r)  # cursor on the link cell
     assert (
-        not r.tooltip_controller.hover_view().nested.shown
+        not r.turn.tooltip_controller.hover_view().nested.shown
     )  # hover did NOT open a scan popup over the link
     ui.click()  # …a click navigates the base in place (no floating popup)
     assert (
-        not r.tooltip_controller.hover_view().nested.shown
-        and r.tooltip_controller.observation().navigation_depth == 1
+        not r.turn.tooltip_controller.hover_view().nested.shown
+        and r.turn.tooltip_controller.observation().navigation_depth == 1
     )
 
 
 def test_scroll_resets_scan_dwell(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    r.tooltip_controller.configure_delays(scan=0.25)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.tooltip_controller.configure_delays(scan=0.25)
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")
-    assert r.tooltip_controller.hover_view().scan_target is not None  # a scan target is settling
-    r.tooltip_controller.surface_state().view.view_h = 20  # make the panel scrollable
+    assert (
+        r.turn.tooltip_controller.hover_view().scan_target is not None
+    )  # a scan target is settling
+    r.turn.tooltip_controller.surface_state().view.view_h = 20  # make the panel scrollable
     Driver(r, instant=False).wheel(1)  # scrolling the panel…
     assert (
-        r.tooltip_controller.hover_view().scan_target is None
+        r.turn.tooltip_controller.hover_view().scan_target is None
     )  # …restarts the dwell so no popup fires mid-scroll
 
 
@@ -2438,16 +2498,16 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     ipc = FakeIPC()
     r = _link_reader(ipc)
     _enable_mining(r)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     events = []
     monkeypatch.setattr(
-        r.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
+        r.turn.mining_controller, "mine_index", lambda _index, **_kwargs: events.append("mine")
     )
     monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
     _point_at_link(r).click()
     assert (
-        events == [] and r.tooltip_controller.observation().navigation_depth == 1
+        events == [] and r.turn.tooltip_controller.observation().navigation_depth == 1
     )  # navigated the base, no mine/speak fallthrough
 
 
@@ -2458,7 +2518,7 @@ def test_copy_line_copies_all_lines(monkeypatch):
     from saitenka.app.tokenize import Token
 
     r = _scan_reader(FakeIPC())
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         lines=[
             [Token("本命", "本命", "ほんめい", "名詞", 0, 2)],
             [Token("読む", "読む", "よむ", "動詞", 0, 2)],
@@ -2468,36 +2528,36 @@ def test_copy_line_copies_all_lines(monkeypatch):
 
     got = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda s: got.append(s))
-    r.command_runtime.handle(app_bindings.COPY_LINE_MSG)
+    r.turn.command_runtime.handle(app_bindings.COPY_LINE_MSG)
     assert got == ["本命\n読む"]  # the whole cue, line by line
 
 
 def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
-    tx, ty, tw, _th = r.tooltip_controller.surface_state().view.rect
+    tx, ty, tw, _th = r.turn.tooltip_controller.surface_state().view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()  # header, not a scan cell
     assert got and "本命" in got[0]  # copied the hovered word
-    assert r.tooltip_controller.observation().pulse.overlay == C.TIP_ID
+    assert r.turn.tooltip_controller.observation().pulse.overlay == C.TIP_ID
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")  # open the nested popup
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
-    nx, ny, nw, nh = r.tooltip_controller.surface_state().nest.rect
+    nx, ny, nw, nh = r.turn.tooltip_controller.surface_state().nest.rect
     Driver(r, instant=False).move(nx + nw / 2, ny + nh / 2).right_click()
     assert got and got[0].startswith("追")  # copied the inner scanned word
-    assert r.tooltip_controller.observation().pulse.overlay == C.NESTED_ID
+    assert r.turn.tooltip_controller.observation().pulse.overlay == C.NESTED_ID
 
 
 def test_flash_border_drawn_then_cleared(monkeypatch):
@@ -2507,14 +2567,14 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
 
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     _hover_base_word(r)
     shots = []
     monkeypatch.setattr(
-        r.ov, "show_bgra", lambda bgra, _x, _y, oid: shots.append((oid, bgra.copy()))
+        r.turn.ov, "show_bgra", lambda bgra, _x, _y, oid: shots.append((oid, bgra.copy()))
     )
-    tx, ty, tw, _th = r.tooltip_controller.surface_state().view.rect
+    tx, ty, tw, _th = r.turn.tooltip_controller.surface_state().view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
     oid, view = shots[-1]
     hl = np.array(tooltip_panel.FLASH_BGRA, np.uint8)
@@ -2531,10 +2591,10 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
     there. Without the revision fence it lands during the second pulse and cuts it short."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     _hover_base_word(r)
-    tx, ty, tw, _th = r.tooltip_controller.surface_state().view.rect
+    tx, ty, tw, _th = r.turn.tooltip_controller.surface_state().view.rect
     ui = Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
     stale = ipc.timers["lifecycle:flash-expiry"]
 
@@ -2543,7 +2603,7 @@ def test_a_second_copy_flash_supersedes_the_first_deadline(monkeypatch):
     assert ipc.timers["lifecycle:flash-expiry"] != stale
     assert ipc.fire_runtime_timer("lifecycle:flash-expiry")
     assert (
-        r.tooltip_controller.observation().pulse.overlay is None
+        r.turn.tooltip_controller.observation().pulse.overlay is None
     )  # the latest due event, and only it, retired the pulse
 
 
@@ -2551,16 +2611,16 @@ def test_closing_retires_a_pending_copy_flash(monkeypatch):
     """A deadline that outlives its session redraws a popup onto a torn-down surface."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     _hover_base_word(r)
-    tx, ty, tw, _th = r.tooltip_controller.surface_state().view.rect
+    tx, ty, tw, _th = r.turn.tooltip_controller.surface_state().view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
 
     r.close()
 
     assert (
-        not r.tooltip_controller.schedule_flash_expiry()
+        not r.turn.tooltip_controller.schedule_flash_expiry()
     )  # and nothing can arm a new one behind the close
 
 
@@ -2573,7 +2633,7 @@ def _preview_reader(ipc, *, with_audio=True, with_image=True):
     from saitenka.app.features.preview.card_preview import PreviewData
 
     r = build_session(ipc)
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     frame = PILImage.new("RGBA", (320, 180), (40, 70, 90, 255)) if with_image else None
     pv = PreviewData(
         "mined",
@@ -2586,7 +2646,7 @@ def _preview_reader(ipc, *, with_audio=True, with_image=True):
         3.9 if with_audio else None,
         "Saitenka::Mining · Lapis",
     )
-    miner_ui.show_preview(r.preview_commands.ports(), pv, "/tmp/a.mp3" if with_audio else None)
+    miner_ui.show_preview(r.turn.preview_commands.ports(), pv, "/tmp/a.mp3" if with_audio else None)
     return r
 
 
@@ -2608,7 +2668,7 @@ def test_preview_audio_button_plays_on_click(monkeypatch):
     monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    _point_at(r, r.preview_controller.panel.audio_rect).click()
+    _point_at(r, r.turn.preview_controller.panel.audio_rect).click()
     assert played == ["/tmp/a.mp3"]  # ▶ button plays the mined clip
 
 
@@ -2617,7 +2677,7 @@ def test_preview_empty_click_plays_nothing(monkeypatch):
     monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    px, py, _pw, ph = r.preview_controller.panel.rect
+    px, py, _pw, ph = r.turn.preview_controller.panel.rect
     Driver(r, instant=False).move(px + 6, py + ph - 6).click()  # empty body
     assert played == []
 
@@ -2625,27 +2685,27 @@ def test_preview_empty_click_plays_nothing(monkeypatch):
 def test_preview_image_click_toggles_zoom():
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    assert not r.preview_controller.state.zoom
-    _point_at(r, r.preview_controller.panel.image_rect).click()
-    assert r.preview_controller.state.zoom  # click screenshot → enlarge
+    assert not r.turn.preview_controller.state.zoom
+    _point_at(r, r.turn.preview_controller.panel.image_rect).click()
+    assert r.turn.preview_controller.state.zoom  # click screenshot → enlarge
     # the (bigger) image moved — re-read its rect
-    _point_at(r, r.preview_controller.panel.image_rect).click()
-    assert not r.preview_controller.state.zoom  # click again → back
+    _point_at(r, r.turn.preview_controller.panel.image_rect).click()
+    assert not r.turn.preview_controller.state.zoom  # click again → back
 
 
 def test_preview_close_button_dismisses():
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    _point_at(r, r.preview_controller.panel.close_rect).click()
-    assert r.preview_controller.panel.rect is None and not r.preview_controller.state.open
+    _point_at(r, r.turn.preview_controller.panel.close_rect).click()
+    assert r.turn.preview_controller.panel.rect is None and not r.turn.preview_controller.state.open
 
 
 def test_new_cue_dismisses_preview(monkeypatch):
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.set_subtitle("別の字幕")  # a new subtitle cue
-    assert r.preview_controller.panel.rect is None
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.set_subtitle("別の字幕")  # a new subtitle cue
+    assert r.turn.preview_controller.panel.rect is None
 
 
 def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
@@ -2654,13 +2714,13 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)  # dict_set present
     _enable_mining(r)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
-    assert r.tooltip_controller.hover_view().tip.key.mined is False  # not mined yet → ⊕
-    expression = card_for(r.subtitle_presentation.cue.current.tokens[0]).expression
-    r.mining_controller.record_mined_expression(expression)
-    r.tooltip_controller.mark_mined(expression, r.tooltip_controller.apply_context())
-    assert r.tooltip_controller.hover_view().tip.key.mined is True  # tooltip rebuilt with ✓
+    assert r.turn.tooltip_controller.hover_view().tip.key.mined is False  # not mined yet → ⊕
+    expression = card_for(r.turn.subtitle_presentation.cue.current.tokens[0]).expression
+    r.turn.mining_controller.record_mined_expression(expression)
+    r.turn.tooltip_controller.mark_mined(expression, r.turn.tooltip_controller.apply_context())
+    assert r.turn.tooltip_controller.hover_view().tip.key.mined is True  # tooltip rebuilt with ✓
 
 
 def test_mined_seed_query_preloads_deck_expressions():
@@ -2695,28 +2755,28 @@ def _auto_trans_reader(ipc):
         ),
         options=ReaderOptions().with_overrides(auto_translate=True),
     )
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
     return r
 
 
 def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     ipc = FakeIPC()
     r = _auto_trans_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     shown = []
     hidden = []
     monkeypatch.setattr(
-        r.lifecycle_surfaces, "present", lambda _img, *_a, oid=0, **_kw: shown.append(oid)
+        r.turn.lifecycle_surfaces, "present", lambda _img, *_a, oid=0, **_kw: shown.append(oid)
     )
-    monkeypatch.setattr(r.lifecycle_surfaces, "remove", lambda oid, **_kw: hidden.append(oid))
+    monkeypatch.setattr(r.turn.lifecycle_surfaces, "remove", lambda oid, **_kw: hidden.append(oid))
     ui = _hover_base_word(r)
     assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
-    assert r.translation_controller.state.drawn == "I want you to read this."
+    assert r.turn.translation_controller.state.drawn == "I want you to read this."
     ui.leave()  # the cursor leaves the video window…
     assert _fire_dwell(ipc, "tooltip-hide")  # …and the tip lingers until its hide dwell is due
     assert OverlayId.TRANS in hidden  # leaving the word hid it again
@@ -2729,15 +2789,15 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     from saitenka.app.tokenize import Token
 
     r = build_session(ipc, services=SessionServices(dictionaries=_FakeDS()))  # flag off (default)
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.subtitle_presentation.cue.replace_tokenized(
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     )
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     shown = []
-    monkeypatch.setattr(r.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
+    monkeypatch.setattr(r.turn.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
     _hover_base_word(r)
     assert OverlayId.TRANS not in shown  # translation stays on the manual `t` key
 
@@ -2746,22 +2806,22 @@ def test_secondary_text_observation_updates_the_active_translation() -> None:
     ipc = FakeIPC()
     ipc.props["secondary-sub-text"] = "first"
     reader = build_session(ipc)
-    reader.command_runtime.handle(app_bindings.TRANS_MSG)
+    reader.turn.command_runtime.handle(app_bindings.TRANS_MSG)
 
-    reader.playback_observation.observe_event({"name": "secondary-sub-text", "data": "second"})
+    reader.turn.playback_observation.observe_event({"name": "secondary-sub-text", "data": "second"})
 
-    assert reader.translation_controller.state.drawn == "second"
+    assert reader.turn.translation_controller.state.drawn == "second"
 
 
 def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
     ipc = FakeIPC()
     r = _auto_trans_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.command_runtime.handle(app_bindings.TRANS_MSG)  # force it ON with `t`
-    assert r.translation_controller.state.held
-    assert r.translation_controller.state.drawn == "I want you to read this."
-    r.tooltip_controller.retire_hover()  # …and it stays even with nothing hovered
-    assert r.translation_controller.state.drawn == "I want you to read this."
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.command_runtime.handle(app_bindings.TRANS_MSG)  # force it ON with `t`
+    assert r.turn.translation_controller.state.held
+    assert r.turn.translation_controller.state.drawn == "I want you to read this."
+    r.turn.tooltip_controller.retire_hover()  # …and it stays even with nothing hovered
+    assert r.turn.translation_controller.state.drawn == "I want you to read this."
 
 
 # --- JLPT pill on the tooltip (same signal as the subtitle underline) ------------------------------
@@ -2785,7 +2845,7 @@ def test_jlpt_pill_matches_underline_color():
         ),
     )
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
-    pill = tooltip_panel.jlpt_pill(tok, r.profile_session.scorer)
+    pill = tooltip_panel.jlpt_pill(tok, r.turn.profile_session.scorer)
     assert pill is not None and pill.name == "JLPT" and pill.value == "N2"
     assert pill.color == tooltip_panel._darken(
         Palette().jlpt["N2"]
@@ -2802,8 +2862,8 @@ def test_jlpt_pill_leads_the_frequency_row():
     entry = tooltip_panel.entry_for_tok(
         Token("本命", "本命", "ほんめい", "名詞", 0, 2),
         None,
-        dict_set=r.profile_session.profile.dict_set,
-        scorer=r.profile_session.scorer,
+        dict_set=r.turn.profile_session.profile.dict_set,
+        scorer=r.turn.profile_session.scorer,
     )
     assert entry.freqs and entry.freqs[0].name == "JLPT" and entry.freqs[0].value == "N2"
 
@@ -2817,10 +2877,13 @@ def test_no_jlpt_pill_without_level_or_scorer():
         FakeIPC(),
         services=SessionServices(dictionaries=_FakeDS(), scorer=_jlpt_scorer({"本命": "N2"})),
     )
-    assert tooltip_panel.jlpt_pill(tok, r.profile_session.scorer) is None
+    assert tooltip_panel.jlpt_pill(tok, r.turn.profile_session.scorer) is None
     assert (
         tooltip_panel.entry_for_tok(
-            tok, None, dict_set=r.profile_session.profile.dict_set, scorer=r.profile_session.scorer
+            tok,
+            None,
+            dict_set=r.turn.profile_session.profile.dict_set,
+            scorer=r.turn.profile_session.scorer,
         ).freqs
         == []
     )
@@ -2830,7 +2893,7 @@ def test_no_jlpt_pill_without_level_or_scorer():
             tok,
             build_session(
                 FakeIPC(), services=SessionServices(dictionaries=_FakeDS())
-            ).profile_session.scorer,
+            ).turn.profile_session.scorer,
         )
         is None
     )
@@ -2849,7 +2912,7 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
     ds = dicthelp.load_set(freq_zips=[fa, fb])
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     tok = Token("猫", "猫", "ねこ", "名詞", 0, 1)
-    pill = tooltip_panel.rareness_pill(tok, r.profile_session.profile.dict_set)
+    pill = tooltip_panel.rareness_pill(tok, r.turn.profile_session.profile.dict_set)
     assert pill is not None and pill.name == "diff"
     assert pill.color == rareness_color(harmonic_of([1000.0, 2000.0]))  # ≈1333 → common (green)
 
@@ -2869,7 +2932,7 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
     ds = dicthelp.load_set(freq_zips=[rank_z, occ_z])
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     pill = tooltip_panel.rareness_pill(
-        Token("猫", "猫", "ねこ", "名詞", 0, 1), r.profile_session.profile.dict_set
+        Token("猫", "猫", "ねこ", "名詞", 0, 1), r.turn.profile_session.profile.dict_set
     )
     assert pill is not None and pill.value == "1.5k"  # blend of {1500} alone, not pulled toward 1
 
@@ -2885,7 +2948,7 @@ def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
     assert (
         tooltip_panel.rareness_pill(
             Token("存在しない語", "存在しない語", "", "名詞", 0, 6),
-            r.profile_session.profile.dict_set,
+            r.turn.profile_session.profile.dict_set,
         )
         is None
     )
@@ -2895,7 +2958,7 @@ def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
             Token("猫", "猫", "ねこ", "名詞", 0, 1),
             build_session(
                 FakeIPC(), services=SessionServices(dictionaries=_FakeDS())
-            ).profile_session.profile.dict_set,
+            ).turn.profile_session.profile.dict_set,
         )
         is None
     )
@@ -2914,16 +2977,22 @@ def test_no_jlpt_pill_for_function_words_even_on_reading_collision():
         ),
     )
     assert (
-        tooltip_panel.jlpt_pill(Token("は", "は", "は", "助詞", 0, 1), r.profile_session.scorer)
+        tooltip_panel.jlpt_pill(
+            Token("は", "は", "は", "助詞", 0, 1), r.turn.profile_session.scorer
+        )
         is None
     )  # particle → no pill
     assert (
-        tooltip_panel.jlpt_pill(Token("ね", "ね", "ね", "助詞", 0, 1), r.profile_session.scorer)
+        tooltip_panel.jlpt_pill(
+            Token("ね", "ね", "ね", "助詞", 0, 1), r.turn.profile_session.scorer
+        )
         is None
     )
     # a real content word whose reading legitimately maps still gets its pill
     assert (
-        tooltip_panel.jlpt_pill(Token("葉", "葉", "は", "名詞", 0, 1), r.profile_session.scorer)
+        tooltip_panel.jlpt_pill(
+            Token("葉", "葉", "は", "名詞", 0, 1), r.turn.profile_session.scorer
+        )
         is not None
     )
 
@@ -2936,7 +3005,7 @@ def test_jlpt_pill_suppressed_when_disabled():
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_FakeDS(), scorer=sc))
     assert (
         tooltip_panel.jlpt_pill(
-            Token("本命", "本命", "ほんめい", "名詞", 0, 2), r.profile_session.scorer
+            Token("本命", "本命", "ほんめい", "名詞", 0, 2), r.turn.profile_session.scorer
         )
         is None
     )
@@ -2961,11 +3030,11 @@ def test_mine_tags_carry_source_and_episode():
 def test_bottom_margin_no_dead_code():
     """bottom_margin must not have unreachable code — verify it returns correctly."""
     r = build_session(FakeIPC())
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    result = r.subtitle_presentation.visual.bottom_margin(r.screen.osd[1])
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    result = r.turn.subtitle_presentation.visual.bottom_margin(r.turn.screen.osd[1])
     assert isinstance(result, int)
     assert result == round(
-        1080 * r.subtitle_presentation.visual.bottom_margin_fraction
+        1080 * r.turn.subtitle_presentation.visual.bottom_margin_fraction
     )  # subtitle margin is OSD-native (osd=1080 here)
 
 
@@ -2984,8 +3053,8 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_CountDS()))
-    r.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    r.turn.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    r.turn.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
 
     from saitenka.app.subtitles import WordBox
 
@@ -2993,18 +3062,18 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
     # We'll manually insert sentinel keys to test LRU behaviour. Fill exactly to the cap so the next
     # insert (the real tooltip below) triggers a single eviction of the oldest.
     sentinel = object()
-    for i in range(r.tooltip_controller.cache_limit):
-        r.tooltip_controller.surface_state().panel_cache.setdefault(f"key_{i}", sentinel)
+    for i in range(r.turn.tooltip_controller.cache_limit):
+        r.turn.tooltip_controller.surface_state().panel_cache.setdefault(f"key_{i}", sentinel)
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
-    r.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
-    r.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
+    r.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
     Driver(r).move_to_word(0)
     # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
     assert (
-        f"key_{r.tooltip_controller.cache_limit - 1}"
-        in r.tooltip_controller.surface_state().panel_cache
+        f"key_{r.turn.tooltip_controller.cache_limit - 1}"
+        in r.turn.tooltip_controller.surface_state().panel_cache
     ), "LRU eviction removed recently-used entry"
-    assert "key_0" not in r.tooltip_controller.surface_state().panel_cache, (
+    assert "key_0" not in r.turn.tooltip_controller.surface_state().panel_cache, (
         "LRU eviction should have removed oldest entry"
     )
 
@@ -3012,7 +3081,7 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
 def test_close_cleans_up_tmp_dir():
     """SessionController.close() must remove the mkdtemp directory it created."""
     r = build_session(FakeIPC())
-    tmp = r.mining_controller._scratch_dir  # lifecycle artifact under test
+    tmp = r.turn.mining_controller._scratch_dir  # lifecycle artifact under test
     assert tmp.exists()
     r.close()
     assert not tmp.exists(), f"tmp dir {tmp} not cleaned up by close()"
@@ -3022,7 +3091,7 @@ def test_capture_media_failure_shows_toast(monkeypatch):
     """If both screenshot and audio fail, the mining transaction warns instead of failing silently."""
     ipc = FakeIPC()
     r = _reader_with_word(ipc)
-    r.playback_observation.install_seed({"sub-text": "本命"})
+    r.turn.playback_observation.install_seed({"sub-text": "本命"})
     # A deck to mine into: capture runs off the mining value, which a session without one never builds.
     _enable_mining(r)
 
@@ -3033,10 +3102,12 @@ def test_capture_media_failure_shows_toast(monkeypatch):
     monkeypatch.setattr(_M, "clip_audio", lambda *_a: (_ for _ in ()).throw(OSError("clip failed")))
     toasts = []
     monkeypatch.setattr(
-        r.notifications, "show", lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind))
+        r.turn.notifications,
+        "show",
+        lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind)),
     )
 
-    operation = r.mining_controller._operation()  # transaction seam under test
+    operation = r.turn.mining_controller._operation()  # transaction seam under test
     assert operation is not None
     pic, audio = miner.capture_media(operation, "test_base", "/fake/video.mkv")
     assert pic == "" and audio == ""
@@ -3047,7 +3118,9 @@ def test_provenance_is_clean_anime_episode_timestamp():
     ipc = FakeIPC()
     ipc.props["time-pos"] = 607
     r = build_session(ipc)
-    assert r.preview_commands.card_source().provenance(VIDEO) == ("Nippon Sangoku · ep10 · 10:07")
+    assert r.turn.preview_commands.card_source().provenance(VIDEO) == (
+        "Nippon Sangoku · ep10 · 10:07"
+    )
 
 
 # --- Stage 1: cue change while hovered leaves stale tooltip / stuck pause ----------------------
@@ -3059,24 +3132,26 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     old word, and so pause_on_tooltip does not stay stuck."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)  # open a tooltip on the first subtitle
-    assert r.tooltip_controller.hover_view().tip.rect is not None  # tooltip is shown
-    assert r.tooltip_controller.observation().selected == 0
+    assert r.turn.tooltip_controller.hover_view().tip.rect is not None  # tooltip is shown
+    assert r.turn.tooltip_controller.observation().selected == 0
 
     # simulate a cue change while the tooltip is visible
     hidden = []
     # Returns a reply, not None: the fenced surface path reads `error` from it now, so a recorder
     # that answers nothing reads as a torn overlay rather than as a recorded hide.
-    monkeypatch.setattr(r.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1])
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.set_subtitle("別の字幕")
+    monkeypatch.setattr(
+        r.turn.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1]
+    )
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.set_subtitle("別の字幕")
 
     assert C.TIP_ID in hidden  # tooltip was hidden
-    assert r.tooltip_controller.hover_view().tip.rect is None  # _tip_rect reset
-    assert not r.tooltip_controller.hover_view().tip.shown  # _tip_state reset
-    assert r.tooltip_controller.hover_view().tip.key is None  # _tip_key reset
-    assert r.tooltip_controller.observation().selected == -1  # hover index reset
+    assert r.turn.tooltip_controller.hover_view().tip.rect is None  # _tip_rect reset
+    assert not r.turn.tooltip_controller.hover_view().tip.shown  # _tip_state reset
+    assert r.turn.tooltip_controller.hover_view().tip.key is None  # _tip_key reset
+    assert r.turn.tooltip_controller.observation().selected == -1  # hover index reset
 
 
 def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
@@ -3084,15 +3159,15 @@ def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)  # pause_on_tooltip=True
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     Driver(r).move_to_word(0)  # opens tooltip and pauses mpv
-    assert r.tooltip_controller.hover_view().paused
+    assert r.turn.tooltip_controller.hover_view().paused
 
     # new cue arrives
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.set_subtitle("別の字幕")
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.set_subtitle("別の字幕")
 
-    assert not r.tooltip_controller.hover_view().paused
+    assert not r.turn.tooltip_controller.hover_view().paused
     assert ("set_property", "pause", False) in ipc.commands
 
 
@@ -3123,10 +3198,16 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     # Call entry_for twice directly via entry_for_tok so the lru_cache is hit on the second call.
     e1 = tooltip_panel.entry_for_tok(
-        tok, None, dict_set=r.profile_session.profile.dict_set, scorer=r.profile_session.scorer
+        tok,
+        None,
+        dict_set=r.turn.profile_session.profile.dict_set,
+        scorer=r.turn.profile_session.scorer,
     )
     e2 = tooltip_panel.entry_for_tok(
-        tok, None, dict_set=r.profile_session.profile.dict_set, scorer=r.profile_session.scorer
+        tok,
+        None,
+        dict_set=r.turn.profile_session.profile.dict_set,
+        scorer=r.turn.profile_session.scorer,
     )
     jlpt_pills_1 = [f for f in e1.freqs if f.name == "JLPT"]
     jlpt_pills_2 = [f for f in e2.freqs if f.name == "JLPT"]
@@ -3140,10 +3221,10 @@ def test_prefetch_worker_receives_mined_flag_not_calls_card_for(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
-    r.playback_observation.install_seed({"sub-text": "本命"})
+    r.turn.playback_observation.install_seed({"sub-text": "本命"})
     is_mined_calls_from_workers: list[str] = []
 
-    original_is_mined = r.tooltip_controller.is_mined
+    original_is_mined = r.turn.tooltip_controller.is_mined
 
     def tracked_is_mined(tok):
         import threading
@@ -3152,7 +3233,7 @@ def test_prefetch_worker_receives_mined_flag_not_calls_card_for(monkeypatch):
             is_mined_calls_from_workers.append(tok.surface)
         return original_is_mined(tok)
 
-    monkeypatch.setattr(r.tooltip_controller, "is_mined", tracked_is_mined)
+    monkeypatch.setattr(r.turn.tooltip_controller, "is_mined", tracked_is_mined)
     items = _captured_prefetch_items(r, monkeypatch)
     assert items, "nothing was queued"
     # Each queued item must carry the main-thread-evaluated mined flag (typed since Stage 8b)
@@ -3163,19 +3244,21 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     """A cue change with a nested popup open must also clear NESTED_ID and _nest state."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
     _hover_base_word(r)
     _hover_first_scan_cell(r)
     _fire_dwell(ipc, "scan-open")  # open the nested popup
-    assert r.tooltip_controller.hover_view().nested.shown
+    assert r.turn.tooltip_controller.hover_view().nested.shown
 
     hidden = []
-    monkeypatch.setattr(r.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1])
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.set_subtitle("別の字幕")
+    monkeypatch.setattr(
+        r.turn.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1]
+    )
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.set_subtitle("別の字幕")
 
     assert (
-        C.NESTED_ID in hidden or not r.tooltip_controller.hover_view().nested.shown
+        C.NESTED_ID in hidden or not r.turn.tooltip_controller.hover_view().nested.shown
     )  # nested cleared
 
 
@@ -3210,7 +3293,7 @@ def test_start_observing_registers_and_seeds_initial_state(request):
     request.addfinalizer(
         r.close
     )  # LIFO: the reader goes down before the gateway it observes through
-    r.playback_observation.start_session()
+    r.turn.playback_observation.start_session()
     observed = {c[2] for c in ipc.commands if c and c[0] == "observe_property"}
     assert {
         "sub-text",
@@ -3221,8 +3304,8 @@ def test_start_observing_registers_and_seeds_initial_state(request):
         "sub-delay",
     } <= observed
     # initial state was read once at startup
-    assert r.playback_observation.value("pause") is True
-    assert r.playback_observation.value("sub-text") == "字幕"
+    assert r.turn.playback_observation.value("pause") is True
+    assert r.turn.playback_observation.value("sub-text") == "字幕"
 
 
 def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch):
@@ -3231,8 +3314,8 @@ def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch):
     ipc = EventIPC()
     ipc.props["sub-text"] = ""
     r = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.playback_observation.start_session()
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.playback_observation.start_session()
     ipc.commands.clear()
     r.pump()
     gets = [
@@ -3250,11 +3333,11 @@ def test_property_change_event_drives_subtitle_update(monkeypatch):
 
     ipc = EventIPC()
     r = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
-    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
-    r.playback_observation.start_session()
+    monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
+    r.turn.playback_observation.start_session()
     ipc.set_prop("sub-text", "新しい字幕")
     r.pump()
-    assert r.playback_observation.cue.text == "新しい字幕"
+    assert r.turn.playback_observation.cue.text == "新しい字幕"
 
 
 def test_cue_change_retires_interaction_before_later_command_in_same_batch(monkeypatch):
@@ -3271,13 +3354,13 @@ def test_cue_change_retires_interaction_before_later_command_in_same_batch(monke
             prefetch=False,
         ),
     )
-    reader.playback_observation.start_session()
-    reader.set_subtitle("古い字幕")
+    reader.turn.playback_observation.start_session()
+    reader.turn.set_subtitle("古い字幕")
     copied = []
     monkeypatch.setattr(
         subtitle_adapter,
         "copy_clipboard",
-        lambda _text: copied.append(reader.playback_observation.cue.text),
+        lambda _text: copied.append(reader.turn.playback_observation.cue.text),
     )
     ipc.events.extend(
         (
@@ -3286,13 +3369,13 @@ def test_cue_change_retires_interaction_before_later_command_in_same_batch(monke
         )
     )
 
-    reader._drain_events()
+    reader.turn._drain_events()
 
     # The command was rejected because the conflicting observation retired the cue first — that
     # rejection IS the ordering proof. The drain then settles the replacement in the same turn;
     # reconciliation used to wait for the next tick.
     assert copied == []
-    assert reader.playback_observation.cue.text == "新しい字幕"
+    assert reader.turn.playback_observation.cue.text == "新しい字幕"
 
 
 def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
@@ -3309,11 +3392,11 @@ def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
             prefetch=False,
         ),
     )
-    reader.playback_observation.start_session()
-    reader.set_subtitle("古い字幕")
+    reader.turn.playback_observation.start_session()
+    reader.turn.set_subtitle("古い字幕")
     navigated = []
     monkeypatch.setattr(
-        reader.subtitle_navigation, "navigate", lambda delta: navigated.append(delta)
+        reader.turn.subtitle_navigation, "navigate", lambda delta: navigated.append(delta)
     )
     ipc.events.extend(
         (
@@ -3322,11 +3405,11 @@ def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
         )
     )
 
-    reader._drain_events()
+    reader.turn._drain_events()
 
     assert navigated == []  # the nav command was rejected against the retired cue
     assert (
-        reader.playback_observation.cue.text == "新しい字幕"
+        reader.turn.playback_observation.cue.text == "新しい字幕"
     )  # and the replacement settled in the same drain
 
 
@@ -3345,16 +3428,16 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text():
             prefetch=False,
         ),
     )
-    reader.playback_observation.start_session()
-    reader.set_subtitle("同じ字幕")
-    before = reader.annotation_controller.view.identity
+    reader.turn.playback_observation.start_session()
+    reader.turn.set_subtitle("同じ字幕")
+    before = reader.turn.annotation_controller.view.identity
     assert before is not None
 
-    reader._cue.replace_source("/media/next.mkv", reason="test")
+    reader.turn._cue.replace_source("/media/next.mkv", reason="test")
 
-    assert reader.annotation_controller.view.retired is True
-    reader.set_subtitle("同じ字幕")
-    after = reader.annotation_controller.view.identity
+    assert reader.turn.annotation_controller.view.retired is True
+    reader.turn.set_subtitle("同じ字幕")
+    after = reader.turn.annotation_controller.view.identity
     assert after is not None
     assert after != before
     assert after.normalized_text == before.normalized_text
@@ -3381,25 +3464,25 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkey
             prefetch=False,
         ),
     )
-    reader.set_subtitle("古い字幕")
+    reader.turn.set_subtitle("古い字幕")
     copied = []
     monkeypatch.setattr(
         subtitle_adapter,
         "copy_clipboard",
-        lambda _text: copied.append(reader.playback_observation.cue.text),
+        lambda _text: copied.append(reader.turn.playback_observation.cue.text),
     )
-    reader._drain_event(ConnectionLost(0))
-    reader._drain_event(UserCommand(bindings.COPY_LINE_MSG, command_id=7))
+    reader.turn._drain_event(ConnectionLost(0))
+    reader.turn._drain_event(UserCommand(bindings.COPY_LINE_MSG, command_id=7))
     assert reader.pump()
 
     assert copied == []
     # A disconnected turn stops before its post-drain settlement, so readiness is never marked.
     # (Was: the tick pipeline did not run. Same claim, now that there is no pipeline to not run.)
-    assert reader._interactive_ready is False
-    assert reader.annotation_controller.view.retired
+    assert reader.turn._interactive_ready is False
+    assert reader.turn.annotation_controller.view.retired
     assert (
-        reader.subtitle_presentation.cue.current.tokens == []
-        and reader.subtitle_presentation.cue.current.boxes == []
+        reader.turn.subtitle_presentation.cue.current.tokens == []
+        and reader.turn.subtitle_presentation.cue.current.boxes == []
     )
     assert ipc.runtime_outcomes == [
         CommandHandled(
@@ -3426,16 +3509,16 @@ def test_same_text_with_new_timing_installs_a_new_cue_identity():
             prefetch=False,
         ),
     )
-    reader.playback_observation.start_session()
-    reader.set_subtitle("同じ字幕")
-    previous = reader.annotation_controller.view.identity
+    reader.turn.playback_observation.start_session()
+    reader.turn.set_subtitle("同じ字幕")
+    previous = reader.turn.annotation_controller.view.identity
 
     ipc.set_prop("sub-start", 3.0)
     reader.pump()
 
-    assert reader.annotation_controller.view.retired is False
-    assert reader.annotation_controller.view.identity != previous
-    assert reader.annotation_controller.view.identity.observed_start == 3.0
+    assert reader.turn.annotation_controller.view.retired is False
+    assert reader.turn.annotation_controller.view.identity != previous
+    assert reader.turn.annotation_controller.view.identity.observed_start == 3.0
 
 
 def test_a_cue_cleared_by_the_reader_is_not_resurrected_by_the_next_observation():
@@ -3456,15 +3539,15 @@ def test_a_cue_cleared_by_the_reader_is_not_resurrected_by_the_next_observation(
             prefetch=False,
         ),
     )
-    reader.playback_observation.start_session()
+    reader.turn.playback_observation.start_session()
 
-    reader.set_subtitle("")  # what a language/track switch does
-    assert reader.playback_observation.cue.text == ""
+    reader.turn.set_subtitle("")  # what a language/track switch does
+    assert reader.turn.playback_observation.cue.text == ""
 
-    reader.playback_observation.observe_event({"name": "sub-end", "data": 9.5})
-    reader._cue.settle()
+    reader.turn.playback_observation.observe_event({"name": "sub-end", "data": 9.5})
+    reader.turn._cue.settle()
 
-    assert reader.playback_observation.cue.text == ""
+    assert reader.turn.playback_observation.cue.text == ""
 
 
 @pytest.mark.parametrize(("name", "value"), [("sid", 2), ("sub-start", 3.0), ("sub-end", 4.0)])
@@ -3482,19 +3565,19 @@ def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, valu
             prefetch=False,
         ),
     )
-    reader.playback_observation.start_session()
-    reader.set_subtitle("同じ字幕")
+    reader.turn.playback_observation.start_session()
+    reader.turn.set_subtitle("同じ字幕")
     ipc.props[name] = value
 
-    reader._on_ipc_reconnect()
-    reader.playback_observation.observe_event(
+    reader.turn._on_ipc_reconnect()
+    reader.turn.playback_observation.observe_event(
         {"event": "property-change", "name": name, "data": value}
     )
 
-    assert reader.annotation_controller.view.retired is True
+    assert reader.turn.annotation_controller.view.retired is True
     assert (
-        reader.subtitle_presentation.cue.current.tokens == []
-        and reader.subtitle_presentation.cue.current.boxes == []
+        reader.turn.subtitle_presentation.cue.current.tokens == []
+        and reader.turn.subtitle_presentation.cue.current.boxes == []
     )
 
 
@@ -3534,12 +3617,12 @@ def test_property_change_invalidates_subtitle_geometry():
             prefetch=False,
         ),
     )
-    r.subtitle_presentation.pipeline = SubtitleModeCoordinator(NullRenderer(), Backend())
-    r.playback_observation.start_session()
+    r.turn.subtitle_presentation.pipeline = SubtitleModeCoordinator(NullRenderer(), Backend())
+    r.turn.playback_observation.start_session()
     track_id = SubtitleTrackId("track-1")
     event_id = SubtitleEventId(track_id, 1_000, 2_000, 0, 2)
     request = GeometryRequest(
-        r.subtitle_presentation.pipeline.generation,
+        r.turn.subtitle_presentation.pipeline.generation,
         track_id,
         SubtitleFrameId(track_id, (event_id,)),
         1_250,
@@ -3547,13 +3630,13 @@ def test_property_change_invalidates_subtitle_geometry():
         (1920, 1080),
         b"[Script Info]\n",
     )
-    assert r.subtitle_presentation.pipeline.render(request) is not None
-    assert r.subtitle_presentation.pipeline.current is not None
+    assert r.turn.subtitle_presentation.pipeline.render(request) is not None
+    assert r.turn.subtitle_presentation.pipeline.current is not None
 
     ipc.set_prop("sub-text", "新しい字幕")
     r.pump()
 
-    assert r.subtitle_presentation.pipeline.current is None
+    assert r.turn.subtitle_presentation.pipeline.current is None
 
 
 def test_property_change_event_drives_hover(monkeypatch):
@@ -3561,24 +3644,24 @@ def test_property_change_event_drives_hover(monkeypatch):
 
     ipc = EventIPC()
     r = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
-    r.subtitle_presentation.cue.replace_tokenized(tokens=["x"])
+    r.turn.subtitle_presentation.cue.replace_tokenized(tokens=["x"])
     seen = []
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "set_hover",
-        lambda i: (seen.append(i), r.tooltip_controller.select(i)),
+        lambda i: (seen.append(i), r.turn.tooltip_controller.select(i)),
     )
     monkeypatch.setattr(
-        r.tooltip_controller,
+        r.turn.tooltip_controller,
         "hit",
         lambda x, y: 0 if (x < 10 and y < 10) else -1,
     )
-    r.playback_observation.start_session()
+    r.turn.playback_observation.start_session()
     ipc.set_prop("mouse-pos", {"hover": True, "x": 5, "y": 5})
     for ev in ipc.drain_events():  # what pump's drain loop does
         if ev.get("event") == "property-change":
-            r.playback_observation.observe_event(ev)
-    r.interaction.update_hover()
+            r.turn.playback_observation.observe_event(ev)
+    r.turn.interaction.update_hover()
     assert seen == [0]  # hover driven purely by the observed event state
 
 
@@ -3596,9 +3679,9 @@ def test_reader_accepts_grouped_options_object():
     r = build_session(FakeIPC(), options=opts)
     assert opts.keys.mine_key == "Ctrl+x"
     assert opts.keys.sub_prev_key == "Alt+a"
-    assert r.tooltip_controller.visual.base_height_fraction == 0.5
-    assert r.tooltip_controller.observation().pause_enabled is True
-    assert r.tooltip_preparation.config.enabled is False
+    assert r.turn.tooltip_controller.visual.base_height_fraction == 0.5
+    assert r.turn.tooltip_controller.observation().pause_enabled is True
+    assert r.turn.tooltip_preparation.config.enabled is False
 
 
 def test_reader_kwargs_still_work_and_map_onto_groups():
@@ -3611,13 +3694,13 @@ def test_reader_kwargs_still_work_and_map_onto_groups():
             mine_key="Ctrl+z", tip_max_frac=0.4, auto_translate=True
         ),
     )
-    assert r.tooltip_controller.visual.base_height_fraction == 0.4
-    assert r.translation_controller.wanted(
+    assert r.turn.tooltip_controller.visual.base_height_fraction == 0.4
+    assert r.turn.translation_controller.wanted(
         TranslationInputs(
             surfaces_visible=True,
             tooltip_selected=True,
             secondary_text="",
-            osd=r.screen.osd,
+            osd=r.turn.screen.osd,
         )
     )
     with pytest.raises(TypeError):
@@ -3632,7 +3715,7 @@ def test_prefetch_queue_items_are_typed_dataclasses(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
-    r.playback_observation.install_seed({"sub-text": "本命"})
+    r.turn.playback_observation.install_seed({"sub-text": "本命"})
     item = _captured_prefetch_items(r, monkeypatch)[0]
     assert isinstance(item, PrefetchItem)
     assert item.token.surface == "本命"
@@ -3652,7 +3735,7 @@ def test_popups_module_unifies_popup_view_state():
     assert pv.state is None and pv.scroll == 0 and pv.rect is None
     assert C._Nested is PopupView
     r = build_session(FakeIPC())
-    assert isinstance(r.tooltip_controller.surface_state().nest, PopupView)
+    assert isinstance(r.turn.tooltip_controller.surface_state().nest, PopupView)
     # Panel wraps the windowed engine and is constructible from rows
     entry = Entry(
         headword="本命", reading="ほんめい", defs=[Definition("辞書", ["これは定義です。"])]
@@ -3696,8 +3779,8 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
         lambda p, tok, **_k: mined.append((p.encounter.cue.hover, tok.surface)),
     )
     _enable_mining(r)
-    r.tooltip_controller.select(0)
-    r.command_runtime.handle(bindings.MINE_MSG)
+    r.turn.tooltip_controller.select(0)
+    r.turn.command_runtime.handle(bindings.MINE_MSG)
     assert mined == [(0, "本命")]
 
 
@@ -3709,8 +3792,8 @@ def test_a_reader_with_no_deck_has_no_active_mining_target(monkeypatch):
     r = _reader_with_word(FakeIPC())
     monkeypatch.setattr(miner, "mine_token", lambda *_a, **_k: pytest.fail("mined with no deck"))
 
-    assert r.mining_controller.active_target is None
-    r.command_runtime.handle(
+    assert r.turn.mining_controller.active_target is None
+    r.turn.command_runtime.handle(
         bindings.MINE_MSG
     )  # must be a no-op, not an AttributeError on the missing client
 
@@ -3738,11 +3821,11 @@ def test_watch_time_accrues_on_the_pause_transition_not_on_a_tick(monkeypatch):
     does no work and a tickless one still measures correctly."""
     ipc = RuntimeFakeIPC()
     r, accrued = _accrual_reader(ipc, monkeypatch)
-    r.playback_observation.start_session()
+    r.turn.playback_observation.start_session()
     assert accrued == []  # observing alone is not a transition
 
     ipc.emit({"event": "property-change", "name": "pause", "data": True})
-    r._drain_events()
+    r.turn._drain_events()
 
     assert len(accrued) == 1
     r.close()
@@ -3753,7 +3836,7 @@ def test_an_uninterrupted_session_still_persists_on_its_own_deadline(monkeypatch
     would sit in memory until close and be lost to a crash. The due event re-arms itself."""
     ipc = RuntimeFakeIPC()
     r, accrued = _accrual_reader(ipc, monkeypatch)
-    r.arm_session_persist(5.0)
+    r.turn.arm_session_persist(5.0)
 
     assert ipc.fire_runtime_timer("lifecycle:session-persist")
     assert len(accrued) == 1
@@ -3777,13 +3860,13 @@ def test_an_osd_resize_redraws_from_the_observation_alone():
             prefetch=False,
         ),
     )
-    r.playback_observation.start_session()
-    assert r.screen.osd == (1280, 720)
+    r.turn.playback_observation.start_session()
+    assert r.turn.screen.osd == (1280, 720)
 
     ipc.emit({"event": "property-change", "name": "osd-dimensions", "data": {"w": 1920, "h": 1080}})
-    r._drain_events()
+    r.turn._drain_events()
 
-    assert r.screen.osd == (1920, 1080)
+    assert r.turn.screen.osd == (1920, 1080)
     r.close()
 
 
@@ -3801,12 +3884,12 @@ def test_a_sub_rendering_option_does_not_resize_anything():
             prefetch=False,
         ),
     )
-    r.playback_observation.start_session()
+    r.turn.playback_observation.start_session()
     redraws = []
-    r._redraw_after_resize = lambda: redraws.append(1)  # type: ignore[method-assign]
+    r.turn._redraw_after_resize = lambda: redraws.append(1)  # type: ignore[method-assign]
 
     ipc.emit({"event": "property-change", "name": "options/sub-scale", "data": 1.4})
-    r._drain_events()
+    r.turn._drain_events()
 
     assert redraws == []
     r.close()
@@ -3826,9 +3909,9 @@ def test_capability_probes_refresh_on_their_own_deadline(monkeypatch):
         ),
     )
     applied = []
-    monkeypatch.setattr(r, "_apply_capabilities", lambda: applied.append(1))
+    monkeypatch.setattr(r.turn, "_apply_capabilities", lambda: applied.append(1))
 
-    r.arm_capability_refresh(0.5)
+    r.turn.arm_capability_refresh(0.5)
 
     assert applied == []  # arming is not asking
     assert ipc.fire_runtime_timer("lifecycle:capability-refresh")
@@ -3854,11 +3937,11 @@ def test_the_sidebar_follows_the_cue_where_the_cue_settles(monkeypatch):
     follows = []
     monkeypatch.setattr(sidebar_module, "follow", follows.append)
 
-    r._cue.settle()
+    r.turn._cue.settle()
 
     # The view it followed, not the host: identity with the owner says the settle boundary
     # reached this sidebar's own state rather than merely calling something once.
-    assert [view.state for view in follows] == [r.sidebar_controller.state]
+    assert [view.state for view in follows] == [r.turn.sidebar_controller.state]
     r.close()
 
 
@@ -3890,7 +3973,7 @@ def test_a_refused_seek_is_reported_rather_than_discarded(caplog):
         ),
     )
     with caplog.at_level(logging.WARNING, logger="saitenka.app.mpv_egress"):
-        r.subtitle_navigation.seek(SeekCue(1, r.cue_revision))
+        r.turn.subtitle_navigation.seek(SeekCue(1, r.turn.cue_revision))
 
     assert any("sub-seek" in record.getMessage() for record in caplog.records)
     r.close()
@@ -3957,16 +4040,16 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
         ipc = FakeIPC()
         ipc.props["pause"] = False
         reader = _reader_with_word(ipc)
-        monkeypatch.setattr(reader.subtitle_presentation, "renderer", NullRenderer())
+        monkeypatch.setattr(reader.turn.subtitle_presentation, "renderer", NullRenderer())
         Driver(reader).move_to_word(0)
-        assert reader.tooltip_controller.hover_view().paused
+        assert reader.turn.tooltip_controller.hover_view().paused
         before = len(ipc.commands)
         act(reader)
-        assert not reader.tooltip_controller.hover_view().paused
+        assert not reader.turn.tooltip_controller.hover_view().paused
         return [c for c in ipc.commands[before:] if c[:2] == ("set_property", "pause")]
 
-    by_cue = resume_via(lambda r: r.set_subtitle("別の字幕"))
-    by_reducer = resume_via(lambda r: r.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG))
+    by_cue = resume_via(lambda r: r.turn.set_subtitle("別の字幕"))
+    by_reducer = resume_via(lambda r: r.turn.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG))
 
     assert by_cue == by_reducer == [("set_property", "pause", False)]
 
@@ -3986,9 +4069,9 @@ def _seeded_reader(request, *, latched, settled):
     request.addfinalizer(gateway.close)
     r = build_session(ipc)
     request.addfinalizer(r.close)
-    r.refresh_osd()  # the pre-observe blocking read, mid mpv fullscreen animation
+    r.turn.refresh_osd()  # the pre-observe blocking read, mid mpv fullscreen animation
     ipc.props["osd-dimensions"] = settled
-    r.playback_observation.start_session()
+    r.turn.playback_observation.start_session()
     return r
 
 
@@ -4003,7 +4086,7 @@ def test_seeding_folds_the_settled_osd_over_a_transient_pre_observe_read(request
     """
     r = _seeded_reader(request, latched={"w": 3642, "h": 2096}, settled={"w": 3024, "h": 1898})
 
-    assert r.screen.osd == (3024, 1898)
+    assert r.turn.screen.osd == (3024, 1898)
 
 
 def test_seeding_keeps_the_osd_when_mpv_reports_nothing(request):
@@ -4011,4 +4094,4 @@ def test_seeding_keeps_the_osd_when_mpv_reports_nothing(request):
     already declines an absent/zero report, and the seed must not route around that guard."""
     r = _seeded_reader(request, latched={"w": 1920, "h": 1080}, settled={})
 
-    assert r.screen.osd == (1920, 1080)
+    assert r.turn.screen.osd == (1920, 1080)

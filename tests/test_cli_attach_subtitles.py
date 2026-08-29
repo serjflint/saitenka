@@ -138,14 +138,14 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     ipc = _TrackIPC()
     reader = build_session(ipc)
     # stale prior-episode state the re-slot must clear
-    reader.track_commands.declare(SubtitleTracksDiscovered(99, None))
-    episode_before = reader.track_commands.navigation.current
+    reader.turn.track_commands.declare(SubtitleTracksDiscovered(99, None))
+    episode_before = reader.turn.track_commands.navigation.current
 
     started: list[str] = []
     monkeypatch.setattr(session_stats, "finish", lambda _recorder, _analysis=None: None)
     monkeypatch.setattr(session_stats, "start", lambda *, path, **_kw: started.append(str(path())))
-    monkeypatch.setattr(reader.tooltip_controller, "start_prefetch", lambda: None)
-    monkeypatch.setattr(reader.notifications, "show", lambda *_a, **_k: None)
+    monkeypatch.setattr(reader.turn.tooltip_controller, "start_prefetch", lambda: None)
+    monkeypatch.setattr(reader.turn.notifications, "show", lambda *_a, **_k: None)
     # new episode carries English only → prepare_attach_startup defers a jimaku fetch
     monkeypatch.setattr(
         subselect,
@@ -158,21 +158,23 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     )
     background: list = []
     monkeypatch.setattr(
-        reader.subtitle_acquisition, "fetch_background", lambda fetch: background.append(fetch)
+        reader.turn.subtitle_acquisition, "fetch_background", lambda fetch: background.append(fetch)
     )
 
     attach_commands._attach_reslot(
-        reader.reslot_ports,
+        reader.turn.reslot_ports,
         ipc,
         Path("/videos/Show - 03.mkv"),
         subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={}, jimaku=True),
     )
 
-    assert reader.track_commands.navigation.current is not episode_before
+    assert reader.turn.track_commands.navigation.current is not episode_before
     assert (
-        reader.track_commands.current().jp_sid is None
+        reader.turn.track_commands.current().jp_sid is None
     )  # …so ep2's jp_sid=99 cannot leak into ep3
     assert ("sub-remove", 10) in ipc.commands  # carried-over ep2 external dropped
     assert started == ["/videos/Show - 03.mkv"]  # a new stats row on the current file
-    assert reader.picker_controller.lister is not None  # Ctrl+J picker rewired for the new episode
+    assert (
+        reader.turn.picker_controller.lister is not None
+    )  # Ctrl+J picker rewired for the new episode
     assert len(background) == 1  # JP absent → provider fetch deferred (continue in Japanese)

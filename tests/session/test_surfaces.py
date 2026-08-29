@@ -104,7 +104,7 @@ def test_wants_mouse_capture_is_any_open():
 def test_real_registry_z_order():
     """Topmost-first, and the exact set — a reordering or a dropped surface is a deliberate re-bless."""
     reader = build_session(_FakeIPC())
-    assert [s.name for s in reader.interaction.router.specs] == [
+    assert [s.name for s in reader.turn.interaction.router.specs] == [
         "help",
         "sub_picker",
         "sidebar",
@@ -117,7 +117,7 @@ def test_every_surface_state_exposes_open():
     """Anti-occlusion invariant: each surface's state object exposes ``open`` (bool) on a real SessionController, so
     it participates in the forced-mouse-section OR and can never be shown-but-click-through (#100 picker)."""
     reader = build_session(_FakeIPC())
-    assert all(isinstance(spec.captures(), bool) for spec in reader.interaction.router.specs)
+    assert all(isinstance(spec.captures(), bool) for spec in reader.turn.interaction.router.specs)
 
 
 def test_surface_router_rejects_duplicate_names():
@@ -137,14 +137,14 @@ def test_scroll_command_routes_to_open_help():
     from saitenka.runtime.help import HelpCommand
 
     reader = build_session(_FakeIPC())
-    reader.screen.osd = (480, 220)
-    reader.help_controller.store.dispatch(
+    reader.turn.screen.osd = (480, 220)
+    reader.turn.help_controller.store.dispatch(
         HelpCommand.TOGGLE
     )  # the slice owns "open"; nothing else may set it
 
-    reader.command_runtime.handle(UserCommand(SCROLL_DOWN_MSG))
+    reader.turn.command_runtime.handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert reader.help_controller.state.page == 1
+    assert reader.turn.help_controller.state.page == 1
 
 
 def test_scroll_command_routes_to_open_picker(monkeypatch):
@@ -155,36 +155,36 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
     candidate = SubtitleCandidate(
         "provider", "name", 1, match=False, download=lambda: ("path", "ok")
     )
-    reader.picker_controller.store.dispatch(events.PickerOpened())
-    reader.picker_controller.store.dispatch(
+    reader.turn.picker_controller.store.dispatch(events.PickerOpened())
+    reader.turn.picker_controller.store.dispatch(
         events.PickerListed(
-            reader.picker_controller.state.generation, ListingResult((candidate,) * 20, ())
+            reader.turn.picker_controller.state.generation, ListingResult((candidate,) * 20, ())
         )
     )
-    reader.picker_controller.panel.rect = (0, 0, 100, 100)
-    monkeypatch.setattr(reader.picker_controller, "redraw", lambda: None)
+    reader.turn.picker_controller.panel.rect = (0, 0, 100, 100)
+    monkeypatch.setattr(reader.turn.picker_controller, "redraw", lambda: None)
 
-    reader.command_runtime.handle(UserCommand(SCROLL_DOWN_MSG))
+    reader.turn.command_runtime.handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert reader.picker_controller.state.scroll == picker.ROWS_PER_WHEEL_STEP
+    assert reader.turn.picker_controller.state.scroll == picker.ROWS_PER_WHEEL_STEP
 
 
 def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     reader = build_session(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
-    reader.sidebar_controller.store.dispatch(events.SidebarShown(active=0, capacity=10))
-    reader.sidebar_controller.panel.rect = (0, 0, 100, 100)
-    reader.sidebar_controller.panel.total = 100
+    reader.turn.sidebar_controller.store.dispatch(events.SidebarShown(active=0, capacity=10))
+    reader.turn.sidebar_controller.panel.rect = (0, 0, 100, 100)
+    reader.turn.sidebar_controller.panel.total = 100
     monkeypatch.setattr(sidebar, "draw", lambda _view: None)
 
-    reader.command_runtime.handle(UserCommand(SCROLL_DOWN_MSG))
+    reader.turn.command_runtime.handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert reader.sidebar_controller.state.scroll == runtime_sidebar.ROWS_PER_WHEEL_STEP
+    assert reader.turn.sidebar_controller.state.scroll == runtime_sidebar.ROWS_PER_WHEEL_STEP
 
 
 def test_the_registry_reads_shown_ness_from_feature_owners() -> None:
     reader = build_session(_FakeIPC())
-    router = reader.interaction.router
+    router = reader.turn.interaction.router
     assert router.wants_mouse_capture() is False
 
-    reader.sidebar_controller.store.dispatch(events.SidebarShown(active=0, capacity=10))
+    reader.turn.sidebar_controller.store.dispatch(events.SidebarShown(active=0, capacity=10))
     assert router.wants_mouse_capture() is True

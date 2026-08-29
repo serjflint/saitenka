@@ -39,26 +39,26 @@ def test_navigation_state_defaults_are_the_no_source_state():
 
 def test_reader_delegates_episode_fields_to_the_context():
     r = build_session(FakeIPC())
-    assert r.track_commands.navigation.current.nav_idx == -1
-    r.track_commands.navigation.current.nav_idx = 7
-    assert r.track_commands.navigation.current.nav_idx == 7
+    assert r.turn.track_commands.navigation.current.nav_idx == -1
+    r.turn.track_commands.navigation.current.nav_idx = 7
+    assert r.turn.track_commands.navigation.current.nav_idx == 7
 
 
 def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     r = build_session(FakeIPC())
-    r.track_commands.navigation.current.nav_idx = 9
-    r.track_commands.navigation.current.sub_settle = (
-        r.track_commands.navigation.current.sub_settle.begin()
+    r.turn.track_commands.navigation.current.nav_idx = 9
+    r.turn.track_commands.navigation.current.sub_settle = (
+        r.turn.track_commands.navigation.current.sub_settle.begin()
     )
     # A geometry hint names a cue of *this* file, so carrying one over would aim the next episode's
     # first decision at a line that is nowhere in it. It was a SessionController field, where nothing cleared it.
-    r.track_commands.navigation.current.geometry_cue_hint = Cue(1.0, 2.0, "犬")
+    r.turn.track_commands.navigation.current.geometry_cue_hint = Cue(1.0, 2.0, "犬")
 
-    r.track_commands.navigation.replace(NavigationState())
+    r.turn.track_commands.navigation.replace(NavigationState())
 
-    assert r.track_commands.navigation.current.nav_idx == -1
-    assert r.track_commands.navigation.current.sub_settle.open is False
-    assert r.track_commands.navigation.current.geometry_cue_hint is None
+    assert r.turn.track_commands.navigation.current.nav_idx == -1
+    assert r.turn.track_commands.navigation.current.sub_settle.open is False
+    assert r.turn.track_commands.navigation.current.geometry_cue_hint is None
 
 
 def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
@@ -69,37 +69,40 @@ def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
     leak-free-by-construction rebind no longer covers.
     """
     r = build_session(FakeIPC())
-    r.track_commands.declare(SubtitleStartupConfigured(5, 6, "en", "ja,jpn,jp"))
-    r.track_commands.declare(SubtitleSecondaryLeased(6))
+    r.turn.track_commands.declare(SubtitleStartupConfigured(5, 6, "en", "ja,jpn,jp"))
+    r.turn.track_commands.declare(SubtitleSecondaryLeased(6))
 
-    r.track_commands.navigation.replace(NavigationState())
+    r.turn.track_commands.navigation.replace(NavigationState())
     assert (
-        r.track_commands.current().jp_sid,
-        r.track_commands.current().en_sid,
-        r.track_commands.current().language,
+        r.turn.track_commands.current().jp_sid,
+        r.turn.track_commands.current().en_sid,
+        r.turn.track_commands.current().language,
     ) == (5, 6, "en")  # the rebind does not reach it
 
-    r.track_commands.declare(SubtitleStartupConfigured(None, None, "jp", "ja,jpn,jp"))
+    r.turn.track_commands.declare(SubtitleStartupConfigured(None, None, "jp", "ja,jpn,jp"))
     assert (
-        r.track_commands.current().jp_sid,
-        r.track_commands.current().en_sid,
-        r.track_commands.current().language,
+        r.turn.track_commands.current().jp_sid,
+        r.turn.track_commands.current().en_sid,
+        r.turn.track_commands.current().language,
     ) == (None, None, "jp")
-    assert r.track_commands.current().secondary_sid is None  # the lease goes with the selection
+    assert (
+        r.turn.track_commands.current().secondary_sid is None
+    )  # the lease goes with the selection
 
 
 def test_tooltip_controller_owns_its_surface_state():
     r = build_session(FakeIPC())
-    assert isinstance(r.tooltip_controller.surface_state(), TooltipState)
+    assert isinstance(r.turn.tooltip_controller.surface_state(), TooltipState)
     assert (
-        r.tooltip_controller.surface_state().nest is r.tooltip_controller.surface_state().nest
-        and isinstance(r.tooltip_controller.surface_state().nest, PopupView)
+        r.turn.tooltip_controller.surface_state().nest
+        is r.turn.tooltip_controller.surface_state().nest
+        and isinstance(r.turn.tooltip_controller.surface_state().nest, PopupView)
     )
-    r.tooltip_controller.surface_state().view.scroll = 4
-    r.tooltip_controller.surface_state().hover_reading = "よむ"
+    r.turn.tooltip_controller.surface_state().view.scroll = 4
+    r.turn.tooltip_controller.surface_state().hover_reading = "よむ"
     assert (
-        r.tooltip_controller.surface_state().view.scroll == 4
-        and r.tooltip_controller.surface_state().hover_reading == "よむ"
+        r.turn.tooltip_controller.surface_state().view.scroll == 4
+        and r.turn.tooltip_controller.surface_state().hover_reading == "よむ"
     )
 
 
@@ -111,13 +114,13 @@ def test_session_does_not_project_tooltip_state_twice():
 
 def test_feature_owned_session_state_survives_an_episode_reslot():
     r = build_session(FakeIPC())
-    r.mining_controller.record_mined_expression("読む")
+    r.turn.mining_controller.record_mined_expression("読む")
     backlog = object()
-    r.history.replace_backlog(backlog)  # type: ignore[assignment]  # lifetime sentinel
-    history_before = r.history
+    r.turn.history.replace_backlog(backlog)  # type: ignore[assignment]  # lifetime sentinel
+    history_before = r.turn.history
 
-    r.track_commands.navigation.replace(NavigationState())
+    r.turn.track_commands.navigation.replace(NavigationState())
 
-    assert r.history is history_before
-    assert "読む" in r.mining_controller.index_snapshot()
-    assert r.history.backlog is backlog
+    assert r.turn.history is history_before
+    assert "読む" in r.turn.mining_controller.index_snapshot()
+    assert r.turn.history.backlog is backlog

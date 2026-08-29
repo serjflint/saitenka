@@ -29,9 +29,9 @@ from saitenka.mpvio.ipc import IPCRequest
 def test_reader_starts_without_deps():
     r = build_session(FakeIPC())
     assert (
-        r.profile_session.scorer is None
-        and r.profile_session.profile.dict_set is None
-        and not r.mining_controller.configured
+        r.turn.profile_session.scorer is None
+        and r.turn.profile_session.profile.dict_set is None
+        and not r.turn.mining_controller.configured
     )
 
 
@@ -41,11 +41,11 @@ def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop() -> 
     gateway = runtime_gateway(ipc)
     reader = build_session(ipc)
     try:
-        reader.prepare_subtitle_blocking("猫")
+        reader.turn.prepare_subtitle_blocking("猫")
 
-        assert [token.surface for token in reader.subtitle_presentation.cue.current.tokens] == [
-            "猫"
-        ]
+        assert [
+            token.surface for token in reader.turn.subtitle_presentation.cue.current.tokens
+        ] == ["猫"]
     finally:
         reader.close()
         gateway.close()
@@ -54,15 +54,15 @@ def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop() -> 
 def test_apply_deps_injects_and_stops_loading():
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.profile_session.begin_loading()
+    r.turn.profile_session.begin_loading()
 
     class _Scorer:  # stand-in; not exercised here (no active subtitle)
         pass
 
     scorer = _Scorer()
-    r.profile_session.accept(DependencyBundle(r.profile_session.identity, scorer=scorer))
-    assert r.profile_session.scorer is scorer
-    assert r.profile_session.loading is False
+    r.turn.profile_session.accept(DependencyBundle(r.turn.profile_session.identity, scorer=scorer))
+    assert r.turn.profile_session.scorer is scorer
+    assert r.turn.profile_session.loading is False
     assert any(c and c[0] == "overlay-remove" for c in ipc.commands)  # spinner cleared
 
 
@@ -72,17 +72,17 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", lambda _anki, _cfg: {"猫"})
     r = build_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
     try:
-        r.mining_controller.request_seed()
+        r.turn.mining_controller.request_seed()
         await_ready(
-            lambda: bool(r.mining_controller.index_snapshot()),
+            lambda: bool(r.turn.mining_controller.index_snapshot()),
             "mined seed never published",
-            pump=r._drain_events,
+            pump=r.turn._drain_events,
         )
 
-        snapshot = r.mining_controller.index_snapshot()
+        snapshot = r.turn.mining_controller.index_snapshot()
         assert snapshot.values == {"猫"}
         assert snapshot.generation == 1
-        assert r.mining_controller.seed_lane.inflight is False
+        assert r.turn.mining_controller.seed_lane.inflight is False
     finally:
         r.close()
         gateway.close()
@@ -107,28 +107,28 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
     config = MineConfig()
     r = build_session(ipc, services=SessionServices(anki=old_anki, mining=config))
     try:
-        r.mining_controller.request_seed()
+        r.turn.mining_controller.request_seed()
         assert old_started.wait(1)
         identity = MiningIdentity("replacement", 1)
-        r.mining_controller.select_mining_spec(
+        r.turn.mining_controller.select_mining_spec(
             MiningSpec(identity, {"deck": config.deck, "model": config.model})
         )
-        r.mining_controller.publish_mining_target(MiningTarget(identity, new_anki, config))
-        r.mining_controller.request_seed()
+        r.turn.mining_controller.publish_mining_target(MiningTarget(identity, new_anki, config))
+        r.turn.mining_controller.request_seed()
         await_ready(
-            lambda: bool(r.mining_controller.index_snapshot()),
+            lambda: bool(r.turn.mining_controller.index_snapshot()),
             "mined seed never published",
-            pump=r._drain_events,
+            pump=r.turn._drain_events,
         )
 
-        current = r.mining_controller.index_snapshot()
+        current = r.turn.mining_controller.index_snapshot()
         assert current.values == {"新しい"}
         release.set()
         # Not a wait: drain repeatedly to give a late result the chance to arrive, then prove it
         # did not. A deadline helper would return on the first pass and assert nothing.
-        drain_for(r._drain_events)
+        drain_for(r.turn._drain_events)
 
-        assert r.mining_controller.index_snapshot() == current
+        assert r.turn.mining_controller.index_snapshot() == current
     finally:
         r.close()
         gateway.close()
@@ -149,24 +149,24 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
 
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     try:
-        r.mining_controller.request_seed()
+        r.turn.mining_controller.request_seed()
         await_ready(
-            lambda: not r.mining_controller.seed_lane.inflight,
+            lambda: not r.turn.mining_controller.seed_lane.inflight,
             "the failed seed never settled",
-            pump=r._drain_events,
+            pump=r.turn._drain_events,
         )
-        assert r.mining_controller.index_snapshot().values == set()
+        assert r.turn.mining_controller.index_snapshot().values == set()
 
         # The backoff is a named deadline now, so firing it *is* the retry — and asserting it was
         # armed proves the failure path scheduled one rather than silently giving up.
         assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
         await_ready(
-            lambda: bool(r.mining_controller.index_snapshot()),
+            lambda: bool(r.turn.mining_controller.index_snapshot()),
             "mined seed never published",
-            pump=r._drain_events,
+            pump=r.turn._drain_events,
         )
 
-        assert attempts == 2 and r.mining_controller.index_snapshot().values == {"猫"}
+        assert attempts == 2 and r.turn.mining_controller.index_snapshot().values == {"猫"}
     finally:
         r.close()
         gateway.close()
@@ -182,7 +182,7 @@ def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
     r = build_session(FakeIPC())
-    r.tooltip_controller.surface_state().jobs.begin("tooltip")
+    r.turn.tooltip_controller.surface_state().jobs.begin("tooltip")
 
     r.close()
 
@@ -211,12 +211,12 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog):
         ),
     )
     try:
-        r.profile_session.accept(
-            DependencyBundle(r.profile_session.identity, dictionaries=dictionaries)
+        r.turn.profile_session.accept(
+            DependencyBundle(r.turn.profile_session.identity, dictionaries=dictionaries)
         )
         assert "3 prefetch worker(s)" in caplog.text  # real count, not 0
         caplog.clear()
-        r.profile_session.accept(DependencyBundle(r.profile_session.identity))
+        r.turn.profile_session.accept(DependencyBundle(r.turn.profile_session.identity))
         assert "prefetch worker(s)" not in caplog.text
     finally:
         r.close()
@@ -260,7 +260,7 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll(request):
     assert ("show-text", "", 1) not in ipc.commands
 
     assert r.pump() is True
-    assert r._interactive_ready is True
+    assert r.turn._interactive_ready is True
     assert ("show-text", "", 1) in ipc.commands
 
     before = ipc.commands.count(("show-text", "", 1))
@@ -282,7 +282,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     clear = ("show-text", "", 1)
     observed = []
     monkeypatch.setattr(
-        reader.picker_controller,
+        reader.turn.picker_controller,
         "open",
         lambda *_args, **_kwargs: observed.append(clear in ipc.commands),
     )
@@ -329,8 +329,10 @@ def test_load_deps_async_marks_loading(monkeypatch):
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     r = build_session(FakeIPC())
-    r.profile_session.load({})
-    assert r.profile_session.loading is True  # spinner shows until the deps-ready deadline injects
+    r.turn.profile_session.load({})
+    assert (
+        r.turn.profile_session.loading is True
+    )  # spinner shows until the deps-ready deadline injects
 
 
 def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
@@ -341,12 +343,12 @@ def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.profile_session.load({})
+    r.turn.profile_session.load({})
     await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed the injection")
 
-    assert r.profile_session.scorer is None  # arming is not applying
+    assert r.turn.profile_session.scorer is None  # arming is not applying
     assert ipc.fire_runtime_timer("lifecycle:deps-ready")
-    assert r.profile_session.loading is False
+    assert r.turn.profile_session.loading is False
 
     assert not ipc.fire_runtime_timer("lifecycle:deps-ready")  # one build, one injection
 
@@ -359,10 +361,10 @@ def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.profile_session.load({})
+    r.turn.profile_session.load({})
     await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed deps-ready")
 
-    assert r.profile_session.ready
+    assert r.turn.profile_session.ready
 
 
 @pytest.mark.timeout(5)
@@ -395,20 +397,20 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     ipc.props.update({"sub-text": "猫", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
     gateway = runtime_gateway(ipc)
     reader = build_session(ipc)
-    reader.subtitle_presentation.renderer = NullRenderer()
-    reader.profile_session.profile.use_tokenizer(_Tokenizer())
-    reader.profile_integration.enable_async_annotation()
-    reader.set_subtitle("猫")
+    reader.turn.subtitle_presentation.renderer = NullRenderer()
+    reader.turn.profile_session.profile.use_tokenizer(_Tokenizer())
+    reader.turn.profile_integration.enable_async_annotation()
+    reader.turn.set_subtitle("猫")
     dictionary = _BlockingDictionary()
     dispatched = []
     monkeypatch.setattr(
-        reader.picker_controller,
+        reader.turn.picker_controller,
         "open",
         lambda *_args, **_kwargs: dispatched.append(True),
     )
 
-    reader.profile_session.accept(
-        DependencyBundle(reader.profile_session.identity, dictionaries=dictionary)
+    reader.turn.profile_session.accept(
+        DependencyBundle(reader.turn.profile_session.identity, dictionaries=dictionary)
     )
     assert dictionary.started.wait(1)
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
@@ -416,22 +418,22 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     assert reader.pump() is True
     assert dispatched == [True]
     assert (
-        reader.subtitle_presentation.cue.current.tokens == []
-        and reader.annotation_controller.view.pending_text == "猫"
+        reader.turn.subtitle_presentation.cue.current.tokens == []
+        and reader.turn.annotation_controller.view.pending_text == "猫"
     )
     assert dictionary.thread_id != threading.get_ident()
 
     dictionary.release.set()
     assert dictionary.finished.wait(1)
     deadline = time.monotonic() + 1
-    while not reader.subtitle_presentation.cue.current.tokens and time.monotonic() < deadline:
+    while not reader.turn.subtitle_presentation.cue.current.tokens and time.monotonic() < deadline:
         reader.pump()
         time.sleep(0.001)
     try:
-        assert [token.surface for token in reader.subtitle_presentation.cue.current.tokens] == [
-            "猫"
-        ]
-        assert reader.annotation_controller.view.pending_text is None
+        assert [
+            token.surface for token in reader.turn.subtitle_presentation.cue.current.tokens
+        ] == ["猫"]
+        assert reader.turn.annotation_controller.view.pending_text is None
     finally:
         dictionary.release.set()
         reader.close()

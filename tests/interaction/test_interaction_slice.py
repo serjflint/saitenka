@@ -211,14 +211,14 @@ def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
         options=ReaderOptions().with_overrides(prefetch=False, hover_switch_delay=10.0),
     )
     try:
-        reader.subtitle_presentation.cue.replace_tokenized(tokens=[object(), object()])
-        reader.tooltip_controller.select(0)
-        reader.tooltip_controller.hit = lambda *_args: 1  # type: ignore[method-assign]
+        reader.turn.subtitle_presentation.cue.replace_tokenized(tokens=[object(), object()])
+        reader.turn.tooltip_controller.select(0)
+        reader.turn.tooltip_controller.hit = lambda *_args: 1  # type: ignore[method-assign]
 
         Driver(reader, instant=False).move(5, 5)
 
-        assert reader.tooltip_controller.hover_diagnostics().word_target == 1
-        assert reader.tooltip_controller.hover_view().scan_target is None
+        assert reader.turn.tooltip_controller.hover_diagnostics().word_target == 1
+        assert reader.turn.tooltip_controller.hover_view().scan_target is None
     finally:
         reader.close()
 

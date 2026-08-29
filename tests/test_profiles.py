@@ -100,8 +100,8 @@ def test_reader_without_a_profile_is_japanese_unidic():
     """The construction default is today's JP profile — so an existing call site (and every golden)
     behaves exactly as before #254."""
     reader = build_session(FakeIPC())
-    assert reader.profile_session.profile.tokenizer.name == "unidic"
-    assert reader.profile_session.profile.langs == ReaderLanguages(main="jp", second="en")
+    assert reader.turn.profile_session.profile.tokenizer.name == "unidic"
+    assert reader.turn.profile_session.profile.langs == ReaderLanguages(main="jp", second="en")
 
 
 # --- a named profile selects language, tokenizer, and second language -----------------------------
@@ -199,13 +199,13 @@ def test_reader_uses_the_active_profiles_tokenizer_and_languages():
     )
     reader = build_session(FakeIPC(), identity=SessionIdentity(profile=profile))
     assert isinstance(
-        reader.profile_session.profile.tokenizer, _FakeLatinTokenizer
+        reader.turn.profile_session.profile.tokenizer, _FakeLatinTokenizer
     )  # selected, not unidic
     assert (
-        reader.profile_session.profile.langs.main == "fr"
-        and reader.profile_session.profile.langs.second == "en"
+        reader.turn.profile_session.profile.langs.main == "fr"
+        and reader.turn.profile_session.profile.langs.second == "en"
     )
-    assert reader.profile_session.profile.profile is profile
+    assert reader.turn.profile_session.profile.profile is profile
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -218,17 +218,17 @@ def test_cycle_profile_rescopes_the_dict_set_live():
     jp_dicts, fr_dicts = object(), object()  # sentinels — cycle must select by profile
 
     reader = build_session(FakeIPC(), identity=SessionIdentity(profile=jp))
-    reader.profile_session.profile.replace_dictionary_set(jp_dicts)
-    reader.profile_session.profile.configure_cycle(
+    reader.turn.profile_session.profile.replace_dictionary_set(jp_dicts)
+    reader.turn.profile_session.profile.configure_cycle(
         [jp, fr], lambda p: fr_dicts if p.langs.main == "fr" else jp_dicts
     )
 
-    reader.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.profile_session.profile.profile is fr
-    assert reader.profile_session.profile.langs.main == "fr"
+    assert reader.turn.profile_session.profile.profile is fr
+    assert reader.turn.profile_session.profile.langs.main == "fr"
     assert (
-        reader.profile_session.profile.dict_set is fr_dicts
+        reader.turn.profile_session.profile.dict_set is fr_dicts
     )  # rescoped, not left on the JP dict set
 
 
@@ -241,13 +241,13 @@ def test_cycle_profile_without_a_scoper_keeps_the_dict_set():
     fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
     reader = build_session(FakeIPC(), identity=SessionIdentity(profile=jp))
     sentinel = object()
-    reader.profile_session.profile.replace_dictionary_set(sentinel)
-    reader.profile_session.profile.configure_cycle([jp, fr])  # no dict_scoper
+    reader.turn.profile_session.profile.replace_dictionary_set(sentinel)
+    reader.turn.profile_session.profile.configure_cycle([jp, fr])  # no dict_scoper
 
-    reader.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
+    reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.profile_session.profile.profile is fr
-    assert reader.profile_session.profile.dict_set is sentinel  # unchanged
+    assert reader.turn.profile_session.profile.profile is fr
+    assert reader.turn.profile_session.profile.dict_set is sentinel  # unchanged
 
 
 # --- open language codes: accepted (not whitelisted), agnostic-provider fallback ------------------

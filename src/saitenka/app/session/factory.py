@@ -18,7 +18,9 @@ if TYPE_CHECKING:
     from saitenka.app.profiles import Profile
     from saitenka.app.scoring import Scorer
     from saitenka.app.session.close_ledger import CloseLedger
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.session.runtime import SessionEntry
+    from saitenka.app.session.turn import SessionTurn
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.mpvio.osd import Overlay
@@ -106,23 +108,42 @@ def prepare_session_controller(
     infrastructure: SessionInfrastructure | None = None,
     identity: SessionIdentity | None = None,
 ) -> PreparedSession:
+    return _compose_session(
+        ipc,
+        services=services,
+        options=options,
+        infrastructure=infrastructure,
+        identity=identity,
+    )[2]
+
+
+def _compose_session(
+    ipc: MpvIPC,
+    *,
+    services: SessionServices | None = None,
+    options: ReaderOptions | None = None,
+    infrastructure: SessionInfrastructure | None = None,
+    identity: SessionIdentity | None = None,
+) -> tuple[SessionController, SessionTurn, PreparedSession]:
+    """Return the live object, internal turn, and public pre-start capabilities."""
     from saitenka.app.config import ReaderOptions
     from saitenka.app.session.assembly import build_session_assembly
-    from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.controller import SessionController, SessionGraph
+    from saitenka.app.session.runtime import SessionEntry
+    from saitenka.app.session.turn import SessionTurn
 
     resolved = services or SessionServices()
     resolved_options = options or ReaderOptions()
     physical = infrastructure or SessionInfrastructure()
     session_identity = identity or SessionIdentity()
-    resolved_submit = getattr(ipc, "submit_runtime_mpv", None)
     resolved_assembly = build_session_assembly(
         ipc,
         resolved_options,
-        runtime_submit=resolved_submit,
+        runtime_submit=ipc.submit_runtime_mpv,
         overlay=physical.overlay,
         tokenizer_warm=session_identity.tokenizer_warm,
     )
-    controller = SessionController(
+    turn = SessionTurn(
         ipc,
         resolved_assembly,
         resolved_options,
@@ -151,15 +172,17 @@ def prepare_session_controller(
             else _geometry_backend(resolved_options.subtitle_geometry)
         ),
     )
-    return PreparedSession(
+    controller = SessionController(SessionGraph(ipc, turn, turn.lifecycle))
+    prepared = PreparedSession(
         live=controller,
-        profile=controller.profile_session,
-        rebuild_sub_index=controller.rebuild_sub_index,
-        configure_subtitle_mode=controller.configure_subtitle_mode,
-        reslot=controller.reslot_ports,
-        watch=controller.watch_ports,
-        entry=controller._entry,
+        profile=turn.profile_session,
+        rebuild_sub_index=turn.rebuild_sub_index,
+        configure_subtitle_mode=turn.configure_subtitle_mode,
+        reslot=turn.reslot_ports,
+        watch=turn.watch_ports,
+        entry=SessionEntry(runtime=turn.entry_runtime, run=controller.run),
     )
+    return controller, turn, prepared
 
 
 def _inline_tooltip_jobs(jobs: TooltipRuntimeJobs) -> TooltipRuntimeJobs:

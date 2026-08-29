@@ -16,8 +16,8 @@ _INSTANT_DWELLS = ("lifecycle:hover-switch", "lifecycle:scan-open")
 
 class Driver:
     def __init__(self, reader, *, instant: bool = True):
-        self.r = reader
-        self.ipc = reader.ipc
+        self.r = reader.turn
+        self.ipc = self.r.ipc
         self._instant = instant
         if instant:  # deterministic tests: no hover-switch or scan dwell to wait out
             self.r.tooltip_controller.configure_delays(switch=0.0)

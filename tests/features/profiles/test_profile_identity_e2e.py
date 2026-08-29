@@ -108,8 +108,8 @@ def _resolve_identity(cfg: dict) -> tuple[str, str, tuple[str, ...]]:
         subselect.AttachSubtitleOptions(jimaku=True, tsukihime=True, language=profile.langs.main),
     )
     return (
-        reader.profile_session.profile.tokenizer.name,
-        reader.profile_session.profile.langs.main,
+        reader.turn.profile_session.profile.tokenizer.name,
+        reader.turn.profile_session.profile.langs.main,
         providers,
     )
 

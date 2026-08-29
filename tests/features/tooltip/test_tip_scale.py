@@ -18,10 +18,10 @@ from saitenka.app.features.tooltip.prefetch import REF_H
 from saitenka.app.session.factory import SessionServices
 
 if TYPE_CHECKING:
-    from saitenka.app.session.controller import SessionController
+    from saitenka.app.session.turn import SessionTurn
 
 
-def _reader(tip_scale: float, osd_h: int) -> SessionController:
+def _reader(tip_scale: float, osd_h: int) -> SessionTurn:
     r = build_session(
         util.FakeIPC(),
         services=SessionServices(
@@ -29,8 +29,8 @@ def _reader(tip_scale: float, osd_h: int) -> SessionController:
         ),
         options=ReaderOptions().with_overrides(tip_scale=tip_scale),
     )
-    r.screen.osd = (round(osd_h * 16 / 9), osd_h)
-    return r
+    r.turn.screen.osd = (round(osd_h * 16 / 9), osd_h)
+    return r.turn
 
 
 def test_auto_scale_tracks_the_video_viewport_when_tip_scale_is_zero():

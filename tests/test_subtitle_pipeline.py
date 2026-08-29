@@ -236,14 +236,14 @@ def test_coordinator_delegates_current_renderer() -> None:
             prefetch=False,
         ),
     )
-    coordinator = reader.subtitle_presentation.pipeline
+    coordinator = reader.turn.subtitle_presentation.pipeline
     coordinator.renderer = renderer
 
-    coordinator.draw_current(reader.subtitle_presentation.target())
+    coordinator.draw_current(reader.turn.subtitle_presentation.target())
 
     assert renderer.drawn is not None
     assert renderer.drawn is not reader
-    assert renderer.drawn.osd == reader.screen.osd
+    assert renderer.drawn.osd == reader.turn.screen.osd
     reader.close()
 
 
