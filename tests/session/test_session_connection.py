@@ -13,7 +13,8 @@ from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
-from saitenka.app.session.routes import install_session_reactor
+from saitenka.app.session.resources import Retiring
+from saitenka.app.session.routes import CUE_RETIRE_RESOURCE, install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.connection import ConnectionState, ConnectionStore, reduce_connection
 from saitenka.runtime.effects import ReplaySubtitleSelection, RetireCueIdentity
@@ -119,6 +120,29 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
         gateway.close()
 
     assert outcomes == 1
+
+
+def test_a_failed_cue_retirement_ends_the_session_turn() -> None:
+    """A reconnect cannot continue over a cue that its owner failed to retire."""
+    ipc = FakeIPC()
+    gateway = bare_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
+    reader = build_session(
+        ipc,
+        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
+        options=ReaderOptions().with_overrides(prefetch=False),
+    )
+
+    def fail() -> None:
+        raise RuntimeError("cue retirement failed")
+
+    gateway.session_resources[CUE_RETIRE_RESOURCE] = Retiring(fail)
+    try:
+        assert gateway.publish_session_event(ConnectionLost(0))
+        assert reader.pump() is False
+    finally:
+        reader.close()
+        gateway.close()
 
 
 def test_the_whole_connection_vocabulary_is_the_reactors() -> None:

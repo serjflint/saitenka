@@ -12,6 +12,8 @@ a package that was never coupled.
 
 from __future__ import annotations
 
+import sys
+
 import arch_map as A
 
 
@@ -89,6 +91,17 @@ def test_the_live_map_is_not_vacuous():
     assert state["commands"]["rows"], "the command table did not parse"
     assert state["seams"]["stateless"]["policies"], "no stateless policy found"
     assert state["seams"]["stateful"]["registered"], "no registered reducer found"
+
+
+def test_default_cli_renders_the_live_markdown(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["arch_map.py"])
+
+    assert A.main() == 0
+
+    output = capsys.readouterr().out
+    assert "## 1. Static" in output
+    assert "## 3. Command" in output
+    assert "## 4. Seams" in output
 
 
 def test_every_stateless_policy_is_reported_as_stateless():

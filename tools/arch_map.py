@@ -488,10 +488,7 @@ def markdown(state: dict) -> str:
     out += [
         "## 3. Command — what a keypress reaches",
         "",
-        (
-            f"{len(cmd['rows'])} rows; {cmd['verbs']} resolve to a `SessionController` verb by name, the"
-            " rest carry an intent to a policy."
-        ),
+        f"{len(cmd['rows'])} rows route script messages through the closed command registry.",
         "",
         "| message | target |",
         "| --- | --- |",

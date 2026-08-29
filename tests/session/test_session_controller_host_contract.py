@@ -1,5 +1,7 @@
+import ast
 from pathlib import Path
 
+import pytest
 from session_controller_host_contract import session_controller_parameters
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -7,6 +9,187 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_new_feature_functions_cannot_accept_session_controller() -> None:
     assert session_controller_parameters(ROOT) == set()
+
+
+def _turn_graph_collaborators(
+    path: Path = ROOT / "src/saitenka/app/session/controller.py",
+) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    controller = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SessionController"
+    )
+    collaborators: set[str] = set()
+    for method in controller.body:
+        if not isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef) or (
+            method.name == "_build_entry_runtime"
+        ):
+            continue
+        assignments = list(_assignments(method))
+        aliases = {
+            value.id
+            for targets, value in assignments
+            if any(_is_self_graph(target) for target in targets) and isinstance(value, ast.Name)
+        }
+        changed = True
+        while changed:
+            changed = False
+            for targets, value in assignments:
+                source_is_graph = _is_graph_reference(value, aliases)
+                if not source_is_graph:
+                    continue
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id not in aliases:
+                        aliases.add(target.id)
+                        changed = True
+        parents = {
+            child: parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)
+        }
+        for node in ast.walk(method):
+            if isinstance(node, ast.Attribute) and _is_graph_reference(node.value, aliases):
+                collaborators.add(node.attr)
+                continue
+            if not _is_graph_reference(node, aliases):
+                continue
+            parent = parents.get(node)
+            if isinstance(parent, ast.Attribute) and parent.value is node:
+                continue
+            if _is_safe_graph_assignment(parent, node):
+                continue
+            collaborators.add("<session-graph-escape>")
+    return collaborators
+
+
+def _assignments(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[list[ast.expr], ast.expr]]:
+    assignments = []
+    for node in ast.walk(method):
+        if isinstance(node, ast.Assign):
+            assignments.append((node.targets, node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            assignments.append(([node.target], node.value))
+    return assignments
+
+
+def _is_self_graph(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+        and node.attr == "_graph"
+    )
+
+
+def _is_graph_reference(node: ast.AST, aliases: set[str]) -> bool:
+    return (_is_self_graph(node) and isinstance(node.ctx, ast.Load)) or (
+        isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in aliases
+    )
+
+
+def _is_safe_graph_assignment(parent: ast.AST | None, node: ast.AST) -> bool:
+    if isinstance(parent, ast.Assign):
+        targets = parent.targets
+    elif isinstance(parent, ast.AnnAssign):
+        targets = [parent.target]
+    else:
+        return False
+    return parent.value is node and all(
+        isinstance(target, ast.Name) or _is_self_graph(target) for target in targets
+    )
+
+
+def test_the_live_turn_does_not_reach_new_feature_authority() -> None:
+    """New feature policy belongs behind its owner or an explicit session conjunction."""
+    assert _turn_graph_collaborators() <= {
+        "annotation",
+        "commands",
+        "connection",
+        "cue",
+        "episode_watch",
+        "interaction",
+        "ipc",
+        "lifecycle",
+        "overlay",
+        "playback",
+        "presentation",
+    }
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            (
+                "class SessionController:\n"
+                "    def perform(self):\n"
+                "        g = self._graph\n"
+                "        g.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            ("class SessionController:\n    def perform(self):\n        consume(self._graph)\n"),
+            {"<session-graph-escape>"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def perform(self):\n"
+                "        graph = object()\n"
+                "        consume(graph)\n"
+            ),
+            set(),
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def __init__(self, session_graph):\n"
+                "        self._graph = session_graph\n"
+                "        session_graph.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def __init__(self, session_graph):\n"
+                "        self._graph: SessionGraph = session_graph\n"
+                "        session_graph.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    def __init__(self, session_graph):\n"
+                "        g = session_graph\n"
+                "        self._graph = session_graph\n"
+                "        g.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+        (
+            (
+                "class SessionController:\n"
+                "    async def perform(self):\n"
+                "        graph = self._graph\n"
+                "        graph.mining.mine()\n"
+            ),
+            {"mining"},
+        ),
+    ],
+)
+def test_the_live_turn_guard_detects_authority_without_name_heuristics(
+    tmp_path: Path,
+    source: str,
+    expected: set[str],
+) -> None:
+    controller = tmp_path / "controller.py"
+    controller.write_text(source, encoding="utf-8")
+
+    assert _turn_graph_collaborators(controller) == expected
 
 
 def test_session_controller_aliases_and_reader_names_are_detected(tmp_path: Path) -> None:
@@ -41,8 +224,6 @@ def test_session_controller_aliases_and_reader_names_are_detected(tmp_path: Path
 
 
 def _public_methods(path: Path, name: str) -> set[str]:
-    import ast
-
     tree = ast.parse(path.read_text(encoding="utf-8"))
     cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == name)
     return {
@@ -80,8 +261,6 @@ _STANDALONE_IPC_DOUBLES = {
 
 
 def _ipc_doubles() -> list[tuple[str, str, bool]]:
-    import ast
-
     found = []
     transport_methods = {
         "command_async",

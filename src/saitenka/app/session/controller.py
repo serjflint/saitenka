@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from saitenka import otel_metrics
 from saitenka.app import subtitle_intents
 from saitenka.app.features.mining import mine_intents
+from saitenka.app.session.resources import ResourceRetirementError
 from saitenka.app.session.runtime import SessionActs, SessionFacts, SessionRuntime
 from saitenka.runtime import StartupReady, UserCommand, events
 
@@ -50,7 +51,7 @@ class SessionController:
                 graph.ipc.receive_session(0.0, self._drain_event)
                 self._settle_turn()
             return True
-        except (OSError, ValueError):
+        except (OSError, ValueError, ResourceRetirementError):
             return False
 
     def run(self) -> None:

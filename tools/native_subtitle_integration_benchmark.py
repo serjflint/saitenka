@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 import psutil
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+from saitenka.app.dictionary import DictionarySet
 from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.session.factory import LiveSession, SessionInfrastructure, _compose_session
 from saitenka.app.session.routes import install_session_runtime
@@ -41,7 +42,6 @@ from saitenka.subtitles.libass_backend import LibassGeometryBackend, extract_tok
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from saitenka.app.dictionary import DictionarySet
     from saitenka.app.session.graph import SessionGraph
     from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
@@ -626,9 +626,6 @@ class _BenchmarkSession:
         finally:
             self.gateway.close()
 
-    def __getattr__(self, name: str):
-        return getattr(self.graph, name)
-
 
 def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> _BenchmarkSession:
     geometry = SubtitleGeometryOptions(native_visible=backend is not None, cache_max=3, lookahead=2)
@@ -671,7 +668,10 @@ def _managed_readers(
                 backend.close()
 
 
-class _TallDictionary:
+class _TallDictionary(DictionarySet):
+    def __init__(self) -> None:
+        super().__init__([])
+
     def entry_for(self, token, inflected=None, *, extra_terms=()):  # noqa: ARG002
         return Entry(
             headword=[token.surface],
@@ -690,49 +690,61 @@ def _present(reader: _BenchmarkSession, text: str, *, native: bool) -> bool:
     so the snapshot this call would install is usually already installed and `apply` reports False
     for it. Reading the return would count zero on a pipeline that is working perfectly.
     """
-    reader.set_subtitle(text)
+    reader.graph.cue.set_subtitle(text)
     if native:
-        assert reader.subtitle_presentation.native is not None
-        reader.subtitle_presentation.native.apply(reader._geometry_observation())
-        return (
-            bool(reader.subtitle_presentation.cue.current.boxes)
-            and reader.subtitle_presentation.native.fallback_reason is None
-        )
-    return bool(reader.subtitle_presentation.cue.current.boxes)
+        presentation = reader.graph.subtitle_presentation
+        assert presentation.native is not None
+        presentation.native.apply(reader.graph.cue.geometry_observation())
+        return bool(presentation.cue.current.boxes) and presentation.native.fallback_reason is None
+    return bool(reader.graph.subtitle_presentation.cue.current.boxes)
 
 
-def _open_tooltip(reader: _BenchmarkSession, ipc: _IPC, *, native: bool) -> tuple[bool, bool, bool]:
-    if not reader.subtitle_presentation.cue.current.boxes:
-        return False, False, False
-    box = reader.subtitle_presentation.cue.current.boxes[0]
-    ox, oy = reader.subtitle_presentation.cue.current.origin
-    hit = reader.tooltip.hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
-    before = len(ipc.commands)
-    reader.tooltip.select(box.index)
-    reader.subtitle_presentation.draw()
-    commands = ipc.commands[before:]
-    focus = (
-        any(command[:3] == ("osd-overlay", 1_001, "ass-events") for command in commands)
-        if native
-        else True
-    )
-    reader.tooltip.show_tooltip(box.index)
-    opened = reader.tooltip.surface_state().view.state is not None
-    return hit, focus, opened
+def _open_tooltip(reader: _BenchmarkSession) -> bool:
+    presentation = reader.graph.subtitle_presentation
+    tooltip = reader.graph.tooltip
+    if not presentation.cue.current.boxes:
+        return False
+    box = presentation.cue.current.boxes[0]
+    ox, oy = presentation.cue.current.origin
+    hit = tooltip.hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
+    tooltip.set_hover(box.index)
+    return hit
 
 
 def _scroll_and_close_tooltip(reader: _BenchmarkSession) -> bool:
-    opened = reader.tooltip.surface_state().view.state is not None
-    reader.tooltip.scroll_tip(1)
+    tooltip = reader.graph.tooltip
+    opened = tooltip.surface_state().view.state is not None
+    tooltip.scroll_tip(1)
     scrolled = (
         opened
-        and reader._scrolled_this_tick
-        and reader.tooltip.surface_state().view.state is not None
-        and reader.tooltip.surface_state().view.scroll > 0
+        and tooltip.surface_state().view.state is not None
+        and tooltip.surface_state().view.scroll > 0
     )
-    reader.tooltip.teardown()
-    reader.tooltip.select(-1)
+    tooltip.teardown()
+    tooltip.select(-1)
     return scrolled
+
+
+def _settle_native_geometry(reader: _BenchmarkSession, timeout: float = 30.0) -> bool:
+    native = reader.graph.subtitle_presentation.native
+    assert native is not None
+    deadline = time.monotonic() + timeout
+    while not native.worker.wait_idle(timeout=0.0):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not reader.live.pump(remaining):
+            return False
+    native.apply(reader.graph.cue.geometry_observation())
+    return True
+
+
+def _settle_tooltip(reader: _BenchmarkSession, timeout: float = 30.0) -> bool:
+    tooltip = reader.graph.tooltip
+    deadline = time.monotonic() + timeout
+    while tooltip.surface_state().view.state is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not reader.live.pump(remaining):
+            return False
+    return True
 
 
 def run(manifest: dict, *, library_path: Path | None = None) -> dict:
@@ -754,19 +766,26 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         _managed_readers(baseline_ipc, native_ipc, backend) as readers,
     ):
         baseline, native = readers
+        assert native.live.pump(0.0)
+        baseline_graph = baseline.graph
+        native_graph = native.graph
         source_path = Path(raw_workspace) / "integration.ass"
         source_path.write_bytes(source)
-        baseline.profile.profile.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
-        native.profile.profile.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
-        assert native.subtitle_presentation.native is not None
-        native.subtitle_presentation.native.set_source(source_path, live=True)
+        baseline_graph.profile.profile.replace_dictionary_set(_TallDictionary())
+        native_graph.profile.profile.replace_dictionary_set(_TallDictionary())
+        assert native_graph.subtitle_presentation.native is not None
+        native_graph.subtitle_presentation.native.set_source(source_path, live=True)
         # A track load is where mpv's font set is read, and a frame measured against an unresolved
         # environment is refused rather than laid out in substitute faces. Through the production
         # resolver, not a hand-built environment: a harness that skipped it would benchmark the
         # refusal path and report the interaction as free.
-        resolve_track_fonts(native.ipc, native.ipc.query, native.subtitle_presentation.native)
+        resolve_track_fonts(
+            native_graph.ipc,
+            native_graph.ipc.query,
+            native_graph.subtitle_presentation.native,
+        )
         index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
-        native.track_commands.navigation.current.sub_index = index
+        native_graph.track_commands.navigation.current.sub_index = index
         latencies: list[float] = []
         baseline_latencies: list[float] = []
         cpu_latencies: list[float] = []
@@ -819,29 +838,36 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
             started = time.perf_counter_ns()
             cpu_started = time.thread_time_ns()
-            _open_tooltip(baseline, baseline_ipc, native=False)
+            baseline_hit = _open_tooltip(baseline)
             baseline_wall = (time.perf_counter_ns() - started) / 1_000_000
             baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             baseline_latencies.append(baseline_wall)
             baseline_cpu_latencies.append(baseline_cpu)
+            if baseline_hit:
+                assert _settle_tooltip(baseline)
             # Outside every timed region on purpose: the presentation numbers above are the perf
             # claim and must keep their cold cue, but whether a tooltip opens is a functional
             # invariant, and leaving it to race the geometry lane makes it a property of the
             # runner's speed. The wait costs the measurement nothing and the oracle everything.
-            assert native.subtitle_presentation.native is not None
-            assert native.subtitle_presentation.native.worker.wait_idle(timeout=30)
+            assert _settle_native_geometry(native)
             started = time.perf_counter_ns()
             cpu_started = time.thread_time_ns()
-            hit, focus, opened = _open_tooltip(native, native_ipc, native=True)
+            commands_before = len(native_ipc.commands)
+            hit = _open_tooltip(native)
             hit_test_count += int(hit)
-            focus_draw_count += int(focus)
-            tooltip_open_count += int(opened)
             native_wall = (time.perf_counter_ns() - started) / 1_000_000
             latencies.append(native_wall)
             wall_deltas.append(max(0.0, native_wall - baseline_wall))
             native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             cpu_latencies.append(native_cpu)
             cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
+            tooltip_open_count += int(_settle_tooltip(native))
+            focus_draw_count += int(
+                any(
+                    command[:3] == ("osd-overlay", 1_001, "ass-events")
+                    for command in native_ipc.commands[commands_before:]
+                )
+            )
             started = time.perf_counter_ns()
             cpu_started = time.thread_time_ns()
             _scroll_and_close_tooltip(baseline)
@@ -859,21 +885,21 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             cpu_latencies.append(native_cpu)
             cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
-        assert native.subtitle_presentation.native.worker.wait_idle(timeout=30)
-        stats = native.subtitle_presentation.native.worker.stats
-        last_error = native.subtitle_presentation.pipeline.last_error
+        assert _settle_native_geometry(native)
+        stats = native_graph.subtitle_presentation.native.worker.stats
+        last_error = native_graph.subtitle_presentation.pipeline.last_error
         rss_retained = process.memory_info().rss
-        native.profile.profile.use_tokenizer(native.profile.profile.tokenizer)
+        native_graph.profile.profile.use_tokenizer(native_graph.profile.profile.tokenizer)
         profile_switch_cache_entries = sum(
             (
-                native.subtitle_presentation.native.worker.stats.result_cache_entries,
-                native.subtitle_presentation.native.worker.stats.prefetch_cache_entries,
+                native_graph.subtitle_presentation.native.worker.stats.result_cache_entries,
+                native_graph.subtitle_presentation.native.worker.stats.prefetch_cache_entries,
             )
         )
         rss_after_profile_switch = process.memory_info().rss
-        native.subtitle_presentation.native.set_source(None, live=True)
-        source_clear_current = native.subtitle_presentation.pipeline.current is not None
-        source_clear_hit_count = len(native.subtitle_presentation.cue.current.boxes)
+        native_graph.subtitle_presentation.native.set_source(None, live=True)
+        source_clear_current = native_graph.subtitle_presentation.pipeline.current is not None
+        source_clear_hit_count = len(native_graph.subtitle_presentation.cue.current.boxes)
     close_completed = backend.closed
     baseline_p99 = _percentile(baseline_latencies, 0.99)
     interaction_p99 = _percentile(latencies, 0.99)

@@ -14,6 +14,22 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+class ResourceRetirementError(RuntimeError):
+    """A retirement sequence ran every participant but one or more failed."""
+
+    def __init__(
+        self,
+        *,
+        missing: tuple[str, ...],
+        failed: tuple[tuple[str, BaseException], ...],
+    ) -> None:
+        self.missing = missing
+        self.failed = failed
+        details = [*(f"{name}: missing" for name in missing)]
+        details.extend(f"{name}: {type(error).__name__}" for name, error in failed)
+        super().__init__("session resources failed to retire: " + ", ".join(details))
+
+
 @dataclass(frozen=True, slots=True)
 class Starting:
     """One setup step, as a session participant.
