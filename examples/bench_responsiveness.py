@@ -119,10 +119,10 @@ class FakeIPC(NoSessionRuntime):
     def install_runtime_ingress(self, _event_sink, _connection_sink, _session_loop, gateway):
         self._runtime_gateway = gateway
 
-    def register_runtime_job_lane(self, name, policy, handler) -> bool:
+    def register_runtime_job_lane(self, _name, _policy, _handler) -> bool:
         if self._runtime_gateway is None:
             return False
-        self._runtime_gateway.register_job_lane(name, policy, handler)
+        self._runtime_gateway.register_job_lane(_name, _policy, _handler)
         return True
 
     def submit_runtime_job(self, **kwargs) -> bool:
@@ -130,10 +130,10 @@ class FakeIPC(NoSessionRuntime):
             return False
         return self._runtime_gateway.submit_job(**kwargs)
 
-    def close_runtime_job_lane(self, name, timeout: float = 2.0) -> bool:
+    def close_runtime_job_lane(self, _name, _timeout: float = 2.0) -> bool:
         if self._runtime_gateway is None:
             return False
-        return self._runtime_gateway.close_job_lane(name, timeout)
+        return self._runtime_gateway.close_job_lane(_name, _timeout)
 
     def wake_session_runtime(self) -> bool:
         if self._runtime_gateway is None:
