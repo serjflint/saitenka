@@ -2,7 +2,7 @@
 
 Saitenka has two runtime packages with different jobs:
 
-- `saitenka.app.runtime` holds the per-command policy `SessionController` consults before dispatch: who owns
+- `saitenka.app.runtime` holds the per-command policy `CommandRuntime` consults before dispatch: who owns
   a command, whether it needs a current cue, whether it survives with the help overlay open.
 - `saitenka.runtime` holds the runtime itself — events, effects, mailbox admission, effect
   lifecycle, timers, the owner slices and the session loop. `app/session/routes.py` composes it, and
@@ -17,8 +17,9 @@ its supported operating envelope are documented in
 
 ## Adding a feature
 
-Paths are relative to `src/saitenka/`. `SessionController` composes the owner-thread session turn;
-it is not a feature capability.
+Paths are relative to `src/saitenka/`. `session.builder` composes the owner-thread graph,
+`SessionTurn` settles it, and `SessionController` drives its live lifecycle. None is a feature
+capability.
 
 Feature-owned policy, adapters, controllers, and presentation live together under
 `app/features/<feature>/`. Shared interaction contracts live under `app/interaction/`; session
@@ -77,8 +78,10 @@ The following gates enforce the boundary:
 
 ## Production session
 
-`SessionController` composes owner-thread session lifetime, ordered cross-feature conjunctions, and
-physical application. Bounded controllers and stores own feature facts: `TooltipController` owns
+`SessionController` owns the live start/run/stop/close state machine. `SessionTurn` drains one
+owner-thread event turn and applies physical results. `CueCoordinator` owns the cross-feature cue
+and episode transactions; other conjunctions stay named at the composition seam. Bounded
+controllers and stores own feature facts: `TooltipController` owns
 tooltip interaction and engaged work, exposes frozen observations to other features, and releases
 mutable paint state only to the physical presentation seam; `TooltipPreparationController` owns speculative prefetch,
 persistent tooltip heads, and mask-atlas activation; `ProfileController` owns the active reading environment,
@@ -99,12 +102,12 @@ SessionLoop.receive(timeout bounded by the earliest armed timer)
           │  one envelope at a time, in mailbox sequence
           ├──────────────────────┐
           ▼                      ▼
-     SessionReactor.handle    SessionController's turn, unless the reactor claimed it
+     SessionReactor.handle    SessionTurn, unless the reactor claimed it
      (owner slices, effects)   ├─ reconcile subtitles
                                ├─ apply results
 worker result queues ─────────►└─ update interaction
 
-SessionController and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
+SessionTurn and other callers ──► bounded command queue ──► sole writer ──► mpv JSON IPC
 ```
 
 The IPC reader performs blocking transport reads away from the session thread. It appends events to
@@ -120,8 +123,8 @@ takes one turn off the loop. A conflicting subtitle observation retires the acti
 before a later cue-dependent command in the same batch can use its tokens or hit boxes.
 
 `CommandExecutor` splits the command table in two: `CommandPolicy` holds the closed spec set
-(`app/runtime/commands.py`) and rejects a duplicate name; `SessionController` supplies the bound handlers and
-the executor refuses any handler with no spec. So ownership and cue eligibility are decided
+(`app/runtime/commands.py`) and rejects a duplicate name; `CommandRuntime` supplies the bound handlers
+assembled from feature contributions and the executor refuses any handler with no spec. So ownership and cue eligibility are decided
 without a session, and the composition seam adds no second state owner.
 
 ## Background work and publication
@@ -165,8 +168,8 @@ hit boxes while keeping the selected pixel owner stable.
 
 `PlaybackProjection` (`saitenka/runtime/playback.py`) is the sole interpreter of raw mpv property
 observations. `PlaybackObservationController` owns observer registration, initial seeding, and the
-local or reactor-routed projection path. `SessionController` applies the typed deltas it publishes as
-explicit cross-feature conjunctions; nothing downstream compares raw property values or decides what
+local or reactor-routed projection path. `SessionTurn` applies the typed deltas through explicit
+coordinators; nothing downstream compares raw property values or decides what
 a property means.
 
 ```text
@@ -232,7 +235,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 
 | Invariant | Current contract |
 | --- | --- |
-| One live state owner | The `SessionController` thread applies production session and presentation mutations. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
+| One owner thread | `SessionController` drives the live lifecycle and `SessionTurn` applies production mutations on that thread. Bounded controllers own feature state and policy; background actors return values. The IPC writer owns transport writes, not domain state. |
 | One tooltip-preparation owner | `TooltipPreparationController` owns speculative queue state, generations, persistent heads, memory inflation, and mask-atlas activation. Admitted jobs carry immutable panel, dictionary, and scale inputs; headless prewarm composes those capabilities without a session. `poe tooltip-ownership` rejects shell-owned preparation state, escaped construction, and full-session prewarm. |
 | One mining writer | `MiningController` alone owns the selected target, deck-derived index, seed/probe lifecycle, local store, scratch resources, and operation admission. `poe mining-ownership` rejects shadow fields and direct mutator/construction escape routes. |
 | One annotation writer | `CueAnnotationController` alone owns annotation identity, admission, completion refusal, degradation, token-cache generation, and episode warming. `poe annotation-ownership` rejects the retired shell fields/facades, private cache escape, and construction outside session assembly. |

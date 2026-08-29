@@ -214,7 +214,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
             anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
         ),
     )
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
     r.turn.mining_controller.mine_token(tok)
@@ -399,7 +399,7 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     ipc.props["time-pos"] = 63
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     shown = []
@@ -506,7 +506,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
@@ -522,7 +522,7 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     previewed = []
     monkeypatch.setattr(
         miner_ui,
@@ -581,7 +581,7 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
     dup_status = []
@@ -645,7 +645,7 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     toasts = []
     monkeypatch.setattr(
@@ -695,7 +695,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     r = build_session(
         ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
     )
-    r.turn.set_subtitle("退いた")
+    r.turn.cue_coordinator.set_subtitle("退いた")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
@@ -739,7 +739,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
         }
     )
     r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg, dictionaries=ds))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
@@ -774,7 +774,7 @@ def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
@@ -794,7 +794,7 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
     r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
@@ -830,7 +830,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
             anki=anki, mining=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
         ),
     )
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
@@ -847,7 +847,7 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     ipc = FakeIPC()
     anki = _FakeAnki()
     r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
@@ -902,7 +902,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     r = build_session(
         ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
     )
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")
@@ -931,7 +931,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     r = build_session(
         ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
     )
-    r.turn.set_subtitle("本を読む")
+    r.turn.cue_coordinator.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
     tok = next(t for t in r.turn.subtitle_presentation.cue.current.tokens if t.surface == "読む")

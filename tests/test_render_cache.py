@@ -344,7 +344,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
         options=ReaderOptions(tooltip=TooltipOptions(render_cache=True)),
     )
     r.turn.screen.osd = (1920, 1080)
-    r.turn.set_subtitle("本命を読む")
+    r.turn.cue_coordinator.set_subtitle("本命を読む")
     i = next(
         i for i, t in enumerate(r.turn.subtitle_presentation.cue.current.tokens) if t.is_content
     )
@@ -841,7 +841,7 @@ def _tall_reader(tmp_path, monkeypatch, ipc=None, *, tooltip_inline: bool = Fals
     _ENGAGED_SLOTS[r] = engaged_slot
     _METADATA_SLOTS[r] = metadata_slot
     r.turn.screen.osd = (1920, 1080)
-    r.turn.set_subtitle("本命を読む")
+    r.turn.cue_coordinator.set_subtitle("本命を読む")
     r.turn.tooltip_preparation.cache.set_min_height(0)
     cache = _cache(tmp_path)
     r.turn.tooltip_preparation.cache.install_build_cache(cache)

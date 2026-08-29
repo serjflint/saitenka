@@ -31,9 +31,9 @@ def _visible_surfaces(commands: list[tuple]) -> set[object]:
 
 
 def _cue(reader: SessionController) -> CueState:
-    if reader._cue.command_state(retired=reader.annotation_controller.view.retired).value == (
-        "retired-after-active"
-    ):
+    if reader.cue_coordinator.command_state(
+        retired=reader.annotation_controller.view.retired
+    ).value == ("retired-after-active"):
         return "retired"
     if (
         reader.annotation_controller.view.identity is not None
@@ -78,9 +78,7 @@ class LegacyReaderTrace:
                 pixels=_pixels(self.reader, visible),
                 interaction=_interaction(self.reader),
                 surfaces="present" if visible else "none",
-                lifecycle=(
-                    "closed" if self.reader._lifecycle.state is LiveState.CLOSED else "open"
-                ),
+                lifecycle=("closed" if self.reader.lifecycle.state is LiveState.CLOSED else "open"),
                 outcome=outcome,
             )
         )

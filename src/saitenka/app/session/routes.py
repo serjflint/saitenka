@@ -31,6 +31,7 @@ from saitenka.app.bindings import (
     COPY_MSG,
     HOVER_PAUSE_MSG,
     KANJI_MSG,
+    LEGACY_RENDERER_MSG,
     MINE_ALL_MSG,
     MINE_MSG,
     MINE_VIDEO_MSG,
@@ -717,4 +718,7 @@ STATELESS_COMMANDS = (
         COPY_CLICK_MSG, interaction_intents.InteractionCommand.COPY_UNDER_CURSOR
     ),
     StatelessCommandRegistration(OVERLAY_TOGGLE_MSG, session_intents.SessionCommand.TOGGLE_OVERLAY),
+    StatelessCommandRegistration(
+        LEGACY_RENDERER_MSG, session_intents.SessionCommand.TOGGLE_RENDERER
+    ),
 )

@@ -77,7 +77,7 @@ def test_warmed_cue_is_a_hit_with_no_retokenization(monkeypatch):
         "tokenize",
         lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a warmed cue")),
     )
-    reader.turn.set_subtitle(
+    reader.turn.cue_coordinator.set_subtitle(
         "水を飲む"
     )  # a warmed cue → served from the cache, annotated at cue time
 

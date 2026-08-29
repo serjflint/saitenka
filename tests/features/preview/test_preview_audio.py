@@ -78,7 +78,9 @@ def _esc(r: SessionController) -> None:
 
 
 def _new_cue(r: SessionController) -> None:
-    r.turn.set_subtitle("次のセリフ")  # a cue change auto-dismisses the last preview
+    r.turn.cue_coordinator.set_subtitle(
+        "次のセリフ"
+    )  # a cue change auto-dismisses the last preview
 
 
 def _replay(r: SessionController) -> None:

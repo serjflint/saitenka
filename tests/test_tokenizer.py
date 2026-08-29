@@ -239,11 +239,11 @@ def test_use_tokenizer_swaps_strategy_and_clears_cache():
             return set()
 
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
-    reader.turn.set_subtitle("本")
+    reader.turn.cue_coordinator.set_subtitle("本")
 
     fake = _FakeTokenizer()
     reader.turn.profile_session.profile.use_tokenizer(fake)
-    reader.turn.set_subtitle("本")
+    reader.turn.cue_coordinator.set_subtitle("本")
 
     assert reader.turn.profile_session.profile.tokenizer is fake
     assert reader.turn.subtitle_presentation.cue.current.tokens == []

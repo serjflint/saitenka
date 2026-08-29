@@ -68,7 +68,7 @@ def _reader(*, render_ahead_submitter=None):
     )
     r.turn.screen.osd = (1920, 1080)
     # the default SubtitleRenderer produces the real per-word boxes these goldens hit-test against
-    r.turn.set_subtitle("本命を読む")  # → 本命 / を / 読む
+    r.turn.cue_coordinator.set_subtitle("本命を読む")  # → 本命 / を / 読む
     return r
 
 
@@ -165,7 +165,7 @@ def test_subtitle_render_span_is_emitted(monkeypatch):
         options=ReaderOptions().with_overrides(tip_max_frac=0.5),
     )
     r.turn.screen.osd = (1920, 1080)
-    r.turn.set_subtitle("本命を読む")
+    r.turn.cue_coordinator.set_subtitle("本命を読む")
     assert "subtitle_render" in [s.name for s in spans]
 
 
@@ -230,7 +230,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
         ),
     )
     r.turn.screen.osd = (1920, 1080)
-    r.turn.set_subtitle("本命を読む")
+    r.turn.cue_coordinator.set_subtitle("本命を読む")
     assert (
         r.turn.tooltip_preparation.cache.peek(r.turn.tooltip_controller.preparation_inputs, ())
         is None
@@ -252,7 +252,7 @@ def test_main_flow_renders_at_4k_without_caches():
         options=ReaderOptions().with_overrides(tip_max_frac=0.5),
     )
     r.turn.screen.osd = (3840, 2160)  # 4K → tip_scale.display 2.0, no prebuilt caches (hermetic)
-    r.turn.set_subtitle("本命を読む")
+    r.turn.cue_coordinator.set_subtitle("本命を読む")
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown and r.turn.tooltip_controller.surface_state().view.rect is not None
@@ -319,7 +319,7 @@ def test_phrase_reaches_panel_lookup(monkeypatch):
         options=ReaderOptions().with_overrides(tip_max_frac=0.5),
     )
     r.turn.screen.osd = (1920, 1080)
-    r.turn.set_subtitle("本命を読む")
+    r.turn.cue_coordinator.set_subtitle("本命を読む")
     monkeypatch.setattr(
         r.turn.profile_session.profile.dict_set, "has_term", lambda *forms: "本命を" in forms
     )

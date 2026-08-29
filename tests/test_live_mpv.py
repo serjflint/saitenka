@@ -203,7 +203,7 @@ def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
             reader,
             lambda: (
                 reader.tooltip_controller.surface_state().view.rect is not None
-                and reader._mouse_captured
+                and reader._mouse.held
             ),
             "tooltip did not show / mouse section not captured",
         )

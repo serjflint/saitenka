@@ -47,7 +47,6 @@ class CommandRuntimePorts:
     contributed_handlers: Mapping[str, Callable[[], object]]
     contributed_specs: tuple[CommandSpec, ...]
     stateless: StatelessCommandGraph
-    toggle_renderer: Callable[[], object]
     mining: MiningController
     connection: ConnectionStore
     cue: CueCoordinator
@@ -59,12 +58,11 @@ class CommandRuntimePorts:
 class CommandRuntime:
     """The single owner-thread route from script-message to a terminal outcome."""
 
-    def __init__(self, ports: CommandRuntimePorts, *, legacy_renderer_message: str) -> None:
+    def __init__(self, ports: CommandRuntimePorts) -> None:
         self._ports = ports
         handlers = merge_command_handlers(
             ports.contributed_handlers,
             ports.stateless.handlers(),
-            {legacy_renderer_message: ports.toggle_renderer},
         )
         contributed_names = {spec.name for spec in ports.contributed_specs}
         legacy = tuple(spec for spec in COMMAND_SPECS if spec.name not in contributed_names)

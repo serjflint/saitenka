@@ -229,9 +229,9 @@ def test_a_cue_publishes_plain_immediately_and_styled_onto_the_same_identity(rec
     the same cue once they land."""
     reader = _reader(recorder)
 
-    reader.turn.set_subtitle("猫を見る")
+    reader.turn.cue_coordinator.set_subtitle("猫を見る")
     reader.turn.profile_session.profile.replace_dictionary_set(_ExistsDS())
-    reader.turn.set_subtitle("猫を見る")
+    reader.turn.cue_coordinator.set_subtitle("猫を見る")
 
     assert recorder.styles == ["plain", "styled"]
     assert {published.text for published in recorder.requests} == {"猫を見る"}
@@ -245,8 +245,8 @@ def test_an_annotation_for_a_replaced_cue_never_restyles_the_current_one(recorde
     So this asserts the guard from the surface's side rather than duplicating it there.
     """
     reader = _reader(recorder, dict_set=_ExistsDS(), annotation_async=True)
-    reader.turn.set_subtitle("猫を見る")
-    reader.turn.set_subtitle("犬を見る")
+    reader.turn.cue_coordinator.set_subtitle("猫を見る")
+    reader.turn.cue_coordinator.set_subtitle("犬を見る")
     published = len(recorder.requests)
 
     _finish_captured_annotation(reader.turn.ipc)
@@ -260,11 +260,11 @@ def test_a_closed_subtitle_surface_publishes_no_pixels_and_releases_its_provider
     """The close participant. A cue that arrives after close — a late annotation publishing its
     upgrade — must not stage pixels onto a slot the close path has already emptied."""
     reader = _reader(recorder, dict_set=_ExistsDS())
-    reader.turn.set_subtitle("猫を見る")
+    reader.turn.cue_coordinator.set_subtitle("猫を見る")
     published = len(recorder.requests)
 
     reader.turn.subtitle_presentation.pipeline.close()
-    reader.turn.set_subtitle("犬を見る")
+    reader.turn.cue_coordinator.set_subtitle("犬を見る")
 
     assert len(recorder.requests) == published
     assert recorder.closed
@@ -276,7 +276,7 @@ def test_a_draw_onto_a_closed_surface_settles_its_caller_as_uncommitted(recorder
     from saitenka.app.subtitle_render import SubtitleRenderer
 
     reader = _reader(recorder, dict_set=_ExistsDS())
-    reader.turn.set_subtitle("猫を見る")
+    reader.turn.cue_coordinator.set_subtitle("猫を見る")
     renderer = reader.turn.subtitle_presentation.renderer
     assert isinstance(renderer, SubtitleRenderer)
     settled: list[bool] = []
@@ -284,7 +284,7 @@ def test_a_draw_onto_a_closed_surface_settles_its_caller_as_uncommitted(recorder
     renderer.close()
 
     result = renderer.draw(
-        reader.turn._draw_request(),
+        reader.turn.cue_coordinator.draw_request(),
         reader.turn.lifecycle_surfaces,
         reader.turn.ipc,
         on_settled=settled.append,

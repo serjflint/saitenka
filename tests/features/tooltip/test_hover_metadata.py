@@ -160,7 +160,7 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
 
     reader.turn.mining_controller.record_mined_expression("__newly-mined__")
     reader.turn.tooltip_preparation.cancel()
-    reader.turn.set_subtitle("犬")
+    reader.turn.cue_coordinator.set_subtitle("犬")
     submitted[0]["on_finished"](
         EffectFinished(
             EffectId(1),

@@ -222,7 +222,7 @@ def test_cycle_clears_the_token_cache_so_stale_segmentation_cannot_leak(request)
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])
     reader.turn.profile_session.profile.replace_dictionary_set(_ExistsDS())
     reader.turn.profile_session.profile.use_tokenizer(_TaggedTokenizer("old"))
-    reader.turn.set_subtitle("本")
+    reader.turn.cue_coordinator.set_subtitle("本")
 
     reader.turn.command_runtime.handle(app_bindings.PROFILE_CYCLE_MSG)
 
@@ -520,7 +520,7 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
     assert submissions == [(selected, {"profile": _FR.name})]
     assert reader.turn.mining_controller.active_target is target
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
-    reader.turn.set_subtitle("chat")
+    reader.turn.cue_coordinator.set_subtitle("chat")
 
     reader.turn.command_runtime.handle(MINE_MSG)
 
@@ -666,7 +666,7 @@ def test_swap_during_warm_drops_the_stale_language_entry(request, monkeypatch):
     )
 
     reader.turn.profile_integration.warm_episode()  # swaps to NEW mid-loop
-    reader.turn.set_subtitle("AAA")
+    reader.turn.cue_coordinator.set_subtitle("AAA")
 
     assert reader.turn.profile_session.profile.tokenizer is new  # the swap took effect
     assert reader.turn.subtitle_presentation.cue.current.tokens[0].lemma == "new"
@@ -688,7 +688,7 @@ def test_warm_under_the_new_generation_stores_cleanly_after_a_swap(request, monk
         "tokenize",
         lambda _line, **_kwargs: (_ for _ in ()).throw(AssertionError("re-tokenized")),
     )
-    reader.turn.set_subtitle("BBB")
+    reader.turn.cue_coordinator.set_subtitle("BBB")
 
     assert reader.turn.subtitle_presentation.cue.current.tokens[0].lemma == "new"
 

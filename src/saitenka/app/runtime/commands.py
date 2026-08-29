@@ -298,15 +298,7 @@ class CommandPolicy:
 
 
 class CommandExecutor:
-    """Decide a command against the policy, then run the action bound to it.
-
-    It used to carry a second map beside this one — `LegacyCommandBinding`, a temporary handler
-    with the work package that would delete it — because a command whose decision was still
-    imperative had nowhere else to live. Every command's decision is a reducer now, so that map
-    was empty at every construction in `src/` and the machinery around it (the deletion owner, the
-    "migrated commands must not keep a binding" guard, the `route`/`bindings` meters) was reporting
-    on a migration that had finished.
-    """
+    """Decide a command against the policy, then run the action bound to it."""
 
     def __init__(
         self,

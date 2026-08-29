@@ -49,7 +49,7 @@ def _reader() -> SessionController:
         options=ReaderOptions().with_overrides(tip_max_frac=0.5),
     )
     r.turn.screen.osd = (1920, 1080)
-    r.turn.set_subtitle("本命を読む")
+    r.turn.cue_coordinator.set_subtitle("本命を読む")
     return r
 
 

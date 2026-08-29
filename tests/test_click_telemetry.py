@@ -12,6 +12,7 @@ from session_builder import build_session
 from util import record_spans
 
 from saitenka.app import backlog
+from saitenka.app import bindings as app_bindings
 from saitenka.app.features.sidebar import sidebar
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitles import SidebarHitBox
@@ -87,7 +88,7 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     reader.turn.playback_observation.install_seed({"sub-text": "猫です"})
     reader.turn.history.replace_backlog(backlog.BacklogStore(tmp_path / "backlog.sqlite"))
 
-    backlog.capture_current(reader.turn.capture_ports)
+    reader.turn.command_runtime.handle(app_bindings.BOOKMARK_MSG)
     (attrs,) = _named(spans, "backlog_write")
     assert attrs["op"] == "toggle"
 

@@ -400,7 +400,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     reader.turn.subtitle_presentation.renderer = NullRenderer()
     reader.turn.profile_session.profile.use_tokenizer(_Tokenizer())
     reader.turn.profile_integration.enable_async_annotation()
-    reader.turn.set_subtitle("猫")
+    reader.turn.cue_coordinator.set_subtitle("猫")
     dictionary = _BlockingDictionary()
     dispatched = []
     monkeypatch.setattr(

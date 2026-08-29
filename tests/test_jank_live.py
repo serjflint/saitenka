@@ -176,7 +176,7 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
     mod = _jank_module()
     reader = build_session(FakeIPC(), services=SessionServices(dictionaries=mod.TallDS()))
     reader.turn.screen.osd = (1280, 720)
-    reader.turn.set_subtitle("門前の小僧習わぬ経を読む")
+    reader.turn.cue_coordinator.set_subtitle("門前の小僧習わぬ経を読む")
     word = next(
         i
         for i, t in enumerate(reader.turn.subtitle_presentation.cue.current.tokens)

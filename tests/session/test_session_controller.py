@@ -343,9 +343,9 @@ def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch):
             prefetch=False,
         ),
     )
-    r.turn.set_subtitle("猫を見る")
-    stale = SeekCue(1, r.turn.cue_revision)
-    r.turn.set_subtitle("犬も見る")  # the cue the step was decided against is gone
+    r.turn.cue_coordinator.set_subtitle("猫を見る")
+    stale = SeekCue(1, r.turn.cue_coordinator.revision)
+    r.turn.cue_coordinator.set_subtitle("犬も見る")  # the cue the step was decided against is gone
 
     assert not r.turn.subtitle_navigation.seek(stale)
 
@@ -353,7 +353,7 @@ def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch):
     (decision,) = [span["attrs"] for span in spans if span["name"] == "sub_nav_identity"]
     assert decision["outcome"] == "superseded"  # dropped out loud, not silently
     assert r.turn.subtitle_navigation.seek(
-        SeekCue(1, r.turn.cue_revision)
+        SeekCue(1, r.turn.cue_coordinator.revision)
     )  # and the current cue still navigates
 
 
@@ -469,9 +469,6 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
 
     ipc = FakeIPC()
     r = build_session(ipc)
-    r.turn.toast = lambda *_a, **_k: (
-        None
-    )  # instance-shadow the toast; assert the delay, not the OSD
     r.turn.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(s / 1000, s / 1000 + 1.0, "x") for s in sorted(starts_ms)]
     )
@@ -547,7 +544,7 @@ def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
     sub-seek so the video catches up behind it."""
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
-    r.turn.set_subtitle("いち")  # currently on cue 1
+    r.turn.cue_coordinator.set_subtitle("いち")  # currently on cue 1
     ipc.props["sub-start"] = 1.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert (
@@ -611,7 +608,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
     r, ipc = _reader_with_index(monkeypatch)
     r.turn.subtitle_presentation.renderer = PublishingRenderer(r)
     ipc.props["sub-text"] = "いち"
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
 
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
@@ -624,13 +621,13 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
 
 def test_sub_nav_prev_and_replay(monkeypatch):
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("に")  # cue 2
+    r.turn.cue_coordinator.set_subtitle("に")  # cue 2
     ipc.props["sub-start"] = 4.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+LEFT"))
     assert r.turn.playback_observation.cue.text == "いち" and ("sub-seek", "-1") in [
         (c[0], c[1]) for c in ipc.commands
     ]
-    r.turn.set_subtitle("に")
+    r.turn.cue_coordinator.set_subtitle("に")
     ipc.props["sub-start"] = 4.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+DOWN"))  # replay → same cue
     assert r.turn.playback_observation.cue.text == "に"
@@ -640,7 +637,7 @@ def test_sub_nav_chains_forward_with_stale_position(monkeypatch):
     """Rapid next/next while the seek is still in flight (sub-start/time-pos stale) must keep
     stepping forward, resolved by the rendered text + the _nav_idx hint."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0  # stale for the whole burst (video hasn't caught up)
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.turn.playback_observation.cue.text == "に"
@@ -654,7 +651,7 @@ def test_sub_nav_from_a_gap_opens_the_upcoming_cue(monkeypatch):
     """Navigating NEXT while no sub is on screen (a gap) must land ON the upcoming cue — matching
     mpv's sub-seek 1 — not skip past it."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("")  # nothing showing (between cues)
+    r.turn.cue_coordinator.set_subtitle("")  # nothing showing (between cues)
     ipc.props["time-pos"] = 8.5  # gap before cue 3 (starts at 10.0)
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.turn.playback_observation.cue.text == "さん"  # cue 3, the upcoming one — not skipped
@@ -668,7 +665,7 @@ def test_sub_nav_records_otel_sub_seek_metric(monkeypatch):
 
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
 
     reader = InMemoryMetricReader()
@@ -701,7 +698,7 @@ def test_sub_nav_span_and_cue_redraw_span_share_a_trace(monkeypatch, tmp_path):
 
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
 
     trace_path = tmp_path / "trace.json"
@@ -744,7 +741,7 @@ def test_reconcile_records_otel_sub_text_reconcile_metric(monkeypatch):
     from saitenka import otel_metrics
 
     r, _ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
@@ -765,7 +762,7 @@ def test_sub_nav_without_index_only_seeks(monkeypatch):
     ipc = FakeIPC()
     r = build_session(ipc)
     monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     r.turn.command_runtime.install_input()
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert (
@@ -778,7 +775,7 @@ def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch):
     """After a nav render, an empty sub-text within the settle window is ignored (no blank flash);
     a non-empty mpv value (source of truth) reconciles and disarms the guard."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.turn.playback_observation.cue.text == "に"  # rendered target
@@ -795,7 +792,7 @@ def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch):
 def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     """Outside the settle window an empty sub-text is honoured (a real gap between cues clears it)."""
     r, _ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("に")
+    r.turn.cue_coordinator.set_subtitle("に")
     r.turn.subtitle_navigation.retire_settle()  # window already closed
     r.turn.subtitle_navigation.reconcile("")
     assert r.turn.playback_observation.cue.text == ""
@@ -809,7 +806,7 @@ _SETTLE = "subtitle:navigation-settle"
 def _navigated(monkeypatch):
     """A reader mid-navigation: the settle window is open and its deadline is scheduled."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.turn.track_commands.navigation.current.sub_settle.open
@@ -832,8 +829,8 @@ def test_a_reconcile_cancels_the_settle_timer_exactly_once(monkeypatch):
 def test_a_source_replacement_cancels_the_settle_timer_exactly_once(monkeypatch):
     r, ipc = _navigated(monkeypatch)
 
-    r.turn._cue.replace_source("/media/next.srt", reason="test")
-    r.turn._cue.replace_source("/media/third.srt", reason="test")
+    r.turn.cue_coordinator.replace_source("/media/next.srt", reason="test")
+    r.turn.cue_coordinator.replace_source("/media/third.srt", reason="test")
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
 
@@ -879,7 +876,7 @@ def test_repeated_empty_observation_is_idempotent(monkeypatch):
     from saitenka import otel_metrics
 
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("に")
+    r.turn.cue_coordinator.set_subtitle("に")
     metric_reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[metric_reader])
     otel_metrics.register(metric_reader, provider.get_meter("test"))
@@ -909,14 +906,14 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
     (any set_subtitle call does), breaking next/next/next chaining even though the render was already
     correct at the real target."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")  # cue 1
+    r.turn.cue_coordinator.set_subtitle("いち")  # cue 1
     ipc.props["sub-start"] = 1.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert (
         r.turn.playback_observation.cue.text == "に"
         and r.turn.track_commands.navigation.current.nav_idx == 1
     )  # rendered target, chaining hint set
-    r.turn._cue.retire("sub-start")  # seek timing landed after the instant target render
+    r.turn.cue_coordinator.retire("sub-start")  # seek timing landed after the instant target render
     r.turn.subtitle_navigation.reconcile(
         "いち"
     )  # mpv transiently re-reports the pre-nav cue mid-seek
@@ -937,7 +934,7 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
 def test_the_settle_deadline_retires_the_window_exactly_once(monkeypatch):
     """The window closes on its named due event, not on a wall clock the reconcile polls."""
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.turn.track_commands.navigation.current.sub_settle.open
@@ -952,7 +949,7 @@ def test_the_settle_deadline_retires_the_window_exactly_once(monkeypatch):
 
 def test_a_superseded_navigation_deadline_cannot_close_the_current_window(monkeypatch):
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     stale = r.turn.track_commands.navigation.current.sub_settle.identity
@@ -965,12 +962,12 @@ def test_a_superseded_navigation_deadline_cannot_close_the_current_window(monkey
 
 def test_replacing_the_subtitle_source_retires_the_settle_window(monkeypatch):
     r, ipc = _reader_with_index(monkeypatch)
-    r.turn.set_subtitle("いち")
+    r.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     r.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.turn.track_commands.navigation.current.sub_settle.open
 
-    r.turn._cue.replace_source("/media/next.mkv", reason="test")
+    r.turn.cue_coordinator.replace_source("/media/next.mkv", reason="test")
 
     assert r.turn.track_commands.navigation.current.sub_settle.open is False
     assert "subtitle:navigation-settle" not in ipc.timers
@@ -988,13 +985,13 @@ def test_settle_guard_reinstalls_retired_identity_for_same_text():
             prefetch=False,
         ),
     )
-    reader.turn.set_subtitle("同じ字幕")
+    reader.turn.cue_coordinator.set_subtitle("同じ字幕")
     reader.turn.track_commands.navigation.current.nav_prev_text = "同じ字幕"
     reader.turn.track_commands.navigation.current.nav_idx = 1
     reader.turn.track_commands.navigation.current.sub_settle = (
         reader.turn.track_commands.navigation.current.sub_settle.begin()
     )
-    reader.turn._cue.retire("sub-start")
+    reader.turn.cue_coordinator.retire("sub-start")
 
     reader.turn.subtitle_navigation.reconcile("同じ字幕")
 
@@ -1022,11 +1019,11 @@ def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch)
             writer=Writer(),
         )
     )
-    reader.turn.set_subtitle("いち")
+    reader.turn.cue_coordinator.set_subtitle("いち")
     ipc.props["sub-start"] = 1.0
     reader.turn.command_runtime.handle(_msg_for(ipc, "Alt+RIGHT"))
     count_after_instant_render = reader.turn.history.recorder.snapshot.cue_count
-    reader.turn._cue.retire("sub-start")
+    reader.turn.cue_coordinator.retire("sub-start")
 
     reader.turn.subtitle_navigation.reconcile("に")
 
@@ -1066,11 +1063,11 @@ def test_identical_text_navigation_counts_the_landed_cue():
             writer=Writer(),
         )
     )
-    reader.turn.set_subtitle("同じ")
+    reader.turn.cue_coordinator.set_subtitle("同じ")
     reader.turn.subtitle_navigation.navigate(1)
     assert reader.turn.history.recorder.snapshot.cue_count == 1
     ipc.props.update({"sub-start": 3.0, "sub-end": 4.0})
-    reader.turn._cue.retire("sub-start")
+    reader.turn.cue_coordinator.retire("sub-start")
 
     reader.turn.subtitle_navigation.reconcile("同じ")
 
@@ -1098,7 +1095,7 @@ def test_navigation_hands_a_filtered_episode_back_to_mpv():
     reader.turn.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")]
     )
-    reader.turn.set_subtitle("いち")
+    reader.turn.cue_coordinator.set_subtitle("いち")
 
     assert reader.turn.subtitle_navigation.navigate(1) is False
     assert reader.turn.playback_observation.cue.text == "いち", (
@@ -1125,7 +1122,7 @@ def test_navigation_stays_instant_without_a_filter():
     reader.turn.track_commands.navigation.current.sub_index = CueIndex(
         [Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")]
     )
-    reader.turn.set_subtitle("いち")
+    reader.turn.cue_coordinator.set_subtitle("いち")
 
     assert reader.turn.subtitle_navigation.navigate(1) is True
     assert reader.turn.playback_observation.cue.text == "に"
@@ -2542,7 +2539,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     tx, ty, tw, _th = r.turn.tooltip_controller.surface_state().view.rect
     Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()  # header, not a scan cell
     assert got and "本命" in got[0]  # copied the hovered word
-    assert r.turn.tooltip_controller.observation().pulse.overlay == C.TIP_ID
+    assert r.turn.tooltip_controller.observation().pulse.overlay == OverlayId.TIP
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
@@ -2557,7 +2554,7 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     nx, ny, nw, nh = r.turn.tooltip_controller.surface_state().nest.rect
     Driver(r, instant=False).move(nx + nw / 2, ny + nh / 2).right_click()
     assert got and got[0].startswith("追")  # copied the inner scanned word
-    assert r.turn.tooltip_controller.observation().pulse.overlay == C.NESTED_ID
+    assert r.turn.tooltip_controller.observation().pulse.overlay == OverlayId.NESTED
 
 
 def test_flash_border_drawn_then_cleared(monkeypatch):
@@ -2578,7 +2575,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()
     oid, view = shots[-1]
     hl = np.array(tooltip_panel.FLASH_BGRA, np.uint8)
-    assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
+    assert oid == OverlayId.TIP and (view[0] == hl).all()  # top border row is the highlight
 
     assert ipc.fire_runtime_timer("lifecycle:flash-expiry")  # redraw without the border
 
@@ -2704,7 +2701,7 @@ def test_new_cue_dismisses_preview(monkeypatch):
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
-    r.turn.set_subtitle("別の字幕")  # a new subtitle cue
+    r.turn.cue_coordinator.set_subtitle("別の字幕")  # a new subtitle cue
     assert r.turn.preview_controller.panel.rect is None
 
 
@@ -3145,9 +3142,9 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
         r.turn.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1]
     )
     monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
-    r.turn.set_subtitle("別の字幕")
+    r.turn.cue_coordinator.set_subtitle("別の字幕")
 
-    assert C.TIP_ID in hidden  # tooltip was hidden
+    assert OverlayId.TIP in hidden  # tooltip was hidden
     assert r.turn.tooltip_controller.hover_view().tip.rect is None  # _tip_rect reset
     assert not r.turn.tooltip_controller.hover_view().tip.shown  # _tip_state reset
     assert r.turn.tooltip_controller.hover_view().tip.key is None  # _tip_key reset
@@ -3165,7 +3162,7 @@ def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
 
     # new cue arrives
     monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
-    r.turn.set_subtitle("別の字幕")
+    r.turn.cue_coordinator.set_subtitle("別の字幕")
 
     assert not r.turn.tooltip_controller.hover_view().paused
     assert ("set_property", "pause", False) in ipc.commands
@@ -3255,10 +3252,10 @@ def test_cue_change_nested_also_cleared(monkeypatch):
         r.turn.ov, "hide", lambda oid: (hidden.append(oid), {"error": "success"})[1]
     )
     monkeypatch.setattr(r.turn.subtitle_presentation, "renderer", NullRenderer())
-    r.turn.set_subtitle("別の字幕")
+    r.turn.cue_coordinator.set_subtitle("別の字幕")
 
     assert (
-        C.NESTED_ID in hidden or not r.turn.tooltip_controller.hover_view().nested.shown
+        OverlayId.NESTED in hidden or not r.turn.tooltip_controller.hover_view().nested.shown
     )  # nested cleared
 
 
@@ -3355,7 +3352,7 @@ def test_cue_change_retires_interaction_before_later_command_in_same_batch(monke
         ),
     )
     reader.turn.playback_observation.start_session()
-    reader.turn.set_subtitle("古い字幕")
+    reader.turn.cue_coordinator.set_subtitle("古い字幕")
     copied = []
     monkeypatch.setattr(
         subtitle_adapter,
@@ -3393,7 +3390,7 @@ def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
         ),
     )
     reader.turn.playback_observation.start_session()
-    reader.turn.set_subtitle("古い字幕")
+    reader.turn.cue_coordinator.set_subtitle("古い字幕")
     navigated = []
     monkeypatch.setattr(
         reader.turn.subtitle_navigation, "navigate", lambda delta: navigated.append(delta)
@@ -3429,14 +3426,14 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text():
         ),
     )
     reader.turn.playback_observation.start_session()
-    reader.turn.set_subtitle("同じ字幕")
+    reader.turn.cue_coordinator.set_subtitle("同じ字幕")
     before = reader.turn.annotation_controller.view.identity
     assert before is not None
 
-    reader.turn._cue.replace_source("/media/next.mkv", reason="test")
+    reader.turn.cue_coordinator.replace_source("/media/next.mkv", reason="test")
 
     assert reader.turn.annotation_controller.view.retired is True
-    reader.turn.set_subtitle("同じ字幕")
+    reader.turn.cue_coordinator.set_subtitle("同じ字幕")
     after = reader.turn.annotation_controller.view.identity
     assert after is not None
     assert after != before
@@ -3464,7 +3461,7 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkey
             prefetch=False,
         ),
     )
-    reader.turn.set_subtitle("古い字幕")
+    reader.turn.cue_coordinator.set_subtitle("古い字幕")
     copied = []
     monkeypatch.setattr(
         subtitle_adapter,
@@ -3510,7 +3507,7 @@ def test_same_text_with_new_timing_installs_a_new_cue_identity():
         ),
     )
     reader.turn.playback_observation.start_session()
-    reader.turn.set_subtitle("同じ字幕")
+    reader.turn.cue_coordinator.set_subtitle("同じ字幕")
     previous = reader.turn.annotation_controller.view.identity
 
     ipc.set_prop("sub-start", 3.0)
@@ -3541,11 +3538,11 @@ def test_a_cue_cleared_by_the_reader_is_not_resurrected_by_the_next_observation(
     )
     reader.turn.playback_observation.start_session()
 
-    reader.turn.set_subtitle("")  # what a language/track switch does
+    reader.turn.cue_coordinator.set_subtitle("")  # what a language/track switch does
     assert reader.turn.playback_observation.cue.text == ""
 
     reader.turn.playback_observation.observe_event({"name": "sub-end", "data": 9.5})
-    reader.turn._cue.settle()
+    reader.turn.cue_coordinator.settle()
 
     assert reader.turn.playback_observation.cue.text == ""
 
@@ -3566,7 +3563,7 @@ def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, valu
         ),
     )
     reader.turn.playback_observation.start_session()
-    reader.turn.set_subtitle("同じ字幕")
+    reader.turn.cue_coordinator.set_subtitle("同じ字幕")
     ipc.props[name] = value
 
     reader.turn._on_ipc_reconnect()
@@ -3937,7 +3934,7 @@ def test_the_sidebar_follows_the_cue_where_the_cue_settles(monkeypatch):
     follows = []
     monkeypatch.setattr(sidebar_module, "follow", follows.append)
 
-    r.turn._cue.settle()
+    r.turn.cue_coordinator.settle()
 
     # The view it followed, not the host: identity with the owner says the settle boundary
     # reached this sidebar's own state rather than merely calling something once.
@@ -3973,7 +3970,7 @@ def test_a_refused_seek_is_reported_rather_than_discarded(caplog):
         ),
     )
     with caplog.at_level(logging.WARNING, logger="saitenka.app.mpv_egress"):
-        r.turn.subtitle_navigation.seek(SeekCue(1, r.turn.cue_revision))
+        r.turn.subtitle_navigation.seek(SeekCue(1, r.turn.cue_coordinator.revision))
 
     assert any("sub-seek" in record.getMessage() for record in caplog.records)
     r.close()
@@ -4048,7 +4045,7 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
         assert not reader.turn.tooltip_controller.hover_view().paused
         return [c for c in ipc.commands[before:] if c[:2] == ("set_property", "pause")]
 
-    by_cue = resume_via(lambda r: r.turn.set_subtitle("別の字幕"))
+    by_cue = resume_via(lambda r: r.turn.cue_coordinator.set_subtitle("別の字幕"))
     by_reducer = resume_via(lambda r: r.turn.command_runtime.handle(app_bindings.HOVER_PAUSE_MSG))
 
     assert by_cue == by_reducer == [("set_property", "pause", False)]

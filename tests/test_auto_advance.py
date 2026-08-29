@@ -208,7 +208,7 @@ def test_reconnect_reslots_file_changed_while_disconnected(tmp_path):
         ),
     )
     reader.turn.playback_observation.start_session()
-    reader.turn.set_subtitle("同じ字幕")
+    reader.turn.cue_coordinator.set_subtitle("同じ字幕")
     seen = []
     reader.turn.episode_watch.install_reslot_hook(seen.append, initial=first)
     ipc.props["path"] = str(second)

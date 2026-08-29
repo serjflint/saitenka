@@ -143,7 +143,7 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
     r.turn.ov = _RecOv()
     # plain path -> no dict/tokenize deps needed to raster a cue
     r.turn.track_commands.declare(SubtitleLanguageChanged("en"))
-    r.turn.set_subtitle("hello")
+    r.turn.cue_coordinator.set_subtitle("hello")
     assert r.turn.subtitle_presentation.renderer.logged_first
     assert ("show-text", "", 1) not in ipc.commands
 

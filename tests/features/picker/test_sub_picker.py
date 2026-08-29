@@ -96,6 +96,14 @@ def _close(reader: SessionController) -> None:
     )
 
 
+def _listing_ports(reader: SessionController) -> sub_picker.ListingPorts:
+    return reader.turn.picker_controller.listing_ports(
+        navigation=reader.turn.track_commands.navigation,
+        stop=reader.turn.lifecycle.stop_signal,
+        toast=reader.turn.notifications.show,
+    )
+
+
 def _picker_adds(ipc: FakeIPC) -> list[tuple]:
     return [c for c in ipc.commands if c[:2] == ("overlay-add", OverlayId.PICKER)]
 
@@ -130,14 +138,14 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
     reader.turn.picker_controller.configure_listing(lister)
     try:
         sub_picker.open_picker(
-            reader.turn.listing_ports,
+            _listing_ports(reader),
             reader.turn.playback_observation.query("path"),
             retire_hover=reader.turn.tooltip_controller.retire_hover,
         )
         assert old_started.wait(1)
         _close(reader)
         sub_picker.open_picker(
-            reader.turn.listing_ports,
+            _listing_ports(reader),
             reader.turn.playback_observation.query("path"),
             retire_hover=reader.turn.tooltip_controller.retire_hover,
         )
@@ -214,7 +222,7 @@ def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
     reader.turn.picker_controller.configure_listing(lister)
     try:
         sub_picker.open_picker(
-            reader.turn.listing_ports,
+            _listing_ports(reader),
             reader.turn.playback_observation.query("path"),
             retire_hover=reader.turn.tooltip_controller.retire_hover,
         )
@@ -253,7 +261,7 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
     )  # no real search thread
 
     sub_picker.open_picker(
-        reader.turn.listing_ports,
+        _listing_ports(reader),
         reader.turn.playback_observation.query("path"),
         retire_hover=reader.turn.tooltip_controller.retire_hover,
     )
@@ -412,7 +420,7 @@ def test_toggle_closes_an_open_picker():
     _open(reader)
 
     _close(reader) if reader.turn.picker_controller.state.open else sub_picker.open_picker(
-        reader.turn.listing_ports,
+        _listing_ports(reader),
         reader.turn.playback_observation.query("path"),
         retire_hover=reader.turn.tooltip_controller.retire_hover,
     )

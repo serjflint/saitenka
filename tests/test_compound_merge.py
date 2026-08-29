@@ -218,7 +218,7 @@ def test_controller_tokens_carry_the_merged_compound(monkeypatch):
         "tokenize",
         lambda _ln: [_at("応急", 0), _at("処置", 2)],
     )
-    reader.turn.set_subtitle("応急処置")
+    reader.turn.cue_coordinator.set_subtitle("応急処置")
     assert [t.surface for t in reader.turn.subtitle_presentation.cue.current.tokens] == [
         "応急処置"
     ]  # ONE hover/hit-test/mine unit
@@ -236,7 +236,7 @@ def test_controller_leaves_fragments_when_dict_set_has_no_probe(monkeypatch):
         "tokenize",
         lambda _ln: [_at("応急", 0), _at("処置", 2)],
     )
-    reader.turn.set_subtitle("応急処置")
+    reader.turn.cue_coordinator.set_subtitle("応急処置")
     assert [t.surface for t in reader.turn.subtitle_presentation.cue.current.tokens] == [
         "応急",
         "処置",

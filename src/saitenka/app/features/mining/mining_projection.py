@@ -10,20 +10,19 @@ from saitenka.app.features.mining import miner
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.features.preview.miner_ui import CardSource, PreviewPorts
     from saitenka.app.features.preview.preview_controller import PreviewController
+    from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
     from saitenka.app.features.tooltip.tooltip_controller import TooltipApply, TooltipController
+    from saitenka.app.toast_controller import NotificationSink
 
 
 @dataclass(frozen=True, slots=True)
 class MiningProjection:
     """Bind mining outcomes to fresh public views of the state owners they affect."""
 
-    toast: Callable[..., object]
+    notifications: NotificationSink
     preview: PreviewController
-    preview_ports: Callable[[], PreviewPorts]
-    card_source: Callable[[], CardSource]
-    preview_enabled: Callable[[], bool]
+    preview_endpoint: Callable[[], PreviewCommandEndpoint]
     tooltip: TooltipController
     tooltip_apply: Callable[[], TooltipApply]
     mined_here: Callable[[], None]
@@ -31,7 +30,7 @@ class MiningProjection:
 
     def build(self) -> miner.MiningApply:
         return miner.MiningApply(
-            toast=self.toast,
+            toast=self.notifications.show,
             reset_capture=self.preview.reset_capture,
             captured_image=self.preview.captured_image,
             captured_audio=self.preview.captured_audio,
@@ -47,24 +46,26 @@ class MiningProjection:
         self.tooltip.mark_mined(expression, self.tooltip_apply())
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
+        endpoint = self.preview_endpoint()
         self.preview.present_existing(
-            self.preview_ports,
-            self.card_source,
-            self.toast,
+            endpoint.ports,
+            endpoint.card_source,
+            self.notifications.show,
             note_id,
             card,
             status,
-            enabled=self.preview_enabled(),
+            enabled=endpoint.mining.show_preview,
         )
 
     def _preview_mined(self, card, token, video, status: str = "mined") -> None:
+        endpoint = self.preview_endpoint()
         self.preview.present_mined(
-            self.preview_ports,
-            self.card_source,
-            self.toast,
+            endpoint.ports,
+            endpoint.card_source,
+            self.notifications.show,
             card,
             token,
             video,
             status,
-            enabled=self.preview_enabled(),
+            enabled=endpoint.mining.show_preview,
         )

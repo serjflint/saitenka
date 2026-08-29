@@ -198,7 +198,7 @@ def _resolve(profile: str, cue: str, at: int, tmp_path):
     reader.turn.screen.osd = (1920, 1080)
     # main track → tokenize (not the plain secondary path)
     reader.turn.track_commands.declare(SubtitleLanguageChanged(MAIN_LANG))
-    reader.turn.set_subtitle(cue)
+    reader.turn.cue_coordinator.set_subtitle(cue)
     idx = _index_at(reader.turn.subtitle_presentation.cue.current.tokens, at)
     resolve_hover(
         reader.turn.tooltip_controller.tip_ports,

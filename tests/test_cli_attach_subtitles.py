@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import util
@@ -157,12 +158,10 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
         ),
     )
     background: list = []
-    monkeypatch.setattr(
-        reader.turn.subtitle_acquisition, "fetch_background", lambda fetch: background.append(fetch)
-    )
+    ports = replace(reader.turn.reslot_ports, fetch_japanese=background.append)
 
     attach_commands._attach_reslot(
-        reader.turn.reslot_ports,
+        ports,
         ipc,
         Path("/videos/Show - 03.mkv"),
         subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={}, jimaku=True),

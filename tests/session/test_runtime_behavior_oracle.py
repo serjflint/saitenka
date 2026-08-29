@@ -99,7 +99,7 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
         ),
     )
     reader.turn.playback_observation.start_session()
-    reader.turn.set_subtitle("old")
+    reader.turn.cue_coordinator.set_subtitle("old")
     reader.turn.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     copied: list[str] = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
@@ -116,13 +116,13 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
     # conflict phase is observed from inside the drain — after every event in the batch was
     # processed against the retired cue, before the replacement settles. Same three phases, real
     # boundaries; snapshotting after the drain would only ever see the settled state.
-    settle = reader.turn._cue.settle
+    settle = reader.turn.cue_coordinator.settle
 
     def traced_settle() -> None:
         trace.observe("cue-conflict", outcome="input-rejected")
         settle()
 
-    monkeypatch.setattr(reader.turn._cue, "settle", traced_settle)
+    monkeypatch.setattr(reader.turn.cue_coordinator, "settle", traced_settle)
     reader.turn._drain_events()
     trace.observe("cue-reconciled", outcome="replacement-active")
 

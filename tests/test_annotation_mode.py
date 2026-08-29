@@ -83,7 +83,7 @@ def test_hover_mode_still_scores_each_new_cue(monkeypatch):
     )
     monkeypatch.setattr(reader.turn.subtitle_presentation, "renderer", NullRenderer())
 
-    reader.turn.set_subtitle("猫")
+    reader.turn.cue_coordinator.set_subtitle("猫")
 
     assert reader.turn.subtitle_presentation.cue.current.styles == ["score:猫"]
 
@@ -167,7 +167,7 @@ def test_cue_change_resets_hover_only_presentation(monkeypatch):
         _SpyRenderer(lambda rq: states.append(rq.annotation_visible)),
     )
 
-    reader.turn.set_subtitle("猫")
+    reader.turn.cue_coordinator.set_subtitle("猫")
 
     assert states == [False]
 
@@ -199,7 +199,7 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
 
 def test_toggle_remains_available_while_cue_identity_is_retired():
     reader = build_session(FakeIPC(), infrastructure=SessionInfrastructure(renderer=NullRenderer()))
-    reader.turn._cue.mark_identity_installed()
+    reader.turn.cue_coordinator.mark_identity_installed()
 
     reader.turn.command_runtime.handle(ANNOTATION_MSG)
 

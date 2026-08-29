@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import time
-from functools import cached_property
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,14 +17,13 @@ if TYPE_CHECKING:
         AnalysisController,
         AnalysisObservation,
     )
-    from saitenka.app.features.annotation import jobs as cue_annotation
     from saitenka.app.features.annotation.annotation_controller import CueAnnotationController
     from saitenka.app.features.help.help_controller import HelpController, ScreenState
     from saitenka.app.features.history.history_owner import HistoryOwner
     from saitenka.app.features.mining.mining_controller import MiningController
-    from saitenka.app.features.picker import sub_picker
     from saitenka.app.features.picker.picker_controller import PickerController
     from saitenka.app.features.preview.preview_controller import PreviewController
+    from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
     from saitenka.app.features.profiles.profile_integration import ProfileIntegration
     from saitenka.app.features.profiles.profile_session import ProfileSession
     from saitenka.app.features.sidebar.sidebar_controller import SidebarController
@@ -51,7 +49,6 @@ if TYPE_CHECKING:
         SubtitleNavigationCoordinator,
         SubtitleTrackCoordinator,
     )
-    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.subtitle_presentation import SubtitlePresentation
     from saitenka.app.toast_controller import ToastController
     from saitenka.mpvio.ipc import MpvIPC
@@ -62,30 +59,14 @@ if TYPE_CHECKING:
 
 from saitenka import otel_metrics
 from saitenka.app import (
-    backlog,
     episode_reslot,
     logsetup,
-    native_subtitles,
     session_stats,
-    subtitle_modes,
-    subtitle_raster,
 )
-from saitenka.app.features.annotation.annotation_controller import (
-    AnnotationInputs,
-    AnnotationTransition,
-)
-from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
 from saitenka.app.features.tooltip.popups import (
     PopupView,
 )
-from saitenka.app.languages import SECOND_LANG
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
-from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.subtitle_render import (
-    DrawRequest,
-    SubtitleTarget,
-)
-from saitenka.app.token_cache import cue_key
 from saitenka.runtime import (
     ConnectionLost,
     ConnectionReady,
@@ -93,21 +74,11 @@ from saitenka.runtime import (
     StartupReady,
     UserCommand,
     events,
-    playback,
 )
 
 log = logging.getLogger(__name__)
 #: For the two lines the user is meant to read on the terminal (logsetup.CONSOLE_LOGGER_NAME).
 console_log = logsetup.user_facing_logger()
-
-# Local names for the shared OSD slot registry (overlay_ids.OverlayId is the single source of truth
-# so extracted subsystems can't collide on slot numbers). IntEnum → drop-in int at every call site.
-SUB_ID = OverlayId.SUB
-TIP_ID = OverlayId.TIP
-NESTED_ID = OverlayId.NESTED
-# The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
-# the base tooltip (tip_max_frac) doesn't cramp the deep-dive.
-
 
 # Every mpv size/scale source, probed at each osd-dimensions change to diagnose why the tooltip scale
 # (osd_h/REF_H) jitters: which source is stable (a candidate to key scale off) vs which wobbles. Unknown
@@ -185,105 +156,17 @@ class SessionTurn:
     _nudge_pending: bool
     interaction: InteractionCoordinator
     _stateless_commands: StatelessCommandGraph
-    _cue: CueCoordinator
+    cue_coordinator: CueCoordinator
     episode_watch: episode_reslot.EpisodeWatch
     command_runtime: CommandRuntime
-    _lifecycle: SessionLifecycle
+    lifecycle: SessionLifecycle
     entry_runtime: SessionRuntime
+    preview_commands: PreviewCommandEndpoint
+    reslot_ports: episode_reslot.ReslotPorts
+    watch_ports: episode_reslot.WatchPorts
 
     def __init__(self) -> None:
         raise TypeError("SessionTurn is assembled by create_session_controller")
-
-    @property
-    def lifecycle(self) -> SessionLifecycle:
-        return self._lifecycle
-
-    def rebuild_sub_index(self) -> None:
-        """Re-index whichever track mpv has selected. The one place the four facts are bound."""
-        from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-        build_sub_index_for_current_track(
-            self.ipc,
-            self.playback_observation.query,
-            self.subtitle_navigation.load_index,
-            self.subtitle_presentation.native,
-        )
-
-    @property
-    def _playback(self) -> playback.PlaybackState:
-        return self.playback_observation.state
-
-    def _geometry_observation(self) -> native_subtitles.GeometryObservation:
-        """The facts the geometry owner decides from, per operation — they all move per cue."""
-        return native_subtitles.GeometryObservation(
-            prop=self.playback_observation.value,
-            osd=self.screen.osd,
-            text=self.playback_observation.cue.text,
-            tokens=self.subtitle_presentation.cue.current.tokens,
-            lines=self.subtitle_presentation.cue.current.lines,
-            index=self.track_commands.navigation.current.sub_index,
-            normalise=cue_key,
-            nav_index=self.track_commands.navigation.current.nav_idx,
-            cue_hint=self.track_commands.navigation.current.geometry_cue_hint,
-            cue_revision=self.cue_revision,
-            is_skippable=self.profile_session.profile.tokenizer.is_skippable,
-        )
-
-    def _build_subtitle_target(
-        self,
-        pipeline: SubtitleModeCoordinator,
-        geometry: native_subtitles.NativeSubtitleGeometry | None,
-    ) -> SubtitleTarget:
-        return SubtitleTarget(
-            ipc=self.ipc,
-            get=self.playback_observation.query,
-            prop=self.playback_observation.value,
-            surfaces=self.lifecycle_surfaces,
-            refresh=(
-                (lambda: None)
-                if geometry is None
-                else (lambda: geometry.refresh(self._geometry_observation()))
-            ),
-            draw_request=self._draw_request,
-            source=None if geometry is None else geometry.source_path,
-            native_unsupported=geometry is not None and geometry.source_unsupported,
-            legacy_forced=pipeline.legacy_forced,
-        )
-
-    def _draw_request(self) -> DrawRequest:
-        """Snapshot the host once per draw, so the values cannot drift apart mid-render.
-
-        The ONE place in the draw path that reads the host; everything downstream of it is a value.
-        Named rather than inlined at its callers: two copies of this snapshot that drift apart is
-        precisely the bug `DrawRequest` was introduced to prevent.
-        """
-        return DrawRequest(
-            text=self.playback_observation.cue.text,
-            lines=self.subtitle_presentation.cue.current.lines,
-            osd=self.screen.osd,
-            sub_size=self.subtitle_presentation.visual.size(self.screen.osd[1]),
-            bg_opacity=self.subtitle_presentation.visual.background_opacity,
-            bottom_margin=self.subtitle_presentation.visual.bottom_margin(self.screen.osd[1]),
-            secondary_role=self._subtitle_tracks.current.language == SECOND_LANG,
-            upgrade_pending=self.annotation_controller.view.pending_text is not None,
-            annotation_degraded=self.annotation_controller.view.degraded,
-            annotation_visible=subtitle_raster.annotation_visible(
-                mode=self.annotation_controller.view.mode,
-                hover_annotation=self.annotation_controller.view.hover_revealed,
-            ),
-            hover=self.tooltip_controller.observation().selected,
-            hover_span=self.tooltip_controller.observation().metadata.span,
-            styles=self.subtitle_presentation.cue.current.styles,
-            boxes=self.subtitle_presentation.cue.current.boxes,
-            paused=bool(self.playback_observation.value("pause")),
-        )
-
-    def _publish_cue_identity(self, identity: cue_annotation.CueIdentity) -> None:
-        """Project the annotation owner's identity into playback conflict detection."""
-        self.playback_observation.dispatch(
-            events.CueIdentityInstalled(identity.observed_start, identity.observed_end)
-        )
-        self._cue.mark_identity_installed()
 
     def refresh_osd(self) -> bool:
         d = self.playback_observation.value("osd-dimensions") or {}
@@ -329,210 +212,20 @@ class SessionTurn:
             probe,
         )
 
-    def set_subtitle(
-        self,
-        text: str,
-        *,
-        revise_session_cue: bool = False,
-        provisional_navigation: bool = False,
-    ) -> None:
-        if provisional_navigation:
-            self.track_commands.navigation.current.nav_provisional_cue_counted = False
-        # Per-cue breadcrumb (low frequency): correlates mpv's sub-text change with the overlay draw +
-        # paused-state in the report — the mpv-log-vs-overlay-log gap the paused-OSD bug lives in.
-        log.debug(
-            "sub-text change: %d chars, paused=%s",
-            len(text.strip()),
-            self.playback_observation.value("pause"),
-        )
-        # Seek-to-paint chain: this span covers everything below (teardown/tokenize/score/render/
-        # upload) for one cue. Nests as a child of sub_nav's "sub_seek" span for the instant-nav
-        # (Alt+←/→/↓) path, or of "sub_text_reconcile" for an mpv-driven change (native sub-seek /
-        # normal cue advance) — either way, its duration IS the "seek command → drawn" latency.
-        with otel_metrics.instrumented(otel_metrics.cue_redraw_duration_ms, "cue_redraw"):
-            self._set_subtitle_inner(
-                text,
-                revise_session_cue=revise_session_cue,
-                provisional_navigation=provisional_navigation,
-            )
-
-    def _set_subtitle_inner(
-        self,
-        text: str,
-        *,
-        revise_session_cue: bool = False,
-        provisional_navigation: bool = False,
-    ) -> None:
-        self.subtitle_presentation.pipeline.invalidate()
-        self.subtitle_presentation.pipeline.cue_changed(
-            self.subtitle_presentation.target(), nonempty=bool(text.strip())
-        )
-        # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
-        # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
-        # any tooltip-owned pause is released. `retire_hover` will not do: it early-returns on
-        # hover already -1, which does not imply the tip is down (`_show_tooltip` can be called
-        # without a hover).
-        with otel_metrics.traced("teardown_tip"):
-            self.tooltip_controller.teardown()
-        self.tooltip_controller.retire_selection()
-        self.playback_observation.dispatch(events.CueTextReplaced(text))
-        self._cue.clear_identity()
-        self.track_commands.navigation.current.nav_idx = (
-            -1
-        )  # any external cause of a cue change invalidates the nav chaining hint
-        with otel_metrics.traced("hide_preview"):
-            self.preview_commands.hide()
-        if not text.strip():
-            self.subtitle_presentation.cue.reset()
-            if self.subtitle_presentation.native is not None:
-                self.subtitle_presentation.native.mark_empty()
-            self.subtitle_presentation.pipeline.clear(self.lifecycle_surfaces, self.ipc)
-            hide = getattr(self.ov, "hide_interactive", self.ov.hide)
-            hide(TIP_ID)
-            return
-        self._record_session_cue(
-            text,
-            revise=revise_session_cue,
-            provisional_navigation=provisional_navigation,
-        )
-        self.subtitle_presentation.cue.reset()
-        transition = self.annotation_controller.replace(text, self._annotation_inputs())
-        self._apply_annotation_transition(transition, draw=True)
-
-    def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
-        recorder = self.history.recorder
-        if recorder is None:
-            return
-        identity = (
-            self._subtitle_tracks.current.language,
-            self.playback_observation.value("sub-start"),
-            self.playback_observation.value("sub-end"),
-            text,
-        )
-        if revise:
-            recorder.revise_cue(identity)
-            return
-        counted = recorder.record_cue(identity)
-        if provisional_navigation:
-            self.track_commands.navigation.current.nav_provisional_cue_counted = counted
-
     def prepare_subtitle_blocking(self, text: str) -> None:
         """Prepare a demo/screenshot cue through the annotation worker before capture."""
         self.annotation_controller.prepare_blocking(
             text,
-            self._annotation_inputs(),
+            self.cue_coordinator.annotation_inputs(),
             drive=self._drive_annotation_once,
         )
-        self.set_subtitle(text)
+        self.cue_coordinator.set_subtitle(text)
 
     def _drive_annotation_once(self, timeout: float | None) -> None:
         """A turn taken from inside cue construction, so it settles nothing: the reconcile this is
         nested in owns the batch boundary, and running a second one here would build the cue again
         against the half-updated identity the outer one is still assembling."""
         self.ipc.receive_session(timeout, self._drain_event)
-
-    def _annotation_inputs(self) -> AnnotationInputs:
-        dictionaries = self.profile_session.profile.dict_set
-        return AnnotationInputs(
-            source_epoch=self._playback.media.source.value,
-            track_identity=self.playback_observation.value("sid"),
-            subtitle_role=self._subtitle_tracks.current.language,
-            observed_start=self.playback_observation.value("sub-start"),
-            observed_end=self.playback_observation.value("sub-end"),
-            source_order=self.track_commands.navigation.current.nav_idx
-            if self.track_commands.navigation.current.nav_idx >= 0
-            else None,
-            tokenizer=self.profile_session.profile.tokenizer,
-            terms_exist=getattr(dictionaries, "terms_exist", None),
-            scorer=self.profile_session.scorer,
-            selected_dictionaries=len(getattr(dictionaries, "dicts", ())),
-            dependencies_ready=dictionaries is not None,
-            annotate=self._subtitle_tracks.current.language != SECOND_LANG,
-        )
-
-    def _apply_annotation_transition(self, transition: AnnotationTransition, *, draw: bool) -> None:
-        if transition.identity is not None:
-            self._publish_cue_identity(transition.identity)
-        if transition.cue is not None:
-            self.subtitle_presentation.cue.install_tokenized(transition.cue)
-        if transition.schedule_geometry and self.subtitle_presentation.native is not None:
-            self.subtitle_presentation.cue.replace_geometry(boxes=[])
-            self.subtitle_presentation.native.schedule(self._geometry_observation())
-        if draw:
-            self.subtitle_presentation.draw()
-
-    @cached_property
-    def preview_commands(self) -> PreviewCommandEndpoint:
-        return PreviewCommandEndpoint(
-            preview=self.preview_controller,
-            help=self.help_controller,
-            tip_keys_bound=lambda: self.tooltip_controller.keybindings_bound,
-            mining=self.mining_controller,
-            surfaces=self.lifecycle_surfaces,
-            screen=self.screen,
-            ipc=self.ipc,
-            keys=self._assembly.keys,
-            tip_scale_override=self.tooltip_controller.visual.scale_override,
-            tip_max_frac=self.tooltip_controller.visual.base_height_fraction,
-            play_audio=self.mining_controller.play_audio,
-            cue=self.subtitle_presentation.cue,
-            playback=self.playback_observation,
-            toast=self.toast,
-        )
-
-    @property
-    def listing_ports(self) -> sub_picker.ListingPorts:
-        """Compatibility projection of the picker-owned listing capability."""
-        return self.picker_controller.listing_ports(
-            navigation=self.track_commands.navigation,
-            stop=self._lifecycle.stop_signal,
-            toast=self.toast,
-        )
-
-    @property
-    def capture_ports(self) -> backlog.CapturePorts:
-        """What a bookmark toggle samples the cue from — read now, so the write is this cue."""
-        return backlog.CapturePorts(
-            video=self.playback_observation.text("path"),
-            start=self.playback_observation.number("sub-start"),
-            end=self.playback_observation.number("sub-end"),
-            text=self.playback_observation.cue.text,
-            secondary_text=self.translation_observation.secondary_text(),
-            language=self._subtitle_tracks.current.language,
-            tokens=self.subtitle_presentation.cue.current.tokens,
-            hover=self.tooltip_controller.observation().selected,
-            jp_sid=self._subtitle_tracks.current.jp_sid,
-            en_sid=self._subtitle_tracks.current.en_sid,
-            tracks=self.playback_observation.sequence("track-list"),
-            store=self.history.ensure_backlog,
-            toast=self.toast,
-            record_capture=self.history.record_capture,
-        )
-
-    @property
-    def reslot_ports(self) -> episode_reslot.ReslotPorts:
-        """What re-slotting the overlay onto a newly loaded episode does."""
-        return episode_reslot.ReslotPorts(
-            ipc=self.ipc,
-            finish_stats=lambda: self.history.finish(self.analysis_controller.result),
-            start_stats=lambda: self.history.start(
-                path=lambda: self.playback_observation.value("path"),
-                arm=self.arm_session_persist,
-            ),
-            rebind_episode=self._cue.rebind_episode,
-            rebuild_index=self.rebuild_sub_index,
-            configure_mode=self.configure_subtitle_mode,
-            configure_retry=self.subtitle_acquisition.configure_retry,
-            configure_picker=self.picker_controller.configure_listing,
-            fetch_japanese=self.subtitle_acquisition.fetch_background,
-            start_prefetch=self.tooltip_controller.start_prefetch,
-            toast=self.toast,
-        )
-
-    @property
-    def watch_ports(self) -> episode_reslot.WatchPorts:
-        """What wiring the follow-mpv-onto-the-next-episode hooks needs."""
-        return self.episode_watch.ports()
 
     def _telemetry_gauges(self) -> dict[str, float]:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
@@ -570,39 +263,13 @@ class SessionTurn:
             )
         return gauges
 
-    @property
-    def _mouse_captured(self) -> bool:
-        return self._mouse.held
-
-    @property
-    def _mouse_section_defined(self) -> bool:
-        return self._mouse.defined
-
-    def configure_subtitle_mode(
-        self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
-    ) -> None:
-        subtitle_modes.configure(
-            startup,
-            slang=slang,
-            declare=self.track_commands.declare,
-            activate=lambda sid: self.subtitle_presentation.pipeline.activate(
-                self.subtitle_presentation.target(), sid, draw=self.subtitle_presentation.draw
-            ),
-            secondary_sid=self.playback_observation.query("secondary-sid"),
-            ipc=self.ipc,
-            invalidate=self.analysis_commands.invalidate,
-        )
-
-    def toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
-        self.notifications.show(text, kind, seconds)
-
     def _open_picker_command(self) -> None:
         self.picker_controller.open(
             self.playback_observation.query("path"),
             retire_hover=self.tooltip_controller.retire_hover,
             navigation=self.track_commands.navigation,
-            stop=self._lifecycle.stop_signal,
-            toast=self.toast,
+            stop=self.lifecycle.stop_signal,
+            toast=self.notifications.show,
         )
 
     def _redraw_after_resize(self) -> None:
@@ -673,12 +340,7 @@ class SessionTurn:
         # performer is what breaks it. The window itself stays drain-local — coalescing across two
         # drains would suppress a genuine second press, and a batch is a property of arrival.
         self.ipc.receive_session(timeout, self._drain_event)
-        self._cue.settle()
-
-    @property
-    def cue_revision(self) -> int:
-        """The projection's cue revision — the identity a geometry refresh was armed for."""
-        return self._playback.cue.cue.value
+        self.cue_coordinator.settle()
 
     def _drain_event(self, ev: object) -> None:
         # The three connection arms are the no-reactor fallback, and nothing else: a session with
@@ -687,7 +349,7 @@ class SessionTurn:
         # capture and most unit tests are sessions that never had a runtime.
         if isinstance(ev, ConnectionLost):
             self._connection.observed(ev)
-            self._cue.retire("connection-lost")
+            self.cue_coordinator.retire("connection-lost")
             return
         if isinstance(ev, ConnectionReplaced):
             self._on_ipc_reconnect()
@@ -763,7 +425,9 @@ class SessionTurn:
         """Announce interactive readiness once. True when this call published the fact."""
         if self._interactive_ready:
             return False
-        if self.playback_observation.observing and self._playback.value("osd-dimensions") in (
+        if self.playback_observation.observing and self.playback_observation.state.value(
+            "osd-dimensions"
+        ) in (
             None,
             {},
         ):

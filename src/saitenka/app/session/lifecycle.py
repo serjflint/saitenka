@@ -96,6 +96,7 @@ class SessionLifecycleActs:
     start_observing: Callable[[], object]
     install_input: Callable[[], object]
     arm_capabilities: Callable[[], object]
+    announce_profile: Callable[[], object]
     start_prefetch: Callable[[], object]
     finish_mask_atlas: Callable[[EffectFinished], None]
     history_path: Callable[[], object]
@@ -355,6 +356,7 @@ def compose_session_lifecycle(
             acts.arm_capabilities,
             acts.start_prefetch,
             lambda: owners.tooltip_preparation.request_mask_atlas(acts.finish_mask_atlas),
+            acts.announce_profile,
         ),
         history=lambda: owners.history.start(
             path=acts.history_path,

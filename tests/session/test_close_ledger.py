@@ -272,7 +272,7 @@ def test_closing_a_session_hands_the_forced_mouse_section_back_through_the_runti
     reader.turn.tooltip_controller.surface_state().view.rect = (0, 0, 10, 10)
     reader.turn._mouse.sync()
     try:
-        assert reader.turn._mouse_captured  # negative control: there is a capture to hand back
+        assert reader.turn._mouse.held  # negative control: there is a capture to hand back
         ledger = reader.close()
     finally:
         gateway.close()

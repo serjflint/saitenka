@@ -129,7 +129,7 @@ def _compose_session(
     from saitenka.app.config import ReaderOptions
     from saitenka.app.session.assembly import build_session_assembly
     from saitenka.app.session.builder import build_session_turn
-    from saitenka.app.session.controller import SessionController, SessionGraph
+    from saitenka.app.session.controller import SessionController
     from saitenka.app.session.runtime import SessionEntry
 
     resolved = services or SessionServices()
@@ -172,12 +172,12 @@ def _compose_session(
             else _geometry_backend(resolved_options.subtitle_geometry)
         ),
     )
-    controller = SessionController(SessionGraph(ipc, turn, turn.lifecycle))
+    controller = SessionController(turn)
     prepared = PreparedSession(
         live=controller,
         profile=turn.profile_session,
-        rebuild_sub_index=turn.rebuild_sub_index,
-        configure_subtitle_mode=turn.configure_subtitle_mode,
+        rebuild_sub_index=turn.cue_coordinator.rebuild_sub_index,
+        configure_subtitle_mode=turn.cue_coordinator.configure_subtitle_mode,
         reslot=turn.reslot_ports,
         watch=turn.watch_ports,
         entry=SessionEntry(runtime=turn.entry_runtime, run=controller.run),

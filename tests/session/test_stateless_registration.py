@@ -92,8 +92,11 @@ def test_the_command_graph_closes_every_installed_policy() -> None:
 
 
 def test_the_command_graph_rejects_an_installed_policy_without_a_message() -> None:
+    missing = _bindings()[0].command_type
+    incomplete = tuple(row for row in STATELESS_COMMANDS if not isinstance(row.command, missing))
+
     with pytest.raises(ValueError, match="have no script messages"):
-        StatelessCommandGraph(_bindings(), STATELESS_COMMANDS[:-1])
+        StatelessCommandGraph(_bindings(), incomplete)
 
 
 def test_the_command_graph_rejects_duplicate_messages() -> None:

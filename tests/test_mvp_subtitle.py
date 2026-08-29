@@ -166,9 +166,11 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
         reader.turn.subtitle_presentation.cue.replace_geometry(
             origin=(999, 999)
         )  # a stale origin the draw has to replace
-        reader.turn.set_subtitle("猫を見る")
+        reader.turn.cue_coordinator.set_subtitle("猫を見る")
         result = SubtitleRenderer().draw(
-            reader.turn._draw_request(), reader.turn.lifecycle_surfaces, reader.turn.ipc
+            reader.turn.cue_coordinator.draw_request(),
+            reader.turn.lifecycle_surfaces,
+            reader.turn.ipc,
         )
         assert result is not None
         reader.turn.subtitle_presentation.cue.replace_geometry(
