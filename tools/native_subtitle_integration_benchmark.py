@@ -626,9 +626,6 @@ class _BenchmarkSession:
         finally:
             self.gateway.close()
 
-    def __getattr__(self, name: str):
-        return getattr(self.graph, name)
-
 
 def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> _BenchmarkSession:
     geometry = SubtitleGeometryOptions(native_visible=backend is not None, cache_max=3, lookahead=2)
@@ -690,48 +687,48 @@ def _present(reader: _BenchmarkSession, text: str, *, native: bool) -> bool:
     so the snapshot this call would install is usually already installed and `apply` reports False
     for it. Reading the return would count zero on a pipeline that is working perfectly.
     """
-    reader.set_subtitle(text)
+    reader.graph.cue.set_subtitle(text)
     if native:
-        assert reader.subtitle_presentation.native is not None
-        reader.subtitle_presentation.native.apply(reader._geometry_observation())
-        return (
-            bool(reader.subtitle_presentation.cue.current.boxes)
-            and reader.subtitle_presentation.native.fallback_reason is None
-        )
-    return bool(reader.subtitle_presentation.cue.current.boxes)
+        presentation = reader.graph.subtitle_presentation
+        assert presentation.native is not None
+        presentation.native.apply(reader.graph.cue.geometry_observation())
+        return bool(presentation.cue.current.boxes) and presentation.native.fallback_reason is None
+    return bool(reader.graph.subtitle_presentation.cue.current.boxes)
 
 
 def _open_tooltip(reader: _BenchmarkSession, ipc: _IPC, *, native: bool) -> tuple[bool, bool, bool]:
-    if not reader.subtitle_presentation.cue.current.boxes:
+    presentation = reader.graph.subtitle_presentation
+    tooltip = reader.graph.tooltip
+    if not presentation.cue.current.boxes:
         return False, False, False
-    box = reader.subtitle_presentation.cue.current.boxes[0]
-    ox, oy = reader.subtitle_presentation.cue.current.origin
-    hit = reader.tooltip.hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
+    box = presentation.cue.current.boxes[0]
+    ox, oy = presentation.cue.current.origin
+    hit = tooltip.hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
     before = len(ipc.commands)
-    reader.tooltip.select(box.index)
-    reader.subtitle_presentation.draw()
+    tooltip.select(box.index)
+    presentation.draw()
     commands = ipc.commands[before:]
     focus = (
         any(command[:3] == ("osd-overlay", 1_001, "ass-events") for command in commands)
         if native
         else True
     )
-    reader.tooltip.show_tooltip(box.index)
-    opened = reader.tooltip.surface_state().view.state is not None
+    tooltip.show_tooltip(box.index)
+    opened = tooltip.surface_state().view.state is not None
     return hit, focus, opened
 
 
 def _scroll_and_close_tooltip(reader: _BenchmarkSession) -> bool:
-    opened = reader.tooltip.surface_state().view.state is not None
-    reader.tooltip.scroll_tip(1)
+    tooltip = reader.graph.tooltip
+    opened = tooltip.surface_state().view.state is not None
+    tooltip.scroll_tip(1)
     scrolled = (
         opened
-        and reader._scrolled_this_tick
-        and reader.tooltip.surface_state().view.state is not None
-        and reader.tooltip.surface_state().view.scroll > 0
+        and tooltip.surface_state().view.state is not None
+        and tooltip.surface_state().view.scroll > 0
     )
-    reader.tooltip.teardown()
-    reader.tooltip.select(-1)
+    tooltip.teardown()
+    tooltip.select(-1)
     return scrolled
 
 
@@ -754,19 +751,29 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         _managed_readers(baseline_ipc, native_ipc, backend) as readers,
     ):
         baseline, native = readers
+        baseline_graph = baseline.graph
+        native_graph = native.graph
         source_path = Path(raw_workspace) / "integration.ass"
         source_path.write_bytes(source)
-        baseline.profile.profile.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
-        native.profile.profile.replace_dictionary_set(cast("DictionarySet", _TallDictionary()))
-        assert native.subtitle_presentation.native is not None
-        native.subtitle_presentation.native.set_source(source_path, live=True)
+        baseline_graph.profile.profile.replace_dictionary_set(
+            cast("DictionarySet", _TallDictionary())
+        )
+        native_graph.profile.profile.replace_dictionary_set(
+            cast("DictionarySet", _TallDictionary())
+        )
+        assert native_graph.subtitle_presentation.native is not None
+        native_graph.subtitle_presentation.native.set_source(source_path, live=True)
         # A track load is where mpv's font set is read, and a frame measured against an unresolved
         # environment is refused rather than laid out in substitute faces. Through the production
         # resolver, not a hand-built environment: a harness that skipped it would benchmark the
         # refusal path and report the interaction as free.
-        resolve_track_fonts(native.ipc, native.ipc.query, native.subtitle_presentation.native)
+        resolve_track_fonts(
+            native_graph.ipc,
+            native_graph.ipc.query,
+            native_graph.subtitle_presentation.native,
+        )
         index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
-        native.track_commands.navigation.current.sub_index = index
+        native_graph.track_commands.navigation.current.sub_index = index
         latencies: list[float] = []
         baseline_latencies: list[float] = []
         cpu_latencies: list[float] = []
@@ -828,8 +835,8 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             # claim and must keep their cold cue, but whether a tooltip opens is a functional
             # invariant, and leaving it to race the geometry lane makes it a property of the
             # runner's speed. The wait costs the measurement nothing and the oracle everything.
-            assert native.subtitle_presentation.native is not None
-            assert native.subtitle_presentation.native.worker.wait_idle(timeout=30)
+            assert native_graph.subtitle_presentation.native is not None
+            assert native_graph.subtitle_presentation.native.worker.wait_idle(timeout=30)
             started = time.perf_counter_ns()
             cpu_started = time.thread_time_ns()
             hit, focus, opened = _open_tooltip(native, native_ipc, native=True)
@@ -859,21 +866,21 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             cpu_latencies.append(native_cpu)
             cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
-        assert native.subtitle_presentation.native.worker.wait_idle(timeout=30)
-        stats = native.subtitle_presentation.native.worker.stats
-        last_error = native.subtitle_presentation.pipeline.last_error
+        assert native_graph.subtitle_presentation.native.worker.wait_idle(timeout=30)
+        stats = native_graph.subtitle_presentation.native.worker.stats
+        last_error = native_graph.subtitle_presentation.pipeline.last_error
         rss_retained = process.memory_info().rss
-        native.profile.profile.use_tokenizer(native.profile.profile.tokenizer)
+        native_graph.profile.profile.use_tokenizer(native_graph.profile.profile.tokenizer)
         profile_switch_cache_entries = sum(
             (
-                native.subtitle_presentation.native.worker.stats.result_cache_entries,
-                native.subtitle_presentation.native.worker.stats.prefetch_cache_entries,
+                native_graph.subtitle_presentation.native.worker.stats.result_cache_entries,
+                native_graph.subtitle_presentation.native.worker.stats.prefetch_cache_entries,
             )
         )
         rss_after_profile_switch = process.memory_info().rss
-        native.subtitle_presentation.native.set_source(None, live=True)
-        source_clear_current = native.subtitle_presentation.pipeline.current is not None
-        source_clear_hit_count = len(native.subtitle_presentation.cue.current.boxes)
+        native_graph.subtitle_presentation.native.set_source(None, live=True)
+        source_clear_current = native_graph.subtitle_presentation.pipeline.current is not None
+        source_clear_hit_count = len(native_graph.subtitle_presentation.cue.current.boxes)
     close_completed = backend.closed
     baseline_p99 = _percentile(baseline_latencies, 0.99)
     interaction_p99 = _percentile(latencies, 0.99)
