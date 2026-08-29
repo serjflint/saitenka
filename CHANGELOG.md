@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-08-29
+
 ### Fixed
 
 - **Overlay publication could fail on Windows with `PermissionError` (WinError 5).** Each frame was
@@ -24,6 +26,13 @@ logs.
   Debian 0.35 → 0.40), so there was no binary to test the declared minimum against. 0.40 is the
   earliest release CI can pin and prove. The regular overlay path is unaffected and still supports
   mpv ≥ 0.37.
+
+### Development
+
+- Completed the reading-session ownership migration. `SessionController` now retains only ordered
+  owner-thread turns and lifecycle boundaries; feature policy, mutable state, background work, and
+  presentation belong to composed feature owners, with structural checks preventing authority from
+  leaking back into the shell.
 
 ## [4.1.0] - 2026-08-24
 
