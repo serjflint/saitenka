@@ -6,6 +6,7 @@
     "src/saitenka/app/features/mining/mining_controller.py",
     "src/saitenka/app/features/tooltip/tooltip_controller.py",
     "src/saitenka/app/session/controller.py",
+    "src/saitenka/app/session/lifecycle.py",
     "src/saitenka/app/session/routes.py",
     "src/saitenka/runtime/reactor.py",
     "src/saitenka/runtime/jobs.py",
@@ -258,11 +259,11 @@
     {
       "id": "P2",
       "module": "src/saitenka/app/session/controller.py",
-      "claim": "SessionController applies the profile transaction only through narrow owner-thread capabilities and carries no profile switch policy",
+      "claim": "SessionController carries no feature policy, does not escape SessionGraph, and is never passed to feature owners",
       "class": 2,
-      "status": "argued",
-      "evidence": "profile command registration and adapter tests cover the current dispatch path but do not prove policy absence or owner-thread application",
-      "settles": "a structural census of SessionController profile-policy methods plus an owner-thread application oracle"
+      "status": "gated",
+      "evidence": "tests/session/test_session_controller_host_contract.py plus its alias and aggregate-escape planted controls (poe all)",
+      "settles": null
     },
     {
       "id": "P3",
@@ -296,27 +297,27 @@
       "module": "src/saitenka/app/features/tooltip/tooltip_controller.py",
       "claim": "TooltipController and its delegated presentation helpers are the only writers of mutable tooltip state and volatile-work state",
       "class": 1,
-      "status": "argued",
-      "evidence": "behavioral tests cover owner-thread publication and stale refusal, but no structural writer census covers TooltipState, metadata, engaged-build, and render-ahead state",
-      "settles": "a structural writer census with a planted mutation outside the controller and its declared helpers"
+      "status": "gated",
+      "evidence": "poe tooltip-ownership (in all), tools/tooltip_ownership_check.py, and planted controls in tool_tests/test_tooltip_ownership_check.py",
+      "settles": null
     },
     {
       "id": "R1",
-      "module": "src/saitenka/app/session/routes.py",
-      "claim": "A runtime-owned close phase is recorded successful only when every registered resource in that phase closed successfully",
+      "module": "src/saitenka/app/session/lifecycle.py",
+      "claim": "SessionLifecycle.close isolates every registered participant, records each failure, and continues through later teardown steps",
       "class": 1,
-      "status": "argued",
-      "evidence": "falsified on the reviewed tree: _retire returns False after an isolated close failure, but SessionReactor drops the dispatcher result and SessionController records only event delivery",
-      "settles": "a close-ledger oracle with a throwing runtime-owned resource and a negative control proving the phase cannot be reported clean"
+      "status": "tested",
+      "evidence": "tests/session/test_close_ledger.py::test_a_wedged_interaction_participant_does_not_strand_transport and test_a_late_failure_does_not_skip_artifact_or_runtime_retirement",
+      "settles": null
     },
     {
       "id": "R2",
-      "module": "src/saitenka/runtime/reactor.py",
-      "claim": "The reactor preserves the outcome of fire-and-forget lifecycle effect dispatch where later lifecycle accounting depends on it",
+      "module": "src/saitenka/app/session/controller.py",
+      "claim": "A cue-retirement participant failure reaches the live session boundary and ends the current session turn",
       "class": 2,
-      "status": "argued",
-      "evidence": "fire-and-forget dispatch invokes self._dispatch(effect) and discards the returned bool; close accounting therefore observes delivery rather than retirement success",
-      "settles": "an explicit result propagation contract from lifecycle performer through the close ledger, with a failing-resource control"
+      "status": "tested",
+      "evidence": "tests/session/test_session_connection.py::test_a_failed_cue_retirement_ends_the_session_turn",
+      "settles": null
     },
     {
       "id": "S1",
