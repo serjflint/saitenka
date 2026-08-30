@@ -10,7 +10,8 @@ logs.
 ### Fixed
 
 - Subtitle-picker downloads remain clickable after the active cue disappears, without admitting
-  stale cue actions on other surfaces, and the picker stays above native subtitle overpaint.
+  stale cue actions on other surfaces. Interactive panels now share an explicit paint order and stay
+  above native subtitle overpaint.
 - Subtitle re-timing now fails visibly without replacing the current track when its local alignment is
   incoherent. The former whole-file fallback could overwrite a cached ASS file with SRT content and
   leave subtitles visible but no longer interactive.
