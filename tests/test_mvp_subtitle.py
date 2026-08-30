@@ -34,7 +34,7 @@ def test_background_opacity_zero_makes_the_box_fully_transparent():
     clear = render_subtitle([toks], osd_w=1280, size=44, background=(0, 0, 0, 0))
 
     def fully_transparent(img):
-        return sum(1 for px in img.getdata() if px[3] == 0)
+        return sum(1 for px in img.get_flattened_data() if px[3] == 0)
 
     assert clear.image.size == boxed.image.size  # only the box alpha changed, not layout
     assert fully_transparent(clear.image) > fully_transparent(boxed.image)
