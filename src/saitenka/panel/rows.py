@@ -34,7 +34,23 @@ if TYPE_CHECKING:
 
     from PIL import Image
 
+    from saitenka.model import PitchAccent
     from saitenka.panel.model import Definition, Entry, EntryGroup
+
+
+def _marker_native(size: int) -> Callable[[float], Image.Image]:
+    """Redraw the bullet at a display scale. An icon is drawn at whatever size is asked for, so it
+    never has to be upscaled from the 1× sprite the way an opaque image would."""
+    return lambda s: render_icon(Icon.MARKER, max(1, round(size * s)))
+
+
+def _pitch_native(
+    reading: str, accent: PitchAccent | int, base: float
+) -> Callable[[float], Image.Image]:
+    """Redraw the accent graph at a display scale — ``base`` is the theme's own UI scale."""
+    from saitenka.draw.pitch import render_pitch_graph
+
+    return lambda s: render_pitch_graph(reading, accent, scale=base * s)
 
 
 def _headword_kanji_links(scan: list[ScanBox]) -> list[LinkBox]:
@@ -345,7 +361,13 @@ def panel_rows(
                     if flow:
                         flow.append(Span("  ", Style(size=theme.px(20))))
                     flow.append(
-                        ImgBox(width=g.width, height=g.height, sprite=g, baseline_drop=theme.px(4))
+                        ImgBox(
+                            width=g.width,
+                            height=g.height,
+                            sprite=g,
+                            baseline_drop=theme.px(4),
+                            native=_pitch_native(reading, pa, theme.scale),
+                        )
                     )
             return _flow_row(flow, content_w, 1.5, render_scale=scale), [], []
 
@@ -362,6 +384,7 @@ def panel_rows(
                     height=pz,
                     sprite=render_icon(Icon.MARKER, pz),
                     baseline_drop=theme.px(3),
+                    native=_marker_native(pz),
                 ),
                 Span("  ", Style(size=theme.px(20))),
             ]
@@ -386,6 +409,7 @@ def panel_rows(
                     height=pz,
                     sprite=render_icon(Icon.MARKER, pz),
                     baseline_drop=theme.px(3),
+                    native=_marker_native(pz),
                 ),
                 Span("  " + tag, Style(size=theme.px(20), color=theme.muted)),
             ]

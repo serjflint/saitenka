@@ -8,7 +8,7 @@ the furigana clearance for its whole line automatically. Baseline stays consiste
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from saitenka import fonts
@@ -26,6 +26,8 @@ from saitenka.render.linebreak import wrap_units
 from saitenka.render.ruby import RubyBox, _base_size, layout_ruby
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PIL import Image, ImageDraw
 
     from saitenka.render.chip import ChipStyle, Sprite
@@ -43,6 +45,10 @@ class ImgBox:
     border: tuple[int, int, int, int] = (170, 170, 170, 255)
     sprite: Image.Image | None = None
     baseline_drop: int = 0  # px the box extends below the baseline
+    #: Re-draws the sprite at a display scale, in device px (``width×scale`` by ``height×scale``). A box
+    #: that can supply one rasters natively; without it the 1× sprite is upscaled, which reads soft next
+    #: to the natively-drawn glyphs around it.
+    native: Callable[[float], Image.Image] | None = None
 
     @property
     def advance(self) -> float:
@@ -68,14 +74,11 @@ class ImgBox:
         top = baseline + self.baseline_drop - self.height
         if self.sprite is not None:
             spr = self.sprite
-            if (
-                scale != 1.0
-            ):  # opaque inline sprite → upscale (not a glyph mask; see the plan's tradeoffs)
-                from PIL import Image as _Image
-
-                spr = spr.resize(
-                    (max(1, round(self.width * scale)), max(1, round(self.height * scale))),
-                    _Image.Resampling.LANCZOS,
+            if scale != 1.0:
+                spr = (
+                    self.native(scale)
+                    if self.native is not None
+                    else _upscale(spr, self.width, self.height, scale)
                 )
             img.alpha_composite(spr, (round(x * scale), round(top * scale)))
             return
@@ -95,6 +98,14 @@ class ImgBox:
                 fill=self.border,
                 anchor="mm",
             )
+
+
+def _upscale(spr: Image.Image, w: int, h: int, scale: float) -> Image.Image:
+    from PIL import Image as _Image
+
+    return spr.resize(
+        (max(1, round(w * scale)), max(1, round(h * scale))), _Image.Resampling.LANCZOS
+    )
 
 
 def img_box(png: bytes | None, height: int, tint: RGBA | None) -> ImgBox:
@@ -132,17 +143,23 @@ class ChipBox:
 
     text: str
     chip_style: ChipStyle
-    _sprite: Sprite | None = None
+    _sprites: dict[float, Sprite] = field(default_factory=dict)
 
-    @property
-    def sprite(self):
-        if self._sprite is None:
+    def sprite_at(self, scale: float) -> Sprite:
+        """The pill rastered natively at ``scale`` (device px), memoised per scale."""
+        spr = self._sprites.get(scale)
+        if spr is None:
             from saitenka.render.chip import (
                 render_chip,  # deferred: build the sprite on first placement
             )
 
-            self._sprite = render_chip(self.text, self.chip_style)
-        return self._sprite
+            spr = self._sprites[scale] = render_chip(self.text, self.chip_style, scale=scale)
+        return spr
+
+    @property
+    def sprite(self) -> Sprite:
+        """The 1× sprite — the reference metrics layout measures, at every display scale."""
+        return self.sprite_at(1.0)
 
     @property
     def advance(self) -> float:
@@ -165,19 +182,14 @@ class ChipBox:
         *,
         scale: float = 1.0,
     ) -> None:
-        spr, top = self.sprite, baseline - self.sprite.baseline
         if scale == 1.0:
-            img.alpha_composite(spr.image, (round(x), round(top)))
+            spr = self.sprite
+            img.alpha_composite(spr.image, (round(x), round(baseline - spr.baseline)))
             return
-        from PIL import (
-            Image as _Image,  # chip sprite → upscale (pre-rendered pill, not a glyph mask)
-        )
-
-        scaled = spr.image.resize(
-            (max(1, round(spr.image.width * scale)), max(1, round(spr.image.height * scale))),
-            _Image.Resampling.LANCZOS,
-        )
-        img.alpha_composite(scaled, (round(x * scale), round(top * scale)))
+        # Native pill: its own baseline is already device px, so align on the DEVICE baseline rather
+        # than projecting the 1× top (rounding the two independently drifts the text off the line).
+        spr = self.sprite_at(scale)
+        img.alpha_composite(spr.image, (round(x * scale), round(baseline * scale) - spr.baseline))
 
 
 # A flow segment is styled text, a ruby box, an opaque image box, or a chip.
@@ -204,13 +216,9 @@ def render_chip_row(
         "RGBA", (max(1, round(width * scale)), max(1, round(height * scale))), (0, 0, 0, 0)
     )
     for chip, rect in zip(chips, rects, strict=True):
-        spr = chip.sprite.image
-        if scale != 1.0:  # opaque pre-rendered pill → upscale (not a glyph mask)
-            spr = spr.resize(
-                (max(1, round(spr.width * scale)), max(1, round(spr.height * scale))),
-                _Image.Resampling.LANCZOS,
-            )
-        img.alpha_composite(spr, (round(rect.x * scale), round(rect.y * scale)))
+        img.alpha_composite(
+            chip.sprite_at(scale).image, (round(rect.x * scale), round(rect.y * scale))
+        )
     return img
 
 
