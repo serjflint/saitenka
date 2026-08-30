@@ -1022,6 +1022,13 @@ def _assemble_stateless_commands(
             open_picker=owners.picker_commands.run,
         )
     )
+
+    def report_overlay_visibility(*, visible: bool) -> None:
+        if visible:
+            owners.notifications.show("Saitenka shown")
+        else:
+            send_correlated(owners.ipc, "overlay-hidden", "show-text", "Saitenka hidden", 2000)
+
     session = SessionCommandCoordinator(
         SessionCommandPorts(
             overlay=owners.overlay,
@@ -1031,6 +1038,7 @@ def _assemble_stateless_commands(
             translation=owners.translation,
             translation_inputs=owners.translation_observation.current,
             toggle_renderer=owners.subtitles.toggle_renderer,
+            report_overlay_visibility=report_overlay_visibility,
             teardown_tip=owners.tooltip.teardown,
             subtitle_target=owners.subtitles.target,
         )

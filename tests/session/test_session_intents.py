@@ -5,6 +5,7 @@ from __future__ import annotations
 from saitenka.app.intents import DismissHover
 from saitenka.app.session.intents import (
     ReleaseSecondarySubtitles,
+    ReportOverlayVisibility,
     ResumeSubtitles,
     SessionCommand,
     SessionInputs,
@@ -26,6 +27,7 @@ def test_hiding_tears_the_tooltip_down_before_the_pixels_go() -> None:
         SetSurfacesVisible(visible=False),
         ReleaseSecondarySubtitles(),
         SuspendSubtitles(),
+        ReportOverlayVisibility(visible=False),
     )
 
 
@@ -43,6 +45,7 @@ def test_showing_resumes_the_pipeline_before_drawing_a_translation() -> None:
         SetSurfacesVisible(visible=True),
         ResumeSubtitles(),
         ShowTranslation(),
+        ReportOverlayVisibility(visible=True),
     )
 
 
@@ -50,6 +53,7 @@ def test_showing_without_a_wanted_translation_draws_none() -> None:
     assert reduce(TOGGLE, SessionInputs(overlay_visible=False)) == (
         SetSurfacesVisible(visible=True),
         ResumeSubtitles(),
+        ReportOverlayVisibility(visible=True),
     )
 
 
