@@ -342,6 +342,36 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     assert ran == ["dl"]
 
 
+def test_picker_click_routes_after_the_active_cue_is_retired(monkeypatch):
+    reader, ipc = _reader(path="/v/ep01.mkv")
+    reader.graph.picker.configure_listing(_lister([]))
+    chosen = _candidate("Show - 01.srt")
+    _open(reader)
+    _adopt(reader, candidates=(chosen,))
+    reader.graph.picker.redraw()
+    reader.graph.cue.set_subtitle("猫")
+    reader.graph.cue.retire("cue-text")
+
+    fetches: list[tuple] = []
+    monkeypatch.setattr(
+        subtitle_modes, "start_fetch", lambda _submit, _get, do, **kw: fetches.append((do, kw))
+    )
+    panel = reader.graph.picker.panel
+    rect = panel.rect
+    assert rect is not None
+    hit = next(box for box in panel.hits if box.kind == "picker-download")
+    ipc.props["mouse-pos"] = {
+        "hover": True,
+        "x": rect[0] + hit.x + hit.w / 2,
+        "y": rect[1] + hit.y + hit.h / 2,
+    }
+
+    reader.command(app_bindings.CLICK_MSG)
+
+    assert reader.graph.picker.state.open is False
+    assert [download for download, _kwargs in fetches] == [chosen.download]
+
+
 def test_click_outside_the_panel_is_not_captured():
     reader, _ipc = _reader(path="/v/ep.mkv")
     reader.graph.picker.configure_listing(_lister([]))

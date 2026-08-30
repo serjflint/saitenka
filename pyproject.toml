@@ -535,13 +535,18 @@ extra-paths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "an
 # lint / types / complexity run repo-wide from the root configuration.
 lint = { shell = "uv run ruff check --fix . && uv run ruff format ." }
 # mypy/basedpyright gate the widened scope (library + examples + tools + install + .agents —
-# see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
-# strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
-# scope for visibility, same posture as `ty` (never a hard gate here).
-# Both advisory passes print one line per diagnostic (`min-text` / `concise`): their default renderers
-# quote source and draw carets, which cost 922 lines of a green gate for 78 findings nothing acts on in
-# that run. A finding still names its file:line, which is what a follow-up needs to re-run it in full.
-types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src && (uv run --extra full pyrefly check --output-format=min-text examples tools install .agents || true) && (uv run --extra full ty check --output-format concise --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src examples tools install .agents || true)" }
+# see [tool.mypy].files); pyrefly stays a HARD gate on library-only, because its dict-literal inference
+# is too strict for the dev-script idiom to gate on.
+types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src" }
+# ADVISORY tier for the two checkers that can't gate: pyrefly over the widened scope, and ty anywhere.
+# Human-triage only (in `hygiene`, never in `all`) — a suppressed exit code plus a per-run diagnostic dump
+# is the shape a finding dies in: 59 known lines every green run, where a new one would read as more of the
+# same. Out of the gate it can exit honestly, so `poe types-advisory` answers "did this grow?" by rc.
+# `min-text`/`concise` because the default renderers quote source and draw carets — 922 lines for 78
+# findings. file:line is what a follow-up needs to re-run one in full.
+# Sequenced on `;`, not `&&`: either checker being red is the normal state, and short-circuiting would
+# hide the second one exactly then. Both always run; the rc is clean only if both are.
+types-advisory = { shell = "uv run --extra full pyrefly check --output-format=min-text examples tools install .agents; p=$?; uv run --extra full ty check --output-format concise --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src examples tools install .agents; t=$?; [ $p -eq 0 ] && [ $t -eq 0 ]" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
@@ -610,7 +615,12 @@ affected = { cmd = "uv run --extra full python tools/affected.py" }
 # The gate's functional + coverage run. `-n auto` parallelises it (~99s → ~38s); pytest-cov combines
 # per-worker data. Its marker set (`not (slow or live)`) is a superset of `test`'s, so `all` runs this
 # instead of a separate `test` — the suite runs twice total (here + `test-ft` under PYTHON_GIL=0).
-cov = "uv run --extra full pytest -q -n auto --cov=saitenka --cov-report=term-missing --cov-fail-under=85 -m 'not (slow or live)'"
+# `--cov-report=` renders no table: --cov-fail-under still bites and still prints the total, and a green
+# run has nothing to read in 304 per-file rows (311 lines, 44% of a whole `poe all` log). The data lands
+# in `.coverage` either way, so `poe cov-report` reconstructs the detail when the number does move.
+cov = "uv run --extra full pytest -q -n auto --cov=saitenka --cov-report= --cov-fail-under=85 -m 'not (slow or live)'"
+# Render the per-file missing-line detail from the last `cov` run — what to open when coverage drops.
+cov-report = "uv run --extra full coverage report -m --skip-covered"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
 # Dict-free deterministic render bench — the CI/asv-safe gate target (no overlay.toml, no randomness).
 # --loops characterizes run-to-run variance (CV); --bench-json emits the gh-pages history JSON.
@@ -915,7 +925,7 @@ shell = { shell = "shellcheck install/*.sh" }
 ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost -EnableExit\"" }
 
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
-hygiene = ["deadcode", "dup"]
+hygiene = ["deadcode", "dup", "types-advisory"]
 
 # Every gate task EXCEPT the free-threaded suite pass. `all` appends it, so locally there is still one
 # name to type and one contract. CI splits the two halves across two jobs instead: the suite costs ~128s

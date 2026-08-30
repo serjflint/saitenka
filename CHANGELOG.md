@@ -9,6 +9,8 @@ logs.
 
 ### Fixed
 
+- Open overlay controls, including subtitle-picker downloads, remain clickable after the active cue
+  disappears.
 - Subtitle re-timing now fails visibly without replacing the current track when its local alignment is
   incoherent. The former whole-file fallback could overwrite a cached ASS file with SRT content and
   leave subtitles visible but no longer interactive.

@@ -162,6 +162,7 @@ _CUE_INDEPENDENT = frozenset(
         ANALYSIS_MSG,
         ANNOTATION_MSG,
         PREVIEW_CLOSE_MSG,
+        CLICK_MSG,
         SCROLL_UP_MSG,
         SCROLL_DOWN_MSG,
         TIP_CLOSE_MSG,

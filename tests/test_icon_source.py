@@ -12,7 +12,7 @@ from saitenka.draw.icon_source import Icon, render_icon
 
 
 def _opaque(img) -> int:
-    return sum(1 for px in img.getdata() if px[3] > 0)
+    return sum(1 for px in img.get_flattened_data() if px[3] > 0)
 
 
 @pytest.mark.parametrize("icon", list(Icon))
@@ -47,7 +47,7 @@ def test_button_affordances_always_use_the_vector() -> None:
 
 def test_color_override_tints_the_glyph() -> None:
     red = render_icon(Icon.MARKER, 24, (220, 20, 20, 255))
-    opaque = [px for px in red.getdata() if px[3] > 0]
+    opaque = [px for px in red.get_flattened_data() if px[3] > 0]
     assert opaque and all(px[0] > px[1] and px[0] > px[2] for px in opaque)
 
 
