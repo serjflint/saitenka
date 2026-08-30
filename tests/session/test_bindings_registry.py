@@ -139,7 +139,7 @@ saitenka-scroll-down|interaction|global|help
 saitenka-speak|interaction|cue|modal
 saitenka-copy|interaction|cue|modal
 saitenka-copy-click|interaction|cue|modal
-saitenka-click|interaction|cue|modal
+saitenka-click|interaction|global|modal
 saitenka-kanji|interaction|cue|modal
 saitenka-tip-up|interaction|global|modal
 saitenka-tip-down|interaction|global|modal
