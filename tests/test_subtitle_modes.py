@@ -717,13 +717,14 @@ def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypat
     assert messages == ["Japanese subtitles selected"]
 
 
-def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path, monkeypatch):
-    # "Retry should just re-time": watching (mistimed) JP → re-sync the CURRENT srt in place (NO
-    # provider query — you already have the subs) and swap the on-screen track for the re-timed file.
+def test_runtime_retry_keeps_current_subs_when_window_retiming_fails(tmp_path, monkeypatch):
+    # A failed local alignment must keep the selected file and fail visibly. Whole-file fallback can
+    # mis-correlate a different region and, for ASS input, used to overwrite it with SRT bytes.
     from saitenka.app import resync as resync_mod
 
-    current = tmp_path / "ep3.ja.srt"
-    current.write_text("1\n00:00:02,000 --> 00:00:03,000\nJP\n", encoding="utf-8")
+    current = tmp_path / "ep3.ja.ass"
+    original = "[Events]\nDialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,猫\n"
+    current.write_text(original, encoding="utf-8")
     jp_external = {
         "id": 2,
         "type": "sub",
@@ -743,40 +744,20 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
     reader.graph.subtitle_acquisition.configure_retry(  # the provider factory must NOT be called
         lambda _v: (_ for _ in ()).throw(AssertionError("queried providers on re-sync"))
     )
-    resynced = []
-
-    def fake_resync_current(video, sub, **_kw):
-        resynced.append((str(video), str(sub)))
-        sub.write_text(
-            "1\n00:00:05,000 --> 00:00:06,000\nJP\n", encoding="utf-8"
-        )  # re-timed in place
-        return sub
-
-    monkeypatch.setattr(resync_mod, "resync_current", fake_resync_current)
+    monkeypatch.setattr(resync_mod, "resync_window", lambda *_a, **_k: None)
     ipc.commands.clear()
 
     reader.command(app_bindings.SUBTITLE_RETRY_MSG)
     jobs.finish()
 
-    # video is wrapped in Path before resync → compare the OS-native form (Windows uses backslashes)
-    assert resynced == [(str(Path("/videos/Show - 03.mkv")), str(current))]  # CURRENT sub, no fetch
-    assert ("sub-remove", 2) in ipc.commands  # stale track dropped
-    assert (
-        "sub-add",
-        str(current),
-        "select",
-        "",
-        "jpn",
-    ) in ipc.commands  # re-timed file re-selected
-    assert (
-        reader.graph.track_commands.current().jp_sid == 9
-        and reader.graph.track_commands.current().language == "jp"
-    )
-    assert (
-        reader.graph.track_commands.navigation.current.sub_index is not None
-    )  # rebuilt against the re-timed cues
-    # single-cue sub → window too small → falls back to a whole-file re-sync (still no provider query)
-    assert "Re-timing subtitles from here…" in messages
+    assert current.read_text(encoding="utf-8") == original
+    assert ("sub-remove", 2) not in ipc.commands
+    assert not any(command[0] == "sub-add" for command in ipc.commands)
+    assert reader.graph.track_commands.current().jp_sid == 2
+    assert messages == [
+        "Re-timing subtitles from here…",
+        "Subtitle retiming failed — current subtitles kept",
+    ]
 
 
 @pytest.mark.parametrize(

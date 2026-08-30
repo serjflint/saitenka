@@ -431,11 +431,11 @@ def _start_resync_window(
     """Re-time the subs you already have from the CURRENT playhead onward (no provider query) — the
     user's "sync from here" shortcut. A drifting source (right after the OP, early before it) can't be
     fixed by one whole-file offset, so this derives the offset from a local slice around the playhead and
-    re-times from there; press again at the next drift point. Falls back to a whole-file re-sync when the
-    window can't align."""
+    re-times from there; press again at the next drift point. A failed alignment keeps the current track
+    unchanged and reports the failure."""
     from pathlib import Path
 
-    from saitenka.app.resync import resync_current, resync_window
+    from saitenka.app.resync import resync_window
 
     playhead = get("time-pos")
     start_s = float(playhead) if isinstance(playhead, int | float) else 0.0
@@ -443,9 +443,8 @@ def _start_resync_window(
 
     def do() -> tuple[Path | None, str]:
         out = resync_window(Path(video_path), sub, start_s=start_s)
-        if out is None:  # window couldn't align → whole-file re-sync (in-place, returns sub)
-            whole = resync_current(Path(video_path), sub)
-            return _published(sub, whole), f"subtitles re-synced: {whole.name}"
+        if out is None:
+            return None, "Subtitle retiming failed — current subtitles kept"
         if out == sub:  # window already aligned here → nothing to swap
             return None, "subtitles already aligned here"
         return _published(sub, out), f"subtitles re-timed from {int(start_s)}s"

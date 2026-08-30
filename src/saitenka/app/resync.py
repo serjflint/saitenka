@@ -459,25 +459,6 @@ def maybe_resync(
         return result
 
 
-def resync_current(video: Path, sub: Path, *, timeout: int | None = None) -> Path:
-    """Re-align an EXISTING subtitle file to *video* — the user's re-sync shortcut. No provider fetch
-    (you already have the subs; you only need them re-timed). Forces a fresh run past the ``.synced``
-    marker. For OUR cache files, overwrites in place so the persisted cache also picks up the new
-    timing; a user-supplied ``--sub-file`` is never clobbered — its ``.synced`` sibling is returned
-    instead. Returns ``sub`` unchanged on failure."""
-    synced = maybe_resync(video, sub, enabled=True, force=True, timeout=timeout, trigger="retry")
-    if synced == sub or not synced.exists():
-        return sub  # tool missing / failed → nothing re-timed
-    from saitenka.app.subtitle_cache import subs_cache_dir
-
-    try:
-        sub.resolve().relative_to(subs_cache_dir().resolve())
-    except ValueError:
-        return synced  # not ours (a user --sub-file) → play the sibling, don't overwrite their file
-    shutil.copy2(str(synced), str(sub))  # our cache file → persist the aligned timing in place
-    return sub
-
-
 def _fmt_srt_ts(t: float) -> str:
     ms = max(0, round(t * 1000))
     h, r = divmod(ms, 3_600_000)
@@ -600,8 +581,8 @@ def _windowed_align(
 
 # Coherence guards on a windowed alignment. A local slice must shift as a near-rigid block, so a wide
 # per-cue spread (or an absurd absolute shift) is proof alass mis-correlated it — a short cold-open window
-# matching a far region (live: a 12-cue slice → +718s, 929s spread) or a slice straddling a cut. Bail so
-# the caller falls back to a whole-file split-align, which has the full episode to correlate against.
+# matching a far region (live: a 12-cue slice → +718s, 929s spread) or a slice straddling a cut. Bail
+# without changing the selected track: a different automatic strategy is not proof of the right timing.
 _WINDOW_MAX_DRIFT_S = (
     5.0  # per-cue spread within the slice (continuous drift over a minute is sub-second)
 )
@@ -628,7 +609,7 @@ def resync_window(
     Applies the single offset to every cue from ``start_s - lookback_s`` on, leaving earlier cues
     untouched — press again after the next drift point (e.g. once past the OP). Returns the re-timed
     ``<base>.win.srt`` path; ``sub`` unchanged when already aligned (no shift); or None on a hard failure
-    (no reference / too few cues / tool failure), so the caller can fall back to a whole-file re-sync."""
+    (no reference / too few cues / tool failure)."""
     from saitenka import otel_metrics
 
     if timeout is None:
@@ -678,8 +659,8 @@ def resync_window(
             span.set("window_delta_ms", round(delta * 1000))
             span.set("window_delta_range_ms", round(drift_range * 1000))
             if drift_range > _WINDOW_MAX_DRIFT_S or abs(delta) > _WINDOW_MAX_SHIFT_S:
-                # incoherent alignment (mis-correlation / straddled a cut) → let the caller fall back to
-                # the whole-file split-align rather than apply a meaningless median.
+                # Incoherent alignment (mis-correlation / straddled a cut): keep the current track
+                # rather than apply a meaningless median or guess with another matcher scope.
                 span.set("outcome", "failed")
                 span.set(
                     "fail_reason",

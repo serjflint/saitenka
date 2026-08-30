@@ -779,7 +779,7 @@ class TestResyncWindow:
         resync = _import_resync()
         sub = self._sub_with_cues(tmp_path, [1.0, 5.0])  # nothing at/after the playhead window
         out = resync.resync_window(tmp_path / "ep02.mkv", sub, start_s=200.0, lookback_s=20.0)
-        assert out is None  # hard failure → caller falls back to a whole-file re-sync
+        assert out is None  # hard failure → caller keeps the current track
 
     def test_span_records_the_window_delta_and_trigger(self, tmp_path, monkeypatch):
         resync = _import_resync()
@@ -863,7 +863,7 @@ class TestResyncWindow:
             ),
         ):
             out = resync.resync_window(tmp_path / "ep02.mkv", sub, start_s=40.0, lookback_s=20.0)
-        assert out is None  # bail → caller runs whole-file resync_current
+        assert out is None  # fail closed; the current track remains selected
         (span,) = recorded
         assert span.attrs["outcome"] == "failed"
         assert "incoherent" in span.attrs["fail_reason"]
