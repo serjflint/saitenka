@@ -45,8 +45,19 @@ class SurfaceRouter:
     def route_scroll(self, wheel: WheelStep, steps: int) -> bool:
         return any(spec.scroll(wheel, steps) for spec in self.specs)
 
-    def route_click(self, target: ClickTarget, x: float, y: float) -> bool:
-        return any(spec.on_click(target, x, y) for spec in self.specs)
+    def route_click(
+        self,
+        target: ClickTarget,
+        x: float,
+        y: float,
+        *,
+        cue_active: bool = True,
+    ) -> bool:
+        return any(
+            spec.on_click(target, x, y)
+            for spec in self.specs
+            if cue_active or spec.click_without_cue
+        )
 
 
 def build_surface_router(

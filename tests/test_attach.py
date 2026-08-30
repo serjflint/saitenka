@@ -110,6 +110,14 @@ def test_overlay_id_base_offsets_overlay_ids():
     assert based.ipc.commands[1] == ("overlay-remove", 11)
 
 
+def test_highest_preexisting_overlay_base_stays_in_mpv_range():
+    from saitenka.app.overlay_ids import OverlayId
+
+    overlay = Overlay(_RecIPC(), id_base=52)
+
+    assert max(overlay.physical_oid(oid) for oid in OverlayId) == 63
+
+
 # --- lua plugin install / uninstall / backup ------------------------------------------------
 
 

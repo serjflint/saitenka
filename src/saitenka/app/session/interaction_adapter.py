@@ -66,6 +66,7 @@ class InteractionPorts:
     """Fresh cross-widget capabilities used during one owner-thread turn."""
 
     overlay_visible: Callable[[], bool]
+    cue_interaction_allowed: Callable[[], bool]
     playback: PlaybackObservationController
     router: SurfaceRouter
     tooltip: TooltipController
@@ -139,6 +140,7 @@ class InteractionCoordinator:
             self.click_target(),
             pointer.get("x", -1),
             pointer.get("y", -1),
+            cue_active=ports.cue_interaction_allowed(),
         )
 
     def route_wheel(self, steps: int) -> None:

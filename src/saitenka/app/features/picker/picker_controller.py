@@ -148,4 +148,5 @@ class PickerController:
             suppress_hover=self.suppress_hover,
             scroll=self.scroll,
             on_click=self.on_click,
+            click_without_cue=True,
         )
