@@ -138,6 +138,13 @@ def test_real_registry_z_order():
     ]
 
 
+def test_only_the_picker_accepts_clicks_without_a_cue():
+    reader = build_session(_FakeIPC())
+    assert {
+        spec.name for spec in reader.graph.interaction.router.specs if spec.click_without_cue
+    } == {"sub_picker"}
+
+
 def test_every_surface_state_exposes_open():
     """Anti-occlusion invariant: each surface's state object exposes ``open`` (bool) on a real SessionController, so
     it participates in the forced-mouse-section OR and can never be shown-but-click-through (#100 picker)."""

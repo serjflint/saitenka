@@ -342,15 +342,21 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     assert ran == ["dl"]
 
 
-def test_picker_click_routes_after_the_active_cue_is_retired(monkeypatch):
+@pytest.mark.parametrize(
+    "retire_active_cue",
+    [False, True],
+    ids=["never-installed", "retired-after-active"],
+)
+def test_picker_click_routes_without_a_current_cue(monkeypatch, retire_active_cue):
     reader, ipc = _reader(path="/v/ep01.mkv")
     reader.graph.picker.configure_listing(_lister([]))
     chosen = _candidate("Show - 01.srt")
     _open(reader)
     _adopt(reader, candidates=(chosen,))
     reader.graph.picker.redraw()
-    reader.graph.cue.set_subtitle("猫")
-    reader.graph.cue.retire("cue-text")
+    if retire_active_cue:
+        reader.graph.cue.set_subtitle("猫")
+        reader.graph.cue.retire("cue-text")
 
     fetches: list[tuple] = []
     monkeypatch.setattr(

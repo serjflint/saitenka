@@ -29,6 +29,6 @@ class OverlayId(IntEnum):
     #: The reading-state color as a raster over mpv's own subtitle glyphs, for a face mpv's OSD
     #: library cannot load. Its own slot because it is retired on its own schedule: the text device
     #: shares the focus slot, and this one has to come down when a cue's masks stop being current.
-    OVERPAINT = 12
+    OVERPAINT = 11
     #: mpv composites higher ``overlay-add`` IDs last, so modal picker chrome stays above overpaint.
-    PICKER = 13  # Window 1: the jimaku subtitle-source download picker
+    PICKER = 12  # Window 1: the jimaku subtitle-source download picker
