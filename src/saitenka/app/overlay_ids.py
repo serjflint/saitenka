@@ -1,13 +1,7 @@
-"""OSD overlay-slot IDs: the small integer index ``Overlay.show``/``.hide`` use to distinguish each
-on-screen element (subtitle, tooltip, toast, ...) from the others sharing mpv's OSD surface.
+"""Collision-free OSD slots in back-to-front paint order.
 
-One shared enum so every module that draws or clears an overlay layer refers to the same slot
-numbers — previously bare ``int`` constants defined separately in each subsystem's module
-(``session/controller.py``, preview, nested tooltip), which only worked by accident
-(nothing stopped two subsystems from picking the same number). A leaf module with zero ``saitenka.app.*``
-imports, so anything can depend on it with no cycle risk. :class:`OverlayId` is an
-:class:`~enum.IntEnum`, so it's a drop-in ``int`` everywhere an ``oid`` is expected (comparisons,
-dict keys, ``Overlay.show(..., oid=OverlayId.TIP)``).
+mpv composites larger ``overlay-add`` IDs last. Keeping the ordering here makes paint priority
+reviewable independently of where each surface is rendered.
 """
 
 from __future__ import annotations
@@ -16,19 +10,23 @@ from enum import IntEnum
 
 
 class OverlayId(IntEnum):
+    # Subtitle plane.
     SUB = 1
-    TIP = 2
-    TOAST = 3
-    TRANS = 4
-    PREVIEW = 5
-    NESTED = 6  # a scan popup opened by hovering a word *inside* the tooltip
+    # Raster color over mpv's subtitle glyphs; separate because its cue lifetime differs.
+    OVERPAINT = 2
+    TRANS = 3
+
+    # Contextual interaction.
+    TIP = 4
+    NESTED = 5  # a scan popup opened by hovering a word *inside* the tooltip
+
+    # Panels, matching the inverse of the topmost-first input order.
+    PREVIEW = 6
     SIDEBAR = 7
     ANALYSIS = 8  # reserved for #66; keeps the two large surfaces collision-free
-    LOADING = 9  # top-left "loading dictionaries" spinner during progressive startup
+    PICKER = 9  # Window 1: the jimaku subtitle-source download picker
     HELP = 10
-    #: The reading-state color as a raster over mpv's own subtitle glyphs, for a face mpv's OSD
-    #: library cannot load. Its own slot because it is retired on its own schedule: the text device
-    #: shares the focus slot, and this one has to come down when a cue's masks stop being current.
-    OVERPAINT = 11
-    #: mpv composites higher ``overlay-add`` IDs last, so modal picker chrome stays above overpaint.
-    PICKER = 12  # Window 1: the jimaku subtitle-source download picker
+
+    # Session chrome stays visible over content and panels.
+    LOADING = 11  # top-left "loading dictionaries" spinner during progressive startup
+    TOAST = 12

@@ -8,13 +8,16 @@ that forgets to declare shown-ness is exactly the #100 picker click-through bug)
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 import util
 from session_builder import build_session
 
 from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.features.sidebar import sidebar
-from saitenka.app.session.surfaces import SurfaceRouter, SurfaceSpec
+from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.session.surfaces import SURFACE_ORDER, SurfaceRouter, SurfaceSpec
 from saitenka.app.subselect import SubtitleCandidate
 from saitenka.runtime import UserCommand, events
 from saitenka.runtime import sidebar as runtime_sidebar
@@ -136,6 +139,35 @@ def test_real_registry_z_order():
         "preview",
         "tooltip",
     ]
+
+
+def test_surface_paint_order_matches_input_order():
+    layers = {
+        "help": (OverlayId.HELP,),
+        "sub_picker": (OverlayId.PICKER,),
+        "sidebar": (OverlayId.SIDEBAR,),
+        "preview": (OverlayId.PREVIEW,),
+        "tooltip": (OverlayId.TIP, OverlayId.NESTED),
+    }
+
+    assert all(
+        min(layers[higher]) > max(layers[lower]) for higher, lower in pairwise(SURFACE_ORDER)
+    )
+
+
+def test_subtitle_layers_are_below_interactive_surfaces():
+    subtitle_layers = (OverlayId.SUB, OverlayId.OVERPAINT, OverlayId.TRANS)
+    interactive_layers = (
+        OverlayId.TIP,
+        OverlayId.NESTED,
+        OverlayId.PREVIEW,
+        OverlayId.SIDEBAR,
+        OverlayId.ANALYSIS,
+        OverlayId.PICKER,
+        OverlayId.HELP,
+    )
+
+    assert max(subtitle_layers) < min(interactive_layers)
 
 
 def test_only_the_picker_accepts_clicks_without_a_cue():
