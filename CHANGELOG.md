@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-08-30
+
 ### Fixed
 
 - Subtitle-picker downloads remain clickable after the active cue disappears, without admitting
