@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788083524708,
+  "lastUpdate": 1788086959684,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -11903,6 +11903,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 0.956834,
             "range": "3 replicas; min 0.875807; max 1.50916; MAD 0.081027; worst 1.50916",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "619597de202f54581d33209a5cb42dac456f5b07",
+          "message": "Merge pull request #460 from serjflint/fix/overlay-zorder\n\nfix(overlays): make paint order explicit",
+          "timestamp": "2026-08-30T15:47:39+05:00",
+          "tree_id": "80bfc22cfd162f930658c9dbd02bacbd0b9b2f9b",
+          "url": "https://github.com/serjflint/saitenka/commit/619597de202f54581d33209a5cb42dac456f5b07"
+        },
+        "date": 1788086958214,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.244629,
+            "range": "3 replicas; min 6.23241; max 6.30939; MAD 0.01222",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.643908,
+            "range": "3 replicas; min 8.63509; max 8.67961; MAD 0.008815; worst 8.67961",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.463909,
+            "range": "3 replicas; min 20.4538; max 20.7206; MAD 0.010106",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.699119,
+            "range": "3 replicas; min 20.6221; max 21.7595; MAD 0.076973; worst 21.7595",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 20.04896,
+            "range": "3 replicas; min 18.5843; max 20.2542; MAD 0.205261",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.16691,
+            "range": "3 replicas; min 0.163326; max 0.183453; MAD 0.003584; worst 0.183453",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.340229,
+            "range": "3 replicas; min 43.3773; max 50.1908; MAD 0.962941; worst 50.1908",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.824753,
+            "range": "3 replicas; min 2.80087; max 2.91139; MAD 0.023885; worst 2.91139",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.13679,
+            "range": "3 replicas; min 1.0313; max 1.22681; MAD 0.090021; worst 1.22681",
             "unit": "ms"
           }
         ]
