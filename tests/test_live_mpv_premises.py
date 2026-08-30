@@ -132,7 +132,11 @@ def test_the_launch_profile_lands_on_values_the_gate_accepts() -> None:
         ipc.close()
         proc.terminate()
 
-    assert _unsupported_render_inputs(settings) == ()
+    # Both track kinds: one session meets authored .ass and mpv-converted SubRip, and the gate's
+    # scale branch only exists for the authored one. A profile that satisfies just one still loses
+    # native geometry on the other.
+    assert _unsupported_render_inputs(settings, authored=True) == ()
+    assert _unsupported_render_inputs(settings, authored=False) == ()
 
 
 @pytest.mark.live
