@@ -115,7 +115,7 @@ def test_highest_preexisting_overlay_base_stays_in_mpv_range():
 
     overlay = Overlay(_RecIPC(), id_base=52)
 
-    assert overlay.physical_oid(OverlayId.PICKER) == 63
+    assert max(overlay.physical_oid(oid) for oid in OverlayId) == 63
 
 
 # --- lua plugin install / uninstall / backup ------------------------------------------------
