@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788082700240,
+  "lastUpdate": 1788083524708,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -11825,6 +11825,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.300626,
             "range": "3 replicas; min 0.894685; max 1.86302; MAD 0.405941; worst 1.86302",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a2e07bfc95b2d58e7e7ebcf4ba70e66e9e8e50a6",
+          "message": "Fix picker clicks after cue retirement (#458)\n\n* fix(picker): route clicks after cue retirement\n\n* docs(changelog): note picker click recovery\n\n* fix(interaction): scope retired-cue clicks by surface\n\n* fix(overlays): preserve mpv id range\n\n* test(overlays): cover full id range",
+          "timestamp": "2026-08-30T14:50:48+05:00",
+          "tree_id": "fa06cefe810ccc1e7a392acd06fbf333e7027b62",
+          "url": "https://github.com/serjflint/saitenka/commit/a2e07bfc95b2d58e7e7ebcf4ba70e66e9e8e50a6"
+        },
+        "date": 1788083523222,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.477493,
+            "range": "3 replicas; min 5.73211; max 6.51404; MAD 0.036547",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.359944,
+            "range": "3 replicas; min 8.16656; max 9.47161; MAD 0.111669; worst 9.47161",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.466654,
+            "range": "3 replicas; min 17.5749; max 19.0388; MAD 0.572176",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.656376,
+            "range": "3 replicas; min 17.6904; max 19.1402; MAD 0.483836; worst 19.1402",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 17.597415,
+            "range": "3 replicas; min 15.8414; max 24.4468; MAD 1.75603",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.120753,
+            "range": "3 replicas; min 0.111792; max 0.132518; MAD 0.008961; worst 0.132518",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.366196,
+            "range": "3 replicas; min 39.4133; max 45.9605; MAD 1.5943; worst 45.9605",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.762281,
+            "range": "3 replicas; min 2.75937; max 5.97861; MAD 0.002914; worst 5.97861",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 0.956834,
+            "range": "3 replicas; min 0.875807; max 1.50916; MAD 0.081027; worst 1.50916",
             "unit": "ms"
           }
         ]
