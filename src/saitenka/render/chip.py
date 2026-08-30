@@ -3,6 +3,13 @@
 The fanciest-looking but simplest element: a rounded rectangle with centred rich text. Used for
 frequency pills, dictionary-name pills, and — with a transparent fill + border — bordered labels
 like 逆引き.
+
+A pill is drawn TWICE over its life: once at 1× for the metrics layout reserves, and again at the
+display scale for the pixels that ship. The second pass re-runs the font at ``size×scale`` rather
+than stretching the first, so a pill is as crisp as the text beside it — but the box it fills is the
+1× box projected, never its own natural extent. That split is what keeps the two passes agreeing:
+an integer font size does not scale linearly, so a freely-sized native pill drifts several px wide of
+its slot and closes the gap to its neighbour.
 """
 
 from __future__ import annotations
@@ -47,7 +54,11 @@ class Sprite:
         return self.image.height
 
 
-def _render_two_tone(name: str, cs: ChipStyle) -> Sprite:
+def _dev(v: float, scale: float, floor: int = 0) -> int:
+    return max(floor, round(v * scale))
+
+
+def _render_two_tone(name: str, cs: ChipStyle, scale: float) -> Sprite:
     """A connected two-segment pill: colored name segment + light value segment (frequency pills)."""
     pad_h = cs.pad_h if cs.pad_h is not None else max(5, round(cs.size * 0.5))
     pad_v = cs.pad_v if cs.pad_v is not None else max(3, round(cs.size * 0.28))
@@ -63,6 +74,8 @@ def _render_two_tone(name: str, cs: ChipStyle) -> Sprite:
     baseline = -t + pad_v
     name_seg_w = round(name_w) + 2 * pad_h
     total_w = name_seg_w + round(val_w) + 2 * pad_h
+    if scale != 1.0:
+        return _native_two_tone(name, cs, scale, (total_w, pill_h, baseline, radius, name_seg_w))
 
     img = Image.new("RGBA", (total_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float h: int() would shift golden geometry
     draw = ImageDraw.Draw(img)
@@ -82,9 +95,44 @@ def _render_two_tone(name: str, cs: ChipStyle) -> Sprite:
     return Sprite(img, baseline)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float baseline is drawn as-is
 
 
-def render_chip(text: str, cs: ChipStyle) -> Sprite:
+def _native_two_tone(
+    name: str, cs: ChipStyle, scale: float, ref: tuple[int, float, float, int, int]
+) -> Sprite:
+    """The two-tone pill redrawn in device px inside ``ref`` (its 1× box) projected by ``scale``."""
+    total_w, pill_h, baseline, radius, name_seg_w = ref
+    w, h = _dev(total_w, scale, 1), _dev(pill_h, scale, 1)
+    seg, r, bl = _dev(name_seg_w, scale, 1), _dev(radius, scale), _dev(baseline, scale)
+    size = _dev(cs.size, scale, 1)
+    name_style = Style(size=size, weight=cs.weight, color=cs.fg)
+    val_style = Style(size=size, weight=cs.weight, color=cs.value_fg)
+
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle(
+        [0, 0, w - 1, h - 1], radius=r, fill=cs.value_bg, outline=cs.bg, width=_dev(1, scale, 1)
+    )
+    draw.rounded_rectangle(
+        [0, 0, seg - 1, h - 1], radius=r, fill=cs.bg, corners=(True, False, False, True)
+    )
+    _draw_centred(img, draw, 0, seg, bl, [Span(name, name_style)])
+    _draw_centred(img, draw, seg, w, bl, [Span(cs.value or "", val_style)])
+    return Sprite(img, bl)
+
+
+def _draw_centred(
+    img: Image.Image, draw: ImageDraw.ImageDraw, x0: int, x1: int, baseline: int, spans: list[Span]
+) -> None:
+    """Centre ``spans`` in ``[x0, x1)``. The native text is a few px off ``scale`` × the 1× text, so
+    the slack is split between the two pads instead of piling up on the right one."""
+    draw_inline(img, draw, x0 + (x1 - x0 - inline_width(spans)) / 2, baseline, spans)
+
+
+def render_chip(text: str, cs: ChipStyle, *, scale: float = 1.0) -> Sprite:
+    """``scale`` > 1 rasters the pill natively at ``size×scale`` into its projected 1× box (see the
+    module docstring). The sprite's own metrics are then DEVICE px, so layout must keep measuring the
+    1× sprite — :class:`~saitenka.render.flow.ChipBox` owns that split."""
     if cs.value is not None:
-        return _render_two_tone(text, cs)
+        return _render_two_tone(text, cs, scale)
     pad_h = cs.pad_h if cs.pad_h is not None else max(4, round(cs.size * 0.45))
     pad_v = cs.pad_v if cs.pad_v is not None else max(2, round(cs.size * 0.18))
     radius = cs.radius if cs.radius is not None else max(3, round(cs.size * 0.35))
@@ -99,6 +147,8 @@ def render_chip(text: str, cs: ChipStyle) -> Sprite:
     pill_h = (bottom - top) + 2 * pad_v
     baseline = -top + pad_v
     pill_w = round(text_w) + 2 * pad_h
+    if scale != 1.0:
+        return _native_plain(text, cs, scale, (pill_w, pill_h, baseline, radius))
 
     img = Image.new("RGBA", (pill_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float h: see above
     draw = ImageDraw.Draw(img)
@@ -112,3 +162,26 @@ def render_chip(text: str, cs: ChipStyle) -> Sprite:
         )
     draw_inline(img, draw, pad_h, baseline, [Span(text, style)])
     return Sprite(img, baseline)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float baseline is drawn as-is
+
+
+def _native_plain(
+    text: str, cs: ChipStyle, scale: float, ref: tuple[int, float, float, int]
+) -> Sprite:
+    """The plain pill redrawn in device px inside ``ref`` (its 1× box) projected by ``scale``."""
+    pill_w, pill_h, baseline, radius = ref
+    w, h = _dev(pill_w, scale, 1), _dev(pill_h, scale, 1)
+    r, bl = _dev(radius, scale), _dev(baseline, scale)
+    style = Style(size=_dev(cs.size, scale, 1), weight=cs.weight, color=cs.fg)
+
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    if cs.bg[3] > 0 or cs.border is not None:
+        draw.rounded_rectangle(
+            [0, 0, w - 1, h - 1],
+            radius=r,
+            fill=cs.bg,
+            outline=cs.border,
+            width=_dev(cs.border_w if cs.border else 1, scale, 1),
+        )
+    _draw_centred(img, draw, 0, w, bl, [Span(text, style)])
+    return Sprite(img, bl)
