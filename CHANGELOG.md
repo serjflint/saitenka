@@ -7,6 +7,16 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Subtitle re-timing now fails visibly without replacing the current track when its local alignment is
+  incoherent. The former whole-file fallback could overwrite a cached ASS file with SRT content and
+  leave subtitles visible but no longer interactive.
+- Alt+O now confirms both the hidden and restored overlay states.
+- `saitenka report` captures native doctor diagnostics in the bundle instead of printing them beside
+  the archive path.
+- SQLite owner finalizers no longer attempt thread-affine closes during interpreter shutdown.
+
 ## [4.2.0] - 2026-08-29
 
 ### Fixed
