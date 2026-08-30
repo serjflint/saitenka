@@ -10,7 +10,10 @@ from __future__ import annotations
 import contextlib
 import gc
 import sqlite3
+import subprocess
+import sys
 import threading
+from textwrap import dedent
 
 import pytest
 
@@ -77,6 +80,48 @@ def test_dropping_a_single_connection_store_closes_it(tmp_path):
     del store
     gc.collect()
     assert _is_closed(connection)
+
+
+@pytest.mark.parametrize(
+    ("module", "store"),
+    [
+        ("saitenka.app.backlog", "BacklogStore"),
+        ("saitenka.app.features.mining.mined_store", "MinedCardStore"),
+        ("saitenka.app.session_stats", "SessionStore"),
+    ],
+)
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_single_owner_store_closes_cleanly_from_the_shutdown_thread(tmp_path, module, store):
+    script = dedent(
+        """
+        import importlib
+        import sys
+        import threading
+        from pathlib import Path
+
+        owners = []
+
+        def open_store():
+            store_type = getattr(importlib.import_module(sys.argv[1]), sys.argv[2])
+            owners.append(store_type(Path(sys.argv[3])))
+
+        thread = threading.Thread(target=open_store)
+        thread.start()
+        thread.join()
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script, module, store, str(tmp_path / f"{store}.sqlite")],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stderr == ""
 
 
 @pytest.mark.parametrize(("pragma", "expected"), [("journal_mode", "wal"), ("synchronous", 1)])

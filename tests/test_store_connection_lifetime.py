@@ -123,3 +123,5 @@ def test_the_oracle_catches_a_store_that_never_registers(
 
     assert opened
     assert not all(_is_closed(c) for c in opened)
+    for connection in opened:
+        connection.close()
