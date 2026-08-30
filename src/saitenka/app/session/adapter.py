@@ -10,6 +10,7 @@ from saitenka.app.intents import DismissHover
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Protocol
 
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.features.translation import TranslationController, TranslationInputs
@@ -17,6 +18,9 @@ if TYPE_CHECKING:
     from saitenka.app.overlay import Overlay
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.subtitle_render import SubtitleTarget
+
+    class OverlayVisibilityReporter(Protocol):
+        def __call__(self, *, visible: bool) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +34,7 @@ class SessionCommandPorts:
     translation: TranslationController
     translation_inputs: Callable[[], TranslationInputs]
     toggle_renderer: Callable[[], object]
+    report_overlay_visibility: OverlayVisibilityReporter
     teardown_tip: Callable[[], None]
     subtitle_target: Callable[[], SubtitleTarget]
 
@@ -64,3 +69,5 @@ class SessionCommandCoordinator:
             ports.translation.reveal(ports.translation_inputs())
         elif isinstance(effect, session_intents.ToggleRenderer):
             ports.toggle_renderer()
+        elif isinstance(effect, session_intents.ReportOverlayVisibility):
+            ports.report_overlay_visibility(visible=effect.visible)

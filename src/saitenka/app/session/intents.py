@@ -62,6 +62,11 @@ class ToggleRenderer:
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class ReportOverlayVisibility:
+    visible: bool
+
+
 type SessionEffect = (
     SetSurfacesVisible
     | ReleaseSecondarySubtitles
@@ -69,6 +74,7 @@ type SessionEffect = (
     | ResumeSubtitles
     | ShowTranslation
     | ToggleRenderer
+    | ReportOverlayVisibility
     | DismissHover
 )
 
@@ -85,6 +91,7 @@ def _toggle_overlay(inputs: SessionInputs) -> tuple[SessionEffect, ...]:
             # secondary line for the frames before the hide lands.
             ReleaseSecondarySubtitles(),
             SuspendSubtitles(),
+            ReportOverlayVisibility(visible=False),
         )
     shown: tuple[SessionEffect, ...] = (
         SetSurfacesVisible(visible=True),
@@ -92,7 +99,8 @@ def _toggle_overlay(inputs: SessionInputs) -> tuple[SessionEffect, ...]:
     )
     # After the resume, so the pipeline that lays the cue out is running before the secondary line
     # is drawn against it.
-    return (*shown, ShowTranslation()) if inputs.translation_wanted else shown
+    restored = (*shown, ShowTranslation()) if inputs.translation_wanted else shown
+    return (*restored, ReportOverlayVisibility(visible=True))
 
 
 def _toggle_renderer(_inputs: SessionInputs) -> tuple[SessionEffect, ...]:

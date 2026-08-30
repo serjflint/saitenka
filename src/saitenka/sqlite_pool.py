@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-__all__ = ["ThreadLocalConnections", "close_when_collected", "open_wal"]
+__all__ = ["ThreadLocalConnections", "close_when_collected", "open_owner_connection", "open_wal"]
 
 
 def open_wal(path: Path) -> sqlite3.Connection:
@@ -35,6 +35,11 @@ def open_wal(path: Path) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
     return connection
+
+
+def open_owner_connection(path: Path) -> sqlite3.Connection:
+    """A single-owner store connection whose final close may run on a collector thread."""
+    return sqlite3.connect(path, check_same_thread=False)
 
 
 def _close_all(connections: list[sqlite3.Connection]) -> None:
@@ -76,7 +81,7 @@ class ThreadLocalConnections:
 def close_when_collected(owner: object, connection: sqlite3.Connection) -> None:
     """Close ``connection`` when ``owner`` is collected, for a store that holds exactly one.
 
-    Complements rather than replaces the store's own ``close()``: closing twice is a no-op, and this
-    is what covers the caller who never gets there.
+    Complements rather than replaces the store's own ``close()``. The connection must allow a close
+    from another thread: collection, including interpreter shutdown, is not thread-affine.
     """
     weakref.finalize(owner, connection.close)

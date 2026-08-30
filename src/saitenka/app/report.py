@@ -9,15 +9,22 @@ out; secrets are removed; dictionaries / Anki / video / third-party script bodie
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
 import platform
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from saitenka.version import overlay_version as _overlay_version
 
@@ -113,11 +120,42 @@ def _collect_doctor() -> dict[str, str]:
     """Structured doctor report (the machine-readable version of the ✓/!/✗ health check)."""
     from saitenka.app.doctor import run_checks
 
-    try:
-        return {"doctor.json": json.dumps(run_checks().to_json(), ensure_ascii=False, indent=2)}
-    except Exception as e:  # never let a doctor hiccup abort the bundle
-        log.warning("doctor check failed while building report bundle", exc_info=True)
-        return {"doctor.json": json.dumps({"error": str(e)})}
+    def collect_json() -> str:
+        try:
+            payload = run_checks().to_json()
+        except Exception as error:  # never let a doctor hiccup abort the bundle
+            log.warning("doctor check failed while building report bundle", exc_info=True)
+            payload = {"error": str(error)}
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    doctor_json, output = _capture_process_output(collect_json)
+    members = {"doctor.json": doctor_json}
+    if output.strip():
+        members["doctor-output.txt"] = redact(output)
+    return members
+
+
+def _capture_process_output[T](action: Callable[[], T]) -> tuple[T, str]:
+    """Run one local diagnostic with Python and native stdout/stderr captured together."""
+    with tempfile.TemporaryFile() as capture:
+        saved = [os.dup(fd) for fd in (1, 2)]
+        try:
+            with contextlib.suppress(Exception):
+                sys.stdout.flush()
+                sys.stderr.flush()
+            os.dup2(capture.fileno(), 1)
+            os.dup2(capture.fileno(), 2)
+            result = action()
+            with contextlib.suppress(Exception):
+                sys.stdout.flush()
+                sys.stderr.flush()
+        finally:
+            for fd, original in zip((1, 2), saved, strict=True):
+                os.dup2(original, fd)
+                os.close(original)
+        capture.seek(0)
+        output = capture.read().decode("utf-8", errors="replace")
+    return result, output
 
 
 def _collect_config() -> dict[str, str]:
