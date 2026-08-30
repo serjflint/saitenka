@@ -493,4 +493,4 @@ def test_the_harness_answers_every_option_the_geometry_gate_reads() -> None:
     settings = {name: props.get(f"options/{name}") for name in GATE_OPTIONS}
 
     assert [name for name in GATE_OPTIONS if f"options/{name}" not in props] == []
-    assert _unsupported_render_inputs(settings) == ()
+    assert _unsupported_render_inputs(settings, authored=True) == ()

@@ -159,6 +159,7 @@ def _attach_reslot(ports: ReslotPorts, ipc, path: Path, cfg: ProviderConfig) -> 
                     tsukihime=ep_cfg.tsukihime,
                     episode=episode,
                     resync=ep_cfg.resync,
+                    language=ep_cfg.language,
                 ),
             )
         except Exception:  # never let sub selection break following the advance
@@ -387,6 +388,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         jimaku=jimaku,
         jimaku_force=jimaku_force,
         tsukihime=bool(th.get("enabled", False)),
+        language=active_profile.langs.main,
     )
     _finish_attach_subtitle_startup(
         prepared.reslot,

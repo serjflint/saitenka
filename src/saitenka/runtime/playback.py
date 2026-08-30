@@ -111,6 +111,7 @@ RENDER_SPACE_PROPERTIES = frozenset(
         # Renderer state, not document style: mpv sets each on the libass renderer, so a
         # mid-episode change moves the boxes without touching the track.
         "options/sub-shaper",
+        "options/sub-ass-justify",
         "options/sub-line-spacing",
         "options/sub-hinting",
         "options/sub-scale-signs",

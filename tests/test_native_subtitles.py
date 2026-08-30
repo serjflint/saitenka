@@ -3978,6 +3978,7 @@ _SUPPORTED_SETTINGS = {
     "embeddedfonts": False,
     "sub-fonts-dir": None,
     "sub-shaper": "complex",
+    "sub-ass-justify": False,
     "sub-line-spacing": 0.0,
     "sub-hinting": "none",
     "sub-scale-signs": False,
@@ -3986,7 +3987,7 @@ _OSD = {"w": 1920, "h": 1080, "mt": 0, "mb": 0, "ml": 0, "mr": 0, "par": 1.0}
 _VIDEO = {"w": 1920, "h": 1080, "par": 1.0}
 
 
-def _inputs(*, osd=None, video=None, frame_size=None, **settings):
+def _inputs(*, osd=None, video=None, frame_size=None, authored=True, **settings):
     from saitenka.app.native_subtitles import render_inputs_of
 
     return render_inputs_of(
@@ -3994,6 +3995,7 @@ def _inputs(*, osd=None, video=None, frame_size=None, **settings):
         {**_VIDEO, **(video or {})},
         {**_SUPPORTED_SETTINGS, **settings},
         frame_size=frame_size or (1920, 1080),
+        authored=authored,
     )
 
 
@@ -4016,7 +4018,10 @@ def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
         accepted = [
             candidate
             for candidate in plausible
-            if name not in _unsupported_render_inputs({**_SUPPORTED_SETTINGS, name: candidate})
+            if name
+            not in _unsupported_render_inputs(
+                {**_SUPPORTED_SETTINGS, name: candidate}, authored=True
+            )
         ]
         assert accepted, f"{name} is accepted only when mpv does not report it"
 
@@ -4086,6 +4091,25 @@ def test_a_moving_setting_is_still_refused_when_the_override_is_off(name: str, v
     reach a renderer that does apply it."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+@pytest.mark.parametrize(("name", "value"), [("sub-scale", 1.5), ("sub-pos", 90.0)])
+def test_a_converted_track_refuses_the_moving_settings_even_under_scale(name: str, value: object):
+    """`converted` is the FIRST disjunct of both branch conditions (`sd_ass.c:544,553`), so a
+    converted track applies `sub-scale` and `100 - sub-pos` whatever the override says — while
+    `_renderer_state` reproduces neither there. Widening on the override alone would accept a
+    letterboxed SubRip track mpv draws at another size and height: boxes silently misplaced rather
+    than a refusal, with every meter green."""
+    with pytest.raises(ValueError, match=name):
+        _inputs(authored=False, **{"sub-ass-override": "scale", name: value})
+
+
+def test_justify_is_refused_under_scale_because_it_is_not_reproduced() -> None:
+    """`--sub-ass-justify` reaches libass through `(converted || override) && ass_justify`
+    (`sd_ass.c:589-591`), so `no` never lets it through on an authored track and `scale` does. It
+    decides where every line of a wrapped cue starts, which is a box position."""
+    with pytest.raises(ValueError, match="sub-ass-justify"):
+        _inputs(**{"sub-ass-override": "scale", "sub-ass-justify": True})
 
 
 @pytest.mark.parametrize(("scale_signs", "selective"), [(False, True), (True, False)])

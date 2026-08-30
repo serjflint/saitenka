@@ -445,6 +445,7 @@ class _IPC:
             "options/blend-subtitles": False,
             "options/sub-filter-sdh": False,
             "options/sub-shaper": "complex",
+            "options/sub-ass-justify": False,
             "options/sub-line-spacing": 0.0,
             "options/sub-hinting": "none",
             "options/sub-scale-signs": True,

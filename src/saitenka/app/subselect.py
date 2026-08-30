@@ -478,6 +478,9 @@ class ProviderConfig:
     jimaku: bool = False
     jimaku_force: bool = False
     tsukihime: bool = False
+    #: Active profile's main language. Carried here so the re-slot gates provider eligibility the
+    #: same way startup does; defaulting it per call site is how the two came to disagree.
+    language: str = MAIN_LANG
 
 
 def provider_fetch_factory(

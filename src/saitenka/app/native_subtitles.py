@@ -173,6 +173,7 @@ GATE_OPTIONS = (
     # mpv's runs with different advances than ours. The rest are read only on the
     # `sub-ass-override` branches that set them (`sd_ass.c:552-558,577`).
     "sub-shaper",
+    "sub-ass-justify",
     "sub-line-spacing",
     "sub-hinting",
     "sub-scale-signs",
@@ -367,16 +368,21 @@ def _scaled_renderer_state(scale: _ScaleOverride) -> RendererState:
     )
 
 
-def _scales_authored_styles(settings: Mapping[str, object]) -> bool:
+def _scales_authored_styles(settings: Mapping[str, object], *, authored: bool) -> bool:
     """Whether mpv is on the `--sub-ass-override=scale` branch, which we reproduce.
 
-    Its own row still refuses everything else, so this only ever widens `scale`; `force` reaching
-    here would be a bug in that row, not a second opinion.
+    `authored` is not a nicety. `converted` is the FIRST disjunct of both branch conditions
+    (`sd_ass.c:544,553`), so a converted track applies `sub-scale` and `100 - sub-pos` whatever the
+    override says — and `_renderer_state` reproduces neither there. Widening on the override alone
+    would accept a letterboxed SubRip track that mpv draws at a different size and height, which is
+    a silently misplaced box rather than a refusal.
     """
-    return settings["sub-ass-override"] == "scale"
+    return authored and settings["sub-ass-override"] == "scale"
 
 
-def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
+def _unsupported_render_inputs(
+    settings: Mapping[str, object], *, authored: bool
+) -> tuple[str, ...]:
     """Which of mpv's render options put the cue somewhere our layout cannot follow.
 
     The font options are absent on purpose: `subtitle_fonts.resolve` now reproduces each of them
@@ -385,7 +391,7 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
     They are still read, so a change to one still invalidates the cache and is still checked
     against the resolved environment.
     """
-    scaled = _scales_authored_styles(settings)
+    scaled = _scales_authored_styles(settings, authored=authored)
     supported = {
         # `yes`/`force` substitute mpv's own style into every event (`sd_ass.c:572-581`), making
         # every `converted.STYLE_OPTIONS` entry an authored-track layout input. `scale` only sets
@@ -400,6 +406,9 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
         # Only the converted branch reads this (`sd_ass.c:545`); the authored one reads
         # `sub-ass-force-margins` below, gated separately and accepted at either value.
         "sub-use-margins": settings["sub-use-margins"] is True,
+        # Reachable on an authored track only once the override is on (`sd_ass.c:589-591`), and not
+        # reproduced: it decides where every line of a wrapped cue starts, which is a box position.
+        "sub-ass-justify": not scaled or settings["sub-ass-justify"] in {False, "no", None},
         "sub-ass-force-margins": isinstance(settings["sub-ass-force-margins"], bool),
         "sub-ass-video-aspect-override": settings["sub-ass-video-aspect-override"]
         in {
@@ -520,6 +529,7 @@ def render_inputs_of(
     settings: Mapping[str, object],
     *,
     frame_size: tuple[int, int],
+    authored: bool,
 ) -> _RenderInputs:
     """Whether mpv's current render configuration lets us key geometry off it, and the frame it
     implies. Raises `ValueError` naming what disqualified it.
@@ -542,11 +552,11 @@ def render_inputs_of(
 
     storage_size = (_dim(video, "w", frame_size[0]), _dim(video, "h", frame_size[1]))
     margins = _frame_margins(osd)
-    unsupported = _unsupported_render_inputs(settings)
+    unsupported = _unsupported_render_inputs(settings, authored=authored)
     if unsupported:
         raise ValueError(", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported))
     _validate_frame(frame_size, margins)
-    override = _scale_override_inputs(settings)
+    override = _scale_override_inputs(settings, authored=authored)
     blended = _blend_space(frame_size, margins, video) if _blends_into_video(settings) else None
     if blended is not None:
         return _RenderInputs(
@@ -578,14 +588,14 @@ def render_inputs_of(
     )
 
 
-def _scale_override_inputs(settings: Mapping[str, object]) -> _ScaleOverride:
+def _scale_override_inputs(settings: Mapping[str, object], *, authored: bool) -> _ScaleOverride:
     """The renderer values `--sub-ass-override=scale` puts in play, or the `no` defaults.
 
     Defaults rather than zeroes under `no` because `configure_ass` assigns none of them there
     (`sd_ass.c:552,557`) — libass keeps its own, and writing values out would claim we read
     something mpv did not.
     """
-    if not _scales_authored_styles(settings):
+    if not _scales_authored_styles(settings, authored=authored):
         return _ScaleOverride()
     return _ScaleOverride(
         active=True,
@@ -1447,8 +1457,7 @@ class NativeSubtitleGeometry:
             keep_coverage=any(entry.font_size <= 0 for entry in palette),
         )
 
-    @staticmethod
-    def _render_inputs(prop: Callable[[str], Any], osd: tuple[int, int]) -> _RenderInputs:
+    def _render_inputs(self, prop: Callable[[str], Any], osd: tuple[int, int]) -> _RenderInputs:
         """Read the mpv properties native geometry depends on, then decide.
 
         Takes the property reader and the OSD surface rather than the host: those two are all it
@@ -1460,6 +1469,7 @@ class NativeSubtitleGeometry:
             prop("video-out-params") or {},
             {name: prop(f"options/{name}") for name in GATE_OPTIONS},
             frame_size=osd,
+            authored=self.source_kind is not SourceKind.CONVERTED,
         )
 
     def _lookahead_cue(
