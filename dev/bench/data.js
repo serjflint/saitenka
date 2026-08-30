@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788077129019,
+  "lastUpdate": 1788082700240,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -11747,6 +11747,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.120228,
             "range": "3 replicas; min 0.807421; max 1.14282; MAD 0.022597; worst 1.14282",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4e056ac0b5540ef354bdcfa59e9e511967443569",
+          "message": "Merge pull request #459 from serjflint/chore/quiet-gate-output\n\nchore(gate): stop poe all narrating a green run",
+          "timestamp": "2026-08-30T14:34:39+05:00",
+          "tree_id": "8b0a234efca332030d4d4f72eafbee22ce49ab9a",
+          "url": "https://github.com/serjflint/saitenka/commit/4e056ac0b5540ef354bdcfa59e9e511967443569"
+        },
+        "date": 1788082699117,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.31444,
+            "range": "3 replicas; min 4.95411; max 6.40322; MAD 0.088779",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.748694,
+            "range": "3 replicas; min 7.75601; max 9.05738; MAD 0.308685; worst 9.05738",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.448037,
+            "range": "3 replicas; min 14.2971; max 20.8447; MAD 2.39664",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.549085,
+            "range": "3 replicas; min 14.4516; max 20.9901; MAD 2.44098; worst 20.9901",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 26.317916,
+            "range": "3 replicas; min 15.2795; max 167.622; MAD 11.0384",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.134107,
+            "range": "3 replicas; min 0.102685; max 0.168795; MAD 0.031422; worst 0.168795",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 40.453903,
+            "range": "3 replicas; min 39.2334; max 44.7864; MAD 1.22049; worst 44.7864",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.511831,
+            "range": "3 replicas; min 2.52058; max 3.67227; MAD 0.160442; worst 3.67227",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.300626,
+            "range": "3 replicas; min 0.894685; max 1.86302; MAD 0.405941; worst 1.86302",
             "unit": "ms"
           }
         ]
