@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788105215863,
+  "lastUpdate": 1788117217128,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -12137,6 +12137,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.278842,
             "range": "3 replicas; min 1.08146; max 1.35132; MAD 0.072474; worst 1.35132",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "694bbc96c9b20be6e8185fc8bfdfa5338659d1b7",
+          "message": "fix(render): raster pills, pitch graphs and markers natively at the display scale (#463)\n\nThe crisp path draws body text through FreeType at size×scale, but composited every\nchip, pitch graph and bullet marker by LANCZOS-upscaling its 1× sprite. Next to\nnatively-drawn glyphs they read soft — visible on any display where the tooltip\nrasters above 1.05×, and on every render when tip_scale is pinned.\n\nChips now redraw in device px, and ImgBox takes a `native` provider so the pitch\ngraph and the icon markers redraw at size rather than being stretched. scale == 1.0\nstays on the untouched reference path: the 1× panel cache depends on it being\nbyte-identical.\n\nThe native pill fills its 1× box projected by the scale, not its own natural extent.\nAn integer font size does not scale linearly, so a freely-sized pill came out several\npx wide of the slot layout reserved for it and, at 1.22×, closed the gap to its\nneighbour outright. The box stays authoritative and the slack is split between the\ntwo pads; ChipBox keeps measuring the 1× sprite, so hit-test geometry is unmoved.",
+          "timestamp": "2026-08-31T00:12:10+05:00",
+          "tree_id": "26225767e2d259f5523b77609558c9932f232b8e",
+          "url": "https://github.com/serjflint/saitenka/commit/694bbc96c9b20be6e8185fc8bfdfa5338659d1b7"
+        },
+        "date": 1788117215646,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.359414,
+            "range": "3 replicas; min 5.91768; max 6.84148; MAD 0.441738",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.870864,
+            "range": "3 replicas; min 7.99932; max 10.2781; MAD 0.871548; worst 10.2781",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.628919,
+            "range": "3 replicas; min 18.1929; max 20.8797; MAD 0.250763",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.92754,
+            "range": "3 replicas; min 18.379; max 21.1254; MAD 0.197843; worst 21.1254",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 25.857056,
+            "range": "3 replicas; min 19.8588; max 60.4442; MAD 5.99821",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.175679,
+            "range": "3 replicas; min 0.115407; max 0.177363; MAD 0.001684; worst 0.177363",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 45.094393,
+            "range": "3 replicas; min 43.8633; max 45.8958; MAD 0.801429; worst 45.8958",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.755695,
+            "range": "3 replicas; min 3.50451; max 87.2101; MAD 0.251185; worst 87.2101",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.758253,
+            "range": "3 replicas; min 1.0417; max 79.2594; MAD 0.716558; worst 79.2594",
             "unit": "ms"
           }
         ]
