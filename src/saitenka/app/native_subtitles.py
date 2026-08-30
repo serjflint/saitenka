@@ -99,6 +99,33 @@ _UNSUPPORTED_SOURCE_REASONS = frozenset(
     }
 )
 
+#: Refusals the user is NOT told about. `subtitle-source-unavailable` is the reset every track load
+#: runs (see `set_source`), so announcing it would toast twice an episode for nothing.
+_UNANNOUNCED_REASONS = frozenset({"subtitle-source-unavailable"})
+
+#: What the user can actually do about a refusal, by reason. Absent here → the generic notice: the
+#: point is that scanning is off, which is true whether or not there is an action to offer.
+_FALLBACK_ACTIONS = {
+    "subtitle-render-input-unsupported": "mpv is configured in a way the overlay cannot follow",
+    "subtitle-source-not-authored-ass": "this track is not an authored .ass",
+    "subtitle-source-too-large": "the subtitle file is too large to measure",
+    "subtitle-source-encoding-unsupported": "the subtitle file is not UTF-8",
+    "subtitle-ass-full-unsupported": "this mpv does not report sub-text/ass-full",
+    "subtitle-font-environment-stale": "mpv's fonts changed mid-track — reselect the track",
+}
+
+
+def _fallback_notice(reason: str, diagnostic: str | None) -> str:
+    """One line naming the loss, the cause, and — when mpv named the options — which ones.
+
+    The detail is what makes it actionable: the reason alone sends a user to the source, while the
+    same line carrying the option names mpv reported sends them to their own mpv.conf.
+    """
+    cause = _FALLBACK_ACTIONS.get(reason, reason)
+    detail = f" ({diagnostic})" if diagnostic else ""
+    return f"no word scanning: {cause}{detail}"
+
+
 #: The demuxer codecs whose libavcodec-to-ASS conversion `subtitles.converted` reproduces. Only
 #: SubRip: every other text codec sd_ass converts (`mov_text`, `webvtt`, `microdvd`, ...) is decoded
 #: by a DIFFERENT libavcodec decoder, which writes its own header and its own styles, and mpv's
@@ -142,6 +169,13 @@ GATE_OPTIONS = (
     "sub-filter-sdh",
     "video-crop",
     "video-rotate",
+    # Read, never refused. `sub-shaper` runs on every branch (`sd_ass.c:570`), so a mismatch shapes
+    # mpv's runs with different advances than ours. The rest are read only on the
+    # `sub-ass-override` branches that set them (`sd_ass.c:552-558,577`).
+    "sub-shaper",
+    "sub-line-spacing",
+    "sub-hinting",
+    "sub-scale-signs",
     *subtitle_fonts.FONT_OPTIONS,
     # Read, never refused: mpv applies these to a CONVERTED track only, and `converted.style_of`
     # reproduces each of them. Refusing one would cost a user with a custom `--sub-font-size` every
@@ -290,6 +324,58 @@ def _palette_in_frame_units(
     )
 
 
+#: `--sub-hinting` to `ASS_Hinting`, in libass's declaration order (`ass.h`). mpv passes the ordinal
+#: straight through (`sd_ass.c:555`), so the names have to line up here rather than be counted.
+_HINTING = {"none": 0, "light": 1, "normal": 2, "native": 3}
+
+
+@dataclass(frozen=True, slots=True)
+class _ScaleOverride:
+    """What `--sub-ass-override=scale` sets on the libass renderer, and nothing else.
+
+    One value rather than six loose fields because they are one decision: mpv reads all of them on
+    the same branch (`sd_ass.c:552-558`) and none of them on the other, so a caller that has one
+    has all of them. `active` is what says which branch produced this — every other field is at
+    libass's own default when it is false, so passing them on is a no-op rather than a claim.
+    """
+
+    active: bool = False
+    font_scale: float = 1.0
+    line_position: float = 0.0
+    line_spacing: float = 0.0
+    hinting: int = 0
+    #: `--sub-scale-signs`. Inverted into `SELECTIVE_FONT_SCALE`, which mpv sets when it is OFF
+    #: (`sd_ass.c:577`): the bit CONFINES the scale to dialogue, so setting it is how signs escape.
+    scale_signs: bool = False
+
+
+def _scaled_renderer_state(scale: _ScaleOverride) -> RendererState:
+    """The authored track's renderer state: libass defaults, or the `scale` branch's four values.
+
+    `selective_font_scale` is the INVERSE of `--sub-scale-signs`, because the bit confines the
+    scale to dialogue and mpv sets it exactly when the user did NOT ask for signs to be scaled
+    (`sd_ass.c:577`). Reading it the other way scales every sign in the episode.
+    """
+    if not scale.active:
+        return RendererState()
+    return RendererState(
+        font_scale=scale.font_scale,
+        line_position=scale.line_position,
+        line_spacing=scale.line_spacing,
+        hinting=scale.hinting,
+        selective_font_scale=not scale.scale_signs,
+    )
+
+
+def _scales_authored_styles(settings: Mapping[str, object]) -> bool:
+    """Whether mpv is on the `--sub-ass-override=scale` branch, which we reproduce.
+
+    Its own row still refuses everything else, so this only ever widens `scale`; `force` reaching
+    here would be a bug in that row, not a second opinion.
+    """
+    return settings["sub-ass-override"] == "scale"
+
+
 def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
     """Which of mpv's render options put the cue somewhere our layout cannot follow.
 
@@ -299,15 +385,20 @@ def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...
     They are still read, so a change to one still invalidates the cache and is still checked
     against the resolved environment.
     """
+    scaled = _scales_authored_styles(settings)
     supported = {
-        # Refusing every value but "no" is what keeps `ass_set_selective_style_override` out of the
-        # measuring render: that API applies `yes`/`force`/`scale` to an AUTHORED track. A converted
-        # track is unaffected either way — mpv rewrites its `[V4+ Styles]` block directly, which
-        # `subtitles.converted` ports.
-        "sub-ass-override": settings["sub-ass-override"] in {False, "no"},
+        # `yes`/`force` substitute mpv's own style into every event (`sd_ass.c:572-581`), making
+        # every `converted.STYLE_OPTIONS` entry an authored-track layout input. `scale` only sets
+        # renderer state, which `_renderer_state` reproduces.
+        "sub-ass-override": settings["sub-ass-override"] in {False, "no", "scale"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
-        "sub-scale": settings["sub-scale"] == 1.0,
-        "sub-pos": settings["sub-pos"] == 100.0,
+        # Read only on the branches `scale` and `force` take (`sd_ass.c:552-558`); under `no` mpv
+        # leaves the renderer at 1 and 0 and never looks at either. So they are refused exactly
+        # when they would move the text AND we are not reproducing the branch that moves it.
+        "sub-scale": scaled or settings["sub-scale"] == 1.0,
+        "sub-pos": scaled or settings["sub-pos"] == 100.0,
+        # Only the converted branch reads this (`sd_ass.c:545`); the authored one reads
+        # `sub-ass-force-margins` below, gated separately and accepted at either value.
         "sub-use-margins": settings["sub-use-margins"] is True,
         "sub-ass-force-margins": isinstance(settings["sub-ass-force-margins"], bool),
         "sub-ass-video-aspect-override": settings["sub-ass-video-aspect-override"]
@@ -455,6 +546,7 @@ def render_inputs_of(
     if unsupported:
         raise ValueError(", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported))
     _validate_frame(frame_size, margins)
+    override = _scale_override_inputs(settings)
     blended = _blend_space(frame_size, margins, video) if _blends_into_video(settings) else None
     if blended is not None:
         return _RenderInputs(
@@ -469,6 +561,7 @@ def render_inputs_of(
             settings["sub-scale-by-window"] is not False,
             blended.origin,
             converted.style_of(settings),
+            override,
         )
     return _RenderInputs(
         frame_size,
@@ -481,7 +574,35 @@ def render_inputs_of(
         settings["sub-scale-with-window"] is not False,
         settings["sub-scale-by-window"] is not False,
         style=converted.style_of(settings),
+        scale=override,
     )
+
+
+def _scale_override_inputs(settings: Mapping[str, object]) -> _ScaleOverride:
+    """The renderer values `--sub-ass-override=scale` puts in play, or the `no` defaults.
+
+    Defaults rather than zeroes under `no` because `configure_ass` assigns none of them there
+    (`sd_ass.c:552,557`) — libass keeps its own, and writing values out would claim we read
+    something mpv did not.
+    """
+    if not _scales_authored_styles(settings):
+        return _ScaleOverride()
+    return _ScaleOverride(
+        active=True,
+        font_scale=_as_float(settings["sub-scale"], 1.0),
+        # mpv hands libass the complement, not the property (`sd_ass.c:553`).
+        line_position=100.0 - _as_float(settings["sub-pos"], 100.0),
+        line_spacing=_as_float(settings["sub-line-spacing"], 0.0),
+        hinting=_HINTING.get(str(settings["sub-hinting"]), 0),
+        scale_signs=settings["sub-scale-signs"] is True,
+    )
+
+
+def _as_float(value: object, default: float) -> float:
+    try:
+        return float(cast("SupportsFloat", value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _subtitle_clock(
@@ -544,6 +665,9 @@ class _RenderInputs:
     #: The `--sub-*` style mpv applies to a converted track. Unread on an authored one, where
     #: `--sub-ass-override=no` leaves the file's own styles standing.
     style: converted.SubStyle = field(default_factory=converted.SubStyle)
+    #: What `--sub-ass-override=scale` puts on the renderer. Its default IS what libass is left at
+    #: under `no`, where `configure_ass` assigns none of them (`sd_ass.c:552,557`).
+    scale: _ScaleOverride = field(default_factory=lambda: _ScaleOverride())
 
 
 @dataclass(frozen=True, slots=True)
@@ -600,6 +724,9 @@ class GeometryPorts:
     #: Tokenize a cue that is not on screen, for the lookahead. Session-lived, like the rest here;
     #: the *active* tokenizer is not, because a profile switch replaces it.
     tokenize_lookahead: Callable[[str], TokenizedCue]
+    #: Surface a refusal to the user. Degrading is silent otherwise: the episode simply has no
+    #: scanning and no overpaint, with nothing on screen to say why or that it was a decision.
+    notify: Callable[[str, str], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -664,6 +791,10 @@ class NativeSubtitleGeometry:
         self._last_recovery: str | None = None
         self._last_render_inputs: _RenderInputs | None = None
         self._failure_diagnostic: tuple[str, str | None] | None = None
+        #: Last reason announced on screen. Separate from `_failure_diagnostic`, which suppresses a
+        #: repeated LOG line for FAILED only — a toast must not repeat for any outcome, and must
+        #: fire again if the user fixes one cause and hits a different one.
+        self._announced_reason: str | None = None
         self._fonts = subtitle_fonts.FontEnvironment()
         self._in_document_families: frozenset[str] = frozenset()
         self._measured_unsafe: frozenset[str] = frozenset()
@@ -876,6 +1007,26 @@ class NativeSubtitleGeometry:
             reason,
             f" detail={diagnostic}" if diagnostic else "",
         )
+        self._announce_fallback(outcome, reason, diagnostic)
+
+    def _announce_fallback(
+        self, outcome: GeometryOutcome, reason: str, diagnostic: str | None
+    ) -> None:
+        """Say on screen that scanning is off, once per distinct cause.
+
+        UNSUPPORTED only, because that is the class the user can act on: a config or a track the
+        measurement refuses the same way for the whole episode. FAILED is provider-level and
+        routinely transient — a cue queried while `sub-delay` is moving can find no active event and
+        recover on the next frame — so it would spend the user's attention on something already
+        fixed. PENDING says "not yet" and fires on every ordinary track load;
+        `subtitle-source-unavailable` is the reset each load runs, for the same reason.
+        """
+        if outcome != GeometryOutcome.UNSUPPORTED or reason in _UNANNOUNCED_REASONS:
+            return
+        if reason == self._announced_reason:
+            return
+        self._announced_reason = reason
+        self._ports.notify(_fallback_notice(reason, diagnostic), "warn")
 
     def _set_ready(self, *, active_events: int = 0) -> None:
         self._failure_diagnostic = None
@@ -1538,13 +1689,14 @@ class NativeSubtitleGeometry:
     def _renderer_state(self, render: _RenderInputs) -> RendererState:
         """What the measuring renderer must be set to for this track kind.
 
-        Nothing for an authored one — mpv leaves its renderer at libass's defaults there. For a
-        converted one, the font scale and the three track features `configure_ass` turns on
-        (`sd_ass.c:604-615`); each of them changes how a run's advances accumulate, so leaving them
-        off measures a layout mpv is not drawing.
+        For an authored track: libass's defaults under `--sub-ass-override=no`, where
+        `configure_ass` assigns none of the renderer values — and the `scale` branch's four when it
+        is on. For a converted one, the font scale and the three track features `configure_ass`
+        turns on (`sd_ass.c:604-615`); each of them changes how a run's advances accumulate, so
+        leaving them off measures a layout mpv is not drawing.
         """
         if self.source_kind is not SourceKind.CONVERTED:
-            return RendererState()
+            return _scaled_renderer_state(render.scale)
         return RendererState(
             font_scale=self._converted_scale(render),
             blur=render.style.blur,

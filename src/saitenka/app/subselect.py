@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_modes import (
+    has_track_for_slang,
     select_initial,
 )
 from saitenka.app.subtitle_modes import (
@@ -633,11 +634,40 @@ class AttachSubtitleOptions:
     language: str = MAIN_LANG  # active profile's main language — gates provider eligibility
 
 
+def _adopt_cached_subtitle(ipc, opts: AttachSubtitleOptions) -> str:
+    """Add this episode's already-cached subtitle before the fallback selection runs.
+
+    ``run`` resolves the cache before mpv launches (`launch.run._configured_subtitles`), so it never
+    shows the wrong language. Attach has to reach the same point before `select_initial` picks a
+    fallback: filing an on-disk file under the deferred providers puts a local stat behind the
+    session's first owner-thread drain, which is the whole of startup. Same language gate as the
+    deferred list — both providers are Japanese-only, so a JP file cached from a prior run must not
+    hijack a second-language profile.
+    """
+    if not enabled_providers_for(opts.language, (("jimaku", True), ("tsukihime", True))):
+        return ""
+    video = ipc.query("path")
+    if not video:
+        return ""
+    video_path, title, episode = _subtitle_identity(str(video), opts.jimaku_title, opts.episode)
+    hit, status = _cached_subtitle(video_path, title, episode, resync=opts.resync)
+    if hit is None:
+        return ""
+    # Tagged, not selected: `select_initial` below owns the choice, exactly as it does in `run` for
+    # the track mpv loaded from `--sub-file`.
+    send_correlated(
+        ipc, "sub-add-cached", "sub-add", str(hit), "auto", "", "jpn", owner=Owner.SUBTITLE
+    )
+    return status or ""
+
+
 def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
     """Select the immediate attach track and defer a missing-JP provider fetch."""
     status = ""
     if opts.sub_file or opts.jimaku_force:
         status = ensure_jp_subs(ipc, opts)
+    elif not has_track_for_slang(ipc, opts.slang):
+        status = _adopt_cached_subtitle(ipc, opts)
 
     startup = select_initial(ipc, opts.slang)
     if not status:

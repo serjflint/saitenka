@@ -138,6 +138,9 @@ class SubtitlePresentationPorts:
     clear_interaction: Callable[[], None]
     redraw_cue: Callable[[], None]
     tokenize_lookahead: Callable[[str], TokenizedCue]
+    #: Tell the user, not just the log. A geometry refusal costs scanning and overpaint for the
+    #: whole episode, and until this existed the only sign was a log line nobody reads live.
+    notify: Callable[[str, str], None]
 
 
 class SubtitlePresentation:
@@ -184,6 +187,7 @@ class SubtitlePresentation:
                 reschedule=self.refresh.arm,
                 publish=self.publish_geometry,
                 tokenize_lookahead=ports.tokenize_lookahead,
+                notify=ports.notify,
             ),
             lookahead=settings.lookahead,
             formats=native_subtitles.native_formats(settings.native_formats),

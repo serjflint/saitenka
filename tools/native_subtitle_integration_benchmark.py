@@ -444,6 +444,10 @@ class _IPC:
             "options/sub-scale-by-window": True,
             "options/blend-subtitles": False,
             "options/sub-filter-sdh": False,
+            "options/sub-shaper": "complex",
+            "options/sub-line-spacing": 0.0,
+            "options/sub-hinting": "none",
+            "options/sub-scale-signs": True,
             # `converted.STYLE_OPTIONS`, as mpv 0.41 reports them with no config: a value
             # missing here reads `None`, and the style falls back to a default the trial is
             # not measuring.

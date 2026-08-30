@@ -71,6 +71,10 @@ OBSERVED_PROPERTIES = (
     "options/sub-justify",
     "options/video-crop",
     "options/video-rotate",
+    "options/sub-shaper",
+    "options/sub-line-spacing",
+    "options/sub-hinting",
+    "options/sub-scale-signs",
     "eof-reached",
 )
 

@@ -217,7 +217,10 @@ def assemble_session_lifecycle(
     """Bind the fixed session phases to their already-owned actions."""
     start_plan = SessionStartPlan(
         contributions=(
-            StartContribution("render-guard", guard_main_render),
+            StartContribution(
+                "render-guard",
+                traced_start("startup.reader_setup.render_guard", guard_main_render),
+            ),
             StartContribution("render-space", actions.render_space),
             StartContribution("observers", actions.observers),
             StartContribution("input", actions.input),
@@ -271,7 +274,7 @@ def compose_session_lifecycle(
         close_runtime=owners.ipc.close_session_runtime,
     )
     start = SessionStartActions(
-        render_space=acts.render_space,
+        render_space=traced_start("startup.reader_setup.render_space", acts.render_space),
         observers=traced_start("startup.reader_setup.observers", acts.start_observing),
         input=traced_start("startup.reader_setup.keybinds", acts.install_input),
         collaborators=start_sequence(

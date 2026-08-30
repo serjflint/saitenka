@@ -20,6 +20,24 @@ class FakeIPC(util.FakeIPC):
         self.props["path"] = path
         util.bare_gateway(self)
 
+    def command(self, *args):
+        reply = super().command(*args)
+        # mpv publishes an added track on `track-list`, and the selection that follows reads it
+        # back. A fake that only records the call cannot tell "added then selected" from "added and
+        # then ignored" — which is the whole of the startup ordering these tests are about.
+        if args and args[0] == "sub-add":
+            self.props["track-list"] = [
+                *self.props["track-list"],
+                {
+                    "id": 9,
+                    "type": "sub",
+                    "lang": args[4] if len(args) > 4 else None,
+                    "external": True,
+                    "external-filename": args[1],
+                },
+            ]
+        return reply
+
     @property
     def calls(self) -> list[tuple]:
         return self.commands
@@ -535,3 +553,56 @@ def test_configure_providers_retry_forces_a_refetch(monkeypatch):
     reader.retry_factory("/v/x.mkv")()  # factory(video) → thunk → fetch_provider_path
 
     assert seen["force"] is True
+
+
+def _attach_opts(**overrides):
+    return subselect.AttachSubtitleOptions(slang="ja,jpn,jp", jimaku=True, **overrides)
+
+
+def test_attach_selects_a_cached_subtitle_before_falling_back_to_english(tmp_path, monkeypatch):
+    """`run` resolves the cache before mpv launches, so it never shows the wrong language. Filing an
+    on-disk file under the deferred providers instead puts a local stat behind the session's first
+    owner-thread drain — English on screen for the whole of startup, then a visible flip."""
+    cached = tmp_path / "Show-ep1-raw.ass"
+    cached.write_text("[Events]\n", encoding="utf-8")
+    monkeypatch.setattr(
+        subselect, "_cached_subtitle", lambda *_a, **_kw: (cached, "cache: using it")
+    )
+    ipc = FakeIPC(tracks=[EN], path="/videos/Show - 01.mkv")
+
+    startup, status, providers = subselect.prepare_attach_startup(ipc, _attach_opts())
+
+    assert ("sub-add", str(cached), "auto", "", "jpn") in ipc.calls
+    assert startup.tracks.jp_sid == 9  # the added track, picked up by `select_initial`
+    assert status == "cache: using it"
+    assert providers == ()  # nothing left to defer once the file is on screen
+
+
+def test_attach_leaves_an_existing_japanese_track_alone(monkeypatch):
+    """A file that ships JP subs is already correct, and adding a cached external over it would
+    stack a second track the user never asked for."""
+    probed = []
+    monkeypatch.setattr(
+        subselect, "_cached_subtitle", lambda *_a, **_kw: (probed.append(1), (None, None))[1]
+    )
+    ipc = FakeIPC(tracks=[EN, JP], path="/videos/Show - 01.mkv")
+
+    startup, _status, _providers = subselect.prepare_attach_startup(ipc, _attach_opts())
+
+    assert probed == []  # the cache is not even consulted
+    assert startup.tracks.jp_sid == 2
+    assert not [call for call in ipc.calls if call[0] == "sub-add"]
+
+
+def test_attach_does_not_hand_a_japanese_cache_to_another_language(monkeypatch):
+    """Both providers are Japanese-only, so a JP file cached from a prior run must not load as an
+    external track over a second-language profile's own subtitles."""
+    probed = []
+    monkeypatch.setattr(
+        subselect, "_cached_subtitle", lambda *_a, **_kw: (probed.append(1), (None, None))[1]
+    )
+    ipc = FakeIPC(tracks=[EN], path="/videos/Show - 01.mkv")
+
+    subselect.prepare_attach_startup(ipc, _attach_opts(language="fr"))
+
+    assert probed == []

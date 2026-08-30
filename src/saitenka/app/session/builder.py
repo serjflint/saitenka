@@ -158,6 +158,28 @@ console_log = logsetup.user_facing_logger()
 _UNBOUND = object()
 
 
+def _adopt_selected_subtitle(
+    presentation: SubtitlePresentation,
+    ports: Callable[[], subtitle_modes.TrackPorts],
+    sid: object,
+) -> None:
+    """Point geometry at whatever track is primary now.
+
+    The reset is unconditional; `on_primary_changed` re-indexes only a track it does not already
+    know. mpv echoes `sid` after the selecting call has rebuilt, so a selection the session made
+    itself lands in that gap and keeps its cues with no geometry source at all.
+    """
+    native = presentation.native
+    if native is None:
+        presentation.pipeline.invalidate()
+        subtitle_modes.on_primary_changed(ports(), sid)
+        return
+    native.set_source(None, live=True)
+    subtitle_modes.on_primary_changed(ports(), sid)
+    if native.source_path is None and sid is not None:
+        ports().rebuild_index()
+
+
 class _Required[T]:
     """One construction-cycle endpoint with a named failure before binding."""
 
@@ -303,6 +325,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             tokenize_lookahead=annotation_controller.captured_lookahead(
                 lambda: cue_ref.get().annotation_inputs()
             ),
+            notify=lambda text, kind: notify(text, kind, 6.0),
         ),
     )
     # Progressive startup: deps loaded on a background thread, injected on the main thread by the
@@ -787,11 +810,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
 
     def subtitle_selection_changed(sid: object) -> None:
         subtitle_presentation.refresh.retire()
-        if subtitle_presentation.native is not None:
-            subtitle_presentation.native.set_source(None, live=True)
-        else:
-            subtitle_presentation.pipeline.invalidate()
-        subtitle_modes.on_primary_changed(track_commands.ports(), sid)
+        _adopt_selected_subtitle(subtitle_presentation, track_commands.ports, sid)
 
     def subtitle_timing_changed() -> None:
         if subtitle_presentation.native is not None:

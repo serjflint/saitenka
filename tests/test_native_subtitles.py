@@ -439,6 +439,28 @@ def settle_jobs(result: TestSession, ipc: FakeIPC) -> None:
     ipc.deliver_runtime_jobs()
 
 
+def toasts(ipc: FakeIPC) -> list[tuple]:
+    """Every notification drawn on the toast surface."""
+    return [
+        command
+        for command in ipc.commands
+        if command[0] == "overlay-add" and command[1] == OverlayId.TOAST
+    ]
+
+
+def painted_overlays(ipc: FakeIPC) -> list[tuple]:
+    """Every `overlay-add` that draws a cue, excluding the notification surface.
+
+    A toast is an `overlay-add` too, and a geometry refusal raises one, so a bare scan for the
+    command cannot tell "no boxes were painted" from "the user was told why they were not".
+    """
+    return [
+        command
+        for command in ipc.commands
+        if command[0] == "overlay-add" and command[1] != OverlayId.TOAST
+    ]
+
+
 def visible_pixel_changes(ipc: FakeIPC) -> list[tuple[object, object]]:
     """Every moment the command trace changed what the user can actually see.
 
@@ -581,7 +603,7 @@ def test_missing_ass_full_property_disables_only_native_geometry(tmp_path: Path)
     )
     assert result.graph.subtitle_presentation.native.status.owner == "native"
     assert backend.requests == []
-    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert not painted_overlays(ipc)
     result.close()
 
 
@@ -2166,7 +2188,7 @@ def test_pending_timing_does_not_escape_an_unsupported_render_profile(tmp_path: 
     )
     assert result.graph.subtitle_presentation.native.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
-    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert not painted_overlays(ipc)
     result.close()
 
 
@@ -3219,6 +3241,80 @@ def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> No
     result.close()
 
 
+def _select_external(ipc: FakeIPC, sid: int, path: Path) -> None:
+    ipc.props["track-list"] = [
+        {
+            "id": sid,
+            "type": "sub",
+            "lang": "jpn",
+            "external": True,
+            "external-filename": str(path),
+            "selected": True,
+            "main-selection": 0,
+        }
+    ]
+    ipc.props["sid"] = sid
+
+
+def test_a_selection_the_session_made_itself_keeps_its_geometry_source(tmp_path: Path) -> None:
+    """mpv echoes `sid` after the selecting call has already rebuilt the index, and the echo resets
+    the geometry source unconditionally while the rebuild that would restore it runs only for a
+    track the session does not already know. The track keeps its cues and loses its geometry: text
+    on screen, nothing scannable, no overpaint, for the rest of the episode."""
+    result, ipc, _backend = reader(tmp_path)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    source = tmp_path / "episode.ass"
+    _select_external(ipc, 3, source)
+    # Declared before the echo, as the selecting call declares it — that is what makes sid 3
+    # "known", and so the coordinate this regression lives at.
+    result.graph.cue.configure_subtitle_mode(SubtitleStartup(SubtitleTracks(3, None), MAIN_LANG))
+    result.graph.cue.rebuild_sub_index()
+    assert native.source_path == source
+
+    result.graph.playback.observe_event({"name": "sid", "data": 3})
+
+    assert native.source_path == source
+    result.close()
+
+
+def test_an_unsupported_render_profile_tells_the_user_which_options_did_it(tmp_path: Path) -> None:
+    """A refusal costs the whole episode's interaction, and the log is not a surface anyone reads
+    live. The option names are the actionable half: the reason alone sends a user to the source."""
+    result, ipc, _backend = reader(tmp_path)
+    ipc.props["options/sub-scale"] = 1.4
+    assert not toasts(ipc)
+
+    result.graph.cue.set_subtitle("猫を見る")
+
+    assert toasts(ipc)
+    assert not painted_overlays(ipc)  # the cue itself stays unmeasured
+    result.close()
+
+
+def test_a_transient_provider_failure_does_not_interrupt_the_user(tmp_path: Path) -> None:
+    """FAILED is provider-level and routinely recovers on the next cue — a geometry query that
+    lands while `sub-delay` is moving finds no active event and fails once. Announcing it spends
+    the user's attention on something already fixed, and a notice that cries wolf is ignored when
+    a real refusal arrives."""
+    result, ipc, backend = reader(tmp_path)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    backend.error = RuntimeError("missing libass token colors: [0]")
+    result.graph.subtitle_presentation.pipeline.invalidate()
+    native.worker.invalidate_cache()
+
+    assert native.schedule(result.graph.cue.geometry_observation())
+    settle_jobs(result, ipc)
+    assert not native.apply(result.graph.cue.geometry_observation())
+
+    assert native.status.fallback_reason == "geometry-provider-failed"
+    assert not toasts(ipc)
+    result.close()
+
+
 def test_osd_and_video_pixel_aspects_are_composed(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     ipc.props["osd-dimensions"]["par"] = 1.25
@@ -3881,6 +3977,10 @@ _SUPPORTED_SETTINGS = {
     "sub-font-provider": "auto",
     "embeddedfonts": False,
     "sub-fonts-dir": None,
+    "sub-shaper": "complex",
+    "sub-line-spacing": 0.0,
+    "sub-hinting": "none",
+    "sub-scale-signs": False,
 }
 _OSD = {"w": 1920, "h": 1080, "mt": 0, "mb": 0, "ml": 0, "mr": 0, "par": 1.0}
 _VIDEO = {"w": 1920, "h": 1080, "par": 1.0}
@@ -3950,6 +4050,52 @@ def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: s
     the setting because a user who set it needs to know which one to undo."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+def _scaled(**settings):
+    from saitenka.app.native_subtitles import _scaled_renderer_state
+
+    return _scaled_renderer_state(_inputs(**{"sub-ass-override": "scale", **settings}).scale)
+
+
+def test_override_scale_is_reproduced_rather_than_refused() -> None:
+    """`scale` only sets renderer state — `ass_set_font_scale`, `ass_set_line_position`,
+    `ass_set_line_spacing`, `ass_set_hinting` (`sd_ass.c:552-558,601-603`) — all of which the
+    measuring renderer sets too. `force` is the one that substitutes mpv's own style into every
+    event, which would make all sixteen `converted.STYLE_OPTIONS` authored-track layout inputs."""
+    state = _scaled(**{"sub-scale": 0.7, "sub-pos": 95.0})
+
+    assert state.font_scale == 0.7
+    assert state.line_position == 5.0  # mpv hands libass the complement (`sd_ass.c:553`)
+
+
+def test_override_no_leaves_the_renderer_at_libass_defaults() -> None:
+    """The branch `configure_ass` takes under `no` assigns none of them, so reproducing a zero here
+    would be claiming a value mpv never read — and would move every box on a track that was
+    previously measured correctly."""
+    from saitenka.app.native_subtitles import _scaled_renderer_state
+    from saitenka.subtitles import RendererState
+
+    assert _scaled_renderer_state(_inputs().scale) == RendererState()
+
+
+@pytest.mark.parametrize(("name", "value"), [("sub-scale", 1.5), ("sub-pos", 50.0)])
+def test_a_moving_setting_is_still_refused_when_the_override_is_off(name: str, value: object):
+    """Widening `scale` must not widen `no`. mpv reads neither option on that branch, so a track
+    carrying one is unchanged — but the row has to keep firing, because the value would otherwise
+    reach a renderer that does apply it."""
+    with pytest.raises(ValueError, match=name):
+        _inputs(**{name: value})
+
+
+@pytest.mark.parametrize(("scale_signs", "selective"), [(False, True), (True, False)])
+def test_scale_signs_inverts_into_the_selective_font_scale_bit(
+    *, scale_signs: bool, selective: bool
+) -> None:
+    """`ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE` CONFINES the scale to dialogue, so mpv sets it
+    exactly when the user did NOT ask for signs to be scaled (`sd_ass.c:577`). Read straight
+    through, every positioned sign in the episode is measured at the dialogue scale."""
+    assert _scaled(**{"sub-scale-signs": scale_signs}).selective_font_scale is selective
 
 
 LETTERBOX = {"w": 1920, "h": 1080, "mt": 140, "mb": 140, "ml": 0, "mr": 0, "par": 1.0}
