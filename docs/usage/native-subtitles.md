@@ -137,8 +137,11 @@ compatible libass can be initialized.
 cannot change how an existing player was launched, so that mpv instance needs these settings:
 
 ```conf
+# `no` or `scale`; `force` is not supported. Note this is the one line you must SET rather than
+# omit — mpv's own default is `scale`, so removing it does not give you `no`.
 sub-ass-override=no
 sub-ass-scale-with-window=no
+# Read only under `sub-ass-override=scale`, and reproduced there; ignored entirely under `no`.
 sub-scale=1
 sub-pos=100
 sub-use-margins=yes
@@ -151,6 +154,19 @@ sub-ass-style-overrides=
 blend-subtitles=no
 sub-filter-sdh=no
 ```
+
+`--sub-ass-override=scale` is reproduced. It only configures the libass renderer — the font scale,
+the line position, line spacing and hinting (`configure_ass`, `sd_ass.c:552-558`) — and the
+measuring renderer sets the same four, so `--sub-scale` and `--sub-pos` become inputs there rather
+than refusals. `--sub-scale-signs` travels with them: mpv turns it into libass's
+`ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE`, which confines the scale to events that look like dialogue
+and leaves positioned signs alone.
+
+`--sub-ass-override=force` (and `yes`, its alias) stays refused. That branch substitutes mpv's own
+style into every event — font name, size fields, colors, border — which makes every `--sub-*` style
+option an authored-track layout input rather than a renderer setting, a far wider surface than this
+measures. `--sub-ass-style-overrides` is refused under both `no` and `scale`, because mpv applies it
+to the track itself whenever the override is anything but `no`.
 
 `--blend-subtitles=yes` is reproduced. mpv draws the subtitle into the video texture instead of the
 OSD surface, so the cue is laid out on the video's on-screen rectangle with no letterbox margins;

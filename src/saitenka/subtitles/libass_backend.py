@@ -237,10 +237,13 @@ def _render_style(state: RendererState) -> object | None:
     Imported here rather than at module scope: the wrapper is an optional extra, and this module is
     imported by hosts that never installed it.
 
-    Only BLUR and JUSTIFY, and only when set. `ASS_OverrideBits` is not in the order its names
-    suggest — the value one bit below JUSTIFY is `FULL_STYLE`, which replaces every field of every
-    style with the one handed over and collapses the layout. Taking the mask from `libasslite`
-    rather than restating it here is what keeps that from being re-derived by counting.
+    `ASS_OverrideBits` is not in the order its names suggest — the value one bit below JUSTIFY is
+    `FULL_STYLE`, which replaces every field of every style with the one handed over and collapses
+    the layout. Taking the mask from `libasslite` rather than restating it here is what keeps that
+    from being re-derived by counting.
+
+    SELECTIVE_FONT_SCALE carries no `override_style` field of its own: it does not copy anything
+    from the style, it decides whether `font_scale` reaches a positioned event at all.
     """
     if state == RendererState():
         return None
@@ -250,10 +253,18 @@ def _render_style(state: RendererState) -> object | None:
         bits |= module.OverrideBits.BLUR
     if state.justify:
         bits |= module.OverrideBits.JUSTIFY
+    if state.selective_font_scale:
+        bits |= module.OverrideBits.SELECTIVE_FONT_SCALE
+    setters = {
+        "font_scale": state.font_scale,
+        "line_position": state.line_position,
+        "line_spacing": state.line_spacing,
+        "hinting": state.hinting,
+    }
     if not bits:
-        return module.RenderStyle(font_scale=state.font_scale)
+        return module.RenderStyle(**setters)
     return module.RenderStyle(
-        font_scale=state.font_scale,
+        **setters,
         override_bits=int(bits),
         override_style=module.AssStyle(blur=state.blur, justify=state.justify),
     )

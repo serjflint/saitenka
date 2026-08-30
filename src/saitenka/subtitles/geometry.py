@@ -69,12 +69,25 @@ class RendererState:
     field for either — mpv writes both onto the libass style struct directly, so the only way to
     reproduce them is a selective style override on the renderer. `justify` decides where every
     line of a multi-line cue starts, which is a box position, not a decoration.
+
+    `line_position`, `line_spacing` and `hinting` are the rest of what `configure_ass` sets on the
+    renderer. mpv assigns none of them under `--sub-ass-override=no`, so their defaults here are
+    libass's own rather than a stand-in for an unread value.
+
+    `selective_font_scale` is `ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE`: it confines `font_scale` to
+    events that look like dialogue, leaving positioned signs unscaled. libass decides which is
+    which from the event text itself (`ass_render.c:1147`), so this is a flag to pass, not a
+    classification to reproduce.
     """
 
     font_scale: float = 1.0
     features: tuple[tuple[int, bool], ...] = ()
     blur: float = 0.0
     justify: int = 0
+    line_position: float = 0.0
+    line_spacing: float = 0.0
+    hinting: int = 0
+    selective_font_scale: bool = False
 
 
 @dataclass(frozen=True, slots=True)
