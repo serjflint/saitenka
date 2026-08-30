@@ -110,19 +110,18 @@ def test_every_global_binding_reaches_mpv_as_one_command_string():
     assert "MBTN_LEFT" in keybind_registry(ipc)
 
 
-def test_overlay_toggle_reports_hidden_and_shown_states(monkeypatch):
+def test_overlay_toggle_reports_hidden_and_shown_states():
     ipc = FakeIPC()
     reader = build_session(ipc)
-    messages: list[str] = []
-    monkeypatch.setattr(
-        reader.graph.notifications, "show", lambda text, *_a, **_k: messages.append(text)
-    )
 
     reader.command(bindings.OVERLAY_TOGGLE_MSG)
     reader.command(bindings.OVERLAY_TOGGLE_MSG)
 
     assert ("show-text", "Saitenka hidden", 2000) in ipc.commands
-    assert messages == ["Saitenka shown"]
+    assert ("show-text", "Saitenka shown", 2000) in ipc.commands
+    assert ipc.commands.index(("show-text", "Saitenka hidden", 2000)) < ipc.commands.index(
+        ("show-text", "Saitenka shown", 2000)
+    )
 
 
 def _section(ipc, name):

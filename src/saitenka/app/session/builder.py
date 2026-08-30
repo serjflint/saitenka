@@ -1024,10 +1024,14 @@ def _assemble_stateless_commands(
     )
 
     def report_overlay_visibility(*, visible: bool) -> None:
-        if visible:
-            owners.notifications.show("Saitenka shown")
-        else:
-            send_correlated(owners.ipc, "overlay-hidden", "show-text", "Saitenka hidden", 2000)
+        state = "shown" if visible else "hidden"
+        send_correlated(
+            owners.ipc,
+            "overlay-visibility",
+            "show-text",
+            f"Saitenka {state}",
+            2000,
+        )
 
     session = SessionCommandCoordinator(
         SessionCommandPorts(
