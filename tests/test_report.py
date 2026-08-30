@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import zipfile
 from pathlib import Path
 
@@ -64,6 +65,27 @@ def test_collect_includes_expected_members_and_redacts(monkeypatch, tmp_path):
     assert "SHOULDVANISH123" not in members["overlay.log"]
     # manifest carries the privacy note
     assert "NEVER uploaded" in members["MANIFEST.txt"]
+
+
+def test_doctor_native_output_is_bundled_instead_of_printed(monkeypatch, capfd):
+    class Report:
+        @staticmethod
+        def to_json():
+            return {"summary": {"ok": 1, "warn": 0, "fail": 0}, "checks": []}
+
+    from saitenka.app import doctor
+
+    def run_checks():
+        os.write(2, b"[ass] libass source: bundled\n")
+        return Report()
+
+    monkeypatch.setattr(doctor, "run_checks", run_checks)
+
+    members = report._collect_doctor()
+
+    captured = capfd.readouterr()
+    assert captured.out == "" and captured.err == ""
+    assert "[ass] libass source: bundled" in members["doctor-output.txt"]
 
 
 def test_collect_bundles_the_mpv_binding_table(monkeypatch, tmp_path):
