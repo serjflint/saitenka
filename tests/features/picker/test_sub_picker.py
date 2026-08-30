@@ -372,6 +372,10 @@ def test_picker_click_routes_after_the_active_cue_is_retired(monkeypatch):
     assert [download for download, _kwargs in fetches] == [chosen.download]
 
 
+def test_picker_overlay_is_above_native_subtitle_overpaint():
+    assert OverlayId.PICKER > OverlayId.OVERPAINT
+
+
 def test_click_outside_the_panel_is_not_captured():
     reader, _ipc = _reader(path="/v/ep.mkv")
     reader.graph.picker.configure_listing(_lister([]))

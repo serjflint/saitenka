@@ -31,7 +31,14 @@ class _FakeIPC(util.FakeIPC):
         self.props.update({"osd-dimensions": {"w": 1920, "h": 1080}, **props})
 
 
-def _spec(name: str, *, claims: set[str], calls: list[str], open: bool = False) -> SurfaceSpec:  # noqa: A002
+def _spec(
+    name: str,
+    *,
+    claims: set[str],
+    calls: list[str],
+    open: bool = False,  # noqa: A002
+    click_without_cue: bool = False,
+) -> SurfaceSpec:
     """A synthetic surface that records each chain call and claims the events named in ``claims``."""
     state = _FakeState(open=open)
 
@@ -48,6 +55,7 @@ def _spec(name: str, *, claims: set[str], calls: list[str], open: bool = False) 
         suppress_hover=_mk("suppress_hover"),
         scroll=_mk("scroll"),
         on_click=_mk("on_click"),
+        click_without_cue=click_without_cue,
     )
 
 
@@ -73,6 +81,23 @@ def test_route_click_stops_at_the_first_claiming_surface():
 
     assert router.route_click(object(), 5, 5) is True
     assert calls == ["top.on_click", "mid.on_click"]  # stops at mid; bot never consulted
+
+
+def test_route_click_without_a_cue_visits_only_opted_in_surfaces():
+    calls: list[str] = []
+    router = _router(
+        _spec("cue-bound", claims={"on_click"}, calls=calls),
+        _spec(
+            "picker",
+            claims={"on_click"},
+            calls=calls,
+            click_without_cue=True,
+        ),
+        _spec("below", claims={"on_click"}, calls=calls),
+    )
+
+    assert router.route_click(object(), 5, 5, cue_active=False) is True
+    assert calls == ["picker.on_click"]
 
 
 def test_route_scroll_falls_through_to_the_terminal_surface():

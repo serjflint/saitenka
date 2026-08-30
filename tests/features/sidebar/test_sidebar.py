@@ -11,6 +11,7 @@ from session_builder import TestSession, build_session, install_profile_dependen
 from saitenka.app import backlog
 from saitenka.app.anki import MineConfig
 from saitenka.app.backlog import BacklogStore, Capture
+from saitenka.app.bindings import CLICK_MSG
 from saitenka.app.features.analysis.episode_analysis import analyze_cues
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
@@ -194,6 +195,28 @@ def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, command
     reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110)
 
     assert invoked == [command]  # not the old silent no-op
+
+
+def test_sidebar_cue_action_is_not_routed_after_cue_retirement(monkeypatch):
+    reader, ipc = _reader(active=3)
+    _capture_render(monkeypatch)
+    invoked = []
+    monkeypatch.setattr(reader.graph.stateless_commands, "run", invoked.append)
+    reader.graph.sidebar.store.dispatch(
+        events.SidebarShown(
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
+        )
+    )
+    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
+    ipc.props["mouse-pos"] = {"hover": True, "x": 110, "y": 110}
+    reader.graph.cue.set_subtitle("cue 3")
+    reader.graph.cue.retire("cue-text")
+
+    reader.command(CLICK_MSG)
+
+    assert invoked == []
 
 
 def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):

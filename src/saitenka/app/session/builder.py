@@ -89,6 +89,7 @@ from saitenka.app.media import (
 )
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.runtime import CueCommandState
 from saitenka.app.session import sidebar_coordination, surfaces
 from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
 from saitenka.app.session.command_runtime import CommandRuntime, CommandRuntimePorts
@@ -702,6 +703,10 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     interaction = InteractionCoordinator(
         InteractionPorts(
             overlay_visible=lambda: bool(getattr(overlay, "visible", True)),
+            cue_interaction_allowed=lambda: (
+                cue_ref.get().command_state(retired=annotation_controller.view.retired)
+                is not CueCommandState.RETIRED_AFTER_ACTIVE
+            ),
             playback=playback_observation,
             router=surface_router,
             tooltip=tooltip_controller,
