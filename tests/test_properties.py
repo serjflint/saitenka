@@ -14,7 +14,7 @@ from saitenka_deinflect import (  # noqa: TID251  # property tests exercise the 
     inflection_chain,
 )
 
-from saitenka.app.tokenize import Token, _has_kanji, merge_inflected, strip_inline_furigana
+from saitenka.app.tokenize import Token, has_kanji, merge_inflected, strip_inline_furigana
 from saitenka.model import Span, Style
 from saitenka.render.flow import build_items, ruby, wrap_items
 
@@ -93,18 +93,18 @@ def test_strip_inline_furigana_is_a_subsequence_preserving_kanji(toks):
 def test_has_kanji_recognizes_supplementary_plane_ideographs():
     # Astral kanji (surrogate pairs) really occur in subs — 𩸽 (ほっけ, atka mackerel) on menus,
     # 𠮟る (しかる) in prose. Before #99 these read as "no kanji" and lost kanji highlighting / N+1.
-    assert _has_kanji("𩸽")  # U+29E3D, CJK Ext B
-    assert _has_kanji("𠮟る")  # U+20B9F + hira tail
-    assert _has_kanji("漢字")  # BMP still detected
-    assert not _has_kanji("ほっけ")  # kana only
-    assert not _has_kanji("ABC 123")  # no CJK at all
+    assert has_kanji("𩸽")  # U+29E3D, CJK Ext B
+    assert has_kanji("𠮟る")  # U+20B9F + hira tail
+    assert has_kanji("漢字")  # BMP still detected
+    assert not has_kanji("ほっけ")  # kana only
+    assert not has_kanji("ABC 123")  # no CJK at all
 
 
 @example(cp=0x20B9F)  # 𠮟 — the shrunk astral boundary that was silently dropped
 @given(cp=st.integers(min_value=0x20000, max_value=0x2A6DF))  # CJK Ext B
 @settings(max_examples=50, deadline=None)
 def test_has_kanji_true_for_every_ext_b_codepoint(cp):
-    assert _has_kanji(chr(cp))
+    assert has_kanji(chr(cp))
 
 
 # --- deinflection chain reaches the lemma or returns empty ---------------------------------------

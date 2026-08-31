@@ -32,4 +32,4 @@ def test_existing_loaders_use_the_resolver():
     from saitenka.app import wordlists
 
     assert fonts.ASSETS.exists()
-    assert wordlists.JLPT_ZIP.exists()
+    assert wordlists.bundled_jlpt_zip().exists()

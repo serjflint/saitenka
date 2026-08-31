@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from saitenka.app.tokenize import _has_kanji, kata_to_hira
+from saitenka.app.tokenize import has_kanji, kata_to_hira
 
 log = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ class KnownSnap:
 
     def _kana_state(self, surface: str | None, read: str) -> str | None:
         """A kana-only token matches any taught reading (kana↔kanji)."""
-        if not surface or _has_kanji(surface):
+        if not surface or has_kanji(surface):
             return None
         if read and read in self.readings:
             return self.readings[read]

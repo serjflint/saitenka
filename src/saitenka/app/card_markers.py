@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app.lookup import _is_kana
+from saitenka.app.tokenize import is_kana
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -45,7 +45,7 @@ def _kana_runs(expression: str) -> list[tuple[bool, str]]:
     """``expression`` as maximal ``(is_kana, text)`` runs, e.g. 話し合う → [(F,話),(T,し),(F,合),(T,う)]."""
     runs: list[tuple[bool, str]] = []
     for ch in expression:
-        k = _is_kana(ch)
+        k = is_kana(ch)
         if runs and runs[-1][0] == k:
             runs[-1] = (k, runs[-1][1] + ch)
         else:
@@ -58,11 +58,11 @@ def _simple_furigana(expression: str, reading: str) -> str:
     ``読[よ]む``, ``小僧[こぞう]``, ``お 前[まえ]`` (space so the reading binds to 前, not お)."""
     s, r = expression, reading
     tail = ""
-    while s and r and s[-1] == r[-1] and _is_kana(s[-1]):
+    while s and r and s[-1] == r[-1] and is_kana(s[-1]):
         tail = s[-1] + tail
         s, r = s[:-1], r[:-1]
     head = ""
-    while s and r and s[0] == r[0] and _is_kana(s[0]):
+    while s and r and s[0] == r[0] and is_kana(s[0]):
         head += s[0]
         s, r = s[1:], r[1:]
     if not s:  # fully reduced to matching kana — nothing to annotate

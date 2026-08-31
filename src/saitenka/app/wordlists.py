@@ -26,39 +26,48 @@ from itertools import starmap
 from typing import TYPE_CHECKING
 
 from saitenka.app.known_cache import KnownCacheUpdate, known_cache_for
-from saitenka.app.tokenize import _has_kanji, kata_to_hira
+from saitenka.app.tokenize import has_kanji, kata_to_hira
 from saitenka.model import PitchAccent
 from saitenka.resources import asset
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from saitenka.app.dictdb import DictionaryDb, DictRow
 
 log = logging.getLogger(__name__)
 
 
-ASSETS = asset("wordlists")  # importlib.resources so the wheel path works too
-JLPT_ZIP = ASSETS / "jlpt.zip"
+def bundled_jlpt_zip() -> Path:
+    """Where the bundled JLPT dictionary ships. A function, not an import-time constant: resolving the
+    asset root when this module is *imported* is the application's layout decided by a library."""
+    return asset("wordlists") / "jlpt.zip"
+
 
 _LEVEL_RANK = {"N1": 1, "N2": 2, "N3": 3, "N4": 4, "N5": 5}
 
 
-def ensure_bundled_jlpt(db: DictionaryDb) -> int:
+def ensure_bundled_jlpt(db: DictionaryDb, jlpt_zip: Path | None = None) -> int:
     """Import the bundled JLPT-level dictionary into ``db`` once, returning its ``dict_id``.
 
     JLPT levels ship with the tool (a small bundled asset, not a user import), so — unlike every other
     dictionary — the runtime imports it on first use. Idempotent: if a dictionary with the bundled
     title already exists it is reused (no rebuild). This is the one build the runtime performs; every
-    other dictionary is built only by an explicit ``import`` command."""
+    other dictionary is built only by an explicit ``import`` command.
+
+    ``jlpt_zip`` defaults to the bundled asset; passing one lets a caller supply the archive instead of
+    inheriting this module's idea of where assets live."""
     from datetime import datetime
 
     from saitenka.app.bankreader import _title_of
 
-    with zipfile.ZipFile(JLPT_ZIP) as zf:
+    archive = jlpt_zip if jlpt_zip is not None else bundled_jlpt_zip()
+    with zipfile.ZipFile(archive) as zf:
         title = _title_of(zf, "JLPT")
     found, _missing = db.resolve([title])
     if found:
         return found[0].id
-    row = db.import_zip(JLPT_ZIP, imported_at=datetime.now(UTC).isoformat(), import_order=-1)
+    row = db.import_zip(archive, imported_at=datetime.now(UTC).isoformat(), import_order=-1)
     return row.id
 
 
@@ -407,7 +416,7 @@ class KnownWords:
     def _kana_hit(self, surface: str | None, read: str) -> bool:
         """A kana-only token (no competing kanji identity) matches any taught reading, so a kanji card
         resurfaces when its word appears written in kana."""
-        if not surface or _has_kanji(surface):
+        if not surface or has_kanji(surface):
             return False
         return bool(read and read in self.readings) or surface in self.readings
 
