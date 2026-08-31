@@ -40,6 +40,49 @@ class _FlakyWriteTransport:
         self._inner.close()
 
 
+class _GatedFailTransport:
+    """Wraps a real transport; ``write`` parks until ``release`` is set and then raises, so a test can
+    attach an observer to the pending future *before* the failure resolves it."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.release = threading.Event()
+
+    def read(self, n: int) -> bytes:
+        return self._inner.read(n)
+
+    def write(self, _data: bytes) -> None:
+        self.release.wait(5.0)
+        raise BrokenPipeError("simulated broken pipe")
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+def test_a_disconnected_result_implies_the_ipc_already_reads_closed():
+    """The ordering a caller depends on: whoever is released by a ``disconnected`` result must find
+    ``disconnected`` already True. The other order hands a thread a dead transport that still looks
+    live, and it re-submits into it.
+
+    Observed at the instant of resolution via a done-callback (which runs on the writer thread inside
+    ``set_result``) — polling afterwards would race the very window under test."""
+    a, b = socket.socketpair()
+    ipc = MpvIPC("unused")
+    transport = _GatedFailTransport(UnixSocketTransport(a))
+    ipc._transport = transport
+    ipc._start_reader()
+    seen: list[bool] = []
+    try:
+        request = ipc.command_async("get_property", "time-pos")
+        request.future.add_done_callback(lambda _f: seen.append(ipc.disconnected))
+        transport.release.set()
+        assert request.future.result(timeout=5.0) == {"error": "disconnected"}
+        assert seen == [True]
+    finally:
+        ipc.close()
+        b.close()
+
+
 def _recv_line(sock: socket.socket) -> dict:
     buf = b""
     while b"\n" not in buf:
