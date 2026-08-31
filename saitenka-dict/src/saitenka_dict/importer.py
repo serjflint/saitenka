@@ -53,9 +53,6 @@ class ImportRequest:
 
 
 _SVG_SUFFIX = ".svg"
-#: What a Yomitan `img` node can actually reference. An archive also carries READMEs, licences and
-#: stylesheets under the same root, and storing those as BLOBs is pure database growth.
-_MEDIA_SUFFIXES = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 
 def _images(
@@ -71,8 +68,6 @@ def _images(
     result = []
     failed = 0
     for name, data in media:
-        if not name.lower().endswith(_MEDIA_SUFFIXES):
-            continue
         if not name.lower().endswith(_SVG_SUFFIX) or rasterize is None:
             result.append((name, data))
             continue

@@ -14,6 +14,9 @@ log = logging.getLogger(__name__)
 _META_BANK = re.compile(r"term_meta_bank_\d+\.json$")
 _TERM_BANK = re.compile(r"term_bank_\d+\.json$")
 PRIMARY_ORDER = ("dict", "pitch", "freq")
+#: What a Yomitan `img` node can reference. Everything else under the archive root is documentation,
+#: licences, fonts or styling — never something the renderer draws.
+MEDIA_SUFFIXES = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 
 class DictionaryArchiveError(ValueError):
@@ -123,6 +126,12 @@ class DictionaryArchive:
             raise DictionaryArchiveError(f"invalid JSON in {name}: {exc}") from exc
 
     def media(self) -> tuple[tuple[str, bytes], ...]:
+        """Every member a Yomitan ``img`` node could reference, decompressed.
+
+        Suffix-filtered before reading, not after: an archive also carries READMEs, licences, fonts
+        and stylesheets under the same root, and a caller that stores no images at all should not pay
+        to decompress them into memory first.
+        """
         if self._media is not None:
             return self._media
         banks = {self.index_name}
@@ -131,6 +140,8 @@ class DictionaryArchive:
         result: list[tuple[str, bytes]] = []
         for info in self._zip.infolist():
             if info.is_dir() or info.filename in banks or not info.filename.startswith(self.root):
+                continue
+            if not info.filename.lower().endswith(MEDIA_SUFFIXES):
                 continue
             result.append((info.filename.removeprefix(self.root), self._read_member(info)))
         self._media = tuple(result)

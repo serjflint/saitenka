@@ -118,6 +118,10 @@ _MIGRATIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
 #: Without fresh stats SQLite's planner can keep scanning ``term_meta`` even with the index present.
 _ANALYZE_GENERATION = "2"
 
+#: Generous, because the thing it waits on is a one-time index rebuild on a multi-GB file, and the
+#: alternative is a second mpv instance failing to start during someone's first post-upgrade launch.
+_BUSY_TIMEOUT_MS = 120_000
+
 
 def ensure_schema(connection: sqlite3.Connection) -> None:
     """Create or bring forward the schema on an open read/write connection. Idempotent.
@@ -126,6 +130,10 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     and is what lets several mpv instances read while an import writes), so every client that can
     create the DB must agree on it.
     """
+    # Several mpv instances open this file, and an upgrade that rebuilds the largest index holds the
+    # write lock for as long as that takes. Without a busy timeout the default is zero: a second
+    # process starting during the upgrade fails outright rather than waiting for it.
+    connection.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
     connection.execute("PRAGMA journal_mode=WAL")
     connection.executescript(_TABLES)
     for pragma, migrations in _MIGRATIONS:
@@ -158,20 +166,22 @@ def _reconcile_indexes(connection: sqlite3.Connection) -> bool:
             "SELECT name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL"
         )
     )
-    changed = False
-    for name in _RETIRED_INDEXES:
-        if name in existing:
+    stale = [name for name in _RETIRED_INDEXES if name in existing]
+    rebuild = {
+        name: statement
+        for name, statement in _INDEXES.items()
+        if (current := existing.get(name)) is None or " ".join(current.split()) != statement
+    }
+    if not stale and not rebuild:
+        return False
+    # One transaction: `DROP INDEX` autocommits on its own, so an upgrade interrupted between the drop
+    # and the create (lock, disk full, Ctrl-C) would otherwise leave the hottest index simply missing.
+    with connection:
+        for name in (*stale, *(name for name in rebuild if name in existing)):
             connection.execute(f"DROP INDEX {name}")  # an internal constant, not input
-            changed = True
-    for name, statement in _INDEXES.items():
-        current = existing.get(name)
-        if current is not None and " ".join(current.split()) == statement:
-            continue
-        if current is not None:
-            connection.execute(f"DROP INDEX {name}")  # an internal constant, not input
-        connection.execute(statement)
-        changed = True
-    return changed
+        for statement in rebuild.values():
+            connection.execute(statement)
+    return True
 
 
 def _analyze_once(connection: sqlite3.Connection, *, force: bool = False) -> None:

@@ -10,6 +10,11 @@ def test_frequency_forms_share_one_normalization_contract():
     assert parse_frequency("123 occurrences") == FrequencyValue(None, 123, None)
     assert parse_frequency("118,121") == FrequencyValue(None, 118, None)
     assert parse_frequency("N5") == FrequencyValue(None, None, "N5")
+    # The asymmetry is deliberate and matches the writer this replaced: a LEADING number wins and
+    # drops whatever follows it ("3 (rare)" loses "rare"), while a trailing parenthesised number
+    # keeps the whole string. Documented rather than smoothed over, because widening the first case
+    # would change what an existing dictionary renders in a pill.
+    assert parse_frequency("3 (rare)") == FrequencyValue(None, 3, None)
     assert parse_frequency(
         {"reading": "うちこむ", "frequency": {"value": 30, "displayValue": "thirty"}}
     ) == FrequencyValue("うちこむ", 30, "thirty")

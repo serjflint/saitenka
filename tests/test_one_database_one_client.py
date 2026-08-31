@@ -67,7 +67,12 @@ _STORE_LOOKUP = (
 
 def test_both_entry_points_create_the_same_schema(tmp_path):
     """The regression itself: the app's handle and the package's admin API must agree, table for
-    table and index for index. Before the merge they disagreed about every shared table."""
+    table and index for index. Before the merge they disagreed about every shared table.
+
+    Two FRESH databases. A migrated one converges on indexes (pinned separately) but keeps its
+    original nullability on columns that already existed — `CREATE TABLE IF NOT EXISTS` never rewrites
+    a table, and no consumer depends on the difference.
+    """
     DictionaryDb.open(tmp_path / "app.sqlite")
     DictionaryDatabase(tmp_path / "package.sqlite").initialize()
 
@@ -114,25 +119,45 @@ _APP_MODULES_THAT_QUERY_THE_DICTIONARY = {
 }
 
 
+#: Table names only this database uses. Marking on the SCHEMA rather than on one column is the point:
+#: a reader that never happens to spell `dict_id` is the same defect, and that shape already exists —
+#: `saitenka_dict.tables` does `SELECT ... FROM term_meta`, which a `dict_id` marker cannot see.
+_DICTIONARY_TABLES = ("entries", "keys", "kanji", "term_meta", "kanji_meta", "tags")
+#: Names the app's *other* databases also use — `backlog.py` owns an unrelated `media` table. A hit on
+#: one of these only counts alongside `dict_id`, which no other schema here has.
+_AMBIGUOUS_TABLES = ("media", "meta")
+
+
+def _names_a_dictionary_table(source: str) -> bool:
+    """Whether a module issues SQL against a table of the *dictionary* database."""
+
+    def clauses(table: str) -> tuple[str, ...]:
+        return tuple(f"{verb} {table}" for verb in ("FROM", "INTO", "UPDATE", "JOIN"))
+
+    # Keywords stay uppercase (the repo writes SQL that way throughout) so prose does not match:
+    # config.py's help text says "into entries.seq" and means nothing of the sort. Collapsed because
+    # a SQL literal wraps across lines.
+    collapsed = " ".join(source.split())
+    if any(clause in collapsed for table in _DICTIONARY_TABLES for clause in clauses(table)):
+        return True
+    return "dict_id" in collapsed and any(
+        clause in collapsed for table in _AMBIGUOUS_TABLES for clause in clauses(table)
+    )
+
+
 def test_no_new_app_module_starts_reading_the_dictionary_database():
     """The reader followed the writer — but only out of `dictionary.py`.
 
     `saitenka.app.dictionary` carried a hand-rolled SQL reader beside the semantic store: two readers
     of one schema, kept in step by hand. Checking that one file would be a gate on a name rather than
-    a meaning, since the same reader can reappear in any neighbour. `dict_id` is the marker — it tags
-    every row of this database and appears in no other schema the app owns.
+    a meaning — the same reader can reappear in any neighbour, and a reviewer's planted one did.
     """
     root = Path(dictdb.__file__).parents[1]
-    querying = set()
-    for path in root.rglob("*.py"):
-        source = path.read_text(encoding="utf-8")
-        # The conjunction is the point. `dict_id` alone also matches a plain attribute (`dictionary.py`
-        # still carries one), and a SQL verb alone matches the app's other databases — `backlog.py`
-        # has its own unrelated `media` table.
-        if "dict_id" in source and any(
-            verb in source for verb in ("SELECT ", "INSERT ", "UPDATE ", "DELETE ")
-        ):
-            querying.add(str(path.relative_to(root)).replace("\\", "/"))
+    querying = {
+        str(path.relative_to(root)).replace("\\", "/")
+        for path in root.rglob("*.py")
+        if _names_a_dictionary_table(path.read_text(encoding="utf-8"))
+    }
 
     assert querying == _APP_MODULES_THAT_QUERY_THE_DICTIONARY
 
