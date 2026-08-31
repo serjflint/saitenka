@@ -362,9 +362,8 @@ def panel_rows(
                         flow.append(Span("  ", Style(size=theme.px(20))))
                     flow.append(
                         ImgBox(
-                            width=g.width,
+                            width=g.width,  # measured off the 1x graph; the box redraws its own pixels
                             height=g.height,
-                            sprite=g,
                             baseline_drop=theme.px(4),
                             native=_pitch_native(reading, pa, theme.scale),
                         )
@@ -379,13 +378,7 @@ def panel_rows(
         def _chain(chain=tuple(entry.inflection_chain), *, scale: float = 1.0):
             pz = theme.px(18)
             cflow: list = [
-                ImgBox(
-                    width=pz,
-                    height=pz,
-                    sprite=render_icon(Icon.MARKER, pz),
-                    baseline_drop=theme.px(3),
-                    native=_marker_native(pz),
-                ),
+                ImgBox(width=pz, height=pz, baseline_drop=theme.px(3), native=_marker_native(pz)),
                 Span("  ", Style(size=theme.px(20))),
             ]
             for i, name in enumerate(chain):
@@ -404,13 +397,7 @@ def panel_rows(
         def _tag(tag=tag, *, scale: float = 1.0):
             pz = theme.px(18)
             tflow = [
-                ImgBox(
-                    width=pz,
-                    height=pz,
-                    sprite=render_icon(Icon.MARKER, pz),
-                    baseline_drop=theme.px(3),
-                    native=_marker_native(pz),
-                ),
+                ImgBox(width=pz, height=pz, baseline_drop=theme.px(3), native=_marker_native(pz)),
                 Span("  " + tag, Style(size=theme.px(20), color=theme.muted)),
             ]
             return _flow_row(tflow, content_w, render_scale=scale), [], []

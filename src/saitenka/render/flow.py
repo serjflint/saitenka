@@ -45,10 +45,34 @@ class ImgBox:
     border: tuple[int, int, int, int] = (170, 170, 170, 255)
     sprite: Image.Image | None = None
     baseline_drop: int = 0  # px the box extends below the baseline
-    #: Re-draws the sprite at a display scale, in device px (``width×scale`` by ``height×scale``). A box
-    #: that can supply one rasters natively; without it the 1× sprite is upscaled, which reads soft next
-    #: to the natively-drawn glyphs around it.
+    #: Draws the sprite at a display scale, in device px (``width×scale`` by ``height×scale``). Supply
+    #: this rather than ``sprite`` — the 1× image is then ``native(1.0)``, one recipe evaluated at one
+    #: more scale, instead of a second expression that can disagree with it (it did: #465).
     native: Callable[[float], Image.Image] | None = None
+    # A memo, not state: kept out of init/eq/repr so `replace()` starts a box with an empty cache and
+    # two equal boxes stay equal once one of them has rendered.
+    _sprites: dict[float, Image.Image] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        if self.sprite is None and self.native is not None:
+            self.sprite = self.native(1.0)
+        if self.sprite is not None:
+            self._sprites[1.0] = self.sprite  # seeded, so 1.0 is a cache HIT, not a special case
+
+    def sprite_at(self, scale: float) -> Image.Image | None:
+        """The sprite in device px at ``scale``, memoised. ``None`` for the ▢ placeholder box."""
+        if self.sprite is None:
+            return None
+        spr = self._sprites.get(scale)
+        if spr is None:
+            spr = self._sprites[scale] = (
+                self.native(scale)
+                if self.native is not None
+                else _upscale(self.sprite, self.width, self.height, scale)
+            )
+        return spr
 
     @property
     def advance(self) -> float:
@@ -72,14 +96,8 @@ class ImgBox:
         scale: float = 1.0,
     ) -> None:
         top = baseline + self.baseline_drop - self.height
-        if self.sprite is not None:
-            spr = self.sprite
-            if scale != 1.0:
-                spr = (
-                    self.native(scale)
-                    if self.native is not None
-                    else _upscale(spr, self.width, self.height, scale)
-                )
+        spr = self.sprite_at(scale)
+        if spr is not None:
             img.alpha_composite(spr, (round(x * scale), round(top * scale)))
             return
         draw.rounded_rectangle(
@@ -130,12 +148,7 @@ def img_box(png: bytes | None, height: int, tint: RGBA | None) -> ImgBox:
         return ImgBox(width=round(height * 1.6), height=height, label="▢")
     sw, sh = source.size
     width = max(1, round(sw * height / sh)) if sh else round(height * 1.6)
-    return ImgBox(
-        width=width,
-        height=height,
-        sprite=_fit(source, width, height),
-        native=_img_native(source, width, height),
-    )
+    return ImgBox(width=width, height=height, native=_img_native(source, width, height))
 
 
 def _decode_sprite(png: bytes, tint: RGBA | None) -> Image.Image | None:
@@ -161,7 +174,9 @@ class ChipBox:
 
     text: str
     chip_style: ChipStyle
-    _sprites: dict[float, Sprite] = field(default_factory=dict)
+    _sprites: dict[float, Sprite] = field(  # a memo, not state — see ImgBox._sprites
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     def sprite_at(self, scale: float) -> Sprite:
         """The pill rastered natively at ``scale`` (device px), memoised per scale."""

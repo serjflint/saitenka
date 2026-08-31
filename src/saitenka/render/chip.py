@@ -4,12 +4,10 @@ The fanciest-looking but simplest element: a rounded rectangle with centred rich
 frequency pills, dictionary-name pills, and — with a transparent fill + border — bordered labels
 like 逆引き.
 
-A pill is drawn TWICE over its life: once at 1× for the metrics layout reserves, and again at the
-display scale for the pixels that ship. The second pass re-runs the font at ``size×scale`` rather
-than stretching the first, so a pill is as crisp as the text beside it — but the box it fills is the
-1× box projected, never its own natural extent. That split is what keeps the two passes agreeing:
-an integer font size does not scale linearly, so a freely-sized native pill drifts several px wide of
-its slot and closes the gap to its neighbour.
+Split in two, along the scale boundary: ``*_metrics`` computes the box in REFERENCE px (what layout
+reserves, scale-free), ``_draw_*`` projects that box by the display scale and re-runs the font at
+``size×scale``. There is deliberately no ``scale == 1.0`` branch — 1.0 projects to itself, so the
+reference raster is the same code path as every other, and the two cannot drift apart.
 """
 
 from __future__ import annotations
@@ -55,120 +53,50 @@ class Sprite:
 
 
 def _dev(v: float, scale: float, floor: int = 0) -> int:
+    """A reference-px metric projected to device px. Identity at 1.0 — ints round to themselves."""
     return max(floor, round(v * scale))
 
 
-def _render_two_tone(name: str, cs: ChipStyle, scale: float) -> Sprite:
-    """A connected two-segment pill: colored name segment + light value segment (frequency pills)."""
+def _text_box(text: str, cs: ChipStyle, pad_v: float) -> tuple[float, float]:
+    """(height, baseline) from the primary font's glyph bbox — a tight vertical extent, not the em."""
+    primary = fonts.load(fonts.FontSpec(fonts.FONT_FILES[0], cs.size, cs.weight))
+    _l, t, _r, b = primary.getbbox(text, anchor="ls")
+    return (b - t) + 2 * pad_v, -t + pad_v
+
+
+def _plain_metrics(text: str, cs: ChipStyle) -> tuple[int, float, float, int]:
+    """(width, height, baseline, radius) in REFERENCE px — the box layout reserves for a plain pill."""
+    pad_h = cs.pad_h if cs.pad_h is not None else max(4, round(cs.size * 0.45))
+    pad_v = cs.pad_v if cs.pad_v is not None else max(2, round(cs.size * 0.18))
+    radius = cs.radius if cs.radius is not None else max(3, round(cs.size * 0.35))
+    width = round(inline_width([Span(text, Style(size=cs.size, weight=cs.weight))])) + 2 * pad_h
+    height, baseline = _text_box(text or "M", cs, pad_v)
+    return width, height, baseline, radius
+
+
+def _two_tone_metrics(name: str, cs: ChipStyle) -> tuple[int, float, float, int, int]:
+    """As :func:`_plain_metrics`, plus the colored name segment's width (the divider's x)."""
     pad_h = cs.pad_h if cs.pad_h is not None else max(5, round(cs.size * 0.5))
     pad_v = cs.pad_v if cs.pad_v is not None else max(3, round(cs.size * 0.28))
     radius = cs.radius if cs.radius is not None else max(4, round(cs.size * 0.42))
-    name_style = Style(size=cs.size, weight=cs.weight, color=cs.fg)
-    val_style = Style(size=cs.size, weight=cs.weight, color=cs.value_fg)
-    name_w = inline_width([Span(name, name_style)])
-    val_w = inline_width([Span(cs.value or "", val_style)])
-
-    primary = fonts.load(fonts.FontSpec(fonts.FONT_FILES[0], cs.size, cs.weight))
-    _, t, _, b = primary.getbbox("あ", anchor="ls")
-    pill_h = (b - t) + 2 * pad_v
-    baseline = -t + pad_v
-    name_seg_w = round(name_w) + 2 * pad_h
-    total_w = name_seg_w + round(val_w) + 2 * pad_h
-    if scale != 1.0:
-        return _native_two_tone(name, cs, scale, (total_w, pill_h, baseline, radius, name_seg_w))
-
-    img = Image.new("RGBA", (total_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float h: int() would shift golden geometry
-    draw = ImageDraw.Draw(img)
-    # whole pill: light value fill + a colored border (the value segment reads as bordered)
-    draw.rounded_rectangle(
-        [0, 0, total_w - 1, pill_h - 1], radius=radius, fill=cs.value_bg, outline=cs.bg, width=1
-    )
-    # left segment: colored, rounded on the left only → clean vertical divider
-    draw.rounded_rectangle(
-        [0, 0, name_seg_w - 1, pill_h - 1],
-        radius=radius,
-        fill=cs.bg,
-        corners=(True, False, False, True),
-    )
-    draw_inline(img, draw, pad_h, baseline, [Span(name, name_style)])
-    draw_inline(img, draw, name_seg_w + pad_h, baseline, [Span(cs.value or "", val_style)])
-    return Sprite(img, baseline)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float baseline is drawn as-is
-
-
-def _native_two_tone(
-    name: str, cs: ChipStyle, scale: float, ref: tuple[int, float, float, int, int]
-) -> Sprite:
-    """The two-tone pill redrawn in device px inside ``ref`` (its 1× box) projected by ``scale``."""
-    total_w, pill_h, baseline, radius, name_seg_w = ref
-    w, h = _dev(total_w, scale, 1), _dev(pill_h, scale, 1)
-    seg, r, bl = _dev(name_seg_w, scale, 1), _dev(radius, scale), _dev(baseline, scale)
-    size = _dev(cs.size, scale, 1)
-    name_style = Style(size=size, weight=cs.weight, color=cs.fg)
-    val_style = Style(size=size, weight=cs.weight, color=cs.value_fg)
-
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle(
-        [0, 0, w - 1, h - 1], radius=r, fill=cs.value_bg, outline=cs.bg, width=_dev(1, scale, 1)
-    )
-    draw.rounded_rectangle(
-        [0, 0, seg - 1, h - 1], radius=r, fill=cs.bg, corners=(True, False, False, True)
-    )
-    _draw_centred(img, draw, 0, seg, bl, [Span(name, name_style)])
-    _draw_centred(img, draw, seg, w, bl, [Span(cs.value or "", val_style)])
-    return Sprite(img, bl)
+    style = Style(size=cs.size, weight=cs.weight)
+    name_seg = round(inline_width([Span(name, style)])) + 2 * pad_h
+    total = name_seg + round(inline_width([Span(cs.value or "", style)])) + 2 * pad_h
+    height, baseline = _text_box("あ", cs, pad_v)
+    return total, height, baseline, radius, name_seg
 
 
 def _draw_centred(
     img: Image.Image, draw: ImageDraw.ImageDraw, x0: int, x1: int, baseline: int, spans: list[Span]
 ) -> None:
-    """Centre ``spans`` in ``[x0, x1)``. The native text is a few px off ``scale`` × the 1× text, so
-    the slack is split between the two pads instead of piling up on the right one."""
+    """Centre ``spans`` in ``[x0, x1)``. The text is sized independently of the box (an integer font
+    size is not linear in the scale), so the slack is split between the two pads rather than piling
+    onto the right one."""
     draw_inline(img, draw, x0 + (x1 - x0 - inline_width(spans)) / 2, baseline, spans)
 
 
-def render_chip(text: str, cs: ChipStyle, *, scale: float = 1.0) -> Sprite:
-    """``scale`` > 1 rasters the pill natively at ``size×scale`` into its projected 1× box (see the
-    module docstring). The sprite's own metrics are then DEVICE px, so layout must keep measuring the
-    1× sprite — :class:`~saitenka.render.flow.ChipBox` owns that split."""
-    if cs.value is not None:
-        return _render_two_tone(text, cs, scale)
-    pad_h = cs.pad_h if cs.pad_h is not None else max(4, round(cs.size * 0.45))
-    pad_v = cs.pad_v if cs.pad_v is not None else max(2, round(cs.size * 0.18))
-    radius = cs.radius if cs.radius is not None else max(3, round(cs.size * 0.35))
-
-    style = Style(size=cs.size, weight=cs.weight, color=cs.fg)
-    text_w = inline_width([Span(text, style)])
-
-    # Tight vertical extent from the primary font's glyph bbox at the baseline.
-    primary = fonts.load(fonts.FontSpec(fonts.FONT_FILES[0], cs.size, cs.weight))
-    _l, t, _r, b = primary.getbbox(text or "M", anchor="ls")
-    top, bottom = t, b
-    pill_h = (bottom - top) + 2 * pad_v
-    baseline = -top + pad_v
-    pill_w = round(text_w) + 2 * pad_h
-    if scale != 1.0:
-        return _native_plain(text, cs, scale, (pill_w, pill_h, baseline, radius))
-
-    img = Image.new("RGBA", (pill_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float h: see above
-    draw = ImageDraw.Draw(img)
-    if cs.bg[3] > 0 or cs.border is not None:
-        draw.rounded_rectangle(
-            [0, 0, pill_w - 1, pill_h - 1],
-            radius=radius,
-            fill=cs.bg,
-            outline=cs.border,
-            width=cs.border_w if cs.border else 1,
-        )
-    draw_inline(img, draw, pad_h, baseline, [Span(text, style)])
-    return Sprite(img, baseline)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float baseline is drawn as-is
-
-
-def _native_plain(
-    text: str, cs: ChipStyle, scale: float, ref: tuple[int, float, float, int]
-) -> Sprite:
-    """The plain pill redrawn in device px inside ``ref`` (its 1× box) projected by ``scale``."""
-    pill_w, pill_h, baseline, radius = ref
+def _draw_plain(text: str, cs: ChipStyle, scale: float) -> Sprite:
+    pill_w, pill_h, baseline, radius = _plain_metrics(text, cs)
     w, h = _dev(pill_w, scale, 1), _dev(pill_h, scale, 1)
     r, bl = _dev(radius, scale), _dev(baseline, scale)
     style = Style(size=_dev(cs.size, scale, 1), weight=cs.weight, color=cs.fg)
@@ -185,3 +113,38 @@ def _native_plain(
         )
     _draw_centred(img, draw, 0, w, bl, [Span(text, style)])
     return Sprite(img, bl)
+
+
+def _draw_two_tone(name: str, cs: ChipStyle, scale: float) -> Sprite:
+    total_w, pill_h, baseline, radius, name_seg_w = _two_tone_metrics(name, cs)
+    w, h = _dev(total_w, scale, 1), _dev(pill_h, scale, 1)
+    seg, r, bl = _dev(name_seg_w, scale, 1), _dev(radius, scale), _dev(baseline, scale)
+    size = _dev(cs.size, scale, 1)
+    name_style = Style(size=size, weight=cs.weight, color=cs.fg)
+    val_style = Style(size=size, weight=cs.weight, color=cs.value_fg)
+
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    # whole pill: light value fill + a colored border (the value segment reads as bordered)
+    draw.rounded_rectangle(
+        [0, 0, w - 1, h - 1], radius=r, fill=cs.value_bg, outline=cs.bg, width=_dev(1, scale, 1)
+    )
+    # left segment: colored, rounded on the left only → clean vertical divider
+    draw.rounded_rectangle(
+        [0, 0, seg - 1, h - 1], radius=r, fill=cs.bg, corners=(True, False, False, True)
+    )
+    _draw_centred(img, draw, 0, seg, bl, [Span(name, name_style)])
+    _draw_centred(img, draw, seg, w, bl, [Span(cs.value or "", val_style)])
+    return Sprite(img, bl)
+
+
+def render_chip(text: str, cs: ChipStyle, *, scale: float = 1.0) -> Sprite:
+    """The pill rastered at ``scale``: glyphs at ``size×scale``, pads/radius/border projected, drawn
+    into the reference box projected by the same factor — never its own natural extent, which drifts
+    off the slot layout reserved and can close the gap to the neighbouring pill.
+
+    The returned sprite's metrics are therefore DEVICE px; layout measures the 1× sprite instead (see
+    :class:`~saitenka.render.flow.ChipBox`)."""
+    if cs.value is not None:
+        return _draw_two_tone(text, cs, scale)
+    return _draw_plain(text, cs, scale)
