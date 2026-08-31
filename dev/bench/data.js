@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788169764894,
+  "lastUpdate": 1788178590931,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -13819,6 +13819,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 6.721536,
             "range": "3 replicas; min 6.50854; max 7.15162; MAD 0.212992",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "06fc7accb918e4d5937343a1b81cdc317ba15ab1",
+          "message": "Merge pull request #470 from serjflint/docs/jitenmpv-comparison\n\ndocs(comparisons): add JitenMPV, and refresh the rows that shipped since",
+          "timestamp": "2026-08-31T09:46:02Z",
+          "url": "https://github.com/serjflint/saitenka/commit/06fc7accb918e4d5937343a1b81cdc317ba15ab1"
+        },
+        "date": 1788178589323,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 24.089333,
+            "range": "3 replicas; min 22.5773; max 192.931; MAD 1.51199; worst 192.931",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 45.768372,
+            "range": "3 replicas; min 25.0959; max 340.524; MAD 20.6725; worst 340.524",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 9.158656,
+            "range": "3 replicas; min 6.63552; max 9.80582; MAD 0.647168",
             "unit": "MB"
           }
         ]
