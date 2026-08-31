@@ -212,7 +212,7 @@ class Dictionary:
     @property
     def tags(self) -> dict:
         if self._tags is None:
-            rows = self.db._conn().execute(
+            rows = self.db.connection().execute(
                 "SELECT code, name, ord, category, notes FROM tags WHERE dict_id=?", (self.dict_id,)
             )
             self._tags = {
@@ -223,7 +223,7 @@ class Dictionary:
     def kanji_lookup(self, char: str) -> dict | None:
         """The kanji_bank entry for one ideograph, or None."""
         row = (
-            self.db._conn()
+            self.db.connection()
             .execute(
                 "SELECT chr, onyomi, kunyomi, tags, meanings, stats FROM kanji "
                 "WHERE dict_id=? AND chr=?",
@@ -364,7 +364,7 @@ class Dictionary:
     def _fetch(self, form: str, *, wildcard: bool, limit: int) -> list:
         """One SQLite lookup for a single form (the ``dict_sql`` span site). The batched exact path
         (see :meth:`DictionarySet._batch_exact`) bypasses this entirely."""
-        conn = self.db._conn()
+        conn = self.db.connection()
         did = self.dict_id
         with otel_metrics.instrumented(
             otel_metrics.dict_sql_duration_ms,
@@ -698,7 +698,7 @@ class DictionarySet:
         placeholders = ",".join("?" * len(dids))
         rows = (
             self.freqs[0]
-            .db._conn()
+            .db.connection()
             .execute(
                 f"SELECT dict_id, reading, rank FROM term_meta "  # noqa: S608 — only ?-placeholder count interpolated
                 f"WHERE dict_id IN ({placeholders}) AND mode='freq' AND term=?",
@@ -887,7 +887,7 @@ class DictionarySet:
             "FROM keys k JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
             f"WHERE k.dict_id IN ({din}) AND k.key IN ({kin}) ORDER BY e.id"
         )
-        conn = self.dicts[0].db._conn()
+        conn = self.dicts[0].db.connection()
         with otel_metrics.instrumented(
             otel_metrics.dict_sql_duration_ms, "dict_sql", emit_span=_emit_sql_span()
         ):

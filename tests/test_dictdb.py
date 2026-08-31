@@ -53,7 +53,7 @@ def test_import_term_dict_populates_entries_keys_and_meta(tmp_path):
     assert counts["term_meta"] == 0
     # the reading key resolves to the kanji headword, scoped to this dict_id
     hit = (
-        db._conn()
+        db.connection()
         .execute(
             "SELECT e.term FROM keys k JOIN entries e ON k.dict_id=e.dict_id AND k.id=e.id "
             "WHERE k.dict_id=? AND k.key=?",
@@ -96,13 +96,13 @@ def test_import_freq_and_pitch_go_to_term_meta(tmp_path):
     pr = db.import_zip(pz, imported_at=AT)
     assert fr.kind == "freq" and pr.kind == "pitch"
     freq = (
-        db._conn()
+        db.connection()
         .execute("SELECT mode, reading, rank FROM term_meta WHERE dict_id=?", (fr.id,))
         .fetchone()
     )
     assert freq == ("freq", "ほんめい", 8912)
     pitch = (
-        db._conn()
+        db.connection()
         .execute("SELECT mode, reading, positions FROM term_meta WHERE dict_id=?", (pr.id,))
         .fetchone()
     )
@@ -127,7 +127,7 @@ def test_import_pitch_carries_devoice_and_nasal(tmp_path):
     db = DictionaryDb.open(tmp_path / "db.sqlite")
     pr = db.import_zip(pz, imported_at=AT)
     rows = dict(
-        db._conn()
+        db.connection()
         .execute("SELECT reading, positions FROM term_meta WHERE dict_id=?", (pr.id,))
         .fetchall()
     )
@@ -150,7 +150,7 @@ def test_import_kanji_and_tags(tmp_path):
     assert db.dict_counts(row.id)["kanji"] == 1
     assert db.dict_counts(row.id)["tags"] == 1
     k = (
-        db._conn()
+        db.connection()
         .execute(
             "SELECT onyomi, kunyomi, meanings FROM kanji WHERE dict_id=? AND chr=?", (row.id, "猫")
         )
@@ -252,7 +252,7 @@ def test_failed_import_rolls_back(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         db.import_zip(z, imported_at=AT)
     assert db.list_dictionaries() == []  # no half-written dictionary row
-    assert db._conn().execute("SELECT COUNT(*) FROM entries").fetchone()[0] == 0
+    assert db.connection().execute("SELECT COUNT(*) FROM entries").fetchone()[0] == 0
 
 
 def test_import_reports_bank_progress(tmp_path):
@@ -265,11 +265,11 @@ def test_import_reports_bank_progress(tmp_path):
 
 
 def test_readonly_conn_has_mmap_and_cache_pragmas(tmp_path):
-    """DictionaryDb._conn() sets a MODEST PRAGMA mmap_size + cache_size on the read-only per-thread
+    """DictionaryDb.connection() sets a MODEST PRAGMA mmap_size + cache_size on the read-only per-thread
     connections — small enough that N worker connections don't inflate the Windows working set by GiB,
     but still page-cache-backed so cold lookups avoid pread round-trips."""
     db = DictionaryDb.open(tmp_path / "db.sqlite")
-    c = db._conn()
+    c = db.connection()
     assert c.execute("PRAGMA mmap_size").fetchone()[0] == 268435456  # 256 MiB per connection
     assert c.execute("PRAGMA cache_size").fetchone()[0] == -32768  # 32 MiB (negative = KiB units)
 
@@ -281,7 +281,7 @@ def test_term_meta_reading_index_exists(tmp_path):
     db = DictionaryDb.open(tmp_path / "db.sqlite")
     names = {
         row[0]
-        for row in db._conn().execute(
+        for row in db.connection().execute(
             "SELECT name FROM sqlite_master WHERE tbl_name='term_meta' AND type='index'"
         )
     }
@@ -294,16 +294,18 @@ def test_ensure_schema_analyzes_term_meta_once(tmp_path):
     records a meta flag so it doesn't repeat on every open — ANALYZE cost scales with table size."""
     p = tmp_path / "db.sqlite"
     db = DictionaryDb.open(p)
-    assert db._conn().execute("SELECT v FROM meta WHERE k='analyzed'").fetchone() is not None
+    assert db.connection().execute("SELECT v FROM meta WHERE k='analyzed'").fetchone() is not None
     # sqlite_stat1 gets populated by ANALYZE even on an empty table (rows for each index/table).
     stat_rows_after_first_open = (
-        db._conn().execute("SELECT count(*) FROM sqlite_stat1").fetchone()[0]
+        db.connection().execute("SELECT count(*) FROM sqlite_stat1").fetchone()[0]
     )
 
     # Reopening (simulating a later app start) must NOT re-run ANALYZE — verified indirectly: the
     # meta flag stays a single row (INSERT OR REPLACE, not accumulating) and reopen doesn't raise.
     db2 = DictionaryDb.open(p)
-    assert db2._conn().execute("SELECT count(*) FROM meta WHERE k='analyzed'").fetchone()[0] == 1
+    assert (
+        db2.connection().execute("SELECT count(*) FROM meta WHERE k='analyzed'").fetchone()[0] == 1
+    )
     assert stat_rows_after_first_open >= 0  # sanity: the query above didn't error
 
 
@@ -319,14 +321,16 @@ def test_import_freq_or_pitch_reanalyzes_term_meta(tmp_path):
     db = DictionaryDb.open(tmp_path / "db.sqlite")
     db.import_zip(pz, imported_at=AT)
     stat = (
-        db._conn().execute("SELECT count(*) FROM sqlite_stat1 WHERE tbl='term_meta'").fetchone()[0]
+        db.connection()
+        .execute("SELECT count(*) FROM sqlite_stat1 WHERE tbl='term_meta'")
+        .fetchone()[0]
     )
     assert stat > 0  # ANALYZE ran and recorded stats for term_meta's indexes
 
 
 def _ranks(db, dict_id):
     return dict(
-        db._conn()
+        db.connection()
         .execute("SELECT term, rank FROM term_meta WHERE dict_id=? AND mode='freq'", (dict_id,))
         .fetchall()
     )
@@ -364,7 +368,7 @@ def test_occurrence_based_preserves_count_in_display(tmp_path):
     db = DictionaryDb.open(tmp_path / "db.sqlite")
     row = db.import_zip(fz, imported_at=AT)
     rank, disp = (
-        db._conn()
+        db.connection()
         .execute("SELECT rank, disp FROM term_meta WHERE dict_id=? AND term='犬'", (row.id,))
         .fetchone()
     )
@@ -393,7 +397,9 @@ def test_seq_column_exists_but_is_null_by_default(tmp_path):
     z = _term_zip(tmp_path / "d.zip", "Jitendex", [["読む", "よむ", ["to read"]]])
     db = DictionaryDb.open(tmp_path / "db.sqlite")  # default DictDbOptions: persist_seq=False
     row = db.import_zip(z, imported_at=AT)
-    seq = db._conn().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
+    seq = (
+        db.connection().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
+    )
     assert seq is None
 
 
@@ -403,7 +409,9 @@ def test_persist_seq_opt_in_writes_the_bank_seq(tmp_path):
     z = _term_zip(tmp_path / "d.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1 (i+1)
     db = DictionaryDb.open(tmp_path / "db.sqlite", DictDbOptions(persist_seq=True))
     row = db.import_zip(z, imported_at=AT)
-    seq = db._conn().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
+    seq = (
+        db.connection().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
+    )
     assert seq == 1
 
 
@@ -425,8 +433,10 @@ def test_seq_column_added_additively_to_a_pre_255_db(tmp_path):
     conn.close()
 
     db = DictionaryDb.open(p)  # triggers _ensure_schema's additive migration
-    cols = {r[1] for r in db._conn().execute("PRAGMA table_info(entries)")}
+    cols = {r[1] for r in db.connection().execute("PRAGMA table_info(entries)")}
     assert "seq" in cols
     # the pre-existing row survives the migration, with seq defaulting to NULL
-    row = db._conn().execute("SELECT term, seq FROM entries WHERE dict_id=1 AND id=1").fetchone()
+    row = (
+        db.connection().execute("SELECT term, seq FROM entries WHERE dict_id=1 AND id=1").fetchone()
+    )
     assert row == ("猫", None)

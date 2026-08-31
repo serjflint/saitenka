@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import hypothesis.strategies as st
 from hypothesis import given
+from saitenka_dict import FreqDict, JlptDict
 from saitenka_tokenize.japanese import Token
 from saitenka_wordstate import FUNCTION_POS, Scorer, TokenVerdict, mark_n_plus_one
 from saitenka_wordstate.fsrs import KnownSnap
 from saitenka_wordstate.known import KnownWords
 
-from saitenka.app.dict_meta import FreqDict, JlptDict
 from saitenka.app.scoring import Coloring, Palette
 
 PAL = Palette()

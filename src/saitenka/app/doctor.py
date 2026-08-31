@@ -899,7 +899,7 @@ def _dictdb_seq_source_available() -> bool:
     matched = [
         r for r in db.list_dictionaries() if r.title in configured and _looks_like_jmdict(r.title)
     ]
-    conn = db._conn()
+    conn = db.connection()
     return any(
         conn.execute(
             "SELECT 1 FROM entries WHERE dict_id=? AND seq IS NOT NULL LIMIT 1", (r.id,)

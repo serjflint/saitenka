@@ -1,28 +1,20 @@
-"""Views over the dictionary DB's ``term_meta`` rows: JLPT level, frequency rank, pitch accent.
+"""What the application decides *about* the dictionary DB's ``term_meta`` rows.
 
-Frequency and pitch dictionaries are imported into the consolidated
-:class:`~saitenka.app.dictdb.DictionaryDb`, so these classes re-parse nothing at runtime.
-:class:`FreqSource` / :class:`PitchSource` query per lookup (tooltip pills, on demand);
-:class:`FreqDict` / :class:`JlptDict` load a small in-RAM dict once (the per-token coloring hot path).
+The tables themselves are `saitenka-dict`'s (:class:`saitenka_dict.FreqDict` /
+:class:`saitenka_dict.JlptDict`, loaded once for the per-token colouring hot path). What stays here is
+policy the package has no business holding: which JLPT dictionary ships with the tool and where its
+asset lives, plus the two per-lookup tooltip sources.
 
-Split out of ``wordlists``, which held these beside the Anki-known set: two capabilities with nothing
-in common but a filename. These read the DICTIONARY; what is left in ``wordlists`` reads the user's
-COLLECTION. `saitenka-dict` already ships `FrequencySource` / `PronunciationSource` protocols this
-duplicates, so the eventual home of this module is that package, not a word-state one.
-
-The freq-value shapes seen in the wild (all handled at import time in ``dictdb``, and reflected in the
-``term_meta`` columns ``reading`` / ``rank`` / ``disp``):
-  - value form:     ``[term, "freq", {"value": rank, "displayValue": "rank㋕"}]``       (term = kana)
-  - frequency form: ``[term, "freq", {"reading": r, "frequency": rank}]``               (term = word)
-  - JLPT:           ``[term, "freq", {"reading": r, "frequency": {"value": -1, "displayValue": "N5"}}]``
+:class:`FreqSource` / :class:`PitchSource` still query directly because they duplicate
+:meth:`Translator.frequencies_for` / :meth:`~Translator.pronunciations_for` field-for-field but for
+two gaps: ``occurrence_based``, which no package type carries, and :class:`PitchAccent`, an app render
+type. Closing those retires both classes; until then they are the last app-side reads of this file.
 """
 
 from __future__ import annotations
 
 import json
-import math
 import zipfile
-from dataclasses import dataclass
 from datetime import UTC
 from typing import TYPE_CHECKING
 
@@ -32,6 +24,8 @@ from saitenka.resources import asset
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from saitenka_dict import JlptDict
+
     from saitenka.app.dictdb import DictionaryDb, DictRow
 
 
@@ -39,9 +33,6 @@ def bundled_jlpt_zip() -> Path:
     """Where the bundled JLPT dictionary ships. A function, not an import-time constant: resolving the
     asset root when this module is *imported* is the application's layout decided by a library."""
     return asset("wordlists") / "jlpt.zip"
-
-
-_LEVEL_RANK = {"N1": 1, "N2": 2, "N3": 3, "N4": 4, "N5": 5}
 
 
 def ensure_bundled_jlpt(db: DictionaryDb, jlpt_zip: Path | None = None) -> int:
@@ -68,79 +59,11 @@ def ensure_bundled_jlpt(db: DictionaryDb, jlpt_zip: Path | None = None) -> int:
     return row.id
 
 
-@dataclass
-class JlptDict:
-    by_key: dict[str, str]  # term|reading -> level ("N1".."N5"), highest (N1) wins
+def load_jlpt(db: DictionaryDb) -> JlptDict:
+    """The JLPT levels table, importing the bundled dictionary on first use."""
+    from saitenka_dict import JlptDict as _JlptDict
 
-    @classmethod
-    def load(cls, db: DictionaryDb) -> JlptDict:
-        """Load JLPT levels from the bundled dictionary in ``db`` (importing it on first use)."""
-        dict_id = ensure_bundled_jlpt(db)
-        by_key: dict[str, str] = {}
-        for term, reading, disp in db._conn().execute(
-            "SELECT term, reading, disp FROM term_meta WHERE dict_id=? AND mode='freq'", (dict_id,)
-        ):
-            if disp in _LEVEL_RANK:
-                cls._put(by_key, term, disp)
-                cls._put(by_key, reading, disp)
-        return cls(by_key)
-
-    @staticmethod
-    def _put(by_key: dict[str, str], key: str | None, level: str) -> None:
-        if not key:
-            return
-        cur = by_key.get(key)
-        if cur is None or _LEVEL_RANK[level] < _LEVEL_RANK[cur]:
-            by_key[key] = level
-
-    def level(self, *forms: str | None) -> str | None:
-        for f in forms:
-            if f and f in self.by_key:
-                return self.by_key[f]
-        return None
-
-
-@dataclass
-class FreqDict:
-    by_key: dict[str, int]  # term|reading -> rank (lowest/most-frequent wins)
-    title: str = ""
-
-    @classmethod
-    def from_db(cls, db: DictionaryDb, row: DictRow, *, top_x: int | None = None) -> FreqDict:
-        """Load one frequency dictionary's ranks into an in-RAM dict for the coloring hot path.
-
-        ``top_x`` caps the load to ``rank <= top_x`` — the banded scorer can't color a rarer word
-        anyway (``FreqDict.band`` returns ``None`` past its cap), so loading the tail is pure startup
-        cost (JPDBv2: 279k rows, ~10k within the cap → ~3x faster load). ``None`` loads everything, for
-        a consumer that needs the full ranking (e.g. 'single' freq_mode, which colors on any presence)."""
-        by_key: dict[str, int] = {}
-        sql = "SELECT term, reading, rank FROM term_meta WHERE dict_id=? AND mode='freq'"
-        params: tuple[object, ...] = (row.id,)
-        if top_x is not None:
-            sql += " AND rank <= ?"
-            params = (row.id, top_x)
-        for term, reading, rank in db._conn().execute(sql, params):
-            cls._put(by_key, term, rank)
-            cls._put(by_key, reading, rank)
-        return cls(by_key, row.title)
-
-    @staticmethod
-    def _put(by_key: dict[str, int], key: str | None, rank: int | None) -> None:
-        if not key or rank is None or rank <= 0:
-            return
-        cur = by_key.get(key)
-        if cur is None or rank < cur:
-            by_key[key] = rank
-
-    def rank(self, *forms: str | None) -> int | None:
-        ranks = [self.by_key[f] for f in forms if f and f in self.by_key]
-        return min(ranks) if ranks else None
-
-    @staticmethod
-    def band(rank: int, top_x: int = 10000, bands: int = 5) -> int | None:
-        if rank <= 0 or rank > top_x:
-            return None
-        return min(bands, max(1, math.ceil(rank / top_x * bands)))
+    return _JlptDict.from_connection(db.connection(), ensure_bundled_jlpt(db))
 
 
 class FreqSource:
@@ -183,7 +106,7 @@ class FreqSource:
     def display(self, forms, reading: str | None = None) -> str | None:
         """Display string for the first matching form. Prefer entries whose reading matches the
         token's (disambiguates 本命/ほんめい), else fall back to all entries for that term."""
-        conn = self.db._conn()
+        conn = self.db.connection()
         for f in forms:
             if not f:
                 continue
@@ -199,7 +122,7 @@ class FreqSource:
         ``reading`` is given, entries whose reading matches it are preferred (so a multi-reading term
         like 退く scores のく separately from しりぞく for the card tie-breaker), falling back to all
         entries for the term when none match."""
-        conn = self.db._conn()
+        conn = self.db.connection()
         for f in forms:
             if not f:
                 continue
@@ -239,7 +162,7 @@ class PitchSource:
         OR reading (a pitch dict is keyed by both). Each accent is a :class:`PitchAccent` carrying the
         downstep position plus any NHK/Kanjium devoice/nasal mora indices; a plain accent dict stores
         bare ints, normalised here to ``PitchAccent(n)``."""
-        conn = self.db._conn()
+        conn = self.db.connection()
         for f in forms:
             if not f:
                 continue

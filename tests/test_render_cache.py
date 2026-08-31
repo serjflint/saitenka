@@ -714,7 +714,7 @@ def test_popular_terms_ranks_by_frequency_dedupes_and_caps():
                 [(dict_id, "freq", t, r, rk) for t, r, rk in rows],
             )
             conn.commit()
-            return SimpleNamespace(dict_id=dict_id, db=SimpleNamespace(_conn=lambda: conn))
+            return SimpleNamespace(dict_id=dict_id, db=SimpleNamespace(connection=lambda: conn))
 
         ds = SimpleNamespace(
             freqs=[

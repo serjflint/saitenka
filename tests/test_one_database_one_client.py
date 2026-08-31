@@ -95,12 +95,16 @@ def test_a_legacy_database_is_widened_in_place_not_rebuilt(tmp_path):
 
     db = DictionaryDb.open(path)
 
-    entry_columns = {row[1] for row in db._conn().execute("PRAGMA table_info(entries)")}
+    entry_columns = {row[1] for row in db.connection().execute("PRAGMA table_info(entries)")}
     assert {"seq", "rules", "score", "term_tags"} <= entry_columns
     assert {"category", "notes", "score"} <= {
-        row[1] for row in db._conn().execute("PRAGMA table_info(tags)")
+        row[1] for row in db.connection().execute("PRAGMA table_info(tags)")
     }
-    assert db._conn().execute("SELECT term, seq, rules FROM entries").fetchone() == ("猫", None, "")
+    assert db.connection().execute("SELECT term, seq, rules FROM entries").fetchone() == (
+        "猫",
+        None,
+        "",
+    )
 
 
 def test_an_import_keeps_the_yomitan_fields_the_app_used_to_discard(tmp_path):
@@ -111,7 +115,7 @@ def test_an_import_keeps_the_yomitan_fields_the_app_used_to_discard(tmp_path):
     row = db.import_zip(_dictionary_zip(tmp_path / "core.zip"), imported_at=AT)
 
     stored = (
-        db._conn()
+        db.connection()
         .execute("SELECT rules, score, term_tags FROM entries WHERE dict_id=?", (row.id,))
         .fetchone()
     )
@@ -125,7 +129,9 @@ def test_the_seq_column_still_follows_the_app_option(tmp_path, persist_seq, expe
     db = DictionaryDb.open(tmp_path / "db.sqlite", DictDbOptions(persist_seq=persist_seq))
     row = db.import_zip(_dictionary_zip(tmp_path / "core.zip"), imported_at=AT)
 
-    stored = db._conn().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()
+    stored = (
+        db.connection().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()
+    )
     assert stored == (expected,)
 
 
@@ -162,7 +168,7 @@ def test_every_key_lookup_seeks_the_index_rather_than_scanning(tmp_path, query, 
     db.import_zip(_dictionary_zip(tmp_path / "core.zip"), imported_at=AT)
 
     plan = " ".join(
-        str(row[3]) for row in db._conn().execute(f"EXPLAIN QUERY PLAN {query}", params)
+        str(row[3]) for row in db.connection().execute(f"EXPLAIN QUERY PLAN {query}", params)
     )
 
     assert "SEARCH k USING INDEX idx_keys" in plan

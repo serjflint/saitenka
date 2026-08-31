@@ -4,11 +4,11 @@ from pathlib import Path
 
 import dicthelp
 import pytest
+from saitenka_dict import FreqDict
 from saitenka_tokenize.japanese import tokenize
 from saitenka_wordstate import FUNCTION_POS, Scorer, mark_n_plus_one
 from saitenka_wordstate.known import KnownForm, KnownWords
 
-from saitenka.app.dict_meta import FreqDict
 from saitenka.app.scoring import Coloring, Palette
 
 PAL = Palette()

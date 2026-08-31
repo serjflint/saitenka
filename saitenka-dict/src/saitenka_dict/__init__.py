@@ -30,6 +30,7 @@ from saitenka_dict.protocols import (
     SearchSource,
 )
 from saitenka_dict.sqlite_store import SqliteDictionaryStore
+from saitenka_dict.tables import FreqDict, JlptDict
 from saitenka_dict.translator import Translator
 
 __all__ = [
@@ -41,12 +42,14 @@ __all__ = [
     "DictionaryArchiveError",
     "DictionaryDatabase",
     "DictionaryInfo",
+    "FreqDict",
     "Frequency",
     "FrequencySource",
     "Headword",
     "ImportProgress",
     "ImportRequest",
     "Inflection",
+    "JlptDict",
     "KanjiEntry",
     "KanjiQuery",
     "KanjiResult",

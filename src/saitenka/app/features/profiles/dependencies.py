@@ -215,9 +215,8 @@ def _load_fsrs_snapshot(cfg: dict) -> KnownSnap | None:
 
 
 def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
+    from saitenka_dict import FreqDict
     from saitenka_wordstate import FREQ_BAND_TOP_X
-
-    from saitenka.app.dict_meta import FreqDict
 
     with otel_metrics.traced("load_freq_dict"):
         # freq_rows is set iff we resolved dict sources above; the coloring band uses the first freq.
@@ -225,14 +224,17 @@ def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
             freq_rows, _ = db.resolve(freq_titles)
         # Cap at the band's top_x: rarer ranks can't color a word (banded freq_mode), so loading them
         # is ~200ms of dead startup work on a big freq like JPDBv2 — the dep-load critical path.
-        return FreqDict.from_db(db, freq_rows[0], top_x=FREQ_BAND_TOP_X) if freq_rows else None
+        if not freq_rows:
+            return None
+        row = freq_rows[0]
+        return FreqDict.from_connection(db.connection(), row.id, row.title, top_x=FREQ_BAND_TOP_X)
 
 
 def _load_jlpt_dict(db):
-    from saitenka.app.dict_meta import JlptDict
+    from saitenka.app.dict_meta import load_jlpt
 
     with otel_metrics.traced("load_jlpt_dict"):
-        return JlptDict.load(db)
+        return load_jlpt(db)
 
 
 def mining_spec_from_config(

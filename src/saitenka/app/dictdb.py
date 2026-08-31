@@ -223,12 +223,12 @@ class DictionaryDb:
         finally:
             conn.close()
 
-    def _conn(self) -> sqlite3.Connection:
-        """A per-thread read-only connection (mmap'd, roomy page cache) for lookups."""
+    def connection(self) -> sqlite3.Connection:
+        """This thread's read-only connection (mmap'd, roomy page cache) for lookups."""
         return self._reads.get()
 
     def meta_get(self, key: str) -> str | None:
-        row = self._conn().execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()
+        row = self.connection().execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()
         return row[0] if row else None
 
     def meta_set(self, key: str, value: str) -> None:
@@ -279,7 +279,7 @@ class DictionaryDb:
         if not wanted or not self._has_media():
             return {}
         qs = ",".join("?" * len(wanted))
-        cur = self._conn().execute(
+        cur = self.connection().execute(
             f"SELECT path, png FROM media WHERE dict_id=? AND path IN ({qs})",  # noqa: S608  # qs is only ? placeholders; paths are parameterized
             (dict_id, *wanted),
         )
@@ -289,7 +289,7 @@ class DictionaryDb:
         """Whether the media table holds any row — cached for the session. On a default install it stays
         empty, so this short-circuits ``media_for`` to zero per-lookup queries."""
         if self._media_present is None:
-            row = self._conn().execute("SELECT EXISTS(SELECT 1 FROM media)").fetchone()
+            row = self.connection().execute("SELECT EXISTS(SELECT 1 FROM media)").fetchone()
             self._media_present = bool(row[0])
         return self._media_present
 
@@ -305,7 +305,7 @@ class DictionaryDb:
 
     def list_dictionaries(self) -> list[DictRow]:
         """Every imported dictionary, ordered by import_order then id."""
-        rows = self._conn().execute(
+        rows = self.connection().execute(
             "SELECT id, title, kind, import_order, source_name, revision FROM dictionaries "
             "ORDER BY import_order, id"
         )
@@ -323,7 +323,7 @@ class DictionaryDb:
 
     def dict_counts(self, dict_id: int) -> dict[str, int]:
         """Row counts per table for one dictionary — for tests and doctor."""
-        c = self._conn()
+        c = self.connection()
         return {
             t: c.execute(
                 f"SELECT COUNT(*) FROM {t} WHERE dict_id=?",  # noqa: S608  # table name is an internal constant; the value is parameterized with ?
@@ -341,7 +341,7 @@ class DictionaryDb:
         raw = self.meta_get("schema")
         meta = {
             int(r[0]): (r[1] or "", int(r[2] or 0))
-            for r in self._conn().execute(
+            for r in self.connection().execute(
                 "SELECT id, imported_at, schema_version FROM dictionaries"
             )
         }

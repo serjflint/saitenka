@@ -87,7 +87,7 @@ def _popular_terms(ds, limit: int) -> list[tuple[str, str]]:
     sql_limit = limit if limit > 0 else -1  # SQLite LIMIT -1 = no limit
     best: dict[str, tuple[str, int]] = {}
     for fs in ds.freqs:
-        rows = fs.db._conn().execute(
+        rows = fs.db.connection().execute(
             "SELECT term, reading, rank FROM term_meta "
             "WHERE dict_id=? AND mode='freq' AND rank>0 ORDER BY rank LIMIT ?",
             (fs.dict_id, sql_limit),

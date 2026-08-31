@@ -2839,10 +2839,10 @@ def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
 
 def _jlpt_scorer(mapping):
     """The app-side pair, because the pill reads a level from the scorer and a hue from the palette."""
+    from saitenka_dict import JlptDict
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords
 
-    from saitenka.app.dict_meta import JlptDict
     from saitenka.app.scoring import Coloring
 
     return Coloring(Scorer(known=KnownWords.from_set([]), jlpt=JlptDict(dict(mapping))))

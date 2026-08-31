@@ -2,6 +2,7 @@
 
 import pytest
 import util
+from saitenka_dict import FreqDict
 from saitenka_tokenize.japanese import Token
 from saitenka_wordstate import Scorer
 from saitenka_wordstate.fsrs import KnownSnap
@@ -11,7 +12,6 @@ from util import RecordingRasterProvider
 
 import saitenka.app.features.profiles.dependencies as reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
-from saitenka.app.dict_meta import FreqDict
 from saitenka.app.scoring import Coloring, Palette
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import SubtitleRenderer

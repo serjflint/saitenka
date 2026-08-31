@@ -359,7 +359,7 @@ def discover_pathological(db, dict_id: int, n: int = 5) -> list[tuple[str, str, 
     DB — the worst cold-first-paint candidates (longest structured-content JSON = tallest render).
     Returns ``(term, reading, payload_bytes)`` rows, biggest first."""
     rows = (
-        db._conn()
+        db.connection()
         .execute(
             "SELECT term, reading, length(glossary) FROM entries WHERE dict_id=? "
             "ORDER BY length(glossary) DESC LIMIT ?",
