@@ -88,6 +88,13 @@ internal modules with explicit dependency contracts, not independently published
   tooling and is excluded from published artifacts.
 - **`../ankiconnect-client/`** — the application-neutral AnkiConnect transport/retry/protocol client.
   `app/anki.py` retains Saitenka launch policy, telemetry, compatibility exceptions, and note building.
+- **`../saitenka-tokenize/`** — per-language segmentation: surface/lemma/reading/POS plus offsets, the
+  strategy registry a profile selects from, and the kana/kanji predicates. Dictionary attestation
+  reaches it as a callable, so the package ships without a dictionary.
+- **`../saitenka-wordstate/`** — what the learner knows: the Anki-backed known set, its SQLite cache,
+  the FSRS retrievability snapshot, and the per-token `TokenVerdict`. Palette-free by construction;
+  `app/scoring.py` holds the `Palette` and the `Coloring` that pairs the two. Frequency and JLPT
+  arrive as protocols, so reading a collection never means depending on a dictionary.
 - **`../libasslite/`** — an independently versioned experimental PyO3 binding for copied libass image
   layers. It dynamically loads libass 0.17.x and is loaded only by the opt-in subtitle-geometry
   adapter; the default Saitenka package and Pillow path do not require it.
@@ -196,7 +203,8 @@ protocol-shaped class from being mistaken for production swappability.
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
 `render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
-`saitenka-dict`, `ankiconnect-client`, and experimental native add-ons are independently published.
+`saitenka-dict`, `ankiconnect-client`, `saitenka-tokenize`, `saitenka-wordstate`, and experimental
+native add-ons are independently published.
 
 ## Interactive startup and cue annotation
 
