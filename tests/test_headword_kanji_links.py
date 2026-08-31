@@ -11,13 +11,13 @@ import zipfile
 
 import dicthelp
 from driver import Driver
+from saitenka_tokenize.japanese import Token
 from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
-from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry, panel_rows
 from saitenka.render.banded import WindowedPanel
 

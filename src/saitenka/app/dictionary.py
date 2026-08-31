@@ -42,6 +42,8 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
         return []
 
 
+from saitenka_wordstate.fsrs import harmonic_of
+
 from saitenka.app.dict_meta import FreqSource, PitchSource
 from saitenka.app.dictionary_surface import (
     DEINFLECT_FORM_CAP as _DEINFLECT_FORM_CAP,
@@ -74,7 +76,6 @@ from saitenka.app.dictionary_surface import (
 from saitenka.app.dictionary_surface import (
     to_glob as _to_glob,
 )
-from saitenka.app.fsrs import harmonic_of
 from saitenka.app.lookup import CardData, furigana
 from saitenka.fonts import STROKE_ORDER_FONT
 from saitenka.panel import Definition, Entry, EntryGroup, Freq
@@ -109,9 +110,9 @@ if TYPE_CHECKING:
 
     from saitenka_deinflect import Deinflection  # noqa: TID251  # GPL chokepoint (type only)
     from saitenka_dict import LookupSource
+    from saitenka_tokenize.japanese import Token
 
     from saitenka.app.dictdb import DictionaryDb, DictRow
-    from saitenka.app.tokenize import Token
 
 log = logging.getLogger(__name__)
 

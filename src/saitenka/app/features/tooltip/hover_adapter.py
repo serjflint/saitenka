@@ -14,11 +14,12 @@ from saitenka.model import is_ideograph
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.features.profiles.profile_controller import ProfileController
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.subtitle_presentation import CueRenderStore
     from saitenka.app.toast_controller import NotificationSink
-    from saitenka.app.tokenize import Token
 
 
 @dataclass(frozen=True, slots=True)

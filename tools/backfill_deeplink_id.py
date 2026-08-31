@@ -162,8 +162,9 @@ def make_resolver(dict_set: DictionarySet | None) -> Callable[[str, str], str | 
     dict's persisted `seq` first (`DictionarySet.card_for`), else jamdict (`lookup.card_for`). A
     non-JMdict dict's seq never surfaces as an id (the `_looks_like_jmdict` gate lives inside
     `card_for`), so it's never duplicated here."""
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app import lookup
-    from saitenka.app.tokenize import Token
 
     def resolve(term: str, reading: str) -> str | None:
         if not term:

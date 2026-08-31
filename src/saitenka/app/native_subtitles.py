@@ -42,10 +42,11 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import SupportsFloat
 
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.token_cache import TokenizedCue
-    from saitenka.app.tokenize import Token
     from saitenka.subtitles import Cue, CueIndex
     from saitenka.subtitles.ass_geometry import PreparedAssFrame
     from saitenka.subtitles.geometry import GeometrySnapshot

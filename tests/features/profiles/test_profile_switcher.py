@@ -10,13 +10,15 @@ for a real subprocess/socket/filesystem — none touched here; mirrors test_toke
 from __future__ import annotations
 
 import pytest
+from saitenka_tokenize.japanese import Token
+from saitenka_tokenize.languages import MAIN_LANG, ReaderLanguages
+from saitenka_tokenize.registry import register_tokenizer
 from session_builder import TestSession, build_session
 from util import FakeIPC, keybind_registry, press, session_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.profiles.profile_controller import ProfileSwitchStatus
-from saitenka.app.languages import MAIN_LANG, ReaderLanguages
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
 from saitenka.app.session.factory import (
     SessionIdentity,
@@ -25,8 +27,6 @@ from saitenka.app.session.factory import (
 )
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.tokenize import Token
-from saitenka.app.tokenizer import register_tokenizer
 from saitenka.runtime.events import SubtitleSecondaryLeased
 from saitenka.subtitles import CueIndex, parse_srt
 
@@ -78,7 +78,7 @@ class _TaggedTokenizer(_MinimalTokenizer):
 
 @pytest.fixture
 def _restore_tokenizer_registry():
-    import saitenka.app.tokenizer as mod
+    import saitenka_tokenize.registry as mod
 
     saved = dict(mod._FACTORIES)
     yield

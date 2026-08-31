@@ -35,11 +35,12 @@ from saitenka.app.media import animated_screenshot, clip_audio, current_timespan
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from saitenka_tokenize.japanese import Token
+    from saitenka_tokenize.registry import Tokenizer
+
     from saitenka.app.anki import Anki, MineConfig
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.features.mining.mined_store import MinedCardStore
-    from saitenka.app.tokenize import Token
-    from saitenka.app.tokenizer import Tokenizer
 
 log = logging.getLogger(__name__)
 

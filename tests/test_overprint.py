@@ -82,8 +82,9 @@ def test_every_drawable_token_gets_its_own_event() -> None:
 
 
 def draw_request(*, styles, boxes):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitle_render import DrawRequest
-    from saitenka.app.tokenize import Token
 
     surfaces = ["猫", "を", "見る"]
     tokens = [Token(s, s, s, "名詞", i, i + 1) for i, s in enumerate(surfaces)]

@@ -426,11 +426,11 @@ def _nested_reader(*, two_words: bool = False):
     scrollable entry — the fixture the nested-popup blit/scroll/crisp tests drive. Prefetch is on so
     scroll records render-ahead; the tests decide when to drain it (the 'worker'). ``two_words`` gives
     the base and the nested view DISTINCT words → distinct panels, so warming one can't warm the other."""
+    from saitenka_tokenize.japanese import Token
     from util import FakeIPC
 
     from saitenka.app.subtitle_render import NullRenderer
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     submitter = _DeferredRenderSubmitter()
     r = build_session(

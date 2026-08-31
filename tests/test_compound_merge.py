@@ -10,14 +10,15 @@ imported dictionary at the bottom.
 from __future__ import annotations
 
 import dicthelp
+from saitenka_tokenize.japanese import Token, merge_dict_compounds, tokenize
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 from session_builder import build_session
 from util import FakeIPC
 
-from saitenka.app.scoring import Palette, Scorer
+from saitenka.app.scoring import Coloring, Palette
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.tokenize import Token, merge_dict_compounds, tokenize
-from saitenka.app.wordlists import KnownWords
 
 
 def _at(
@@ -189,7 +190,7 @@ def test_merged_compound_is_coloured_as_one_unit():
     # 満員電車: 満員 is a known word, 電車 is not. Once merged, the COMPOUND's own known-state drives the
     # single colour — it is not painted from either fragment (issue #94's coloring guardrail vs #20/#26).
     toks = merge_dict_compounds([_at("満員", 0), _at("電車", 2)], _exists("満員電車"))
-    scorer = Scorer(known=KnownWords.from_set(["満員"]), enable_freq=False)
+    scorer = Coloring(Scorer(known=KnownWords.from_set(["満員"]), enable_freq=False))
     styles = scorer.score_line(toks)
     assert len(styles) == 1  # one token → one style, not two fragment colours
     assert styles[0].color == Palette().base  # 満員電車 (not 満員) is the lookup key → not "known"

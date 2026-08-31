@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from saitenka.app.features.profiles.profile_session import ProfileSession
     from saitenka.app.features.tooltip.tooltip_controller import TooltipRuntimeJobs
     from saitenka.app.profiles import Profile
-    from saitenka.app.scoring import Scorer
+    from saitenka.app.scoring import Coloring
     from saitenka.app.session.close_ledger import CloseLedger
     from saitenka.app.session.controller import SessionController
     from saitenka.app.session.graph import SessionGraph
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class SessionServices:
-    scorer: Scorer | None = None
+    scorer: Coloring | None = None
     anki: object | None = None
     mining: object | None = None
     dictionaries: object | None = None

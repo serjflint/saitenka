@@ -88,7 +88,7 @@ content dictionary can be swapped in behind it later without touching the render
 
 `app/scoring.py` colors each subtitle word: **N+1 > forgotten > mature-known > learning > young >
 frequency-band > base** text color, plus a JLPT-level **underline**. Known words come from Anki
-(`app/wordlists.py::KnownWords.from_ankiconnect`, decks→fields like SubMiner) or a static set. An
+(`saitenka_wordstate.KnownWords.from_ankiconnect`, decks→fields like SubMiner) or a static set. An
 optional `[fsrs]` path to a copied `collection.anki2` refines that binary set; Saitenka never opens the
 live Anki database. Learning and young colors are configurable under `[palette]`;
 `overlay.example.toml` owns the settings and defaults. Frequency comes from a user-supplied Yomitan
@@ -117,7 +117,7 @@ Japanese, immediately falls back to English when needed, then tries configured p
 background: Jimaku first, followed by opt-in TsukiHime. Fetched Japanese is added without switching
 tracks; configurable `Ctrl+Shift+T` retries that chain for the current media. Amazon-style **inline
 furigana** baked into ASS (`龍門光英りゅうもんみつひで`) is stripped
-before tokenizing (`app/tokenize.py::strip_inline_furigana`).
+before tokenizing (`saitenka_tokenize.strip_inline_furigana`).
 
 ```bash
 # real anime with an embedded JP track + your real Anki known-set (FSRS deck):

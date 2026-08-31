@@ -54,7 +54,8 @@ def _proc_init():
 def _render(tok_fields: tuple[str, str, str, str]) -> int:
     """Render one word's full panel; returns its height. ``entry_for`` (lookup+decode, ~1% of cost) is
     inside the timed loop here so a ProcessPool worker does self-contained work over a shareable tuple."""
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.panel import LazyPanel, panel_rows
 
     assert _ds is not None, "worker not initialised"

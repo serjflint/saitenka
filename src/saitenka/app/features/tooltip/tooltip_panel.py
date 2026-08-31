@@ -19,9 +19,10 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
+from saitenka_wordstate.fsrs import rareness_band
+
 from saitenka import otel_metrics
 from saitenka.app.features.tooltip.popups import Panel, PanelCache, PopupView, TipPorts
-from saitenka.app.fsrs import rareness_band
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.panel import Freq, panel_rows
@@ -30,8 +31,9 @@ from saitenka.runtime import events, hover
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from saitenka_tokenize.registry import Tokenizer
+
     from saitenka.app.features.tooltip.popups import TooltipState
-    from saitenka.app.tokenizer import Tokenizer
     from saitenka.render.layout_backend import LayoutBackend
 
 TIP_GAP = 12  # px between an anchored popup and the word it points at
@@ -139,22 +141,23 @@ def _darken(rgba, f: float = JLPT_DARKEN):
     return (round(r * f), round(g * f), round(b * f), a)
 
 
-def jlpt_pill(tok, scorer) -> Freq | None:
+def jlpt_pill(tok, coloring) -> Freq | None:
     """A ``JLPT | Nx`` pill for the tooltip's frequency row, shown only when the word has a JLPT
     level — the same signal the subtitle draws as an underline. The pill's hue is the level's
     underline color (darkened for legible white text), so the tooltip and the underline read as the
     same thing.
 
-    The level comes from the scorer's verdict, which is where the content-POS gate lives. Asking the
-    JLPT map directly needed a second copy of that gate here, and without it a particle (は, ね) whose
-    bare-kana reading collides with an N1 word's reading was labelled N1.
+    The level comes from the verdict, which is where the content-POS gate lives. Asking the JLPT map
+    directly needed a second copy of that gate here, and without it a particle (は, ね) whose bare-kana
+    reading collides with an N1 word's reading was labelled N1. Takes the `Coloring` pair rather than
+    a `Scorer`, because the hue is the palette's and the level is the scorer's.
     """
-    if scorer is None:
+    if coloring is None:
         return None
-    level = scorer.verdict(tok).jlpt
+    level = coloring.verdict(tok).jlpt
     if not level:
         return None
-    return Freq("JLPT", level, _darken(scorer.palette.jlpt.get(level, (96, 125, 175, 255))))
+    return Freq("JLPT", level, _darken(coloring.palette.jlpt.get(level, (96, 125, 175, 255))))
 
 
 # green (common) → amber (uncommon) → red (rare); the green matches the per-source freq pills.

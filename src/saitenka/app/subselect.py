@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saitenka.app.languages import MAIN_LANG, SECOND_LANG
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
+
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_modes import (
     has_track_for_slang,

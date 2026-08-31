@@ -6,9 +6,10 @@ the token surfaces / offsets / POS kinds and the two predicates every reader cal
 
 from __future__ import annotations
 
+from saitenka_tokenize.latin import WORD, LatinTokenizer
+from saitenka_tokenize.registry import get_tokenizer
+
 from saitenka.app.profiles import default_tokenizer_for
-from saitenka.app.tokenizer import get_tokenizer
-from saitenka.app.tokenizer_latin import WORD, LatinTokenizer
 
 
 def _surfaces(line: str) -> list[str]:

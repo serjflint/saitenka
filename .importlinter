@@ -1,6 +1,8 @@
 [importlinter]
 root_packages =
     saitenka
+    saitenka_tokenize
+    saitenka_wordstate
 include_external_packages = True
 exclude_type_checking_imports = True
 
@@ -25,7 +27,7 @@ ancestors =
 # #30, draw.chip->render.layout (chip moved into render/, since it consumes layout), dictdb<->yomitan_import
 # and dictdb<->wordlists (the pure zip-parse helpers classify_zip/read_json_bank/_title_of extracted to the
 # leaf app/bankreader.py), doctor/report<->crashlog (crash_dir() moved to the leaf app/paths.py), and
-# controller<->miner (miner imports SKIP_POS from its real home app/tokenize, not controller).
+# controller<->miner (miner imports SKIP_POS from the tokenizer, not controller).
 # No ignore_imports — the contract is exhaustive. Never add one; only sever edges.
 
 [importlinter:contract:layers]
@@ -145,35 +147,37 @@ source_modules =
 forbidden_modules =
     libasslite
 
-[importlinter:contract:word-state-owes-nothing-to-presentation]
-name = The word-state layer never reaches for the panel or the renderer
+[importlinter:contract:tokenize-package-is-independent]
+name = The tokenize package never imports the application it was extracted from
 type = forbidden
-# fsrs.diff_pill built a panel.Freq — a runtime edge from the lowest layer we want to package to one
-# of the highest, invisible to the layering contract because the import was function-local. scoring
-# was the same defect in RGBA form. Both are severed; this is what stops either coming back.
+# The retirement criterion, as a gate: A is retired when no tokenization behaviour is reachable from
+# `saitenka` except through this package, and the package owes `saitenka` nothing back.
 source_modules =
-    saitenka.app.fsrs
-    saitenka.app.scoring
-    saitenka.app.wordlists
-    saitenka.app.known_cache
-    saitenka.app.tokenize
+    saitenka_tokenize
 forbidden_modules =
-    saitenka.panel
-    saitenka.render
-    saitenka.draw
-    saitenka.raster
+    saitenka
+
+[importlinter:contract:word-state-package-is-independent]
+name = The word-state package never imports the application it was extracted from
+type = forbidden
+# The retirement criterion as a gate, and the severance too: fsrs.diff_pill built a panel.Freq and
+# the Scorer held a Palette, so this edge used to exist in two places. A palette import would fail
+# here even function-locally, which is the form the layering contract could never see.
+source_modules =
+    saitenka_wordstate
+forbidden_modules =
+    saitenka
 
 [importlinter:contract:word-state-reads-no-dictionary]
-name = The known-word set does not read the dictionary database
+name = The word-state package does not read a dictionary
 type = forbidden
-# wordlists was two capabilities in one file, split by data source: term_meta views (now dict_meta)
-# and the user's collection. This pins the split so the halves cannot re-fuse.
+# wordlists was two capabilities in one file, split by data source: term_meta views (app.dict_meta)
+# and the user's collection (this package). Frequency and JLPT arrive as protocols, so a concrete
+# table would be a dependency inversion, not a convenience.
 source_modules =
-    saitenka.app.wordlists
+    saitenka_wordstate
 forbidden_modules =
-    saitenka.app.dictdb
-    saitenka.app.dict_meta
-    saitenka.app.dictionary
+    saitenka_dict
 
 [importlinter:contract:runtime-core-independent]
 name = Runtime core never imports app or mpv adapters

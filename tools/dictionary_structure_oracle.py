@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from saitenka_dict import SqliteDictionaryStore, TermQuery, TermResultMode, Translator
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.dictdb import default_db_path
 from saitenka.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
-from saitenka.app.tokenize import Token
 from saitenka.model import Style
 from saitenka.render.sc_adapter import walk
 

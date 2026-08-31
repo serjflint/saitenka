@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import SECOND_LANG
+
 from saitenka.app import subtitle_modes
-from saitenka.app.languages import SECOND_LANG
 
 if TYPE_CHECKING:
     from collections.abc import Callable

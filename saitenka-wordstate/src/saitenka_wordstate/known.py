@@ -2,8 +2,8 @@
 
 Built either from AnkiConnect (mirroring SubMiner's decks→fields config) or from the persistent
 SQLite cache, and matched reading-aware so a same-spelling homograph does not inherit a state it was
-never taught. The dictionary-side views this used to sit beside now live in
-:mod:`saitenka.app.dict_meta`.
+never taught. The AnkiConnect client is injected: this package decides what a known word IS, never
+where to reach for one.
 """
 
 from __future__ import annotations
@@ -12,11 +12,19 @@ import hashlib
 import json
 import logging
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass
 from itertools import starmap
+from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app.known_cache import KnownCacheUpdate, known_cache_for
-from saitenka.app.tokenize import has_kanji, kata_to_hira
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
+    from ankiconnect_client import AnkiConnectClient
+
+from saitenka_tokenize import has_kanji, kata_to_hira
+
+from saitenka_wordstate.cache import KnownCacheUpdate, known_cache_for
 
 log = logging.getLogger(__name__)
 
@@ -72,13 +80,15 @@ def _known_signature(decks: dict[str, list[str]]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def _ankiconnect(host: str, action: str, **params):
-    """One AnkiConnect JSON-RPC call for the known-word coloring path — no retry, otel-traced (the
-    IO/parse spans settle the IO-vs-CPU budget). Routes through the single :class:`Anki` client (SSOT),
-    so auth (the apiKey this used to silently drop) and error handling live in one place."""
-    from saitenka.app.anki import Anki
+class Trace(Protocol):
+    """A span factory. The consumer passes one to keep its telemetry; the default records nothing, so
+    this package does not depend on an observability stack to be usable."""
 
-    return Anki(host)._call(action, timeout=10, attempts=1, trace=True, **params)
+    def __call__(self, name: str, **attrs: str) -> AbstractContextManager[object]: ...
+
+
+def _no_trace(name: str, **attrs: str) -> AbstractContextManager[object]:  # noqa: ARG001
+    return nullcontext()
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,8 +225,10 @@ class KnownWords:
     def from_ankiconnect(
         cls,
         decks: dict[str, list[str]],
-        host: str = "http://127.0.0.1:8765",
+        client: AnkiConnectClient,
         reading_fields=_READING_FIELDS,
+        *,
+        trace: Trace = _no_trace,
     ) -> KnownWords:
         """Build the known set from Anki notes, mirroring SubMiner's decks→fields config. Requested
         fields that don't exist on a note are skipped; furigana fields yield both surface and reading.
@@ -225,47 +237,50 @@ class KnownWords:
         chunking over threads was a net loss). This is the un-cached full load; :func:`refresh_known_cache`
         is the cache-aware path that only re-fetches changed notes. Traced in three stages
         (``anki_http_call`` IO / ``anki_json_parse`` CPU / ``anki_known_extract`` CPU)."""
-        from saitenka import otel_metrics
-
         forms: list[KnownForm] = []
         for deck, fields in decks.items():
-            ids = _ankiconnect(host, "findNotes", query=f'deck:"{deck}"') or []
+            ids = client.find_notes(f'deck:"{deck}"')
             if not ids:
                 continue
-            notes = _ankiconnect(host, "notesInfo", notes=ids) or []
-            with otel_metrics.traced("anki_known_extract", deck=deck, notes=str(len(notes))):
+            notes = client.notes_info(ids)
+            with trace("anki_known_extract", deck=deck, notes=str(len(notes))):
                 for note in notes:
                     forms.extend(_extract_forms(note, fields, reading_fields))
         return cls.from_forms(forms)
 
 
 def _fetch_forms(
-    host: str, deck: str, ids: list[int], fields, reading_fields
+    client: AnkiConnectClient, deck: str, ids: list[int], fields, reading_fields, trace: Trace
 ) -> dict[int, list[KnownForm]]:
     """``{note_id: [KnownForm]}`` for a subset of note ids — the only heavy (``notesInfo``) call, made
     solely for the changed notes the diff selected."""
-    from saitenka import otel_metrics
-
-    notes = _ankiconnect(host, "notesInfo", notes=ids) or []
-    with otel_metrics.traced("anki_known_extract", deck=deck, notes=str(len(notes))):
+    notes = client.notes_info(ids)
+    with trace("anki_known_extract", deck=deck, notes=str(len(notes))):
         return {n["noteId"]: _extract_forms(n, fields, reading_fields) for n in notes}
 
 
 def _refresh_deck(
-    store: object, deck: str, fields, host: str, reading_fields, *, force_full: bool
+    store: object,
+    deck: str,
+    fields,
+    client: AnkiConnectClient,
+    reading_fields,
+    trace: Trace,
+    *,
+    force_full: bool,
 ) -> list[KnownForm]:
     """Reconcile one deck's cache against Anki by note mod-time, re-fetching only changed notes, and
     return its :class:`KnownForm`s. ``force_full`` (empty/stale cache) treats every note as changed, so
     no old-format cached payload is ever read back."""
     cache = known_cache_for(store)
     cached = cache.read([deck])[deck]  # {note_id: (mod, [[surface, reading]])}
-    ids = _ankiconnect(host, "findNotes", query=f'deck:"{deck}"') or []
-    mods = {n["noteId"]: n["mod"] for n in (_ankiconnect(host, "notesModTime", notes=ids) or [])}
+    ids = client.find_notes(f'deck:"{deck}"')
+    mods = {n["noteId"]: n["mod"] for n in client.notes_mod_time(ids)}
     changed = (
         ids if force_full else [i for i in ids if mods.get(i) != (cached.get(i) or (None,))[0]]
     )
     deleted = [i for i in cached if i not in mods]
-    fetched = _fetch_forms(host, deck, changed, fields, reading_fields) if changed else {}
+    fetched = _fetch_forms(client, deck, changed, fields, reading_fields, trace) if changed else {}
     cache.write(
         KnownCacheUpdate(
             deck,
@@ -291,8 +306,10 @@ def _merge_forms(ids, fetched, cached) -> list[KnownForm]:
 def refresh_known_cache(
     store: object,
     decks: dict[str, list[str]],
-    host: str = "http://127.0.0.1:8765",
+    client: AnkiConnectClient,
     reading_fields=_READING_FIELDS,
+    *,
+    trace: Trace = _no_trace,
 ) -> KnownWords:
     """Cache-aware known-set load: per deck, diff against the SQLite cache by mod-time and re-fetch only
     the changed subset (a full fetch when the cache is empty or the config signature changed), update the
@@ -303,7 +320,7 @@ def refresh_known_cache(
     forms: list[KnownForm] = []
     for deck, fields in decks.items():
         forms.extend(
-            _refresh_deck(cache, deck, fields, host, reading_fields, force_full=force_full)
+            _refresh_deck(cache, deck, fields, client, reading_fields, trace, force_full=force_full)
         )
     cache.set_metadata(_KNOWN_SIG_KEY, sig)
     return KnownWords.from_forms(forms)

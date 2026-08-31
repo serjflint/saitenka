@@ -95,8 +95,9 @@ def test_a_panel_build_needs_no_host() -> None:
     changing underneath it — the same reason `DrawRequest` is frozen. That it constructs at all with
     no SessionController in scope is the assertion.
     """
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.features.tooltip.tooltip_panel import PanelKey, PanelStyle, _build_panel
-    from saitenka.app.tokenize import Token
     from saitenka.panel import Definition, Entry
 
     class _DictSet:

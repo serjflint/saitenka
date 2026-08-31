@@ -11,13 +11,13 @@ from __future__ import annotations
 import threading
 
 import pytest
+from saitenka_tokenize.japanese import Token
 from session_builder import TestSession, build_session
 from util import FakeIPC, RecordingRasterProvider
 
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue
-from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
 

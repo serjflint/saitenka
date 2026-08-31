@@ -9,9 +9,9 @@ the chain is computed from the token's surface→lemma, independent of dictionar
 from __future__ import annotations
 
 import pytest
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.dictionary import DictionarySet
-from saitenka.app.tokenize import Token
 
 pytest.importorskip("saitenka_deinflect")  # chain is empty without the GPL add-on; skip if absent
 

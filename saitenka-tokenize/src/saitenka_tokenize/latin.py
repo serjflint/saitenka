@@ -27,7 +27,7 @@ from __future__ import annotations
 import unicodedata
 from typing import TYPE_CHECKING
 
-from saitenka.app.tokenize import Token
+from saitenka_tokenize.japanese import Token
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

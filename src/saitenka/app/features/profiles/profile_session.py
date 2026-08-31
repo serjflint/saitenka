@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.lifecycle_timers import LifecycleTimers
     from saitenka.app.profiles import Profile
-    from saitenka.app.scoring import Scorer
+    from saitenka.app.scoring import Coloring
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +51,7 @@ class ProfileSession:
         assembly: ProfileSessionAssembly,
         *,
         identity,
-        scorer: Scorer | None,
+        scorer: Coloring | None,
     ) -> None:
         self.profile = assembly.profile
         self._mining = assembly.mining
@@ -67,7 +67,7 @@ class ProfileSession:
         self._runtime_announced = False
 
     @property
-    def scorer(self) -> Scorer | None:
+    def scorer(self) -> Coloring | None:
         return self._scorer
 
     @property

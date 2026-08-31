@@ -13,9 +13,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
+
 from saitenka.app import paths
 from saitenka.app.continuity import episode_identity
-from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.sqlite_pool import close_when_collected, open_owner_connection
 
 if TYPE_CHECKING:

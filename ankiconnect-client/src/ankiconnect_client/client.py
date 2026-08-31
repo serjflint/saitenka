@@ -91,6 +91,11 @@ class AnkiConnectClient:
     def find_notes(self, query: str) -> list[int]:
         return list(self.call("findNotes", query=query) or [])
 
+    def notes_mod_time(self, ids: list[int]) -> list[dict[str, Any]]:
+        """`[{"noteId": …, "mod": …}]` — the cheap call a cache diff needs, so reconciling a deck
+        does not have to fetch every note's fields to learn which ones changed."""
+        return self.call("notesModTime", notes=ids) or []
+
     def notes_info(self, ids: list[int]) -> list[dict[str, Any]]:
         return list(self.call("notesInfo", notes=ids) or [])
 

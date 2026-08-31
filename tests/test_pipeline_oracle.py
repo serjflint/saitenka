@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import pytest
 from dicthelp import AT, db, term_zip
+from saitenka_tokenize.languages import MAIN_LANG
 from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.features.tooltip.tooltip import entry_for_tok, resolve_hover
-from saitenka.app.languages import MAIN_LANG
 from saitenka.app.launch.run import RunDepsRequest, _build_run_deps
 from saitenka.app.profiles import resolve_launch_identity
 from saitenka.app.session.factory import SessionIdentity, SessionServices

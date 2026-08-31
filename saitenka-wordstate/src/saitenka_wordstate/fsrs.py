@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from saitenka.app.tokenize import has_kanji, kata_to_hira
+from saitenka_tokenize import has_kanji, kata_to_hira
 
 log = logging.getLogger(__name__)
 
@@ -40,9 +40,8 @@ FORGOTTEN_R = 0.85
 # Mature interval (days): cards with ivl ≥ this are "known", below = "young".
 MATURE_IVL = 21
 
-# Rareness bands for the blended "diff" pill, by harmonic-mean rank. Cutoffs align with the scorer's
-# FREQ_BAND_TOP_X (10k): ≤10k common, ≤30k uncommon, else rare. The blend skews higher than any single
-# dict when a word is missing from the big-corpus lists, so "rare" sits at 30k, not 20k — tune here.
+# The blend skews higher than any single dictionary when a word is missing from the big-corpus lists,
+# so "rare" sits at 30k rather than tracking FREQ_BAND_TOP_X's 10k on both sides.
 RARENESS_COMMON_MAX = 10_000
 RARENESS_UNCOMMON_MAX = 30_000
 

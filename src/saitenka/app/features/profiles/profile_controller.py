@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.registry import Tokenizer, get_tokenizer
+
 from saitenka import fonts
 from saitenka.app.profiles import (
     DEFAULT_PROFILE,
@@ -13,13 +15,13 @@ from saitenka.app.profiles import (
     effective_slang,
     primary_font_for,
 )
-from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from saitenka_tokenize.languages import ReaderLanguages
+
     from saitenka.app.dictionary import DictionarySet
-    from saitenka.app.languages import ReaderLanguages
 
 
 @dataclass(frozen=True, slots=True)

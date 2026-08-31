@@ -5,6 +5,7 @@ import zipfile
 
 import dicthelp
 import pytest
+from saitenka_tokenize.japanese import Token, tokenize
 
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import (
@@ -17,7 +18,6 @@ from saitenka.app.dictionary import (
     _short_freq_name,
     split_existing,
 )
-from saitenka.app.tokenize import Token, tokenize
 
 
 def test_short_freq_name_strips_saitenka_prefix():

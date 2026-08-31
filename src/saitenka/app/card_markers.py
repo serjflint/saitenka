@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app.tokenize import is_kana
+from saitenka_tokenize.japanese import is_kana
 
 if TYPE_CHECKING:
     from collections.abc import Callable

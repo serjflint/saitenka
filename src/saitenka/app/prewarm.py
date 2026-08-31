@@ -21,13 +21,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.japanese import Token
+
 from saitenka.app.features.tooltip import prefetch, tooltip_panel
 from saitenka.app.features.tooltip.preparation import (
     PersistentHeadCache,
     TooltipPreparationConfig,
     TooltipPreparationInputs,
 )
-from saitenka.app.tokenize import Token
 from saitenka.mask_atlas import REFERENCE_SCALE
 
 if TYPE_CHECKING:
@@ -111,9 +112,10 @@ class _HeadlessTooltipPreparation:
         *,
         render_cache_on: bool,
     ) -> None:
+        from saitenka_tokenize.registry import get_tokenizer
+
         from saitenka.app.config import TooltipOptions
         from saitenka.app.features.tooltip.popups import PanelCache
-        from saitenka.app.tokenizer import get_tokenizer
         from saitenka.render.layout_backend import backend_label, resolve_backend
 
         options = TooltipOptions(render_cache=render_cache_on)

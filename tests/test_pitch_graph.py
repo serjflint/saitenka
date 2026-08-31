@@ -98,8 +98,8 @@ def test_entry_carries_pitch_accents(tmp_path):
     import zipfile as _zf
 
     import dicthelp
+    from saitenka_tokenize.japanese import Token
 
-    from saitenka.app.tokenize import Token
     from saitenka.model import PitchAccent
 
     dz = tmp_path / "d.zip"

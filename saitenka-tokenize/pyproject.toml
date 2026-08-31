@@ -1,0 +1,22 @@
+[project]
+name = "saitenka-tokenize"
+version = "0.1.0"
+description = "Per-language tokenization: segmentation, lemmas, readings, and dictionary-attested merging"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "fugashi>=1.5.2",
+    "unidic-lite>=1.0.8",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

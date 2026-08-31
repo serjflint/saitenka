@@ -13,8 +13,8 @@ from saitenka_deinflect import (  # noqa: TID251  # property tests exercise the 
     deinflect,
     inflection_chain,
 )
+from saitenka_tokenize.japanese import Token, has_kanji, merge_inflected, strip_inline_furigana
 
-from saitenka.app.tokenize import Token, has_kanji, merge_inflected, strip_inline_furigana
 from saitenka.model import Span, Style
 from saitenka.render.flow import build_items, ruby, wrap_items
 

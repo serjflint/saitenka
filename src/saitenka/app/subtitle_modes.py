@@ -6,7 +6,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app.languages import MAIN_LANG, Language
+from saitenka_tokenize.languages import MAIN_LANG, Language
+
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 from saitenka.app.subtitle_selection import (

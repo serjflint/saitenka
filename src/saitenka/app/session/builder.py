@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.lifecycle_timers import LifecycleTimers
     from saitenka.app.profiles import Profile
-    from saitenka.app.scoring import Scorer
+    from saitenka.app.scoring import Coloring
     from saitenka.app.session.assembly import SessionAssembly
     from saitenka.app.session.interaction_adapter import InteractionCommandCoordinator
     from saitenka.app.subtitle_presentation import CueRenderStore
@@ -261,7 +261,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     assembly: SessionAssembly,
     options: ReaderOptions,
     *,
-    scorer: Scorer | None = None,
+    scorer: Coloring | None = None,
     anki=None,
     mine_cfg=None,
     dict_set=None,

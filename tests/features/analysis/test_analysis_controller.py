@@ -3,6 +3,8 @@
 import threading
 
 import pytest
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 from session_builder import TestSession, build_session
 from util import FakeIPC, await_ready, drain_for, session_gateway
 
@@ -11,9 +13,8 @@ from saitenka.app.features.analysis import analysis_controller
 from saitenka.app.features.analysis.episode_analysis import cue_result
 from saitenka.app.features.profiles.dependencies import DependencyBundle
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.scoring import Scorer
+from saitenka.app.scoring import Coloring
 from saitenka.app.session.factory import SessionServices
-from saitenka.app.wordlists import KnownWords
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime.events import (
     SubtitleLanguageChanged,
@@ -28,7 +29,7 @@ def reader():
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
     reader = build_session(
-        ipc, services=SessionServices(scorer=Scorer(known=KnownWords.from_set(["本"])))
+        ipc, services=SessionServices(scorer=Coloring(Scorer(known=KnownWords.from_set(["本"]))))
     )
     reader.graph.track_commands.declare(SubtitleStartupConfigured(1, None, "jp", "ja,jpn,jp"))
     reader.graph.track_commands.navigation.current.sub_index = CueIndex(
@@ -240,7 +241,7 @@ def test_close_preserves_completed_analysis_for_the_session_summary():
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
     reader = build_session(
-        ipc, services=SessionServices(scorer=Scorer(known=KnownWords.from_set(["本"])))
+        ipc, services=SessionServices(scorer=Coloring(Scorer(known=KnownWords.from_set(["本"]))))
     )
     result = None
     try:

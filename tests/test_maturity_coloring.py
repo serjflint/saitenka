@@ -2,18 +2,19 @@
 
 import pytest
 import util
+from saitenka_tokenize.japanese import Token
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.fsrs import KnownSnap
+from saitenka_wordstate.known import KnownWords
 from session_builder import build_session
 from util import RecordingRasterProvider
 
 import saitenka.app.features.profiles.dependencies as reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
 from saitenka.app.dict_meta import FreqDict
-from saitenka.app.fsrs import KnownSnap
-from saitenka.app.scoring import Palette, Scorer
+from saitenka.app.scoring import Coloring, Palette
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import SubtitleRenderer
-from saitenka.app.tokenize import Token
-from saitenka.app.wordlists import KnownWords
 
 
 def _token(surface: str = "本") -> Token:
@@ -38,14 +39,18 @@ def test_fsrs_state_has_configurable_style_and_precedes_frequency(state, tag, co
         forgotten=(10, 11, 12, 255),
         freq_single=(13, 14, 15, 255),
     )
-    scorer = Scorer(
-        known=KnownWords.from_set(["本"]),
-        freq=FreqDict({"本": 1}, "test"),
-        palette=palette,
-        fsrs_snap=KnownSnap.of({"本": state}),
-        enable_n_plus_one=False,
-        enable_jlpt=False,
-        freq_mode="single",
+    scorer = Coloring(
+        Coloring(
+            Scorer(
+                known=KnownWords.from_set(["本"]),
+                freq=FreqDict({"本": 1}, "test"),
+                fsrs_snap=KnownSnap.of({"本": state}),
+                enable_n_plus_one=False,
+                enable_jlpt=False,
+                freq_mode="single",
+            )
+        ),
+        palette,
     )
 
     style = scorer.score_line([_token()])[0]
@@ -55,11 +60,13 @@ def test_fsrs_state_has_configurable_style_and_precedes_frequency(state, tag, co
 
 def test_n_plus_one_precedes_forgotten():
     tokens = [_token("私"), _token("人"), _token("本")]
-    scorer = Scorer(
-        known=KnownWords.from_set(["私", "人"]),
-        fsrs_snap=KnownSnap.of({"本": "forgotten"}),
-        enable_freq=False,
-        enable_jlpt=False,
+    scorer = Coloring(
+        Scorer(
+            known=KnownWords.from_set(["私", "人"]),
+            fsrs_snap=KnownSnap.of({"本": "forgotten"}),
+            enable_freq=False,
+            enable_jlpt=False,
+        )
     )
 
     style = scorer.score_line(tokens)[2]
@@ -71,7 +78,7 @@ def test_config_loads_fsrs_copy_and_controls_maturity_colors(tmp_path, monkeypat
     collection = tmp_path / "collection-copy.anki2"
     collection.touch()
     monkeypatch.setattr(
-        "saitenka.app.fsrs.load_knownness", lambda _path: KnownSnap.of({"本": "learning"})
+        "saitenka_wordstate.fsrs.load_knownness", lambda _path: KnownSnap.of({"本": "learning"})
     )
     scorer, _, _, _ = reader_deps.build_reader_deps(
         {
@@ -94,12 +101,14 @@ class _IPC(util.FakeIPC):
 
 
 def test_hover_visibility_reuses_the_learning_style(monkeypatch):
-    scorer = Scorer(
-        known=KnownWords.from_set([]),
-        fsrs_snap=KnownSnap.of({"本": "learning"}),
-        enable_n_plus_one=False,
-        enable_freq=False,
-        enable_jlpt=False,
+    scorer = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]),
+            fsrs_snap=KnownSnap.of({"本": "learning"}),
+            enable_n_plus_one=False,
+            enable_freq=False,
+            enable_jlpt=False,
+        )
     )
     reader = build_session(
         _IPC(),

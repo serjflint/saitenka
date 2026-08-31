@@ -94,7 +94,7 @@ internal modules with explicit dependency contracts, not independently published
 - **`../libasslite-bundle/`** — an optional platform wheel containing libass and its native runtime
   closure. It is discovered by `libasslite`, not imported by Saitenka, and stays outside the
   Apache-2.0 core distribution with its own notices and corresponding-source archives.
-- **`app/known_cache.py`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
+- **`saitenka-wordstate/`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
   and schema rebuilds no longer own Anki-derived state.
 
 ## Composition and extension seams
@@ -410,7 +410,7 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 
 | Entity | Lives in | What it is |
 | --- | --- | --- |
-| **Token** (the *term*) | `app/tokenize.py` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
+| **Token** (the *term*) | `saitenka-tokenize/` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
 | **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`); the legacy `Dictionary` path remains a compatibility fallback. |
 | **`Entry`** | `panel/model.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
 | **Panel** | `app/features/tooltip/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |

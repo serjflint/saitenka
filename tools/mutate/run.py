@@ -47,9 +47,18 @@ TARGETS = {
         "src/saitenka/subtitles/parsers.py",
         "tests/test_sub_index.py tests/test_sub_index_properties.py tests/test_subtitle_metamorphic.py",
     ),
-    "fsrs": ("src/saitenka/app/fsrs.py", "tests/test_fsrs.py tests/test_fsrs_properties.py"),
+    "fsrs": (
+        "saitenka-wordstate/src/saitenka_wordstate/fsrs.py",
+        "tests/test_fsrs.py tests/test_fsrs_properties.py",
+    ),
+    # The classification moved into saitenka-wordstate; what is left in app/scoring.py is the palette,
+    # whose every literal is already pinned concretely by test_palette_literals_are_concrete.
     "scoring": (
-        "src/saitenka/app/scoring.py",
+        "saitenka-wordstate/src/saitenka_wordstate/scorer.py",
+        "tests/test_coloring.py tests/test_scoring_properties.py",
+    ),
+    "verdict": (
+        "saitenka-wordstate/src/saitenka_wordstate/verdict.py",
         "tests/test_coloring.py tests/test_scoring_properties.py",
     ),
     "window": ("src/saitenka/render/window.py", "tests/test_window_geometry.py"),

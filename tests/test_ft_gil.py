@@ -17,8 +17,9 @@ GIL_FORCED_OFF = os.environ.get("PYTHON_GIL") == "0"
 )
 def test_gil_stays_disabled_after_all_imports():
     # Import the heavy stack the live run uses — including fugashi via a real tokenize call.
+    from saitenka_tokenize.japanese import tokenize
+
     from saitenka.app.session.controller import SessionController  # noqa: F401
-    from saitenka.app.tokenize import tokenize
 
     tokenize("本を読む")  # forces the fugashi C extension to load
     assert sys._is_gil_enabled() is False, (

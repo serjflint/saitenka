@@ -14,12 +14,13 @@ from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleTarget
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.config import SubtitleGeometryOptions, TooltipOptions
     from saitenka.app.scoring import TokenStyle
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
     from saitenka.app.subtitles import WordBox
     from saitenka.app.token_cache import TokenizedCue
-    from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.subtitles import GeometryBackend
 

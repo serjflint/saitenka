@@ -10,6 +10,7 @@ gate. The *performance* side of the same scenario lives in examples/bench_respon
 from __future__ import annotations
 
 from driver import Driver
+from saitenka_tokenize.japanese import Token
 from session_builder import TestSession, build_session
 from util import FakeIPC
 
@@ -17,7 +18,6 @@ from saitenka.app.config import TooltipOptions
 from saitenka.app.features.tooltip import nested_popup
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.session.factory import SessionServices
-from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
 
 PANEL_CACHE_MAX = TooltipOptions().panel_cache_max

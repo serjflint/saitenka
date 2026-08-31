@@ -2,15 +2,16 @@
 RSS gauges the telemetry interval sampler reports."""
 
 import util
+from saitenka_tokenize.japanese import Token
+from saitenka_wordstate import TokenVerdict
+from saitenka_wordstate.known import KnownWords
 from session_builder import build_session
 
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.features.tooltip import prefetch
-from saitenka.app.scoring import TokenStyle, TokenVerdict
+from saitenka.app.scoring import TokenStyle
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.tokenize import Token
-from saitenka.app.wordlists import KnownWords
 from saitenka.panel import Definition, Entry
 from saitenka.subtitles import CueIndex, parse_srt
 

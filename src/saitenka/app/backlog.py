@@ -10,16 +10,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+from saitenka_tokenize.languages import MAIN_LANG
+
 from saitenka import otel_metrics
 from saitenka.app import paths
 from saitenka.app.jimaku import parse_filename
-from saitenka.app.languages import MAIN_LANG
 from saitenka.sqlite_pool import close_when_collected, open_owner_connection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 Status = Literal["open", "reviewed", "mined", "archived"]
 MatchKind = Literal["matched", "ambiguous", "candidate", "unmatched"]

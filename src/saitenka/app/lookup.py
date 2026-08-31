@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from saitenka.app.tokenize import is_kana
+from saitenka_tokenize.japanese import is_kana
+
 from saitenka.panel import Definition, Entry
 
 if TYPE_CHECKING:
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 POS_EN = {
     "名詞": "noun",

@@ -17,9 +17,10 @@ from saitenka.runtime.jobs import JobLanePolicy
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.scoring import Scorer, TokenVerdict
-    from saitenka.app.tokenize import Token
-    from saitenka.app.tokenizer import Tokenizer
+    from saitenka_tokenize.japanese import Token
+    from saitenka_tokenize.registry import Tokenizer
+
+    from saitenka.app.scoring import Coloring, TokenVerdict
 
 log = logging.getLogger(__name__)
 
@@ -358,7 +359,7 @@ class HeadProbe:
     optional — without a scorer there is no ranking, and the warm pass runs anyway.
     """
 
-    scorer: Scorer | None
+    scorer: Coloring | None
     panel_key: Callable[..., object]
     panel_present: Callable[[object], bool]
     lookahead: int

@@ -24,12 +24,12 @@ from saitenka_dict import (
     TermResultMode,
     Translator,
 )
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import DictionarySet
 from saitenka.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
-from saitenka.app.tokenize import Token
 from saitenka.model import Style
 from saitenka.render.sc_adapter import walk
 

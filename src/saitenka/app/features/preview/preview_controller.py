@@ -12,8 +12,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.features.preview.miner_ui import CardSource, PreviewPorts
-    from saitenka.app.tokenize import Token
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.interaction_slice import PreviewStore

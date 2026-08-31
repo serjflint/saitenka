@@ -20,7 +20,7 @@ from saitenka.app.subtitle_raster import (
 
 
 def token(surface: str = "猫"):
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     return Token(surface=surface, lemma=surface, reading="", pos="", start=0, end=len(surface))
 

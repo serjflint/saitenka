@@ -12,6 +12,7 @@ import logging
 import threading
 
 import pytest
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.launch import run as cli_run
 from saitenka.app.session.runtime import (
@@ -20,7 +21,6 @@ from saitenka.app.session.runtime import (
     SessionFacts,
     SessionRuntime,
 )
-from saitenka.app.tokenize import Token
 
 
 def _facts(**given) -> SessionFacts:

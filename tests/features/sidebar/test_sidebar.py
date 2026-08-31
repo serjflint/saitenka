@@ -6,6 +6,8 @@ import pytest
 import util
 from driver import Driver
 from PIL import Image
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 from session_builder import TestSession, build_session, install_profile_dependencies
 
 from saitenka.app import backlog
@@ -16,7 +18,7 @@ from saitenka.app.features.analysis.episode_analysis import analyze_cues
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.features.sidebar import sidebar
-from saitenka.app.scoring import Scorer
+from saitenka.app.scoring import Coloring
 from saitenka.app.session import sidebar_coordination
 from saitenka.app.subtitles import (
     SidebarAction,
@@ -25,7 +27,6 @@ from saitenka.app.subtitles import (
     SidebarRow,
     render_sidebar,
 )
-from saitenka.app.wordlists import KnownWords
 from saitenka.runtime import events
 from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
 from saitenka.subtitles import Cue, CueIndex
@@ -269,7 +270,9 @@ def test_rows_use_shared_episode_analysis_when_ready():
         [Cue(0.0, 1.0, "私は本を読む。")]
     )
     reader.graph.playback.install_seed({"sub-text": "私は本を読む。"})
-    install_profile_dependencies(reader, scorer=Scorer(known=KnownWords.from_set(["私", "本"])))
+    install_profile_dependencies(
+        reader, scorer=Coloring(Scorer(known=KnownWords.from_set(["私", "本"])))
+    )
     analysis = analyze_cues(
         list(reader.graph.track_commands.navigation.current.sub_index.cues),
         reader.graph.profile.scorer,
@@ -289,7 +292,9 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
         reader.graph.track_commands.declare(
             SubtitleTracksDiscovered(1, reader.graph.track_commands.current().en_sid)
         )
-        install_profile_dependencies(reader, scorer=Scorer(known=KnownWords.from_set(["私", "本"])))
+        install_profile_dependencies(
+            reader, scorer=Coloring(Scorer(known=KnownWords.from_set(["私", "本"])))
+        )
         reader.graph.track_commands.navigation.current.sub_index = CueIndex(
             [Cue(0.0, 1.0, "私は本を読む。")]
         )

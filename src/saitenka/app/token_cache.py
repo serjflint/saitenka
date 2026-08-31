@@ -23,8 +23,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.scoring import TokenStyle
-    from saitenka.app.tokenize import Token
 
 
 def cue_key(text: str) -> str:

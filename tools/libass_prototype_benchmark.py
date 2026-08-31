@@ -24,10 +24,10 @@ from libass_token_matrix import (
     character_support,
     extract_token_geometry,
 )
+from saitenka_tokenize.registry import UnidicTokenizer
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 
-from saitenka.app.scoring import Scorer
-from saitenka.app.tokenizer import UnidicTokenizer
-from saitenka.app.wordlists import KnownWords
 from saitenka.subtitles.ass import (
     allocate_token_colors,
     decode_ass_event,
@@ -43,8 +43,9 @@ if TYPE_CHECKING:
 
     from libass_token_matrix import RenderResult
 
-    from saitenka.app.scoring import TokenStyle
     from saitenka.subtitles.document import DecodedSubtitleEvent
+
+from saitenka.app.scoring import Coloring, TokenStyle
 
 
 class Renderer(Protocol):
@@ -266,8 +267,10 @@ def prepare_case(
     case: dict, tokenizer: UnidicTokenizer | None = None, scorer: Scorer | None = None
 ) -> PreparedPrototype:
     tokenizer = tokenizer or UnidicTokenizer()
-    scorer = scorer or Scorer(
-        known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False, enable_known=False
+    scorer = scorer or Coloring(
+        Scorer(
+            known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False, enable_known=False
+        )
     )
     model = build_model(_event_inputs(case))
     annotated, styles = tokenize_and_score(model, tokenizer, scorer)
@@ -373,8 +376,10 @@ def _cold_worker(manifest_path: Path, library_path: str | None) -> dict[str, int
     case = cast("list[dict]", manifest["cases"])[0]
     libass = cast("LibassModule", importlib.import_module("libasslite"))
     tokenizer = UnidicTokenizer()
-    scorer = Scorer(
-        known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False, enable_known=False
+    scorer = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False, enable_known=False
+        )
     )
     started = time.perf_counter_ns()
     prototype = prepare_case(case, tokenizer, scorer)
@@ -465,8 +470,10 @@ def run_benchmark(
     libass = cast("LibassModule", importlib.import_module("libasslite"))
     library_path = os.environ.get("LIBASSLITE_LIBRARY")
     tokenizer = UnidicTokenizer()
-    scorer = Scorer(
-        known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False, enable_known=False
+    scorer = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False, enable_known=False
+        )
     )
     prepared = [prepare_case(case, tokenizer, scorer) for case in cases]
     process = psutil.Process()

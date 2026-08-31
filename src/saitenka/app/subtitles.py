@@ -21,7 +21,7 @@ from saitenka.render.layout import NO_START, Block
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 WHITE = (255, 255, 255, 255)
 HOVER = (255, 214, 90, 255)  # warm yellow highlight

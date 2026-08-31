@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from concurrent.futures import Future
 
-    from saitenka.app.tokenizer import Tokenizer
+    from saitenka_tokenize.registry import Tokenizer
 
 
 class AnnotationPriority(IntEnum):

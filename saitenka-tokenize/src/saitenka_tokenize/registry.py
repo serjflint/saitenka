@@ -16,12 +16,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app import tokenize as _jp
+from saitenka_tokenize import japanese as _jp
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 
 class Tokenizer(Protocol):
@@ -104,7 +104,7 @@ def get_tokenizer(name: str = DEFAULT_TOKENIZER) -> Tokenizer:
 def _register_builtin_latin() -> None:
     """Register the Latin-script strategy (#254 W1) at import time. The ``tokenizer_latin`` import only
     pulls in the ``Token`` dataclass (already loaded via ``_jp``), not fugashi — so this stays cheap."""
-    from saitenka.app.tokenizer_latin import LatinTokenizer
+    from saitenka_tokenize.latin import LatinTokenizer
 
     _FACTORIES.setdefault(LatinTokenizer.name, LatinTokenizer)
 

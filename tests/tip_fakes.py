@@ -31,8 +31,9 @@ class LinkingDS:
 def hidpi_reader(scale: float) -> TestSession:
     """A headless reader whose OSD pins ``tip_scale.display`` to ~``scale`` (osd_h / REF_H(1080)),
     one content token shown, crisp enabled — the fixture the crisp/native path needs."""
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r = build_session(
         util.FakeIPC(),

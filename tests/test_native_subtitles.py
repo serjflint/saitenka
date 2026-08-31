@@ -9,6 +9,10 @@ import pytest
 import util
 from dirty_equals import IsPartialDict
 from driver import Driver
+from saitenka_tokenize.japanese import Token
+from saitenka_tokenize.languages import MAIN_LANG
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 from session_builder import TestSession, build_session
 from util import record_spans
 
@@ -16,10 +20,9 @@ from saitenka.app import native_subtitles, subtitle_fonts, subtitle_render
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.features.tooltip.nested_popup import kanji_current
-from saitenka.app.languages import MAIN_LANG
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.scoring import Scorer
+from saitenka.app.scoring import Coloring
 from saitenka.app.session.factory import (
     SessionInfrastructure,
     SessionServices,
@@ -28,8 +31,6 @@ from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
-from saitenka.app.tokenize import Token
-from saitenka.app.wordlists import KnownWords
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
@@ -2622,7 +2623,9 @@ def test_a_face_the_osd_library_cannot_load_is_colored_as_a_raster_instead(tmp_p
     whose typesetting this mode is for. The raster needs no face: it tints the pixels the
     measurement already drew, from the font set mpv's SUBTITLE renderer holds.
     """
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     assert result.graph.subtitle_presentation.native is not None
     result.graph.subtitle_presentation.native.set_fonts(attachment_supplying(ipc, "arial"))
 
@@ -2648,7 +2651,9 @@ def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path)
 
     The focus rect had the same hole: arriving at LEGACY emitted no interaction clear at all.
     """
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     renderer = result.graph.subtitle_presentation.pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     assert result.graph.subtitle_presentation.native is not None
@@ -2762,7 +2767,9 @@ def test_a_playing_session_still_measures_once_for_the_track(tmp_path: Path) -> 
     `pause_on_tooltip` is a setting, and without this a session that never pauses would never
     measure at all — the inference about which faces mpv's OSD renderer can load would go
     unchecked for the whole episode. The track load is where that one check is affordable."""
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     ipc.props["pause"] = False
 
     result.graph.cue.set_subtitle("猫を見る")
@@ -2776,7 +2783,9 @@ def test_a_playing_session_does_not_measure_again_after_that(tmp_path: Path) -> 
     """The other half, and the reason the check is gated at all: `compute_bounds` makes mpv do a
     full render on its core thread. One per track load is a stall nobody sees; one per cue is a
     stutter through the whole episode."""
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     ipc.props["pause"] = False
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -2795,7 +2804,9 @@ def test_the_layout_check_measures_once_per_face_set_while_paused(tmp_path: Path
     """Paused, it asks mpv where its OSD renderer actually put the overprint — the one direct check
     of the only claim the text device makes. Once per face set, not once per cue: the answer cannot
     change while the faces and the surface do not."""
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     ipc.props["pause"] = True
 
     result.graph.cue.set_subtitle("猫を見る")
@@ -2818,7 +2829,9 @@ def test_a_refused_layout_check_is_asked_again_rather_than_written_off(tmp_path:
     when it is at capacity, and marking the face set before the ask lands retires it for the whole
     session — so a real substituted-face drift on that set is never measured, and the text device
     keeps drawing words in the wrong place with every meter reading green."""
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     ipc.props["pause"] = True
     ipc.refused_identities = ("subtitle:calibrate:",)
 
@@ -2850,7 +2863,9 @@ def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing
     built, and the measurement can contradict that inference long after — by which time the request
     is gone. Applying it where the drawing happens is what lets the answer reach the cue on screen
     instead of some later one."""
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     ipc.props["pause"] = True
     ipc.osd_bounds = osd_box(right=29.0)
 
@@ -2879,7 +2894,9 @@ def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing
 def test_an_agreeing_measurement_leaves_the_text_device_alone(tmp_path: Path) -> None:
     """The negative control. Demoting on agreement would strip the color from every correctly
     typeset track — and the whole point of measuring is that the inference can be wrong either way."""
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     ipc.props["pause"] = True
     ipc.osd_bounds = osd_box(right=0.0)
 
@@ -2894,7 +2911,9 @@ def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_pat
     """The consequence for the other side. A late verdict lands on device 3's rule because the cue
     was built without masks; telling the geometry side is what makes the NEXT build keep them, so
     those tokens rise to the raster instead of staying on the bottom rung."""
-    result, ipc, backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     ipc.props["pause"] = True
     ipc.osd_bounds = osd_box(right=29.0)
 
@@ -2914,7 +2933,9 @@ def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_pat
 def test_a_cue_the_text_device_can_draw_publishes_no_raster(tmp_path: Path) -> None:
     """The negative control, and the ladder's rule: a device is used only when the one above it
     cannot draw. Two colors over one cue would double every glyph's alpha."""
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
 
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -3014,7 +3035,9 @@ def test_the_overprint_reaches_mpv_in_the_measured_face_and_size(tmp_path: Path)
     The one test the whole path had no positive for — which is why a palette carrying zero for every
     cue, and so an overprint that never drew anywhere, passed the suite.
     """
-    result, ipc, _backend = reader(tmp_path, scorer=Scorer(known=KnownWords.from_set(["猫"])))
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
 
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)

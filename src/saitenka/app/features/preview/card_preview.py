@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     import subprocess
     from pathlib import Path
 
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 from saitenka.app.lookup import furigana
 from saitenka.draw.icon_source import Icon, render_icon

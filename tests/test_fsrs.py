@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from saitenka.app.scoring import Coloring, Palette
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
 
 
 def _import_fsrs():
-    from saitenka.app import fsrs
+    from saitenka_wordstate import fsrs
 
     return fsrs
 
@@ -237,8 +239,6 @@ class TestScorerForgottenTint:
 
     def test_palette_has_forgotten_color(self):
         """Palette now has a 'forgotten' color attribute."""
-        from saitenka.app.scoring import Palette
-
         p = Palette()
         assert hasattr(p, "forgotten"), "Palette must have a 'forgotten' color for Stage 13"
 
@@ -249,15 +249,17 @@ class TestScorerForgottenTint:
         _build_minimal_anki2(db)
         snap = fsrs.load_knownness(db)
 
-        from saitenka.app.scoring import Palette, Scorer
-        from saitenka.app.tokenize import Token
-        from saitenka.app.wordlists import KnownWords
+        from saitenka_tokenize.japanese import Token
+        from saitenka_wordstate import Scorer
+        from saitenka_wordstate.known import KnownWords
+
+        from saitenka.app.scoring import Palette
 
         p = Palette()
         # KnownWords treats the forgotten word as NOT known (binary for coloring purposes)
         kw = KnownWords.from_set([])  # empty: nothing is "known" in the old sense
 
-        scorer = Scorer(known=kw, palette=p, fsrs_snap=snap)
+        scorer = Coloring(Scorer(known=kw, fsrs_snap=snap), p)
 
         # Build a minimal token for 忘れる (which is "forgotten")
         tok = Token(
@@ -282,14 +284,16 @@ class TestScorerForgottenTint:
         _build_minimal_anki2(db)
         snap = fsrs.load_knownness(db)
 
-        from saitenka.app.scoring import Palette, Scorer
-        from saitenka.app.tokenize import Token
-        from saitenka.app.wordlists import KnownWords
+        from saitenka_tokenize.japanese import Token
+        from saitenka_wordstate import Scorer
+        from saitenka_wordstate.known import KnownWords
+
+        from saitenka.app.scoring import Palette
 
         p = Palette()
         kw = KnownWords.from_set([])
 
-        scorer = Scorer(known=kw, palette=p, fsrs_snap=snap)
+        scorer = Coloring(Scorer(known=kw, fsrs_snap=snap), p)
 
         tok = Token(
             surface="知る",
@@ -306,12 +310,12 @@ class TestScorerForgottenTint:
 
     def test_scorer_without_fsrs_snap_unchanged(self):
         """If fsrs_snap=None (not configured), Scorer behaves exactly as before Stage 13."""
-        from saitenka.app.scoring import Scorer
-        from saitenka.app.tokenize import Token
-        from saitenka.app.wordlists import KnownWords
+        from saitenka_tokenize.japanese import Token
+        from saitenka_wordstate import Scorer
+        from saitenka_wordstate.known import KnownWords
 
         kw = KnownWords.from_set([])
-        scorer = Scorer(known=kw, fsrs_snap=None)  # no snap: no forgotten tint
+        scorer = Coloring(Scorer(known=kw, fsrs_snap=None))  # no snap: no forgotten tint
         tok = Token(
             surface="忘れる",
             lemma="忘れる",

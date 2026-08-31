@@ -20,10 +20,8 @@ from typing import Any
 import hypothesis.strategies as st
 import pytest
 from hypothesis import example, given, settings
-
-from saitenka.app import fsrs
-from saitenka.app.features.tooltip.tooltip_panel import rareness_value
-from saitenka.app.fsrs import (
+from saitenka_wordstate import fsrs
+from saitenka_wordstate.fsrs import (
     FORGOTTEN_R,
     FSRS_DEFAULT_DECAY,
     MATURE_IVL,
@@ -33,6 +31,8 @@ from saitenka.app.fsrs import (
     rareness_band,
     retrievability,
 )
+
+from saitenka.app.features.tooltip.tooltip_panel import rareness_value
 
 # ---------------------------------------------------------------------------
 # DB fixture builders (extend test_fsrs.py's _build_minimal_anki2 pattern)
