@@ -70,15 +70,18 @@ def _fixture_ds(tmp_path, terms=(("読む", "よむ", ["to read"]),)):
 
 
 def test_kanji_bank_ingested_into_db(tmp_path):
-    p = _make_dict_zip(tmp_path / "k.zip", "K", kanji=[KANJI_READ])
-    d = dicthelp.load_dict(p)
-    k = d.kanji_lookup("読")
-    assert k is not None
-    assert k["onyomi"] == "ドク トク"
-    assert k["kunyomi"] == "よ.む"
-    assert k["meanings"] == ["reading", "to read"]
-    assert k["stats"]["strokes"] == "14"
-    assert d.kanji_lookup("犬") is None
+    """The kanji_bank round-trips through import: readings, meanings and KANJIDIC stats all come back
+    out, and a character the bank never held stays absent."""
+    ds = dicthelp.load_set([_make_dict_zip(tmp_path / "k.zip", "K", kanji=[KANJI_READ])])
+
+    entry = ds.kanji_for("読")
+
+    assert entry is not None
+    dumped = json.dumps(entry.defs[0].content, ensure_ascii=False)
+    assert "ドク トク" in dumped and "よ.む" in dumped
+    assert "reading" in dumped and "to read" in dumped
+    assert "14" in dumped  # the strokes stat
+    assert ds.kanji_for("犬") is None
 
 
 # --- kanji_for -------------------------------------------------------------------------------------

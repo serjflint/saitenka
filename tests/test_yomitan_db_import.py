@@ -155,13 +155,14 @@ def test_import_reconstructs_zips_that_the_loader_reads(tmp_path):
     assert seen[-1] == (5, 5)  # progress reached the header total
 
     import dicthelp
+    from saitenka_tokenize.japanese import Token
 
     from saitenka.app.bankreader import classify_zip
 
-    d = dicthelp.load_dict(out / "TestDict.zip")
-    assert d.title == "TestDict"
-    ents = d.lookup("猫")
-    assert ents and ents[0].reading == "ねこ"
+    ds = dicthelp.load_set([out / "TestDict.zip"])
+    assert [dictionary.title for dictionary in ds.dicts] == ["TestDict"]
+    tok = Token(surface="猫", lemma="猫", reading="", pos="名詞", start=0, end=1)
+    assert ds.entry_for(tok).reading == "ねこ"
 
     # content-based classification: the def dict vs the freq dict built from termMeta
     assert classify_zip(out / "TestDict.zip") == "dict"

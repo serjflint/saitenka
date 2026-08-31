@@ -84,9 +84,9 @@ internal modules with explicit dependency contracts, not independently published
   stay a cohesive leaf; a growing subsystem gets a package named for its intent.
 - **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
   SQLite lookup, semantic term/kanji models, and all five Yomitan result modes.
-  `app/source_adapter.py` presents it by default through the stable Saitenka tooltip/card facade; the
-  legacy facade is the compatibility fallback. The headless-Yomitan oracle is repository-only test
-  tooling and is excluded from published artifacts.
+  `app/source_adapter.py` presents it through the stable Saitenka tooltip/card facade — the sole
+  lookup path; the app keeps no reader of its own. The headless-Yomitan oracle is repository-only
+  test tooling and is excluded from published artifacts.
 - **`../ankiconnect-client/`** — the application-neutral AnkiConnect transport/retry/protocol client.
   `app/anki.py` retains Saitenka launch policy, telemetry, compatibility exceptions, and note building.
 - **`../saitenka-tokenize/`** — per-language segmentation: surface/lemma/reading/POS plus offsets, the
@@ -193,7 +193,7 @@ protocol-shaped class from being mistaken for production swappability.
 
 | Capability | Boundary | Current status |
 | --- | --- | --- |
-| Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
+| Dictionary semantics | `saitenka_dict.LookupSource` | Complete: `DictionarySourceAdapter` is the only path. A set with no dictionaries holds an `EmptyDictionaryStore`, so "nothing configured" is a source rather than a second branch. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
 | Session commands | `CommandRegistration` + `CommandExecutor` | Explicit and unit-testable; independently assembled handlers and the closed stateless command graph join once. |
@@ -420,7 +420,7 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 | Entity | Lives in | What it is |
 | --- | --- | --- |
 | **Token** (the *term*) | `saitenka-tokenize/` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
-| **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`); the legacy `Dictionary` path remains a compatibility fallback. |
+| **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`). `app/dictionary.py` is scope + ranking + the deinflection seam; it issues no SQL (pinned by `tests/test_one_database_one_client.py`). |
 | **The dictionary database** | `saitenka_dict/schema.py`, `saitenka_dict/importer.py` | `saitenka-dict` owns `dictionaries.sqlite` outright: one schema declaration, one writer. `app/dictdb.py` is the application's *policy* over it — the file's location, read-connection tuning, and the SVG rasterizer handed to an import — and declares no tables and writes no dictionary rows (pinned by `tests/test_one_database_one_client.py`). |
 | **`Entry`** | `panel/model.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
 | **Panel** | `app/features/tooltip/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
@@ -536,8 +536,8 @@ On hover, the adapter sends the token's lemma, surface, reading, and deinflected
 `SqliteDictionaryStore` loads ordered term rows, metadata, and pronunciations with bound queries and
 decodes them into LRU-cached `TermRecord`s (`entry_cache_max = 256`/dict). `Translator` assembles the
 configured result mode; the adapter maps those semantic entries into the stable tooltip `Entry`.
-Prefetch normally warms the same path before hover. The legacy `_batch_exact`/`DictEntry` pipeline is
-used only when no semantic source is installed.
+Prefetch warms the same path before hover. There is no second pipeline: the app-side reader that used
+to decode Yomitan rows itself was retired with the second writer.
 
 ### Stage 3 — build rows (deferred) · `panel/rows.py`
 

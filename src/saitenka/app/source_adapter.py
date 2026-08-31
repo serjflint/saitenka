@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import re
+import threading
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,7 @@ from saitenka_dict import (
     TermResultMode,
 )
 
+from saitenka import otel_metrics
 from saitenka.app.dictionary_surface import (
     FREQ_COLOR,
     PITCH_COLOR,
@@ -26,12 +28,10 @@ from saitenka.app.dictionary_surface import (
 from saitenka.app.dictionary_surface import (
     SearchHit as _SearchHit,
 )
+from saitenka.app.dictionary_surface import entry_rank_key as _entry_rank_key
 from saitenka.app.dictionary_surface import glossary_to_nodes as _glossary_to_nodes
 from saitenka.app.dictionary_surface import (
     glosses_of as _glosses_of,
-)
-from saitenka.app.dictionary_surface import (
-    reading_affinity as _reading_affinity,
 )
 from saitenka.app.dictionary_surface import (
     search_result_nodes as _search_result_nodes,
@@ -53,6 +53,31 @@ from saitenka_dict import (
 from saitenka_dict import (
     PronunciationSource as SemanticPronunciationSource,
 )
+
+# Sampled on prefetch workers, where a per-word span floods the trace and prefetch_decode already
+# covers the phase. The histogram still records every call.
+_BG_SQL_SPAN_SAMPLE = 8
+_sql_tls = threading.local()
+
+
+def _emit_sql_span() -> bool:
+    """True → this ``dict_sql`` call gets a trace span. Always on the foreground (hover/cue) threads
+    for full step resolution; 1-in-``_BG_SQL_SPAN_SAMPLE`` on ``saitenka-prefetch-*`` workers. The
+    per-thread tick is race-free under free-threading (no shared counter)."""
+    if not threading.current_thread().name.startswith("saitenka-prefetch"):
+        return True
+    n = getattr(_sql_tls, "tick", 0)
+    _sql_tls.tick = n + 1
+    return n % _BG_SQL_SPAN_SAMPLE == 0
+
+
+def _short_freq_name(title: str) -> str:
+    """Freq-pill display name: strip the ``Saitenka`` product prefix (``Saitenka Known`` → ``Known``)
+    so our own frequency lists don't waste pill width. Case-insensitive; other dicts pass through."""
+    for prefix in ("Saitenka ", "saitenka-"):
+        if title.lower().startswith(prefix.lower()):
+            return title[len(prefix) :]
+    return title
 
 
 def _no_deinflection(_lemma: str) -> tuple[str, ...]:
@@ -98,15 +123,18 @@ class DictionarySourceAdapter:
         )
         if not candidates:
             return self.source.lookup_terms(TermQuery(""))
-        result = self.source.lookup_terms(
-            TermQuery(
-                candidates[0],
-                mode=self.options.result_mode,
-                dictionaries=self.options.dictionaries,
-                primary_reading=token.reading,
-                alternate_forms=candidates[1:],
+        with otel_metrics.instrumented(
+            otel_metrics.dict_sql_duration_ms, "dict_sql", emit_span=_emit_sql_span()
+        ):
+            result = self.source.lookup_terms(
+                TermQuery(
+                    candidates[0],
+                    mode=self.options.result_mode,
+                    dictionaries=self.options.dictionaries,
+                    primary_reading=token.reading,
+                    alternate_forms=candidates[1:],
+                )
             )
-        )
         termforms = {
             value for value in (*extra_terms, token.lemma, token.surface, *deinflected) if value
         }
@@ -119,12 +147,13 @@ class DictionarySourceAdapter:
                 for item in entry.frequencies
                 if isinstance(item.value, int) and item.value > 0
             ]
-            return (
-                headword.term not in termforms,
-                headword.term not in preferred,
-                -len(headword.term),
-                -_reading_affinity(headword.reading, token.reading),
-                min(frequencies, default=float("inf")),
+            return _entry_rank_key(
+                headword.term,
+                headword.reading,
+                token.reading,
+                termforms,
+                preferred,
+                min(frequencies, default=None),
             )
 
         return replace(result, entries=tuple(sorted(result.entries, key=rank)))
@@ -132,7 +161,7 @@ class DictionarySourceAdapter:
     def entry_for(self, token, inflected=None, *, extra_terms=()):
         result = self._result(token, extra_terms, inflected)
         if not result.entries:
-            return self._missing_entry(token)
+            return self._missing_entry(token, inflected)
         entries = self._matching_entries(result.entries, token, extra_terms)
         first = entries[0]
         headword = first.headwords[0]
@@ -153,15 +182,25 @@ class DictionarySourceAdapter:
             groups=groups,
         )
 
-    def _missing_entry(self, token):
+    def _missing_entry(self, token, inflected=None):
+        """No dictionary has the word — but the deinflection chain still does.
+
+        The chain is computed from surface→lemma, not from a hit, and it is the one thing that can
+        explain an unknown word to a learner ("parlons: present indicative"). Dropping it here is what
+        made a second-language profile show a bare "not found" for every inflected form it missed.
+        """
         message = (
             "（辞書に見つかりませんでした）"
             if self.options.language in {"jp", "ja"}
             else "(not found in dictionary)"
         )
+        surface = inflected or token.surface
         return Entry(
             headword=furigana(token.lemma or token.surface, token.reading),
             defs=[Definition("—", [message])],
+            inflection_chain=self.options.inflection_chain(
+                surface, tuple(value for value in (token.lemma,) if value and value != surface)
+            ),
             reading=token.reading,
         )
 
@@ -471,7 +510,9 @@ class DictionarySourceAdapter:
     @staticmethod
     def _frequency_pills(entry):
         pills = [
-            Freq(item.dictionary, str(item.display_value or item.value), FREQ_COLOR)
+            Freq(
+                _short_freq_name(item.dictionary), str(item.display_value or item.value), FREQ_COLOR
+            )
             for item in entry.frequencies
         ]
         pills.extend(

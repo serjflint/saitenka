@@ -78,6 +78,23 @@ def test_the_app_writes_only_its_own_key_value_rows():
     assert source.count("INSERT OR REPLACE INTO META VALUES") == 1
 
 
+def test_the_app_runs_no_query_of_its_own_against_the_dictionary_tables():
+    """The reader followed the writer.
+
+    `saitenka.app.dictionary` used to carry a hand-rolled SQL reader beside the semantic store — two
+    readers of one schema, kept in step by hand, with the second one dead in production because the
+    store always won the branch. Every lookup goes through `saitenka-dict` now, so a `SELECT` naming
+    a dictionary table here would be that second reader coming back.
+    """
+    from saitenka.app import dictionary
+
+    source = Path(dictionary.__file__).read_text(encoding="utf-8").upper()
+
+    assert "SELECT" not in source
+    for table in ("ENTRIES", "KEYS", "KANJI", "TERM_META", "TAGS", "MEDIA"):
+        assert f"FROM {table}" not in source
+
+
 def test_a_legacy_database_is_widened_in_place_not_rebuilt(tmp_path):
     """An existing user's DB predates the union columns. Opening it must ALTER them in, leaving the
     imported rows alone — an upgrade that forced a re-import would cost hours of dictionary builds."""
