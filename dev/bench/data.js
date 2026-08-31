@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788153310354,
+  "lastUpdate": 1788157474336,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -12293,6 +12293,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.236245,
             "range": "3 replicas; min 1.20294; max 1.7821; MAD 0.033308; worst 1.7821",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "056df8ff4b63fdfa4cdb648a6951973f728893ee",
+          "message": "Merge pull request #465 from serjflint/fix/gaiji-box-fit\n\nfix: gaiji sprite overdraw at 1×, an IPC ordering race, and the branch shape behind both",
+          "timestamp": "2026-08-31T11:22:50+05:00",
+          "tree_id": "b808b5184c328f6dcdfa0d1c800e63a64c2bef3b",
+          "url": "https://github.com/serjflint/saitenka/commit/056df8ff4b63fdfa4cdb648a6951973f728893ee"
+        },
+        "date": 1788157473393,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.004978,
+            "range": "3 replicas; min 4.97755; max 6.34317; MAD 0.027429",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.866181,
+            "range": "3 replicas; min 6.81937; max 8.71293; MAD 0.046809; worst 8.71293",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 15.158226,
+            "range": "3 replicas; min 14.2775; max 20.9288; MAD 0.880753",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 15.402609,
+            "range": "3 replicas; min 14.3601; max 21.0158; MAD 1.04252; worst 21.0158",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 21.329322,
+            "range": "3 replicas; min 18.6159; max 41.8078; MAD 2.71342",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.10615,
+            "range": "3 replicas; min 0.093189; max 0.16494; MAD 0.012961; worst 0.16494",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 36.922204,
+            "range": "3 replicas; min 30.6795; max 43.5742; MAD 6.24273; worst 43.5742",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.921897,
+            "range": "3 replicas; min 2.8424; max 3.31312; MAD 0.079492; worst 3.31312",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.233866,
+            "range": "3 replicas; min 1.1705; max 1.23945; MAD 0.005582; worst 1.23945",
             "unit": "ms"
           }
         ]
