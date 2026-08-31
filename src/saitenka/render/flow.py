@@ -100,24 +100,42 @@ class ImgBox:
             )
 
 
-def _upscale(spr: Image.Image, w: int, h: int, scale: float) -> Image.Image:
+def _fit(spr: Image.Image, w: int, h: int) -> Image.Image:
+    """``spr`` resampled to exactly ``w × h``."""
     from PIL import Image as _Image
 
-    return spr.resize(
-        (max(1, round(w * scale)), max(1, round(h * scale))), _Image.Resampling.LANCZOS
-    )
+    return spr.resize((max(1, w), max(1, h)), _Image.Resampling.LANCZOS)
+
+
+def _upscale(spr: Image.Image, w: int, h: int, scale: float) -> Image.Image:
+    return _fit(spr, round(w * scale), round(h * scale))
+
+
+def _img_native(source: Image.Image, w: int, h: int) -> Callable[[float], Image.Image]:
+    """Resample the display-scale sprite from the FULL-resolution decode rather than from the fitted
+    1× thumbnail — a gaiji is stored well above its drawn size, so the detail is there to use."""
+    return lambda s: _fit(source, round(w * s), round(h * s))
 
 
 def img_box(png: bytes | None, height: int, tint: RGBA | None) -> ImgBox:
     """Build an inline image box for a structured-content ``img`` (#283): the decoded sprite scaled to
     ``height`` (a monochrome gaiji recoloured to ``tint``), or the ▢ placeholder when there is no
-    decodable image. PIL decoding stays in the renderer, outside the structured-content model."""
-    sprite = _decode_sprite(png, tint) if png is not None else None
-    if sprite is None:
+    decodable image. PIL decoding stays in the renderer, outside the structured-content model.
+
+    The decode is stored at a fixed base height (``dictdb``), unrelated to the size it is drawn at, so
+    it is fitted to the box here — compositing it raw drew a 64px gaiji into a 24px slot, over the text
+    beside it."""
+    source = _decode_sprite(png, tint) if png is not None else None
+    if source is None:
         return ImgBox(width=round(height * 1.6), height=height, label="▢")
-    sw, sh = sprite.size
+    sw, sh = source.size
     width = max(1, round(sw * height / sh)) if sh else round(height * 1.6)
-    return ImgBox(width=width, height=height, sprite=sprite)
+    return ImgBox(
+        width=width,
+        height=height,
+        sprite=_fit(source, width, height),
+        native=_img_native(source, width, height),
+    )
 
 
 def _decode_sprite(png: bytes, tint: RGBA | None) -> Image.Image | None:

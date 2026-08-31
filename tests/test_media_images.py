@@ -57,6 +57,41 @@ def test_collect_img_paths_walks_nested_content():
     assert collect_img_paths(node) == ["a.svg", "b.svg"]
 
 
+def _ink(sprite: Image.Image):
+    """The gaiji's centre pixel — solid ink in every fixture here. Read by proportion, not by a fixed
+    coordinate, because the sprite is fitted to the box it is drawn in, not left at its decoded size."""
+    return sprite.getpixel((sprite.width // 2, sprite.height // 2))
+
+
+def test_sprite_is_fitted_to_the_box_it_reserves():
+    # The decode is stored at a fixed base height unrelated to the drawn size (64px for a real gaiji),
+    # and the box reserves `style.size`. Compositing the decode raw drew it ~2.4x oversize, over the
+    # neighbouring text — visible on any display taking the 1x path (1080p, no `tip_scale`).
+    node = {"tag": "img", "path": "x.png"}
+    box = next(
+        x
+        for b in walk(node, Style(size=24), media={"x.png": _png()})
+        for x in b.flow
+        if isinstance(x, ImgBox)
+    )
+    assert box.sprite is not None
+    assert box.sprite.size == (box.width, box.height)
+
+
+def test_scaled_sprite_fills_the_projected_box_from_the_full_resolution_decode():
+    # A gaiji is stored well above its drawn size, so the display-scale sprite is resampled from the
+    # decode rather than from the fitted 1x thumbnail — and still lands exactly on the projected box.
+    node = {"tag": "img", "path": "x.png"}
+    box = next(
+        x
+        for b in walk(node, Style(size=24), media={"x.png": _png()})
+        for x in b.flow
+        if isinstance(x, ImgBox)
+    )
+    assert box.native is not None
+    assert box.native(1.5).size == (round(box.width * 1.5), round(box.height * 1.5))
+
+
 def test_img_with_media_becomes_sprite_box():
     node = {"tag": "img", "path": "x.png"}
     blocks = walk(node, Style(size=24), media={"x.png": _png()})
@@ -70,7 +105,7 @@ def test_monochrome_img_is_tinted_to_text_colour():
     blocks = walk(node, Style(size=24, color=(200, 30, 30, 255)), media={"x.png": _png()})
     sprite = next(x.sprite for b in blocks for x in b.flow if isinstance(x, ImgBox))
     assert sprite is not None
-    assert sprite.getpixel((16, 16)) == (200, 30, 30, 255)  # opaque ink recoloured to text colour
+    assert _ink(sprite) == (200, 30, 30, 255)  # opaque ink recoloured to text colour
 
 
 def test_default_appearance_keeps_colours_not_tinted():
@@ -82,12 +117,7 @@ def test_default_appearance_keeps_colours_not_tinted():
     )
     sprite = next(x.sprite for b in blocks for x in b.flow if isinstance(x, ImgBox))
     assert sprite is not None
-    assert sprite.getpixel((16, 16)) == (
-        10,
-        160,
-        40,
-        255,
-    )  # green preserved, NOT overwritten with red
+    assert _ink(sprite) == (10, 160, 40, 255)  # green preserved, NOT overwritten with red
 
 
 def test_appearance_auto_keeps_the_svg_colours():
@@ -97,7 +127,7 @@ def test_appearance_auto_keeps_the_svg_colours():
     )
     sprite = next(x.sprite for b in blocks for x in b.flow if isinstance(x, ImgBox))
     assert sprite is not None
-    assert sprite.getpixel((16, 16)) == (10, 160, 40, 255)  # original green kept, NOT tinted red
+    assert _ink(sprite) == (10, 160, 40, 255)  # original green kept, NOT tinted red
 
 
 def test_missing_media_falls_back_to_box():
