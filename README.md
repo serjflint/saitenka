@@ -90,9 +90,11 @@ actions never pause or seek a Syncplay room.
 Saitenka, **[SubMiner](https://github.com/ksyasuda/SubMiner)**,
 **[Autocards](https://learnjapanese.moe/autocards/)**, and
 **[Anki Miner](https://github.com/0xzerolight/anki_miner)** get Japanese vocabulary from video into Anki,
-while **[Migaku](https://migaku.com/)** spans streaming video, web reading, mobile OCR, and its own study
-system. Five different angles: Saitenka is a **grounded, FSRS-driven engine composited inside mpv's own
-surface**; SubMiner a **feature-broad Electron app**; Autocards a **retroactive back-filler**; Anki Miner
+while **[Migaku](https://migaku.com/)** and **[JitenMPV](https://github.com/Sirush/JitenMPV)** feed their
+own study systems instead. Six different angles: Saitenka is a **grounded, FSRS-driven engine composited
+inside mpv's own surface**; JitenMPV the **same in-mpv loop served entirely by a [Jiten](https://jiten.moe)
+cloud account** (no local dictionary, no offline, no Anki — but it can grade a card from the popup);
+SubMiner a **feature-broad Electron app**; Autocards a **retroactive back-filler**; Anki Miner
 a **batch-mining desktop GUI**; Migaku a **commercial browser-and-mobile immersion platform**. Trade-offs
 across different jobs, not a scoreboard.
 
