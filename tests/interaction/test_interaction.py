@@ -39,6 +39,10 @@ class _FakeDS:
         # phrase-merge probe stays off and these geometry goldens keep their single-token hover.
         return any(f in {"本命", "を", "読む", "命", "ほんめい", "よむ"} for f in forms)
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _reader(*, render_ahead_submitter=None):
     # Pin tip_max_frac so the fixed hit-points and layout goldens below are independent of the product

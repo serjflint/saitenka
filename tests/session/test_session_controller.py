@@ -1431,6 +1431,10 @@ def test_panel_cache_avoids_rerender_on_revisit(monkeypatch):
             calls.append(tok.surface)
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
+
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=FakeDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
@@ -1463,6 +1467,10 @@ def test_panel_cache_records_otel_render_and_cache_metrics(monkeypatch):
     class FakeDS:
         def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=FakeDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -1502,6 +1510,10 @@ class _FakeDS:
         from saitenka.panel import Definition, Entry
 
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
 
 
 def _reader_with_word(ipc):
@@ -1687,6 +1699,10 @@ class _TallDS:
     def has_term(self, *_forms):
         return True  # the def body is all dictionary words → a body click doesn't fall to kanji
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _tall_reader(ipc, *, tts: bool | None = None):
     from saitenka.app.subtitles import WordBox
@@ -1822,6 +1838,10 @@ class _ScanDS:
             reading="ほんめい",
             defs=[Definition("MonoC", ["追いかけること。また、その人。"])],
         )
+
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
 
 
 def _scan_reader(ipc, *, tts: bool | None = None):
@@ -2188,6 +2208,10 @@ class _LinkDS:
     def kanji_for(self, _ch):
         return None  # this fixture has no kanji bank — a header-kanji click is a graceful no-op
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _link_reader(ipc):
     from saitenka.app.subtitles import WordBox
@@ -2259,6 +2283,10 @@ class _WildcardDS:
             headword=[pattern], defs=[Definition(f"検索 {pattern}", [{"tag": "ul", "content": li}])]
         )
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     from saitenka.app.subtitles import WordBox
@@ -2316,6 +2344,10 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
             ]
             return Entry(headword=tok.surface, reading="みる", defs=[Definition("Bilingual", body)])
 
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
+
     r = build_session(ipc, services=SessionServices(dictionaries=_ExternalDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
@@ -2354,6 +2386,10 @@ class _RubyLinkDS:
             reading="かんがえ",
             defs=[Definition("MonoA", ["敬語は", ref, "。"])],
         )
+
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
 
 
 def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
@@ -2864,7 +2900,7 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
     and it leads the frequency row (before the per-dict pills)."""
     import dicthelp
 
-    from saitenka.app.fsrs import harmonic_of, rareness_color
+    from saitenka.app.fsrs import harmonic_of, rareness_band
     from saitenka.app.tokenize import Token
 
     fa = dicthelp.meta_zip(tmp_path / "fa.zip", "FreqA", "freq", [["猫", {"frequency": 1000}]])
@@ -2872,9 +2908,14 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
     ds = dicthelp.load_set(freq_zips=[fa, fb])
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     tok = Token("猫", "猫", "ねこ", "名詞", 0, 1)
-    pill = tooltip_panel.rareness_pill(tok, r.graph.profile.profile.dict_set)
+    dict_set = r.graph.profile.profile.dict_set
+    blended = harmonic_of([1000.0, 2000.0])
+    assert blended is not None
+    assert dict_set.rareness_rank(tok) == pytest.approx(blended)
+    pill = tooltip_panel.rareness_pill(tok, dict_set)
     assert pill is not None and pill.name == "diff"
-    assert pill.color == rareness_color(harmonic_of([1000.0, 2000.0]))  # ≈1333 → common (green)
+    # ≈1333 → common (green); the band is the dictionary's answer, the colour is the panel's
+    assert pill.color == tooltip_panel.RARENESS_COLORS[rareness_band(blended)]
 
 
 def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
@@ -3005,6 +3046,10 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
         def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             self.calls += 1
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_CountDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -3141,6 +3186,10 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
         @functools.cache  # noqa: B019  # test-local fake, GC'd with the test — no leak risk
         def entry_for(self, surface, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return _Entry(headword=surface, defs=[Definition("D", ["x"])], freqs=[])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(
         FakeIPC(),

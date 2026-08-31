@@ -398,6 +398,10 @@ class _SyntheticDS:
             defs=[Definition(f"辞書{i}", [para]) for i in range(6)],
         )
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 # Deterministic CJK headword pool for the dict-free synth corpus — a fixed string, no randomness, so the
 # same corpus (and the same numbers) come out on every machine and every commit.

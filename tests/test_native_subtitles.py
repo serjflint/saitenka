@@ -381,6 +381,10 @@ class _ExistsDS:
     def decoded_entry_count(self):
         return 0
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def reader(
     tmp_path: Path,

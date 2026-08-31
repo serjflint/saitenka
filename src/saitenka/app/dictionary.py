@@ -73,6 +73,7 @@ from saitenka.app.dictionary_surface import (
 from saitenka.app.dictionary_surface import (
     to_glob as _to_glob,
 )
+from saitenka.app.fsrs import harmonic_of
 from saitenka.app.lookup import CardData, furigana
 from saitenka.app.wordlists import FreqSource, PitchSource
 from saitenka.fonts import STROKE_ORDER_FONT
@@ -544,6 +545,24 @@ class DictionarySet:
                 row[1] == key for row in rows
             )  # row[1] == e.term → exact headword, not a reading
         }
+
+    def rareness_rank(self, token) -> float | None:
+        """The harmonic-mean rank of ``token`` across every **rank-based** frequency dictionary, or
+        ``None`` when no such dictionary has the word.
+
+        A read-only view, so a caller that wants the blend asks for it instead of walking ``freqs``
+        and re-deciding which sources may be blended. An occurrence-based dictionary stores a
+        per-corpus dense rank on an incomparable scale (see :attr:`FreqSource.occurrence_based`), so
+        it stays in the per-dictionary pill row but never in the mean.
+        """
+        forms = (token.lemma, token.surface, token.reading)
+        ranks = [
+            float(rank)
+            for source in self.freqs
+            if not source.occurrence_based
+            and (rank := source.rank(forms, token.reading)) is not None
+        ]
+        return harmonic_of(ranks)
 
     def decoded_entry_count(self) -> int:
         """Decoded entries currently held by the active source's bounded per-dictionary LRUs."""

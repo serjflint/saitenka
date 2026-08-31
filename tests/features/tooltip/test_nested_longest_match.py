@@ -28,6 +28,10 @@ class _DS:
     def has_term(self, *forms):
         return "コンサート" in forms
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _tok(surface: str, start: int) -> Token:
     return Token(surface, surface, surface, "名詞", start, start + len(surface))
@@ -58,6 +62,10 @@ class _RecordingDS:
     def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         self.seen.append(tok.surface)
         return Entry(headword=[tok.surface], reading="", defs=[Definition("辞書", ["定義"])])
+
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
 
 
 def test_link_query_is_looked_up_whole_not_tokenized():

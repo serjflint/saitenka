@@ -47,6 +47,10 @@ class _FakeDS:
         self.warmed.append(tok.surface)
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _reader(
     monkeypatch,

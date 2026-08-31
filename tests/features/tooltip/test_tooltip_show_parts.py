@@ -103,6 +103,10 @@ def test_a_panel_build_needs_no_host() -> None:
         def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
+
     style = PanelStyle(
         width=420,
         band_cache_max=4,

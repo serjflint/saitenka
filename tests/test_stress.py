@@ -39,6 +39,10 @@ class _TallDS:
             ],  # ≥2 → dict-tab strip + reserve
         )
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _reader() -> TestSession:
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_TallDS()))

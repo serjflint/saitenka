@@ -325,6 +325,10 @@ class _TallDS:
     def has_term(self, *forms):  # noqa: ARG002  # protocol shape
         return False
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypatch):
     # The whole point of #149's direct-paint: a cold hover the cache HAS uploads the cached pixels
@@ -411,6 +415,10 @@ class _ScrollTallDS:
 
     def has_term(self, *forms):  # noqa: ARG002  # protocol shape
         return False
+
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
 
 
 def _nested_reader(*, two_words: bool = False):

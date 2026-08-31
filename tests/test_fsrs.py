@@ -369,43 +369,17 @@ class TestDifficultyPill:
         result = fsrs.harmonic_rank("猫", [])
         assert result is None
 
-    def test_diff_pill_from_entry_freqs(self):
-        """diff_pill_from_ranks produces a Freq pill with the blended rank."""
-        fsrs = _import_fsrs()
-        pill = fsrs.diff_pill(1333.0)
-        from saitenka.panel import Freq
-
-        assert isinstance(pill, Freq)
-        assert pill.name == "diff"
-        # value should encode the rank as a string (1333 → "1.3k" or "1333")
-        assert "1333" in pill.value or "k" in pill.value.lower()
-
-    def test_diff_pill_none_for_missing_rank(self):
-        """diff_pill(None) returns None — no pill emitted when we have no data."""
-        fsrs = _import_fsrs()
-        assert fsrs.diff_pill(None) is None
-
     def test_harmonic_of_blends_a_rank_list(self):
         """harmonic_of is the blend core: len/sum(1/r); empty → None."""
         fsrs = _import_fsrs()
         assert fsrs.harmonic_of([1000.0, 2000.0]) == pytest.approx(1333.33, rel=1e-3)
         assert fsrs.harmonic_of([]) is None
 
-    def test_rareness_color_bands_at_the_cutoffs(self):
-        """Green ≤10k (common), amber ≤30k (uncommon), red beyond (rare) — cutoffs inclusive."""
+    def test_rareness_bands_at_the_cutoffs(self):
+        """common ≤10k, uncommon ≤30k, rare beyond — cutoffs inclusive."""
         fsrs = _import_fsrs()
-        assert fsrs.rareness_color(500) == fsrs.rareness_color(fsrs.RARENESS_COMMON_MAX)  # common
-        assert fsrs.rareness_color(fsrs.RARENESS_COMMON_MAX + 1) == fsrs.rareness_color(
-            fsrs.RARENESS_UNCOMMON_MAX
-        )  # uncommon
-        rare = fsrs.rareness_color(fsrs.RARENESS_UNCOMMON_MAX + 1)
-        assert rare != fsrs.rareness_color(fsrs.RARENESS_COMMON_MAX)
-        assert rare != fsrs.rareness_color(fsrs.RARENESS_UNCOMMON_MAX)
-
-    def test_diff_pill_colored_by_band(self):
-        """A common word's pill is green; a rare word's is not — the band drives the color."""
-        fsrs = _import_fsrs()
-        common = fsrs.diff_pill(500.0)
-        rare = fsrs.diff_pill(float(fsrs.RARENESS_UNCOMMON_MAX + 5000))
-        assert common.color == fsrs.rareness_color(500)
-        assert rare.color != common.color
+        assert fsrs.rareness_band(500) == "common"
+        assert fsrs.rareness_band(fsrs.RARENESS_COMMON_MAX) == "common"
+        assert fsrs.rareness_band(fsrs.RARENESS_COMMON_MAX + 1) == "uncommon"
+        assert fsrs.rareness_band(fsrs.RARENESS_UNCOMMON_MAX) == "uncommon"
+        assert fsrs.rareness_band(fsrs.RARENESS_UNCOMMON_MAX + 1) == "rare"

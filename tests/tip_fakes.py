@@ -23,6 +23,10 @@ class LinkingDS:
     def search(self, _pattern):
         return util.cjk_links_entry(2)
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def hidpi_reader(scale: float) -> TestSession:
     """A headless reader whose OSD pins ``tip_scale.display`` to ~``scale`` (osd_h / REF_H(1080)),

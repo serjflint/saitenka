@@ -157,6 +157,10 @@ class TallDS:
     def has_term(self, *_forms):
         return False
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def run(*, settle_s: float = 0.4) -> dict:
     """Drive the scripted workload against a live, PLAYING mpv and return the reduced jank report."""
