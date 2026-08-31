@@ -7,6 +7,24 @@ logs.
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-08-30
+
+### Fixed
+
+- **Frequency pills, dictionary-name pills, pitch-accent graphs and bullet markers now raster at the
+  display scale** instead of being stretched from a reference-size sprite, so they are as crisp as the
+  text beside them. Visible wherever the tooltip renders above 1.05×, and on every render when
+  `tip_scale` is pinned in `overlay.toml`. Layout is unchanged — a pill still fills exactly the box
+  reserved for it at 1×, so nothing moves under the hit-test.
+- **`saitenka attach` could lose word scanning and subtitle overpaint for a whole session.** A
+  subtitle selection the session made itself raced mpv's `sid` echo and left the track holding its
+  cues with no geometry source at all. `saitenka run` was never affected.
+- **Native subtitle geometry no longer accepts a converted SubRip track it cannot reproduce.** mpv
+  applies `sub-scale` and `sub-pos` to converted tracks regardless of `--sub-ass-override`, so
+  widening on the override alone placed interaction boxes silently wrong instead of declining the
+  track. `sub-ass-justify` on an authored track under `scale` is refused for the same reason, and
+  episode advance again applies the profile's language guard when re-slotting.
+
 ## [4.3.0] - 2026-08-30
 
 ### Fixed
