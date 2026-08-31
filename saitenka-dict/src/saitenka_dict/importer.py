@@ -1,19 +1,29 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from saitenka_dict.archive import ArchiveLimits, DictionaryArchive, DictionaryArchiveError
+from saitenka_dict.archive import (
+    PRIMARY_ORDER,
+    ArchiveLimits,
+    DictionaryArchive,
+    DictionaryArchiveError,
+    zip_roles,
+)
 from saitenka_dict.media import normalize_glossary
 from saitenka_dict.metadata import parse_frequency
 from saitenka_dict.models import Capability, DictionaryInfo
+from saitenka_dict.schema import SCHEMA_VERSION, ensure_schema
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,81 +41,70 @@ class ImportRequest:
     limits: ArchiveLimits = field(default_factory=ArchiveLimits)
     on_progress: Callable[[ImportProgress], None] | None = None
     is_cancelled: Callable[[], bool] | None = None
+    #: ``(name, bytes) -> png | None``, applied to SVG members. Injected because the renderer, its
+    #: optional extra, and the fallback font are the application's choices; ``None`` stores them raw.
+    rasterize_svg: Callable[[str, bytes], bytes | None] | None = None
+    #: Whether to store each entry's Yomitan ``seq`` — only useful to a consumer showing related terms.
+    persist_seq: bool = True
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS schema_info(version INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS dictionaries(
-  id INTEGER PRIMARY KEY, title TEXT UNIQUE NOT NULL, kind TEXT NOT NULL,
-  import_order INTEGER NOT NULL, source_name TEXT NOT NULL, revision TEXT NOT NULL,
-  imported_at TEXT NOT NULL, schema_version INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS entries(
-  dict_id INTEGER NOT NULL, id INTEGER NOT NULL, term TEXT NOT NULL, reading TEXT NOT NULL,
-  glossary TEXT NOT NULL, tags TEXT NOT NULL, seq INTEGER, rules TEXT NOT NULL,
-  score INTEGER NOT NULL, term_tags TEXT NOT NULL, PRIMARY KEY(dict_id, id));
-CREATE TABLE IF NOT EXISTS keys(dict_id INTEGER NOT NULL, key TEXT NOT NULL, id INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS kanji(
-  dict_id INTEGER NOT NULL, chr TEXT NOT NULL, onyomi TEXT NOT NULL, kunyomi TEXT NOT NULL,
-  tags TEXT NOT NULL, meanings TEXT NOT NULL, stats TEXT NOT NULL, PRIMARY KEY(dict_id, chr));
-CREATE TABLE IF NOT EXISTS term_meta(
-  dict_id INTEGER NOT NULL, term TEXT NOT NULL, mode TEXT NOT NULL, reading TEXT,
-  rank INTEGER, disp TEXT, positions TEXT);
-CREATE TABLE IF NOT EXISTS kanji_meta(
-  dict_id INTEGER NOT NULL, chr TEXT NOT NULL, mode TEXT NOT NULL, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS tags(
-  dict_id INTEGER NOT NULL, code TEXT NOT NULL, name TEXT NOT NULL, ord INTEGER NOT NULL,
-  category TEXT NOT NULL, notes TEXT NOT NULL, score INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS media(
-  dict_id INTEGER NOT NULL, path TEXT NOT NULL, png BLOB NOT NULL, PRIMARY KEY(dict_id, path));
-CREATE INDEX IF NOT EXISTS idx_keys ON keys(key, dict_id);
-CREATE INDEX IF NOT EXISTS idx_entries_seq ON entries(seq, dict_id);
-CREATE INDEX IF NOT EXISTS idx_term_meta_term ON term_meta(term, mode, dict_id);
-CREATE INDEX IF NOT EXISTS idx_kanji_char ON kanji(chr, dict_id);
-"""
+_SVG_SUFFIX = ".svg"
 
-_LEGACY_MIGRATIONS = (
-    (
-        "PRAGMA table_info(dictionaries)",
-        (
-            ("kind", "ALTER TABLE dictionaries ADD COLUMN kind TEXT NOT NULL DEFAULT 'dict'"),
-            (
-                "import_order",
-                "ALTER TABLE dictionaries ADD COLUMN import_order INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "source_name",
-                "ALTER TABLE dictionaries ADD COLUMN source_name TEXT NOT NULL DEFAULT ''",
-            ),
-            (
-                "revision",
-                "ALTER TABLE dictionaries ADD COLUMN revision TEXT NOT NULL DEFAULT ''",
-            ),
-            (
-                "imported_at",
-                "ALTER TABLE dictionaries ADD COLUMN imported_at TEXT NOT NULL DEFAULT ''",
-            ),
-            (
-                "schema_version",
-                "ALTER TABLE dictionaries ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1",
-            ),
-        ),
-    ),
-    (
-        "PRAGMA table_info(entries)",
-        (
-            ("rules", "ALTER TABLE entries ADD COLUMN rules TEXT NOT NULL DEFAULT ''"),
-            ("score", "ALTER TABLE entries ADD COLUMN score INTEGER NOT NULL DEFAULT 0"),
-            (
-                "term_tags",
-                "ALTER TABLE entries ADD COLUMN term_tags TEXT NOT NULL DEFAULT ''",
-            ),
-        ),
-    ),
-    (
-        "PRAGMA table_info(tags)",
-        (("score", "ALTER TABLE tags ADD COLUMN score INTEGER NOT NULL DEFAULT 0"),),
-    ),
-)
+
+def _rasterized(
+    media: tuple[tuple[str, bytes], ...],
+    rasterize: Callable[[str, bytes], bytes | None] | None,
+) -> tuple[tuple[str, bytes], ...]:
+    """Replace SVG members with their rasterized bytes. A member the rasterizer declines is dropped,
+    not stored: half an image is worse than the renderer's missing-glyph fallback."""
+    if rasterize is None:
+        return media
+    result = []
+    failed = 0
+    for name, data in media:
+        if not name.lower().endswith(_SVG_SUFFIX):
+            result.append((name, data))
+            continue
+        raster = rasterize(name, data)
+        if raster is None:
+            failed += 1
+            continue
+        result.append((name, raster))
+    if failed:
+        # A per-dictionary tally beside the per-file warnings: one bad glyph is noise, hundreds is a
+        # broken rasterizer, and only the count distinguishes them.
+        log.warning("%d media SVG(s) failed to rasterize — those render as a fallback box", failed)
+    return tuple(result)
+
+
+def _morae(value: Any) -> list[int]:
+    """A NHK/Kanjium per-mora annotation (``devoice``/``nasal``) → 1-based mora indices. Yomitan
+    writes an int for one mora or an array for several; a bare bool flag carries no index."""
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, int) and not isinstance(item, bool)]
+    return []
+
+
+def _accents(data: dict[str, Any]) -> list[int | dict[str, Any]]:
+    """One pitch entry's ``pitches`` → the stored accent list.
+
+    A plain accent (no devoice/nasal anywhere) stores the bare ``int`` downstep position it always
+    has, so an ordinary pitch dictionary's rows are byte-identical to previous releases'. Only an
+    entry that actually carries annotations grows into ``{"p", "d", "n"}``.
+    """
+    accents: list[int | dict[str, Any]] = []
+    for pitch in data.get("pitches", ()):
+        if not (isinstance(pitch, dict) and isinstance(position := pitch.get("position"), int)):
+            continue
+        devoiced, nasal = _morae(pitch.get("devoice")), _morae(pitch.get("nasal"))
+        accents.append(
+            {"p": position, "d": devoiced, "n": nasal} if (devoiced or nasal) else position
+        )
+    return accents
 
 
 class DictionaryDatabase:
@@ -118,45 +117,43 @@ class DictionaryDatabase:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path)
         try:
-            connection.executescript(_SCHEMA)
-            self._migrate_legacy_schema(connection)
-            if connection.execute("SELECT COUNT(*) FROM schema_info").fetchone()[0] == 0:
-                connection.execute("INSERT INTO schema_info VALUES (2)")
-            connection.commit()
+            ensure_schema(connection)
         finally:
             connection.close()
-
-    @staticmethod
-    def _migrate_legacy_schema(connection: sqlite3.Connection) -> None:
-        for pragma, migrations in _LEGACY_MIGRATIONS:
-            present = {row[1] for row in connection.execute(pragma)}
-            for name, statement in migrations:
-                if name not in present:
-                    connection.execute(statement)
 
     def import_dictionary(self, archive: str | Path | ImportRequest) -> DictionaryInfo:
         request = archive if isinstance(archive, ImportRequest) else ImportRequest(Path(archive))
         self.initialize()
+        # A zip can fill several roles at once (a combined definition+frequency dictionary), so the
+        # display `kind` is only the primary one — every role's banks are loaded regardless.
+        roles = zip_roles(request.archive)
         with DictionaryArchive(request.archive, request.limits) as source:
             info = self._dictionary_info(source)
             connection = sqlite3.connect(self.path)
             try:
+                connection.execute("PRAGMA synchronous=NORMAL")
                 with connection:
                     self._remove(connection, info.title)
                     cursor = connection.execute(
                         "INSERT INTO dictionaries(title, kind, import_order, source_name, revision, "
-                        "imported_at, schema_version) VALUES(?, ?, ?, ?, ?, ?, 2)",
+                        "imported_at, schema_version) VALUES(?, ?, ?, ?, ?, ?, ?)",
                         (
                             info.title,
-                            self._kind(source),
+                            next(kind for kind in PRIMARY_ORDER if kind in roles),
                             request.import_order,
                             request.archive.name,
                             info.revision,
                             request.imported_at or datetime.now(UTC).isoformat(),
+                            SCHEMA_VERSION,
                         ),
                     )
                     dictionary_id = int(cursor.lastrowid or 0)
                     self._load(source, connection, dictionary_id, request)
+                if roles & {"freq", "pitch"}:
+                    # term_meta's planner statistics decide whether the pitch/frequency lookups seek
+                    # or scan, and a fresh import moves the row count by millions.
+                    connection.execute("ANALYZE term_meta")
+                    connection.commit()
             finally:
                 connection.close()
         return info
@@ -232,18 +229,6 @@ class DictionaryDatabase:
             frozenset(capabilities),
         )
 
-    @staticmethod
-    def _kind(source: DictionaryArchive) -> str:
-        if source.names("term_bank"):
-            return "dict"
-        modes = {
-            entry[1]
-            for name in source.names("term_meta_bank")
-            for entry in source.read_bank(name)
-            if isinstance(entry, list) and len(entry) > 1
-        }
-        return "pitch" if "pitch" in modes else "freq"
-
     def _load(
         self,
         source: DictionaryArchive,
@@ -256,7 +241,7 @@ class DictionaryDatabase:
             for kind in ("term_bank", "kanji_bank", "term_meta_bank", "kanji_meta_bank", "tag_bank")
             for name in source.names(kind)
         )
-        media = source.media()
+        media = _rasterized(source.media(), request.rasterize_svg)
         media_by_path = dict(media)
         record_id = 0
         for completed, (kind, name) in enumerate(banks, 1):
@@ -265,7 +250,12 @@ class DictionaryDatabase:
             records = source.read_bank(name)
             if kind == "term_bank":
                 record_id = self._load_terms(
-                    connection, dictionary_id, record_id, records, media_by_path
+                    connection,
+                    dictionary_id,
+                    record_id,
+                    records,
+                    media_by_path,
+                    persist_seq=request.persist_seq,
                 )
             elif kind == "kanji_bank":
                 self._load_kanji(connection, dictionary_id, records)
@@ -281,26 +271,46 @@ class DictionaryDatabase:
             "INSERT INTO media(dict_id, path, png) VALUES(?, ?, ?)",
             ((dictionary_id, name, data) for name, data in media),
         )
-        if source.index.get("frequencyMode") == "occurrence-based":
+        occurrence_based = source.index.get("frequencyMode") == "occurrence-based"
+        if occurrence_based:
             self._rank_occurrences(connection, dictionary_id)
+        # The ORIGINAL frequency mode, which nothing downstream can reconstruct once the counts have
+        # been ranked. An occurrence-based dictionary's rank is dense and per-corpus, so it is not
+        # comparable with a real rank-based list and the blended-frequency pill must exclude it.
+        connection.execute(
+            "INSERT OR REPLACE INTO meta VALUES(?, ?)",
+            (
+                f"freqmode:{dictionary_id}",
+                "occurrence" if occurrence_based else "rank",
+            ),
+        )
 
     @staticmethod
     def _rank_occurrences(connection: sqlite3.Connection, dictionary_id: int) -> None:
+        """Occurrence COUNTS → 1-based dense ranks (most frequent = 1).
+
+        Every consumer assumes rank semantics, so left as counts the dictionary colours inverted. The
+        original count survives in ``disp`` when the dictionary supplied no explicit ``displayValue``,
+        so the tooltip still shows the real frequency rather than the derived rank.
+        """
         rows = connection.execute(
-            "SELECT rowid, rank FROM term_meta "
+            "SELECT rowid, rank, disp FROM term_meta "
             "WHERE dict_id=? AND mode='freq' AND rank IS NOT NULL",
             (dictionary_id,),
         ).fetchall()
         ranks = {
             value: rank
             for rank, value in enumerate(
-                sorted({value for _rowid, value in rows}, reverse=True),
+                sorted({value for _rowid, value, _disp in rows}, reverse=True),
                 1,
             )
         }
         connection.executemany(
-            "UPDATE term_meta SET rank=? WHERE rowid=?",
-            ((ranks[value], rowid) for rowid, value in rows),
+            "UPDATE term_meta SET rank=?, disp=? WHERE rowid=?",
+            (
+                (ranks[value], disp if disp is not None else str(value), rowid)
+                for rowid, value, disp in rows
+            ),
         )
 
     @staticmethod
@@ -310,6 +320,8 @@ class DictionaryDatabase:
         record_id: int,
         records: list[Any],
         media: dict[str, bytes],
+        *,
+        persist_seq: bool = True,
     ) -> int:
         rows: list[tuple[Any, ...]] = []
         keys: list[tuple[int, str, int]] = []
@@ -327,7 +339,9 @@ class DictionaryDatabase:
                     reading,
                     json.dumps(normalize_glossary(entry[5], media), ensure_ascii=False),
                     entry[2] or "",
-                    entry[6] if len(entry) > 6 and isinstance(entry[6], int) else None,
+                    entry[6]
+                    if persist_seq and len(entry) > 6 and isinstance(entry[6], int)
+                    else None,
                     entry[3] or "",
                     entry[4] if isinstance(entry[4], int) else 0,
                     entry[7] if len(entry) > 7 and isinstance(entry[7], str) else "",
@@ -387,7 +401,10 @@ class DictionaryDatabase:
             positions: str | None = None
             if mode == "pitch" and isinstance(data, dict):
                 reading = data.get("reading") or term
-                positions = json.dumps(data.get("pitches", ()), ensure_ascii=False)
+                accents = _accents(data)
+                if not accents:
+                    continue
+                positions = json.dumps(accents, ensure_ascii=False)
             elif mode == "ipa" and isinstance(data, dict):
                 reading = data.get("reading") or term
                 positions = json.dumps(data.get("transcriptions", ()), ensure_ascii=False)

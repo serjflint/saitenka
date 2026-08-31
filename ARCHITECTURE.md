@@ -61,12 +61,13 @@ internal modules with explicit dependency contracts, not independently published
   feature owners and their declarations; `app/session/factory.py` is the production construction seam.
   `cli.py` owns process setup and Cyclopts registration, `commands/` owns domain command surfaces and
   attach orchestration, and
-  `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
-  seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
-  strategy); `profiles.py`/`features/profiles/profile_cli.py`/`languages.py` define reading-profile
-  values and loading (a French profile ships today), while the profile feature owns command
-  admission and application; `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
-  dictionary DB); `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring);
+  `launch/` owns run orchestration. The remaining domains include `saitenka-tokenize/` (the
+  tokenizer-strategy seam over fugashi/unidic-lite JP segmentation and the Latin strategy);
+  `profiles.py`/`features/profiles/profile_cli.py` define reading-profile values and loading (a French
+  profile ships today), while the profile feature owns command admission and application;
+  `dictionary.py`/`dictdb.py`/`lookup.py` (the app's side of the consolidated SQLite dictionary DB,
+  whose schema and writer are `saitenka-dict`'s); `scoring.py` plus `saitenka-wordstate/` (word
+  coloring);
   `anki.py` plus `features/mining/` (mining + optional word-pronunciation audio);
   `features/analysis/` plus `render/analysis.py` (cached whole-track metrics and their background UI);
   `features/annotation/` (cue annotation identity, work, cache, and degradation policy);
@@ -420,6 +421,7 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 | --- | --- | --- |
 | **Token** (the *term*) | `saitenka-tokenize/` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
 | **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`); the legacy `Dictionary` path remains a compatibility fallback. |
+| **The dictionary database** | `saitenka_dict/schema.py`, `saitenka_dict/importer.py` | `saitenka-dict` owns `dictionaries.sqlite` outright: one schema declaration, one writer. `app/dictdb.py` is the application's *policy* over it — the file's location, read-connection tuning, and the SVG rasterizer handed to an import — and declares no tables and writes no dictionary rows (pinned by `tests/test_one_database_one_client.py`). |
 | **`Entry`** | `panel/model.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
 | **Panel** | `app/features/tooltip/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
 | **`Row`** | `panel/rows.py` | One horizontal slice of the panel (header, freq row, a def-name chip, or a **def body**), as a *deferred thunk* — building rows walks no content. Only def-body rows are expensive. |

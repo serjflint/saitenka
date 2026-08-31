@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 _META_BANK = re.compile(r"term_meta_bank_\d+\.json$")
 _TERM_BANK = re.compile(r"term_bank_\d+\.json$")
-_PRIMARY_ORDER = ("dict", "pitch", "freq")
+PRIMARY_ORDER = ("dict", "pitch", "freq")
 
 
 class DictionaryArchiveError(ValueError):
@@ -189,7 +189,7 @@ def zip_roles(path: str | Path) -> frozenset[str]:
 
 def classify_zip(path: str | Path) -> str:
     roles = zip_roles(path)
-    return next(kind for kind in _PRIMARY_ORDER if kind in roles)
+    return next(kind for kind in PRIMARY_ORDER if kind in roles)
 
 
 def title_of(archive: zipfile.ZipFile, fallback: str) -> str:

@@ -10,16 +10,6 @@
     ]
   },
   {
-    "path": "src/saitenka/app/dictdb.py",
-    "file_name": "dictdb.py",
-    "functions": [
-      {
-        "name": "_read_term_meta",
-        "complexity": 19
-      }
-    ]
-  },
-  {
     "path": "src/saitenka/app/yomitan_db_import.py",
     "file_name": "yomitan_db_import.py",
     "functions": [

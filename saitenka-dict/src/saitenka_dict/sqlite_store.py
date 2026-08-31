@@ -151,6 +151,7 @@ class SqliteDictionaryStore:
         self._entry_lock = threading.Lock()
         self._tag_cache: dict[int, dict[str, Tag]] = {}
         self._tag_lock = threading.Lock()
+        self._enriched: bool | None = None
 
     def _conn(self) -> sqlite3.Connection:
         connection = getattr(self._local, "connection", None)
@@ -168,9 +169,18 @@ class SqliteDictionaryStore:
         return encoded, encoded
 
     def _has_enriched_entries(self) -> bool:
-        columns = {row[1] for row in self._conn().execute("PRAGMA table_info(entries)")}
-        required = {"rules", "score", "term_tags"}
-        return required <= columns
+        """Whether ``entries`` carries the full Yomitan columns.
+
+        No current writer produces the narrow shape — :mod:`saitenka_dict.schema` widens any database
+        it opens — but this store opens **read-only**, so a file that has not yet been opened for
+        writing can still be the old one. That makes this on-disk *format* compatibility, not a second
+        client: it costs one PRAGMA per store rather than one per query, and it retires when the
+        narrow shape is provably gone from the wild.
+        """
+        if self._enriched is None:
+            columns = {row[1] for row in self._conn().execute("PRAGMA table_info(entries)")}
+            self._enriched = {"rules", "score", "term_tags"} <= columns
+        return self._enriched
 
     def _tags(self, dictionary_id: int) -> dict[str, Tag]:
         with self._tag_lock:

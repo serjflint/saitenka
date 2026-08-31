@@ -4,6 +4,7 @@ import json
 import zipfile
 
 import pytest
+from saitenka_dict.schema import SCHEMA_VERSION
 
 from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
@@ -167,11 +168,13 @@ def test_stats_reports_schema_size_and_per_dict_counts(tmp_path):
     db.import_zip(tagged, imported_at=AT)
     db.import_zip(untagged, imported_at=AT)
     st = db.stats()
-    assert st.exists and st.schema == 1 and st.size_bytes > 0
+    assert st.exists and st.schema == SCHEMA_VERSION and st.size_bytes > 0
     by_title = {d.row.title: d for d in st.dicts}
     assert by_title["Tagged"].counts["tags"] == 1
     assert by_title["Tagged"].counts["entries"] == 1
-    assert by_title["Tagged"].imported_at == AT and by_title["Tagged"].schema_version == 1
+    assert (
+        by_title["Tagged"].imported_at == AT and by_title["Tagged"].schema_version == SCHEMA_VERSION
+    )
     # 0 tags for a dict-kind entry is the sidecar-era / no-tag-bank tell the report surfaces
     assert by_title["Untagged"].counts["tags"] == 0
 
@@ -237,15 +240,15 @@ def test_import_tolerates_wrong_crc_meta(tmp_path):
 
 def test_failed_import_rolls_back(tmp_path, monkeypatch):
     """A failure mid-import must leave the DB untouched — the whole import is one transaction."""
-    from saitenka.app import dictdb
+    from saitenka_dict.importer import DictionaryDatabase
 
     z = _term_zip(tmp_path / "d.zip", "Boom", [["猫", "ねこ", ["cat"]]], tags=[["★", "p", 1]])
     db = DictionaryDb.open(tmp_path / "db.sqlite")
 
-    def boom(_zf):
+    def boom(*_args):
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(dictdb, "_extract_tags", boom)
+    monkeypatch.setattr(DictionaryDatabase, "_load_tags", staticmethod(boom))
     with pytest.raises(RuntimeError):
         db.import_zip(z, imported_at=AT)
     assert db.list_dictionaries() == []  # no half-written dictionary row
@@ -283,7 +286,7 @@ def test_term_meta_reading_index_exists(tmp_path):
         )
     }
     assert "idx_meta_reading" in names
-    assert "idx_meta_term" in names
+    assert "idx_term_meta_term" in names
 
 
 def test_ensure_schema_analyzes_term_meta_once(tmp_path):
@@ -291,7 +294,7 @@ def test_ensure_schema_analyzes_term_meta_once(tmp_path):
     records a meta flag so it doesn't repeat on every open — ANALYZE cost scales with table size."""
     p = tmp_path / "db.sqlite"
     db = DictionaryDb.open(p)
-    assert db._conn().execute("SELECT v FROM meta WHERE k='analyzed'").fetchone() == ("1",)
+    assert db._conn().execute("SELECT v FROM meta WHERE k='analyzed'").fetchone() is not None
     # sqlite_stat1 gets populated by ANALYZE even on an empty table (rows for each index/table).
     stat_rows_after_first_open = (
         db._conn().execute("SELECT count(*) FROM sqlite_stat1").fetchone()[0]
@@ -319,46 +322,6 @@ def test_import_freq_or_pitch_reanalyzes_term_meta(tmp_path):
         db._conn().execute("SELECT count(*) FROM sqlite_stat1 WHERE tbl='term_meta'").fetchone()[0]
     )
     assert stat > 0  # ANALYZE ran and recorded stats for term_meta's indexes
-
-
-# --- frequency value parsing (SubMiner-parity edge cases) --------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (8912, 8912),  # plain int
-        (8912.0, 8912),  # float
-        ("8912", 8912),  # numeric string
-        ("118,121", 118),  # grouped "rank, occurrences" → LEADING rank, not 118121
-        ("118, 121", 118),  # same, with a space
-        ("  73 ", 73),  # surrounding whitespace
-        ("N5", None),  # non-numeric → no rank (never a crash)
-        (True, None),  # bool is not rank 1
-        (None, None),
-    ],
-)
-def test_coerce_rank(value, expected):
-    from saitenka.app.dictdb import _coerce_rank
-
-    assert _coerce_rank(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("data", "expected"),
-    [
-        (8912, (None, 8912, None)),
-        ({"reading": "ほんめい", "frequency": 8912}, ("ほんめい", 8912, None)),
-        ({"value": 4073, "displayValue": "4073㋕"}, (None, 4073, "4073㋕")),
-        # grouped display packed into value as a string → leading rank wins, no crash downstream
-        ({"value": "118,121"}, (None, 118, None)),
-        ({"frequency": {"value": -1, "displayValue": "N5"}}, (None, -1, "N5")),  # JLPT sentinel
-    ],
-)
-def test_parse_freq_entry_shapes(data, expected):
-    from saitenka.app.dictdb import _parse_freq_entry
-
-    assert _parse_freq_entry(data) == expected
 
 
 def _ranks(db, dict_id):
