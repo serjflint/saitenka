@@ -11,6 +11,7 @@ from __future__ import annotations
 import hypothesis.strategies as st
 from hypothesis import given
 
+from saitenka.app.dict_meta import FreqDict, JlptDict
 from saitenka.app.fsrs import KnownSnap
 from saitenka.app.scoring import (
     FUNCTION_POS,
@@ -20,7 +21,7 @@ from saitenka.app.scoring import (
     mark_n_plus_one,
 )
 from saitenka.app.tokenize import Token
-from saitenka.app.wordlists import FreqDict, JlptDict, KnownWords
+from saitenka.app.wordlists import KnownWords
 
 PAL = Palette()
 CONTENT_POS = ["名詞", "動詞", "形容詞", "副詞"]

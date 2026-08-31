@@ -5,9 +5,10 @@ from pathlib import Path
 import dicthelp
 import pytest
 
+from saitenka.app.dict_meta import FreqDict
 from saitenka.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
 from saitenka.app.tokenize import tokenize
-from saitenka.app.wordlists import FreqDict, KnownForm, KnownWords
+from saitenka.app.wordlists import KnownForm, KnownWords
 
 PAL = Palette()
 

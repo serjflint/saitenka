@@ -7,12 +7,13 @@ from util import RecordingRasterProvider
 
 import saitenka.app.features.profiles.dependencies as reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
+from saitenka.app.dict_meta import FreqDict
 from saitenka.app.fsrs import KnownSnap
 from saitenka.app.scoring import Palette, Scorer
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.tokenize import Token
-from saitenka.app.wordlists import FreqDict, KnownWords
+from saitenka.app.wordlists import KnownWords
 
 
 def _token(surface: str = "本") -> Token:

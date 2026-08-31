@@ -12,11 +12,12 @@ from dataclasses import dataclass, field
 from itertools import starmap
 from typing import TYPE_CHECKING
 
-from saitenka.app.wordlists import FreqDict, JlptDict, KnownWords
+from saitenka.app.dict_meta import FreqDict, JlptDict
 
 if TYPE_CHECKING:
     from saitenka.app.fsrs import KnownSnap
     from saitenka.app.tokenize import Token
+    from saitenka.app.wordlists import KnownWords
 
 RGBA = tuple[int, int, int, int]
 

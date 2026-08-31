@@ -42,6 +42,7 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
         return []
 
 
+from saitenka.app.dict_meta import FreqSource, PitchSource
 from saitenka.app.dictionary_surface import (
     DEINFLECT_FORM_CAP as _DEINFLECT_FORM_CAP,
 )
@@ -75,7 +76,6 @@ from saitenka.app.dictionary_surface import (
 )
 from saitenka.app.fsrs import harmonic_of
 from saitenka.app.lookup import CardData, furigana
-from saitenka.app.wordlists import FreqSource, PitchSource
 from saitenka.fonts import STROKE_ORDER_FONT
 from saitenka.panel import Definition, Entry, EntryGroup, Freq
 from saitenka.render.sc_adapter import collect_img_paths

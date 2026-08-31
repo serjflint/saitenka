@@ -6,8 +6,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka.app.dict_meta import FreqDict
 from saitenka.app.scoring import Scorer, SentenceProfile, is_content, sentence_profiles
-from saitenka.app.wordlists import FreqDict
 
 if TYPE_CHECKING:
     from saitenka.app.tokenize import Token

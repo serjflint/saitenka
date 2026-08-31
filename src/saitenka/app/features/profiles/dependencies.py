@@ -197,8 +197,8 @@ def _load_fsrs_snapshot(cfg: dict) -> KnownSnap | None:
 
 
 def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
+    from saitenka.app.dict_meta import FreqDict
     from saitenka.app.scoring import FREQ_BAND_TOP_X
-    from saitenka.app.wordlists import FreqDict
 
     with otel_metrics.traced("load_freq_dict"):
         # freq_rows is set iff we resolved dict sources above; the coloring band uses the first freq.
@@ -210,7 +210,7 @@ def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
 
 
 def _load_jlpt_dict(db):
-    from saitenka.app.wordlists import JlptDict
+    from saitenka.app.dict_meta import JlptDict
 
     with otel_metrics.traced("load_jlpt_dict"):
         return JlptDict.load(db)

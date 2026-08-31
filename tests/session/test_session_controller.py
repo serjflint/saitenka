@@ -2824,8 +2824,9 @@ def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
 
 
 def _jlpt_scorer(mapping):
+    from saitenka.app.dict_meta import JlptDict
     from saitenka.app.scoring import Scorer
-    from saitenka.app.wordlists import JlptDict, KnownWords
+    from saitenka.app.wordlists import KnownWords
 
     return Scorer(known=KnownWords.from_set([]), jlpt=JlptDict(dict(mapping)))
 

@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 import zipfile
 
+from saitenka.app.dict_meta import FreqDict, FreqSource, JlptDict, PitchSource
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import Dictionary, DictionarySet
-from saitenka.app.wordlists import FreqDict, FreqSource, JlptDict, PitchSource
 
 AT = "2026-07-23T00:00:00"  # fixed imported_at — the store never stamps time itself
 

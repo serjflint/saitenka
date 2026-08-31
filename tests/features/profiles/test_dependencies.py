@@ -139,13 +139,14 @@ def test_mining_validation_drops_field_absent_from_note_type(monkeypatch):
 
 
 def test_color_builds_scorer_even_without_known(monkeypatch):
+    import saitenka.app.dict_meta as dm
     import saitenka.app.scoring as scoring_mod
     import saitenka.app.wordlists as wl
 
     monkeypatch.setattr(
         wl.KnownWords, "from_set", staticmethod(lambda words: f"known:{len(words)}")
     )
-    monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
+    monkeypatch.setattr(dm.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
     monkeypatch.setattr(
         scoring_mod, "Scorer", lambda known, jlpt, **_kw: {"known": known, "jlpt": jlpt}
     )
@@ -177,8 +178,8 @@ def test_freqdict_load_caps_at_top_x_and_drops_the_uncolorable_tail(tmp_path):
     cap. A rank beyond the cap looks up as None (uncolored), exactly as a full load + band() would."""
     import dicthelp
 
+    from saitenka.app.dict_meta import FreqDict
     from saitenka.app.scoring import FREQ_BAND_TOP_X
-    from saitenka.app.wordlists import FreqDict
 
     f = dicthelp.meta_zip(
         tmp_path / "f.zip",
@@ -220,6 +221,7 @@ def test_anki_launch_is_fire_and_forget_off_the_critical_path(monkeypatch):
 
 
 def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
+    import saitenka.app.dict_meta as dm
     import saitenka.app.scoring as scoring_mod
     import saitenka.app.wordlists as wl
 
@@ -229,7 +231,7 @@ def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
     # cache-first path: empty cache → miss → the blocking refresh_known_cache raises (Anki down)
     monkeypatch.setattr(wl, "refresh_known_cache", boom)
     monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
-    monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
+    monkeypatch.setattr(dm.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
     monkeypatch.setattr(scoring_mod, "Scorer", lambda known, **_kw: {"known": known})
     scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
     assert scorer == {"known": "empty-known"}  # degraded, not crashed
@@ -239,6 +241,7 @@ def test_known_falls_back_on_ankiretryable_not_just_oserror(monkeypatch):
     # Regression: an expected-down Anki raises `_AnkiRetryable` (an AnkiError, NOT an OSError). The
     # cache-miss catch used to omit AnkiError, so it escaped to the top-level dep loader and surfaced as
     # a full startup traceback. It must degrade to the fallback set exactly like a connection error.
+    import saitenka.app.dict_meta as dm
     import saitenka.app.scoring as scoring_mod
     import saitenka.app.wordlists as wl
     from saitenka.app.anki import _AnkiRetryable
@@ -248,7 +251,7 @@ def test_known_falls_back_on_ankiretryable_not_just_oserror(monkeypatch):
 
     monkeypatch.setattr(wl, "refresh_known_cache", boom)
     monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
-    monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
+    monkeypatch.setattr(dm.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
     monkeypatch.setattr(scoring_mod, "Scorer", lambda known, **_kw: {"known": known})
 
     scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
