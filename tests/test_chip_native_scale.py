@@ -97,23 +97,50 @@ def test_chip_metrics_stay_reference_px_at_every_scale(scale):
     assert (box.advance, box.ascent, box.descent) == before
 
 
-def test_inline_box_redraws_through_its_native_provider_instead_of_upscaling():
-    # The same seam for the pitch graph and the bullet markers: both can be drawn at any size, so a
-    # box that supplies a `native` callable must be asked for device pixels, not stretched.
-    asked: list[float] = []
-
+def _counting_native(asked: list[float]):
     def native(s: float) -> Image.Image:
         asked.append(s)
         return Image.new("RGBA", (round(20 * s), round(20 * s)), (0, 200, 0, 255))
 
-    box = ImgBox(width=20, height=20, sprite=Image.new("RGBA", (20, 20), (0, 200, 0, 255)))
-    canvas = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(canvas)
-    box.draw(canvas, draw, 10, 40, scale=2.0)
-    assert asked == []  # no provider → the old upscale, unchanged
+    return native
 
-    replace(box, native=native).draw(canvas, draw, 10, 40, scale=2.0)
-    assert asked == [2.0]
+
+def test_a_box_with_a_native_provider_never_upscales():
+    # The seam the pitch graph, the bullet markers and the gaiji share: all three can be drawn at any
+    # size, so the box is asked for device pixels rather than handed a stretched 1x sprite.
+    asked: list[float] = []
+    box = ImgBox(width=20, height=20, native=_counting_native(asked))
+    canvas = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+    box.draw(canvas, ImageDraw.Draw(canvas), 10, 40, scale=2.0)
+    assert asked == [1.0, 2.0]  # 1.0 at construction (the reference sprite), then the device one
+
+
+def test_the_reference_sprite_is_the_provider_at_scale_one():
+    # The dedup that closed #465's gaiji bug: `sprite` is not a second recipe that can disagree with
+    # the scaled one, it IS `native(1.0)`.
+    asked: list[float] = []
+    box = ImgBox(width=20, height=20, native=_counting_native(asked))
+    assert asked == [1.0]
+    assert box.sprite is not None
+    assert box.sprite.size == (20, 20)
+    assert box.sprite_at(1.0) is box.sprite  # seeded, so 1.0 is a cache hit, not a recompute
+    assert asked == [1.0]
+
+
+def test_a_box_without_a_provider_still_upscales_its_sprite():
+    box = ImgBox(width=20, height=20, sprite=Image.new("RGBA", (20, 20), (0, 200, 0, 255)))
+    scaled = box.sprite_at(2.0)
+    assert scaled is not None and scaled.size == (40, 40)
+
+
+def test_the_sprite_memo_is_not_part_of_the_box_s_identity():
+    # A cache that joined __eq__/__init__ would make two equal boxes compare unequal once one had
+    # rendered, and `replace()` would inherit the other box's pixels.
+    a = ImgBox(width=20, height=20, native=_counting_native([]))
+    b = replace(a)
+    a.sprite_at(2.0)
+    assert a == b
+    assert b._sprites.keys() == {1.0}
 
 
 def test_chip_row_raster_is_the_device_size_of_its_reference_row():

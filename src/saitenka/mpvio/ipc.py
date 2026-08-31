@@ -333,9 +333,12 @@ class MpvIPC:
             transport.write(data)
         except OSError as error:
             log.warning("mpv IPC: queued write failed (%s) — disconnected", error)
-            self._reject_write(request_id, future, "disconnected")
+            # Close BEFORE completing the future: resolving it releases the waiting caller, so the
+            # other order lets a thread observe a `disconnected` result while `is_closed()` is still
+            # False and re-submit into a dead transport. `close` already sequences it this way.
             if closed is not None:
                 closed.set()
+            self._reject_write(request_id, future, "disconnected")
 
     def _reject_write(self, request_id: int, future: Future[dict], error: str) -> None:
         with self._pending_lock:
