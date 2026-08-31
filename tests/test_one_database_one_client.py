@@ -97,21 +97,44 @@ def test_the_app_writes_only_its_own_key_value_rows():
     assert source.count("INSERT OR REPLACE INTO META VALUES") == 1
 
 
-def test_the_app_runs_no_query_of_its_own_against_the_dictionary_tables():
-    """The reader followed the writer.
+#: Every app module still allowed to issue SQL against the dictionary database, and the reason. This
+#: is a census with a locked denominator, not a per-file check: the reader this PR retired could
+#: otherwise reappear one module over and a gate scoped to `dictionary.py` would say nothing.
+#: Shrinking it is the goal; growing it is a decision, so both directions fail until re-blessed.
+_APP_MODULES_THAT_QUERY_THE_DICTIONARY = {
+    # The app's own handle: `media_for` and the `meta` key-value rows it owns.
+    "app/dictdb.py",
+    # `FreqSource`/`PitchSource`, retiring into `Translator` once `occurrence_based` and
+    # `PitchAccent` have package homes. Its own docstring records that.
+    "app/dict_meta.py",
+    # Diagnostics: a `seq IS NOT NULL` probe for the deep-link report.
+    "app/doctor.py",
+    # Atlas prewarm: the most frequent terms, off any interactive path.
+    "app/prewarm.py",
+}
 
-    `saitenka.app.dictionary` used to carry a hand-rolled SQL reader beside the semantic store — two
-    readers of one schema, kept in step by hand, with the second one dead in production because the
-    store always won the branch. Every lookup goes through `saitenka-dict` now, so a `SELECT` naming
-    a dictionary table here would be that second reader coming back.
+
+def test_no_new_app_module_starts_reading_the_dictionary_database():
+    """The reader followed the writer — but only out of `dictionary.py`.
+
+    `saitenka.app.dictionary` carried a hand-rolled SQL reader beside the semantic store: two readers
+    of one schema, kept in step by hand. Checking that one file would be a gate on a name rather than
+    a meaning, since the same reader can reappear in any neighbour. `dict_id` is the marker — it tags
+    every row of this database and appears in no other schema the app owns.
     """
-    from saitenka.app import dictionary
+    root = Path(dictdb.__file__).parents[1]
+    querying = set()
+    for path in root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        # The conjunction is the point. `dict_id` alone also matches a plain attribute (`dictionary.py`
+        # still carries one), and a SQL verb alone matches the app's other databases — `backlog.py`
+        # has its own unrelated `media` table.
+        if "dict_id" in source and any(
+            verb in source for verb in ("SELECT ", "INSERT ", "UPDATE ", "DELETE ")
+        ):
+            querying.add(str(path.relative_to(root)).replace("\\", "/"))
 
-    source = Path(dictionary.__file__).read_text(encoding="utf-8").upper()
-
-    assert "SELECT" not in source
-    for table in ("ENTRIES", "KEYS", "KANJI", "TERM_META", "TAGS", "MEDIA"):
-        assert f"FROM {table}" not in source
+    assert querying == _APP_MODULES_THAT_QUERY_THE_DICTIONARY
 
 
 #: The shape a released version of the app actually created. A migration test that invents its own

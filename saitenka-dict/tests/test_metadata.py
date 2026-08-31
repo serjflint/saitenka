@@ -5,7 +5,11 @@ from saitenka_dict.metadata import FrequencyValue, parse_frequency
 def test_frequency_forms_share_one_normalization_contract():
     assert parse_frequency(3) == FrequencyValue(None, 3, None)
     assert parse_frequency("twenty-four (24)") == FrequencyValue(None, 24, "twenty-four (24)")
-    assert parse_frequency("123 occurrences") == FrequencyValue(None, 123, "123 occurrences")
+    # A leading number is the whole of what the string says; the pill shows the parsed rank, not the
+    # raw text. A trailing "(24)" or a wordy string keeps its text — that text carries something.
+    assert parse_frequency("123 occurrences") == FrequencyValue(None, 123, None)
+    assert parse_frequency("118,121") == FrequencyValue(None, 118, None)
+    assert parse_frequency("N5") == FrequencyValue(None, None, "N5")
     assert parse_frequency(
         {"reading": "うちこむ", "frequency": {"value": 30, "displayValue": "thirty"}}
     ) == FrequencyValue("うちこむ", 30, "thirty")
@@ -39,7 +43,7 @@ def test_a_value_without_a_number_carries_no_rank(value, expected):
         (8912, (None, 8912, None)),
         ({"reading": "ほんめい", "frequency": 8912}, ("ほんめい", 8912, None)),
         ({"value": 4073, "displayValue": "4073㋕"}, (None, 4073, "4073㋕")),
-        ({"value": "118,121"}, (None, 118, "118,121")),
+        ({"value": "118,121"}, (None, 118, None)),
         # The JLPT dictionary rides the freq mode with a -1 sentinel; the level is in displayValue.
         ({"frequency": {"value": -1, "displayValue": "N5"}}, (None, -1, "N5")),
     ],

@@ -70,17 +70,28 @@ def _fixture_ds(tmp_path, terms=(("読む", "よむ", ["to read"]),)):
 
 
 def test_kanji_bank_ingested_into_db(tmp_path):
-    """The kanji_bank round-trips through import: readings, meanings and KANJIDIC stats all come back
-    out, and a character the bank never held stays absent."""
+    """The kanji_bank round-trips through import: on-readings, kun-readings, meanings and KANJIDIC
+    stats each come back in their own field, and a character the bank never held stays absent.
+
+    Per-field, not a substring search of the rendered panel: 音 and 訓 are different readings of the
+    same character, so a search that only asks whether both strings appear somewhere cannot tell them
+    apart if they are swapped.
+    """
     ds = dicthelp.load_set([_make_dict_zip(tmp_path / "k.zip", "K", kanji=[KANJI_READ])])
 
     entry = ds.kanji_for("読")
 
     assert entry is not None
-    dumped = json.dumps(entry.defs[0].content, ensure_ascii=False)
-    assert "ドク トク" in dumped and "よ.む" in dumped
-    assert "reading" in dumped and "to read" in dumped
-    assert "14" in dumped  # the strokes stat
+    rows = {
+        node["content"].split("　")[0]: node["content"].split("　")[1]
+        for node in entry.defs[0].content
+        if isinstance(node, dict) and node.get("tag") == "div" and "　" in str(node.get("content"))
+    }
+    assert rows["音"] == "ドク トク"
+    assert rows["訓"] == "よ.む"
+    meanings = next(node for node in entry.defs[0].content if node.get("tag") == "ol")
+    assert [item["content"] for item in meanings["content"]] == ["reading", "to read"]
+    assert "14" in json.dumps(entry.defs[0].content, ensure_ascii=False)  # the strokes stat
     assert ds.kanji_for("犬") is None
 
 

@@ -37,11 +37,16 @@ def parse_frequency(data: Any) -> FrequencyValue:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return FrequencyValue(reading, value, display)
     if isinstance(value, str):
-        match = re.search(r"\((-?\d+(?:\.\d+)?)\)\s*$", value) or re.match(
-            r"\s*(-?\d+(?:\.\d+)?)", value
-        )
+        parenthesised = re.search(r"\((-?\d+(?:\.\d+)?)\)\s*$", value)
+        match = parenthesised or re.match(r"\s*(-?\d+(?:\.\d+)?)", value)
         if match is None:
             return FrequencyValue(reading, None, display or value)
         number = float(match.group(1)) if "." in match.group(1) else int(match.group(1))
+        if display is None and parenthesised is None:
+            # The string LEADS with its number, so the number is the whole of what it says and the
+            # rest is grouping (`"118,121"` is rank-then-occurrences). Showing the raw string would
+            # spend a width-constrained pill repeating a figure we already parsed. A trailing
+            # `(24)`, or a string with no number at all, carries words worth showing — those keep it.
+            return FrequencyValue(reading, number, None)
         return FrequencyValue(reading, number, display or value)
     return FrequencyValue(reading, None, display)

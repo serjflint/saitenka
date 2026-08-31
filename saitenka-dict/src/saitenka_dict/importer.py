@@ -44,25 +44,36 @@ class ImportRequest:
     #: ``(name, bytes) -> png | None``, applied to SVG members. Injected because the renderer, its
     #: optional extra, and the fallback font are the application's choices; ``None`` stores them raw.
     rasterize_svg: Callable[[str, bytes], bytes | None] | None = None
+    #: Whether to store inline images at all. A deployment whose renderer cannot draw them gains
+    #: nothing but database size — and a non-empty `media` table also costs it the per-lookup
+    #: short-circuit that an empty one buys.
+    media: bool = True
     #: Whether to store each entry's Yomitan ``seq`` — only useful to a consumer showing related terms.
     persist_seq: bool = True
 
 
 _SVG_SUFFIX = ".svg"
+#: What a Yomitan `img` node can actually reference. An archive also carries READMEs, licences and
+#: stylesheets under the same root, and storing those as BLOBs is pure database growth.
+_MEDIA_SUFFIXES = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 
-def _rasterized(
+def _images(
     media: tuple[tuple[str, bytes], ...],
     rasterize: Callable[[str, bytes], bytes | None] | None,
+    *,
+    store: bool = True,
 ) -> tuple[tuple[str, bytes], ...]:
-    """Replace SVG members with their rasterized bytes. A member the rasterizer declines is dropped,
-    not stored: half an image is worse than the renderer's missing-glyph fallback."""
-    if rasterize is None:
-        return media
+    """The archive members worth storing, with SVGs rasterized. A member the rasterizer declines is
+    dropped, not stored: half an image is worse than the renderer's missing-glyph fallback."""
+    if not store:
+        return ()
     result = []
     failed = 0
     for name, data in media:
-        if not name.lower().endswith(_SVG_SUFFIX):
+        if not name.lower().endswith(_MEDIA_SUFFIXES):
+            continue
+        if not name.lower().endswith(_SVG_SUFFIX) or rasterize is None:
             result.append((name, data))
             continue
         raster = rasterize(name, data)
@@ -75,6 +86,26 @@ def _rasterized(
         # broken rasterizer, and only the count distinguishes them.
         log.warning("%d media SVG(s) failed to rasterize — those render as a fallback box", failed)
     return tuple(result)
+
+
+def _warn_skipped(bank: str, skipped: int) -> None:
+    """A malformed *row* is skipped, not fatal.
+
+    Community dictionaries are hand-built and a few rows in a 448k-entry bank are routinely odd.
+    Aborting the whole import over one of them means the dictionary cannot be used at all, which is
+    strictly worse than importing it minus the row. A malformed *bank* or *archive* still raises —
+    that is a broken file, not a broken row, and silently importing nothing is its own bug.
+    """
+    if skipped:
+        log.warning("%s: skipped %d malformed row(s)", bank, skipped)
+
+
+def _integral(rank: int | float | None) -> int | float | None:
+    """``term_meta.rank`` has INTEGER affinity and every consumer compares it as an ordinal, so a
+    whole-number float is stored as the int it is rather than as REAL."""
+    if isinstance(rank, float) and rank.is_integer():
+        return int(rank)
+    return rank
 
 
 def _morae(value: Any) -> list[int]:
@@ -241,7 +272,7 @@ class DictionaryDatabase:
             for kind in ("term_bank", "kanji_bank", "term_meta_bank", "kanji_meta_bank", "tag_bank")
             for name in source.names(kind)
         )
-        media = _rasterized(source.media(), request.rasterize_svg)
+        media = _images(source.media(), request.rasterize_svg, store=request.media)
         media_by_path = dict(media)
         record_id = 0
         for completed, (kind, name) in enumerate(banks, 1):
@@ -293,9 +324,12 @@ class DictionaryDatabase:
         original count survives in ``disp`` when the dictionary supplied no explicit ``displayValue``,
         so the tooltip still shows the real frequency rather than the derived rank.
         """
+        # `rank > 0` only: a non-positive value is a sentinel, not a count. The level dictionaries
+        # ride the freq mode with `-1` and carry their level in `disp`; ranking those would both
+        # invent an ordinal for them and overwrite the level with the sentinel.
         rows = connection.execute(
             "SELECT rowid, rank, disp FROM term_meta "
-            "WHERE dict_id=? AND mode='freq' AND rank IS NOT NULL",
+            "WHERE dict_id=? AND mode='freq' AND rank IS NOT NULL AND rank > 0",
             (dictionary_id,),
         ).fetchall()
         ranks = {
@@ -325,9 +359,11 @@ class DictionaryDatabase:
     ) -> int:
         rows: list[tuple[Any, ...]] = []
         keys: list[tuple[int, str, int]] = []
+        skipped = 0
         for entry in records:
             if not isinstance(entry, list) or len(entry) < 6 or not isinstance(entry[0], str):
-                raise DictionaryArchiveError("invalid term bank entry")
+                skipped += 1
+                continue
             record_id += 1
             term = entry[0]
             reading = entry[1] or term
@@ -356,14 +392,17 @@ class DictionaryDatabase:
             rows,
         )
         connection.executemany("INSERT INTO keys VALUES(?, ?, ?)", keys)
+        _warn_skipped("term bank", skipped)
         return record_id
 
     @staticmethod
     def _load_kanji(connection: sqlite3.Connection, dictionary_id: int, records: list[Any]) -> None:
         rows = []
+        skipped = 0
         for entry in records:
             if not isinstance(entry, list) or not entry or not isinstance(entry[0], str):
-                raise DictionaryArchiveError("invalid kanji bank entry")
+                skipped += 1
+                continue
             rows.append(
                 (
                     dictionary_id,
@@ -375,25 +414,25 @@ class DictionaryDatabase:
                     json.dumps(entry[5] if len(entry) > 5 else {}, ensure_ascii=False),
                 )
             )
-        connection.executemany("INSERT OR REPLACE INTO kanji VALUES(?, ?, ?, ?, ?, ?, ?)", rows)
+        # OR IGNORE, not OR REPLACE: a bank listing a character twice keeps the FIRST row, matching
+        # the order every other bank is read in.
+        connection.executemany("INSERT OR IGNORE INTO kanji VALUES(?, ?, ?, ?, ?, ?, ?)", rows)
+        _warn_skipped("kanji bank", skipped)
 
     @staticmethod
     def _load_term_meta(
         connection: sqlite3.Connection, dictionary_id: int, records: list[Any]
     ) -> None:
         rows = []
+        skipped = 0
         for entry in records:
             if (
                 not isinstance(entry, list)
                 or len(entry) < 3
-                or entry[1]
-                not in {
-                    "freq",
-                    "ipa",
-                    "pitch",
-                }
+                or entry[1] not in {"freq", "ipa", "pitch"}
             ):
-                raise DictionaryArchiveError("invalid term metadata entry")
+                skipped += 1
+                continue
             term, mode, data = entry[:3]
             reading: str | None = None
             rank: int | float | None = None
@@ -411,28 +450,34 @@ class DictionaryDatabase:
             else:
                 frequency = parse_frequency(data)
                 reading, rank, display = frequency.reading, frequency.value, frequency.display
-            rows.append((dictionary_id, term, mode, reading, rank, display, positions))
+            rows.append((dictionary_id, term, mode, reading, _integral(rank), display, positions))
         connection.executemany("INSERT INTO term_meta VALUES(?, ?, ?, ?, ?, ?, ?)", rows)
+        _warn_skipped("term meta bank", skipped)
 
     @staticmethod
     def _load_kanji_meta(
         connection: sqlite3.Connection, dictionary_id: int, records: list[Any]
     ) -> None:
         rows = []
+        skipped = 0
         for entry in records:
             if not isinstance(entry, list) or len(entry) < 3 or not isinstance(entry[0], str):
-                raise DictionaryArchiveError("invalid kanji metadata entry")
+                skipped += 1
+                continue
             rows.append(
                 (dictionary_id, entry[0], str(entry[1]), json.dumps(entry[2], ensure_ascii=False))
             )
         connection.executemany("INSERT INTO kanji_meta VALUES(?, ?, ?, ?)", rows)
+        _warn_skipped("kanji meta bank", skipped)
 
     @staticmethod
     def _load_tags(connection: sqlite3.Connection, dictionary_id: int, records: list[Any]) -> None:
         rows = []
+        skipped = 0
         for entry in records:
             if not isinstance(entry, list) or not entry or not isinstance(entry[0], str):
-                raise DictionaryArchiveError("invalid tag bank entry")
+                skipped += 1
+                continue
             code = entry[0]
             rows.append(
                 (
@@ -450,3 +495,4 @@ class DictionaryDatabase:
             "VALUES(?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
+        _warn_skipped("tag bank", skipped)

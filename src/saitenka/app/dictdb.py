@@ -261,7 +261,8 @@ class DictionaryDb:
             import_order=import_order,
             imported_at=imported_at,
             on_progress=_bank_progress(on_bank),
-            rasterize_svg=_svg_rasterizer(),
+            rasterize_svg=(rasterizer := _svg_rasterizer()),
+            media=rasterizer is not None,
             persist_seq=self._opts.persist_seq,
         )
         info = DictionaryDatabase(self.path).import_dictionary(request)

@@ -979,4 +979,5 @@ def test_the_decoded_entry_cache_survives_concurrent_prefetch_workers(tmp_path):
         t.join()
 
     assert not errors, f"entry cache raced: {errors[:3]!r}"
-    assert ds.decoded_entry_count() <= 8  # bounded, never exceeded or corrupted
+    # Exactly the cap: `<=` would also pass a store that cached nothing at all.
+    assert ds.decoded_entry_count() == 8

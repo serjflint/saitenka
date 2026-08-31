@@ -49,8 +49,16 @@ class DictionaryArchive:
         self._zip.close()
 
     def _validate_index(self) -> None:
-        if not isinstance(self.index.get("title"), str) or not self.index["title"].strip():
-            raise DictionaryArchiveError("index.json must contain a non-empty title")
+        """A titleless ``index.json`` falls back to the archive's filename rather than failing.
+
+        Yomitan requires the field, but dictionaries in the wild omit it and were importable for
+        years under that fallback; refusing them now would strand a working dictionary over a
+        cosmetic field. The title only has to be unique enough to key the import.
+        """
+        title = self.index.get("title")
+        if not isinstance(title, str) or not title.strip():
+            log.debug("%s: index.json has no title, using the filename", self.path.name)
+            self.index["title"] = self.path.stem
 
     def __enter__(self) -> DictionaryArchive:
         return self
