@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import starmap
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from saitenka.app.wordlists import FreqDict, JlptDict, KnownWords
 
@@ -95,12 +95,96 @@ class Palette:
             young=_configured_color(raw, "young", palette.young),
         )
 
+    def style_for(self, verdict: TokenVerdict) -> TokenStyle:
+        """The drawn style for a verdict — the ONE place a classification becomes a color.
+
+        Priority: N+1 > maturity > known > frequency > base, with JLPT as an additive underline.
+        """
+        underline = self.jlpt.get(verdict.jlpt) if verdict.jlpt else None
+        return TokenStyle(self._color_for(verdict), underline, verdict)
+
+    def _color_for(self, verdict: TokenVerdict) -> RGBA:
+        if verdict.is_n_plus_one:
+            return self.n_plus_one
+        if verdict.is_content and verdict.fsrs_state in MATURITY_STATES:
+            return getattr(self, verdict.fsrs_state or "base")
+        if verdict.is_mature:
+            return self.known
+        if verdict.freq_single:
+            return self.freq_single
+        if verdict.freq_band is not None:
+            return self.freq_bands[verdict.freq_band - 1]
+        return self.base
+
+
+#: FSRS states that take their own color, ranked above plain "known".
+MATURITY_STATES = frozenset({"forgotten", "learning", "young"})
+
+
+@dataclass(frozen=True, slots=True)
+class TokenVerdict:
+    """What the word-state layer knows about one token: classification only, never a color.
+
+    The palette lives on the other side of this type. Callers that want a *decision* — which word to
+    mine, which to prefetch — read the fields; only the renderer converts one into a `TokenStyle`.
+    """
+
+    is_content: bool = False
+    is_known: bool = False
+    fsrs_state: str | None = None  # new | learning | young | forgotten | known
+    n_plus: int | None = None  # 1 when the token is its sentence's single eligible unknown
+    jlpt: str | None = None  # N1..N5
+    freq_rank: int | None = None
+    freq_band: int | None = None  # 1..5, banded mode only
+    freq_single: bool = False  # 'single' mode hit, which has a band-independent color
+
+    @property
+    def is_n_plus_one(self) -> bool:
+        return self.n_plus == 1
+
+    @property
+    def is_mature(self) -> bool:
+        """Reads "known" the way coloring does — a mature FSRS card, or the binary set when no FSRS."""
+        return self.is_content and self.is_known
+
+    @property
+    def tag(self) -> str:
+        """The legacy coloring tag, DERIVED from the fields rather than carried beside them.
+
+        Mirrors `Palette.style_for`'s rule order, so the two cannot disagree about a token. Frequency
+        never takes the JLPT suffix because it only fires when there is no level — applying it
+        unconditionally is therefore the same string, one branch shorter.
+        """
+        base = "base"
+        if self.is_n_plus_one:
+            base = "n+1"
+        elif self.is_content and self.fsrs_state in MATURITY_STATES:
+            base = self.fsrs_state or base
+        elif self.is_mature:
+            base = "known"
+        elif self.freq_single:
+            base = "freq"
+        elif self.freq_band is not None:
+            base = f"freq-{self.freq_band}"
+        return f"{base}/jlpt-{self.jlpt}" if self.jlpt else base
+
 
 @dataclass(frozen=True)
 class TokenStyle:
+    """A drawn token: the palette's two colors, plus the verdict they were derived from.
+
+    The verdict rides along because the pipeline that carries styles to the renderer is the same one
+    mining and prefetch read to make decisions, and they want the classification, not the color.
+    Deriving `tag` from it rather than storing it beside it is what keeps the two from disagreeing.
+    """
+
     color: RGBA
     underline: RGBA | None = None
-    tag: str = "base"  # 'n+1' | 'known' | 'freq-N' | 'base' (+ '/jlpt-Nx')
+    verdict: TokenVerdict = TokenVerdict()
+
+    @property
+    def tag(self) -> str:  # 'n+1' | 'known' | 'freq-N' | 'base' (+ '/jlpt-Nx')
+        return self.verdict.tag
 
 
 def is_content(t: Token) -> bool:
@@ -160,19 +244,6 @@ def mark_n_plus(
     }
 
 
-@dataclass(frozen=True)
-class _StyleCtx:
-    """Immutable bundle passed to each `_style_*` rule below — avoids a 5-parameter signature."""
-
-    t: Token
-    is_known: bool
-    fsrs_state: str | None
-    is_n1: bool
-    content: bool
-    level: str | None
-    underline: RGBA | None
-
-
 def mark_n_plus_one(tokens: list[Token], known: list[bool], min_words: int = 3) -> set[int]:
     """Indices of the single unknown content word in each ≥min_words-content-word sentence."""
     return mark_n_plus(tokens, known, unknowns=1, min_words=min_words)
@@ -198,6 +269,10 @@ class Scorer:
     enable_jlpt: bool = True
     freq_mode: str = "banded"  # 'banded' | 'single'
     freq_top_x: int = FREQ_BAND_TOP_X
+    # How many bands `band()` splits `freq_top_x` into. Was `len(palette.freq_bands)`, which read the
+    # band COUNT off the color table; the two can only ever agree because `Palette.from_config` cannot
+    # resize that tuple. Held here so classification owes the palette nothing.
+    freq_bands: int = 5
     min_sentence_words: int = 3
     # FSRS state overrides the binary known set when the same card appears in both.
     fsrs_snap: KnownSnap | None = None
@@ -223,7 +298,9 @@ class Scorer:
         """Public knownness seam shared by coloring and whole-track analysis."""
         return self._is_known(t)
 
-    def score_line(self, tokens: list[Token]) -> list[TokenStyle]:
+    def verdict_line(self, tokens: list[Token]) -> list[TokenVerdict]:
+        """Classify a whole line. The sentence-scoped part (N+1) is why this is per line, not per
+        token — everything else `verdict` can answer alone."""
         states = [self._fsrs_state(t) for t in tokens]
         known = list(starmap(self._known_for, zip(tokens, states, strict=True)))
         n1 = (
@@ -232,61 +309,50 @@ class Scorer:
             else set()
         )
         return [
-            self._style(t, is_known=known[i], fsrs_state=states[i], is_n1=i in n1)
+            self._verdict(t, is_known=known[i], fsrs_state=states[i], is_n1=i in n1)
             for i, t in enumerate(tokens)
         ]
 
-    def _style_n1(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
-        # N+1 needs no `content` gate — mark_n_plus_one already excludes function words.
-        if ctx.is_n1:
-            return TokenStyle(p.n_plus_one, ctx.underline, self._tag("n+1", ctx.level))
-        return None
+    def verdict(self, t: Token) -> TokenVerdict:
+        """One token's classification, with no sentence context — so `n_plus` is never set. The
+        tooltip's read: it wants the level and the rank, not the N+1 slot."""
+        state = self._fsrs_state(t)
+        return self._verdict(t, is_known=self._known_for(t, state), fsrs_state=state, is_n1=False)
 
-    def _style_known(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
-        # Gates on `content` so a function word stays base even when it lands in KnownWords (the
-        # documented model: function words never take a colour).
-        if ctx.content and ctx.is_known:
-            return TokenStyle(p.known, ctx.underline, self._tag("known", ctx.level))
-        return None
+    def score_line(self, tokens: list[Token]) -> list[TokenStyle]:
+        return [self.palette.style_for(v) for v in self.verdict_line(tokens)]
 
-    def _style_maturity(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
-        if ctx.content and ctx.fsrs_state in {"forgotten", "learning", "young"}:
-            state = ctx.fsrs_state
-            return TokenStyle(getattr(p, state), ctx.underline, self._tag(state, ctx.level))
-        return None
-
-    def _style_freq(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
-        # Frequency only when there is no other signal (incl. JLPT).
-        if not (ctx.content and self.enable_freq and self.freq and ctx.level is None):
-            return None
-        rank = self.freq.rank(ctx.t.lemma, ctx.t.surface, ctx.t.reading)
-        if rank is None:
-            return None
-        if self.freq_mode == "single":
-            return TokenStyle(p.freq_single, ctx.underline, "freq")
-        band = FreqDict.band(rank, self.freq_top_x, len(p.freq_bands))
-        return TokenStyle(p.freq_bands[band - 1], ctx.underline, f"freq-{band}") if band else None
-
-    _STYLE_RULES: ClassVar = (_style_n1, _style_maturity, _style_known, _style_freq)
-
-    def _style(
+    def _verdict(
         self, t: Token, *, is_known: bool, fsrs_state: str | None, is_n1: bool
-    ) -> TokenStyle:
-        p = self.palette
+    ) -> TokenVerdict:
         content = is_content(t)
         level = (
             self.jlpt.level(t.lemma, t.surface, t.reading)
             if (self.enable_jlpt and self.jlpt and content)
             else None
         )
-        underline = p.jlpt.get(level) if level else None
-        ctx = _StyleCtx(t, is_known, fsrs_state, is_n1, content, level, underline)
-        for rule in self._STYLE_RULES:
-            style = rule(self, p, ctx)
-            if style is not None:
-                return style
-        return TokenStyle(p.base, underline, self._tag("base", level))
+        rank, band, single = self._frequency(t, content=content, level=level)
+        return TokenVerdict(
+            is_content=content,
+            is_known=is_known,
+            fsrs_state=fsrs_state,
+            n_plus=1 if is_n1 else None,
+            jlpt=level,
+            freq_rank=rank,
+            freq_band=band,
+            freq_single=single,
+        )
 
-    @staticmethod
-    def _tag(base: str, level: str | None) -> str:
-        return f"{base}/jlpt-{level}" if level else base
+    def _frequency(
+        self, t: Token, *, content: bool, level: str | None
+    ) -> tuple[int | None, int | None, bool]:
+        """``(rank, band, single)`` — frequency only speaks when there is no other signal (incl. JLPT),
+        so a token with a level reports no rank at all."""
+        if not (content and self.enable_freq and self.freq and level is None):
+            return None, None, False
+        rank = self.freq.rank(t.lemma, t.surface, t.reading)
+        if rank is None:
+            return None, None, False
+        if self.freq_mode == "single":
+            return rank, None, True
+        return rank, FreqDict.band(rank, self.freq_top_x, self.freq_bands), False

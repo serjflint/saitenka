@@ -609,7 +609,7 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     from types import SimpleNamespace
 
     from saitenka.app.features.mining.miner import _select_bulk_targets
-    from saitenka.app.scoring import TokenStyle
+    from saitenka.app.scoring import TokenStyle, TokenVerdict
     from saitenka.app.tokenize import Token
     from saitenka.app.tokenizer import UnidicTokenizer
 
@@ -626,7 +626,7 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     styles = [
         TokenStyle(color=(0, 0, 0, 255)),
         TokenStyle(color=(0, 0, 0, 255)),
-        TokenStyle(color=(0, 0, 0, 255), tag="known"),
+        TokenStyle(color=(0, 0, 0, 255), verdict=TokenVerdict(is_content=True, is_known=True)),
         TokenStyle(color=(0, 0, 0, 255)),
         TokenStyle(color=(0, 0, 0, 255)),
     ]

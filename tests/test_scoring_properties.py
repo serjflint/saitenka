@@ -12,7 +12,13 @@ import hypothesis.strategies as st
 from hypothesis import given
 
 from saitenka.app.fsrs import KnownSnap
-from saitenka.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
+from saitenka.app.scoring import (
+    FUNCTION_POS,
+    Palette,
+    Scorer,
+    TokenVerdict,
+    mark_n_plus_one,
+)
 from saitenka.app.tokenize import Token
 from saitenka.app.wordlists import FreqDict, JlptDict, KnownWords
 
@@ -302,3 +308,77 @@ def test_n1_marks_each_sentence_independently():
         False,
     ]  # 読む (idx 2) and 待つ (idx 6) are the lone unknowns
     assert mark_n_plus_one(toks, known, min_words=3) == {2, 6}
+
+
+# --- the verdict/palette seam: a classification and the color drawn from it never disagree ---------
+
+
+def _expected_paint(verdict, palette: Palette):
+    """Oracle mirroring the priority ladder independently of `Palette.style_for`, the way `_content`
+    mirrors `is_content` above. Routing through `style_for` would only restate `score_line`'s own
+    definition."""
+    underline = palette.jlpt.get(verdict.jlpt) if verdict.jlpt else None
+    if verdict.n_plus == 1:
+        return palette.n_plus_one, underline
+    if verdict.is_content and verdict.fsrs_state in {"forgotten", "learning", "young"}:
+        return getattr(palette, verdict.fsrs_state), underline
+    if verdict.is_content and verdict.is_known:
+        return palette.known, underline
+    if verdict.freq_single:
+        return palette.freq_single, underline
+    if verdict.freq_band is not None:
+        return palette.freq_bands[verdict.freq_band - 1], underline
+    return palette.base, underline
+
+
+@given(
+    _line(),
+    st.booleans(),
+    st.booleans(),
+    st.booleans(),
+    st.sampled_from(["banded", "single"]),
+)
+def test_every_drawn_colour_is_the_one_its_verdict_implies(line, jlpt_on, freq_on, known_on, mode):
+    """Whatever the scorer is configured to consider, the colour a token is drawn in is the one an
+    independent read of its verdict predicts — the invariant the split exists to make checkable.
+    Before it, the classification and the colour were one pass with nothing to compare.
+    """
+    toks, _known = line
+    sc = Scorer(
+        known=KnownWords.from_set(["本", "犬"]),
+        freq=FreqDict({"本": 500, "ほん": 500, "犬": 40_000}, "t"),
+        jlpt=JlptDict({"本": "N5", "犬": "N4"}),
+        enable_jlpt=jlpt_on,
+        enable_freq=freq_on,
+        enable_known=known_on,
+        freq_mode=mode,
+    )
+    for style, verdict in zip(sc.score_line(toks), sc.verdict_line(toks), strict=True):
+        assert (style.color, style.underline) == _expected_paint(verdict, sc.palette)
+
+
+@given(_line())
+def test_a_single_token_verdict_matches_its_line_verdict_but_for_n_plus_one(line):
+    """`verdict(token)` is the per-token read the tooltip needs. It agrees with the line-scoped
+    classification on every field N+1 does not depend on — N+1 alone needs the sentence."""
+    toks, _known = line
+    sc = Scorer(
+        known=KnownWords.from_set(["本"]),
+        jlpt=JlptDict({"本": "N5"}),
+        enable_n_plus_one=False,  # the only field a lone token cannot know
+    )
+    for token, line_verdict in zip(toks, sc.verdict_line(toks), strict=True):
+        assert sc.verdict(token) == line_verdict
+
+
+def test_the_tag_is_derived_from_the_verdict_not_stored_beside_it():
+    """A verdict built by hand reports the tag its fields imply — the negative control for the
+    property above, which would still pass if `tag` were a field both paths happened to set."""
+    assert TokenVerdict(is_content=True, n_plus=1, jlpt="N3").tag == "n+1/jlpt-N3"
+    assert TokenVerdict(is_content=True, is_known=True).tag == "known"
+    assert TokenVerdict(is_content=True, fsrs_state="forgotten").tag == "forgotten"
+    assert TokenVerdict(is_content=True, freq_band=3).tag == "freq-3"
+    assert TokenVerdict(is_content=True, freq_single=True).tag == "freq"
+    assert TokenVerdict(is_content=True).tag == "base"
+    # A function word never takes a state colour even when the collection says it is known.
+    assert TokenVerdict(is_content=False, is_known=True).tag == "base"
