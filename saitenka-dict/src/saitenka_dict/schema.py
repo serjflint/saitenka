@@ -48,18 +48,25 @@ CREATE TABLE IF NOT EXISTS media(
 """
 
 #: ``idx_keys`` leads with ``key`` because the semantic store looks a form up across every dictionary
-#: at once (no ``dict_id`` to seek on). Every plan is pinned by an EXPLAIN QUERY PLAN test.
-_INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_keys ON keys(key, dict_id);
-CREATE INDEX IF NOT EXISTS idx_entries_seq ON entries(seq, dict_id);
-CREATE INDEX IF NOT EXISTS idx_kanji_char ON kanji(chr, dict_id);
-CREATE INDEX IF NOT EXISTS idx_term_meta_term ON term_meta(dict_id, term);
--- Pitch lookup matches `term=? OR reading=?`; idx_term_meta_term covers only the `term` branch, so
--- without this SQLite falls back to a full per-dict_id scan for `reading` — EXPLAIN QUERY PLAN plus a
--- py-spy profile put that query at ~28% of total sampled time under --stress (a 73k-row pitch dict
--- rescanned up to 3x per tooltip). With both, the OR-optimization splits it into two indexed seeks.
-CREATE INDEX IF NOT EXISTS idx_meta_reading ON term_meta(dict_id, mode, reading);
-"""
+#: at once (no ``dict_id`` to seek on). Every plan is pinned by an EXPLAIN QUERY PLAN test, on a
+#: migrated database as well as a fresh one — see :func:`_reconcile_indexes` for why that matters.
+#:
+#: ``idx_meta_reading``: pitch lookup matches ``term=? OR reading=?`` and ``idx_term_meta_term``
+#: covers only the ``term`` branch, so without this SQLite falls back to a full per-``dict_id`` scan
+#: for ``reading`` — EXPLAIN QUERY PLAN plus a py-spy profile put that query at ~28% of total sampled
+#: time under ``--stress``. With both, the OR-optimization splits it into two indexed seeks.
+_INDEXES = {
+    "idx_keys": "CREATE INDEX idx_keys ON keys(key, dict_id)",
+    "idx_entries_seq": "CREATE INDEX idx_entries_seq ON entries(seq, dict_id)",
+    "idx_kanji_char": "CREATE INDEX idx_kanji_char ON kanji(chr, dict_id)",
+    "idx_term_meta_term": "CREATE INDEX idx_term_meta_term ON term_meta(dict_id, term)",
+    "idx_meta_reading": "CREATE INDEX idx_meta_reading ON term_meta(dict_id, mode, reading)",
+}
+
+#: Indexes an older release created that a current one supersedes. ``idx_meta_term`` covered exactly
+#: what ``idx_term_meta_term`` covers, so leaving it costs a second copy of a multi-million-row index
+#: and a write on every insert, for nothing.
+_RETIRED_INDEXES = ("idx_meta_term",)
 
 #: ``(PRAGMA, ((column, ALTER), ...))`` — additive column upgrades for a DB created by an older
 #: release. ``CREATE TABLE IF NOT EXISTS`` never touches an existing table's columns, so each widening
@@ -126,24 +133,56 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
         for column, statement in migrations:
             if column not in present:
                 connection.execute(statement)
-    connection.executescript(_INDEXES)
+    rebuilt = _reconcile_indexes(connection)
     if connection.execute("SELECT COUNT(*) FROM schema_info").fetchone()[0] == 0:
         connection.execute("INSERT INTO schema_info VALUES (?)", (SCHEMA_VERSION,))
     else:
         connection.execute("UPDATE schema_info SET version=?", (SCHEMA_VERSION,))
     connection.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
-    _analyze_once(connection)
+    _analyze_once(connection, force=rebuilt)
     connection.commit()
 
 
-def _analyze_once(connection: sqlite3.Connection) -> None:
+def _reconcile_indexes(connection: sqlite3.Connection) -> bool:
+    """Bring the index set to :data:`_INDEXES`, rebuilding any that exists under a different
+    definition. Returns whether anything changed.
+
+    ``CREATE INDEX IF NOT EXISTS`` matches on the **name** alone — it will not replace an index whose
+    columns differ, and reports no error. So a release that reorders an index reaches only databases
+    created after it: every existing install silently keeps the old one, which is how the reorder
+    ``idx_keys`` needs (``key`` leading, for the store's cross-dictionary lookup) would otherwise have
+    shipped to nobody. Dropping and recreating costs one rebuild, once.
+    """
+    existing = dict(
+        connection.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL"
+        )
+    )
+    changed = False
+    for name in _RETIRED_INDEXES:
+        if name in existing:
+            connection.execute(f"DROP INDEX {name}")  # an internal constant, not input
+            changed = True
+    for name, statement in _INDEXES.items():
+        current = existing.get(name)
+        if current is not None and " ".join(current.split()) == statement:
+            continue
+        if current is not None:
+            connection.execute(f"DROP INDEX {name}")  # an internal constant, not input
+        connection.execute(statement)
+        changed = True
+    return changed
+
+
+def _analyze_once(connection: sqlite3.Connection, *, force: bool = False) -> None:
     """Refresh ``term_meta``'s planner statistics after an index-set change, once per generation.
 
     ANALYZE costs ~1.3s on a 2.3M-row ``term_meta``, so it must not run on every open — but skipping
-    it entirely leaves an existing install on the plan it had before the index existed.
+    it entirely leaves an existing install on the plan it had before the index existed. ``force``
+    after a rebuild: the stored stats name indexes that no longer exist in that shape.
     """
     row = connection.execute("SELECT v FROM meta WHERE k='analyzed'").fetchone()
-    if row is not None and row[0] == _ANALYZE_GENERATION:
+    if not force and row is not None and row[0] == _ANALYZE_GENERATION:
         return
     connection.execute("ANALYZE term_meta")
     connection.execute("INSERT OR REPLACE INTO meta VALUES('analyzed', ?)", (_ANALYZE_GENERATION,))

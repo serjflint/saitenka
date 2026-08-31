@@ -15,10 +15,12 @@ from pathlib import Path
 import pytest
 from saitenka_dict import DictionaryDatabase
 from saitenka_dict.schema import SCHEMA_VERSION, ensure_schema
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app import dictdb
 from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
+from saitenka.app.dictionary import DictionarySet
 
 AT = "2026-08-31T00:00:00"
 
@@ -44,6 +46,23 @@ def _dictionary_zip(path: Path, title: str = "Core") -> Path:
             json.dumps([["猫", "ねこ", "n", "v5", 7, ["cat"], 101, "common"]], ensure_ascii=False),
         )
     return path
+
+
+# The app's per-(dict, form) point lookup and its batched multi-dict form.
+_APP_POINT_LOOKUP = (
+    "SELECT e.id FROM keys k JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
+    "WHERE k.dict_id = ? AND k.key = ?"
+)
+_APP_BATCH_LOOKUP = (
+    "SELECT k.dict_id, e.id FROM keys k JOIN entries e ON k.dict_id = e.dict_id "
+    "AND k.id = e.id WHERE k.dict_id IN (?, ?) AND k.key IN (?, ?)"
+)
+# The semantic store's key-only lookup — the one a `(dict_id, key)` index cannot seek, and the
+# reason the union index leads with `key`.
+_STORE_LOOKUP = (
+    "SELECT e.id FROM keys k JOIN entries e ON e.dict_id=k.dict_id AND e.id=k.id "
+    "WHERE k.key IN (SELECT value FROM json_each(?))"
+)
 
 
 def test_both_entry_points_create_the_same_schema(tmp_path):
@@ -95,10 +114,105 @@ def test_the_app_runs_no_query_of_its_own_against_the_dictionary_tables():
         assert f"FROM {table}" not in source
 
 
+#: The shape a released version of the app actually created. A migration test that invents its own
+#: "old" schema tests the migration against fiction; this is copied from the retired `_SCHEMA_SQL`.
+_SHIPPED_LEGACY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS dictionaries(
+  id INTEGER PRIMARY KEY, title TEXT UNIQUE, kind TEXT, import_order INTEGER,
+  source_name TEXT, revision TEXT, imported_at TEXT, schema_version INTEGER);
+CREATE TABLE IF NOT EXISTS entries(
+  dict_id INTEGER, id INTEGER, term TEXT, reading TEXT, glossary TEXT, tags TEXT, seq INTEGER,
+  PRIMARY KEY(dict_id, id));
+CREATE TABLE IF NOT EXISTS keys(dict_id INTEGER, key TEXT, id INTEGER);
+CREATE TABLE IF NOT EXISTS kanji(
+  dict_id INTEGER, chr TEXT, onyomi TEXT, kunyomi TEXT, tags TEXT, meanings TEXT, stats TEXT,
+  PRIMARY KEY(dict_id, chr));
+CREATE TABLE IF NOT EXISTS term_meta(
+  dict_id INTEGER, term TEXT, mode TEXT, reading TEXT, rank INTEGER, disp TEXT, positions TEXT);
+CREATE TABLE IF NOT EXISTS tags(
+  dict_id INTEGER, code TEXT, name TEXT, ord INTEGER, category TEXT, notes TEXT);
+CREATE TABLE IF NOT EXISTS media(dict_id INTEGER, path TEXT, png BLOB, PRIMARY KEY(dict_id, path));
+CREATE INDEX IF NOT EXISTS idx_keys ON keys(dict_id, key);
+CREATE INDEX IF NOT EXISTS idx_meta_term ON term_meta(dict_id, term);
+CREATE INDEX IF NOT EXISTS idx_meta_reading ON term_meta(dict_id, mode, reading);
+"""
+
+
+def _shipped_legacy_db(path: Path) -> Path:
+    """A database as a released version left it: old schema, one imported dictionary, real rows."""
+    connection = sqlite3.connect(path)
+    connection.executescript(_SHIPPED_LEGACY_SCHEMA)
+    connection.execute(
+        "INSERT INTO dictionaries VALUES(1,'JMdict','dict',0,'jmdict.zip','r1','2026-01-01',1)"
+    )
+    connection.execute("INSERT INTO entries VALUES(1,1,'猫','ねこ','[\"cat\"]','n',101)")
+    connection.executemany("INSERT INTO keys VALUES(?,?,?)", [(1, "猫", 1), (1, "ねこ", 1)])
+    connection.execute("INSERT INTO term_meta VALUES(1,'猫','freq','ねこ',42,'42',NULL)")
+    connection.execute("INSERT INTO tags VALUES(1,'n','n',1,'partOfSpeech','noun')")
+    connection.executemany(
+        "INSERT OR REPLACE INTO meta VALUES(?,?)",
+        [("schema", "1"), ("freqmode:1", "rank"), ("analyzed", "1")],
+    )
+    connection.commit()
+    connection.close()
+    return path
+
+
+def test_an_upgrade_rebuilds_an_index_whose_columns_changed(tmp_path):
+    """`CREATE INDEX IF NOT EXISTS` matches on the NAME alone: it will not replace an index whose
+    columns differ, and reports no error.
+
+    So an index reorder reaches only databases created after it, and every existing install silently
+    keeps the old one — which for `idx_keys` means the store's cross-dictionary lookup goes on
+    scanning the whole `keys` table. Pinned on a MIGRATED database, because a fresh one cannot show
+    this at all.
+    """
+    db = DictionaryDb.open(_shipped_legacy_db(tmp_path / "legacy.sqlite"))
+
+    definitions = {
+        name: " ".join(sql.split())
+        for name, sql in db.connection().execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL"
+        )
+    }
+    assert definitions["idx_keys"] == "CREATE INDEX idx_keys ON keys(key, dict_id)"
+    # Superseded by idx_term_meta_term, which covers the same columns — two copies of a
+    # multi-million-row index cost a write on every insert for nothing.
+    assert "idx_meta_term" not in definitions
+
+    plan = " ".join(
+        str(row[3])
+        for row in db.connection().execute(
+            f"EXPLAIN QUERY PLAN {_STORE_LOOKUP}", (json.dumps(["猫"]),)
+        )
+    )
+    assert "SEARCH k USING INDEX idx_keys" in plan
+    assert "SCAN k" not in plan
+
+
+def test_a_migrated_database_keeps_every_row_and_still_answers(tmp_path):
+    """The rows are the expensive part — a multi-GB import is hours of work. An upgrade may add
+    columns and rebuild indexes, but must not lose a row or break the lookup that reads them."""
+    path = _shipped_legacy_db(tmp_path / "legacy.sqlite")
+    db = DictionaryDb.open(path)
+
+    assert db.connection().execute(
+        "SELECT dict_id, id, term, reading, glossary, tags, seq FROM entries"
+    ).fetchall() == [(1, 1, "猫", "ねこ", '["cat"]', "n", 101)]
+    # The one fact nothing downstream can reconstruct once the counts have been ranked.
+    assert db.meta_get("freqmode:1") == "rank"
+
+    entry = DictionarySet.from_db(db, ["JMdict"]).entry_for(
+        Token(surface="猫", lemma="猫", reading="ねこ", pos="名詞", start=0, end=1)
+    )
+    assert [(d.dict_name, d.content) for d in entry.defs] == [("JMdict", ["cat"])]
+
+
 def test_a_legacy_database_is_widened_in_place_not_rebuilt(tmp_path):
     """An existing user's DB predates the union columns. Opening it must ALTER them in, leaving the
     imported rows alone — an upgrade that forced a re-import would cost hours of dictionary builds."""
-    path = tmp_path / "legacy.sqlite"
+    path = tmp_path / "narrow.sqlite"
     connection = sqlite3.connect(path)
     connection.executescript(
         "CREATE TABLE entries(dict_id INTEGER, id INTEGER, term TEXT, reading TEXT, "
@@ -150,23 +264,6 @@ def test_the_seq_column_still_follows_the_app_option(tmp_path, persist_seq, expe
         db.connection().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()
     )
     assert stored == (expected,)
-
-
-# The app's per-(dict, form) point lookup and its batched multi-dict form.
-_APP_POINT_LOOKUP = (
-    "SELECT e.id FROM keys k JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
-    "WHERE k.dict_id = ? AND k.key = ?"
-)
-_APP_BATCH_LOOKUP = (
-    "SELECT k.dict_id, e.id FROM keys k JOIN entries e ON k.dict_id = e.dict_id "
-    "AND k.id = e.id WHERE k.dict_id IN (?, ?) AND k.key IN (?, ?)"
-)
-# The semantic store's key-only lookup — the one a `(dict_id, key)` index cannot seek, and the
-# reason the union index leads with `key`.
-_STORE_LOOKUP = (
-    "SELECT e.id FROM keys k JOIN entries e ON e.dict_id=k.dict_id AND e.id=k.id "
-    "WHERE k.key IN (SELECT value FROM json_each(?))"
-)
 
 
 @pytest.mark.parametrize(
