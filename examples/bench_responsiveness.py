@@ -47,8 +47,9 @@ from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
-    from saitenka.app.session.graph import SessionGraph
     from saitenka.mpvio.gateway import MpvGateway
+
+    from saitenka.app.session.graph import SessionGraph
     from saitenka.mpvio.ipc import MpvIPC
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
