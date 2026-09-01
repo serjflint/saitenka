@@ -231,6 +231,16 @@ class TooltipSession(RuleBasedStateMachine):
         if self.r.tooltip.surface_state().nest.state is not None:
             _assert_agrees(self.session, nested=True)
 
+    def teardown(self) -> None:
+        """Release this example's session before the next one is built.
+
+        `__init__` runs per example, so 25 examples build 25 whole session graphs — and a session's
+        worker threads root everything it owns. Without this, all of them stay alive until the test
+        ends: the conftest sweep fires once per *test*, and a state machine is one test. That was
+        ~499 MB retained in a single node, the largest in the suite.
+        """
+        self.session.close()
+
 
 TestTooltipSession = pytest.mark.integration(TooltipSession.TestCase)
 
