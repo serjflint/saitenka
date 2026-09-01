@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from saitenka_tokenize.languages import MAIN_LANG
 
+from saitenka.app.features.analysis.analysis_rows import analysis_rows
 from saitenka.app.features.analysis.episode_analysis import (
     AnalysisKey,
     EpisodeAnalysis,
@@ -193,8 +194,7 @@ class AnalysisController:
             return
         osd = self._screen.osd
         image = render_analysis(
-            state.current,
-            state.status,
+            analysis_rows(state.current, state.status),
             osd=osd,
             close_key=self._keys.analysis_key,
             scale=self._ui_scale * max(1.0, osd[1] / 1080),
