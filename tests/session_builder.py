@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar
 
@@ -68,6 +69,21 @@ class TestSession:
 #: so the whole graph (panel caches, stores, timers, transport) stays reachable for the rest of the
 #: process. Measured: ~14.6 MB retained per leaked session against ~0.4 MB when closed.
 BUILT_SESSIONS: list[TestSession] = []
+
+
+def drain_and_close(registry: list[TestSession]) -> int:
+    """Empty ``registry`` and close everything that was in it; return how many were swept.
+
+    Newest first, so a session built on top of another is retired before what it was layered over.
+    Errors are suppressed: this runs in teardown, where raising would rewrite a test's failure as an
+    error and hide the assertion that actually mattered. Emptying happens before closing, so a close
+    that spawns another session cannot make the sweep re-enter its own list.
+    """
+    pending, registry[:] = list(registry), []
+    for session in reversed(pending):
+        with contextlib.suppress(Exception):
+            session.close()
+    return len(pending)
 
 
 def build_session(
