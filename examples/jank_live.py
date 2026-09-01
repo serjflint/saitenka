@@ -125,9 +125,13 @@ def _scroll_four(tooltip, pump) -> None:
         )
 
 
-def _present_overlay(overlay) -> None:
-    """Synchronously ask mpv to re-composite the changed paused overlay."""
-    overlay.repaint()
+def _present_overlay(surfaces) -> None:
+    """Synchronously ask mpv to re-composite the changed paused overlay.
+
+    Through the surface layer, not the overlay under it: that is the seam the session itself uses,
+    so a harness reaching past it measures a path production does not take.
+    """
+    surfaces.repaint()
 
 
 class TallDS:
@@ -189,7 +193,7 @@ def run(*, settle_s: float = 0.4) -> dict:
             action()
             if ready is not None:
                 poll_until(reader, ready, "timed live interaction did not complete")
-            _present_overlay(reader.graph.ov)
+            _present_overlay(reader.graph.lifecycle_surfaces)
             return (time.perf_counter() - start) * 1000.0
 
         i = next(
