@@ -1,6 +1,7 @@
 """Make ``tests/util.py`` importable as ``util``, put ``src/`` on the path, and keep the consolidated
 dictionary DB HERMETIC: tests must never write into the user's real ``data_dir()/dictionaries.sqlite``."""
 
+import contextlib
 import functools
 import sys
 from pathlib import Path
@@ -10,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402  # must come after the sys.path setup above
+import session_builder  # noqa: E402  # must come after the sys.path setup above
 
 import saitenka.app.backlog as _backlog  # noqa: E402  # must come after the sys.path setup above
 import saitenka.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
@@ -170,3 +172,21 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     if seed is None or reporter is None:  # `-p no:randomly`, or no terminal to write to
         return
     reporter.write_line(f"randomly-seed: {seed}  (replay with --randomly-seed={seed})")
+
+
+@pytest.fixture(autouse=True)
+def close_built_sessions():
+    """Close every session `build_session` handed out, even when the test did not.
+
+    A session owns worker threads, SQLite handles, timers and temp artifacts; leaving it open keeps
+    the whole graph rooted by its own live threads, so nothing in it is ever collected. The suite
+    builds ~330 sessions and closes a minority explicitly, which is what makes a worker's RSS climb
+    monotonically through a file rather than returning between tests.
+
+    `LiveSession.close()` is idempotent, so a test that closes its own session is unaffected.
+    """
+    yield
+    sessions, session_builder.BUILT_SESSIONS[:] = list(session_builder.BUILT_SESSIONS), []
+    for session in sessions:
+        with contextlib.suppress(Exception):  # teardown must not convert a failure into an error
+            session.close()
