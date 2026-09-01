@@ -75,6 +75,17 @@ def test_graph_goldens_four_patterns():
 # --- positions threaded through Entry --------------------------------------------------------------
 
 
+def _term_zip(path, title, term, reading):
+    """A pitch dictionary attaches accents to an entry, so a lookup needs a definition to carry."""
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
+        zf.writestr(
+            "term_bank_1.json",
+            json.dumps([[term, reading, "", "", 0, ["gloss"], 1, ""]], ensure_ascii=False),
+        )
+    return str(path)
+
+
 def _pitch_zip(path):
     entries = [["本命", "pitch", {"reading": "ほんめい", "pitches": [{"position": 0}]}]]
     with zipfile.ZipFile(path, "w") as zf:
@@ -83,15 +94,20 @@ def _pitch_zip(path):
     return str(path)
 
 
-def test_pitch_source_exposes_raw_positions(tmp_path):
+def test_the_lookup_exposes_raw_positions(tmp_path):
     import dicthelp
+    from saitenka_tokenize.japanese import Token
 
     from saitenka.model import PitchAccent
 
-    ps = dicthelp.load_pitchsource(_pitch_zip(tmp_path / "p.zip"))
-    got = ps.accents(("本命", "ほんめい"), "ほんめい")
-    assert got == ("ほんめい", [PitchAccent(0)])
-    assert ps.accents(("犬",), "いぬ") is None
+    ds = dicthelp.load_set(
+        [_term_zip(tmp_path / "d.zip", "D", "本命", "ほんめい")],
+        pitch_zips=[_pitch_zip(tmp_path / "p.zip")],
+    )
+    assert ds.entry_for(Token("本命", "本命", "ほんめい", "名詞", 0, 2)).pitches == [
+        ("ほんめい", (PitchAccent(0),))
+    ]
+    assert ds.entry_for(Token("犬", "犬", "いぬ", "名詞", 0, 1)).pitches == []
 
 
 def test_entry_carries_pitch_accents(tmp_path):
@@ -144,7 +160,7 @@ def test_nasal_mora_adds_a_mark_above_the_row():
     assert _alpha_sum(nasal) > _alpha_sum(plain)  # the extra ゜ ring adds ink
 
 
-def test_pitch_source_round_trips_devoice_nasal(tmp_path):
+def test_devoice_and_nasal_round_trip_from_import_to_pill(tmp_path):
     import dicthelp
 
     from saitenka.model import PitchAccent
@@ -160,10 +176,15 @@ def test_pitch_source_round_trips_devoice_nasal(tmp_path):
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("index.json", json.dumps({"title": "PitchNHK", "format": 3}))
         zf.writestr("term_meta_bank_1.json", json.dumps(entries, ensure_ascii=False))
-    ps = dicthelp.load_pitchsource(str(path))
-    got = ps.accents(("牛", "うし"), "うし")
-    assert got == ("うし", [PitchAccent(0, (1,), (2,))])  # devoice + nasal survived import→query
-    assert ps.display(("牛", "うし"), "うし") == "うし [0]"  # pill still shows only the position
+    from saitenka_tokenize.japanese import Token
+
+    token = Token("牛", "牛", "うし", "名詞", 0, 1)
+    ds = dicthelp.load_set(
+        [_term_zip(tmp_path / "d.zip", "D", "牛", "うし")], pitch_zips=[str(path)]
+    )
+    # devoice + nasal survived import → query
+    assert ds.entry_for(token).pitches == [("うし", (PitchAccent(0, (1,), (2,)),))]
+    assert ds.pitch_field(token)[1] == "0"  # the pill still shows only the position
 
 
 def test_panel_renders_pitch_graph_row():

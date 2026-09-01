@@ -92,6 +92,9 @@ def _no_inflection_chain(_surface: str, _targets: tuple[str, ...]) -> list[str]:
 class SourceAdapterOptions:
     dictionaries: tuple[str, ...] = ()
     sequence_dictionaries: tuple[str, ...] = ()
+    #: Frequency dictionaries whose rank is a per-corpus dense rank rather than a real rank — an
+    #: incomparable scale, so they stay in the pill row but never in the blended mean.
+    occurrence_based: frozenset[str] = frozenset()
     language: str = "jp"
     result_mode: TermResultMode = TermResultMode.GROUP
     deinflected_forms: Callable[[str], tuple[str, ...]] = _no_deinflection
@@ -377,6 +380,28 @@ class DictionarySourceAdapter:
         return f'<ul style="text-align:left;margin:0;padding-left:1.1em;">{body}</ul>', (
             str(min(numbers)) if numbers else ""
         )
+
+    def rareness_rank(self, token) -> float | None:
+        """The harmonic-mean rank of ``token`` across every rank-based frequency dictionary, or
+        ``None`` when none has the word.
+
+        Deliberately the same query as :meth:`frequency_field`, on the same headwords. The two used
+        to be separate readers of ``term_meta`` with different matching rules, so a kana-keyed row
+        could score the card while the pill beside it stayed blank; one call site is what makes that
+        unrepresentable rather than merely fixed.
+        """
+        from saitenka_wordstate.fsrs import harmonic_of
+
+        if not isinstance(self.source, SemanticFrequencySource):
+            return None
+        best: dict[str, int] = {}
+        for item in self.source.frequencies_for(self._headwords(token), self.options.dictionaries):
+            value = item.value
+            if item.dictionary in self.options.occurrence_based or not isinstance(value, int):
+                continue
+            if value > 0:
+                best[item.dictionary] = min(best.get(item.dictionary, value), value)
+        return harmonic_of([float(rank) for rank in best.values()])
 
     def pitch_field(self, token):
         if isinstance(self.source, SemanticPronunciationSource):

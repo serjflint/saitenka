@@ -191,6 +191,12 @@ class DictionaryDatabase:
             rows = connection.execute(
                 "SELECT id, title, revision FROM dictionaries ORDER BY import_order, id"
             ).fetchall()
+            modes = {
+                int(key.removeprefix("freqmode:")): value
+                for key, value in connection.execute(
+                    "SELECT k, v FROM meta WHERE k LIKE 'freqmode:%'"
+                )
+            }
             result = []
             for dictionary_id, title, revision in rows:
                 capabilities = {Capability.IMPORT}
@@ -206,7 +212,25 @@ class DictionaryDatabase:
                     "SELECT 1 FROM media WHERE dict_id=? LIMIT 1", (dictionary_id,)
                 ).fetchone():
                     capabilities.add(Capability.MEDIA)
-                result.append(DictionaryInfo(title, revision, capabilities=frozenset(capabilities)))
+                # The ORIGINAL frequency mode, unreconstructable from the stored ranks once
+                # `_rank_occurrences` has run. Absent for a database written before it was
+                # persisted, which the reader must read as rank-based.
+                mode = modes.get(dictionary_id)
+                metadata = (
+                    (
+                        (
+                            "frequency_mode",
+                            "occurrence-based" if mode == "occurrence" else "rank-based",
+                        ),
+                    )
+                    if mode is not None
+                    else ()
+                )
+                result.append(
+                    DictionaryInfo(
+                        title, revision, capabilities=frozenset(capabilities), metadata=metadata
+                    )
+                )
             return tuple(result)
         finally:
             connection.close()

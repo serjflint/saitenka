@@ -385,7 +385,7 @@ def _load_dict_set():
     ds = DictionarySet.from_db(
         db, dict_titles, list(cfg.get("freq") or []), list(cfg.get("pitch") or [])
     )
-    tag = f"{len(ds.dicts)} dicts + {len(ds.freqs)} freq + {len(ds.pitches)} pitch"
+    tag = f"{len(ds.dicts)} dicts + {len(ds.freq_titles)} freq + {len(ds.pitch_titles)} pitch"
     return ds, tag
 
 

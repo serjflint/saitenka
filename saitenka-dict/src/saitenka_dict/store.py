@@ -70,6 +70,11 @@ class EmptyDictionaryStore:
     ) -> tuple[TermRecord, ...]:
         return ()
 
+    def frequent_terms(
+        self, _limit: int, _dictionaries: tuple[str, ...] = ()
+    ) -> tuple[tuple[str, str], ...]:
+        return ()
+
     def find_frequencies(
         self, _headwords: tuple[tuple[str, str], ...], _dictionaries: tuple[str, ...]
     ) -> tuple[Frequency, ...]:

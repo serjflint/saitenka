@@ -14,6 +14,7 @@ from saitenka.app.dictionary_surface import FREQ_COLOR, PITCH_COLOR
 from saitenka.app.dictionary_surface import glossary_to_nodes as _glossary_to_nodes
 from saitenka.app.dictionary_surface import glosses_of as _glosses_of
 from saitenka.app.source_adapter import _short_freq_name
+from saitenka.model import PitchAccent
 
 
 def test_short_freq_name_strips_saitenka_prefix():
@@ -755,8 +756,18 @@ def _make_meta(path, title, mode, entries):
     return str(path)
 
 
-def test_freq_source_display_prefers_displayvalue_and_reading(tmp_path):
-    # 本命 (kanji) entry should win over the ほんめい (kana) entry, and displayValue is preferred.
+_TOKEN = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
+
+
+def _freq_pill(ds, token=_TOKEN) -> str:
+    """The frequency values as the pill row shows them, joined — what `FreqSource.display` returned
+    before the tooltip sources were retired into the store."""
+    items = ds.source.frequencies_for(((token.lemma, token.reading),), tuple(ds.freq_titles))
+    seen = dict.fromkeys(str(item.display_value or item.value) for item in items)
+    return ", ".join(seen)
+
+
+def test_freq_display_prefers_displayvalue_over_the_raw_rank(tmp_path):
     p = _make_meta(
         tmp_path / "freqa.zip",
         "FreqA",
@@ -768,16 +779,30 @@ def test_freq_source_display_prefers_displayvalue_and_reading(tmp_path):
                     "reading": "ほんめい",
                     "frequency": {"value": 8912, "displayValue": "8912, 143969㋕"},
                 },
-            ],
+            ]
+        ],
+    )
+    ds = dicthelp.load_set(freq_zips=[p])
+    assert ds.freq_titles == ["FreqA"]
+    assert _freq_pill(ds) == "8912, 143969㋕"
+
+
+def test_a_kana_keyed_row_does_not_double_the_pill_its_own_dictionary_already_answered(tmp_path):
+    """Both keyings in one dictionary: the kanji row is the precise one, so the kana row it also
+    carries must not appear beside it (`prefer_term_keyed`)."""
+    p = _make_meta(
+        tmp_path / "freqk.zip",
+        "FreqK",
+        "freq",
+        [
+            ["本命", {"reading": "ほんめい", "frequency": 8912}],
             ["ほんめい", {"value": 143969, "displayValue": "143969㋕"}],
         ],
     )
-    fs = dicthelp.load_freqsource(p)
-    assert fs.title == "FreqA"
-    assert fs.display(("本命", "本命", "ほんめい"), "ほんめい") == "8912, 143969㋕"
+    assert _freq_pill(dicthelp.load_set(freq_zips=[p])) == "8912"
 
 
-def test_freq_source_joins_multiple_entries(tmp_path):
+def test_several_entries_for_one_term_are_all_shown(tmp_path):
     # some freq lists give SUW+LUW as two entries for one term → joined ("12813, 14117").
     p = _make_meta(
         tmp_path / "freqb.zip",
@@ -789,11 +814,10 @@ def test_freq_source_joins_multiple_entries(tmp_path):
             ["本命", 14086],  # plain-int form — deduped display strings
         ],
     )
-    fs = dicthelp.load_freqsource(p)
-    assert fs.display(("本命",), "ほんめい") == "12813, 14117, 14086"
+    assert _freq_pill(dicthelp.load_set(freq_zips=[p])) == "12813, 14117, 14086"
 
 
-def test_freq_source_rank_returns_min_numeric_rank(tmp_path):
+def test_the_blend_takes_the_minimum_rank_a_dictionary_offers(tmp_path):
     # SUW+LUW give two entries for one term → the blend consumes the most-frequent (min) rank.
     p = _make_meta(
         tmp_path / "freqr.zip",
@@ -804,41 +828,48 @@ def test_freq_source_rank_returns_min_numeric_rank(tmp_path):
             ["本命", {"reading": "ほんめい", "frequency": 12813}],
         ],
     )
-    fs = dicthelp.load_freqsource(p)
-    assert fs.rank(("本命", "本命", "ほんめい"), "ほんめい") == 12813
+    assert dicthelp.load_set(freq_zips=[p]).rareness_rank(_TOKEN) == 12813
 
 
-def test_freq_source_rank_none_when_absent(tmp_path):
+def test_the_blend_is_none_when_no_dictionary_has_the_word(tmp_path):
     p = _make_meta(tmp_path / "freqr2.zip", "FreqR2", "freq", [["猫", {"frequency": 500}]])
-    fs = dicthelp.load_freqsource(p)
-    assert fs.rank(("存在しない語",), None) is None
+    ds = dicthelp.load_set(freq_zips=[p])
+    assert ds.rareness_rank(Token("存在しない語", "存在しない語", "", "名詞", 0, 6)) is None
 
 
-def test_freq_source_records_original_frequency_mode(tmp_path):
-    # The blend must know a dict's ORIGINAL mode even though occurrence counts are converted to
-    # ranks at import — persisted per dict so occurrence-based lists can be excluded.
+def test_an_occurrence_based_dictionary_is_named_but_never_blended(tmp_path):
+    """Occurrence counts become ranks at import, so the ORIGINAL mode has to be persisted — a dense
+    per-corpus rank is not comparable with a real one and must stay out of the mean."""
     rank_zip = dicthelp.meta_zip(
-        tmp_path / "rank.zip", "RankDict", "freq", [["猫", {"frequency": 500}]]
+        tmp_path / "rank.zip", "RankDict", "freq", [["本命", {"frequency": 500}]]
     )
     occ_zip = dicthelp.meta_zip(
-        tmp_path / "occ.zip", "OccDict", "freq", [["猫", 99999]], frequency_mode="occurrence-based"
+        tmp_path / "occ.zip",
+        "OccDict",
+        "freq",
+        [["本命", 99999]],
+        frequency_mode="occurrence-based",
     )
-    on = dicthelp.db()
-    assert dicthelp.load_freqsource(rank_zip, on=on).occurrence_based is False
-    assert dicthelp.load_freqsource(occ_zip, on=on).occurrence_based is True
+    ds = dicthelp.load_set(freq_zips=[rank_zip, occ_zip])
+
+    assert ds.occurrence_based == frozenset({"OccDict"})
+    # Both are shown in the pill row...
+    assert _freq_pill(ds) == "500, 99999"
+    # ...and only the rank-based one reaches the blend.
+    assert ds.rareness_rank(_TOKEN) == 500
 
 
-def test_pitch_source_reading_and_positions(tmp_path):
+def test_pitch_reading_and_positions_reach_the_entry(tmp_path):
+    d = _make_dict(tmp_path / "pd.zip", "PD", [["本命", "ほんめい", ["favourite"]]])
     p = _make_meta(
         tmp_path / "pitch.zip",
         "Pitch",
         "pitch",
-        [
-            ["本命", {"reading": "ほんめい", "pitches": [{"position": 0}]}],
-        ],
+        [["本命", {"reading": "ほんめい", "pitches": [{"position": 0}]}]],
     )
-    ps = dicthelp.load_pitchsource(p)
-    assert ps.display(("本命",), None) == "ほんめい [0]"
+    ds = dicthelp.load_set([d], pitch_zips=[p])
+    assert ds.pitch_field(_TOKEN)[1] == "0"
+    assert ds.entry_for(_TOKEN).pitches == [("ほんめい", (PitchAccent(0),))]
 
 
 def test_read_json_bank_recovers_wrong_crc(tmp_path):

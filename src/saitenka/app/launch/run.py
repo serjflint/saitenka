@@ -881,14 +881,14 @@ def _build_run_deps(req: RunDepsRequest):
 
     if dict_set is not None:
         print(
-            f"dictionaries: {len(dict_set.dicts)} defn, {len(dict_set.freqs)} freq, "
-            f"{len(dict_set.pitches)} pitch — see {config_path()} to change"
+            f"dictionaries: {len(dict_set.dicts)} defn, {len(dict_set.freq_titles)} freq, "
+            f"{len(dict_set.pitch_titles)} pitch — see {config_path()} to change"
         )
         log.info(
             "dictionaries loaded: %d defn, %d freq, %d pitch",
             len(dict_set.dicts),
-            len(dict_set.freqs),
-            len(dict_set.pitches),
+            len(dict_set.freq_titles),
+            len(dict_set.pitch_titles),
         )
 
     if scorer is not None:
