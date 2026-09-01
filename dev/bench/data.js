@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788270437712,
+  "lastUpdate": 1788270461234,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -13073,6 +13073,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.301014,
             "range": "3 replicas; min 1.18249; max 1.4206; MAD 0.118529; worst 1.4206",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "babf27bb088854bd6de0eeafc20de6eb482f6dd5",
+          "message": "Merge pull request #480 from serjflint/ci/runner-shutdown-probe\n\nci: make a runner shutdown leave evidence, and stop calling a confounded pair a control",
+          "timestamp": "2026-09-01T18:45:21+05:00",
+          "tree_id": "a5ccb8dc6219c3e57753f783b2d7fdb7fb26df3f",
+          "url": "https://github.com/serjflint/saitenka/commit/babf27bb088854bd6de0eeafc20de6eb482f6dd5"
+        },
+        "date": 1788270459798,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.391293,
+            "range": "3 replicas; min 6.37827; max 6.42471; MAD 0.013021",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.923105,
+            "range": "3 replicas; min 8.88626; max 9.77007; MAD 0.036849; worst 9.77007",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.570838,
+            "range": "3 replicas; min 18.5293; max 20.7798; MAD 0.041569",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.718756,
+            "range": "3 replicas; min 18.6885; max 21.2266; MAD 0.030232; worst 21.2266",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 12.416636,
+            "range": "3 replicas; min 12.0894; max 16.9998; MAD 0.327263",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.091776,
+            "range": "3 replicas; min 0.090272; max 0.121757; MAD 0.001504; worst 0.121757",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.350212,
+            "range": "3 replicas; min 38.9319; max 44.5645; MAD 0.41833; worst 44.5645",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.854998,
+            "range": "3 replicas; min 2.56213; max 4.82193; MAD 0.292865; worst 4.82193",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 0.929196,
+            "range": "3 replicas; min 0.853156; max 1.4806; MAD 0.07604; worst 1.4806",
             "unit": "ms"
           }
         ]
