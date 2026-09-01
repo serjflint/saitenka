@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788270508982,
+  "lastUpdate": 1788290438082,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -13307,6 +13307,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.095876,
             "range": "3 replicas; min 1.08849; max 1.49401; MAD 0.007383; worst 1.49401",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cad2521f7eb54c52de0282007a236503c0532055",
+          "message": "Merge pull request #483 from serjflint/fix/hover-drops-its-own-metadata-request\n\nfix(tooltip): stop a hover invalidating its own in-flight metadata request",
+          "timestamp": "2026-09-02T00:19:00+05:00",
+          "tree_id": "f0ab48d6d59965c9d35b084ea52e3b3dd194086b",
+          "url": "https://github.com/serjflint/saitenka/commit/cad2521f7eb54c52de0282007a236503c0532055"
+        },
+        "date": 1788290436608,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.386849,
+            "range": "3 replicas; min 6.05499; max 6.9569; MAD 0.331856",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.7624,
+            "range": "3 replicas; min 8.69454; max 9.77267; MAD 0.067859; worst 9.77267",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.530229,
+            "range": "3 replicas; min 17.7025; max 20.9984; MAD 0.468194",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.626409,
+            "range": "3 replicas; min 18.0244; max 21.2008; MAD 0.574422; worst 21.2008",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.435384,
+            "range": "3 replicas; min 14.7827; max 196.792; MAD 0.652694",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.123562,
+            "range": "3 replicas; min 0.09288; max 0.127297; MAD 0.003735; worst 0.127297",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 47.151353,
+            "range": "3 replicas; min 44.4621; max 48.6154; MAD 1.464; worst 48.6154",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.768087,
+            "range": "3 replicas; min 3.14544; max 193.831; MAD 0.62265; worst 193.831",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.592952,
+            "range": "3 replicas; min 1.30874; max 55.491; MAD 0.284215; worst 55.491",
             "unit": "ms"
           }
         ]
