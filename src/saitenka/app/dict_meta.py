@@ -7,10 +7,15 @@ its asset lives.
 
 The two per-lookup tooltip sources that used to live here are gone. They were a second reader of
 ``term_meta`` beside the store, with their own matching rules — the shape that put two schemas in
-one file (#472) — and the rules genuinely differed: a row keyed by the kana reading was found here
-and missed there, so a word could be scored by the blend while its pill stayed blank. Widening the
-store's selection (#476) made the two agree, which turned the deletion into a no-op rather than a
-swap that has to be argued.
+one file (#472) — and the rules genuinely differed, so a word could be scored by one and shown by
+the other.
+
+The deletion is **not** behaviour-neutral, and measuring it is what said so. Over 8,000 real
+headwords the blended rank is unchanged for 7,459; of the rest, 512 are words whose old blend
+included a frequency row belonging to a different reading of the same kanji (馬酔木 read あせぼ took
+あせび's rank), because these classes fell back to *every* row for a term when none matched the
+reading. The store rejects those and the frequency pill has therefore always rejected them — so the
+change is the card score being made to agree with what the user was already shown.
 """
 
 from __future__ import annotations
