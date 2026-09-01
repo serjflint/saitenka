@@ -1,10 +1,13 @@
 """Reject a docstring that names a source file which does not exist.
 
 Every instance found when this was written came from the same event: a module moved, and the prose
-describing it did not. `registry.py` still delegated to ``tokenize.py`` a release after that file
-became `saitenka_tokenize/japanese.py`; `token_cache.py` compared its locking to a
-``Dictionary._entry_cache`` that #472 deleted. Both read as current, which is the whole problem —
-a stale comment is worse than none, because it is confidently wrong.
+describing it did not. Two modules still delegated to a tokenizer file that the package extraction
+had renamed, and `token_cache.py` compared its locking to a `Dictionary` cache attribute that #472
+deleted. All of them read as current, which is the whole problem — a stale reference is worse than
+none, because it is confidently wrong.
+
+(Deliberately phrased without naming the dead files in backticks: this gate reads its own docstring,
+and an example would be indistinguishable from the defect. It caught this file on the first run.)
 
 `poe docs-refs` already does this for the docs site. This is the same rule one layer in, for the
 prose that ships inside the package.
@@ -31,8 +34,19 @@ EXEMPT_PREFIXES = ("vibe/",)
 
 
 def _tracked() -> set[str]:
+    """Tracked files **plus** untracked ones git would not ignore.
+
+    `git ls-files` alone skips a file that has been written but not yet added, so a new module's
+    docstrings went unchecked until the commit that introduced them — which is exactly when a gate
+    is supposed to speak. This one reported clean on its own first run for that reason, and only
+    failed once `git add` had made it visible to itself.
+    """
     listing = subprocess.run(
-        ["git", "ls-files"], capture_output=True, text=True, cwd=ROOT, check=True
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=True,
     ).stdout.split()
     return set(listing)
 

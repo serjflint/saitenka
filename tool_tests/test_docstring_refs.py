@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import subprocess
 
 import pytest
 from docstring_refs import REFERENCE, _docstrings, violations
@@ -10,6 +11,30 @@ from docstring_refs import REFERENCE, _docstrings, violations
 
 def test_the_tree_is_clean_today():
     assert violations() == []
+
+
+def test_a_file_written_but_not_yet_added_is_still_checked(tmp_path, monkeypatch):
+    """The gate's own first run reported clean because `git ls-files` does not list an untracked
+    file — so it skipped itself, and only failed once `git add` had made it visible. A gate that
+    goes quiet exactly when new code arrives is worse than no gate.
+
+    Driven against a throwaway repository rather than this one: planting a file in the real tree is
+    global state, and under `-n auto` it raced the clean-tree assertion above into a false failure.
+    """
+    import docstring_refs
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    tracked = tmp_path / "tracked.py"
+    tracked.write_text('"""Fine."""\n', encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.py"], cwd=tmp_path, check=True)
+    (tmp_path / "brand_new.py").write_text(
+        '"""Delegates to ``a_file_that_does_not_exist.py``."""\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(docstring_refs, "ROOT", tmp_path)
+
+    assert [(name, ref) for name, _line, ref in docstring_refs.violations()] == [
+        ("brand_new.py", "a_file_that_does_not_exist.py")
+    ]
 
 
 @pytest.mark.parametrize(
