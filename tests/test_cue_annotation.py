@@ -6,6 +6,7 @@ from collections import deque
 from concurrent.futures import Future
 
 import pytest
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.features.annotation.jobs import (
     AnnotationExecutionResult,
@@ -17,7 +18,6 @@ from saitenka.app.features.annotation.jobs import (
     CueIdentity,
     annotate,
 )
-from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
 

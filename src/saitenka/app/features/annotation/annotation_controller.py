@@ -18,9 +18,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from concurrent.futures import Future
 
+    from saitenka_tokenize.registry import Tokenizer
+
     from saitenka.app import subtitle_intents
-    from saitenka.app.scoring import Scorer, TokenStyle
-    from saitenka.app.tokenizer import Tokenizer
+    from saitenka.app.scoring import Coloring, TokenStyle
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.subtitles import CueIndex
 
@@ -49,7 +50,7 @@ class AnnotationInputs:
     source_order: int | None
     tokenizer: Tokenizer
     terms_exist: Callable[[Sequence[str]], set[str]] | None
-    scorer: Scorer | None
+    scorer: Coloring | None
     selected_dictionaries: int
     dependencies_ready: bool
     annotate: bool

@@ -29,7 +29,7 @@ def test_lua_resolves():
 def test_existing_loaders_use_the_resolver():
     """fonts / wordlists must load through the resolver so the wheel path works too."""
     from saitenka import fonts
-    from saitenka.app import wordlists
+    from saitenka.app import dict_meta
 
     assert fonts.ASSETS.exists()
-    assert wordlists.JLPT_ZIP.exists()
+    assert dict_meta.bundled_jlpt_zip().exists()

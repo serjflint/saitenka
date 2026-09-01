@@ -30,12 +30,12 @@ from driver import Driver
 from hypothesis import HealthCheck, event, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
+from saitenka_tokenize.japanese import Token
 from tip_fakes import hidpi_reader
 
 from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
-from saitenka.app.tokenize import Token
 
 _SCALES = [1.5, 1.76, 2.0]
 _NAV_QUERY = "見*"  # wildcard → always resolves via LinkingDS.search, so navigate is deterministic

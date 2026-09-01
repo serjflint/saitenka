@@ -6,13 +6,13 @@ import zipfile
 
 import dicthelp
 from driver import Driver
+from saitenka_tokenize.japanese import Token
 from session_builder import build_session
 from util import FakeIPC, assert_golden, keybind_registry
 
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
-from saitenka.app.tokenize import Token
 
 
 def _make_dict_zip(path, title, terms=(), kanji=(), tags=()):
@@ -70,15 +70,29 @@ def _fixture_ds(tmp_path, terms=(("読む", "よむ", ["to read"]),)):
 
 
 def test_kanji_bank_ingested_into_db(tmp_path):
-    p = _make_dict_zip(tmp_path / "k.zip", "K", kanji=[KANJI_READ])
-    d = dicthelp.load_dict(p)
-    k = d.kanji_lookup("読")
-    assert k is not None
-    assert k["onyomi"] == "ドク トク"
-    assert k["kunyomi"] == "よ.む"
-    assert k["meanings"] == ["reading", "to read"]
-    assert k["stats"]["strokes"] == "14"
-    assert d.kanji_lookup("犬") is None
+    """The kanji_bank round-trips through import: on-readings, kun-readings, meanings and KANJIDIC
+    stats each come back in their own field, and a character the bank never held stays absent.
+
+    Per-field, not a substring search of the rendered panel: 音 and 訓 are different readings of the
+    same character, so a search that only asks whether both strings appear somewhere cannot tell them
+    apart if they are swapped.
+    """
+    ds = dicthelp.load_set([_make_dict_zip(tmp_path / "k.zip", "K", kanji=[KANJI_READ])])
+
+    entry = ds.kanji_for("読")
+
+    assert entry is not None
+    rows = {
+        node["content"].split("　")[0]: node["content"].split("　")[1]
+        for node in entry.defs[0].content
+        if isinstance(node, dict) and node.get("tag") == "div" and "　" in str(node.get("content"))
+    }
+    assert rows["音"] == "ドク トク"
+    assert rows["訓"] == "よ.む"
+    meanings = next(node for node in entry.defs[0].content if node.get("tag") == "ol")
+    assert [item["content"] for item in meanings["content"]] == ["reading", "to read"]
+    assert "14" in json.dumps(entry.defs[0].content, ensure_ascii=False)  # the strokes stat
+    assert ds.kanji_for("犬") is None
 
 
 # --- kanji_for -------------------------------------------------------------------------------------

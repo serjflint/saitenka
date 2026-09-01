@@ -42,6 +42,10 @@ class MiniDS:
     def has_term(self, *_forms):
         return False  # no multi-token phrase merge — the input path, not phrase stacking
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
     clip = tmp / "clip.mp4"

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from saitenka.render.sc_adapter import _text_of
+
+if TYPE_CHECKING:
+    from collections.abc import Container
 
 FREQ_COLOR = (74, 158, 92, 255)
 PITCH_COLOR = (126, 96, 168, 255)
@@ -56,6 +60,34 @@ def reading_affinity(dict_reading: str, context_reading: str) -> int:
             break
         length += 1
     return length
+
+
+def entry_rank_key(
+    term: str,
+    reading: str,
+    context_reading: str,
+    termforms: Container[str],
+    preferred: Container[str] = (),
+    frequency: float | None = None,
+) -> tuple:
+    """Sort key for choosing and ordering the entries behind one hovered word.
+
+    Exact-headword first (like Yomitan); then a deinflected **base form** ahead of the inflected
+    surface (``parapluie`` outranks its own plural entry ``parapluies`` — ``preferred`` is empty for
+    JP, so the slot is inert there); then the LONGEST term (a phrase 数ある stacks above the bare 数);
+    then the reading closest to the token's contextual one (退いた prefers のく); then the more common
+    reading by frequency rank.
+
+    A free function rather than a closure so the ordering can be asserted directly — it is the rule a
+    hovered word's default mine target depends on, and it has no other observable surface.
+    """
+    return (
+        term not in termforms,
+        term not in preferred,
+        -len(term),
+        -reading_affinity(reading, context_reading),
+        float("inf") if frequency is None else frequency,
+    )
 
 
 def glosses_of(glossary: list) -> list[str]:

@@ -12,6 +12,7 @@ from weakref import WeakKeyDictionary
 
 import dicthelp
 from driver import Driver
+from saitenka_tokenize.japanese import Token
 from session_builder import TestSession, build_session
 from util import FakeIPC
 
@@ -23,7 +24,6 @@ from saitenka.app.session.factory import (
 )
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
-from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
 _SUBMITTERS: WeakKeyDictionary[TestSession, _DeferredEngagedSubmitter]

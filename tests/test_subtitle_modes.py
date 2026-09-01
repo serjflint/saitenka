@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from session_builder import TestSession, build_session
 from util import FakeIPC as RuntimeFakeIPC
 from util import RecordingRasterProvider, bare_gateway, session_gateway
@@ -13,7 +14,6 @@ from util import RecordingRasterProvider, bare_gateway, session_gateway
 from saitenka.app import bindings as app_bindings
 from saitenka.app import subtitle_modes, subtitle_selection
 from saitenka.app.features.translation import TranslationInputs
-from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from saitenka.app.session.lifecycle import LiveState
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner

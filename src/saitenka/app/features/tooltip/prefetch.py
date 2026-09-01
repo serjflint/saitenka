@@ -17,9 +17,10 @@ from saitenka.runtime.jobs import JobLanePolicy
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.scoring import Scorer
-    from saitenka.app.tokenize import Token
-    from saitenka.app.tokenizer import Tokenizer
+    from saitenka_tokenize.japanese import Token
+    from saitenka_tokenize.registry import Tokenizer
+
+    from saitenka.app.scoring import Coloring, TokenVerdict
 
 log = logging.getLogger(__name__)
 
@@ -358,7 +359,7 @@ class HeadProbe:
     optional — without a scorer there is no ranking, and the warm pass runs anyway.
     """
 
-    scorer: Scorer | None
+    scorer: Coloring | None
     panel_key: Callable[..., object]
     panel_present: Callable[[object], bool]
     lookahead: int
@@ -443,24 +444,20 @@ def _lookahead_items(
     return items
 
 
-def _head_priority(tag: str) -> int | None:
+def _head_priority(verdict: TokenVerdict) -> int | None:
     """Lower sorts first; ``None`` means "not worth a render job at all," which is the
     real RAM/CPU cap on this feature (selectivity, not just the queue's ``maxsize``). n+1/forgotten
     (the word the system already expects to be looked up) first, then rarer frequency bands; already-
-    ``known`` words are excluded outright — see :class:`saitenka.app.scoring.Scorer` for the tag
-    vocabulary (``'n+1' | 'known' | 'forgotten' | 'freq-N' | 'base'``, ``+'/jlpt-Nx'``).
+    ``known`` words are excluded outright.
 
-    Known blind spot: a word absent from the frequency list entirely (arguably the RAREST case) tags
-    ``'base'`` — identical to a word that's merely low-signal — so it's excluded here rather than
-    risking treating an ordinary word as high-priority. A finer ranking could read
-    ``Scorer.freq.rank()`` directly instead of the coloring tag string."""
-    base = tag.split("/", 1)[0]
-    if base in {"n+1", "forgotten"}:
+    Known blind spot: a word absent from the frequency list entirely (arguably the RAREST case) has no
+    band — indistinguishable here from a word that is merely low-signal — so it is excluded rather than
+    risking treating an ordinary word as high-priority."""
+    if verdict.is_n_plus_one or (verdict.is_content and verdict.fsrs_state == "forgotten"):
         return 0
-    if base.startswith("freq-"):
-        band = int(base.split("-", 1)[1])
-        return 1 + (5 - band)  # rarer (higher band) sorts first
-    return None  # 'known' or 'base' (no strong signal) — plain decode-warming is enough
+    if verdict.freq_band is not None:
+        return 1 + (5 - verdict.freq_band)  # rarer (higher band) sorts first
+    return None  # known / no signal — plain decode-warming is enough
 
 
 def _head_prefetch_candidate(
@@ -468,7 +465,7 @@ def _head_prefetch_candidate(
 ) -> tuple[int, HeadPrefetchItem] | None:
     """Is token `t` (at index `i`) worth a speculative head-render? None if not — either
     :func:`_head_priority` says no, it's already mined, or it's already warm in the panel cache."""
-    priority = _head_priority(styles[i].tag)
+    priority = _head_priority(styles[i].verdict)
     if priority is None:
         return None
     if ports.is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring

@@ -15,8 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from PIL.Image import Image
-
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 
 class RasterStyle(StrEnum):

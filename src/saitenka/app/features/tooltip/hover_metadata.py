@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.registry import get_tokenizer
+
 from saitenka.app.lookup import card_for
-from saitenka.app.tokenizer import get_tokenizer
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     import threading
     from collections.abc import Callable
 
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,9 +9,10 @@ the chain is computed from the token's surface→lemma, independent of dictionar
 from __future__ import annotations
 
 import pytest
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.dictionary import DictionarySet
-from saitenka.app.tokenize import Token
+from saitenka.app.dictionary_surface import entry_rank_key
 
 pytest.importorskip("saitenka_deinflect")  # chain is empty without the GPL add-on; skip if absent
 
@@ -64,19 +65,15 @@ def test_deinflected_base_form_outranks_the_inflected_surface_entry():
     # A dict that carries BOTH the base "parapluie" and a "parapluies -> plural of" form-entry must
     # show the base first (live bug: the inflected surface headed the tooltip). The base is in the
     # deinflected `preferred` set; it wins even though it's shorter than the inflected surface.
-    ds = DictionarySet(dicts=[], language="fr")
-    tok = _token("parapluies", "parapluies")
     formset = {"parapluies", "parapluie"}
     preferred = frozenset({"parapluie"})
-    assert ds._rank_key("parapluie", "", tok, formset, preferred) < ds._rank_key(
-        "parapluies", "", tok, formset, preferred
+    assert entry_rank_key("parapluie", "", "", formset, preferred) < entry_rank_key(
+        "parapluies", "", "", formset, preferred
     )
 
 
 def test_jp_ranking_keeps_longest_match_first_with_no_preferred_set():
     # JP has no deinflected `preferred` set, so the longest-match-first rule (数ある over 数) is intact —
     # the second-language base-form preference can't perturb the byte-identical JP path.
-    ds = DictionarySet(dicts=[], language="jp")
-    tok = _token("数", "数")
     formset = {"数ある", "数"}
-    assert ds._rank_key("数ある", "", tok, formset) < ds._rank_key("数", "", tok, formset)
+    assert entry_rank_key("数ある", "", "", formset) < entry_rank_key("数", "", "", formset)

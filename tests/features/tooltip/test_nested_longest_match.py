@@ -3,13 +3,13 @@ whole dictionary term, mirroring the base tooltip's forward longest-match on a c
 
 from __future__ import annotations
 
+from saitenka_tokenize.japanese import Token
+from saitenka_tokenize.registry import get_tokenizer
 from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.features.tooltip import nested_popup
 from saitenka.app.session.factory import SessionServices
-from saitenka.app.tokenize import Token
-from saitenka.app.tokenizer import get_tokenizer
 from saitenka.model import LinkBox, ScanBox
 from saitenka.panel import Definition, Entry
 
@@ -27,6 +27,10 @@ class _DS:
 
     def has_term(self, *forms):
         return "コンサート" in forms
+
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
 
 
 def _tok(surface: str, start: int) -> Token:
@@ -59,11 +63,15 @@ class _RecordingDS:
         self.seen.append(tok.surface)
         return Entry(headword=[tok.surface], reading="", defs=[Definition("辞書", ["定義"])])
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def test_link_query_is_looked_up_whole_not_tokenized():
     # Regression (それにしては → その): a cross-reference link ``?query=それにしては`` must look up the WHOLE
     # compound, not tokenize it and take the first token (それ). Both nav paths build a whole-query token.
-    from saitenka.app.tokenize import query_token
+    from saitenka_tokenize.japanese import query_token
 
     assert query_token("それにしては").surface == "それにしては"
     assert query_token("  ") is None

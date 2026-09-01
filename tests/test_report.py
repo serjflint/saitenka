@@ -6,6 +6,8 @@ import os
 import zipfile
 from pathlib import Path
 
+from saitenka_dict.schema import SCHEMA_VERSION
+
 from saitenka.app import report
 
 
@@ -140,7 +142,7 @@ def test_collect_includes_dict_listing_and_mpv_log(monkeypatch, tmp_path):
     members = report.collect(include_log=True)
     listing = members["dicts.listing.txt"]
     assert "MyDict" in listing  # imported dictionary listed
-    assert "schema 1" in listing  # header carries schema + size (content-free)
+    assert f"schema {SCHEMA_VERSION}" in listing  # header carries schema + size (content-free)
     assert "entries=1" in listing  # per-table counts — a missing tags table is now visible
     assert "mpv.log" in members and "mpv 0.40 started" in members["mpv.log"]
 

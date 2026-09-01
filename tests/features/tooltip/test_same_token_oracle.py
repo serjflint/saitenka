@@ -17,9 +17,9 @@ The legacy renderer is this work's comparison target, and this is what makes it 
 from __future__ import annotations
 
 import pytest
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.subtitles import WordBox, render_subtitle, token_at
-from saitenka.app.tokenize import Token
 
 CUE = "猫を見る犬も見る"
 OSD = (1280, 720)

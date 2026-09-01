@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     import numpy as np
+    from saitenka_tokenize.japanese import Token
+    from saitenka_tokenize.registry import Tokenizer
 
     from saitenka.app.features.tooltip.prefetch import TipScale
     from saitenka.app.hover_store import HoverStore
@@ -29,8 +31,6 @@ if TYPE_CHECKING:
     from saitenka.app.lifecycle_timers import LifecycleTimerKind
     from saitenka.app.render_cache import LoadedView, RenderCache
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
-    from saitenka.app.tokenizer import Tokenizer
     from saitenka.model import Theme
     from saitenka.render.banded import WindowedPanel
     from saitenka.render.layout_backend import LayoutBackend

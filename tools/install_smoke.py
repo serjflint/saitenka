@@ -26,8 +26,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 OVERLAY = Path(__file__).resolve().parent.parent
@@ -45,12 +47,58 @@ def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, encoding="utf-8", errors="replace", capture_output=True, **kw)
 
 
+_REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9._-]+")
+_SELF_EXTRA = re.compile(r"saitenka\[([a-z0-9,-]+)\]$")
+
+
+def _requirement_name(spec: str) -> str:
+    return _REQUIREMENT_NAME.match(spec.strip()).group(0).lower().replace("_", "-")  # type: ignore[union-attr]
+
+
+def _pyproject() -> dict:
+    return tomllib.loads((OVERLAY / "pyproject.toml").read_text(encoding="utf-8"))
+
+
+def _required_names(*, subtitle_geometry: bool) -> set[str]:
+    """Every distribution `saitenka[full(,subtitle-geometry)]` pulls in, extras expanded."""
+    data = _pyproject()["project"]
+    optional = data.get("optional-dependencies", {})
+    names = {_requirement_name(spec) for spec in data["dependencies"]}
+    pending = ["full", "subtitle-geometry"] if subtitle_geometry else ["full"]
+    seen: set[str] = set()
+    while pending:
+        extra = pending.pop()
+        if extra in seen:
+            continue
+        seen.add(extra)
+        for spec in optional.get(extra, []):
+            if nested := _SELF_EXTRA.fullmatch(spec.strip()):
+                pending.extend(nested.group(1).split(","))
+            else:
+                names.add(_requirement_name(spec))
+    return names
+
+
+def _local_projects(*, subtitle_geometry: bool) -> list[Path]:
+    """The in-repo packages this install needs a wheel for, derived rather than listed.
+
+    A hardcoded list rots silently and only in this job: extracting a package makes it a core
+    dependency that exists nowhere but this checkout, so `uv tool install` reaches the registry for
+    something never published and the resolver — not a packaging assertion — reports it. Keyed on
+    `[tool.uv.sources]`, the next extraction is covered the moment it is wired up.
+    """
+    sources = _pyproject()["tool"]["uv"]["sources"]
+    needed = _required_names(subtitle_geometry=subtitle_geometry)
+    return [
+        OVERLAY / source["path"]
+        for name, source in sorted(sources.items())
+        if name in needed and "path" in source
+    ]
+
+
 def _build_wheel(*, subtitle_geometry: bool) -> Path:
     dist = OVERLAY / "dist"
-    projects = [OVERLAY / "saitenka-dict", OVERLAY / "ankiconnect-client"]
-    if subtitle_geometry:
-        projects.append(OVERLAY / "libasslite")
-    projects.append(OVERLAY)
+    projects = [*_local_projects(subtitle_geometry=subtitle_geometry), OVERLAY]
     for project in projects:
         out = _run(["uv", "build", "--wheel", "--out-dir", str(dist)], cwd=project)
         if out.returncode != 0:

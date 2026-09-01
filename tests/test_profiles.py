@@ -4,10 +4,11 @@ active profile. Japanese stays the byte-identical default when nothing is config
 
 import pytest
 import util
+from saitenka_tokenize.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, ReaderLanguages
+from saitenka_tokenize.registry import register_tokenizer
 from session_builder import build_session
 
 from saitenka.app import bindings as app_bindings
-from saitenka.app.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, ReaderLanguages
 from saitenka.app.profiles import (
     DEFAULT_PROFILE,
     Profile,
@@ -19,7 +20,6 @@ from saitenka.app.profiles import (
 )
 from saitenka.app.session.factory import SessionIdentity
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
-from saitenka.app.tokenizer import register_tokenizer
 
 
 class FakeIPC(util.FakeIPC):
@@ -57,7 +57,7 @@ class _FakeLatinTokenizer:
 
 @pytest.fixture
 def _restore_tokenizer_registry():
-    import saitenka.app.tokenizer as mod
+    import saitenka_tokenize.registry as mod
 
     saved = dict(mod._FACTORIES)
     yield

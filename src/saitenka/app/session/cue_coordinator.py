@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import SECOND_LANG
+
 from saitenka import otel_metrics
 from saitenka.app import native_subtitles, subtitle_modes, subtitle_raster
 from saitenka.app.features.annotation.annotation_controller import AnnotationInputs
-from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.runtime import CueCommandState
 from saitenka.app.subtitle_render import DrawRequest, SubtitleTarget

@@ -6,13 +6,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import MAIN_LANG
+
 from saitenka.app.features.analysis.episode_analysis import (
     AnalysisKey,
     EpisodeAnalysis,
     analysis_key,
     analyze_cues,
 )
-from saitenka.app.languages import MAIN_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
@@ -22,13 +23,14 @@ if TYPE_CHECKING:
     import threading
     from collections.abc import Callable
 
+    from saitenka_tokenize.registry import Tokenizer
+
     from saitenka.app.config import KeyOptions
     from saitenka.app.features.help.help_controller import ScreenState
     from saitenka.app.features.profiles.profile_session import ProfileSession
     from saitenka.app.features.subtitle.navigation_state import NavigationStore
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
-    from saitenka.app.scoring import Scorer
-    from saitenka.app.tokenizer import Tokenizer
+    from saitenka.app.scoring import Coloring
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.subtitle_slice import SubtitleTrackStore
     from saitenka.subtitles import Cue, CueIndex
@@ -44,7 +46,7 @@ class AnalysisInputs:
     language: str
     index: CueIndex | None
     loading: bool
-    scorer: Scorer | None
+    scorer: Coloring | None
     tokenizer: Tokenizer
 
 
@@ -69,7 +71,7 @@ class AnalysisObservation:
 @dataclass(frozen=True, slots=True)
 class AnalysisRequest:
     cues: tuple[Cue, ...]
-    scorer: Scorer | None
+    scorer: Coloring | None
     tokenizer: Tokenizer
 
 

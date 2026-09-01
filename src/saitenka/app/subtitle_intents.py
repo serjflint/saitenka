@@ -16,7 +16,8 @@ from saitenka.app.subnav_policy import anchor_delay
 from saitenka.app.subtitle_selection import toggle_target
 
 if TYPE_CHECKING:
-    from saitenka.app.languages import Language
+    from saitenka_tokenize.languages import Language
+
     from saitenka.app.subtitle_selection import SubtitleTracks
 
 type AnnotationMode = Literal["full", "hover"]

@@ -1,9 +1,9 @@
 """MVP: tokenizer (lemma/reading), furigana alignment, and JMdict → Entry adapter."""
 
 import pytest
+from saitenka_tokenize.japanese import Token, tokenize
 
 from saitenka.app.lookup import entry_for, furigana
-from saitenka.app.tokenize import Token, tokenize
 
 LINE = "門前の小僧習わぬ経を読む"
 
@@ -77,7 +77,7 @@ def _at(surface: str, start: int, pos: str = "名詞") -> Token:
 
 
 def test_phrase_terms_longest_match_first_from_cursor():
-    from saitenka.app.tokenize import phrase_terms
+    from saitenka_tokenize.japanese import phrase_terms
 
     # line 数ある魔法 → 数(0-1) ある(1-3) 魔法(3-5); only 数ある is a term
     toks = [_at("数", 0), _at("ある", 1), _at("魔法", 3)]
@@ -86,7 +86,7 @@ def test_phrase_terms_longest_match_first_from_cursor():
 
 
 def test_phrase_terms_orders_longest_first_when_nested_terms_exist():
-    from saitenka.app.tokenize import phrase_terms
+    from saitenka_tokenize.japanese import phrase_terms
 
     toks = [_at("数", 0), _at("ある", 1), _at("程", 3)]
     # both the 2-token and 3-token concatenations are terms → longest first, span reaches the longest
@@ -95,7 +95,7 @@ def test_phrase_terms_orders_longest_first_when_nested_terms_exist():
 
 
 def test_phrase_terms_folds_in_a_leading_honorific_prefix():
-    from saitenka.app.tokenize import phrase_terms
+    from saitenka_tokenize.japanese import phrase_terms
 
     # お休み → お(接頭辞, 0-1) + 休み(1-3). Hovering 休み must still find お休み (the tiny お is behind the
     # cursor, so a forward-only scan would miss it) — the span reaches back over the prefix.
@@ -109,7 +109,7 @@ def test_phrase_terms_folds_in_a_leading_honorific_prefix():
 
 
 def test_phrase_terms_anchors_at_cursor_and_returns_none_off_a_phrase():
-    from saitenka.app.tokenize import phrase_terms
+    from saitenka_tokenize.japanese import phrase_terms
 
     toks = [_at("数", 0), _at("ある", 1)]
     # hovering ある (no following token, no preceding prefix) → no term
@@ -119,7 +119,7 @@ def test_phrase_terms_anchors_at_cursor_and_returns_none_off_a_phrase():
 
 
 def test_phrase_terms_stops_at_line_break_and_punctuation():
-    from saitenka.app.tokenize import phrase_terms
+    from saitenka_tokenize.japanese import phrase_terms
 
     # ある sits on the next source line: its start (0) resets below the previous end → not adjacent
     cross_line = [_at("数", 0), _at("X", 5), _at("ある", 0)]

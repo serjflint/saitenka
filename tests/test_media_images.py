@@ -14,6 +14,7 @@ from io import BytesIO
 import dicthelp
 import pytest
 from PIL import Image
+from saitenka_tokenize.japanese import Token
 
 from saitenka.model import Style
 from saitenka.render.flow import ImgBox
@@ -163,7 +164,8 @@ def test_definition_carries_preloaded_media(tmp_path):
         media={"m/x.svg": _SVG},
     )
     dset = dicthelp.load_set(dict_zips=[zp])
-    defs, _headword, _reading = dset._dict_defs(("語",), {"語"}, "ご")
+    tok = Token(surface="語", lemma="語", reading="ご", pos="名詞", start=0, end=1)
+    defs = dset.entry_for(tok).defs
     media_maps = [dfn.media for dfn in defs if dfn.media]
     assert (
         media_maps and "m/x.svg" in media_maps[0]

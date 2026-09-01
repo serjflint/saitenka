@@ -21,13 +21,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.japanese import Token
+
 from saitenka.app.features.tooltip import prefetch, tooltip_panel
 from saitenka.app.features.tooltip.preparation import (
     PersistentHeadCache,
     TooltipPreparationConfig,
     TooltipPreparationInputs,
 )
-from saitenka.app.tokenize import Token
 from saitenka.mask_atlas import REFERENCE_SCALE
 
 if TYPE_CHECKING:
@@ -86,7 +87,7 @@ def _popular_terms(ds, limit: int) -> list[tuple[str, str]]:
     sql_limit = limit if limit > 0 else -1  # SQLite LIMIT -1 = no limit
     best: dict[str, tuple[str, int]] = {}
     for fs in ds.freqs:
-        rows = fs.db._conn().execute(
+        rows = fs.db.connection().execute(
             "SELECT term, reading, rank FROM term_meta "
             "WHERE dict_id=? AND mode='freq' AND rank>0 ORDER BY rank LIMIT ?",
             (fs.dict_id, sql_limit),
@@ -111,9 +112,10 @@ class _HeadlessTooltipPreparation:
         *,
         render_cache_on: bool,
     ) -> None:
+        from saitenka_tokenize.registry import get_tokenizer
+
         from saitenka.app.config import TooltipOptions
         from saitenka.app.features.tooltip.popups import PanelCache
-        from saitenka.app.tokenizer import get_tokenizer
         from saitenka.render.layout_backend import backend_label, resolve_backend
 
         options = TooltipOptions(render_cache=render_cache_on)

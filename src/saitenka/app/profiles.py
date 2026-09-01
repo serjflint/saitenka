@@ -20,8 +20,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from saitenka_tokenize.languages import MAIN_LANG, ReaderLanguages
+
 from saitenka.app.config import ProfileOptions
-from saitenka.app.languages import MAIN_LANG, ReaderLanguages
 
 # BCP-47-ish shape: a primary subtag of letters, optional hyphen-separated alphanumeric subtags. Open by
 # design — this validates SHAPE, never a whitelist, so any real language ("fr", "de-CH", "zh-Hant") is

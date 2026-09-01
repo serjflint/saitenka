@@ -12,8 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from saitenka.app import fsrs
+from saitenka_wordstate import fsrs
 
 _CASES = json.loads(
     (Path(__file__).parent / "fixtures" / "fsrs" / "py_fsrs_retrievability.json").read_text(

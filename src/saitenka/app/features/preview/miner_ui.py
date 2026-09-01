@@ -33,12 +33,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from PIL.Image import Image as PILImage
+    from saitenka_tokenize.japanese import Token
 
     from saitenka.app.config import KeyOptions
     from saitenka.app.features.preview.card_preview import PreviewPanel
     from saitenka.app.features.preview.preview_controller import PreviewController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
-    from saitenka.app.tokenize import Token
 
 
 @dataclass(frozen=True, slots=True)

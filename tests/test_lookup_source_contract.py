@@ -1,4 +1,9 @@
-"""Characterization bridge between Saitenka's facade and saitenka-dict's semantic surface."""
+"""What the overlay requires of `saitenka-dict`'s semantic surface.
+
+This began as a differential harness: the app carried a second, hand-rolled reader and every case
+diffed the two. That reader is gone — one database, one client — so what a case pins now is the
+extracted surface against the fixture it imported, and the app-side adapter against the surface.
+"""
 
 from __future__ import annotations
 
@@ -24,12 +29,12 @@ from saitenka_dict import (
     TermResultMode,
     Translator,
 )
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import DictionarySet
 from saitenka.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
-from saitenka.app.tokenize import Token
 from saitenka.model import Style
 from saitenka.render.sc_adapter import walk
 
@@ -69,31 +74,23 @@ def _dictionary(
     return str(path)
 
 
-def test_extracted_split_surface_agrees_with_the_stable_dictionary_facade(tmp_path):
+def test_the_split_surface_returns_one_entry_per_row_in_import_order(tmp_path):
+    """SPLIT is the un-grouped view: every stored row surfaces as its own entry, carrying the term,
+    reading, glossary and sequence exactly as imported, ordered by the configured dictionary order.
+
+    Asserted against the fixture rather than against a second reader — the app's own reader, which
+    this used to diff against, no longer exists.
+    """
+    structured = {"type": "structured-content", "content": {"tag": "b", "content": "読むこと"}}
     first = _dictionary(tmp_path / "first.zip", "First", ["to read"])
-    second = _dictionary(
-        tmp_path / "second.zip",
-        "Second",
-        [{"type": "structured-content", "content": {"tag": "b", "content": "読むこと"}}],
-    )
+    second = _dictionary(tmp_path / "second.zip", "Second", [structured])
     current = dicthelp.load_set([first, second])
 
     extracted = Translator(SqliteDictionaryStore(current.dicts[0].db.path)).lookup_terms(
         TermQuery("読む", mode=TermResultMode.SPLIT)
     )
 
-    current_rows = [
-        (
-            hit.term,
-            hit.reading,
-            hit.glossary,
-            hit.seq if hit.seq is not None else -1,
-            dictionary.title,
-        )
-        for dictionary in current.dicts
-        for hit in dictionary.lookup("読む")
-    ]
-    extracted_rows = [
+    assert [
         (
             entry.headwords[0].term,
             entry.headwords[0].reading,
@@ -102,8 +99,12 @@ def test_extracted_split_surface_agrees_with_the_stable_dictionary_facade(tmp_pa
             entry.definitions[0].source.dictionary,
         )
         for entry in extracted.entries
+    ] == [
+        # `sequence` is -1 because `[dictdb] persist_seq` is off by default, not because the bank
+        # lacked one — the fixture writes 1456360.
+        ("読む", "よむ", ["to read"], -1, "First"),
+        ("読む", "よむ", [structured], -1, "Second"),
     ]
-    assert extracted_rows == current_rows
 
 
 def test_extracted_group_surface_preserves_panel_source_order_and_tags(tmp_path):

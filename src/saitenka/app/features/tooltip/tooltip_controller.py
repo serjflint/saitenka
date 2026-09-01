@@ -7,6 +7,8 @@ import threading
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import MAIN_LANG
+
 from saitenka import otel_metrics
 from saitenka.app import subtitles
 from saitenka.app.bindings import active_bindings
@@ -48,7 +50,6 @@ from saitenka.app.interaction.surfaces import (
     WheelStep,
     tip_wheel_pixels,
 )
-from saitenka.app.languages import MAIN_LANG
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
@@ -56,6 +57,8 @@ from saitenka.runtime import Owner, events
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection
+
+    from saitenka_tokenize.registry import Tokenizer
 
     from saitenka.app.config import KeyOptions, TooltipOptions
     from saitenka.app.dictionary import DictionarySet
@@ -79,9 +82,8 @@ if TYPE_CHECKING:
     from saitenka.app.interaction.presentation import InteractionSurfaces
     from saitenka.app.lifecycle_timers import LifecycleTimers
     from saitenka.app.render_cache import LoadedView
-    from saitenka.app.scoring import Scorer
+    from saitenka.app.scoring import Coloring
     from saitenka.app.subtitle_presentation import CueRenderState
-    from saitenka.app.tokenizer import Tokenizer
     from saitenka.render.layout_backend import LayoutBackend
     from saitenka.runtime import EffectFinished
     from saitenka.runtime.hover import HoverDelays
@@ -217,7 +219,7 @@ class TooltipSessionView:
     annotation: AnnotationView
     tokenizer: Tokenizer
     dictionary: DictionarySet | None
-    scorer: Scorer | None
+    scorer: Coloring | None
     mined: MiningIndexSnapshot
     mining_target_available: bool
     subtitle_language: str

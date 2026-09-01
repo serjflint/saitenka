@@ -43,9 +43,10 @@ from saitenka.subtitles import decoration, font_names, overpaint, overprint
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
     from saitenka.runtime.surfaces import SurfaceTransaction
 
 log = logging.getLogger("saitenka.app.subtitle_render")

@@ -1,6 +1,7 @@
 """Mining: card builder, dedup query, sentence bolding, media args, toast (no real Anki add)."""
 
 import pytest
+from saitenka_tokenize.japanese import tokenize
 from session_builder import build_session
 
 from saitenka.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
@@ -10,7 +11,6 @@ from saitenka.app.lookup import card_for
 from saitenka.app.media import AnimatedClip, Timespan, clip_audio
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.toast import render_toast
-from saitenka.app.tokenize import tokenize
 
 
 def _discard_preview(*_args, **_kwargs) -> None:
@@ -608,10 +608,12 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     at max_bulk."""
     from types import SimpleNamespace
 
+    from saitenka_tokenize.japanese import Token
+    from saitenka_tokenize.registry import UnidicTokenizer
+    from saitenka_wordstate import TokenVerdict
+
     from saitenka.app.features.mining.miner import _select_bulk_targets
     from saitenka.app.scoring import TokenStyle
-    from saitenka.app.tokenize import Token
-    from saitenka.app.tokenizer import UnidicTokenizer
 
     def tok(surface, lemma, pos="名詞"):
         return Token(surface=surface, lemma=lemma, reading="", pos=pos, start=0, end=len(surface))
@@ -626,7 +628,7 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     styles = [
         TokenStyle(color=(0, 0, 0, 255)),
         TokenStyle(color=(0, 0, 0, 255)),
-        TokenStyle(color=(0, 0, 0, 255), tag="known"),
+        TokenStyle(color=(0, 0, 0, 255), verdict=TokenVerdict(is_content=True, is_known=True)),
         TokenStyle(color=(0, 0, 0, 255)),
         TokenStyle(color=(0, 0, 0, 255)),
     ]
@@ -677,10 +679,10 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     """The per-entry ⊕ arrives as a 'mine:<i>' LinkBox; _mine_link mines cards_for(tok)[i] — clicking
     the しりぞく block (index 1) mines that reading/gloss, not the default のく."""
     import dicthelp
+    from saitenka_tokenize.japanese import Token
     from util import FakeIPC
 
     from saitenka.app.features.tooltip import tooltip
-    from saitenka.app.tokenize import Token
     from saitenka.model import LinkBox
 
     d = _make_dict(
@@ -860,10 +862,10 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     """Per-stacked-entry ✓ state tracks deck membership by expression (Anki's dedup key): mining 退く
     flips every 退く reading-block, since a second reading would be a duplicate expression."""
     import dicthelp
+    from saitenka_tokenize.japanese import Token
     from util import FakeIPC
 
     from saitenka.app.features.tooltip import tooltip_panel
-    from saitenka.app.tokenize import Token
 
     d = _make_dict(
         tmp_path / "gm.zip",

@@ -7,10 +7,10 @@ Two public surfaces:
    The FSRS retrievability math is copied verbatim from ``tools/anki_rank_dicts.py`` and
    cross-checked against py-fsrs.
 
-2. :func:`harmonic_of` / :func:`harmonic_rank` / :func:`diff_pill` — blend frequency ranks from
+2. :func:`harmonic_of` / :func:`harmonic_rank` / :func:`rareness_band` — blend frequency ranks from
    multiple Yomitan freq dicts using the harmonic-mean formula (identical to
-   ``tools/anki_rank_dicts.py``), returning a compact ``Freq("diff", "1.3k", …)`` pill for the
-   tooltip header row, colored by rareness band (green common → amber → red rare).
+   ``tools/anki_rank_dicts.py``) and classify the result as common / uncommon / rare. The panel
+   turns that into the tooltip's "diff" pill; nothing here knows a colour.
 
 Threading note: KnownSnap is read-only once built; ``load_knownness`` is called at launch
 (or on snapshot refresh) from the main thread only.
@@ -26,12 +26,8 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from saitenka.app.tokenize import _has_kanji, kata_to_hira
-
-if TYPE_CHECKING:
-    from saitenka.panel import Freq
+from saitenka_tokenize import has_kanji, kata_to_hira
 
 log = logging.getLogger(__name__)
 
@@ -44,27 +40,22 @@ FORGOTTEN_R = 0.85
 # Mature interval (days): cards with ivl ≥ this are "known", below = "young".
 MATURE_IVL = 21
 
-# Rareness bands for the blended "diff" pill, by harmonic-mean rank. Cutoffs align with the scorer's
-# FREQ_BAND_TOP_X (10k): ≤10k common, ≤30k uncommon, else rare. The blend skews higher than any single
-# dict when a word is missing from the big-corpus lists, so "rare" sits at 30k, not 20k — tune here.
+# The blend skews higher than any single dictionary when a word is missing from the big-corpus lists,
+# so "rare" sits at 30k rather than tracking FREQ_BAND_TOP_X's 10k on both sides.
 RARENESS_COMMON_MAX = 10_000
 RARENESS_UNCOMMON_MAX = 30_000
 
-# green (common) → amber (uncommon) → red (rare); the green matches the per-source freq pills.
-_RARENESS_COLORS: tuple[tuple[int, int, int, int], ...] = (
-    (74, 158, 92, 255),
-    (198, 156, 60, 255),
-    (188, 86, 74, 255),
-)
+RARENESS_BANDS = ("common", "uncommon", "rare")
 
 
-def rareness_color(rank: float) -> tuple[int, int, int, int]:
-    """Band color for a blended rank: green ≤10k, amber ≤30k, red beyond."""
+def rareness_band(rank: float) -> str:
+    """Band for a blended rank: common ≤10k, uncommon ≤30k, rare beyond. The band is the fact; which
+    colour draws it is the panel's business."""
     if rank <= RARENESS_COMMON_MAX:
-        return _RARENESS_COLORS[0]
+        return RARENESS_BANDS[0]
     if rank <= RARENESS_UNCOMMON_MAX:
-        return _RARENESS_COLORS[1]
-    return _RARENESS_COLORS[2]
+        return RARENESS_BANDS[1]
+    return RARENESS_BANDS[2]
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +183,7 @@ class KnownSnap:
 
     def _kana_state(self, surface: str | None, read: str) -> str | None:
         """A kana-only token matches any taught reading (kana↔kanji)."""
-        if not surface or _has_kanji(surface):
+        if not surface or has_kanji(surface):
             return None
         if read and read in self.readings:
             return self.readings[read]
@@ -453,16 +444,3 @@ def harmonic_rank(
 ) -> float | None:
     """Harmonic mean of ``word``'s rank across all dicts that contain it. ``None`` if in none."""
     return harmonic_of([d[word] for d in freq_dicts if word in d])
-
-
-def diff_pill(rank: float | None) -> Freq | None:
-    """A ``Freq("diff", …)`` pill for the harmonic-blended rank, colored by rareness band
-    (:func:`rareness_color`). Returns ``None`` when ``rank`` is ``None`` so the caller skips it.
-    """
-    if rank is None:
-        return None
-    from saitenka.panel import Freq as _Freq
-
-    r = round(rank)
-    value = (f"{r // 1000}k" if r % 1000 == 0 else f"{r / 1000:.1f}k") if r >= 1000 else str(r)
-    return _Freq(name="diff", value=value, color=rareness_color(rank))

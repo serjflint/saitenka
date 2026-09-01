@@ -276,3 +276,92 @@ def test_result_limit_is_applied_after_score_ordering(tmp_path):
     )
 
     assert result.entries[0].definitions[0].content == ("high",)
+
+
+def _bank_zip(path, **members):
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, value in members.items():
+            archive.writestr(
+                name.replace("__", "."),
+                value if isinstance(value, (str, bytes)) else json.dumps(value, ensure_ascii=False),
+            )
+    return path
+
+
+@pytest.mark.parametrize(
+    ("bank", "records"),
+    [
+        ("term_bank_1__json", [["鳥", "とり", "", "", 0, ["bird"], 1, ""], "not-a-list"]),
+        ("tag_bank_1__json", [["ok", "cat", 1, "n", 0], [123, "bad", 0, "", 0]]),
+        ("term_meta_bank_1__json", [["鳥", "freq", 5], ["鳥", "unknown-mode", {"a": 1}]]),
+        (
+            "kanji_bank_1__json",
+            [["鳥", "チョウ", "とり", "", ["bird"], {}], [99, "x", "y", "", [], {}]],
+        ),
+    ],
+)
+def test_one_malformed_row_does_not_abort_the_import(tmp_path, bank, records):
+    """A hand-built community dictionary routinely has a few odd rows in a 448k-entry bank. Failing
+    the whole import over one of them means the dictionary cannot be used at all — strictly worse
+    than importing it minus the row."""
+    archive = _bank_zip(
+        tmp_path / "d.zip", index__json={"title": "D", "format": 3}, **{bank: records}
+    )
+
+    info = DictionaryDatabase(tmp_path / "dictionary.sqlite").import_dictionary(archive)
+
+    assert info.title == "D"
+
+
+def test_an_unparseable_bank_still_fails_loudly(tmp_path):
+    """A row is salvageable; a bank is not. Importing a dictionary as silently empty is its own bug —
+    the user sees an installed dictionary that answers nothing and no reason why."""
+    archive = _bank_zip(
+        tmp_path / "d.zip", index__json={"title": "D", "format": 3}, term_bank_1__json="{ not json"
+    )
+
+    with pytest.raises(DictionaryArchiveError, match="invalid JSON"):
+        DictionaryDatabase(tmp_path / "dictionary.sqlite").import_dictionary(archive)
+
+
+def test_a_titleless_archive_falls_back_to_its_filename(tmp_path):
+    """Yomitan requires the field, but dictionaries in the wild omit it and imported for years under
+    this fallback. Refusing them now would strand a working dictionary over a cosmetic field."""
+    archive = _bank_zip(
+        tmp_path / "untitled-dict.zip",
+        index__json={"format": 3},
+        term_bank_1__json=[["犬", "いぬ", "", "", 0, ["dog"], 1, ""]],
+    )
+
+    info = DictionaryDatabase(tmp_path / "dictionary.sqlite").import_dictionary(archive)
+
+    assert info.title == "untitled-dict"
+
+
+def test_a_default_install_stores_no_media(tmp_path):
+    """`media=False` is what a deployment without an image renderer passes. Storing images it cannot
+    draw costs database size and, worse, a non-empty table defeats the per-lookup short-circuit an
+    empty one buys. Non-image members are never stored either way."""
+    archive = _bank_zip(
+        tmp_path / "d.zip",
+        index__json={"title": "D", "format": 3},
+        term_bank_1__json=[["猫", "ねこ", "", "", 0, ["cat"], 1, ""]],
+        README__md="not media",
+        styles__css="body{}",
+        icon__gif=b"GIF89a" + (1).to_bytes(2, "little") + (1).to_bytes(2, "little"),
+    )
+    path = tmp_path / "dictionary.sqlite"
+
+    DictionaryDatabase(path).import_dictionary(ImportRequest(archive, media=False))
+    assert _media_paths(path) == []
+
+    DictionaryDatabase(path).import_dictionary(ImportRequest(archive, media=True))
+    assert _media_paths(path) == ["icon.gif"]  # never README.md or styles.css
+
+
+def _media_paths(path):
+    connection = sqlite3.connect(path)
+    try:
+        return [row[0] for row in connection.execute("SELECT path FROM media ORDER BY path")]
+    finally:
+        connection.close()

@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import hypothesis.strategies as st
 from hypothesis import given
+from saitenka_dict import FreqDict, JlptDict
+from saitenka_tokenize.japanese import Token
+from saitenka_wordstate import FUNCTION_POS, Scorer, TokenVerdict, mark_n_plus_one
+from saitenka_wordstate.fsrs import KnownSnap
+from saitenka_wordstate.known import KnownWords
 
-from saitenka.app.fsrs import KnownSnap
-from saitenka.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
-from saitenka.app.tokenize import Token
-from saitenka.app.wordlists import FreqDict, JlptDict, KnownWords
+from saitenka.app.scoring import Coloring, Palette
 
 PAL = Palette()
 CONTENT_POS = ["名詞", "動詞", "形容詞", "副詞"]
@@ -88,7 +90,7 @@ def test_n1_needs_a_genuinely_single_candidate(line):
 @given(_line())
 def test_score_line_is_total_and_deterministic(line):
     toks, _ = line
-    sc = Scorer(known=KnownWords.from_set([]))
+    sc = Coloring(Scorer(known=KnownWords.from_set([])))
     styles = sc.score_line(toks)
     assert len(styles) == len(toks)
     assert styles == sc.score_line(toks)  # pure — same input, same styles
@@ -101,10 +103,12 @@ def test_function_words_stay_base_even_with_jlpt_and_freq(line):
     toks, known = line
     jl = JlptDict(dict.fromkeys(_all_forms(toks), "N3"))
     fq = FreqDict(dict.fromkeys(_all_forms(toks), 5), "t")
-    sc = Scorer(
-        known=KnownWords.from_set([t.surface for t, k in zip(toks, known, strict=True) if k]),
-        jlpt=jl,
-        freq=fq,
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([t.surface for t, k in zip(toks, known, strict=True) if k]),
+            jlpt=jl,
+            freq=fq,
+        )
     )
     for t, s in zip(toks, sc.score_line(toks), strict=True):
         if not _content(t):
@@ -117,7 +121,7 @@ def test_function_words_stay_base_even_with_jlpt_and_freq(line):
 def test_n1_wins_over_everything(line):
     """A word selected as N+1 always gets the N+1 colour/tag — top of the priority order."""
     toks, _ = line
-    sc = Scorer(known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False)
+    sc = Coloring(Scorer(known=KnownWords.from_set([]), enable_freq=False, enable_jlpt=False))
     n1 = mark_n_plus_one(toks, [False] * len(toks), sc.min_sentence_words)
     styles = sc.score_line(toks)
     for i in n1:
@@ -130,8 +134,12 @@ def test_all_known_content_gets_known_colour(line):
     """When every word is known, N+1 can't fire (it needs an unknown), so each content word takes the
     known colour — the known branch below N+1."""
     toks, _ = line
-    sc = Scorer(
-        known=KnownWords.from_set([t.surface for t in toks]), enable_freq=False, enable_jlpt=False
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([t.surface for t in toks]),
+            enable_freq=False,
+            enable_jlpt=False,
+        )
     )
     for t, s in zip(toks, sc.score_line(toks), strict=True):
         if _content(t):
@@ -142,12 +150,14 @@ def test_all_known_content_gets_known_colour(line):
 def test_disable_known_suppresses_known_colour(line):
     """enable_known=False must stop the known colour appearing even when the word is in KnownWords."""
     toks, _ = line
-    sc = Scorer(
-        known=KnownWords.from_set([t.surface for t in toks]),
-        enable_known=False,
-        enable_freq=False,
-        enable_jlpt=False,
-        enable_n_plus_one=False,
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([t.surface for t in toks]),
+            enable_known=False,
+            enable_freq=False,
+            enable_jlpt=False,
+            enable_n_plus_one=False,
+        )
     )
     for s in sc.score_line(toks):
         assert s.color != PAL.known  # everything falls through to base
@@ -161,7 +171,7 @@ def test_jlpt_level_suppresses_frequency(line):
     toks, _ = line
     jl = JlptDict(dict.fromkeys(_all_forms(toks), "N3"))
     fq = FreqDict(dict.fromkeys(_all_forms(toks), 5), "t")
-    sc = Scorer(known=KnownWords.from_set([]), jlpt=jl, freq=fq, enable_n_plus_one=False)
+    sc = Coloring(Scorer(known=KnownWords.from_set([]), jlpt=jl, freq=fq, enable_n_plus_one=False))
     for t, s in zip(toks, sc.score_line(toks), strict=True):
         if _content(t):
             assert s.underline == PAL.jlpt["N3"]
@@ -199,11 +209,13 @@ def test_freq_banded_colour_matches_the_band(rank):
     """A ranked content word with no other signal gets the freq band colour FreqDict.band selects —
     pins the `band - 1` index and the `rank is not None` guard."""
     t = _kanji_token()
-    sc = Scorer(
-        known=KnownWords.from_set([]),
-        freq=FreqDict({"本": rank, "ほん": rank}, "t"),
-        enable_jlpt=False,
-        enable_n_plus_one=False,
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]),
+            freq=FreqDict({"本": rank, "ほん": rank}, "t"),
+            enable_jlpt=False,
+            enable_n_plus_one=False,
+        )
     )
     band = FreqDict.band(rank, sc.freq_top_x, len(PAL.freq_bands))
     assert band is not None  # rank ≤ top_x always bands
@@ -214,12 +226,14 @@ def test_freq_banded_colour_matches_the_band(rank):
 
 def test_freq_single_mode_uses_one_colour():
     """freq_mode='single' colours every ranked word freq_single with tag 'freq' — no banding."""
-    sc = Scorer(
-        known=KnownWords.from_set([]),
-        freq=FreqDict({"本": 500, "ほん": 500}, "t"),
-        freq_mode="single",
-        enable_jlpt=False,
-        enable_n_plus_one=False,
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]),
+            freq=FreqDict({"本": 500, "ほん": 500}, "t"),
+            freq_mode="single",
+            enable_jlpt=False,
+            enable_n_plus_one=False,
+        )
     )
     s = sc.score_line([_kanji_token()])[0]
     assert s.color == PAL.freq_single
@@ -228,11 +242,13 @@ def test_freq_single_mode_uses_one_colour():
 
 def test_out_of_range_rank_falls_through_to_base():
     """A rank past top_x has no band → the word stays base (freq only colours the top_x)."""
-    sc = Scorer(
-        known=KnownWords.from_set([]),
-        freq=FreqDict({"本": 99_999, "ほん": 99_999}, "t"),
-        enable_jlpt=False,
-        enable_n_plus_one=False,
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]),
+            freq=FreqDict({"本": 99_999, "ほん": 99_999}, "t"),
+            enable_jlpt=False,
+            enable_n_plus_one=False,
+        )
     )
     s = sc.score_line([_kanji_token()])[0]
     assert s.color == PAL.base
@@ -246,12 +262,14 @@ def test_forgotten_word_gets_the_forgotten_tint():
     """An FSRS 'forgotten' content word (not known, not N+1) resurfaces with the forgotten colour,
     between known and unknown."""
     snap = KnownSnap.of({"本": "forgotten"})
-    sc = Scorer(
-        known=KnownWords.from_set([]),
-        fsrs_snap=snap,
-        enable_freq=False,
-        enable_jlpt=False,
-        enable_n_plus_one=False,
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]),
+            fsrs_snap=snap,
+            enable_freq=False,
+            enable_jlpt=False,
+            enable_n_plus_one=False,
+        )
     )
     s = sc.score_line([_kanji_token()])[0]
     assert s.color == PAL.forgotten
@@ -261,12 +279,14 @@ def test_forgotten_word_gets_the_forgotten_tint():
 def test_fsrs_known_beats_forgotten_and_freq():
     """A word the snapshot marks 'known' takes the known colour even with a freq dict present."""
     snap = KnownSnap.of({"本": "known"})
-    sc = Scorer(
-        known=KnownWords.from_set([]),
-        fsrs_snap=snap,
-        freq=FreqDict({"本": 1}, "t"),
-        enable_jlpt=False,
-        enable_n_plus_one=False,
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]),
+            fsrs_snap=snap,
+            freq=FreqDict({"本": 1}, "t"),
+            enable_jlpt=False,
+            enable_n_plus_one=False,
+        )
     )
     s = sc.score_line([_kanji_token()])[0]
     assert s.color == PAL.known
@@ -302,3 +322,81 @@ def test_n1_marks_each_sentence_independently():
         False,
     ]  # 読む (idx 2) and 待つ (idx 6) are the lone unknowns
     assert mark_n_plus_one(toks, known, min_words=3) == {2, 6}
+
+
+# --- the verdict/palette seam: a classification and the color drawn from it never disagree ---------
+
+
+def _expected_paint(verdict, palette: Palette):
+    """Oracle mirroring the priority ladder independently of `Palette.style_for`, the way `_content`
+    mirrors `is_content` above. Routing through `style_for` would only restate `score_line`'s own
+    definition."""
+    underline = palette.jlpt.get(verdict.jlpt) if verdict.jlpt else None
+    if verdict.n_plus == 1:
+        return palette.n_plus_one, underline
+    if verdict.is_content and verdict.fsrs_state in {"forgotten", "learning", "young"}:
+        return getattr(palette, verdict.fsrs_state), underline
+    if verdict.is_content and verdict.is_known:
+        return palette.known, underline
+    if verdict.freq_single:
+        return palette.freq_single, underline
+    if verdict.freq_band is not None:
+        return palette.freq_bands[verdict.freq_band - 1], underline
+    return palette.base, underline
+
+
+@given(
+    _line(),
+    st.booleans(),
+    st.booleans(),
+    st.booleans(),
+    st.sampled_from(["banded", "single"]),
+)
+def test_every_drawn_colour_is_the_one_its_verdict_implies(line, jlpt_on, freq_on, known_on, mode):
+    """Whatever the scorer is configured to consider, the colour a token is drawn in is the one an
+    independent read of its verdict predicts — the invariant the split exists to make checkable.
+    Before it, the classification and the colour were one pass with nothing to compare.
+    """
+    toks, _known = line
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set(["本", "犬"]),
+            freq=FreqDict({"本": 500, "ほん": 500, "犬": 40_000}, "t"),
+            jlpt=JlptDict({"本": "N5", "犬": "N4"}),
+            enable_jlpt=jlpt_on,
+            enable_freq=freq_on,
+            enable_known=known_on,
+            freq_mode=mode,
+        )
+    )
+    for style, verdict in zip(sc.score_line(toks), sc.verdict_line(toks), strict=True):
+        assert (style.color, style.underline) == _expected_paint(verdict, sc.palette)
+
+
+@given(_line())
+def test_a_single_token_verdict_matches_its_line_verdict_but_for_n_plus_one(line):
+    """`verdict(token)` is the per-token read the tooltip needs. It agrees with the line-scoped
+    classification on every field N+1 does not depend on — N+1 alone needs the sentence."""
+    toks, _known = line
+    sc = Coloring(
+        Scorer(
+            known=KnownWords.from_set(["本"]),
+            jlpt=JlptDict({"本": "N5"}),
+            enable_n_plus_one=False,  # the only field a lone token cannot know
+        )
+    )
+    for token, line_verdict in zip(toks, sc.verdict_line(toks), strict=True):
+        assert sc.verdict(token) == line_verdict
+
+
+def test_the_tag_is_derived_from_the_verdict_not_stored_beside_it():
+    """A verdict built by hand reports the tag its fields imply — the negative control for the
+    property above, which would still pass if `tag` were a field both paths happened to set."""
+    assert TokenVerdict(is_content=True, n_plus=1, jlpt="N3").tag == "n+1/jlpt-N3"
+    assert TokenVerdict(is_content=True, is_known=True).tag == "known"
+    assert TokenVerdict(is_content=True, fsrs_state="forgotten").tag == "forgotten"
+    assert TokenVerdict(is_content=True, freq_band=3).tag == "freq-3"
+    assert TokenVerdict(is_content=True, freq_single=True).tag == "freq"
+    assert TokenVerdict(is_content=True).tag == "base"
+    # A function word never takes a state colour even when the collection says it is known.
+    assert TokenVerdict(is_content=False, is_known=True).tag == "base"

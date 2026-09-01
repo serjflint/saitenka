@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
 
-from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.subtitle_selection import (
     FetchAction,
     SubtitleStartup,

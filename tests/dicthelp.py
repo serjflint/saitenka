@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import zipfile
 
+from saitenka_dict import FreqDict, JlptDict
+
+from saitenka.app.dict_meta import FreqSource, PitchSource
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import Dictionary, DictionarySet
-from saitenka.app.wordlists import FreqDict, FreqSource, JlptDict, PitchSource
 
 AT = "2026-07-23T00:00:00"  # fixed imported_at — the store never stamps time itself
 
@@ -74,8 +76,11 @@ def load_pitchsource(zip_path, *, on: DictionaryDb | None = None) -> PitchSource
 
 def load_freqdict(zip_path, *, on: DictionaryDb | None = None) -> FreqDict:
     d = on or db()
-    return FreqDict.from_db(d, d.import_zip(zip_path, imported_at=AT))
+    row = d.import_zip(zip_path, imported_at=AT)
+    return FreqDict.from_connection(d.connection(), row.id, row.title)
 
 
 def load_jlpt(*, on: DictionaryDb | None = None) -> JlptDict:
-    return JlptDict.load(on or db())
+    from saitenka.app.dict_meta import load_jlpt
+
+    return load_jlpt(on or db())

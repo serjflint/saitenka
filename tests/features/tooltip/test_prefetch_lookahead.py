@@ -2,14 +2,16 @@
 RSS gauges the telemetry interval sampler reports."""
 
 import util
+from saitenka_tokenize.japanese import Token
+from saitenka_wordstate import TokenVerdict
+from saitenka_wordstate.known import KnownWords
 from session_builder import build_session
 
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.features.tooltip import prefetch
+from saitenka.app.scoring import TokenStyle
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.tokenize import Token
-from saitenka.app.wordlists import KnownWords
 from saitenka.panel import Definition, Entry
 from saitenka.subtitles import CueIndex, parse_srt
 
@@ -26,6 +28,16 @@ class _FakeIPC(util.FakeIPC):
         self.props.update(props or {})
 
 
+def _style(kind: str) -> TokenStyle:
+    """A real scored style for the two classifications prefetch prioritises on."""
+    verdict = (
+        TokenVerdict(is_content=True, n_plus=1)
+        if kind == "n+1"
+        else TokenVerdict(is_content=True, is_known=True)
+    )
+    return TokenStyle(color=(0, 0, 0, 255), verdict=verdict)
+
+
 class _FakeDS:
     """Records every warmed word; the entry content is irrelevant to a warm job."""
 
@@ -35,6 +47,10 @@ class _FakeDS:
     def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         self.warmed.append(tok.surface)
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
 
 
 def _reader(
@@ -170,7 +186,7 @@ def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypat
         def score_line(self, tokens):
             nonlocal calls
             calls += 1
-            return [type("Style", (), {"tag": "known"})() for _token in tokens]
+            return [_style("known") for _token in tokens]
 
     r = _reader(
         monkeypatch,
@@ -197,7 +213,7 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
         fsrs_snap = None
 
         def score_line(self, values):
-            return [type("Style", (), {"tag": "n+1"})() for _value in values]
+            return [_style("n+1") for _value in values]
 
     def is_mined(_token):
         nonlocal probes
@@ -230,8 +246,8 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
 
         def score_line(self, values):
             return [
-                type("Style", (), {"tag": "known"})(),
-                type("Style", (), {"tag": "n+1"})(),
+                _style("known"),
+                _style("n+1"),
             ][: len(values)]
 
     r = _reader(monkeypatch, lookahead=0, head_lookahead=1, head_queue_max=1, scorer=_Scorer())
@@ -296,13 +312,7 @@ class _Content:
 
 
 def _tok(surface, lemma=None):
-    from saitenka.app.tokenize import Token
-
     return Token(surface, lemma or surface, "", "名詞", 0, len(surface))
-
-
-def _style(tag):
-    return type("Style", (), {"tag": tag})()
 
 
 def test_lookahead_reads_the_cues_after_the_one_on_screen():

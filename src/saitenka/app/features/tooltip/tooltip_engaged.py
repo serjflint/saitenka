@@ -14,10 +14,11 @@ from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.features.tooltip.popups import Panel
     from saitenka.app.features.tooltip.prefetch import TipScale
     from saitenka.app.features.tooltip.tooltip_panel import PanelPorts
-    from saitenka.app.tokenize import Token
 
 log = logging.getLogger(__name__)
 

@@ -1,11 +1,13 @@
 """Whole-track lexical metrics share the subtitle scorer's eligibility model."""
 
+from saitenka_dict import FreqDict, JlptDict
+from saitenka_tokenize.japanese import tokenize
+from saitenka_tokenize.registry import UnidicTokenizer
+from saitenka_wordstate import Scorer, mark_n_plus
+from saitenka_wordstate.fsrs import KnownSnap
+from saitenka_wordstate.known import KnownWords
+
 from saitenka.app.features.analysis.episode_analysis import analysis_key, analyze_cues
-from saitenka.app.fsrs import KnownSnap
-from saitenka.app.scoring import Scorer, mark_n_plus
-from saitenka.app.tokenize import tokenize
-from saitenka.app.tokenizer import UnidicTokenizer
-from saitenka.app.wordlists import FreqDict, JlptDict, KnownWords
 from saitenka.subtitles import Cue, CueIndex
 
 TOKENIZER = UnidicTokenizer()

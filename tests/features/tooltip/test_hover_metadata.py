@@ -5,6 +5,7 @@ import time
 from dataclasses import replace
 
 from driver import Driver
+from saitenka_tokenize.japanese import Token
 from session_builder import build_session
 from util import FakeIPC
 
@@ -19,7 +20,6 @@ from saitenka.app.session.factory import (
     SessionServices,
 )
 from saitenka.app.subtitles import WordBox
-from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 

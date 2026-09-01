@@ -324,8 +324,9 @@ def _check_one_profile(label: str, resolve_cfg: dict, override: str | None, db, 
     """One profile's health as a single :class:`Check`: resolution (language codes) → tokenizer
     registered → its scoped dict titles imported. Split out of :func:`check_profiles` so the loop just
     collects these (keeps each piece under the complexity watermark)."""
+    from saitenka_tokenize.registry import get_tokenizer
+
     from saitenka.app.profiles import resolve_profile
-    from saitenka.app.tokenizer import get_tokenizer
 
     try:
         profile = resolve_profile(resolve_cfg, override=override)
@@ -898,7 +899,7 @@ def _dictdb_seq_source_available() -> bool:
     matched = [
         r for r in db.list_dictionaries() if r.title in configured and _looks_like_jmdict(r.title)
     ]
-    conn = db._conn()
+    conn = db.connection()
     return any(
         conn.execute(
             "SELECT 1 FROM entries WHERE dict_id=? AND seq IS NOT NULL LIMIT 1", (r.id,)

@@ -4,7 +4,7 @@ Companion to the example-based test_fsrs.py. Each property below targets a class
 mutants found by a fresh `poe mutate fsrs` run (59.00% survival rate, the worst of the four
 audited modules) — a boundary comparison, an arithmetic swap, or a continue/break control-flow
 flip that the example suite never happened to exercise. All properties drive the PUBLIC surface
-(`retrievability`, `diff_pill`, `load_knownness` + `KnownSnap`) — never the private `_classify_state`
+(`retrievability`, `rareness_band`, `load_knownness` + `KnownSnap`) — never the private `_classify_state`
 / `_build_card_info` / `_build_states` / `_wordlike` helpers directly — per this repo's "test the
 seam, not private methods" rule; oracles below re-derive the documented contract independently.
 """
@@ -20,16 +20,19 @@ from typing import Any
 import hypothesis.strategies as st
 import pytest
 from hypothesis import example, given, settings
-
-from saitenka.app import fsrs
-from saitenka.app.fsrs import (
+from saitenka_wordstate import fsrs
+from saitenka_wordstate.fsrs import (
     FORGOTTEN_R,
     FSRS_DEFAULT_DECAY,
     MATURE_IVL,
-    diff_pill,
+    RARENESS_COMMON_MAX,
+    RARENESS_UNCOMMON_MAX,
     load_knownness,
+    rareness_band,
     retrievability,
 )
+
+from saitenka.app.features.tooltip.tooltip_panel import rareness_value
 
 # ---------------------------------------------------------------------------
 # DB fixture builders (extend test_fsrs.py's _build_minimal_anki2 pattern)
@@ -135,7 +138,7 @@ def test_retrievability_none_for_nonpositive_s(s, elapsed, decay):
 
 
 # ---------------------------------------------------------------------------
-# 2. diff_pill — kills the whole `r // 1000` / `r % 1000 == 0` / `r >= 1000` cluster (line 396)
+# 2. The rareness pill's two halves: the band (here) and the `Nk` formatting (the panel side)
 # ---------------------------------------------------------------------------
 
 
@@ -146,18 +149,25 @@ def test_retrievability_none_for_nonpositive_s(s, elapsed, decay):
 @example(rank=1999)
 @example(rank=2000)  # exact even thousand again
 @settings(max_examples=200, deadline=None)
-def test_diff_pill_value_matches_documented_formatting(rank):
-    """`diff_pill`'s contract (docstring + module comment): below 1000 render the bare int; at/above
-    1000 render `Nk` on an exact multiple, else one decimal place of thousands."""
-    pill = diff_pill(float(rank))
+def test_rareness_value_matches_documented_formatting(rank):
+    """Below 1000 render the bare int; at/above 1000 render `Nk` on an exact multiple, else one
+    decimal place of thousands."""
     r = round(float(rank))
     expected = (f"{r // 1000}k" if r % 1000 == 0 else f"{r / 1000:.1f}k") if r >= 1000 else str(r)
-    assert pill is not None
-    assert pill.value == expected
+    assert rareness_value(float(rank)) == expected
 
 
-def test_diff_pill_none_stays_none():
-    assert diff_pill(None) is None
+@given(rank=st.integers(min_value=0, max_value=200_000))
+@example(rank=RARENESS_COMMON_MAX)
+@example(rank=RARENESS_COMMON_MAX + 1)
+@example(rank=RARENESS_UNCOMMON_MAX)
+@example(rank=RARENESS_UNCOMMON_MAX + 1)
+@settings(max_examples=200, deadline=None)
+def test_rareness_band_is_monotone_in_the_rank(rank):
+    """Rarer never bands as commoner — the invariant behind the two cutoffs, independent of where
+    they sit or which colour draws them."""
+    order = {"common": 0, "uncommon": 1, "rare": 2}
+    assert order[rareness_band(float(rank))] <= order[rareness_band(float(rank) + 1)]
 
 
 # ---------------------------------------------------------------------------

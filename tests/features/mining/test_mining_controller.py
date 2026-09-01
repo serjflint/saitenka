@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from saitenka_tokenize.japanese import Token
+
 from saitenka.app.anki import MineConfig
 from saitenka.app.config import MiningOptions
 from saitenka.app.features.mining import miner
@@ -15,7 +17,6 @@ from saitenka.app.features.mining.mining_controller import (
     MiningTarget,
     SeedStatus,
 )
-from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 

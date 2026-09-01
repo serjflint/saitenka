@@ -35,11 +35,12 @@ from saitenka.app.media import animated_screenshot, clip_audio, current_timespan
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from saitenka_tokenize.japanese import Token
+    from saitenka_tokenize.registry import Tokenizer
+
     from saitenka.app.anki import Anki, MineConfig
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.features.mining.mined_store import MinedCardStore
-    from saitenka.app.tokenize import Token
-    from saitenka.app.tokenizer import Tokenizer
 
 log = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def mine_target(cue: MineCue) -> int | None:
         return None
     if cue.styles:
         for i, s in enumerate(cue.styles):
-            if s.tag.startswith("n+1"):
+            if s.verdict.is_n_plus_one:
                 return i
     for i, t in enumerate(cue.tokens):
         if cue.tokenizer.is_content(t):
@@ -151,7 +152,10 @@ def _select_bulk_targets(cue: MineCue) -> list[int]:
     for i, t in enumerate(cue.tokens):
         if not cue.tokenizer.is_content(t):
             continue
-        if cue.styles and cue.styles[i].tag == "known":
+        # Reads the verdict, not the tag string. `tag == "known"` also excluded every known word that
+        # HAS a JLPT level, because the level suffixes the tag ("known/jlpt-N3") — so those were
+        # offered as bulk-mine candidates despite being known-colored.
+        if cue.styles and cue.styles[i].verdict.is_mature:
             continue
         if t.lemma in seen:
             continue

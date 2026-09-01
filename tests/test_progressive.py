@@ -9,6 +9,7 @@ import time
 from concurrent.futures import Future
 
 import pytest
+from saitenka_tokenize.japanese import Token
 from session_builder import build_session
 from util import FakeIPC, await_ready, bare_gateway, drain_for, session_gateway
 
@@ -22,7 +23,6 @@ from saitenka.app.features.profiles.dependencies import DependencyBundle
 from saitenka.app.logsetup import CONSOLE_LOGGER_NAME
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.tokenize import Token
 from saitenka.mpvio.ipc import IPCRequest
 
 
@@ -227,8 +227,9 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     """`[perf].prefetch_workers` > 0 pins the count on both builds (a RAM/coverage knob); 0 auto-sizes
     — min(8, cores-2) free-threaded (render parallelizes), 2 on a GIL build (extra workers only contend)."""
 
+    from saitenka_tokenize.registry import UnidicTokenizer
+
     from saitenka.app.features.tooltip import prefetch
-    from saitenka.app.tokenizer import UnidicTokenizer
 
     def count(configured: int) -> int:
         return prefetch.prefetch_worker_count(UnidicTokenizer(), configured)

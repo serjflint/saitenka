@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from saitenka_tokenize.japanese import Token, tokenize
+
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import ReaderOptions, load_config
 from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
@@ -39,7 +41,6 @@ from saitenka.app.session.factory import (
     TooltipWorkMode,
     _compose_session,
 )
-from saitenka.app.tokenize import Token, tokenize
 from saitenka.mpvio.ipc import IPCRequest
 from saitenka.mpvio.osd import to_bgra, to_bgra_array
 from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
@@ -358,7 +359,7 @@ def discover_pathological(db, dict_id: int, n: int = 5) -> list[tuple[str, str, 
     DB — the worst cold-first-paint candidates (longest structured-content JSON = tallest render).
     Returns ``(term, reading, payload_bytes)`` rows, biggest first."""
     rows = (
-        db._conn()
+        db.connection()
         .execute(
             "SELECT term, reading, length(glossary) FROM entries WHERE dict_id=? "
             "ORDER BY length(glossary) DESC LIMIT ?",
@@ -398,6 +399,10 @@ class _SyntheticDS:
             defs=[Definition(f"辞書{i}", [para]) for i in range(6)],
         )
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 # Deterministic CJK headword pool for the dict-free synth corpus — a fixed string, no randomness, so the
 # same corpus (and the same numbers) come out on every machine and every commit.
@@ -421,7 +426,7 @@ def synth_corpus(n: int = 60) -> list[tuple[str, Entry]]:
 
 
 def _content_indices(reader) -> list[int]:
-    from saitenka.app.tokenize import SKIP_POS
+    from saitenka_tokenize.japanese import SKIP_POS
 
     return [
         i
@@ -492,22 +497,26 @@ def _timeline_cues(
 
 
 def _timeline_scorer(words: list[list[str]]):
-    """A :class:`~saitenka.app.scoring.Scorer` for ``--timeline-head-prefetch``: marks every 8th
+    """A :class:`~saitenka.app.scoring.Coloring` for ``--timeline-head-prefetch``: marks every 8th
     vocabulary word as the lone "unknown" one and the rest ``known``, so ``mark_n_plus_one``'s
     exactly-one-unknown-content-word rule can actually fire on our punctuation-less synthetic cues
     (a real subtitle line has sentence breaks; ours doesn't) — a realistic mostly-known viewer with
     occasional n+1 gaps, not "nothing is known" (which would never trigger n+1 at all) or "everything
     is content" (which would trigger it on almost every word). ``min_sentence_words=1`` because our
     cues are short chunks, not real multi-clause sentences."""
-    from saitenka.app.scoring import Scorer
-    from saitenka.app.wordlists import KnownWords
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
+
+    from saitenka.app.scoring import Coloring
 
     known = {w[0] for i, w in enumerate(words) if i % 8 != 0}
     # Surface-known with the "" (no-reading-taught) sentinel → matches any reading, i.e. the old flat
     # set's unconditional-known semantics under the reading-aware KnownWords.
-    return Scorer(
-        known=KnownWords(by_surface={surface: {""} for surface in known}, readings=set()),
-        min_sentence_words=1,
+    return Coloring(
+        Scorer(
+            known=KnownWords(by_surface={surface: {""} for surface in known}, readings=set()),
+            min_sentence_words=1,
+        )
     )
 
 
@@ -1483,7 +1492,8 @@ def _vocab_init() -> None:
 def _vocab_render(job: tuple[str, str, str, str, int]) -> int:
     """Render one word's windowed viewport — the shipping compositor path. Self-contained over a
     picklable tuple so it works as a ProcessPool task or a thread task."""
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.render.banded import WindowedPanel
 
     surface, lemma, reading, pos, width = job
@@ -1666,7 +1676,7 @@ def run_vocab(
             h = _vocab_render(job)
             full_ms.append((time.perf_counter() - t0) * 1000.0)
             t1 = time.perf_counter()
-            from saitenka.app.tokenize import Token
+            from saitenka_tokenize.japanese import Token
 
             LazyPanel(
                 panel_rows(
@@ -1837,7 +1847,7 @@ def run_timeline(
     reader.graph.track_commands.navigation.current.sub_index = CueIndex(cues)
     reader.graph.tooltip.start_prefetch()
 
-    from saitenka.app.tokenize import SKIP_POS
+    from saitenka_tokenize.japanese import SKIP_POS
 
     def _content_lemmas(text: str) -> list[str]:
         return [

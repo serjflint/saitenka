@@ -25,10 +25,11 @@ def _real_many_homograph_entry(width: int) -> tuple[Entry, str] | None:
     many-homograph pathological case: かける/する/…). ``None`` when no real dicts are configured or the
     consolidated DB is absent — the caller skips (mirrors ``bench_responsiveness._load_dict_set``)."""
     try:
+        from saitenka_tokenize.japanese import Token
+
         from saitenka.app.config import load_config
         from saitenka.app.dictdb import DictionaryDb
         from saitenka.app.dictionary import DictionarySet
-        from saitenka.app.tokenize import Token
 
         cfg = load_config()
         dict_titles = list(cfg.get("dicts") or [])

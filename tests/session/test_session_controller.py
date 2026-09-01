@@ -190,8 +190,9 @@ def test_hover_reacts_to_the_pointer_observation_not_to_a_tick():
             prefetch=False,
         ),
     )
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("猫", "猫", "ねこ", "名詞", 0, 1)]
@@ -1397,8 +1398,9 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
 
 
 def test_tooltip_capped_and_inside_safe_area():
+    from saitenka_tokenize.japanese import tokenize
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import tokenize
 
     r = build_session(FakeIPC(), options=ReaderOptions().with_overrides(tip_max_frac=0.5))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -1420,8 +1422,9 @@ def test_tooltip_capped_and_inside_safe_area():
 
 
 def test_panel_cache_avoids_rerender_on_revisit(monkeypatch):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
     from saitenka.panel import Definition, Entry
 
     calls = []
@@ -1430,6 +1433,10 @@ def test_panel_cache_avoids_rerender_on_revisit(monkeypatch):
         def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             calls.append(tok.surface)
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=FakeDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -1454,15 +1461,19 @@ def test_panel_cache_avoids_rerender_on_revisit(monkeypatch):
 def test_panel_cache_records_otel_render_and_cache_metrics(monkeypatch):
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+    from saitenka_tokenize.japanese import Token
 
     from saitenka import otel_metrics
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
     from saitenka.panel import Definition, Entry
 
     class FakeDS:
         def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=FakeDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -1503,10 +1514,15 @@ class _FakeDS:
 
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _reader_with_word(ipc):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r = build_session(
         ipc,
@@ -1687,10 +1703,15 @@ class _TallDS:
     def has_term(self, *_forms):
         return True  # the def body is all dictionary words → a body click doesn't fall to kanji
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _tall_reader(ipc, *, tts: bool | None = None):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r = build_session(ipc, services=SessionServices(dictionaries=_TallDS(), tts=tts))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -1823,10 +1844,15 @@ class _ScanDS:
             defs=[Definition("MonoC", ["追いかけること。また、その人。"])],
         )
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _scan_reader(ipc, *, tts: bool | None = None):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r = build_session(
         ipc,
@@ -1900,8 +1926,9 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
 
 def _tall_nested_reader(ipc):
     """Scan reader whose inner-word lookup returns a TALL entry, so the nested popup must scroll."""
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r = build_session(
         ipc,
@@ -2100,8 +2127,9 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
 
 
 def test_switch_base_word_drops_nested(monkeypatch):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     ipc = FakeIPC()
     r = _scan_reader(ipc)
@@ -2188,10 +2216,15 @@ class _LinkDS:
     def kanji_for(self, _ch):
         return None  # this fixture has no kanji bank — a header-kanji click is a graceful no-op
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def _link_reader(ipc):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r = build_session(ipc, services=SessionServices(dictionaries=_LinkDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -2259,10 +2292,15 @@ class _WildcardDS:
             headword=[pattern], defs=[Definition(f"検索 {pattern}", [{"tag": "ul", "content": li}])]
         )
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     ipc = FakeIPC()
     r = build_session(ipc, services=SessionServices(dictionaries=_WildcardDS()))
@@ -2301,8 +2339,9 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
 
 def test_external_link_is_not_a_clickable_region(monkeypatch):
     # an external source link (Bilingual 'JMdict') is styled blue but captures NO LinkBox → inert
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     ipc = FakeIPC()
 
@@ -2315,6 +2354,10 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
                 {"tag": "a", "href": "https://www.edrdg.org/x?q=1", "content": "JMdict"},
             ]
             return Entry(headword=tok.surface, reading="みる", defs=[Definition("Bilingual", body)])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(ipc, services=SessionServices(dictionaries=_ExternalDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -2355,10 +2398,15 @@ class _RubyLinkDS:
             defs=[Definition("MonoA", ["敬語は", ref, "。"])],
         )
 
+    def rareness_rank(self, _token):  # protocol shape
+        """No frequency dictionaries, so no blended rank and no pill."""
+        return
+
 
 def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     ipc = FakeIPC()
     r = build_session(ipc, services=SessionServices(dictionaries=_RubyLinkDS()))
@@ -2473,7 +2521,7 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
 
 
 def test_copy_line_copies_all_lines(monkeypatch):
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     r = _scan_reader(FakeIPC())
     r.graph.subtitle_presentation.cue.replace_tokenized(
@@ -2704,8 +2752,9 @@ def test_mined_seed_query_preloads_deck_expressions():
 
 
 def _auto_trans_reader(ipc):
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     ipc.props["secondary-sub-text"] = "I want you to read this."
     r = build_session(
@@ -2745,8 +2794,9 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
 def test_no_auto_translate_without_the_flag(monkeypatch):
     ipc = FakeIPC()
     ipc.props["secondary-sub-text"] = "hidden"
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.subtitles import WordBox
-    from saitenka.app.tokenize import Token
 
     r = build_session(ipc, services=SessionServices(dictionaries=_FakeDS()))  # flag off (default)
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -2788,15 +2838,20 @@ def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
 
 
 def _jlpt_scorer(mapping):
-    from saitenka.app.scoring import Scorer
-    from saitenka.app.wordlists import JlptDict, KnownWords
+    """The app-side pair, because the pill reads a level from the scorer and a hue from the palette."""
+    from saitenka_dict import JlptDict
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
 
-    return Scorer(known=KnownWords.from_set([]), jlpt=JlptDict(dict(mapping)))
+    from saitenka.app.scoring import Coloring
+
+    return Coloring(Scorer(known=KnownWords.from_set([]), jlpt=JlptDict(dict(mapping))))
 
 
 def test_jlpt_pill_matches_underline_color():
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.scoring import Palette
-    from saitenka.app.tokenize import Token
 
     r = build_session(
         FakeIPC(),
@@ -2813,7 +2868,7 @@ def test_jlpt_pill_matches_underline_color():
 
 
 def test_jlpt_pill_leads_the_frequency_row():
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     r = build_session(
         FakeIPC(),
@@ -2829,7 +2884,7 @@ def test_jlpt_pill_leads_the_frequency_row():
 
 
 def test_no_jlpt_pill_without_level_or_scorer():
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     tok = Token("犬", "犬", "いぬ", "名詞", 0, 1)
     # word not in the JLPT dict → no pill, frequency row untouched
@@ -2863,18 +2918,22 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
     """The blended pill's rank is the harmonic mean of the word's rank across every loaded freq dict,
     and it leads the frequency row (before the per-dict pills)."""
     import dicthelp
-
-    from saitenka.app.fsrs import harmonic_of, rareness_color
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
+    from saitenka_wordstate.fsrs import harmonic_of, rareness_band
 
     fa = dicthelp.meta_zip(tmp_path / "fa.zip", "FreqA", "freq", [["猫", {"frequency": 1000}]])
     fb = dicthelp.meta_zip(tmp_path / "fb.zip", "FreqB", "freq", [["猫", {"frequency": 2000}]])
     ds = dicthelp.load_set(freq_zips=[fa, fb])
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     tok = Token("猫", "猫", "ねこ", "名詞", 0, 1)
-    pill = tooltip_panel.rareness_pill(tok, r.graph.profile.profile.dict_set)
+    dict_set = r.graph.profile.profile.dict_set
+    blended = harmonic_of([1000.0, 2000.0])
+    assert blended is not None
+    assert dict_set.rareness_rank(tok) == pytest.approx(blended)
+    pill = tooltip_panel.rareness_pill(tok, dict_set)
     assert pill is not None and pill.name == "diff"
-    assert pill.color == rareness_color(harmonic_of([1000.0, 2000.0]))  # ≈1333 → common (green)
+    # ≈1333 → common (green); the band is the dictionary's answer, the colour is the panel's
+    assert pill.color == tooltip_panel.RARENESS_COLORS[rareness_band(blended)]
 
 
 def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
@@ -2882,8 +2941,7 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
     per-corpus rank of 1) would crush the harmonic mean if included — it must be skipped, so the pill
     reflects the rank-based dict alone."""
     import dicthelp
-
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     rank_z = dicthelp.meta_zip(tmp_path / "r.zip", "RankF", "freq", [["猫", {"frequency": 1500}]])
     occ_z = dicthelp.meta_zip(
@@ -2899,8 +2957,7 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
 
 def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
     import dicthelp
-
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     fa = dicthelp.meta_zip(tmp_path / "fc.zip", "FreqC", "freq", [["猫", {"frequency": 1000}]])
     ds = dicthelp.load_set(freq_zips=[fa])
@@ -2928,7 +2985,7 @@ def test_no_jlpt_pill_for_function_words_even_on_reading_collision():
     """Particles/aux (は, ね) share a bare-kana reading with N1 kanji words in the JLPT map. The pill
     must gate on content POS like the underline does, so は (助詞) gets NO pill even though its reading
     is present at N1 — otherwise every は/ね is mislabelled N1."""
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     r = build_session(
         FakeIPC(),
@@ -2952,10 +3009,10 @@ def test_no_jlpt_pill_for_function_words_even_on_reading_collision():
 
 
 def test_jlpt_pill_suppressed_when_disabled():
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     sc = _jlpt_scorer({"本命": "N2"})
-    sc.enable_jlpt = False
+    sc.scorer.enable_jlpt = False  # the flag is the classifier's, not the palette pair's
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_FakeDS(), scorer=sc))
     assert (
         tooltip_panel.jlpt_pill(
@@ -2995,7 +3052,8 @@ def test_bottom_margin_no_dead_code():
 def test_panel_cache_lru_eviction_not_wholesale_clear():
     """_panel_cache must evict the OLDEST entry (LRU) at its limit, not clear everything.
     After overflow, the most-recently-used entry must still be present."""
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.panel import Definition, Entry
 
     class _CountDS:
@@ -3005,6 +3063,10 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
         def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             self.calls += 1
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=_CountDS()))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -3131,7 +3193,7 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
     """entry_for_tok must not mutate the lru_cached Entry returned by entry_for / dict_set.entry_for.
     Two calls with a JLPT-level token must yield exactly ONE pill each time, not accumulate.
     Uses a dict_set whose entry_for IS lru_cached (same object returned each call) to expose mutation."""
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     # A dict_set backed by a real lru_cache so the same Entry object is returned on repeated calls.
     from saitenka.panel import Definition
@@ -3141,6 +3203,10 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
         @functools.cache  # noqa: B019  # test-local fake, GC'd with the test — no leak risk
         def entry_for(self, surface, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return _Entry(headword=surface, defs=[Definition("D", ["x"])], freqs=[])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     r = build_session(
         FakeIPC(),
@@ -3945,8 +4011,9 @@ def test_anki_media_failures_are_absent_media_not_errors() -> None:
 
 
 def test_sentence_lines_rejoins_each_tokenized_line() -> None:
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.features.preview.miner_ui import sentence_lines
-    from saitenka.app.tokenize import Token
 
     def token(surface: str) -> Token:
         return Token(surface, surface, "", "名詞", 0, len(surface))

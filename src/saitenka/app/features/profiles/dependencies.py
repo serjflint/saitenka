@@ -27,9 +27,10 @@ from saitenka.app.overlay_ids import OverlayId
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_wordstate.fsrs import KnownSnap
+
     from saitenka.app.dictionary import DictionarySet
-    from saitenka.app.fsrs import KnownSnap
-    from saitenka.app.scoring import Scorer
+    from saitenka.app.scoring import Coloring
 
 log = logging.getLogger(__name__)
 
@@ -129,12 +130,14 @@ def _spawn_known_refresh(store, known_cfg) -> None:
     """Background: reconcile the known-word cache against Anki (subset mod-time diff) so the NEXT launch
     reads a current set off disk. Fire-and-forget — a failure (Anki down) leaves the cache as-is; this
     session already colored from it. Daemon so it never holds up shutdown."""
+    from saitenka_wordstate.known import refresh_known_cache
+
     from saitenka.app.anki import is_unreachable
-    from saitenka.app.wordlists import refresh_known_cache
 
     def _refresh() -> None:
         try:
-            refresh_known_cache(store, known_cfg)
+            client, trace = _client_and_trace()
+            refresh_known_cache(store, known_cfg, client, trace=trace)
         except Exception as e:
             # Anki down is expected — one compact line, traceback only for a real fault.
             log.debug(
@@ -144,6 +147,19 @@ def _spawn_known_refresh(store, known_cfg) -> None:
     threading.Thread(target=_refresh, name="saitenka-known-refresh", daemon=True).start()
 
 
+def _client_and_trace():
+    """The AnkiConnect client the known-word loader reads through, plus our tracing.
+
+    The word-state package takes both as inputs: it decides what a known word IS, never where to
+    reach for one or how the call is instrumented. Host and api-key resolution stay with `Anki`, the
+    one place that owns them.
+    """
+    from saitenka import otel_metrics
+    from saitenka.app.anki import Anki
+
+    return Anki()._client, otel_metrics.traced
+
+
 def _load_known_words(store, known_cfg, *, fallback_words=(), on_error=None):
     """Cache-first: serve the last-known set from our SQLite cache (~1 ms) and reconcile in the
     background, so the ~190 ms IO-bound AnkiConnect load is off the startup critical path. A cache miss
@@ -151,8 +167,9 @@ def _load_known_words(store, known_cfg, *, fallback_words=(), on_error=None):
 
     ``fallback_words`` is ``run``'s plain ``--known word1,word2`` list (``attach`` has none);
     ``on_error`` lets ``run`` print a console note instead of the default log-only Anki-failure warning."""
+    from saitenka_wordstate.known import KnownWords, refresh_known_cache
+
     from saitenka.app.anki import ANKI_DOWN_ERRORS
-    from saitenka.app.wordlists import KnownWords, refresh_known_cache
 
     if not known_cfg:
         return KnownWords.from_set(fallback_words)
@@ -176,7 +193,8 @@ def _load_known_words(store, known_cfg, *, fallback_words=(), on_error=None):
         TypeError,
     )
     try:  # cache miss: full load NOW (populates the cache + signature for next time)
-        return refresh_known_cache(store, known_cfg)
+        client, trace = _client_and_trace()
+        return refresh_known_cache(store, known_cfg, client, trace=trace)
     except known_load_errors as e:
         if on_error is not None:
             on_error(e)
@@ -191,14 +209,14 @@ def _load_fsrs_snapshot(cfg: dict) -> KnownSnap | None:
     collection = fsrs_cfg.get("collection")
     if not collection:
         return None
-    from saitenka.app.fsrs import load_knownness
+    from saitenka_wordstate.fsrs import load_knownness
 
     return load_knownness(collection)
 
 
 def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
-    from saitenka.app.scoring import FREQ_BAND_TOP_X
-    from saitenka.app.wordlists import FreqDict
+    from saitenka_dict import FreqDict
+    from saitenka_wordstate import FREQ_BAND_TOP_X
 
     with otel_metrics.traced("load_freq_dict"):
         # freq_rows is set iff we resolved dict sources above; the coloring band uses the first freq.
@@ -206,14 +224,17 @@ def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
             freq_rows, _ = db.resolve(freq_titles)
         # Cap at the band's top_x: rarer ranks can't color a word (banded freq_mode), so loading them
         # is ~200ms of dead startup work on a big freq like JPDBv2 — the dep-load critical path.
-        return FreqDict.from_db(db, freq_rows[0], top_x=FREQ_BAND_TOP_X) if freq_rows else None
+        if not freq_rows:
+            return None
+        row = freq_rows[0]
+        return FreqDict.from_connection(db.connection(), row.id, row.title, top_x=FREQ_BAND_TOP_X)
 
 
 def _load_jlpt_dict(db):
-    from saitenka.app.wordlists import JlptDict
+    from saitenka.app.dict_meta import load_jlpt
 
     with otel_metrics.traced("load_jlpt_dict"):
-        return JlptDict.load(db)
+        return load_jlpt(db)
 
 
 def mining_spec_from_config(
@@ -332,8 +353,9 @@ def build_reader_deps(
 
     from concurrent.futures import ThreadPoolExecutor
 
+    from saitenka_wordstate.cache import KnownWordCache
+
     from saitenka.app.dictdb import DictionaryDb
-    from saitenka.app.known_cache import KnownWordCache
 
     with otel_metrics.traced("dictdb_open"):
         db = DictionaryDb.open()
@@ -372,15 +394,19 @@ def build_reader_deps(
 
         scorer = None
         if want_scorer:
-            from saitenka.app.scoring import Palette, Scorer
+            from saitenka_wordstate import Scorer
+
+            from saitenka.app.scoring import Coloring, Palette
 
             assert kw_fut is not None and fd_fut is not None and jlpt_fut is not None  # want_scorer
-            scorer = Scorer(
-                known=kw_fut.result(),
-                freq=fd_fut.result(),
-                jlpt=jlpt_fut.result(),
-                palette=Palette.from_config(cfg.get("palette")),
-                fsrs_snap=fsrs_fut.result(),
+            scorer = Coloring(
+                Scorer(
+                    known=kw_fut.result(),
+                    freq=fd_fut.result(),
+                    jlpt=jlpt_fut.result(),
+                    fsrs_snap=fsrs_fut.result(),
+                ),
+                Palette.from_config(cfg.get("palette")),
             )
         anki, mine_conf = mining_fut.result()
 
@@ -404,7 +430,7 @@ def warm_tokenizer(tokenizer: str = "unidic") -> None:
     if tokenizer != "unidic":
         return
     with otel_metrics.traced("warm_tokenizer"):
-        from saitenka.app.tokenize import tokenize
+        from saitenka_tokenize.japanese import tokenize
 
         tokenize(" ")
 
@@ -434,7 +460,7 @@ class DependencyBundle:
     """A full collaborator set qualified by the profile generation it was built for."""
 
     identity: MiningIdentity
-    scorer: Scorer | None = None
+    scorer: Coloring | None = None
     mining: MiningTarget | None = None
     dictionaries: DictionarySet | None = None
     failed: bool = False

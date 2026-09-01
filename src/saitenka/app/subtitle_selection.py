@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from saitenka.app.languages import MAIN_LANG, SECOND_LANG, Language, looks_japanese
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, Language, looks_japanese
 
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
 JP_LANGS = {"ja", "jpn", "jp", "japanese"}

@@ -108,6 +108,10 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         def has_term(self, *_forms):
             return False
 
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
+
     with _live_reader() as (_tmp, reader, ipc):
         reader.graph.profile.profile.replace_dictionary_set(
             _TallDS()

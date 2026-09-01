@@ -19,6 +19,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
+from saitenka_wordstate.fsrs import rareness_band
+
 from saitenka import otel_metrics
 from saitenka.app.features.tooltip.popups import Panel, PanelCache, PopupView, TipPorts
 from saitenka.app.lookup import card_for, entry_for
@@ -29,8 +31,9 @@ from saitenka.runtime import events, hover
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from saitenka_tokenize.registry import Tokenizer
+
     from saitenka.app.features.tooltip.popups import TooltipState
-    from saitenka.app.tokenizer import Tokenizer
     from saitenka.render.layout_backend import LayoutBackend
 
 TIP_GAP = 12  # px between an anchored popup and the word it points at
@@ -138,49 +141,51 @@ def _darken(rgba, f: float = JLPT_DARKEN):
     return (round(r * f), round(g * f), round(b * f), a)
 
 
-def jlpt_pill(tok, scorer) -> Freq | None:
+def jlpt_pill(tok, coloring) -> Freq | None:
     """A ``JLPT | Nx`` pill for the tooltip's frequency row, shown only when the word has a JLPT
-    level — the same signal the subtitle draws as an underline (``Scorer._style``). The pill's hue
-    is the level's underline color (darkened for legible white text), so the tooltip and the
-    underline read as the same thing."""
-    from saitenka.app.scoring import _is_content
+    level — the same signal the subtitle draws as an underline. The pill's hue is the level's
+    underline color (darkened for legible white text), so the tooltip and the underline read as the
+    same thing.
 
-    sc = scorer
-    if sc is None or not getattr(sc, "enable_jlpt", False) or sc.jlpt is None:
+    The level comes from the verdict, which is where the content-POS gate lives. Asking the JLPT map
+    directly needed a second copy of that gate here, and without it a particle (は, ね) whose bare-kana
+    reading collides with an N1 word's reading was labelled N1. Takes the `Coloring` pair rather than
+    a `Scorer`, because the hue is the palette's and the level is the scorer's.
+    """
+    if coloring is None:
         return None
-    # Gate on content POS exactly like the subtitle underline (Scorer._style). Without this a
-    # particle/aux (は, ね) whose bare-kana READING collides with an N1 word's reading in the JLPT
-    # map gets mislabelled — usually N1, since _put keeps the highest level. Better no pill.
-    if not _is_content(tok):
-        return None
-    level = sc.jlpt.level(tok.lemma, tok.surface, tok.reading)
+    level = coloring.verdict(tok).jlpt
     if not level:
         return None
-    base = sc.palette.jlpt.get(level, (96, 125, 175, 255))
-    return Freq("JLPT", level, _darken(base))
+    return Freq("JLPT", level, _darken(coloring.palette.jlpt.get(level, (96, 125, 175, 255))))
+
+
+# green (common) → amber (uncommon) → red (rare); the green matches the per-source freq pills.
+RARENESS_COLORS: dict[str, tuple[int, int, int, int]] = {
+    "common": (74, 158, 92, 255),
+    "uncommon": (198, 156, 60, 255),
+    "rare": (188, 86, 74, 255),
+}
+
+
+def rareness_value(rank: float) -> str:
+    """A blended rank as the pill shows it: bare below 1000, else thousands (``1.3k``, ``12k``)."""
+    r = round(rank)
+    return (f"{r // 1000}k" if r % 1000 == 0 else f"{r / 1000:.1f}k") if r >= 1000 else str(r)
 
 
 def rareness_pill(tok, dict_set) -> Freq | None:
-    """The blended-rareness "diff" pill: harmonic mean of the word's rank across every loaded freq
-    dict, colored by band (:func:`fsrs.rareness_color`). Summarizes the row of 7+ per-dict pills into
-    one rareness read. ``None`` when no freq dict has the word, so the caller skips it cleanly."""
-    from saitenka.app.fsrs import diff_pill, harmonic_of
+    """The blended-rareness "diff" pill, summarizing the row of 7+ per-dict pills into one read.
 
-    ds = dict_set
-    sources = getattr(ds, "freqs", None)
-    if not sources:
+    The blend and the band are the dictionary's and the word-state layer's answers; the colour and
+    the ``1.3k`` formatting are this side's. ``None`` when no rank-based freq dict has the word.
+    """
+    if dict_set is None:
         return None
-    # Only rank-based dicts may be blended — an occurrence-based dict's converted rank is a per-corpus
-    # dense rank on an incomparable scale (see FreqSource.occurrence_based); it stays in the per-dict
-    # pill row but never in the harmonic mean.
-    forms = (tok.lemma, tok.surface, tok.reading)
-    ranks = [
-        r
-        for fs in sources
-        if not getattr(fs, "occurrence_based", False)
-        and (r := fs.rank(forms, tok.reading)) is not None
-    ]
-    return diff_pill(harmonic_of([float(r) for r in ranks]))
+    rank = dict_set.rareness_rank(tok)
+    if rank is None:
+        return None
+    return Freq("diff", rareness_value(rank), RARENESS_COLORS[rareness_band(rank)])
 
 
 def entry_for_tok(tok, inflected, *, dict_set, scorer, extra_terms: tuple[str, ...] = ()):
@@ -216,6 +221,8 @@ class PanelDictionary(Protocol):
     def search(self, pattern: str, limit: int = 30) -> object: ...
 
     def has_term(self, *forms: str | None) -> bool: ...
+
+    def rareness_rank(self, token: object) -> float | None: ...
 
 
 @dataclass(frozen=True, slots=True)

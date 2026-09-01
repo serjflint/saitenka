@@ -5,19 +5,15 @@ import zipfile
 
 import dicthelp
 import pytest
+from saitenka_tokenize.japanese import Token, tokenize
 
+from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
-from saitenka.app.dictionary import (
-    FREQ_COLOR,
-    PITCH_COLOR,
-    DictionaryError,
-    DictionarySet,
-    _glossary_to_nodes,
-    _glosses_of,
-    _short_freq_name,
-    split_existing,
-)
-from saitenka.app.tokenize import Token, tokenize
+from saitenka.app.dictionary import DictionaryError, DictionarySet, split_existing
+from saitenka.app.dictionary_surface import FREQ_COLOR, PITCH_COLOR
+from saitenka.app.dictionary_surface import glossary_to_nodes as _glossary_to_nodes
+from saitenka.app.dictionary_surface import glosses_of as _glosses_of
+from saitenka.app.source_adapter import _short_freq_name
 
 
 def test_short_freq_name_strips_saitenka_prefix():
@@ -124,12 +120,14 @@ def test_load_and_lookup(tmp_path):
     p = _make_dict(
         tmp_path / "d1.zip", "TestDict", [["読む", "よむ", ["to read"]], ["本", "ほん", ["book"]]]
     )
-    d = dicthelp.load_dict(p)
-    assert d.title == "TestDict"
-    hits = d.lookup("読む")
-    assert len(hits) == 1 and hits[0].glossary == ["to read"]
-    assert d.lookup("よむ")[0].term == "読む"  # reading key works
-    assert d.lookup("nope") == []
+    ds = dicthelp.load_set([p])
+    assert [d.title for d in ds.dicts] == ["TestDict"]
+    entry = ds.entry_for(
+        Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
+    )
+    assert _glosses_of(entry.defs[0].content) == ["to read"]
+    assert ds.has_term("よむ")  # a term is keyed by its reading too
+    assert not ds.has_term("nope")
 
 
 def test_lookup_ranks_exact_term_above_reading_only(tmp_path):
@@ -140,9 +138,10 @@ def test_lookup_ranks_exact_term_above_reading_only(tmp_path):
         "N",
         [["箆", "の", ["shaft of an arrow"]], ["の", "の", ["possessive particle"]]],
     )
-    dic = dicthelp.load_dict(d)
-    hits = dic.lookup("の", "の", "の")
-    assert hits[0].term == "の"  # exact-term match wins, not reading-only 箆
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="の", lemma="の", reading="の", pos="助詞", start=0, end=1)
+    # exact-term match heads the entry, not the reading-only 箆
+    assert ds.entry_for(tok).headword == ["の"]
 
 
 def test_entry_for_drops_reading_only_homophones_when_a_term_matches(tmp_path):
@@ -233,64 +232,42 @@ def test_entry_for_with_many_dicts_preserves_order_and_content(tmp_path):
     assert [d.content[0] for d in entry.defs] == [f"cat ({i})" for i in range(6)]
 
 
-def test_batch_exact_reassembles_identically_to_per_dict_lookup(tmp_path):
-    """_batch_exact runs ONE query for every dict; feeding its rows back through
-    lookup(rows_by_key=...) must reproduce exactly what each dict's own per-form point queries
-    returned — same entries, same order — across a colliding form (lemma==surface) and a reading
-    key shared by three homophone terms."""
-    a = _make_dict(
-        tmp_path / "a.zip",
-        "A",
-        [["取る", "とる", ["take"]], ["撮る", "とる", ["photograph"]], ["採る", "とる", ["adopt"]]],
-    )
-    b = _make_dict(tmp_path / "b.zip", "B", [["取る", "とる", ["grasp"]]])
-    c = _make_dict(tmp_path / "c.zip", "C", [["猫", "ねこ", ["cat"]]])  # no 取る/とる key at all
-    ds = dicthelp.load_set([a, b, c])
-    forms = ("取る", "取る", "とる")  # lemma==surface duplicate + the reading key three terms share
-    batched = ds._batch_exact(forms)
-    for d in ds.dicts:
-        expected = [(h.term, h.reading, h.raw_glossary) for h in d.lookup(*forms)]
-        via_batch = d.lookup(*forms, rows_by_key=batched.get(d.dict_id, {}))
-        assert [(h.term, h.reading, h.raw_glossary) for h in via_batch] == expected, d.title
-    # exact-term (取る) first, then the reading-only homophones in stable id order
-    hits = ds.dicts[0].lookup(*forms, rows_by_key=batched[ds.dicts[0].dict_id])
-    assert [h.term for h in hits] == ["取る", "撮る", "採る"]
+def test_a_hover_does_not_issue_one_query_per_dictionary(tmp_path):
+    """The N+1 guard, restated against the surviving path: a hovered word costs the same number of SQL
+    statements whether one dictionary is configured or four.
 
+    It used to be pinned by asserting the per-dict point query was never called. Counting the
+    statements the lookup source actually issues is both closer to what matters and independent of how
+    that source assembles its rows — but it only means anything if the count is non-zero, so that is
+    asserted too (tracing the wrong connection silently makes this test unfailable).
+    """
+    tok = Token(surface="猫", lemma="猫", reading="ねこ", pos="名詞", start=0, end=1)
 
-def test_batch_exact_buckets_rows_by_dict_and_key_and_skips_absent(tmp_path):
-    """The single query's rows are grouped {dict_id: {key: rows}}: every matching key present, and a
-    dict with no hit contributes no bucket at all (so lookup(rows_by_key={}) → [])."""
-    a = _make_dict(tmp_path / "a.zip", "A", [["読む", "よむ", ["read"]]])
-    b = _make_dict(tmp_path / "b.zip", "B", [["本", "ほん", ["book"]]])
-    ds = dicthelp.load_set([a, b])
-    a_id, b_id = ds.dicts[0].dict_id, ds.dicts[1].dict_id
-    batched = ds._batch_exact(("読む", "読む", "よむ"))
-    assert set(batched) == {a_id}  # only A had a matching row
-    assert set(batched[a_id]) == {"読む", "よむ"}  # keyed by BOTH the term and the reading
-    assert ds.dicts[1].lookup("読む", "よむ", rows_by_key=batched.get(b_id, {})) == []
+    def statements(count: int) -> int:
+        paths = [
+            _make_dict(
+                tmp_path / f"n{count}_{i}.zip", f"N{count}D{i}", [["猫", "ねこ", [f"cat{i}"]]]
+            )
+            for i in range(count)
+        ]
+        ds = dicthelp.load_set(paths)
+        ds.entry_for(tok)  # warm the adapter, its connection, and the schema probes
+        assert [d.dict_name for d in ds.entry_for(tok).defs] == [
+            f"N{count}D{i}" for i in range(count)
+        ]
+        executed: list[str] = []
+        connection = ds.source.store._conn()
+        connection.set_trace_callback(executed.append)
+        try:
+            ds.entry_for(tok)
+        finally:
+            connection.set_trace_callback(None)
+        return len(executed)
 
+    wide, narrow = statements(4), statements(1)
 
-def test_entry_for_batches_into_one_query_not_one_per_dict(tmp_path, monkeypatch):
-    """entry_for's exact definitions come from the single _batch_exact query — the per-dict point
-    query (Dictionary._fetch) is never called, even with several dicts."""
-    from saitenka.app.dictionary import Dictionary
-
-    paths = [
-        _make_dict(tmp_path / f"d{i}.zip", f"D{i}", [["猫", "ねこ", [f"cat{i}"]]]) for i in range(4)
-    ]
-    ds = dicthelp.load_set(paths)
-    fetched: list[str] = []
-    orig = Dictionary._fetch
-
-    def _spy(self, *a, **k):
-        fetched.append(self.title)
-        return orig(self, *a, **k)
-
-    monkeypatch.setattr(Dictionary, "_fetch", _spy)
-    tok = next(t for t in tokenize("猫がいる") if t.surface == "猫")
-    entry = ds.entry_for(tok)
-    assert [d.dict_name for d in entry.defs] == [f"D{i}" for i in range(4)]  # all 4 dicts present
-    assert fetched == []  # ...assembled from ONE batched query, zero per-dict fetches
+    assert narrow > 0  # a lookup that issued no SQL would make the comparison below vacuous
+    assert wide == narrow
 
 
 def test_card_for_uses_user_dictionary(tmp_path):
@@ -571,14 +548,15 @@ def test_lookup_records_otel_dict_sql_and_cache_metrics(tmp_path):
     from saitenka import otel_metrics
 
     d = _make_dict(tmp_path / "otel.zip", "OtelDict", [["猫", "ねこ", ["cat"]]])
-    dic = dicthelp.load_dict(d)
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="猫", lemma="猫", reading="ねこ", pos="名詞", start=0, end=1)
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
-        dic.lookup("猫")
-        dic.lookup("猫")
+        ds.entry_for(tok)
+        ds.entry_for(tok)
         snap = otel_metrics.snapshot()
         assert snap["saitenka.dict_sql.duration_ms"]["count"] == 2
         assert snap["saitenka.dict_cache.misses"]["value"] == 1
@@ -588,28 +566,39 @@ def test_lookup_records_otel_dict_sql_and_cache_metrics(tmp_path):
         provider.shutdown()
 
 
-def test_lookup_reuses_cached_entry_object_on_repeat_lookup(tmp_path):
-    """A second lookup of the same term returns the SAME DictEntry object (identity, not just equal
-    value) — confirms the decode is skipped on a cache hit, not just that the result is correct."""
+def test_a_repeat_lookup_decodes_nothing_new(tmp_path):
+    """The decode is the expensive part (51% of samples in a --stress profile), so a second hover of
+    the same word must not add a decoded entry — the count, not object identity, is what the app can
+    observe now that the LRU belongs to the source."""
     d = _make_dict(tmp_path / "cache1.zip", "C", [["猫", "ねこ", ["cat"]]])
-    dic = dicthelp.load_dict(d)
-    first = dic.lookup("猫")
-    second = dic.lookup("猫")
-    assert first[0] is second[0]
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="猫", lemma="猫", reading="ねこ", pos="名詞", start=0, end=1)
+
+    ds.entry_for(tok)
+    after_first = ds.decoded_entry_count()
+    ds.entry_for(tok)
+
+    assert after_first == 1
+    assert ds.decoded_entry_count() == after_first
 
 
-def test_lookup_cache_evicts_oldest_beyond_entry_cache_max(tmp_path):
+def test_the_decoded_entry_cache_stays_bounded(tmp_path):
+    """`[dictdb] entry_cache_max` is a ceiling, not a hint: a long session hovers far more words than
+    it can hold, and an unbounded cache would grow for the whole session."""
     entries = [[f"語{i}", f"ご{i}", [f"gloss {i}"]] for i in range(5)]
     d = _make_dict(tmp_path / "cache2.zip", "C", entries)
-    dic = dicthelp.load_dict(d)
-    dic._entry_cache_max = 3
+    db = DictionaryDb.open(tmp_path / "capped.sqlite", DictDbOptions(entry_cache_max=3))
+    ds = dicthelp.load_set([d], on=db)
+
     for i in range(5):
-        dic.lookup(f"語{i}")
-    assert len(dic._entry_cache) == 3
-    # the two oldest (語0, 語1) were evicted; re-looking them up must decode fresh, not reuse a stale
-    # cache slot that should no longer exist — and the cache stays bounded after the refill.
-    assert dic.lookup("語0")
-    assert len(dic._entry_cache) == 3
+        ds.entry_for(
+            Token(surface=f"語{i}", lemma=f"語{i}", reading=f"ご{i}", pos="名詞", start=0, end=2)
+        )
+    assert ds.decoded_entry_count() == 3
+
+    # Re-hovering an evicted word refills without ever exceeding the cap.
+    ds.entry_for(Token(surface="語0", lemma="語0", reading="ご0", pos="名詞", start=0, end=2))
+    assert ds.decoded_entry_count() == 3
 
 
 def test_dict_sql_span_always_on_foreground_sampled_on_prefetch_workers():
@@ -617,7 +606,7 @@ def test_dict_sql_span_always_on_foreground_sampled_on_prefetch_workers():
     # prefetch workers, where it floods the trace and prefetch_decode already covers the phase.
     import threading
 
-    from saitenka.app.dictionary import _BG_SQL_SPAN_SAMPLE, _emit_sql_span
+    from saitenka.app.source_adapter import _BG_SQL_SPAN_SAMPLE, _emit_sql_span
 
     assert _emit_sql_span() is True  # main thread → always traced
 
@@ -643,15 +632,19 @@ def test_lookup_records_dict_cache_eviction_counter(tmp_path):
     from saitenka import otel_metrics
 
     entries = [[f"語{i}", f"ご{i}", [f"gloss {i}"]] for i in range(5)]
-    dic = dicthelp.load_dict(_make_dict(tmp_path / "evict.zip", "C", entries))
-    dic._entry_cache_max = 3
+    db = DictionaryDb.open(tmp_path / "evict.sqlite", DictDbOptions(entry_cache_max=3))
+    ds = dicthelp.load_set([_make_dict(tmp_path / "evict.zip", "C", entries)], on=db)
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
-        for i in range(5):
-            dic.lookup(f"語{i}")  # 5 distinct decodes over a cap of 3 → 2 evictions
+        for i in range(5):  # 5 distinct decodes over a cap of 3 → 2 evictions
+            ds.entry_for(
+                Token(
+                    surface=f"語{i}", lemma=f"語{i}", reading=f"ご{i}", pos="名詞", start=0, end=2
+                )
+            )
         assert otel_metrics.snapshot()["saitenka.dict_cache.evictions"]["value"] == 2
     finally:
         otel_metrics.unregister()
@@ -685,8 +678,8 @@ def test_entry_for_sets_inflection_chain(tmp_path):
     assert ds.entry_for(tok).inflection_chain == ["-た"]
 
 
-def test_wildcard_lookup_prefix_suffix_and_limit(tmp_path):
-    # GLOB wildcard lookup — prefix (たべ*), suffix (*べる), single-char (?べる), and a LIMIT cap.
+def test_wildcard_search_matches_prefix_suffix_and_middle(tmp_path):
+    """The GLOB forms users type into the search box: `*` any run, `?` one character."""
     d = _make_dict(
         tmp_path / "w.zip",
         "W",
@@ -698,25 +691,23 @@ def test_wildcard_lookup_prefix_suffix_and_limit(tmp_path):
             ["本", "ほん", ["book"]],
         ],
     )
-    dic = dicthelp.load_dict(d)
-    assert {h.term for h in dic.lookup("たべ*", wildcard=True)} == {"食べる", "食べ物"}  # prefix
-    assert {h.term for h in dic.lookup("*べる", wildcard=True)} == {
-        "食べる",
-        "調べる",
-        "並べる",
-    }  # suffix
-    assert {h.term for h in dic.lookup("食べ?", wildcard=True)} == {
-        "食べる",
-        "食べ物",
-    }  # 食べ + one char
-    assert dic.lookup("たべ", wildcard=False) == []  # non-wildcard = exact
-    assert len(dic.lookup("*", wildcard=True, limit=2)) == 2  # LIMIT bounds a broad glob
+    ds = dicthelp.load_set([d])
+
+    def matched(pattern: str, limit: int = 30) -> set[str]:
+        dumped = json.dumps(ds.search(pattern, limit).defs[0].content, ensure_ascii=False)
+        return {term for term in ("食べる", "食べ物", "調べる", "並べる", "本") if term in dumped}
+
+    assert matched("たべ*") == {"食べる", "食べ物"}
+    assert matched("*べる") == {"食べる", "調べる", "並べる"}
+    assert matched("食べ?") == {"食べる", "食べ物"}
+    assert len(matched("*", limit=2)) == 2  # a broad glob stays bounded by the limit
 
 
 def test_wildcard_normalizes_fullwidth_star(tmp_path):
     d = _make_dict(tmp_path / "fw.zip", "FW", [["食べる", "たべる", ["to eat"]]])
-    dic = dicthelp.load_dict(d)
-    assert {h.term for h in dic.lookup("たべ＊", wildcard=True)} == {"食べる"}  # fullwidth ＊ → *
+    ds = dicthelp.load_set([d])
+    dumped = json.dumps(ds.search("たべ＊").defs[0].content, ensure_ascii=False)
+    assert "食べる" in dumped  # fullwidth ＊ → *
 
 
 def test_search_lists_matches_as_clickable_links(tmp_path):
@@ -920,6 +911,17 @@ def test_dictionary_set_populates_freq_and_pitch_pills(tmp_path):
     assert ("Pitch", "ほんめい [0]", PITCH_COLOR) in kinds
 
 
+def test_a_freq_pill_drops_the_product_prefix_from_our_own_lists(tmp_path):
+    """`_short_freq_name` is only worth having if the pill actually uses it — the pill row is narrow,
+    and our own lists would otherwise spend a third of it repeating the product name."""
+    d = _make_dict(tmp_path / "d.zip", "Def", [["本命", "ほんめい", ["favorite"]]])
+    fz = _make_meta(tmp_path / "f.zip", "Saitenka Known", "freq", [["本命", 5386]])
+    ds = dicthelp.load_set([d], freq_zips=[fz])
+    tok = Token(surface="本命", lemma="本命", reading="ほんめい", pos="名詞", start=0, end=2)
+
+    assert "Known" in [f.name for f in ds.entry_for(tok).freqs]
+
+
 def test_pitch_field_returns_html_and_positions(tmp_path):
     # #192: the mined-card {pitch-accents}/{pitch-accent-positions} markers, mirroring frequency_field
     pz = _make_meta(
@@ -942,27 +944,31 @@ def test_pitch_field_empty_when_no_pitch_source(tmp_path):
 
 
 @pytest.mark.timeout(30)
-def test_entry_cache_survives_concurrent_access_from_workers(tmp_path):
-    """_entry_from_row runs on the main thread AND every prefetch worker at once (free-threaded build),
-    all sharing one _entry_cache. A concurrent popitem() must not evict an eid between another thread's
-    get() and move_to_end() — the KeyError a report's prefetch worker hit. Guard: no thread raises and
-    the cache stays bounded. (Reproduces only on a free-threaded build; a no-op safety net under the GIL.)"""
+def test_the_decoded_entry_cache_survives_concurrent_prefetch_workers(tmp_path):
+    """The decoded-entry LRU is touched by the main thread AND every prefetch worker at once
+    (free-threaded build). A concurrent eviction must not drop a key between another thread's get()
+    and move_to_end() — the KeyError a report's prefetch worker hit. Guard: no thread raises and the
+    cache stays bounded. (Reproduces only on a free-threaded build; a safety net under the GIL.)"""
     import threading
 
-    dic = dicthelp.load_dict(_make_dict(tmp_path / "race.zip", "C", [["猫", "ねこ", ["cat"]]]))
-    dic._entry_cache_max = 8
-    # A working set ~2x the cap so every thread constantly hits (move_to_end) AND overflows (popitem) —
-    # the exact interleaving that raced. Rows are synthetic so the hot loop never touches SQLite.
-    rows = [(i, f"語{i}", f"ご{i}", f'["gloss {i}"]', "", None) for i in range(16)]
+    words = [[f"語{i}", f"ご{i}", [f"gloss {i}"]] for i in range(16)]
+    db = DictionaryDb.open(tmp_path / "race.sqlite", DictDbOptions(entry_cache_max=8))
+    ds = dicthelp.load_set([_make_dict(tmp_path / "race.zip", "C", words)], on=db)
+    # A working set ~2x the cap so every thread constantly hits AND overflows — the interleaving
+    # that raced.
+    tokens = [
+        Token(surface=t, lemma=t, reading=r, pos="名詞", start=0, end=len(t)) for t, r, _g in words
+    ]
+    ds.entry_for(tokens[0])  # build the adapter once; the race is in the cache, not in setup
     errors: list[BaseException] = []
     start = threading.Barrier(8)
 
     def worker():
-        start.wait()  # release all threads together to overlap the get/move_to_end/popitem windows
+        start.wait()  # release all threads together to overlap the get/evict windows
         try:
-            for _ in range(400):
-                for row in rows:
-                    dic._entry_from_row(row)
+            for _ in range(40):
+                for token in tokens:
+                    ds.entry_for(token)
         except BaseException as exc:  # noqa: BLE001 — capture the race, don't die silently in a thread
             errors.append(exc)
 
@@ -973,4 +979,5 @@ def test_entry_cache_survives_concurrent_access_from_workers(tmp_path):
         t.join()
 
     assert not errors, f"entry cache raced: {errors[:3]!r}"
-    assert len(dic._entry_cache) == dic._entry_cache_max  # bounded, never exceeded or corrupted
+    # Exactly the cap: `<=` would also pass a store that cached nothing at all.
+    assert ds.decoded_entry_count() == 8

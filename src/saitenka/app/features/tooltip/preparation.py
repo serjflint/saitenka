@@ -14,13 +14,14 @@ from saitenka.app.paths import cache_dir
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from saitenka_tokenize.registry import Tokenizer
+
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.features.tooltip.popups import Panel
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.features.tooltip.tooltip_engaged import HoverRequest
     from saitenka.app.features.tooltip.tooltip_panel import PanelPorts
     from saitenka.app.render_cache import CompressedHeadCache, LoadedView, RenderCache
-    from saitenka.app.tokenizer import Tokenizer
     from saitenka.mask_atlas import MaskAtlas
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime import EffectFinished

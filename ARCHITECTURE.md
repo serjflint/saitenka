@@ -61,12 +61,13 @@ internal modules with explicit dependency contracts, not independently published
   feature owners and their declarations; `app/session/factory.py` is the production construction seam.
   `cli.py` owns process setup and Cyclopts registration, `commands/` owns domain command surfaces and
   attach orchestration, and
-  `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
-  seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
-  strategy); `profiles.py`/`features/profiles/profile_cli.py`/`languages.py` define reading-profile
-  values and loading (a French profile ships today), while the profile feature owns command
-  admission and application; `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
-  dictionary DB); `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring);
+  `launch/` owns run orchestration. The remaining domains include `saitenka-tokenize/` (the
+  tokenizer-strategy seam over fugashi/unidic-lite JP segmentation and the Latin strategy);
+  `profiles.py`/`features/profiles/profile_cli.py` define reading-profile values and loading (a French
+  profile ships today), while the profile feature owns command admission and application;
+  `dictionary.py`/`dictdb.py`/`lookup.py` (the app's side of the consolidated SQLite dictionary DB,
+  whose schema and writer are `saitenka-dict`'s); `scoring.py` plus `saitenka-wordstate/` (word
+  coloring);
   `anki.py` plus `features/mining/` (mining + optional word-pronunciation audio);
   `features/analysis/` plus `render/analysis.py` (cached whole-track metrics and their background UI);
   `features/annotation/` (cue annotation identity, work, cache, and degradation policy);
@@ -83,18 +84,25 @@ internal modules with explicit dependency contracts, not independently published
   stay a cohesive leaf; a growing subsystem gets a package named for its intent.
 - **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
   SQLite lookup, semantic term/kanji models, and all five Yomitan result modes.
-  `app/source_adapter.py` presents it by default through the stable Saitenka tooltip/card facade; the
-  legacy facade is the compatibility fallback. The headless-Yomitan oracle is repository-only test
-  tooling and is excluded from published artifacts.
+  `app/source_adapter.py` presents it through the stable Saitenka tooltip/card facade — the sole
+  lookup path; the app keeps no reader of its own. The headless-Yomitan oracle is repository-only
+  test tooling and is excluded from published artifacts.
 - **`../ankiconnect-client/`** — the application-neutral AnkiConnect transport/retry/protocol client.
   `app/anki.py` retains Saitenka launch policy, telemetry, compatibility exceptions, and note building.
+- **`../saitenka-tokenize/`** — per-language segmentation: surface/lemma/reading/POS plus offsets, the
+  strategy registry a profile selects from, and the kana/kanji predicates. Dictionary attestation
+  reaches it as a callable, so the package ships without a dictionary.
+- **`../saitenka-wordstate/`** — what the learner knows: the Anki-backed known set, its SQLite cache,
+  the FSRS retrievability snapshot, and the per-token `TokenVerdict`. Palette-free by construction;
+  `app/scoring.py` holds the `Palette` and the `Coloring` that pairs the two. Frequency and JLPT
+  arrive as protocols, so reading a collection never means depending on a dictionary.
 - **`../libasslite/`** — an independently versioned experimental PyO3 binding for copied libass image
   layers. It dynamically loads libass 0.17.x and is loaded only by the opt-in subtitle-geometry
   adapter; the default Saitenka package and Pillow path do not require it.
 - **`../libasslite-bundle/`** — an optional platform wheel containing libass and its native runtime
   closure. It is discovered by `libasslite`, not imported by Saitenka, and stays outside the
   Apache-2.0 core distribution with its own notices and corresponding-source archives.
-- **`app/known_cache.py`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
+- **`saitenka-wordstate/`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
   and schema rebuilds no longer own Anki-derived state.
 
 ## Composition and extension seams
@@ -185,7 +193,7 @@ protocol-shaped class from being mistaken for production swappability.
 
 | Capability | Boundary | Current status |
 | --- | --- | --- |
-| Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
+| Dictionary semantics | `saitenka_dict.LookupSource` | Complete: `DictionarySourceAdapter` is the only path. A set with no dictionaries holds an `EmptyDictionaryStore`, so "nothing configured" is a source rather than a second branch. |
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
 | Session commands | `CommandRegistration` + `CommandExecutor` | Explicit and unit-testable; independently assembled handlers and the closed stateless command graph join once. |
@@ -196,7 +204,8 @@ protocol-shaped class from being mistaken for production swappability.
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
 `render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
-`saitenka-dict`, `ankiconnect-client`, and experimental native add-ons are independently published.
+`saitenka-dict`, `ankiconnect-client`, `saitenka-tokenize`, `saitenka-wordstate`, and experimental
+native add-ons are independently published.
 
 ## Interactive startup and cue annotation
 
@@ -410,8 +419,9 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 
 | Entity | Lives in | What it is |
 | --- | --- | --- |
-| **Token** (the *term*) | `app/tokenize.py` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
-| **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`); the legacy `Dictionary` path remains a compatibility fallback. |
+| **Token** (the *term*) | `saitenka-tokenize/` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
+| **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`). `app/dictionary.py` is scope + ranking + the deinflection seam; it issues no SQL (pinned by `tests/test_one_database_one_client.py`). |
+| **The dictionary database** | `saitenka_dict/schema.py`, `saitenka_dict/importer.py` | `saitenka-dict` owns `dictionaries.sqlite` outright: one schema declaration, one writer. `app/dictdb.py` is the application's *policy* over it — the file's location, read-connection tuning, and the SVG rasterizer handed to an import — and declares no tables and writes no dictionary rows (pinned by `tests/test_one_database_one_client.py`). |
 | **`Entry`** | `panel/model.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
 | **Panel** | `app/features/tooltip/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
 | **`Row`** | `panel/rows.py` | One horizontal slice of the panel (header, freq row, a def-name chip, or a **def body**), as a *deferred thunk* — building rows walks no content. Only def-body rows are expensive. |
@@ -526,8 +536,8 @@ On hover, the adapter sends the token's lemma, surface, reading, and deinflected
 `SqliteDictionaryStore` loads ordered term rows, metadata, and pronunciations with bound queries and
 decodes them into LRU-cached `TermRecord`s (`entry_cache_max = 256`/dict). `Translator` assembles the
 configured result mode; the adapter maps those semantic entries into the stable tooltip `Entry`.
-Prefetch normally warms the same path before hover. The legacy `_batch_exact`/`DictEntry` pipeline is
-used only when no semantic source is installed.
+Prefetch warms the same path before hover. There is no second pipeline: the app-side reader that used
+to decode Yomitan rows itself was retired with the second writer.
 
 ### Stage 3 — build rows (deferred) · `panel/rows.py`
 

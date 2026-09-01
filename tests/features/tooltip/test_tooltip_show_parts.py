@@ -95,13 +95,18 @@ def test_a_panel_build_needs_no_host() -> None:
     changing underneath it — the same reason `DrawRequest` is frozen. That it constructs at all with
     no SessionController in scope is the assertion.
     """
+    from saitenka_tokenize.japanese import Token
+
     from saitenka.app.features.tooltip.tooltip_panel import PanelKey, PanelStyle, _build_panel
-    from saitenka.app.tokenize import Token
     from saitenka.panel import Definition, Entry
 
     class _DictSet:
         def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+        def rareness_rank(self, _token):  # protocol shape
+            """No frequency dictionaries, so no blended rank and no pill."""
+            return
 
     style = PanelStyle(
         width=420,

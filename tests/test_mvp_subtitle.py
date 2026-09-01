@@ -1,12 +1,12 @@
 """MVP: subtitle rendering (multi-line) + per-word hitbox geometry."""
 
 import pytest
+from saitenka_tokenize.japanese import tokenize
 from session_builder import build_session
 from util import assert_golden
 
 from saitenka.app.config import ReaderOptions, TooltipOptions
 from saitenka.app.subtitles import render_subtitle
-from saitenka.app.tokenize import tokenize
 
 LINE = "門前の小僧習わぬ経を読む"
 

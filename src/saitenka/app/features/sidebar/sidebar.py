@@ -7,9 +7,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import SECOND_LANG
+
 from saitenka import otel_metrics
 from saitenka.app.features.analysis.episode_analysis import cue_result
-from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
 from saitenka.model import in_rect

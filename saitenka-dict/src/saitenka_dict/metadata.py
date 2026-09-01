@@ -13,6 +13,18 @@ class FrequencyValue:
 
 
 def parse_frequency(data: Any) -> FrequencyValue:
+    """One ``freq`` term_meta value → ``(reading, rank, display)``.
+
+    Covers the shapes seen in the wild: a plain number, ``{"value", "displayValue"}``,
+    ``{"reading", "frequency"}``, and the JLPT ``{"frequency": {"value": -1, "displayValue": "N5"}}``
+    sentinel. A *string* value yields its trailing parenthesised number if it has one
+    (``"twenty-four (24)"`` → 24), else its LEADING integer — ``"118,121"`` is 118, never the
+    comma-stripped 118121, because a grouped ``"rank, occurrences"`` display puts the rank first.
+
+    A value with no number in it has **no rank** (``None``, not ``0``): every consumer treats the rank
+    as an ordinal, so a synthetic ``0`` would read as "more frequent than everything". ``bool`` is
+    rejected for the same reason — ``True`` is not rank 1.
+    """
     reading: str | None = None
     display: str | None = None
     value = data
@@ -25,15 +37,16 @@ def parse_frequency(data: Any) -> FrequencyValue:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return FrequencyValue(reading, value, display)
     if isinstance(value, str):
-        match = re.search(r"\((-?\d+(?:\.\d+)?)\)\s*$", value) or re.match(
-            r"\s*(-?\d+(?:\.\d+)?)", value
-        )
-        number = (
-            float(match.group(1))
-            if match is not None and "." in match.group(1)
-            else int(match.group(1))
-            if match is not None
-            else 0
-        )
+        parenthesised = re.search(r"\((-?\d+(?:\.\d+)?)\)\s*$", value)
+        match = parenthesised or re.match(r"\s*(-?\d+(?:\.\d+)?)", value)
+        if match is None:
+            return FrequencyValue(reading, None, display or value)
+        number = float(match.group(1)) if "." in match.group(1) else int(match.group(1))
+        if display is None and parenthesised is None:
+            # The string LEADS with its number, so the number is the whole of what it says and the
+            # rest is grouping (`"118,121"` is rank-then-occurrences). Showing the raw string would
+            # spend a width-constrained pill repeating a figure we already parsed. A trailing
+            # `(24)`, or a string with no number at all, carries words worth showing — those keep it.
+            return FrequencyValue(reading, number, None)
         return FrequencyValue(reading, number, display or value)
     return FrequencyValue(reading, None, display)

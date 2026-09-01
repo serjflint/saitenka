@@ -130,7 +130,8 @@ def test_attach_startup_provider_list_matches_the_registry_enablement_for_ja():
     """Single source of truth: the deferred initial-fetch list from prepare_attach_startup must equal
     the registry/language-gated enablement the retry+picker use (cli.py), so the two can't diverge
     under a non-jp profile. jimaku_force is fetched ahead, so it's excluded from the deferred list."""
-    from saitenka.app.languages import MAIN_LANG
+    from saitenka_tokenize.languages import MAIN_LANG
+
     from saitenka.app.subtitle_providers import enabled_providers_for
 
     ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")

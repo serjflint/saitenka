@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 import util
+from saitenka_tokenize.registry import register_tokenizer
 from session_builder import build_session
 
 from saitenka.app import subselect
@@ -24,7 +25,6 @@ from saitenka.app.subtitle_providers import (
     enabled_providers_for,
     register_provider,
 )
-from saitenka.app.tokenizer import register_tokenizer
 
 EN = {"id": 1, "type": "sub", "lang": "eng"}  # English-only file → no JP track, so the gate runs
 
@@ -85,7 +85,7 @@ def _stub_provider(name, languages):
 
 @pytest.fixture
 def _restore_tokenizer_registry():
-    import saitenka.app.tokenizer as mod
+    import saitenka_tokenize.registry as mod
 
     saved = dict(mod._FACTORIES)
     yield

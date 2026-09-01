@@ -13,7 +13,10 @@ log = logging.getLogger(__name__)
 
 _META_BANK = re.compile(r"term_meta_bank_\d+\.json$")
 _TERM_BANK = re.compile(r"term_bank_\d+\.json$")
-_PRIMARY_ORDER = ("dict", "pitch", "freq")
+PRIMARY_ORDER = ("dict", "pitch", "freq")
+#: What a Yomitan `img` node can reference. Everything else under the archive root is documentation,
+#: licences, fonts or styling — never something the renderer draws.
+MEDIA_SUFFIXES = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 
 class DictionaryArchiveError(ValueError):
@@ -49,8 +52,16 @@ class DictionaryArchive:
         self._zip.close()
 
     def _validate_index(self) -> None:
-        if not isinstance(self.index.get("title"), str) or not self.index["title"].strip():
-            raise DictionaryArchiveError("index.json must contain a non-empty title")
+        """A titleless ``index.json`` falls back to the archive's filename rather than failing.
+
+        Yomitan requires the field, but dictionaries in the wild omit it and were importable for
+        years under that fallback; refusing them now would strand a working dictionary over a
+        cosmetic field. The title only has to be unique enough to key the import.
+        """
+        title = self.index.get("title")
+        if not isinstance(title, str) or not title.strip():
+            log.debug("%s: index.json has no title, using the filename", self.path.name)
+            self.index["title"] = self.path.stem
 
     def __enter__(self) -> DictionaryArchive:
         return self
@@ -115,6 +126,12 @@ class DictionaryArchive:
             raise DictionaryArchiveError(f"invalid JSON in {name}: {exc}") from exc
 
     def media(self) -> tuple[tuple[str, bytes], ...]:
+        """Every member a Yomitan ``img`` node could reference, decompressed.
+
+        Suffix-filtered before reading, not after: an archive also carries READMEs, licences, fonts
+        and stylesheets under the same root, and a caller that stores no images at all should not pay
+        to decompress them into memory first.
+        """
         if self._media is not None:
             return self._media
         banks = {self.index_name}
@@ -123,6 +140,8 @@ class DictionaryArchive:
         result: list[tuple[str, bytes]] = []
         for info in self._zip.infolist():
             if info.is_dir() or info.filename in banks or not info.filename.startswith(self.root):
+                continue
+            if not info.filename.lower().endswith(MEDIA_SUFFIXES):
                 continue
             result.append((info.filename.removeprefix(self.root), self._read_member(info)))
         self._media = tuple(result)
@@ -189,7 +208,7 @@ def zip_roles(path: str | Path) -> frozenset[str]:
 
 def classify_zip(path: str | Path) -> str:
     roles = zip_roles(path)
-    return next(kind for kind in _PRIMARY_ORDER if kind in roles)
+    return next(kind for kind in PRIMARY_ORDER if kind in roles)
 
 
 def title_of(archive: zipfile.ZipFile, fallback: str) -> str:

@@ -2,10 +2,7 @@
 
 import pytest
 import util
-from session_builder import build_session
-
-from saitenka.app.session.factory import SessionServices
-from saitenka.app.tokenize import (
+from saitenka_tokenize.japanese import (
     Token,
     inflected_in,
     merge_dict_compounds,
@@ -13,12 +10,15 @@ from saitenka.app.tokenize import (
     query_token,
     tokenize,
 )
-from saitenka.app.tokenizer import (
+from saitenka_tokenize.registry import (
     DEFAULT_TOKENIZER,
     UnidicTokenizer,
     get_tokenizer,
     register_tokenizer,
 )
+from session_builder import build_session
+
+from saitenka.app.session.factory import SessionServices
 
 
 class FakeIPC(util.FakeIPC):
@@ -59,7 +59,7 @@ class _FakeTokenizer:
 def _restore_registry():
     """Isolate registry mutations — a register_tokenizer in one test must not leak into another
     (pytest-randomly reorders)."""
-    import saitenka.app.tokenizer as mod
+    import saitenka_tokenize.registry as mod
 
     saved = dict(mod._FACTORIES)
     yield

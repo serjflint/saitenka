@@ -1,9 +1,9 @@
 """Jimaku filename parsing + Amazon inline-furigana stripping."""
 
 import pytest
+from saitenka_tokenize.japanese import tokenize
 
 from saitenka.app.jimaku import JimakuClient, JimakuError, parse_filename
-from saitenka.app.tokenize import tokenize
 
 
 def test_parse_filename():

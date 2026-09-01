@@ -17,12 +17,12 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from cases import CASES  # noqa: E402
+from saitenka_tokenize.japanese import Token  # noqa: E402
 
 from saitenka import fonts  # noqa: E402
 from saitenka.app.config import load_config  # noqa: E402
 from saitenka.app.dictdb import DictionaryDb  # noqa: E402
 from saitenka.app.dictionary import DictionarySet  # noqa: E402
-from saitenka.app.tokenize import Token  # noqa: E402
 from saitenka.panel import render_panel  # noqa: E402
 
 REFS = HERE / "refs"

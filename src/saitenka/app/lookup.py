@@ -13,10 +13,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.japanese import is_kana
+
 from saitenka.panel import Definition, Entry
 
 if TYPE_CHECKING:
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
 POS_EN = {
     "名詞": "noun",
@@ -37,10 +39,6 @@ POS_EN = {
 }
 
 
-def _is_kana(ch: str) -> bool:
-    return 0x3040 <= ord(ch) <= 0x30FF
-
-
 def furigana(surface: str, reading: str):
     """Structured-content nodes for `surface` with `reading` as ruby, aligning okurigana.
 
@@ -52,11 +50,11 @@ def furigana(surface: str, reading: str):
         return [surface]
     s, r = surface, reading
     tail = ""
-    while s and r and s[-1] == r[-1] and _is_kana(s[-1]):
+    while s and r and s[-1] == r[-1] and is_kana(s[-1]):
         tail = s[-1] + tail
         s, r = s[:-1], r[:-1]
     head = ""
-    while s and r and s[0] == r[0] and _is_kana(s[0]):
+    while s and r and s[0] == r[0] and is_kana(s[0]):
         head += s[0]
         s, r = s[1:], r[1:]
     nodes: list = []

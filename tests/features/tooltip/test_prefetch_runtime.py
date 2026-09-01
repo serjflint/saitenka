@@ -6,6 +6,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.features.tooltip import prefetch
 from saitenka.app.features.tooltip.preparation import (
@@ -13,7 +14,6 @@ from saitenka.app.features.tooltip.preparation import (
     TooltipPreparationConfig,
     TooltipPreparationInputs,
 )
-from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 

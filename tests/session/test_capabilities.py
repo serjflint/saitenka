@@ -3,12 +3,12 @@ from __future__ import annotations
 import threading
 import time
 
+from saitenka_tokenize.japanese import Token
 from session_builder import build_session
 from util import FakeIPC, await_ready, bare_gateway, session_gateway
 
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.features.tooltip.tooltip import panel_key
-from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
 

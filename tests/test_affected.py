@@ -44,11 +44,11 @@ def test_affected_tier_matches_default_test_universe() -> None:
 def test_closure_is_reverse_transitive_not_one_hop() -> None:
     a = _mod()
     graph = {
-        "src/saitenka/app/fsrs.py": ["src/saitenka/app/scoring.py", "tests/test_fsrs.py"],
+        "src/saitenka/app/dict_meta.py": ["src/saitenka/app/scoring.py", "tests/test_fsrs.py"],
         "src/saitenka/app/scoring.py": ["tests/test_coloring.py"],
     }
     # changing fsrs must reach test_coloring THROUGH scoring — the one-hop set would miss it
-    assert a.closure_tests({"src/saitenka/app/fsrs.py"}, graph) == {
+    assert a.closure_tests({"src/saitenka/app/dict_meta.py"}, graph) == {
         "tests/test_fsrs.py",
         "tests/test_coloring.py",
     }

@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saitenka.app import paths
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -38,10 +36,10 @@ class KnownWordCache:
         self.path = Path(path)
 
     @classmethod
-    def open(
-        cls, path: str | Path | None = None, *, legacy_path: str | Path | None = None
-    ) -> KnownWordCache:
-        cache = cls(path or (paths.data_dir() / "anki-known.sqlite"))
+    def open(cls, path: str | Path, *, legacy_path: str | Path | None = None) -> KnownWordCache:
+        """``path`` is required: where the cache lives is the composition root's decision, not this
+        module's. Both callers already pass one — the XDG default here was reachable only from a test."""
+        cache = cls(path)
         cache.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(cache.path)
         try:

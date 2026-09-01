@@ -75,7 +75,7 @@ def kata_to_hira(s: str) -> str:
     return "".join(out)
 
 
-def _has_kanji(s: str) -> bool:
+def has_kanji(s: str) -> bool:
     # last range = supplementary planes (Ext B–H + Compat Supplement): astral surrogate-pair kanji
     return any(
         0x3400 <= ord(c) <= 0x9FFF  # CJK Unified + Ext A
@@ -83,6 +83,16 @@ def _has_kanji(s: str) -> bool:
         or 0x20000 <= ord(c) <= 0x3FFFF
         for c in s
     )
+
+
+def is_kana(ch: str) -> bool:
+    """Hiragana or katakana, INCLUDING the katakana punctuation ``・゠`` — the whole 3040–30FF block.
+
+    `Token.is_kana_only` deliberately excludes those two separators, because a name like
+    ジョン・スミス must not read as one kana-only word. This is the character-class predicate the
+    furigana aligners want; the two are different questions, not two answers to one.
+    """
+    return 0x3040 <= ord(ch) <= 0x30FF
 
 
 def _all_hira(s: str) -> bool:
@@ -109,9 +119,9 @@ def strip_inline_furigana(tokens: list[Token]) -> list[Token]:
     out: list[Token] = []
     i, n = 0, len(tokens)
     while i < n:
-        if _has_kanji(tokens[i].surface):
+        if has_kanji(tokens[i].surface):
             j = i
-            while j < n and _has_kanji(tokens[j].surface):
+            while j < n and has_kanji(tokens[j].surface):
                 j += 1
             reading = "".join(t.reading for t in tokens[i:j])
             k, matched = _match_furigana_run(tokens, j, reading)

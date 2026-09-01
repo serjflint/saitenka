@@ -1,0 +1,26 @@
+[project]
+name = "saitenka-wordstate"
+version = "0.1.0"
+description = "What a learner knows: an Anki-backed known-word set, FSRS retrievability, and per-token classification"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "ankiconnect-client>=0.1.0",
+    "saitenka-tokenize>=0.1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+ankiconnect-client = { path = "../ankiconnect-client", editable = true }
+saitenka-tokenize = { path = "../saitenka-tokenize", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

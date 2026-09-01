@@ -51,7 +51,7 @@ def dict_set():
 
 @pytest.mark.parametrize("case", CASES, ids=[str(c["word"]) for c in CASES])
 def test_tooltip_parity(case, dict_set):
-    from saitenka.app.tokenize import Token
+    from saitenka_tokenize.japanese import Token
 
     tok = Token(
         surface=case["surface"],
