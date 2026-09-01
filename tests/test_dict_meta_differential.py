@@ -78,13 +78,13 @@ def test_devoice_and_nasal_survive_both_paths(tmp_path):
     ]
 
 
-def test_a_reading_keyed_pitch_entry_is_where_the_two_paths_part(tmp_path):
-    """The divergence the SQL predicts: an entry whose `term` IS the reading.
+def test_a_reading_keyed_pitch_entry_now_reads_the_same_through_both_paths(tmp_path):
+    """Was the divergence; is now the convergence.
 
     `PitchSource` matches `term = ? OR reading = ?` for each form it is given, so a bare surface
-    form finds it. The store is asked for `(term, reading)` pairs, so what it returns depends on the
-    pair the caller supplies — which is the contract change a retirement has to honour, and the
-    reason this is not a pure deletion.
+    form finds an entry whose `term` IS the reading. The store selected `m.term IN (headword terms)`
+    and could not. `meta_lookup_terms` closed that, so the two agree and the retirement of these
+    classes stops being a behaviour change.
     """
     db, row = _import(
         tmp_path,
@@ -98,12 +98,10 @@ def test_a_reading_keyed_pitch_entry_is_where_the_two_paths_part(tmp_path):
     surface_only = _translator(db).pronunciations_for((("本命", "ほんめい"),), (row.title,))
     exact_pair = _translator(db).pronunciations_for((("ほんめい", "ほんめい"),), (row.title,))
 
-    # The dead reader finds it from the surface form...
     assert legacy == ("ほんめい", [PitchAccent(0)])
-    # ...the live one does not, because `_PRONUNCIATION_QUERY` selects `m.term IN (terms)` and the
-    # terms come from matched headwords — for a kanji-written word that is 本命, never ほんめい.
-    assert surface_only == ()
-    # It is reachable only by naming the kana as the term.
+    # The surface form reaches it now — the reading is selected as a term as well.
+    assert [item.pitch_positions for item in surface_only] == [(0,)]
+    # ...and naming the kana directly is unchanged.
     assert [item.pitch_positions for item in exact_pair] == [(0,)]
 
 
@@ -131,14 +129,14 @@ def test_the_blend_rank_matches_the_minimum_the_store_reports(tmp_path, entries,
     assert legacy == min(ranks)
 
 
-def test_a_kana_keyed_frequency_row_is_the_regression_a_naive_retirement_would_ship(tmp_path):
-    """The same divergence as the pitch case — but on the one method the product actually calls.
+def test_a_kana_keyed_frequency_row_is_what_makes_the_retirement_a_no_op(tmp_path):
+    """The case that decided the order of work — on the one method the product actually calls.
 
     `rareness_rank` blends `FreqSource.rank`, which tries the lemma, the surface form *and* the
-    reading as terms. The store is asked with `(term, reading)` pairs whose terms come from matched
-    headwords, so for a kanji-written word the kana is never a term. Swapping the blend onto
-    `frequencies_for` without supplying the reading as a term drops every kana-keyed frequency
-    dictionary out of the mean, silently and only for some words.
+    reading as terms. Before `meta_lookup_terms`, the store could not answer for a kana-keyed row at
+    all, so retiring the blend onto `frequencies_for` would have dropped those dictionaries out of
+    the mean — silently, and only for some words. Fixing the store first makes the retirement a
+    behaviour-preserving deletion instead of a swap that has to be argued.
     """
     db, row = _import(
         tmp_path, "FreqKana", "freq", [["ほんめい", {"reading": "ほんめい", "frequency": 8912}]]
@@ -146,12 +144,9 @@ def test_a_kana_keyed_frequency_row_is_the_regression_a_naive_retirement_would_s
     translator = _translator(db)
 
     assert FreqSource(db, row).rank(("本命", "ほんめい"), "ほんめい") == 8912
-    assert translator.frequencies_for((("本命", "ほんめい"),), (row.title,)) == ()
-    # The shape a faithful retirement has to send: every form paired as a term.
-    faithful = translator.frequencies_for(
-        (("本命", "ほんめい"), ("ほんめい", "ほんめい")), (row.title,)
-    )
-    assert [item.value for item in faithful] == [8912]
+    assert [
+        item.value for item in translator.frequencies_for((("本命", "ほんめい"),), (row.title,))
+    ] == [8912]
 
 
 def test_the_original_frequency_mode_is_not_on_any_package_type(tmp_path):
