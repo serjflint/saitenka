@@ -172,7 +172,12 @@ def _restore_editable() -> None:
 
 
 def _resolve_exe() -> Path:
-    bindir = _run(["uv", "tool", "dir", "--bin"]).stdout.strip()
+    # NO_COLOR: uv styles this path even when stdout is a pipe, and the escapes land inside the
+    # string — `Path("\x1b[36m/Users/...")` simply never exists, so the smoke fails claiming the
+    # install produced no executable. CI happens not to colour, which is why it only bites locally.
+    bindir = _run(
+        ["uv", "tool", "dir", "--bin"], env={**os.environ, "NO_COLOR": "1"}
+    ).stdout.strip()
     if bindir and (exe := Path(bindir) / EXE_NAME).exists():
         return exe
     sys.exit(f"installed `{EXE_NAME}` not found under `uv tool dir --bin` ({bindir!r})")

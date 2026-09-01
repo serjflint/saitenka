@@ -7,6 +7,33 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pitch accents and frequency pills now reach a dictionary entry keyed under its kana reading.**
+  A kanji-written word never matched such a row, so for NHK 2016 that silenced pitch on 12,228
+  headwords that had an accent all along. The row is admitted per `(dictionary, reading)`, so a
+  reading shared by several words does not hand all of them the same accent.
+- **A reading spelled in a different script now matches.** Frequency dictionaries write readings
+  their own way — BCCWJ has `ぷれえやあ` for `プレーヤー`, Jiten has `ゴミいれ` — and a literal
+  comparison dropped the row, taking that dictionary out of the word's pill row and out of its
+  blended rank. Comparison folds katakana to hiragana and expands `ー`; over the sampled headwords
+  that carry any frequency row, 1,444 recover a dictionary they had been losing.
+- **Dictionary lookups were a full table scan on every install created before 4.3.1.**
+  `CREATE INDEX IF NOT EXISTS` matches on the index *name*, so a corrected column order never
+  reached an existing database and reported no error. Indexes are now compared against their
+  intended definition and rebuilt when they differ — no re-import needed.
+- The frequency pill again shortens a dictionary's name (`Saitenka Known` → `Known`), and a word
+  no dictionary has again shows its inflection chain — which, in a second-language profile, is the
+  only thing that can explain it.
+
+### Changed
+
+- **Four more capabilities are separate distributions:** `saitenka-tokenize`, `saitenka-wordstate`,
+  `saitenka-subtitles` and `saitenka-card`, joining `saitenka-dict` and `ankiconnect-client`. They
+  install automatically with `saitenka` and need no action; each is usable on its own, without a
+  player or a running Anki. `pysubs2` is consequently no longer a direct dependency of `saitenka` —
+  it belongs to `saitenka-subtitles`.
+
 ## [4.3.1] - 2026-08-30
 
 ### Fixed
