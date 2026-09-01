@@ -9,6 +9,11 @@ logs.
 
 ### Fixed
 
+- **The first hover after the pointer enters the video showed no tooltip.** The word's dictionary
+  lookup is stamped with the prefetch queue's epoch, and moving the pointer onto the video is
+  itself what re-keys that queue — so the lookup came back stamped one epoch stale and was thrown
+  away as if it answered about some other word, with nothing asking again. Pausing re-keys the
+  queue the same way.
 - **Pitch accents and frequency pills now reach a dictionary entry keyed under its kana reading.**
   A kanji-written word never matched such a row, so for NHK 2016 that silenced pitch on 12,228
   headwords that had an accent all along. The row is admitted per `(dictionary, reading)`, so a
