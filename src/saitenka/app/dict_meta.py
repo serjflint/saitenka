@@ -5,10 +5,24 @@ The tables themselves are `saitenka-dict`'s (:class:`saitenka_dict.FreqDict` /
 policy the package has no business holding: which JLPT dictionary ships with the tool and where its
 asset lives, plus the two per-lookup tooltip sources.
 
-:class:`FreqSource` / :class:`PitchSource` still query directly because they duplicate
-:meth:`Translator.frequencies_for` / :meth:`~Translator.pronunciations_for` field-for-field but for
-two gaps: ``occurrence_based``, which no package type carries, and :class:`PitchAccent`, an app render
-type. Closing those retires both classes; until then they are the last app-side reads of this file.
+:class:`FreqSource` / :class:`PitchSource` still query directly. The blockers are not the two this
+docstring used to name — ``occurrence_based`` is written by the package itself
+(``importer`` persists ``freqmode:<id>``), so it is a missing accessor rather than missing data, and
+:class:`PitchAccent` is a three-field ``NamedTuple`` in :mod:`saitenka.model` with no render
+dependency, which :mod:`saitenka.app.source_adapter` already builds from the package's
+``Pronunciation``.
+
+The real one is a **matching difference**, measured in ``tests/test_dict_meta_differential.py``:
+these classes take bare forms and match ``term = ?`` against each of them (so a lemma, a surface
+form *and* a reading are all tried as terms), while the store selects ``m.term IN (terms)`` from
+``(term, reading)`` pairs built out of matched headwords. A row keyed by the kana reading is found
+here and missed there. Retiring :meth:`FreqSource.rank` — the one method of these two the product
+actually calls — therefore has to supply the reading as a term, or the harmonic blend silently
+loses every kana-keyed frequency dictionary.
+
+Only ``title``, ``occurrence_based`` and :meth:`FreqSource.rank` have production callers;
+:meth:`FreqSource.display` and all of :class:`PitchSource`'s query surface are exercised by tests
+alone.
 """
 
 from __future__ import annotations
