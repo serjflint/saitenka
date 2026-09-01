@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788258036530,
+  "lastUpdate": 1788270437712,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -12995,6 +12995,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.456574,
             "range": "3 replicas; min 1.05369; max 1.49765; MAD 0.041081; worst 1.49765",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5a9c0c0df7a5f7db922456b0ddacad07a9b9775",
+          "message": "Merge pull request #479 from serjflint/refactor/mpvio-runtime-contract\n\nrefactor(mpvio): let the transport carry a command and a bool, not the runtime's vocabulary",
+          "timestamp": "2026-09-01T18:44:58+05:00",
+          "tree_id": "c8ebfb4de77cf57c20534de8e55f973e75af783a",
+          "url": "https://github.com/serjflint/saitenka/commit/a5a9c0c0df7a5f7db922456b0ddacad07a9b9775"
+        },
+        "date": 1788270436242,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.352322,
+            "range": "3 replicas; min 6.32923; max 6.42549; MAD 0.023092",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.203763,
+            "range": "3 replicas; min 8.85655; max 9.35931; MAD 0.155547; worst 9.35931",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.653549,
+            "range": "3 replicas; min 20.528; max 20.838; MAD 0.125571",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.8776,
+            "range": "3 replicas; min 20.7126; max 20.9641; MAD 0.086491; worst 20.9641",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.815897,
+            "range": "3 replicas; min 14.4733; max 14.9252; MAD 0.109265",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.122648,
+            "range": "3 replicas; min 0.121828; max 0.124584; MAD 0.00082; worst 0.124584",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.901037,
+            "range": "3 replicas; min 43.2997; max 44.8187; MAD 0.601375; worst 44.8187",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.251981,
+            "range": "3 replicas; min 2.97857; max 3.31107; MAD 0.059088; worst 3.31107",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.301014,
+            "range": "3 replicas; min 1.18249; max 1.4206; MAD 0.118529; worst 1.4206",
             "unit": "ms"
           }
         ]
