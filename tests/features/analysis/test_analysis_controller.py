@@ -10,6 +10,7 @@ from util import FakeIPC, await_ready, drain_for, session_gateway
 
 from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.features.analysis import analysis_controller
+from saitenka.app.features.analysis.analysis_rows import analysis_rows
 from saitenka.app.features.analysis.episode_analysis import cue_result
 from saitenka.app.features.profiles.dependencies import DependencyBundle
 from saitenka.app.overlay_ids import OverlayId
@@ -303,8 +304,9 @@ def test_english_or_missing_japanese_track_is_unavailable(reader):
 
 
 def test_ui_scale_enlarges_episode_analysis_window():
-    normal = render_analysis(None, "Analyzing…", osd=(1920, 1080), close_key="`")
-    enlarged = render_analysis(None, "Analyzing…", osd=(1920, 1080), close_key="`", scale=1.5)
+    rows = analysis_rows(None, "Analyzing…")
+    normal = render_analysis(rows, osd=(1920, 1080), close_key="`")
+    enlarged = render_analysis(rows, osd=(1920, 1080), close_key="`", scale=1.5)
 
     assert enlarged.width > normal.width
     assert enlarged.height > normal.height
