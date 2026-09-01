@@ -2,7 +2,6 @@
 
 import util
 from PIL import Image
-from session_builder import build_session
 from util import keybind_registry
 
 from saitenka.app import bindings as app_bindings
@@ -56,9 +55,9 @@ def test_showing_overlay_restores_latest_hidden_draw():
     overlay.close()
 
 
-def test_alt_o_hides_saitenka_and_restores_native_subs():
+def test_alt_o_hides_saitenka_and_restores_native_subs(make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.overlay.show(_image(), oid=OverlayId.SUB)
     reader.graph.commands.install_input()
     bindings = keybind_registry(ipc)
@@ -73,9 +72,9 @@ def test_alt_o_hides_saitenka_and_restores_native_subs():
     reader.close()
 
 
-def test_showing_overlay_restores_saitenka_subtitle_policy():
+def test_showing_overlay_restores_saitenka_subtitle_policy(make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
 
     reader.command(app_bindings.OVERLAY_TOGGLE_MSG)
     reader.command(app_bindings.OVERLAY_TOGGLE_MSG)
@@ -84,19 +83,19 @@ def test_showing_overlay_restores_saitenka_subtitle_policy():
     assert "osd-level" not in ipc.props  # toggle never manages osd-level anymore
 
 
-def test_overlay_toggle_key_is_configurable():
+def test_overlay_toggle_key_is_configurable(make_session):
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(overlay_toggle_key="Ctrl+o"))
 
-    build_session(ipc, options=options).graph.commands.install_input()
+    make_session(ipc, options=options).graph.commands.install_input()
 
     bindings = set(keybind_registry(ipc))
     assert "Ctrl+o" in bindings and "Alt+o" not in bindings
 
 
-def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling():
+def test_hiding_overlay_releases_translation_track_for_native_subtitle_cycling(make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.track_commands.declare(SubtitleTracksDiscovered(2, 1))
     reader.graph.playback.install_seed({"sid": 2})
     reader.command(app_bindings.TRANS_MSG)

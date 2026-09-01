@@ -6,7 +6,6 @@ import pytest
 import util
 from saitenka_tokenize.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, ReaderLanguages
 from saitenka_tokenize.registry import register_tokenizer
-from session_builder import build_session
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.profiles import (
@@ -96,10 +95,10 @@ def test_unconfigured_resolves_to_the_japanese_default_profile():
     assert profile.tokenizer == "unidic"
 
 
-def test_reader_without_a_profile_is_japanese_unidic():
+def test_reader_without_a_profile_is_japanese_unidic(make_session):
     """The construction default is today's JP profile — so an existing call site (and every golden)
     behaves exactly as before #254."""
-    reader = build_session(FakeIPC())
+    reader = make_session(FakeIPC())
     assert reader.graph.profile.profile.tokenizer.name == "unidic"
     assert reader.graph.profile.profile.langs == ReaderLanguages(main="jp", second="en")
 
@@ -192,12 +191,12 @@ def test_latin_script_language_defaults_to_the_latin_tokenizer():
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_reader_uses_the_active_profiles_tokenizer_and_languages():
+def test_reader_uses_the_active_profiles_tokenizer_and_languages(make_session):
     register_tokenizer("latin", _FakeLatinTokenizer)
     profile = resolve_profile(
         {"active_profile": "fr", "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}}}
     )
-    reader = build_session(FakeIPC(), identity=SessionIdentity(profile=profile))
+    reader = make_session(FakeIPC(), identity=SessionIdentity(profile=profile))
     assert isinstance(
         reader.graph.profile.profile.tokenizer, _FakeLatinTokenizer
     )  # selected, not unidic
@@ -209,7 +208,7 @@ def test_reader_uses_the_active_profiles_tokenizer_and_languages():
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_profile_rescopes_the_dict_set_live():
+def test_cycle_profile_rescopes_the_dict_set_live(make_session):
     """A live profile cycle (#254 W3) swaps not just the tokenizer/langs but the dictionary set — the
     scoper the CLI installs is consulted and its result replaces reader.dict_set."""
     register_tokenizer("latin", _FakeLatinTokenizer)
@@ -217,7 +216,7 @@ def test_cycle_profile_rescopes_the_dict_set_live():
     fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
     jp_dicts, fr_dicts = object(), object()  # sentinels — cycle must select by profile
 
-    reader = build_session(FakeIPC(), identity=SessionIdentity(profile=jp))
+    reader = make_session(FakeIPC(), identity=SessionIdentity(profile=jp))
     reader.graph.profile.profile.replace_dictionary_set(jp_dicts)
     reader.graph.profile.profile.configure_cycle(
         [jp, fr], lambda p: fr_dicts if p.langs.main == "fr" else jp_dicts
@@ -233,13 +232,13 @@ def test_cycle_profile_rescopes_the_dict_set_live():
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_profile_without_a_scoper_keeps_the_dict_set():
+def test_cycle_profile_without_a_scoper_keeps_the_dict_set(make_session):
     """No scoper installed (the pre-W3 wiring / single-DB path) → a cycle leaves dict_set untouched,
     so the switcher stays backward-compatible."""
     register_tokenizer("latin", _FakeLatinTokenizer)
     jp = resolve_profile({})
     fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
-    reader = build_session(FakeIPC(), identity=SessionIdentity(profile=jp))
+    reader = make_session(FakeIPC(), identity=SessionIdentity(profile=jp))
     sentinel = object()
     reader.graph.profile.profile.replace_dictionary_set(sentinel)
     reader.graph.profile.profile.configure_cycle([jp, fr])  # no dict_scoper

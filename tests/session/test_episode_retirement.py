@@ -7,7 +7,6 @@ that make the procedural guarantee as good as the structural one it replaced.
 
 from __future__ import annotations
 
-from session_builder import build_session
 from util import FakeIPC, bare_gateway
 
 from saitenka.app import bindings as app_bindings
@@ -110,7 +109,9 @@ def test_an_owner_with_no_per_episode_facts_is_not_counted_as_an_unrouted_gap(re
     assert not [key for key in router.unrouted if key.endswith("EpisodeRetired")]
 
 
-def test_rebinding_the_episode_retires_the_slots_with_the_container(request, monkeypatch) -> None:
+def test_rebinding_the_episode_retires_the_slots_with_the_container(
+    request, monkeypatch, make_session
+) -> None:
     """Both halves move together or the slots keep the last episode's facts — silently, because
     nothing at the seam reads them until the next cue arrives."""
 
@@ -119,7 +120,7 @@ def test_rebinding_the_episode_retires_the_slots_with_the_container(request, mon
     gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
-    reader = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
+    reader = make_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
     request.addfinalizer(reader.close)
     removed: list[int] = []
     monkeypatch.setattr(reader.graph.lifecycle_surfaces, "remove", removed.append)

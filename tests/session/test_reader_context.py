@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import util
 from saitenka_subtitles import Cue
-from session_builder import build_session
 
 from saitenka.app.features.subtitle.navigation_state import NavigationState
 from saitenka.app.features.tooltip.popups import PopupView, TooltipState
@@ -37,15 +36,15 @@ def test_navigation_state_defaults_are_the_no_source_state():
     )
 
 
-def test_reader_delegates_episode_fields_to_the_context():
-    r = build_session(FakeIPC())
+def test_reader_delegates_episode_fields_to_the_context(make_session):
+    r = make_session(FakeIPC())
     assert r.graph.track_commands.navigation.current.nav_idx == -1
     r.graph.track_commands.navigation.current.nav_idx = 7
     assert r.graph.track_commands.navigation.current.nav_idx == 7
 
 
-def test_reslot_rebinds_the_episode_without_leaking_prior_state():
-    r = build_session(FakeIPC())
+def test_reslot_rebinds_the_episode_without_leaking_prior_state(make_session):
+    r = make_session(FakeIPC())
     r.graph.track_commands.navigation.current.nav_idx = 9
     r.graph.track_commands.navigation.current.sub_settle = (
         r.graph.track_commands.navigation.current.sub_settle.begin()
@@ -61,14 +60,14 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     assert r.graph.track_commands.navigation.current.geometry_cue_hint is None
 
 
-def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
+def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind(make_session):
     """`Owner.SUBTITLE`'s slice is session-lived, so the episode rebind cannot clear it.
 
     What keeps it episode-safe is that a re-slot always configures the new file's tracks, and that
     declaration is a whole-state reset. Asserted here because it is the one episode fact the
     leak-free-by-construction rebind no longer covers.
     """
-    r = build_session(FakeIPC())
+    r = make_session(FakeIPC())
     r.graph.track_commands.declare(SubtitleStartupConfigured(5, 6, "en", "ja,jpn,jp"))
     r.graph.track_commands.declare(SubtitleSecondaryLeased(6))
 
@@ -90,8 +89,8 @@ def test_the_track_selection_is_reset_by_configuring_it_not_by_the_rebind():
     )  # the lease goes with the selection
 
 
-def test_tooltip_controller_owns_its_surface_state():
-    r = build_session(FakeIPC())
+def test_tooltip_controller_owns_its_surface_state(make_session):
+    r = make_session(FakeIPC())
     assert isinstance(r.graph.tooltip.surface_state(), TooltipState)
     assert (
         r.graph.tooltip.surface_state().nest is r.graph.tooltip.surface_state().nest
@@ -105,14 +104,14 @@ def test_tooltip_controller_owns_its_surface_state():
     )
 
 
-def test_session_does_not_project_tooltip_state_twice():
-    r = build_session(FakeIPC())
+def test_session_does_not_project_tooltip_state_twice(make_session):
+    r = make_session(FakeIPC())
 
     assert not hasattr(r, "tip")
 
 
-def test_feature_owned_session_state_survives_an_episode_reslot():
-    r = build_session(FakeIPC())
+def test_feature_owned_session_state_survives_an_episode_reslot(make_session):
+    r = make_session(FakeIPC())
     r.graph.mining.record_mined_expression("読む")
     backlog = object()
     r.graph.history.replace_backlog(backlog)  # type: ignore[assignment]  # lifetime sentinel

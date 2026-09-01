@@ -13,7 +13,6 @@ Every hazard asserted here was found by executing the code, not by reading it.
 
 from __future__ import annotations
 
-from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.config import ReaderOptions
@@ -137,7 +136,7 @@ def test_a_claimed_event_is_withheld_from_the_reader() -> None:
     assert _drain(consumer) == [{"event": "unclaimed"}]
 
 
-def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> None:
+def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over(make_session) -> None:
     """Claiming withholds a payload from the SessionController, so an act the SessionController was performing has to
     have somewhere else to land — an effect with a registered performer.
 
@@ -170,7 +169,7 @@ def test_every_claimed_payload_has_a_performer_for_the_act_it_takes_over() -> No
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),

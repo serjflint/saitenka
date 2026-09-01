@@ -284,10 +284,10 @@ def test_rows_use_shared_episode_analysis_when_ready():
     assert rows[0].status == "N+1"
 
 
-def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
+def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch, make_session):
     ipc = FakeIPC()
     gateway = util.session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     try:
         reader.graph.track_commands.declare(
             SubtitleTracksDiscovered(1, reader.graph.track_commands.current().en_sid)

@@ -2,7 +2,6 @@
 
 import pytest
 from saitenka_tokenize.japanese import tokenize
-from session_builder import build_session
 from util import assert_golden
 
 from saitenka.app.config import ReaderOptions, TooltipOptions
@@ -147,7 +146,7 @@ def test_the_request_carries_the_cue_state_as_one_snapshot():
         request.text = "別の字幕"
 
 
-def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
+def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to(make_session):
     """The boxes the raster returns are relative to the subtitle image, so a hit test adds
     `sub_origin` to reach screen coordinates. If the draw computed a new origin and the host kept an
     old one, every hit would land offset by the difference — the boxes would look right and resolve
@@ -158,7 +157,7 @@ def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
     from saitenka.app.subtitle_render import SubtitleRenderer
 
     def origin_for(frac: float) -> tuple[int, int]:
-        reader = build_session(
+        reader = make_session(
             util.FakeIPC(),
             options=ReaderOptions(tooltip=TooltipOptions(bottom_margin_frac=frac)),
         )

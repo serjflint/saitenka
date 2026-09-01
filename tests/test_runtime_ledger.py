@@ -8,7 +8,6 @@ share one ledger.
 
 from __future__ import annotations
 
-from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.config import ReaderOptions
@@ -30,7 +29,7 @@ from saitenka.runtime.effects import (
 from saitenka.runtime.events import RawMpvEvent
 
 
-def test_a_live_session_records_what_its_reducers_reported() -> None:
+def test_a_live_session_records_what_its_reducers_reported(make_session) -> None:
     """The startup hint's `show`/`clear` outcomes are the one diagnostic production emits today.
 
     Driven through the session install and a real close rather than by calling the reducer, because
@@ -38,7 +37,7 @@ def test_a_live_session_records_what_its_reducers_reported() -> None:
     """
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),
@@ -59,11 +58,11 @@ def test_a_live_session_records_what_its_reducers_reported() -> None:
     assert any(key.startswith("diagnostic:session:startup.hint,operation=show") for key in counts)
 
 
-def test_an_event_no_owner_claims_is_counted_rather_than_dropped() -> None:
+def test_an_event_no_owner_claims_is_counted_rather_than_dropped(make_session) -> None:
     """An unrouted event must remain observable instead of disappearing silently."""
     ipc = FakeIPC()
     gateway = install_session_runtime(ipc, startup_hint=False)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),

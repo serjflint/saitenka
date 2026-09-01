@@ -227,7 +227,7 @@ def test_worker_completion_is_applied_only_when_the_session_thread_drains(reader
     assert worker_thread[0] != session_thread
 
 
-def test_close_preserves_completed_analysis_for_the_session_summary():
+def test_close_preserves_completed_analysis_for_the_session_summary(make_session):
     from saitenka.app.session_stats import SessionRecorder, analysis_snapshot
 
     snapshots = []
@@ -241,7 +241,7 @@ def test_close_preserves_completed_analysis_for_the_session_summary():
 
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(
+    reader = make_session(
         ipc, services=SessionServices(scorer=Coloring(Scorer(known=KnownWords.from_set(["本"]))))
     )
     result = None

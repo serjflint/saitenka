@@ -173,16 +173,16 @@ def test_forced_font_falls_back_when_it_lacks_the_glyph():
     assert all(t.file != "NotoEmoji.ttf" for t in toks)  # NotoEmoji lacks 鳥 → resolved elsewhere
 
 
-def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path):
+def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path, make_session):
     from dataclasses import replace
 
     from saitenka.app.config import ReaderOptions, TooltipOptions
 
     assert TooltipOptions().kanji_stroke_order is True  # on by default
-    r = build_session(FakeIPC(), services=SessionServices(dictionaries=_fixture_ds(tmp_path)))
+    r = make_session(FakeIPC(), services=SessionServices(dictionaries=_fixture_ds(tmp_path)))
     assert r.graph.tooltip.visual.stroke_order is True
     off_opts = replace(ReaderOptions(), tooltip=TooltipOptions(kanji_stroke_order=False))
-    off = build_session(
+    off = make_session(
         FakeIPC(),
         services=SessionServices(
             dictionaries=_fixture_ds(tmp_path),
@@ -220,9 +220,9 @@ def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
     assert r.graph.tooltip.hover_view().nested.word == "読"  # …and wraps around
 
 
-def test_k_key_bound_globally():
+def test_k_key_bound_globally(make_session):
     ipc = FakeIPC()
-    build_session(ipc).graph.commands.install_input()
+    make_session(ipc).graph.commands.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert "k" in binds and binds["k"].startswith("script-message ")
 
@@ -247,11 +247,11 @@ def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
 # --- single-ideograph scan cell with no term match falls back to the kanji entry -------------------
 
 
-def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
+def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path, make_session):
     # the def body contains 本 (an ideograph that IS in the kanji bank but the tokenized cell has
     # no useful term context) — clicking its scan cell opens the KANJI entry in the nested popup.
     ds = _fixture_ds(tmp_path, terms=(("読む", "よむ", ["本のことだ。"]),))
-    r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    r = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     r.graph.subtitle_presentation.cue.replace_tokenized(

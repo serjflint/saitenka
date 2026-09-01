@@ -12,7 +12,6 @@ from itertools import pairwise
 
 import pytest
 import util
-from session_builder import build_session
 
 from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.features.sidebar import sidebar
@@ -129,9 +128,9 @@ def test_wants_mouse_capture_is_any_open():
     assert router.wants_mouse_capture() is True
 
 
-def test_real_registry_z_order():
+def test_real_registry_z_order(make_session):
     """Topmost-first, and the exact set — a reordering or a dropped surface is a deliberate re-bless."""
-    reader = build_session(_FakeIPC())
+    reader = make_session(_FakeIPC())
     assert [s.name for s in reader.graph.interaction.router.specs] == [
         "help",
         "sub_picker",
@@ -170,17 +169,17 @@ def test_subtitle_layers_are_below_interactive_surfaces():
     assert max(subtitle_layers) < min(interactive_layers)
 
 
-def test_only_the_picker_accepts_clicks_without_a_cue():
-    reader = build_session(_FakeIPC())
+def test_only_the_picker_accepts_clicks_without_a_cue(make_session):
+    reader = make_session(_FakeIPC())
     assert {
         spec.name for spec in reader.graph.interaction.router.specs if spec.click_without_cue
     } == {"sub_picker"}
 
 
-def test_every_surface_state_exposes_open():
+def test_every_surface_state_exposes_open(make_session):
     """Anti-occlusion invariant: each surface's state object exposes ``open`` (bool) on a real SessionController, so
     it participates in the forced-mouse-section OR and can never be shown-but-click-through (#100 picker)."""
-    reader = build_session(_FakeIPC())
+    reader = make_session(_FakeIPC())
     assert all(isinstance(spec.captures(), bool) for spec in reader.graph.interaction.router.specs)
 
 
@@ -197,10 +196,10 @@ def test_surface_router_rejects_implicit_order():
         SurfaceRouter((bottom, top), order=("top", "bottom"))
 
 
-def test_scroll_command_routes_to_open_help():
+def test_scroll_command_routes_to_open_help(make_session):
     from saitenka.runtime.help import HelpCommand
 
-    reader = build_session(_FakeIPC())
+    reader = make_session(_FakeIPC())
     reader.graph.screen.osd = (480, 220)
     reader.graph.help.store.dispatch(
         HelpCommand.TOGGLE
@@ -211,11 +210,11 @@ def test_scroll_command_routes_to_open_help():
     assert reader.graph.help.state.page == 1
 
 
-def test_scroll_command_routes_to_open_picker(monkeypatch):
+def test_scroll_command_routes_to_open_picker(monkeypatch, make_session):
     from saitenka.app.features.picker.sub_picker import ListingResult
     from saitenka.runtime import events, picker
 
-    reader = build_session(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
+    reader = make_session(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
     candidate = SubtitleCandidate(
         "provider", "name", 1, match=False, download=lambda: ("path", "ok")
     )
@@ -233,8 +232,8 @@ def test_scroll_command_routes_to_open_picker(monkeypatch):
     assert reader.graph.picker.state.scroll == picker.ROWS_PER_WHEEL_STEP
 
 
-def test_scroll_command_routes_to_open_sidebar(monkeypatch):
-    reader = build_session(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
+def test_scroll_command_routes_to_open_sidebar(monkeypatch, make_session):
+    reader = make_session(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
     reader.graph.sidebar.store.dispatch(events.SidebarShown(active=0, capacity=10))
     reader.graph.sidebar.panel.rect = (0, 0, 100, 100)
     reader.graph.sidebar.panel.total = 100
@@ -245,8 +244,8 @@ def test_scroll_command_routes_to_open_sidebar(monkeypatch):
     assert reader.graph.sidebar.state.scroll == runtime_sidebar.ROWS_PER_WHEEL_STEP
 
 
-def test_the_registry_reads_shown_ness_from_feature_owners() -> None:
-    reader = build_session(_FakeIPC())
+def test_the_registry_reads_shown_ness_from_feature_owners(make_session) -> None:
+    reader = make_session(_FakeIPC())
     router = reader.graph.interaction.router
     assert router.wants_mouse_capture() is False
 

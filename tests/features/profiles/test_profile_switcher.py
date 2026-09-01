@@ -135,12 +135,12 @@ def test_cycle_is_a_noop_with_a_single_profile(request):
     ) == before
 
 
-def test_profile_cycle_key_is_registered_even_on_the_default_path():
+def test_profile_cycle_key_is_registered_even_on_the_default_path(make_session):
     """Always-register: the switcher binding exists regardless of how many profiles are configured, so
     the handler (not the registration) is what no-ops."""
     ipc = FakeIPC()
     options = ReaderOptions()
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(renderer=NullRenderer()),
         options=options,
@@ -153,7 +153,7 @@ def test_profile_cycle_key_is_registered_even_on_the_default_path():
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
+def test_pressing_the_key_cycles_the_reading_identity(monkeypatch, make_session):
     """Two configured profiles → the key flips tokenizer AND language, and wraps back. Driven through
     the REAL keybind dispatch (press → _handle → the command table → cycle_profile), so it proves the wire, not
     just the method. Provider gating follows ``reader.langs.main`` (the D5 capability gate)."""
@@ -167,7 +167,7 @@ def test_pressing_the_key_cycles_the_reading_identity(monkeypatch):
 
     ipc = FakeIPC()
     options = ReaderOptions()
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(renderer=NullRenderer()),
         options=options,
@@ -318,14 +318,14 @@ def test_same_track_switch_retokenizes_the_current_cue(request, monkeypatch):
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request):
+def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request, make_session):
     """Wrapping back to the slang-less JP default re-selects its track using the launcher's base slang,
     proving that the fallback is not hard-coded to the default string."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     ipc = FakeIPC()
     gateway = session_gateway(ipc)  # selection issues correlated commands
     request.addfinalizer(gateway.close)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(renderer=NullRenderer()),
         identity=SessionIdentity(
@@ -520,7 +520,7 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_invalid_profile_mining_spec_disables_the_old_target(request):
+def test_invalid_profile_mining_spec_disables_the_old_target(request, make_session):
     from saitenka_card import MineConfig
 
     from saitenka.app.features.mining.mining_controller import MiningSpec
@@ -530,7 +530,7 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
     request.addfinalizer(gateway.close)
-    reader = build_session(
+    reader = make_session(
         ipc,
         services=SessionServices(
             anki=object(),
@@ -565,7 +565,7 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
     assert reader.graph.mining.index_snapshot().values == set()
 
 
-def test_matching_failed_dependency_bundle_clears_the_active_mining_target(request):
+def test_matching_failed_dependency_bundle_clears_the_active_mining_target(request, make_session):
     from saitenka_card import MineConfig
 
     from saitenka.app.features.mining.mining_controller import SeedStatus
@@ -574,7 +574,7 @@ def test_matching_failed_dependency_bundle_clears_the_active_mining_target(reque
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
     request.addfinalizer(gateway.close)
-    reader = build_session(
+    reader = make_session(
         ipc,
         services=SessionServices(
             anki=object(),

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from saitenka_tokenize.japanese import Token
 from saitenka_tokenize.registry import get_tokenizer
-from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.features.tooltip import nested_popup
@@ -68,7 +67,7 @@ class _RecordingDS:
         return
 
 
-def test_link_query_is_looked_up_whole_not_tokenized():
+def test_link_query_is_looked_up_whole_not_tokenized(make_session):
     # Regression (それにしては → その): a cross-reference link ``?query=それにしては`` must look up the WHOLE
     # compound, not tokenize it and take the first token (それ). Both nav paths build a whole-query token.
     from saitenka_tokenize.japanese import query_token
@@ -77,16 +76,16 @@ def test_link_query_is_looked_up_whole_not_tokenized():
     assert query_token("  ") is None
 
     ds = _RecordingDS()
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     reader.graph.tooltip.navigated_panel("それにしては")
     assert ds.seen == ["それにしては"]  # the WHOLE query reached the lookup, not それ
 
 
-def test_open_link_navigates_the_whole_query(monkeypatch):
+def test_open_link_navigates_the_whole_query(monkeypatch, make_session):
     from saitenka.app.subtitle_render import NullRenderer
 
     ds = _RecordingDS()
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     reader.graph.screen.osd = (1920, 1080)
     reader.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     monkeypatch.setattr(reader.graph.subtitle_presentation, "renderer", NullRenderer())
@@ -108,8 +107,8 @@ def test_phrase_extra_terms_is_empty_off_a_known_phrase():
     assert _extra_terms(_DS(), [_tok("犬", 0), _tok("猫", 1)]) == ()
 
 
-def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch):
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
+def test_show_nested_opens_the_whole_word_not_the_first_morpheme(monkeypatch, make_session):
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
     reader.graph.screen.osd = (1920, 1080)
     # Decouple from the live unidic split: the scan tail tokenises to コン + サート.
     monkeypatch.setattr(reader.graph.profile.profile.tokenizer, "tokenize", lambda _s: _SPLIT)

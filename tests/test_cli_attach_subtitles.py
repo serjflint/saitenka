@@ -2,7 +2,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import util
-from session_builder import build_session
 
 from saitenka.app import subselect
 from saitenka.app.commands import attach as attach_commands
@@ -130,14 +129,16 @@ class _TrackIPC(util.FakeIPC):
         return super().command(*args)
 
 
-def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(monkeypatch):
+def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(
+    monkeypatch, make_session
+):
     """On an ATTACH episode advance: close+reopen stats, reset subtitle navigation, drop
     the carried-over external, and — when the new file has no JP — defer a provider fetch so watching
     continues in Japanese. Reuses the run re-slot's contract (test_auto_advance) for attach."""
     from saitenka.app import session_stats
 
     ipc = _TrackIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     # stale prior-episode state the re-slot must clear
     reader.graph.track_commands.declare(SubtitleTracksDiscovered(99, None))
     episode_before = reader.graph.track_commands.navigation.current

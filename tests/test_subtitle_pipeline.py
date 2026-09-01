@@ -14,7 +14,6 @@ from saitenka_subtitles import (
     SubtitleTrackId,
     TokenGeometry,
 )
-from session_builder import build_session
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
@@ -218,7 +217,7 @@ def test_geometry_values_are_immutable() -> None:
         rect.x = 5  # type: ignore[misc]
 
 
-def test_coordinator_delegates_current_renderer() -> None:
+def test_coordinator_delegates_current_renderer(make_session) -> None:
     """The coordinator hands the renderer a request, not the host it built it from.
 
     `object()` no longer stands in for a reader: the point of the seam is that the renderer never
@@ -227,7 +226,7 @@ def test_coordinator_delegates_current_renderer() -> None:
     from util import FakeIPC
 
     renderer = FakeCurrentRenderer()
-    reader = build_session(
+    reader = make_session(
         FakeIPC(),
         infrastructure=SessionInfrastructure(
             renderer=renderer,

@@ -6,7 +6,6 @@ import threading
 import time
 
 import pytest
-from session_builder import build_session
 from util import FakeIPC, bare_gateway, session_gateway
 
 from saitenka.app.config import ReaderOptions
@@ -195,7 +194,7 @@ def test_waking_publishes_nothing_and_does_not_close() -> None:
     assert mailbox.drain_ready() == ()
 
 
-def test_requesting_a_stop_wakes_the_transport(request) -> None:
+def test_requesting_a_stop_wakes_the_transport(request, make_session) -> None:
     """The SessionController half: the flag alone leaves a blocked receiver blocked."""
 
     ipc = FakeIPC()
@@ -203,7 +202,7 @@ def test_requesting_a_stop_wakes_the_transport(request) -> None:
     request.addfinalizer(gateway.close)
     woken: list[bool] = []
     ipc.wake_session_runtime = lambda: woken.append(True) or True  # type: ignore[method-assign]
-    reader = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
+    reader = make_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
     try:
         reader.request_stop()
         assert woken == [True]

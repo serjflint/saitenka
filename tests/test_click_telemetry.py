@@ -8,7 +8,6 @@ assert the span fires with its low-cardinality attribute, via the sanctioned tra
 from __future__ import annotations
 
 import util
-from session_builder import build_session
 from util import record_spans
 
 from saitenka.app import backlog
@@ -29,11 +28,11 @@ def _named(spans: list[dict], name: str) -> list[dict]:
     return [s["attrs"] for s in spans if s["name"] == name]
 
 
-def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
+def test_sidebar_click_is_spanned_with_its_kind(monkeypatch, make_session):
     # A sidebar click emits a sidebar_click span tagged with the action kind — the click-latency signal.
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(sidebar, "draw", lambda *_a: None)
-    reader = build_session(_FakeIPC({}))
+    reader = make_session(_FakeIPC({}))
     reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
             reader.graph.sidebar.view().active,
@@ -55,10 +54,10 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     assert attrs["kind"] == "bookmark"
 
 
-def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
+def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch, make_session):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
     spans = record_spans(monkeypatch)
-    reader = build_session(_FakeIPC({}))
+    reader = make_session(_FakeIPC({}))
     reader.graph.sidebar.store.dispatch(
         events.SidebarShown(
             reader.graph.sidebar.view().active,
@@ -76,12 +75,12 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     assert _named(spans, "sidebar_click") == []
 
 
-def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
+def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path, make_session):
     # capture_current's durable backlog write (main-thread SQLite) is spanned backlog_write[op=toggle].
     spans = record_spans(monkeypatch)
     video = tmp_path / "Show - 01.mkv"
     video.write_bytes(b"v")
-    reader = build_session(
+    reader = make_session(
         _FakeIPC({"path": str(video), "sub-start": 1.0, "sub-end": 3.0, "track-list": []})
     )
     reader.graph.playback.install_seed({"sub-text": "猫です"})
@@ -92,7 +91,7 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     assert attrs["op"] == "toggle"
 
 
-def test_mined_store_write_is_spanned(monkeypatch, tmp_path):
+def test_mined_store_write_is_spanned(monkeypatch, tmp_path, make_session):
     # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
     from types import SimpleNamespace
 
@@ -102,7 +101,7 @@ def test_mined_store_write_is_spanned(monkeypatch, tmp_path):
 
     spans = record_spans(monkeypatch)
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
-    reader = build_session(
+    reader = make_session(
         _FakeIPC({"sub-start": 1.0, "sub-end": 3.0}),
         services=SessionServices(
             anki=SimpleNamespace(),

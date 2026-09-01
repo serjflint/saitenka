@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from session_builder import build_session
 
 from saitenka.app.session import surfaces
 from saitenka.app.session.factory import SessionServices
@@ -161,7 +160,7 @@ def test_the_stuck_scroll_message_names_the_reason(state, expected):
     assert "nest_rect=" in str(excinfo.value)
 
 
-def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order():
+def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order(make_session):
     """The regression the live replicas kept hitting, without a display: the workload's own dictionary
     has to be in place *before* the cue resolves its entries.
 
@@ -176,7 +175,7 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
     mod = _jank_module()
     ipc = FakeIPC()
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
-    reader = build_session(ipc, services=SessionServices(dictionaries=mod.TallDS()))
+    reader = make_session(ipc, services=SessionServices(dictionaries=mod.TallDS()))
     try:
         reader.start()
         reader.pump()

@@ -152,12 +152,12 @@ def test_tooltip_show_span_attributes_the_cold_hover(monkeypatch):
     assert show.attrs["bands"] == 0
 
 
-def test_subtitle_render_span_is_emitted(monkeypatch):
+def test_subtitle_render_span_is_emitted(monkeypatch, make_session):
     # The subtitle-render path (every cue redraw; the `subtitle_render` bench signal) opens a span that
     # was produced but never asserted. Patch traced BEFORE set_subtitle so the render is captured.
     spans: list = []
     _patch_traced(monkeypatch, spans)
-    r = build_session(
+    r = make_session(
         FakeIPC(),
         services=SessionServices(
             dictionaries=_FakeDS(),
@@ -207,7 +207,9 @@ def test_move_over_word_shows_tooltip_and_switching_words():
     assert ui.hover == j, "resting on a different word must switch the tooltip to it"
 
 
-def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, monkeypatch):
+def test_main_flow_renders_with_caches_disabled_even_when_files_exist(
+    tmp_path, monkeypatch, make_session
+):
     # Opt-out of BOTH caches must beat use-when-available: a prebuilt file on disk is ignored, and the
     # live pipeline still renders the tooltip (the caches are pure accelerators, never load-bearing).
     from saitenka import mask_atlas
@@ -220,7 +222,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
     assert atlas is not None
     atlas.close()
 
-    r = build_session(
+    r = make_session(
         FakeIPC(),
         services=SessionServices(
             dictionaries=_FakeDS(),
@@ -239,9 +241,9 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
     assert ui.tip_shown  # the live pipeline renders the tooltip with no cache help
 
 
-def test_main_flow_renders_at_4k_without_caches():
+def test_main_flow_renders_at_4k_without_caches(make_session):
     # Cache-free AND scale ≠ 1: the reference-render → display-upscale path must stand on its own.
-    r = build_session(
+    r = make_session(
         FakeIPC(),
         services=SessionServices(
             dictionaries=_FakeDS(),
@@ -304,11 +306,11 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     )
 
 
-def test_phrase_reaches_panel_lookup(monkeypatch):
+def test_phrase_reaches_panel_lookup(monkeypatch, make_session):
     """Regression: the hovered word's multi-token phrase terms must reach the entry lookup as
     ``extra_terms``. The build once gated extra_terms on a visual toggle, so お休み never stacked —
     hovering お showed the bare 御 instead."""
-    r = build_session(
+    r = make_session(
         FakeIPC(),
         services=SessionServices(
             dictionaries=_FakeDS(),

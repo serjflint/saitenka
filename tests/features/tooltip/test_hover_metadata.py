@@ -7,7 +7,6 @@ from dataclasses import replace
 import pytest
 from driver import Driver
 from saitenka_tokenize.japanese import Token
-from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.features.tooltip import hover_metadata, tooltip, tooltip_controller
@@ -63,7 +62,7 @@ def test_metadata_scheduler_keeps_only_the_newest_queued_intent():
     assert [request.key.index for request in admitted] == [0, 2]
 
 
-def test_metadata_worker_resolves_off_the_event_thread():
+def test_metadata_worker_resolves_off_the_event_thread(make_session):
     event_thread = threading.get_ident()
     resolved_thread = None
 
@@ -77,7 +76,7 @@ def test_metadata_worker_resolves_off_the_event_thread():
 
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(ipc, services=SessionServices(dictionaries=Dictionary()))
+    reader = make_session(ipc, services=SessionServices(dictionaries=Dictionary()))
     reader.graph.subtitle_presentation.cue.replace_tokenized(
         tokens=[Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     )
@@ -93,7 +92,7 @@ def test_metadata_worker_resolves_off_the_event_thread():
         gateway.close()
 
 
-def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
+def test_metadata_completion_applies_on_the_owner_thread(monkeypatch, make_session):
     owner_thread = threading.get_ident()
     resolved_thread = None
     applied_thread = None
@@ -112,7 +111,7 @@ def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
 
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(ipc, services=SessionServices(dictionaries=Dictionary()))
+    reader = make_session(ipc, services=SessionServices(dictionaries=Dictionary()))
     monkeypatch.setattr(tooltip_controller.tooltip, "apply_hover_metadata", apply_metadata)
 
     try:
@@ -129,14 +128,14 @@ def test_metadata_completion_applies_on_the_owner_thread(monkeypatch):
         gateway.close()
 
 
-def test_metadata_completion_refuses_facts_that_changed_after_submission():
+def test_metadata_completion_refuses_facts_that_changed_after_submission(make_session):
     submitted = []
 
     def submitter(**kwargs):
         submitted.append(kwargs)
         return True
 
-    reader = build_session(
+    reader = make_session(
         FakeIPC(),
         infrastructure=SessionInfrastructure(
             tooltip_jobs=lambda jobs: replace(jobs, metadata=submitter),
@@ -204,7 +203,7 @@ def test_same_target_excuses_the_epochs_and_no_other_field(field, value, worth_r
     assert key.same_target(replace(key, **{field: value})) is worth_re_asking
 
 
-def test_a_hover_survives_the_prefetch_generation_its_own_arrival_bumps():
+def test_a_hover_survives_the_prefetch_generation_its_own_arrival_bumps(make_session):
     """The prefetch generation is a queue epoch, not the hovered word's identity.
 
     Engaging — pausing, or the cursor entering the video — is what `update_prefetch` re-keys on, so
@@ -215,7 +214,7 @@ def test_a_hover_survives_the_prefetch_generation_its_own_arrival_bumps():
     passes whichever of the three is doing the work.
     """
     submitted = []
-    reader = build_session(
+    reader = make_session(
         FakeIPC(),
         infrastructure=SessionInfrastructure(
             tooltip_jobs=lambda jobs: replace(
@@ -251,8 +250,8 @@ def test_a_hover_survives_the_prefetch_generation_its_own_arrival_bumps():
     assert [kwargs["request"].key.index for kwargs in submitted] == [0, 0]
 
 
-def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch):
-    reader = build_session(FakeIPC())
+def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch, make_session):
+    reader = make_session(FakeIPC())
 
     def unexpected_apply():
         raise AssertionError("uncorrelated completion assembled tooltip apply ports")
@@ -264,13 +263,13 @@ def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypa
     )
 
 
-def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypatch):
+def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypatch, make_session):
     class Dictionary:
         def has_term(self, _term: str) -> bool:
             raise AssertionError("dictionary probe ran on the event thread")
 
     submitted = []
-    reader = build_session(
+    reader = make_session(
         FakeIPC(),
         services=SessionServices(
             dictionaries=Dictionary(),

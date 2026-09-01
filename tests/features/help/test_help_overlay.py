@@ -1,7 +1,7 @@
 """In-player help uses effective bindings and remains playback-neutral."""
 
 from driver import Driver
-from session_builder import TestSession, build_session
+from session_builder import TestSession
 from util import FakeIPC, keybind_registry
 
 from saitenka.app.bindings import (
@@ -29,20 +29,20 @@ def _entries(reader: TestSession):
     ]
 
 
-def test_default_and_configured_help_keys_are_registered():
+def test_default_and_configured_help_keys_are_registered(make_session):
     default_ipc = FakeIPC()
-    build_session(default_ipc).graph.commands.install_input()
+    make_session(default_ipc).graph.commands.install_input()
     assert keybind_registry(default_ipc)["F1"] == "saitenka-toggle-help"
 
     custom_ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(help_key="Ctrl+h"))
-    build_session(custom_ipc, options=options).graph.commands.install_input()
+    make_session(custom_ipc, options=options).graph.commands.install_input()
     custom_binds = keybind_registry(custom_ipc)
     assert custom_binds["Ctrl+h"] == "saitenka-toggle-help"
     assert "F1" not in custom_binds
 
 
-def test_help_document_uses_effective_catalog_and_context_labels():
+def test_help_document_uses_effective_catalog_and_context_labels(make_session):
     options = ReaderOptions(
         keys=KeyOptions(
             help_key="Ctrl+h",
@@ -52,7 +52,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
             mine_key="Ctrl+x",
         )
     )
-    reader = build_session(
+    reader = make_session(
         FakeIPC(),
         services=SessionServices(
             anki=object(),
@@ -90,8 +90,8 @@ def test_help_document_uses_effective_catalog_and_context_labels():
     assert set(keybind_registry(reader.graph.ipc).items()) >= expected
 
 
-def test_small_osd_pages_and_repeats_navigation_hints():
-    reader = build_session(FakeIPC(), services=SessionServices(anki=object()))
+def test_small_osd_pages_and_repeats_navigation_hints(make_session):
+    reader = make_session(FakeIPC(), services=SessionServices(anki=object()))
     reader.graph.screen.osd = (480, 220)
     document = reader.graph.help.document()
 
@@ -110,9 +110,9 @@ def test_small_osd_pages_and_repeats_navigation_hints():
         assert image.height <= reader.graph.screen.osd[1]
 
 
-def test_ui_scale_enlarges_help_document():
-    normal = build_session(FakeIPC(), options=ReaderOptions())
-    enlarged = build_session(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
+def test_ui_scale_enlarges_help_document(make_session):
+    normal = make_session(FakeIPC(), options=ReaderOptions())
+    enlarged = make_session(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
     normal.graph.screen.osd = enlarged.graph.screen.osd = (1920, 1080)
 
     normal_document = normal.graph.help.document()
@@ -123,9 +123,9 @@ def test_ui_scale_enlarges_help_document():
     assert enlarged_document.scale == 1.5
 
 
-def test_toggle_navigation_and_escape_are_playback_neutral():
+def test_toggle_navigation_and_escape_are_playback_neutral(make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc, services=SessionServices(anki=object()))
+    reader = make_session(ipc, services=SessionServices(anki=object()))
     reader.graph.screen.osd = (480, 220)
 
     reader.command(HELP_TOGGLE_MSG)
@@ -142,9 +142,9 @@ def test_toggle_navigation_and_escape_are_playback_neutral():
     assert not [command for command in ipc.commands if command[0] in forbidden]
 
 
-def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
+def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch, make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc, services=SessionServices(anki=object()))
+    reader = make_session(ipc, services=SessionServices(anki=object()))
     hover_updates: list[str] = []
     actions: list[str] = []
     monkeypatch.setattr(tooltip, "update_hover", lambda *_a: hover_updates.append("hover"))
@@ -163,9 +163,9 @@ def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch):
     assert hover_updates == ["hover"]
 
 
-def test_closing_help_restores_active_tooltip_escape_binding():
+def test_closing_help_restores_active_tooltip_escape_binding(make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.tooltip.bind_keybindings()
 
     reader.command(HELP_TOGGLE_MSG)
@@ -175,9 +175,9 @@ def test_closing_help_restores_active_tooltip_escape_binding():
     assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-tip-close")
 
 
-def test_tooltip_teardown_does_not_steal_escape_while_help_is_open():
+def test_tooltip_teardown_does_not_steal_escape_while_help_is_open(make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.tooltip.bind_keybindings()
 
     reader.command(HELP_TOGGLE_MSG)
