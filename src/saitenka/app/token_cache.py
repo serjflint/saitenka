@@ -48,8 +48,7 @@ class TokenizedCue:
 
 class TokenCache:
     """Thread-safe LRU of ``source text → TokenizedCue``. Shared by the main thread (cue redraw) and
-    the prefetch workers, so — like :class:`~saitenka.app.dictionary.Dictionary._entry_cache` — every
-    mutation holds the lock (``OrderedDict`` get/move_to_end/setitem/popitem aren't atomic no-GIL)."""
+    the prefetch workers, so every mutation holds the lock (``OrderedDict`` get/move_to_end/setitem/popitem aren't atomic no-GIL)."""
 
     def __init__(self, maxsize: int = 512) -> None:
         self._data: OrderedDict[str, TokenizedCue] = OrderedDict()
