@@ -179,6 +179,23 @@ source_modules =
 forbidden_modules =
     saitenka_dict
 
+[importlinter:contract:mpv-transport-constructs-no-runtime-value]
+name = The mpv transport constructs no session-runtime value
+# The pair to runtime-core-independent: that one stops the core reaching down, this one stops the
+# transport reaching up. osd.py used to build EffectFinished/EffectOutcome behind function-local
+# imports — a real edge kept out of the module-level graph. Surface commands now cross as a command
+# tuple and a bool, and the app layer that owns the transaction mints the completion.
+#
+# Scoped to RUNTIME imports on purpose, hence the wording: exclude_type_checking_imports makes an
+# annotation invisible here, and ipc.py legitimately annotates an injected SessionLoop it never
+# constructs. So this forbids owning the vocabulary, not naming it — moving an import under
+# TYPE_CHECKING passes the gate and is exactly the evasion the deletion has to beat.
+type = forbidden
+source_modules =
+    saitenka.mpvio
+forbidden_modules =
+    saitenka.runtime
+
 [importlinter:contract:runtime-core-independent]
 name = Runtime core never imports app or mpv adapters
 type = forbidden

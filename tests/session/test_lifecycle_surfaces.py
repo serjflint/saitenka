@@ -101,6 +101,34 @@ def test_rejected_surface_submission_is_terminally_failed():
     assert surfaces.snapshot(OverlayId.LOADING).status is SurfaceStatus.FAILED
 
 
+class _RejectingIPC(util.FakeIPC):
+    """mpv answering `overlay-add` with a refusal — a bad format or a size it will not draw."""
+
+    def command(self, *args):
+        super().command(*args)
+        return {"error": "unsupported"}
+
+
+def test_surface_without_a_correlated_port_settles_on_what_mpv_answered():
+    """No `runtime_submit`: the command is issued and answered inline, so the outcome is one this
+    layer observed. It has to be read off the reply rather than assumed, or a refusal presents."""
+    ipc = util.FakeIPC()
+    surfaces = LifecycleSurfaces(Overlay(ipc))
+
+    surfaces.present(Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.LOADING)
+
+    assert ipc.commands[-1][0] == "overlay-add"
+    assert surfaces.snapshot(OverlayId.LOADING).status is SurfaceStatus.PRESENT
+
+
+def test_surface_mpv_refuses_inline_is_terminally_failed():
+    surfaces = LifecycleSurfaces(Overlay(_RejectingIPC()))
+
+    surfaces.present(Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.LOADING)
+
+    assert surfaces.snapshot(OverlayId.LOADING).status is SurfaceStatus.FAILED
+
+
 class _BlockingOverlay:
     def __init__(self) -> None:
         self.first_entered = threading.Event()
@@ -116,8 +144,15 @@ class _BlockingOverlay:
             self.release_first.wait()
         return PreparedOverlay(oid, Path(f"unused-{revision}"), (), ("overlay-add", oid))
 
-    def submit_surface_transaction(self, *, identity, **_kwargs):
+    @property
+    def runtime_submit(self):
+        return self.submit_runtime
+
+    def submit_runtime(self, *, identity, **_kwargs):
+        """Accept without settling — the port owns the completion, and this test only asks in which
+        order the two revisions reached it."""
         self.submitted.append(identity.revision)
+        return True
 
     def physical_oid(self, oid):
         return oid
@@ -187,7 +222,7 @@ def test_submission_exception_fails_revision_and_discards_staged_file():
 
 
 class _RemoveFailureOverlay(_BlockingOverlay):
-    def submit_surface_transaction(self, **_kwargs):
+    def submit_runtime(self, **_kwargs):
         raise OSError("adapter unavailable")
 
 

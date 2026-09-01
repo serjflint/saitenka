@@ -65,10 +65,15 @@ class FakeOverlay:
     def remove_lifecycle_now(self, oid):  # noqa: ARG002
         return {"error": "success"}
 
-    def submit_surface_transaction(self, *, owner, identity, command, on_finished):  # noqa: ARG002
+    @property
+    def runtime_submit(self):
+        return self._submit_runtime
+
+    def _submit_runtime(self, *, owner, identity, command, on_finished, **_kwargs):  # noqa: ARG002
         from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
         on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+        return True
 
     def show(self, image, x=0, y=0, oid=0):
         self.shown.append((image, x, y, oid))

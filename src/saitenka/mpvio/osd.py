@@ -192,49 +192,23 @@ class Overlay:
         self._staged_lifecycle_paths: set[Path] = set()
         #: Guards the path maps below plus `_live`. NOT `visible`/`ops` — no retirement reads them.
         self._state_lock = threading.Lock()
-        self._compat_effect_id = 1_000_000
 
-    def next_compat_effect_id(self):
-        from saitenka.runtime import EffectId
+    @property
+    def runtime_submit(self):
+        """The correlated-command port composition supplied, or ``None`` when surface writes go
+        straight over IPC. Read by the surface layer to decide who settles the transaction: the port
+        answers asynchronously, :meth:`apply_surface_command` answers inline."""
+        return self._runtime_submit
 
-        effect_id = EffectId(self._compat_effect_id)
-        self._compat_effect_id += 1
-        return effect_id
-
-    def submit_surface_transaction(
-        self, *, owner, identity, command: tuple[object, ...], on_finished
-    ) -> None:
-        from saitenka.runtime import EffectError, EffectFinished, EffectOutcome
-
-        submit = self._runtime_submit
-        if submit is not None:
-            accepted = submit(
-                owner=owner,
-                identity=identity,
-                command=command,
-                timeout_s=10.0,
-                on_finished=on_finished,
-            )
-            if accepted:
-                return
-            reply = {"error": "disconnected"}
-        elif not isinstance(command[1], int):
-            raise ValueError("surface command requires an integer overlay id")
-        elif command[0] == "overlay-add":
+    def apply_surface_command(self, command: tuple[object, ...]) -> bool:
+        """Issue a surface command directly over IPC; report whether mpv accepted it."""
+        if not isinstance(command[1], int):
+            raise TypeError("surface command requires an integer overlay id")
+        if command[0] == "overlay-add":
             reply = self._add(command[1], tuple(command[2:]))
         else:
-            logical_oid = command[1] - (self.id_base - 1)
-            reply = self.hide(logical_oid)
-        succeeded = reply.get("error") in {None, "success"}
-        on_finished(
-            EffectFinished(
-                self.next_compat_effect_id(),
-                owner,
-                identity,
-                EffectOutcome.SUCCEEDED if succeeded else EffectOutcome.FAILED,
-                error=None if succeeded else EffectError.INVALID_RESULT,
-            )
-        )
+            reply = self.hide(command[1] - (self.id_base - 1))
+        return reply.get("error") in {None, "success"}
 
     def physical_oid(self, oid: int) -> int:
         return self._oid(oid)
