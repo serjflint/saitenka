@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788252387470,
+  "lastUpdate": 1788257979216,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -12839,6 +12839,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.384621,
             "range": "3 replicas; min 1.20812; max 3.84489; MAD 0.176506; worst 3.84489",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8771537f3b8792f375ea5b9f3f7c425d1c9e41d6",
+          "message": "Merge pull request #477 from serjflint/fix/reading-orthography-match\n\nfix(dict): match a reading by its sound, not its spelling",
+          "timestamp": "2026-09-01T15:18:08+05:00",
+          "tree_id": "66adc14d7231d7ff591f69b890aafd859e61d7b4",
+          "url": "https://github.com/serjflint/saitenka/commit/8771537f3b8792f375ea5b9f3f7c425d1c9e41d6"
+        },
+        "date": 1788257978101,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.482026,
+            "range": "3 replicas; min 6.40058; max 6.90466; MAD 0.081447",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.936847,
+            "range": "3 replicas; min 8.71487; max 9.75641; MAD 0.221974; worst 9.75641",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.699106,
+            "range": "3 replicas; min 18.6278; max 20.8761; MAD 0.071267",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.978717,
+            "range": "3 replicas; min 18.7744; max 21.0923; MAD 0.204327; worst 21.0923",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.130998,
+            "range": "3 replicas; min 12.2148; max 13.381; MAD 0.249952",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.090657,
+            "range": "3 replicas; min 0.088783; max 0.123391; MAD 0.001874; worst 0.123391",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.803564,
+            "range": "3 replicas; min 39.3561; max 43.6902; MAD 0.447452; worst 43.6902",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.820727,
+            "range": "3 replicas; min 2.53672; max 2.88647; MAD 0.065746; worst 2.88647",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.098685,
+            "range": "3 replicas; min 0.999307; max 1.2132; MAD 0.099378; worst 1.2132",
             "unit": "ms"
           }
         ]
