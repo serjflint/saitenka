@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -315,14 +316,12 @@ def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
     assert created[1].closed
 
 
-def test_building_a_renderer_is_timed_and_reusing_one_is_not(monkeypatch) -> None:
+def test_building_a_renderer_is_timed_and_reusing_one_is_not() -> None:
     """The interval nothing measured. `render_ms` times `renderer.render()` and `extract_ms` a
     pure-Python walk, so a library init and a font scan fell between the two spans and read as
     free — which is how a per-cue cost got argued about from console noise instead of a number.
     Zero on a reuse, so the histogram measures construction rather than diluting it.
     """
-    from saitenka import otel_metrics
-
     spans: list[dict[str, object]] = []
 
     class _Span:
@@ -332,15 +331,21 @@ def test_building_a_renderer_is_timed_and_reusing_one_is_not(monkeypatch) -> Non
         def set(self, key: str, value: object) -> None:
             self.values[key] = value
 
-    @contextmanager
-    def record(_name: str, **attributes: str):
-        values: dict[str, object] = dict(attributes)
-        spans.append(values)
-        yield _Span(values)
+    class _RecordingTelemetry:
+        @contextmanager
+        def span(self, _name: str):
+            values: dict[str, object] = {}
+            spans.append(values)
+            yield _Span(values)
 
-    monkeypatch.setattr(otel_metrics, "traced", record)
+        def record(self, metric: str, milliseconds: float) -> None:
+            pass
+
     layers = Result((Layer(1, 1, b"\xff", 0x01020300, 10, 20),))
-    backend = LibassGeometryBackend(renderer_factory=lambda *_a, **_k: FakeRenderer(layers))
+    backend = LibassGeometryBackend(
+        renderer_factory=lambda *_a, **_k: FakeRenderer(layers),
+        telemetry=_RecordingTelemetry(),
+    )
     try:
         backend.render(request(palette_size=1))
         backend.render(request(palette_size=1))
@@ -351,6 +356,64 @@ def test_building_a_renderer_is_timed_and_reusing_one_is_not(monkeypatch) -> Non
     assert len(built) == 2
     assert built[0] >= 0.0
     assert built[1] == 0.0, "a cached renderer was billed for a construction that did not happen"
+
+
+def test_backend_reports_each_phase_it_times_to_the_injected_sink() -> None:
+    """The three histograms are the point of timing the phases at all. They used to be recorded by
+    name against module globals; behind a port a dropped one is silent, so the names are asserted."""
+    recorded: list[tuple[str, float]] = []
+
+    class _Telemetry:
+        @contextmanager
+        def span(self, _name: str):
+            yield SimpleNamespace(set=lambda _k, _v: None)
+
+        def record(self, metric: str, milliseconds: float) -> None:
+            recorded.append((metric, milliseconds))
+
+    layers = Result((Layer(1, 1, b"\xff", 0x01020300, 10, 20),))
+    backend = LibassGeometryBackend(
+        renderer_factory=lambda *_a, **_k: FakeRenderer(layers), telemetry=_Telemetry()
+    )
+    try:
+        backend.render(request(palette_size=1))
+        backend.render(request(palette_size=1))
+    finally:
+        backend.close()
+
+    names = [metric for metric, _ms in recorded]
+    assert names.count("renderer_build_ms") == 1, "the cached second render billed a construction"
+    assert names.count("render_ms") == 2
+    assert names.count("extract_ms") == 2
+    assert all(milliseconds >= 0.0 for _metric, milliseconds in recorded)
+
+
+def test_the_telemetry_adapter_reaches_the_histogram_each_name_stands_for() -> None:
+    """`otel_metrics` satisfies the port structurally — nothing type-checks the mapping, so a typo
+    would silently record nothing. Reads the globals per call, since `configure` rebinds them."""
+    from saitenka import otel_metrics
+
+    class _Histogram:
+        def __init__(self) -> None:
+            self.values: list[float] = []
+
+        def record(self, value: float) -> None:
+            self.values.append(value)
+
+    histograms = {name: _Histogram() for name in ("renderer_build", "render", "extract")}
+    with pytest.MonkeyPatch.context() as patch:
+        for name, histogram in histograms.items():
+            patch.setattr(otel_metrics, f"subtitle_geometry_{name}_ms", histogram)
+        for name in histograms:
+            otel_metrics.geometry_telemetry.record(f"{name}_ms", 1.5)
+
+    assert {name: histogram.values for name, histogram in histograms.items()} == {
+        "renderer_build": [1.5],
+        "render": [1.5],
+        "extract": [1.5],
+    }
+    with pytest.raises(ValueError, match="unknown geometry metric"):
+        otel_metrics.geometry_telemetry.record("prepare_ms", 1.0)
 
 
 def test_backend_forwards_every_font_source_to_the_renderer() -> None:

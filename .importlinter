@@ -15,6 +15,11 @@ forbidden_modules =
     saitenka.app
     saitenka.mpvio
     saitenka.render
+    # The last edge out, and the one blocking its own distribution: libass_backend recorded into
+    # otel_metrics' module globals, which `configure` rebinds — a library bound to the application's
+    # telemetry lifecycle. It now takes a sink through `subtitles.telemetry`, which otel_metrics
+    # satisfies structurally without importing back.
+    saitenka.otel_metrics
 
 [importlinter:contract:no-cycles]
 name = No import cycles among Saitenka's top-level packages

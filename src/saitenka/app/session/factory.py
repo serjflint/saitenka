@@ -200,9 +200,11 @@ def _geometry_backend(settings: SubtitleGeometryOptions):
     """
     if not settings.native_visible:
         return None
+    from saitenka import otel_metrics
     from saitenka.subtitles.libass_backend import LibassGeometryBackend
 
     return LibassGeometryBackend(
         library_path=Path(settings.library_path) if settings.library_path else None,
         renderer_cache_max=settings.cache_max,
+        telemetry=otel_metrics.geometry_telemetry,
     )
