@@ -109,13 +109,8 @@ def test_the_app_writes_only_its_own_key_value_rows():
 _APP_MODULES_THAT_QUERY_THE_DICTIONARY = {
     # The app's own handle: `media_for` and the `meta` key-value rows it owns.
     "app/dictdb.py",
-    # `FreqSource`/`PitchSource`, retiring into `Translator` once `occurrence_based` and
-    # `PitchAccent` have package homes. Its own docstring records that.
-    "app/dict_meta.py",
     # Diagnostics: a `seq IS NOT NULL` probe for the deep-link report.
     "app/doctor.py",
-    # Atlas prewarm: the most frequent terms, off any interactive path.
-    "app/prewarm.py",
 }
 
 

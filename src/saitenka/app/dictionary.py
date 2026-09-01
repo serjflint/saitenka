@@ -38,9 +38,6 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
         return []
 
 
-from saitenka_wordstate.fsrs import harmonic_of
-
-from saitenka.app.dict_meta import FreqSource, PitchSource
 from saitenka.app.dictionary_surface import (
     DEINFLECT_FORM_CAP as _DEINFLECT_FORM_CAP,
 )
@@ -129,11 +126,34 @@ def _empty_source() -> LookupSource:
     return Translator(EmptyDictionaryStore())
 
 
+def _occurrence_based(db: DictionaryDb, freq_rows: Sequence[DictRow]) -> frozenset[str]:
+    """Which of ``freq_rows`` store a per-corpus dense rank, from the mode the importer persisted.
+
+    Asked of the package rather than read out of the ``meta`` table here: the key's spelling is the
+    importer's business, and this module holding a copy of it is how the two-readers shape starts.
+    """
+    from saitenka_dict import DictionaryDatabase
+
+    wanted = {row.title for row in freq_rows}
+    if not wanted:
+        return frozenset()
+    return frozenset(
+        info.title
+        for info in DictionaryDatabase(db.path).list_dictionaries()
+        if info.title in wanted and dict(info.metadata).get("frequency_mode") == "occurrence-based"
+    )
+
+
 @dataclass
 class DictionarySet:
     dicts: list[Dictionary]
-    freqs: list[FreqSource] = field(default_factory=list)
-    pitches: list[PitchSource] = field(default_factory=list)
+    #: Titles only. These used to be `FreqSource` / `PitchSource` — a second reader of `term_meta`
+    #: alongside the store, with its own matching rules; what the set still needs from them is the
+    #: title it passes to the source.
+    freq_titles: list[str] = field(default_factory=list)
+    pitch_titles: list[str] = field(default_factory=list)
+    #: Of `freq_titles`, those whose rank is per-corpus dense rather than a real rank.
+    occurrence_based: frozenset[str] = frozenset()
     # Active profile's main language (#254) — routes the deinflection chain to the right rule set.
     # Yomitan's ``jp`` default keeps every existing JP path byte-identical.
     language: str = "jp"
@@ -150,8 +170,8 @@ class DictionarySet:
                 dict.fromkeys(
                     (
                         *(dictionary.title for dictionary in self.dicts),
-                        *(frequency.title for frequency in self.freqs),
-                        *(pitch.title for pitch in self.pitches),
+                        *self.freq_titles,
+                        *self.pitch_titles,
                     )
                 )
             )
@@ -164,6 +184,7 @@ class DictionarySet:
                         for dictionary in self.dicts
                         if _looks_like_jmdict(dictionary.title)
                     ),
+                    occurrence_based=self.occurrence_based,
                     language=self.language,
                     deinflected_forms=self._deinflected_candidates,
                     inflection_chain=self._source_inflection_chain,
@@ -205,8 +226,9 @@ class DictionarySet:
 
         return cls(
             dicts=[Dictionary(db, r) for r in dict_rows],
-            freqs=[FreqSource(db, r) for r in freq_rows],
-            pitches=[PitchSource(db, r) for r in pitch_rows],
+            freq_titles=[r.title for r in freq_rows],
+            pitch_titles=[r.title for r in pitch_rows],
+            occurrence_based=_occurrence_based(db, freq_rows),
             language=language,
             source=Translator(
                 SqliteDictionaryStore(
@@ -261,19 +283,10 @@ class DictionarySet:
         """The harmonic-mean rank of ``token`` across every **rank-based** frequency dictionary, or
         ``None`` when no such dictionary has the word.
 
-        A read-only view, so a caller that wants the blend asks for it instead of walking ``freqs``
-        and re-deciding which sources may be blended. An occurrence-based dictionary stores a
-        per-corpus dense rank on an incomparable scale (see :attr:`FreqSource.occurrence_based`), so
-        it stays in the per-dictionary pill row but never in the mean.
+        A read-only view, so a caller that wants the blend asks for it instead of walking the
+        frequency dictionaries and re-deciding which of them may be blended.
         """
-        forms = (token.lemma, token.surface, token.reading)
-        ranks = [
-            float(rank)
-            for source in self.freqs
-            if not source.occurrence_based
-            and (rank := source.rank(forms, token.reading)) is not None
-        ]
-        return harmonic_of(ranks)
+        return self._source_view().rareness_rank(token)
 
     def decoded_entry_count(self) -> int:
         """Decoded entries currently held by the active source's bounded per-dictionary LRUs."""

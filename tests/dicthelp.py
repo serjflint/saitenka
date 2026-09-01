@@ -12,7 +12,6 @@ import zipfile
 
 from saitenka_dict import FreqDict, JlptDict
 
-from saitenka.app.dict_meta import FreqSource, PitchSource
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import Dictionary, DictionarySet
 
@@ -62,16 +61,6 @@ def load_set(
     freq_rows = [d.import_zip(z, imported_at=AT) for z in freq_zips]
     pitch_rows = [d.import_zip(z, imported_at=AT) for z in pitch_zips]
     return DictionarySet.from_rows(d, dict_rows, freq_rows, pitch_rows)
-
-
-def load_freqsource(zip_path, *, on: DictionaryDb | None = None) -> FreqSource:
-    d = on or db()
-    return FreqSource(d, d.import_zip(zip_path, imported_at=AT))
-
-
-def load_pitchsource(zip_path, *, on: DictionaryDb | None = None) -> PitchSource:
-    d = on or db()
-    return PitchSource(d, d.import_zip(zip_path, imported_at=AT))
 
 
 def load_freqdict(zip_path, *, on: DictionaryDb | None = None) -> FreqDict:

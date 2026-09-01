@@ -47,8 +47,9 @@ from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
-    from saitenka.app.session.graph import SessionGraph
     from saitenka.mpvio.gateway import MpvGateway
+
+    from saitenka.app.session.graph import SessionGraph
     from saitenka.mpvio.ipc import MpvIPC
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
@@ -384,7 +385,7 @@ def _load_dict_set():
     ds = DictionarySet.from_db(
         db, dict_titles, list(cfg.get("freq") or []), list(cfg.get("pitch") or [])
     )
-    tag = f"{len(ds.dicts)} dicts + {len(ds.freqs)} freq + {len(ds.pitches)} pitch"
+    tag = f"{len(ds.dicts)} dicts + {len(ds.freq_titles)} freq + {len(ds.pitch_titles)} pitch"
     return ds, tag
 
 

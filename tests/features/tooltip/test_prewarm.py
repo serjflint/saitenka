@@ -197,7 +197,7 @@ def test_native_scale_survives_a_pathological_native_raster():
 
 
 def test_popular_terms_empty_without_freq_dicts():
-    ds = type("DS", (), {"freqs": []})()
+    ds = type("DS", (), {"freq_titles": []})()
     assert _popular_terms(ds, 100) == []
 
 

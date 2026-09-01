@@ -83,22 +83,14 @@ def _popular_terms(ds, limit: int) -> list[tuple[str, str]]:
     """The top ``limit`` ``(term, reading)`` by FREQUENCY rank across the configured freq dictionaries —
     the words a learner actually meets — de-duplicated by term, MOST-POPULAR FIRST. ``limit <= 0`` = ALL
     freq-ranked terms (``--limit 0``), for a full-coverage mask atlas (the render cache stays bounded by
-    its byte ceiling). Empty when no frequency dictionaries are configured (nothing to rank by)."""
-    sql_limit = limit if limit > 0 else -1  # SQLite LIMIT -1 = no limit
-    best: dict[str, tuple[str, int]] = {}
-    for fs in ds.freqs:
-        rows = fs.db.connection().execute(
-            "SELECT term, reading, rank FROM term_meta "
-            "WHERE dict_id=? AND mode='freq' AND rank>0 ORDER BY rank LIMIT ?",
-            (fs.dict_id, sql_limit),
-        )
-        for term, reading, rank in rows:
-            if term and (term not in best or rank < best[term][1]):
-                best[term] = (reading or "", rank)
-    ranked = sorted(best.items(), key=lambda kv: kv[1][1])
-    return [
-        (term, reading) for term, (reading, _rank) in (ranked if limit <= 0 else ranked[:limit])
-    ]
+    its byte ceiling). Empty when no frequency dictionaries are configured (nothing to rank by).
+
+    Ranking across dictionaries is one grouped query now, not a per-dictionary top-``limit`` merged
+    here: taking each dictionary's own head first could drop a word that only one list ranks well.
+    """
+    if not ds.freq_titles:
+        return []
+    return list(ds.source.frequent_terms(limit, tuple(ds.freq_titles)))
 
 
 class _HeadlessTooltipPreparation:

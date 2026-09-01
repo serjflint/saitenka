@@ -171,6 +171,13 @@ _PRONUNCIATION_QUERY = (
     "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
     "ORDER BY d.import_order, m.rowid"
 )
+_FREQUENT_TERMS_QUERY = (
+    "SELECT m.term, m.reading, MIN(m.rank) FROM term_meta m "
+    "JOIN dictionaries d ON d.id=m.dict_id "
+    "WHERE m.mode='freq' AND m.rank>0 "
+    "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
+    "GROUP BY m.term ORDER BY 3 LIMIT ?"
+)
 _KANJI_QUERY = (
     "SELECT d.id, d.title, d.import_order, k.rowid, k.chr, k.onyomi, k.kunyomi, "
     "k.tags, k.meanings, k.stats FROM kanji k JOIN dictionaries d ON d.id=k.dict_id "
@@ -444,6 +451,22 @@ class SqliteDictionaryStore:
             Frequency(title, rank if rank is not None else display or "", display, reading)
             for title, _term, reading, rank, display in prefer_term_keyed(rows, headwords)
         )
+
+    def frequent_terms(
+        self, limit: int, dictionaries: tuple[str, ...] = ()
+    ) -> tuple[tuple[str, str], ...]:
+        """The ``limit`` best-ranked ``(term, reading)`` across the given frequency dictionaries,
+        most popular first, one row per term. ``limit <= 0`` means all of them.
+
+        A term listed by several dictionaries is scored by its BEST rank, and SQLite's bare-column
+        rule pairs the surviving ``MIN(rank)`` with that same row's reading — so the reading is the
+        one the winning dictionary gave, not an arbitrary sibling's.
+        """
+        rows = self._conn().execute(
+            _FREQUENT_TERMS_QUERY,
+            (*self._dictionary_args(dictionaries), limit if limit > 0 else -1),
+        )
+        return tuple((term, reading or "") for term, reading, _rank in rows if term)
 
     def find_pronunciations(
         self, headwords: tuple[tuple[str, str], ...], dictionaries: tuple[str, ...]

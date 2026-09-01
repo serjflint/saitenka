@@ -168,7 +168,7 @@ def test_dict_set_built_from_db_titles_and_warns_on_missing(tmp_path, capsys):
     cfg = {"dicts": ["Def", "Nope"], "freq": ["Freq"]}
     scorer, _anki, _mc, dict_set = reader_deps.build_reader_deps(cfg, color=True)
     assert [d.title for d in dict_set.dicts] == ["Def"]  # imported title resolved
-    assert [f.title for f in dict_set.freqs] == ["Freq"]
+    assert dict_set.freq_titles == ["Freq"]
     assert scorer is not None and scorer.freq is not None  # freq[0] drove the coloring FreqDict
     assert "not imported" in capsys.readouterr().err  # the missing title was warned
 

@@ -250,14 +250,14 @@ def test_dict_set_signature_tracks_titles_and_db_stamp(tmp_path):
     db.write_bytes(b"x" * 10)
     ds = SimpleNamespace(
         dicts=[SimpleNamespace(title="Jitendex", db=SimpleNamespace(path=db))],
-        freqs=[SimpleNamespace(title="Freq")],
-        pitches=[],
+        freq_titles=["Freq"],
+        pitch_titles=[],
     )
     sig = dict_set_signature(ds)
     ds2 = SimpleNamespace(
         dicts=[SimpleNamespace(title="Other", db=SimpleNamespace(path=db))],
-        freqs=[SimpleNamespace(title="Freq")],
-        pitches=[],
+        freq_titles=["Freq"],
+        pitch_titles=[],
     )
     assert dict_set_signature(ds2) != sig  # a different dict title → different partition
     db.write_bytes(b"x" * 20)  # a re-import changes size → different stamp
@@ -311,8 +311,8 @@ class _TallDS:
     """A dict set stand-in whose every entry is tall (scrollable) so the cost gate keeps it."""
 
     dicts: ClassVar[list] = []
-    freqs: ClassVar[list] = []
-    pitches: ClassVar[list] = []
+    freq_titles: ClassVar[list] = []
+    pitch_titles: ClassVar[list] = []
 
     def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         para = "とても長い定義の本文で" * 8
@@ -402,8 +402,8 @@ class _ScrollTallDS:
     catch. Every word gets its own headword, so distinct tokens build distinct panels."""
 
     dicts: ClassVar[list] = []
-    freqs: ClassVar[list] = []
-    pitches: ClassVar[list] = []
+    freq_titles: ClassVar[list] = []
+    pitch_titles: ClassVar[list] = []
 
     def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         para = "とても長い定義の本文がここに縦へ縦へと伸びていく段落" * 6
@@ -691,43 +691,39 @@ def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     ]  # ONLY the nested re-blit; the base was not spuriously redrawn
 
 
-def test_popular_terms_ranks_by_frequency_dedupes_and_caps():
+def test_popular_terms_ranks_by_frequency_dedupes_and_caps(tmp_path):
     # The prewarm population is the top-N by freq rank, most-popular first, de-duped across freq dicts —
     # NOT the whole term dump. A term in two freq dicts takes its best (lowest) rank.
-    import contextlib
-    import sqlite3
+    import dicthelp
 
     from saitenka.app.prewarm import _popular_terms
 
-    with contextlib.ExitStack() as closing:
-
-        def _freq_source(rows, dict_id):
-            # closing(), not the connection itself: sqlite3's context manager commits, never closes.
-            conn = closing.enter_context(
-                contextlib.closing(sqlite3.connect(":memory:", check_same_thread=False))
-            )
-            conn.execute(
-                "CREATE TABLE term_meta (dict_id INT, mode TEXT, term TEXT, reading TEXT, rank INT)"
-            )
-            conn.executemany(
-                "INSERT INTO term_meta VALUES (?,?,?,?,?)",
-                [(dict_id, "freq", t, r, rk) for t, r, rk in rows],
-            )
-            conn.commit()
-            return SimpleNamespace(dict_id=dict_id, db=SimpleNamespace(connection=lambda: conn))
-
-        ds = SimpleNamespace(
-            freqs=[
-                _freq_source([("見る", "みる", 5), ("手", "て", 1), ("鬱", "うつ", 900)], 1),
-                _freq_source([("手", "て", 3), ("気", "き", 2)], 2),  # 手 also here, worse rank
-            ]
+    def _zip(name, rows):
+        return dicthelp.meta_zip(
+            tmp_path / f"{name}.zip",
+            name,
+            "freq",
+            [[term, {"reading": reading, "frequency": rank}] for term, reading, rank in rows],
         )
-        out = _popular_terms(ds, limit=3)
-    assert out == [
-        ("手", "て"),
-        ("気", "き"),
-        ("見る", "みる"),
-    ]  # rank 1,2,5 — 鬱(900) dropped by the cap
+
+    ds = dicthelp.load_set(
+        freq_zips=[
+            _zip("A", [("見る", "みる", 5), ("手", "て", 1), ("鬱", "うつ", 900)]),
+            _zip("B", [("手", "て", 3), ("気", "き", 2)]),  # 手 also here, worse rank
+        ]
+    )
+    # rank 1,2,5 — 鬱(900) dropped by the cap
+    assert _popular_terms(ds, limit=3) == [("手", "て"), ("気", "き"), ("見る", "みる")]
+
+
+def test_popular_terms_is_empty_without_a_frequency_dictionary():
+    """`limit <= 0` means "every ranked term", so an unguarded empty set would ask for the whole
+    corpus of a database that has no ranks in it."""
+    import dicthelp
+
+    from saitenka.app.prewarm import _popular_terms
+
+    assert _popular_terms(dicthelp.load_set(), limit=0) == []
 
 
 def test_content_key_is_stable_and_distinguishing():

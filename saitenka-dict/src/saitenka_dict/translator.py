@@ -16,6 +16,7 @@ from saitenka_dict.models import (
     TermResult,
     TermResultMode,
 )
+from saitenka_dict.protocols import FrequentTermSource
 from saitenka_dict.store import DictionaryStore, TermRecord, TermSearch
 
 
@@ -114,6 +115,14 @@ class Translator:
         self, headwords: tuple[tuple[str, str], ...], dictionaries: tuple[str, ...] = ()
     ):
         return self.store.find_pronunciations(headwords, dictionaries)
+
+    def frequent_terms(self, limit: int, dictionaries: tuple[str, ...] = ()):
+        """Empty for a store that cannot enumerate — the capability is optional (see
+        :class:`~saitenka_dict.protocols.FrequentTermSource`), and prewarm treats "nothing to rank
+        by" the same as "no frequency dictionary configured"."""
+        if not isinstance(self.store, FrequentTermSource):
+            return ()
+        return self.store.frequent_terms(limit, dictionaries)
 
     def _matches(self, query: TermQuery) -> tuple[tuple[_Match, ...], int]:
         for length in range(len(query.text), 0, -1):

@@ -122,9 +122,9 @@ def dict_set_signature(ds: DictionarySet) -> str:
         [
             *(d.title for d in ds.dicts),
             "|freq|",
-            *(f.title for f in ds.freqs),
+            *ds.freq_titles,
             "|pitch|",
-            *(p.title for p in ds.pitches),
+            *ds.pitch_titles,
         ]
     )
     stamp = ""

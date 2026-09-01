@@ -1,38 +1,24 @@
 """What the application decides *about* the dictionary DB's ``term_meta`` rows.
 
 The tables themselves are `saitenka-dict`'s (:class:`saitenka_dict.FreqDict` /
-:class:`saitenka_dict.JlptDict`, loaded once for the per-token colouring hot path). What stays here is
-policy the package has no business holding: which JLPT dictionary ships with the tool and where its
-asset lives, plus the two per-lookup tooltip sources.
+:class:`saitenka_dict.JlptDict`, loaded once for the per-token colouring hot path). What stays here
+is policy the package has no business holding: which JLPT dictionary ships with the tool, and where
+its asset lives.
 
-:class:`FreqSource` / :class:`PitchSource` still query directly. The blockers are not the two this
-docstring used to name — ``occurrence_based`` is written by the package itself
-(``importer`` persists ``freqmode:<id>``), so it is a missing accessor rather than missing data, and
-:class:`PitchAccent` is a three-field ``NamedTuple`` in :mod:`saitenka.model` with no render
-dependency, which :mod:`saitenka.app.source_adapter` already builds from the package's
-``Pronunciation``.
-
-The real one is a **matching difference**, measured in ``tests/test_dict_meta_differential.py``:
-these classes take bare forms and match ``term = ?`` against each of them (so a lemma, a surface
-form *and* a reading are all tried as terms), while the store selects ``m.term IN (terms)`` from
-``(term, reading)`` pairs built out of matched headwords. A row keyed by the kana reading is found
-here and missed there. Retiring :meth:`FreqSource.rank` — the one method of these two the product
-actually calls — therefore has to supply the reading as a term, or the harmonic blend silently
-loses every kana-keyed frequency dictionary.
-
-Only ``title``, ``occurrence_based`` and :meth:`FreqSource.rank` have production callers;
-:meth:`FreqSource.display` and all of :class:`PitchSource`'s query surface are exercised by tests
-alone.
+The two per-lookup tooltip sources that used to live here are gone. They were a second reader of
+``term_meta`` beside the store, with their own matching rules — the shape that put two schemas in
+one file (#472) — and the rules genuinely differed: a row keyed by the kana reading was found here
+and missed there, so a word could be scored by the blend while its pill stayed blank. Widening the
+store's selection (#476) made the two agree, which turned the deletion into a no-op rather than a
+swap that has to be argued.
 """
 
 from __future__ import annotations
 
-import json
 import zipfile
 from datetime import UTC
 from typing import TYPE_CHECKING
 
-from saitenka.model import PitchAccent
 from saitenka.resources import asset
 
 if TYPE_CHECKING:
@@ -40,7 +26,7 @@ if TYPE_CHECKING:
 
     from saitenka_dict import JlptDict
 
-    from saitenka.app.dictdb import DictionaryDb, DictRow
+    from saitenka.app.dictdb import DictionaryDb
 
 
 def bundled_jlpt_zip() -> Path:
@@ -78,120 +64,3 @@ def load_jlpt(db: DictionaryDb) -> JlptDict:
     from saitenka_dict import JlptDict as _JlptDict
 
     return _JlptDict.from_connection(db.connection(), ensure_bundled_jlpt(db))
-
-
-class FreqSource:
-    """One frequency dictionary as the tooltip shows it — a title + per-term display string(s), queried
-    from the consolidated DB on demand.
-
-    Keeps the human display value SubMiner shows in the pill row — the ``displayValue`` if present
-    (``"8912, 143969㋕"``), else the raw rank. A term can have several entries (some freq lists give
-    SUW+LUW → ``12813, 14117``); we join them, preferring entries whose reading matches the token's."""
-
-    def __init__(self, db: DictionaryDb, row: DictRow):
-        self.db = db
-        self.dict_id = row.id
-        self.title = row.title
-        # ORIGINAL frequency mode, persisted at import. Occurrence-based dicts store a per-corpus
-        # dense rank that is not comparable across dicts, so the harmonic-blend pill excludes them —
-        # only true rank-based lists may be blended. Missing key (pre-persist imports) → rank-based.
-        self.occurrence_based = db.meta_get(f"freqmode:{row.id}") == "occurrence"
-
-    def _entries_for_form(self, conn, form: str) -> list[tuple[str | None, str]]:
-        rows = conn.execute(
-            "SELECT reading, disp, rank FROM term_meta WHERE dict_id=? AND mode='freq' AND term=?",
-            (self.dict_id, form),
-        ).fetchall()
-        ents: list[tuple[str | None, str]] = []
-        for r, disp, rank in rows:
-            display = disp if disp is not None else (str(rank) if rank is not None else None)
-            if display is not None:
-                ents.append((r, display))
-        return ents
-
-    @staticmethod
-    def _dedup_preferring_reading(ents: list[tuple[str | None, str]], reading: str | None) -> str:
-        matched = [d for (r, d) in ents if reading is None or r is None or r == reading]
-        use = matched or [d for _, d in ents]
-        seen: set[str] = set()
-        out = [d for d in use if not (d in seen or seen.add(d))]  # type: ignore[func-returns-value]
-        return ", ".join(out)
-
-    def display(self, forms, reading: str | None = None) -> str | None:
-        """Display string for the first matching form. Prefer entries whose reading matches the
-        token's (disambiguates 本命/ほんめい), else fall back to all entries for that term."""
-        conn = self.db.connection()
-        for f in forms:
-            if not f:
-                continue
-            ents = self._entries_for_form(conn, f)
-            if not ents:
-                continue
-            return self._dedup_preferring_reading(ents, reading)
-        return None
-
-    def rank(self, forms, reading: str | None = None) -> int | None:
-        """Numeric rank for the first matching form (min across its entries) — the raw signal the
-        harmonic-blend pill consumes, parallel to :meth:`display` which formats it for the row. When
-        ``reading`` is given, entries whose reading matches it are preferred (so a multi-reading term
-        like 退く scores のく separately from しりぞく for the card tie-breaker), falling back to all
-        entries for the term when none match."""
-        conn = self.db.connection()
-        for f in forms:
-            if not f:
-                continue
-            rows = conn.execute(
-                "SELECT reading, rank FROM term_meta WHERE dict_id=? AND mode='freq' AND term=?",
-                (self.dict_id, f),
-            ).fetchall()
-            ranks = [
-                rk
-                for r, rk in rows
-                if rk is not None and rk > 0 and (reading is None or r is None or r == reading)
-            ]
-            use = ranks or [rk for _, rk in rows if rk is not None and rk > 0]
-            if use:
-                return min(use)
-        return None
-
-
-def _to_accent(a) -> PitchAccent:
-    """Normalise one stored accent — a bare ``int`` (plain dict) or a ``{"p","d","n"}`` object (NHK/
-    Kanjium, with devoice/nasal) — into a :class:`PitchAccent`."""
-    if isinstance(a, dict):
-        return PitchAccent(a["p"], tuple(a.get("d", ())), tuple(a.get("n", ())))
-    return PitchAccent(a)
-
-
-class PitchSource:
-    """A pitch-accent dictionary → the ``reading [positions]`` label the tooltip shows, from the DB."""
-
-    def __init__(self, db: DictionaryDb, row: DictRow):
-        self.db = db
-        self.dict_id = row.id
-        self.title = row.title
-
-    def accents(self, forms, _reading: str | None = None) -> tuple[str, list[PitchAccent]] | None:
-        """Raw (reading, accents) for the first matching form — the pitch-graph input. Matches by term
-        OR reading (a pitch dict is keyed by both). Each accent is a :class:`PitchAccent` carrying the
-        downstep position plus any NHK/Kanjium devoice/nasal mora indices; a plain accent dict stores
-        bare ints, normalised here to ``PitchAccent(n)``."""
-        conn = self.db.connection()
-        for f in forms:
-            if not f:
-                continue
-            row = conn.execute(
-                "SELECT reading, positions FROM term_meta WHERE dict_id=? AND mode='pitch' "
-                "AND (term=? OR reading=?) LIMIT 1",
-                (self.dict_id, f, f),
-            ).fetchone()
-            if row is not None:
-                return (row[0], [_to_accent(a) for a in json.loads(row[1])])
-        return None
-
-    def display(self, forms, reading: str | None = None) -> str | None:
-        got = self.accents(forms, reading)
-        if got is None:
-            return None
-        r, accents = got
-        return f"{r} [{','.join(str(a.position) for a in accents)}]"

@@ -52,6 +52,20 @@ class FrequencySource(Protocol):
 
 
 @runtime_checkable
+class FrequentTermSource(Protocol):
+    """Ranked-corpus enumeration, kept off :class:`FrequencySource` on purpose.
+
+    Both are runtime-checkable, so a member added to the per-word protocol silently un-matches every
+    source that answers lookups but cannot enumerate — the prewarm capability is optional, and a
+    separate protocol is what says so.
+    """
+
+    def frequent_terms(
+        self, limit: int, dictionaries: tuple[str, ...] = ()
+    ) -> tuple[tuple[str, str], ...]: ...
+
+
+@runtime_checkable
 class PronunciationSource(Protocol):
     def pronunciations_for(
         self, headwords: tuple[tuple[str, str], ...], dictionaries: tuple[str, ...] = ()

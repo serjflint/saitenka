@@ -150,8 +150,8 @@ def test_persistent_signature_tracks_the_captured_dictionary_identity() -> None:
     def inputs(label: str) -> TooltipPreparationInputs:
         dictionary = SimpleNamespace(
             dicts=(),
-            freqs=(SimpleNamespace(title=label),),
-            pitches=(),
+            freq_titles=(label,),
+            pitch_titles=(),
         )
         return TooltipPreparationInputs(panels, dictionary)  # type: ignore[arg-type]
 
