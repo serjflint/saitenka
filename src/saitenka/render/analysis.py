@@ -1,4 +1,10 @@
-"""Pillow renderer for the static episode-analysis saitenka."""
+"""Pillow renderer for the static episode-analysis overlay.
+
+Draws label/value rows; it does not know what the numbers mean. Turning an ``EpisodeAnalysis`` into
+rows is the analysis feature's job (``features/analysis/analysis_rows.py``) — this module used to
+take the analysis object itself, which made a renderer unreadable without the application it draws
+for, purely through a type annotation.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +15,7 @@ from PIL import Image, ImageDraw
 from saitenka import fonts
 
 if TYPE_CHECKING:
-    from saitenka.app.features.analysis.episode_analysis import EpisodeAnalysis
+    from collections.abc import Sequence
 
 BG = (13, 18, 26, 248)
 ROW_BG = (25, 33, 45, 235)
@@ -22,43 +28,8 @@ def _font(size: int, weight: int = 400):
     return fonts.load(fonts.FontSpec(fonts.FONT_FILES[0], size, weight))
 
 
-def _percent(value: float) -> str:
-    return f"{value * 100:.1f}%"
-
-
-def _distribution(value) -> str:
-    compact = {"Unranked": "other", **{f"Band {i}": f"B{i}" for i in range(1, 6)}}
-    return " · ".join(f"{compact.get(label, label)} {count}" for label, count in value if count)
-
-
-def _rows(result: EpisodeAnalysis | None, status: str) -> tuple[tuple[str, str], ...]:
-    if result is None:
-        return ((status, ""),)
-    return (
-        ("Sentences / content tokens", f"{result.sentence_count} / {result.content_token_count}"),
-        ("Unique lemmas / kanji", f"{len(result.unique_lemmas)} / {len(result.unique_kanji)}"),
-        ("Unique unknown lemmas", str(len(result.unknown_lemmas))),
-        ("Known token coverage", _percent(result.known_token_coverage)),
-        ("Known type coverage", _percent(result.known_type_coverage)),
-        ("N+1 / N+2 sentences", f"{result.n_plus_one_count} / {result.n_plus_two_count}"),
-        (
-            "JLPT",
-            _distribution(result.jlpt_distribution)
-            if result.jlpt_distribution is not None
-            else "source unavailable",
-        ),
-        (
-            "Frequency",
-            _distribution(result.frequency_distribution)
-            if result.frequency_distribution is not None
-            else "source unavailable",
-        ),
-    )
-
-
 def render_analysis(
-    result: EpisodeAnalysis | None,
-    status: str,
+    rows: Sequence[tuple[str, str]],
     *,
     osd: tuple[int, int],
     close_key: str,
@@ -68,7 +39,6 @@ def render_analysis(
         return max(1, round(value * scale))
 
     width = max(px(320), min(px(680), osd[0] - px(32)))
-    rows = _rows(result, status)
     height = px(78) + len(rows) * px(40) + px(38)
     image = Image.new("RGBA", (width, height), BG)
     draw = ImageDraw.Draw(image)
