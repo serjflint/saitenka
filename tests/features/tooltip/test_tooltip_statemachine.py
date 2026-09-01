@@ -231,6 +231,14 @@ class TooltipSession(RuleBasedStateMachine):
         if self.r.tooltip.surface_state().nest.state is not None:
             _assert_agrees(self.session, nested=True)
 
+    def teardown(self) -> None:
+        """Release this example's session; `__init__` builds one per example.
+
+        A session's worker threads root everything it owns, and the conftest sweep fires once per
+        *test* — a state machine is one test — so without this every example's graph stays live.
+        """
+        self.session.close()
+
 
 TestTooltipSession = pytest.mark.integration(TooltipSession.TestCase)
 
