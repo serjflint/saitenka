@@ -296,7 +296,11 @@ def test_blocking_adapter_timeout_bounds_the_whole_operation() -> None:
                 priority=AnnotationPriority.LOOKAHEAD,
                 timeout=0.01,
             )
-        assert tokenizer.started.is_set()
+        # Bounded wait, not is_set(): the claim is that the timeout bounded work that had really
+        # begun, not that the worker had been scheduled within the 10ms the timeout allows. Under a
+        # loaded gate the submitter thread can dequeue a moment later, which is not the bug this
+        # asserts against.
+        assert tokenizer.started.wait(2)
     finally:
         tokenizer.release.set()
         coordinator.close()

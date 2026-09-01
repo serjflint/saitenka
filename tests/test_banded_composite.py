@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw
 from saitenka import fonts
 from saitenka.mpvio.osd import to_bgra_array
 from saitenka.panel import Theme, compose_panel
+from saitenka.render import banded
 from saitenka.render.banded import composite_window
 from saitenka.render.window import build_offsets
 
@@ -126,3 +127,24 @@ def test_premultiplied_disjoint_numpy_copy_matches_reference(col):
         scroll : scroll + viewport
     ]
     assert np.array_equal(out, ref)
+
+
+def test_a_band_inflates_with_the_codec_that_wrote_it(monkeypatch):
+    """A band carries its codec, so the reader never assumes its own.
+
+    zstd is 3.14+ only and the band renderer can run in a process pool, so "written by zlib, read
+    where zstd exists" is a real pairing. Only the zstd arm runs on 3.14+ and only the zlib arm on
+    3.13, so without driving both here the fallback ships untested on every leg that could reach it.
+    """
+    size = (64, 48)
+    raw = Image.new("RGBA", size, (12, 34, 56, 255)).tobytes()
+
+    by_zstd = banded.PackedPixels.pack(raw, size)
+    monkeypatch.setattr(banded, "_zstd", None)
+    by_zlib = banded.PackedPixels.pack(raw, size)
+
+    assert (by_zstd.codec, by_zlib.codec) == ("zstd", "zlib")
+    assert by_zlib.inflate() == raw  # zlib writer, zlib-only reader
+    monkeypatch.undo()
+    assert by_zlib.inflate() == raw  # zlib writer, zstd-capable reader
+    assert by_zstd.inflate() == raw

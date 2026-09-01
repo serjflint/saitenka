@@ -651,7 +651,7 @@ the code; the configuration reference owns the user-facing tuning guidance.
 | Base tooltip viewport fraction | `tip_max_frac = 0.4` | `TooltipOptions` |
 | Retained panels | `panel_cache_max = 128` | `TooltipOptions` |
 | Retained bands per panel | `band_cache_max = 128` | `TooltipOptions` |
-| Raw-band estimate ceiling | `raw_band_ceiling_mb = 100` MiB | `TooltipOptions` |
+| Raw-band estimate ceiling | `raw_band_ceiling_mb = 0.1` MiB | `TooltipOptions` |
 | Decoded records | `entry_cache_max = 256` per dictionary | `DictDbOptions` |
 | Tokenized cues | `token_cache_max = 2500` | `PerfOptions` |
 | Decode-warm cue lookahead | `prefetch_lookahead = 0` | `PerfOptions` |
