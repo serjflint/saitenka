@@ -40,6 +40,12 @@ class HoverMetadataKey:
         entering the video — so the first hover after the pointer arrives bumps the epoch its own
         in-flight request was stamped with. Counting that as a different target dropped the answer
         and declined to ask again, which is a tooltip that never appears at all.
+
+        The re-ask costs a second identical round trip, because `hover_key` still carries the epoch
+        and so still fails the equality that decides whether to *apply*. Nothing in the resolver
+        reads the epoch, so that field is arguably redundant there too — but removing it widens what
+        may be applied, where excusing it here only widens what may be asked again. Kept as the
+        conservative half; it is one off-thread lookup on the first hover, not per frame.
         """
         mine = (self.dependency_generation, self.cue_identity, self.index)
         theirs = (other.dependency_generation, other.cue_identity, other.index)

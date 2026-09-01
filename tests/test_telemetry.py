@@ -196,8 +196,14 @@ def test_configure_writes_counter_tracks_into_the_trace_file(tmp_path):
     for _ in range(60):
         trace_path = telemetry.latest_trace(export)  # timestamped per-session file
         if trace_path is not None and trace_path.exists():
-            data = json.loads(trace_path.read_text())
-            if any(e["ph"] == "C" for e in data["traceEvents"]):
+            try:
+                data = json.loads(trace_path.read_text())
+            except json.JSONDecodeError:
+                # The file existing is not the writer having finished a flush; a read landing
+                # mid-append is a poll that came early, not a failure. Retry rather than raise,
+                # or the whole poll loop is decided by one unlucky interleaving.
+                data = None
+            if data is not None and any(e["ph"] == "C" for e in data["traceEvents"]):
                 break
         time_mod.sleep(0.1)
     else:

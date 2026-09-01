@@ -202,6 +202,11 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order()
         assert view.state is not None
         assert view.state.full_height > view.view_h, mod._why_stuck(reader.graph.tooltip)
         mod._scroll_four(reader.graph.tooltip, reader.pump)  # raises if the viewport did not move
+        # Resolve the repaint target against a REAL graph. `test_live_latency_boundary_repaints_the
+        # _overlay` hands `_present_overlay` a double, so it stayed green for the whole period the
+        # harness asked the graph for a member that no longer existed — the AttributeError could only
+        # surface in the weekly live job, behind a step that was failing for its own reasons.
+        mod._present_overlay(reader.graph.lifecycle_surfaces)
     finally:
         reader.close()
 

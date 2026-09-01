@@ -4,6 +4,7 @@ import threading
 import time
 from dataclasses import replace
 
+import pytest
 from driver import Driver
 from saitenka_tokenize.japanese import Token
 from session_builder import build_session
@@ -178,6 +179,29 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
     assert len(submitted) == 1
     assert reader.graph.tooltip.observation().metadata.terms == ()
     assert reader.graph.tooltip.surface_state().view.state is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "worth_re_asking"),
+    [
+        ("generation", 99, True),  # prefetch queue epoch — the hover's own arrival bumps it
+        ("mined_generation", 99, True),  # the mined set moved; the word did not
+        ("dependency_generation", 99, False),  # different dictionaries, so a different answer
+        ("cue_identity", "another-cue", False),
+        ("index", 7, False),
+        ("job_id", 7, False),
+    ],
+)
+def test_same_target_excuses_the_epochs_and_no_other_field(field, value, worth_re_asking):
+    """Pin every discriminator, not just the one that last moved.
+
+    `same_target` decides whether a stale result means "ask again" or "that was a different word".
+    Widening it is how a wrong tooltip gets shown; narrowing it is how a tooltip goes missing. Both
+    edits are one tuple element, and before this test either could be made with the suite green.
+    """
+    key = HoverMetadataKey(1, 1, 1, "cue", 0, job_id=1)
+
+    assert key.same_target(replace(key, **{field: value})) is worth_re_asking
 
 
 def test_a_hover_survives_the_prefetch_generation_its_own_arrival_bumps():

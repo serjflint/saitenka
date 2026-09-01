@@ -41,10 +41,17 @@ ALLOWED_FAILS = {"mpv", "ffmpeg"}
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
     print(f"$ {' '.join(cmd)}", flush=True)
+    # NO_COLOR: uv styles paths even when stdout is a pipe, and the escapes land inside the string.
+    # A caller treating stdout as a path then holds one that cannot exist — loudly in `_resolve_exe`,
+    # silently in `_editable_install_present`, which reports "no editable install" and skips the
+    # restore. Set here rather than per call so the next stdout-parsing caller inherits it.
+    env = {**os.environ, "NO_COLOR": "1", **kw.pop("env", {})}
     # Force UTF-8: `text=True` alone decodes with the platform locale (cp1252 on Windows), which chokes
     # on the CLI's non-ASCII help/doctor output (UnicodeDecodeError → stdout=None). Same trap as the
     # repo's subprocess-utf8-encoding ast-grep rule.
-    return subprocess.run(cmd, encoding="utf-8", errors="replace", capture_output=True, **kw)
+    return subprocess.run(
+        cmd, encoding="utf-8", errors="replace", capture_output=True, env=env, **kw
+    )
 
 
 _REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9._-]+")
@@ -172,12 +179,7 @@ def _restore_editable() -> None:
 
 
 def _resolve_exe() -> Path:
-    # NO_COLOR: uv styles this path even when stdout is a pipe, and the escapes land inside the
-    # string — `Path("\x1b[36m/Users/...")` simply never exists, so the smoke fails claiming the
-    # install produced no executable. CI happens not to colour, which is why it only bites locally.
-    bindir = _run(
-        ["uv", "tool", "dir", "--bin"], env={**os.environ, "NO_COLOR": "1"}
-    ).stdout.strip()
+    bindir = _run(["uv", "tool", "dir", "--bin"]).stdout.strip()
     if bindir and (exe := Path(bindir) / EXE_NAME).exists():
         return exe
     sys.exit(f"installed `{EXE_NAME}` not found under `uv tool dir --bin` ({bindir!r})")

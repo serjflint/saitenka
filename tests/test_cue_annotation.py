@@ -222,6 +222,22 @@ def _wait_result(results):
     raise AssertionError("annotation result did not arrive")
 
 
+def _wait_calls(tokenizer, count: int) -> list[str]:
+    """Block until the workers have recorded ``count`` tokenize calls, then return them.
+
+    A result arriving says its own job finished, not that every job has. Reading `calls` off the
+    back of one job's completion asserts an ordering against a list another thread is still
+    appending to, which fails as `['current'] == ['current', 'episode']` whenever the second worker
+    is a moment behind.
+    """
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        if len(tokenizer.calls) >= count:
+            return tokenizer.calls[:count]
+        time.sleep(0.001)
+    raise AssertionError(f"expected {count} tokenize calls, saw {tokenizer.calls}")
+
+
 def test_settled_no_dictionary_still_tokenizes_and_scores_without_attestation():
     tokenizer = _Tokenizer()
 
@@ -603,7 +619,7 @@ def test_current_work_precedes_an_already_queued_episode_job():
         blocker.release.set()
         result = _wait_result(results)
         assert result.identity == _identity("current")
-        assert tokenizer.calls[:2] == ["current", "episode"]
+        assert _wait_calls(tokenizer, 2) == ["current", "episode"]
     finally:
         blocker.release.set()
         coordinator.close()
