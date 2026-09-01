@@ -2,7 +2,6 @@
 
 import pytest
 import util
-from session_builder import build_session
 from util import RecordingRasterProvider, keybind_registry
 
 from saitenka.app import bindings as app_bindings
@@ -37,15 +36,15 @@ class _SpyRenderer(NullRenderer):
         self._on_draw(request)
 
 
-def test_full_annotations_remain_the_default():
-    reader = build_session(FakeIPC())
+def test_full_annotations_remain_the_default(make_session):
+    reader = make_session(FakeIPC())
 
     assert reader.graph.annotation.view.mode == "full"
     assert ReaderOptions().keys.annotation_key == "Alt+a"
 
 
-def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
-    reader = build_session(
+def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch, make_session):
+    reader = make_session(
         FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
     )
     reader.graph.playback.install_seed({"sub-text": "猫"})
@@ -69,12 +68,12 @@ def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
     ]
 
 
-def test_hover_mode_still_scores_each_new_cue(monkeypatch):
+def test_hover_mode_still_scores_each_new_cue(monkeypatch, make_session):
     class Scorer:
         def score_line(self, tokens):
             return [f"score:{token.surface}" for token in tokens]
 
-    reader = build_session(
+    reader = make_session(
         FakeIPC(),
         services=SessionServices(
             scorer=Scorer(),
@@ -88,9 +87,9 @@ def test_hover_mode_still_scores_each_new_cue(monkeypatch):
     assert reader.graph.subtitle_presentation.cue.current.styles == ["score:猫"]
 
 
-def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
+def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch, make_session):
     ipc = FakeIPC({"mouse-pos": {"hover": True, "x": 50, "y": 50}})
-    reader = build_session(ipc, options=ReaderOptions().with_overrides(hover_switch_delay=10.0))
+    reader = make_session(ipc, options=ReaderOptions().with_overrides(hover_switch_delay=10.0))
     reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object(), object()])
     reader.graph.tooltip.select(0)
     calls = []
@@ -113,10 +112,10 @@ def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch):
     assert reader.graph.tooltip.observation().selected == 0
 
 
-def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch):
+def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch, make_session):
     ipc = FakeIPC()
     options = ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover", pause_on_tooltip=False))
-    reader = build_session(ipc, options=options)
+    reader = make_session(ipc, options=options)
     reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object()])
     redrawn = []
     monkeypatch.setattr(
@@ -132,9 +131,9 @@ def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatc
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
 
-def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
+def test_leaving_subtitle_restores_neutral_presentation(monkeypatch, make_session):
     ipc = FakeIPC({"mouse-pos": {"hover": False, "x": 50, "y": 50}})
-    reader = build_session(
+    reader = make_session(
         ipc, options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
     )
     reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object()])
@@ -155,8 +154,8 @@ def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
     assert states == [False]
 
 
-def test_cue_change_resets_hover_only_presentation(monkeypatch):
-    reader = build_session(
+def test_cue_change_resets_hover_only_presentation(monkeypatch, make_session):
+    reader = make_session(
         FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
     )
     reader.graph.annotation.set_hover_revealed(revealed=True)
@@ -172,9 +171,9 @@ def test_cue_change_resets_hover_only_presentation(monkeypatch):
     assert states == [False]
 
 
-def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
+def test_toggle_changes_presentation_without_playback_commands(monkeypatch, make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.playback.install_seed({"sub-text": "猫"})
     drawn = []
     toasts = []
@@ -197,8 +196,8 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
     assert not any(command[0] in {"set_property", "seek", "sub-seek"} for command in ipc.commands)
 
 
-def test_toggle_remains_available_while_cue_identity_is_retired():
-    reader = build_session(FakeIPC(), infrastructure=SessionInfrastructure(renderer=NullRenderer()))
+def test_toggle_remains_available_while_cue_identity_is_retired(make_session):
+    reader = make_session(FakeIPC(), infrastructure=SessionInfrastructure(renderer=NullRenderer()))
     reader.graph.cue.mark_identity_installed()
 
     reader.command(ANNOTATION_MSG)
@@ -206,18 +205,18 @@ def test_toggle_remains_available_while_cue_identity_is_retired():
     assert reader.graph.annotation.view.mode == "hover"
 
 
-def test_annotation_key_is_configurable():
+def test_annotation_key_is_configurable(make_session):
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(annotation_key="Ctrl+a"))
 
-    build_session(ipc, options=options).graph.commands.install_input()
+    make_session(ipc, options=options).graph.commands.install_input()
 
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Ctrl+a"] == "script-message saitenka-toggle-annotations"
 
 
-def test_unknown_initial_annotation_mode_is_rejected():
+def test_unknown_initial_annotation_mode_is_rejected(make_session):
     options = ReaderOptions(tooltip=TooltipOptions(annotation_mode="invalid"))  # type: ignore[arg-type]
 
     with pytest.raises(ValueError, match="unknown annotation mode"):
-        build_session(FakeIPC(), options=options)
+        make_session(FakeIPC(), options=options)

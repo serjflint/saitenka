@@ -112,11 +112,11 @@ def _drain_until(reader: TestSession, predicate) -> None:
     assert predicate()
 
 
-def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes():
+def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(make_session):
     ipc = RuntimeFakeIPC()
     ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.screen.osd = (1920, 1080)
     old_started = threading.Event()
     old_release = threading.Event()
@@ -159,10 +159,10 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
         gateway.close()
 
 
-def test_subtitle_picker_lane_rejects_work_beyond_its_bound():
+def test_subtitle_picker_lane_rejects_work_beyond_its_bound(make_session):
     ipc = RuntimeFakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     release = threading.Event()
     started = [threading.Event(), threading.Event()]
     start_lock = threading.Lock()
@@ -201,11 +201,11 @@ def test_subtitle_picker_lane_rejects_work_beyond_its_bound():
         gateway.close()
 
 
-def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
+def test_episode_rebind_closes_loading_picker_and_rejects_old_listing(make_session):
     ipc = RuntimeFakeIPC()
     ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.screen.osd = (1920, 1080)
     started = threading.Event()
     release = threading.Event()

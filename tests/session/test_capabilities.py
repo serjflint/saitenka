@@ -4,7 +4,6 @@ import threading
 import time
 
 from saitenka_tokenize.japanese import Token
-from session_builder import build_session
 from util import FakeIPC, await_ready, bare_gateway, session_gateway
 
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
@@ -90,7 +89,7 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     assert probe.value is True
 
 
-def test_reader_construction_does_not_run_tts_probe(monkeypatch):
+def test_reader_construction_does_not_run_tts_probe(monkeypatch, make_session):
     called = False
 
     def probe() -> bool:
@@ -99,7 +98,7 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
         return True
 
     monkeypatch.setattr("saitenka.app.session.builder.tts_available", probe)
-    reader = build_session(FakeIPC())
+    reader = make_session(FakeIPC())
     try:
         assert called is False
         assert reader.graph.tooltip.panel_style.speak_button is False
@@ -107,13 +106,13 @@ def test_reader_construction_does_not_run_tts_probe(monkeypatch):
         reader.close()
 
 
-def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
+def test_late_tts_result_changes_panel_cache_identity(monkeypatch, make_session):
     release = threading.Event()
     monkeypatch.setattr(
         "saitenka.app.session.builder.tts_available",
         lambda: release.wait(1) or True,
     )
-    reader = build_session(FakeIPC())
+    reader = make_session(FakeIPC())
     token = Token("猫", "猫", "ネコ", "名詞", 0, 1)
     try:
         before = panel_key(reader.graph.tooltip.panel_ports, token, "猫")
@@ -138,7 +137,9 @@ def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
         reader.close()
 
 
-def test_runtime_capability_completion_changes_reader_only_after_event_delivery(monkeypatch):
+def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
+    monkeypatch, make_session
+):
     finished = threading.Event()
 
     def probe() -> bool:
@@ -148,7 +149,7 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
     monkeypatch.setattr("saitenka.app.session.builder.tts_available", probe)
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     try:
         reader.graph.recurrence.refresh_capabilities()
         assert finished.wait(1.0)

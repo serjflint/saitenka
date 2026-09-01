@@ -184,8 +184,8 @@ def test_renderer_draws_plain_while_a_cue_is_pending():
 
 
 @pytest.mark.timeout(5)
-def test_annotation_failure_keeps_plain_subtitle_on_later_redraw():
-    reader = build_session(
+def test_annotation_failure_keeps_plain_subtitle_on_later_redraw(make_session):
+    reader = make_session(
         _InlineAnnotationIPC(), services=SessionServices(dictionaries=_ExistsDS())
     )
     reader.graph.screen.osd = (1920, 1080)

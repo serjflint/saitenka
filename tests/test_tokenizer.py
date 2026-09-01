@@ -119,8 +119,8 @@ def test_unidic_merge_dict_compounds_matches_module_function():
     )
 
 
-def test_reader_owns_unidic_tokenizer_by_default():
-    reader = build_session(FakeIPC())
+def test_reader_owns_unidic_tokenizer_by_default(make_session):
+    reader = make_session(FakeIPC())
     assert reader.graph.profile.profile.tokenizer.name == "unidic"
 
 
@@ -144,7 +144,7 @@ class _SpyTokenizer(_FakeTokenizer):
         return super().phrase_terms(tokens, index, has_term)
 
 
-def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
+def test_swapped_tokenizer_reroutes_tooltip_phrase_probing(make_session):
     """A profile swap (``use_tokenizer``) must reroute the base tooltip's hover phrase-probe through
     the NEW strategy, not the JP module functions directly — the core of #254 phase 3a.2."""
     from saitenka.app.features.tooltip import tooltip
@@ -153,7 +153,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
         def has_term(self, *_forms):
             return True
 
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
     spy = _SpyTokenizer()
     reader.graph.profile.profile.use_tokenizer(spy)
     reader.graph.subtitle_presentation.cue.replace_tokenized(
@@ -170,13 +170,13 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
     assert "phrase_terms" in spy.calls
 
 
-def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
+def test_swapped_tokenizer_reroutes_nested_popup_link_lookup(make_session):
     """A profile swap must reroute a clicked cross-reference link's whole-query lookup through the
     NEW strategy, not ``japanese.py``'s ``query_token`` directly."""
     from saitenka.app.features.tooltip import nested_popup
     from saitenka.model import LinkBox
 
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=object()))
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=object()))
     spy = _SpyTokenizer()
     reader.graph.profile.profile.use_tokenizer(spy)
     lb = LinkBox("query", 0, 0, 10, 10)
@@ -228,12 +228,12 @@ def testmine_target_follows_the_active_tokenizers_content_partition():
     assert mine_target(MineCue(tokens, None, -1, swapped.graph.profile.profile.tokenizer, 20)) == 0
 
 
-def test_use_tokenizer_swaps_strategy_and_clears_cache():
+def test_use_tokenizer_swaps_strategy_and_clears_cache(make_session):
     class _DS:
         def terms_exist(self, _forms):
             return set()
 
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
     reader.graph.cue.set_subtitle("本")
 
     fake = _FakeTokenizer()

@@ -8,7 +8,6 @@ window is the whole reason this state exists.
 
 from __future__ import annotations
 
-from session_builder import build_session
 from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
@@ -95,13 +94,13 @@ def test_a_routed_store_does_not_reduce_what_the_reactor_already_did() -> None:
     gateway.close()
 
 
-def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
+def test_a_session_that_has_seen_the_transport_go_refuses_a_command(make_session) -> None:
     """The SessionController-side consequence, driven through the drain rather than by setting the state:
     a command that reaches a session whose socket is gone is rejected, not queued at mpv."""
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),
@@ -122,12 +121,12 @@ def test_a_session_that_has_seen_the_transport_go_refuses_a_command() -> None:
     assert outcomes == 1
 
 
-def test_a_failed_cue_retirement_ends_the_session_turn() -> None:
+def test_a_failed_cue_retirement_ends_the_session_turn(make_session) -> None:
     """A reconnect cannot continue over a cue that its owner failed to retire."""
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(renderer=NullRenderer()),
         options=ReaderOptions().with_overrides(prefetch=False),
@@ -176,14 +175,14 @@ def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
     gateway.close()
 
 
-def test_a_file_load_reaches_the_episode_owner_once(monkeypatch) -> None:
+def test_a_file_load_reaches_the_episode_owner_once(monkeypatch, make_session) -> None:
     from saitenka.runtime.events import FileLoaded
 
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     reslotted: list[str] = []
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),

@@ -1,5 +1,4 @@
 import pytest
-from session_builder import build_session
 from util import FakeIPC, bare_gateway
 
 from saitenka.app.bindings import SCROLL_UP_MSG
@@ -137,12 +136,14 @@ def test_a_failing_action_is_a_terminal_typed_outcome():
     assert result.error_type == "RuntimeError"
 
 
-def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request, monkeypatch):
+def test_reader_publishes_handler_failure_as_typed_runtime_outcome(
+    request, monkeypatch, make_session
+):
     def fail() -> None:
         raise RuntimeError
 
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     spec = CommandSpec("fail", Owner.SESSION, requires_cue=False)
     monkeypatch.setattr(
@@ -172,8 +173,8 @@ def test_reader_publishes_handler_failure_as_typed_runtime_outcome(request, monk
     ]
 
 
-def test_inline_tooltip_work_is_selected_at_session_construction(request):
-    reader = build_session(
+def test_inline_tooltip_work_is_selected_at_session_construction(request, make_session):
+    reader = make_session(
         FakeIPC(), infrastructure=SessionInfrastructure(tooltip_work=TooltipWorkMode.INLINE)
     )
     request.addfinalizer(reader.close)
@@ -181,9 +182,9 @@ def test_inline_tooltip_work_is_selected_at_session_construction(request):
     assert not reader.graph.tooltip.metadata_deferred
 
 
-def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request):
+def test_scroll_command_remains_eligible_while_help_is_open(monkeypatch, request, make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
     reader.graph.help.store.dispatch(HelpCommand.TOGGLE)
     calls: list[int] = []
@@ -230,9 +231,9 @@ def test_gateway_translates_adjacent_scroll_messages_into_one_command():
         gateway.close()
 
 
-def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch):
+def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch, make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     request.addfinalizer(reader.close)
     outcomes: list[CommandHandled] = []
     publish = ipc.publish_command_outcome
@@ -263,7 +264,7 @@ def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch
     ]
 
 
-def test_composition_threads_grouped_optional_services(request):
+def test_composition_threads_grouped_optional_services(request, make_session):
     from types import SimpleNamespace
 
     from saitenka_card import MineConfig
@@ -275,7 +276,7 @@ def test_composition_threads_grouped_optional_services(request):
         scorer=scorer, anki=anki, mining=mining, dictionaries="dict", tts=True
     )
 
-    reader = build_session(FakeIPC(), services=services)
+    reader = make_session(FakeIPC(), services=services)
 
     request.addfinalizer(reader.close)  # owns threads; a leak here exhausts the pool at -n auto
 
@@ -295,7 +296,7 @@ def test_composition_threads_grouped_optional_services(request):
     assert reader.graph.tooltip.panel_style.speak_button is True
 
 
-def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() -> None:
+def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks(make_session) -> None:
     """The SessionController used to construct `LibassGeometryBackend` itself when none was passed, so it was
     not injectable in the case that mattered — the shipping one. A host that picks its own provider
     cannot be handed a different one, which is what makes the conformance contract testable.
@@ -311,7 +312,7 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() 
     options = ReaderOptions(
         subtitle_geometry=SubtitleGeometryOptions(native_visible=True), prefetch=False
     )
-    direct = build_session(FakeIPC(), options=options)
+    direct = make_session(FakeIPC(), options=options)
 
     # The factory-selected provider receives the request. This deliberately incomplete probe is
     # rejected by the provider; a missing provider would return without recording an error.
@@ -341,7 +342,7 @@ def _probe_request(reader):
     )
 
 
-def test_an_idle_session_blocks_instead_of_polling():
+def test_an_idle_session_blocks_instead_of_polling(make_session):
     """An idle turn waits for input instead of polling domain state."""
     import time
 
@@ -349,7 +350,7 @@ def test_an_idle_session_blocks_instead_of_polling():
 
     from saitenka.app.subtitle_render import NullRenderer
 
-    reader = build_session(
+    reader = make_session(
         FakeIPC(),
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),
@@ -366,7 +367,7 @@ def test_an_idle_session_blocks_instead_of_polling():
         reader.close()
 
 
-def test_an_event_wakes_the_wait_early():
+def test_an_event_wakes_the_wait_early(make_session):
     """The negative control for the test above — a blocking wait that never wakes is a hang.
 
     Without this, `pump` could satisfy "it blocked" by simply always sleeping the full timeout,
@@ -380,7 +381,7 @@ def test_an_event_wakes_the_wait_early():
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),

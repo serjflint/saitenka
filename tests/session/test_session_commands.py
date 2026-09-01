@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from session_builder import build_session
 from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
@@ -20,11 +19,11 @@ def test_command_families_cannot_replace_each_other_at_the_shell() -> None:
 
 
 @pytest.mark.timeout(5)
-def test_a_command_reaches_its_owner_thread_handler_once(monkeypatch) -> None:
+def test_a_command_reaches_its_owner_thread_handler_once(monkeypatch, make_session) -> None:
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),
@@ -50,11 +49,13 @@ def test_a_command_reaches_its_owner_thread_handler_once(monkeypatch) -> None:
 
 @pytest.mark.parametrize("transport_lost", [False, True])
 @pytest.mark.timeout(5)
-def test_the_transport_decides_whether_a_command_runs(monkeypatch, transport_lost) -> None:
+def test_the_transport_decides_whether_a_command_runs(
+    monkeypatch, transport_lost, make_session
+) -> None:
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),

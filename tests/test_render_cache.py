@@ -330,7 +330,7 @@ class _TallDS:
         return
 
 
-def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypatch):
+def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypatch, make_session):
     # The whole point of #149's direct-paint: a cold hover the cache HAS uploads the cached pixels
     # WITHOUT the build+measure+raster pipeline. Prove the path (not just identical pixels) with a
     # sentinel array a fresh raster could never produce — if mpv receives the sentinel, it came from disk.
@@ -340,7 +340,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     from saitenka.app.render_cache import content_key
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
-    r = build_session(
+    r = make_session(
         FakeIPC(),
         services=SessionServices(
             dictionaries=_TallDS(),

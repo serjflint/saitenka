@@ -6,7 +6,6 @@ from typing import cast
 import pytest
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
 from session_behavior_trace import SessionTrace, _visible_surfaces
-from session_builder import build_session
 from util import FakeIPC, await_ready, bare_gateway
 
 from saitenka.app import subtitle_adapter
@@ -54,13 +53,15 @@ def _runtime_settled(reader) -> bool:
     )
 
 
-def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, request) -> None:
+def test_first_command_precedes_readiness_and_cosmetic_clear(
+    monkeypatch, request, make_session
+) -> None:
     ipc = _AsyncHintIPC()
     gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = build_session(ipc, infrastructure=SessionInfrastructure(renderer=NullRenderer()))
+    reader = make_session(ipc, infrastructure=SessionInfrastructure(renderer=NullRenderer()))
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     reader.start()
     dispatched: list[bool] = []
@@ -101,10 +102,12 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch, reques
     reader.close()
 
 
-def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch) -> None:
+def test_changed_cue_retires_interaction_before_later_batch_command(
+    monkeypatch, make_session
+) -> None:
     ipc = FakeIPC()
     ipc.props.update({"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),
@@ -170,11 +173,11 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
     reader.close()
 
 
-def test_native_geometry_degradation_changes_hits_not_pixel_owner() -> None:
+def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) -> None:
     ipc = _VisibilityIPC()
     ipc.props.update({"sid": 2, "sub-visibility": False})
     renderer = NativeVisibleRenderer()
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=renderer,

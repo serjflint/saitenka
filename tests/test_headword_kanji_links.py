@@ -12,7 +12,6 @@ import zipfile
 import dicthelp
 from driver import Driver
 from saitenka_tokenize.japanese import Token
-from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.session.factory import SessionServices
@@ -65,8 +64,8 @@ def _fixture_ds(tmp_path):
     return dicthelp.load_set([str(p)])
 
 
-def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
-    r = build_session(FakeIPC(), services=SessionServices(dictionaries=_fixture_ds(tmp_path)))
+def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path, make_session):
+    r = make_session(FakeIPC(), services=SessionServices(dictionaries=_fixture_ds(tmp_path)))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     r.graph.subtitle_presentation.cue.replace_tokenized(

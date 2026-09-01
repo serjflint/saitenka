@@ -11,7 +11,6 @@ from concurrent.futures import Future
 import pytest
 from saitenka_card import MineConfig
 from saitenka_tokenize.japanese import Token
-from session_builder import build_session
 from util import FakeIPC, await_ready, bare_gateway, drain_for, session_gateway
 
 import saitenka.app.features.mining.mined_seed as mined_seed_lane
@@ -26,8 +25,8 @@ from saitenka.app.subtitle_render import NullRenderer
 from saitenka.mpvio.ipc import IPCRequest
 
 
-def test_reader_starts_without_deps():
-    r = build_session(FakeIPC())
+def test_reader_starts_without_deps(make_session):
+    r = make_session(FakeIPC())
     assert (
         r.graph.profile.scorer is None
         and r.graph.profile.profile.dict_set is None
@@ -36,10 +35,10 @@ def test_reader_starts_without_deps():
 
 
 @pytest.mark.timeout(5)
-def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop() -> None:
+def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop(make_session) -> None:
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     try:
         reader.entry.runtime.prepare_cue("猫")
 
@@ -51,9 +50,9 @@ def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop() -> 
         gateway.close()
 
 
-def test_apply_deps_injects_and_stops_loading():
+def test_apply_deps_injects_and_stops_loading(make_session):
     ipc = FakeIPC()
-    r = build_session(ipc)
+    r = make_session(ipc)
     r.graph.profile.begin_loading()
 
     class _Scorer:  # stand-in; not exercised here (no active subtitle)
@@ -66,11 +65,11 @@ def test_apply_deps_injects_and_stops_loading():
     assert any(c and c[0] == "overlay-remove" for c in ipc.commands)  # spinner cleared
 
 
-def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
+def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch, make_session):
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", lambda _anki, _cfg: {"猫"})
-    r = build_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
     try:
         r.graph.mining.request_seed()
         await_ready(
@@ -88,7 +87,7 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
         gateway.close()
 
 
-def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
+def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch, make_session):
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
     old_anki = object()
@@ -105,7 +104,7 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
 
     monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     config = MineConfig()
-    r = build_session(ipc, services=SessionServices(anki=old_anki, mining=config))
+    r = make_session(ipc, services=SessionServices(anki=old_anki, mining=config))
     try:
         r.graph.mining.request_seed()
         assert old_started.wait(1)
@@ -134,10 +133,10 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
         gateway.close()
 
 
-def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
+def test_mined_seed_retries_after_a_transient_failure(monkeypatch, make_session):
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    r = build_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
     attempts = 0
 
     def fetch(_anki, _cfg):
@@ -172,7 +171,7 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
         gateway.close()
 
 
-def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
+def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch, make_session):
     spans = []
 
     @contextlib.contextmanager
@@ -181,7 +180,7 @@ def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
         yield None
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
-    r = build_session(FakeIPC())
+    r = make_session(FakeIPC())
     r.graph.tooltip.surface_state().jobs.begin("tooltip")
 
     r.close()
@@ -190,7 +189,7 @@ def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
     assert spans[-1][1]["outcome"] == "cancelled"
 
 
-def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog):
+def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, make_session):
     """Regression: the banner announced from run() BEFORE async deps spawned prefetch workers, so it
     always said '0 prefetch worker(s)'. It must now fire from apply_deps with the live count, exactly
     once (a later re-inject must not re-announce).
@@ -202,7 +201,7 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog):
     dictionaries = object()
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    r = build_session(
+    r = make_session(
         ipc,
         services=SessionServices(dictionaries=dictionaries),
         options=ReaderOptions(
@@ -247,7 +246,7 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     assert count(0) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
-def test_owned_startup_hint_clears_after_the_first_completed_turn(request):
+def test_owned_startup_hint_clears_after_the_first_completed_turn(request, make_session):
     from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
@@ -255,7 +254,7 @@ def test_owned_startup_hint_clears_after_the_first_completed_turn(request):
     gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
-    r = build_session(ipc)
+    r = make_session(ipc)
     request.addfinalizer(r.close)  # LIFO: the reader goes down before its gateway
     r.start()
     assert ("show-text", "", 1) not in ipc.commands
@@ -268,7 +267,9 @@ def test_owned_startup_hint_clears_after_the_first_completed_turn(request):
     assert ipc.commands.count(("show-text", "", 1)) == before
 
 
-def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch, request):
+def test_first_batch_command_dispatches_before_readiness_clears_the_hint(
+    monkeypatch, request, make_session
+):
     from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
@@ -276,7 +277,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     reader.start()
     clear = ("show-text", "", 1)
@@ -293,7 +294,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     assert clear in ipc.commands
 
 
-def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
+def test_unanswered_async_clear_does_not_delay_the_next_poll(request, make_session):
     from saitenka.app.session.routes import install_session_reactor
 
     class _AsyncFakeIPC(FakeIPC):
@@ -314,7 +315,7 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
     install_session_reactor(gateway)
     ipc.requests[0].future.set_result({"error": "success"})
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
     reader.start()
 
@@ -324,23 +325,23 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll(request):
     assert reader.pump() is True
 
 
-def test_load_deps_async_marks_loading(monkeypatch):
+def test_load_deps_async_marks_loading(monkeypatch, make_session):
     import saitenka.app.features.profiles.dependencies as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
-    r = build_session(FakeIPC())
+    r = make_session(FakeIPC())
     r.graph.profile.load({})
     assert r.graph.profile.loading is True  # spinner shows until the deps-ready deadline injects
 
 
-def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
+def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch, make_session):
     """The build thread hands the value over and *arms* the injection; a tick used to discover it by
     looking. The due event runs on the session turn, which is what makes the hand-off safe."""
     import saitenka.app.features.profiles.dependencies as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()
-    r = build_session(ipc)
+    r = make_session(ipc)
     r.graph.profile.load({})
     await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed the injection")
 
@@ -351,14 +352,14 @@ def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
     assert not ipc.fire_runtime_timer("lifecycle:deps-ready")  # one build, one injection
 
 
-def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
+def test_the_value_is_published_before_the_injection_is_armed(monkeypatch, make_session):
     """Ordering, and the whole hand-off: arming first would let the due event fire against a
     dependency owner with no published bundle, and the session would sit loading forever."""
     import saitenka.app.features.profiles.dependencies as rd
 
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     ipc = FakeIPC()
-    r = build_session(ipc)
+    r = make_session(ipc)
     r.graph.profile.load({})
     await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed deps-ready")
 
@@ -366,7 +367,9 @@ def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
 
 
 @pytest.mark.timeout(5)
-def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkeypatch):
+def test_dependency_publication_never_runs_attestation_on_the_reader_tick(
+    monkeypatch, make_session
+):
     class _Tokenizer:
         name = "test"
 
@@ -394,7 +397,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     ipc = FakeIPC()
     ipc.props.update({"sub-text": "猫", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.subtitle_presentation.renderer = NullRenderer()
     reader.graph.profile.profile.use_tokenizer(_Tokenizer())
     reader.graph.profile_integration.enable_async_annotation()

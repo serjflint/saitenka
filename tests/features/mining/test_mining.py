@@ -209,13 +209,13 @@ def test_dedupe_allows_add_when_card_format_has_no_expression_field():
     assert dedupe(_A(), cfg, "読む") == [] and called == []  # short-circuits, no query
 
 
-def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
+def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch, make_session):
     # end-to-end: an already-mined word is detected under card_format (the both-KeyError/false-negative fix)
     from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
-    r = build_session(
+    r = make_session(
         ipc,
         services=SessionServices(
             anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
@@ -400,14 +400,14 @@ class _FakeAnki:
         return name
 
 
-def test_mine_token_adds_note_with_fields(monkeypatch):
+def test_mine_token_adds_note_with_fields(monkeypatch, make_session):
     from util import FakeIPC
 
     ipc = FakeIPC()
     ipc.props["path"] = "/x/[Grp] Show - 03 [1080p].mkv"
     ipc.props["time-pos"] = 63
     anki = _FakeAnki()
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
@@ -505,7 +505,7 @@ def test_capture_media_survives_a_timespan_read_error(monkeypatch):
     assert pic.endswith(".jpg") and audio == ""  # still captured; audio skipped (no span)
 
 
-def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
+def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch, make_session):
     """A per-entry ⊕ passes an explicit CardData, so the mined note is that chosen entry (しりぞく),
     not whatever the default dict-first pick would derive for the token."""
     from saitenka_card import CardData
@@ -513,7 +513,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
@@ -524,12 +524,12 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     assert anki.added[0]["fields"]["ExpressionReading"] == "しりぞく"
 
 
-def test_mine_token_duplicate_shows_existing(monkeypatch):
+def test_mine_token_duplicate_shows_existing(monkeypatch, make_session):
     from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     previewed = []
     monkeypatch.setattr(
@@ -557,7 +557,7 @@ def test_preview_replay_key_is_tooltip_scoped():
     assert PREVIEW_MSG in tooltip_msgs
 
 
-def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
+def test_esc_closes_card_preview_and_hands_key_back(monkeypatch, make_session):
     """Showing the preview grabs Esc → close; pressing it hides the preview; closing hands Esc back
     to a no-op when no tooltip is up."""
     from util import FakeIPC
@@ -566,7 +566,7 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
     from saitenka.app.features.preview.card_preview import PreviewData
 
     ipc = FakeIPC()
-    r = build_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
     # skip the PIL render
     monkeypatch.setattr(miner_ui, "render_preview", lambda *_args: None)
     pv = PreviewData(
@@ -581,14 +581,14 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
     assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
 
 
-def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
+def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch, make_session):
     """Mining an in-deck word shows "✓ in deck" and adds nothing, but stashes the token; the preview's
     ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
     from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_existing", _discard_preview)
@@ -647,14 +647,14 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     assert _select_bulk_targets(r) == [0, 4]  # は/犬/dup-猫 all filtered out
 
 
-def test_bulk_mine_counts_and_toasts(monkeypatch):
+def test_bulk_mine_counts_and_toasts(monkeypatch, make_session):
     from util import FakeIPC
 
     from saitenka.app.features.mining import mine_intents
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     toasts = []
@@ -683,7 +683,7 @@ def _make_dict(path, title, entries):
     return str(path)
 
 
-def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
+def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path, make_session):
     """The per-entry ⊕ arrives as a 'mine:<i>' LinkBox; _mine_link mines cards_for(tok)[i] — clicking
     the しりぞく block (index 1) mines that reading/gloss, not the default のく."""
     import dicthelp
@@ -702,9 +702,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     ipc = FakeIPC()
     ipc.props["path"] = "/x/S - 01.mkv"
     anki = _FakeAnki()
-    r = build_session(
-        ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
-    )
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds))
     r.graph.cue.set_subtitle("退いた")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
@@ -722,7 +720,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     assert f["Glossary"] == "<ol><li>to retreat</li></ol>"
 
 
-def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
+def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path, make_session):
     """#192: with [mine.card_format] set, the mined note's fields are the rendered {marker} templates —
     furigana, pitch (from the dict), and a cloze-split sentence — not the entity→field map."""
     import dicthelp
@@ -748,7 +746,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
             "Freq": "{frequency-rank}",
         }
     )
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg, dictionaries=ds))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=cfg, dictionaries=ds))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
@@ -776,14 +774,14 @@ def _word_audio_pack(tmp_path, term: str, reading: str, filename: str):
     return pack
 
 
-def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path):
+def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path, make_session):
     from util import FakeIPC
 
     pack = _word_audio_pack(tmp_path, "読む", "よむ", "yomu.opus")
     ipc = FakeIPC()
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=cfg))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
@@ -795,7 +793,9 @@ def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path
     assert "yomu.opus" in anki.stored  # storeMediaFile called with the resolved file
 
 
-def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tmp_path):
+def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(
+    monkeypatch, tmp_path, make_session
+):
     """The pack has no entry for this word — the field must stay unset, not an empty [sound:] tag."""
     from util import FakeIPC
 
@@ -803,7 +803,7 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     ipc = FakeIPC()
     anki = _FakeAnki()
     cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=cfg))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=cfg))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
@@ -814,7 +814,9 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     assert anki.stored == []  # never stores media for a miss
 
 
-def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tmp_path):
+def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(
+    monkeypatch, tmp_path, make_session
+):
     """P1 containment through the mine path: a poisoned index entry escaping the pack dir (`../` or an
     absolute path) resolves to a miss — the word-audio field stays unset and store_media is NEVER called,
     so a shared/downloaded pack can't read+upload an arbitrary local file into Anki."""
@@ -834,7 +836,7 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
     )
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = build_session(
+    r = make_session(
         ipc,
         services=SessionServices(
             anki=anki, mining=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
@@ -850,13 +852,13 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tm
     assert not any("secret" in name for name in anki.stored)  # never uploaded the escaping file
 
 
-def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
+def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch, make_session):
     """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
     from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki()
-    r = build_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
@@ -866,7 +868,7 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     assert anki.stored == []
 
 
-def test_group_mined_of_marks_entries_by_expression(tmp_path):
+def test_group_mined_of_marks_entries_by_expression(tmp_path, make_session):
     """Per-stacked-entry ✓ state tracks deck membership by expression (Anki's dedup key): mining 退く
     flips every 退く reading-block, since a second reading would be a duplicate expression."""
     import dicthelp
@@ -881,7 +883,7 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
         [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
     )
     ds = dicthelp.load_set([d])
-    r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
+    r = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     assert (
         tooltip_panel.group_mined_of(
@@ -898,7 +900,7 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     )  # both entries share expression 退く
 
 
-def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
+def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path, make_session):
     """Dict-first mining: with a user dictionary configured, the mined card's Glossary comes from
     that dict — not the JMdict/jamdict fallback (which would gloss 読む as 'to read')."""
     import dicthelp
@@ -909,9 +911,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = _FakeAnki()
-    r = build_session(
-        ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
-    )
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)
@@ -923,7 +923,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     assert f["Glossary"] == "<ol><li>DICTGLOSS-read</li></ol>"  # from the user dict
 
 
-def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_path):
+def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_path, make_session):
     """#255 end-to-end: dict-first mining with an imported JMdict-derived dict (Jitendex-titled) and
     `[dictdb] persist_seq` on writes the real Kanji Study deep-link `ID` field — without jamdict."""
     import dicthelp
@@ -938,9 +938,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = _FakeAnki()
-    r = build_session(
-        ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds)
-    )
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
     monkeypatch.setattr(miner_ui, "preview_mined", _discard_preview)

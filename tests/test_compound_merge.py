@@ -13,7 +13,6 @@ import dicthelp
 from saitenka_tokenize.japanese import Token, merge_dict_compounds, tokenize
 from saitenka_wordstate import Scorer
 from saitenka_wordstate.known import KnownWords
-from session_builder import build_session
 from util import FakeIPC
 
 from saitenka.app.scoring import Coloring, Palette
@@ -209,8 +208,8 @@ class _ExistsDS:
         return {f for f in forms if f in self._hw}
 
 
-def test_controller_tokens_carry_the_merged_compound(monkeypatch):
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=_ExistsDS("応急処置")))
+def test_controller_tokens_carry_the_merged_compound(monkeypatch, make_session):
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=_ExistsDS("応急処置")))
     reader.graph.screen.osd = (1920, 1080)
     monkeypatch.setattr(reader.graph.subtitle_presentation, "renderer", NullRenderer())
     # decouple from the live unidic split: the cue tokenises to 応急 + 処置
@@ -226,8 +225,8 @@ def test_controller_tokens_carry_the_merged_compound(monkeypatch):
     assert reader.graph.subtitle_presentation.cue.current.tokens[0].lemma == "応急処置"
 
 
-def test_controller_leaves_fragments_when_dict_set_has_no_probe(monkeypatch):
-    reader = build_session(
+def test_controller_leaves_fragments_when_dict_set_has_no_probe(monkeypatch, make_session):
+    reader = make_session(
         FakeIPC(), services=SessionServices(dictionaries=object())
     )  # no terms_exist → merge is skipped
     reader.graph.screen.osd = (1920, 1080)

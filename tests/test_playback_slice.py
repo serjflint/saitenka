@@ -142,12 +142,12 @@ def test_a_session_runtime_owns_the_slot_the_reader_observes_into(request) -> No
     assert reader.graph.playback.state is slice_of(slot).state
 
 
-def test_a_reader_with_no_runtime_still_observes_into_its_own_slice(request) -> None:
+def test_a_reader_with_no_runtime_still_observes_into_its_own_slice(request, make_session) -> None:
     from util import FakeIPC
 
     from saitenka.app.subtitle_render import NullRenderer
 
-    reader = build_session(FakeIPC(), infrastructure=SessionInfrastructure(renderer=NullRenderer()))
+    reader = make_session(FakeIPC(), infrastructure=SessionInfrastructure(renderer=NullRenderer()))
     request.addfinalizer(reader.close)
     reader.graph.playback.observe("sub-text", "ただいま")
 

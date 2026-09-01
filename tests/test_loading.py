@@ -5,7 +5,6 @@ from __future__ import annotations
 from concurrent.futures import Future
 
 import pytest
-from session_builder import build_session
 from util import await_ready, bare_gateway
 
 from saitenka.app.loading import SPINNER, loading_image
@@ -27,12 +26,12 @@ def test_frames_cycle_through_spinner_glyphs():
 # --- the controller lifecycle: the spinner actually shows while loading, and stops when deps land ---
 
 
-def test_draw_loading_paints_one_timer_authorized_frame():
+def test_draw_loading_paints_one_timer_authorized_frame(make_session):
     from util import FakeIPC
 
     from saitenka.app.overlay_ids import OverlayId
 
-    r = build_session(FakeIPC())
+    r = make_session(FakeIPC())
     r.graph.profile.begin_loading()
     assert r.graph.ipc.fire_runtime_timer("lifecycle:loading-frame")
     adds = [
@@ -121,12 +120,12 @@ def test_ready_startup_hint_empties_the_osd_text():
     assert ("show-text", "", 1) in ipc.commands
 
 
-def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
+def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness(make_session):
     from util import FakeIPC
 
     ipc = FakeIPC()
     _install(ipc)
-    r = build_session(ipc)
+    r = make_session(ipc)
     ipc.drain_events()
     # plain path -> no dict/tokenize deps needed to raster a cue
     r.graph.track_commands.declare(SubtitleLanguageChanged("en"))
@@ -139,12 +138,12 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
 
 
 @pytest.mark.parametrize("unavailable", [None, {}])
-def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
+def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable, make_session):
     from util import FakeIPC
 
     ipc = FakeIPC()
     _install(ipc)
-    r = build_session(ipc)
+    r = make_session(ipc)
     ipc.drain_events()
     r.graph.playback.install_seed({"osd-dimensions": unavailable})
 
@@ -266,26 +265,26 @@ def test_lost_clear_reply_is_retried_once_on_the_replacement_connection():
     assert ipc.commands.count(("show-text", "", 1)) == 2
 
 
-def test_apply_deps_stops_the_spinner():
+def test_apply_deps_stops_the_spinner(make_session):
     from util import FakeIPC
 
     from saitenka.app.features.profiles.dependencies import DependencyBundle
     from saitenka.app.overlay_ids import OverlayId
 
-    r = build_session(FakeIPC())
+    r = make_session(FakeIPC())
     r.graph.profile.begin_loading()
     r.graph.profile.accept(DependencyBundle(r.graph.profile.identity))
     assert r.graph.profile.loading is False
     assert ("overlay-remove", OverlayId.LOADING) in r.graph.ipc.commands
 
 
-def test_load_deps_async_uses_a_custom_build():
+def test_load_deps_async_uses_a_custom_build(make_session):
     """#16: `run` passes its own CLI-flag-aware builder; load_deps_async must call THAT (not the
     config-only build_reader_deps) and publish its result for the poll loop to inject."""
 
     from util import FakeIPC
 
-    r = build_session(FakeIPC())
+    r = make_session(FakeIPC())
     called = {"n": 0}
 
     def _build():
@@ -300,7 +299,7 @@ def test_load_deps_async_uses_a_custom_build():
     assert r.graph.profile.scorer == "SCORER" and r.graph.profile.loading is False
 
 
-def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
+def test_load_deps_async_consumes_a_prebuilt_hoisted_future(make_session):
     """The run-mode hoist: begin_deps_build starts the build BEFORE mpv launches; load_deps_async then
     consumes that Future (it must NOT build a second time) and publishes the result for the poll loop."""
 
@@ -315,7 +314,7 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
         return "SCORER", None, None, None
 
     fut = rd.begin_deps_build({}, _build)  # hoisted: runs before the reader exists
-    r = build_session(FakeIPC())
+    r = make_session(FakeIPC())
     r.graph.profile.load({}, prebuilt=fut)  # consume the in-flight build, don't restart it
     await_ready(lambda: r.graph.profile.ready, "the build thread never published deps")
     assert (

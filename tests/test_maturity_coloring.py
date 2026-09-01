@@ -7,7 +7,6 @@ from saitenka_tokenize.japanese import Token
 from saitenka_wordstate import Scorer
 from saitenka_wordstate.fsrs import KnownSnap
 from saitenka_wordstate.known import KnownWords
-from session_builder import build_session
 from util import RecordingRasterProvider
 
 import saitenka.app.features.profiles.dependencies as reader_deps
@@ -100,7 +99,7 @@ class _IPC(util.FakeIPC):
     pass
 
 
-def test_hover_visibility_reuses_the_learning_style(monkeypatch):
+def test_hover_visibility_reuses_the_learning_style(monkeypatch, make_session):
     scorer = Coloring(
         Scorer(
             known=KnownWords.from_set([]),
@@ -110,7 +109,7 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
             enable_jlpt=False,
         )
     )
-    reader = build_session(
+    reader = make_session(
         _IPC(),
         services=SessionServices(
             scorer=scorer,

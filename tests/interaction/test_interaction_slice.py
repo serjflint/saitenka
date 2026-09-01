@@ -14,7 +14,6 @@ feature's events reach the others by broadcast, and each has to leave the others
 from __future__ import annotations
 
 import pytest
-from session_builder import build_session
 from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
@@ -195,7 +194,7 @@ def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None
         store.current = HoverFeature(HoverState(word_target=3))
 
 
-def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
+def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it(make_session) -> None:
     """There is one representation of the hysteresis: what a caller is told about a dwell is what
     the machine armed, with no mirrored copy in between that can go stale."""
     from driver import Driver
@@ -203,7 +202,7 @@ def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it() -> None:
     from saitenka.app.subtitle_render import NullRenderer
 
     ipc = FakeIPC()
-    reader = build_session(
+    reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(
             renderer=NullRenderer(),

@@ -2,7 +2,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import util
-from session_builder import build_session
 from util import keybind_registry
 
 from saitenka.app import bindings as app_bindings
@@ -163,7 +162,9 @@ class _IPC(util.FakeIPC):
         self.props.update(props)
 
 
-def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, monkeypatch):
+def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(
+    tmp_path, monkeypatch, make_session
+):
     video = tmp_path / "Show - 01.mkv"
     ipc = _IPC(
         {
@@ -183,7 +184,7 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
             ],
         }
     )
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.playback.install_seed({"sub-text": "日本語"})
     reader.graph.track_commands.declare(SubtitleTracksDiscovered(3, 4))
     reader.graph.subtitle_presentation.cue.replace_tokenized(
@@ -232,7 +233,9 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     reader.close()
 
 
-def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_path, monkeypatch):
+def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(
+    tmp_path, monkeypatch, make_session
+):
     video = tmp_path / "Show - 02.mkv"
     ipc = _IPC(
         {
@@ -243,7 +246,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
             "track-list": [],
         }
     )
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
     reader.graph.playback.install_seed({"sub-text": "English line"})
     store = BacklogStore(tmp_path / "reader.sqlite")
@@ -257,9 +260,9 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(tmp_pat
     reader.close()
 
 
-def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
+def test_bookmark_without_active_cue_does_not_open_store(monkeypatch, make_session):
     ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.playback.install_seed({"sub-text": "日本語"})
     shown = []
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *args: shown.append(args))
@@ -270,11 +273,11 @@ def test_bookmark_without_active_cue_does_not_open_store(monkeypatch):
     assert shown == [("no active cue to bookmark", "warn")]
 
 
-def test_bookmark_key_is_configurable():
+def test_bookmark_key_is_configurable(make_session):
     from saitenka.app.config import KeyOptions, ReaderOptions
 
     ipc = _IPC({})
-    reader = build_session(ipc, options=ReaderOptions(keys=KeyOptions(bookmark_key="Alt+q")))
+    reader = make_session(ipc, options=ReaderOptions(keys=KeyOptions(bookmark_key="Alt+q")))
     reader.graph.commands.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"

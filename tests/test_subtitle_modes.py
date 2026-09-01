@@ -111,10 +111,10 @@ def _drain_until(reader: TestSession, predicate) -> None:
     assert predicate()
 
 
-def test_subtitle_fetch_runs_off_the_event_thread_and_publishes_directly(monkeypatch):
+def test_subtitle_fetch_runs_off_the_event_thread_and_publishes_directly(monkeypatch, make_session):
     ipc = RuntimeFakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     event_thread = threading.get_ident()
     worker_thread = None
     messages = []
@@ -211,10 +211,10 @@ def test_newer_explicit_subtitle_choice_supersedes_older_completion(tmp_path, mo
     assert added == [str(newer)]
 
 
-def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
+def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch, make_session):
     ipc = RuntimeFakeIPC()
     gateway = session_gateway(ipc)
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     started = threading.Event()
     release = threading.Event()
     messages = []
@@ -260,9 +260,9 @@ _LANES_BEFORE_ARTIFACTS = [
 ]
 
 
-def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeypatch):
+def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeypatch, make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     order = []
 
     def close_lane(name, _timeout):
@@ -312,20 +312,20 @@ def test_startup_with_no_subtitles_fails_softly():
     assert not [c for c in ipc.commands if c[:2] == ("set_property", "sid")]
 
 
-def test_configure_releases_preselected_secondary_for_native_track_cycling():
+def test_configure_releases_preselected_secondary_for_native_track_cycling(make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
     startup = subtitle_modes.select_initial(ipc)
     ipc.props["secondary-sid"] = 1
     ipc.commands.clear()
 
-    build_session(ipc).graph.cue.configure_subtitle_mode(startup)
+    make_session(ipc).graph.cue.configure_subtitle_mode(startup)
 
     assert ("set_property", "secondary-sid", "no") in ipc.commands
 
 
-def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeypatch):
+def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     hold_translation(reader)
     messages = []
@@ -350,9 +350,9 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     assert messages == ["subtitles: English (1/2)"]
 
 
-def test_language_switch_releases_secondary_before_selecting_its_track(monkeypatch):
+def test_language_switch_releases_secondary_before_selecting_its_track(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     reader.command(app_bindings.TRANS_MSG)
     reader.graph.track_commands.declare(SubtitleSecondaryLeased(1))
@@ -371,9 +371,9 @@ def test_language_switch_releases_secondary_before_selecting_its_track(monkeypat
     assert secondary_off < primary_english < secondary_japanese
 
 
-def test_secondary_sid_event_does_not_change_primary_language():
+def test_secondary_sid_event_does_not_change_primary_language(make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
     reader.graph.track_commands.declare(SubtitleSecondaryLeased(2))
@@ -383,9 +383,9 @@ def test_secondary_sid_event_does_not_change_primary_language():
     assert reader.graph.track_commands.current().language == "en"
 
 
-def test_primary_track_event_shows_language_and_counter(monkeypatch):
+def test_primary_track_event_shows_language_and_counter(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     messages = []
     monkeypatch.setattr(reader.graph.notifications, "show", lambda text: messages.append(text))
@@ -395,9 +395,9 @@ def test_primary_track_event_shows_language_and_counter(monkeypatch):
     assert messages == ["subtitles: English (1/2)"]
 
 
-def test_hidden_translation_does_not_reserve_english_secondary():
+def test_hidden_translation_does_not_reserve_english_secondary(make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     ipc.commands.clear()
 
@@ -408,9 +408,9 @@ def test_hidden_translation_does_not_reserve_english_secondary():
     ]
 
 
-def test_translation_leases_english_only_while_visible():
+def test_translation_leases_english_only_while_visible(make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     ipc.commands.clear()
 
@@ -423,9 +423,9 @@ def test_translation_leases_english_only_while_visible():
     assert secondary == [1, "no"]
 
 
-def test_primary_sid_event_updates_rendering_language():
+def test_primary_sid_event_updates_rendering_language(make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     hold_translation(reader)
     reader.graph.playback.install_seed({"sid": 2})
@@ -438,9 +438,9 @@ def test_primary_sid_event_updates_rendering_language():
     assert ("set_property", "secondary-sid", 2) in ipc.commands
 
 
-def test_unavailable_language_keeps_current_mode(monkeypatch):
+def test_unavailable_language_keeps_current_mode(monkeypatch, make_session):
     ipc = FakeIPC([JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     messages = []
     monkeypatch.setattr(
@@ -455,9 +455,9 @@ def test_unavailable_language_keeps_current_mode(monkeypatch):
     assert messages == [("EN subtitles unavailable", "warn")]
 
 
-def test_english_primary_is_plain_and_noninteractive(monkeypatch):
+def test_english_primary_is_plain_and_noninteractive(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(
         reader.graph.profile.profile.tokenizer,
@@ -565,12 +565,12 @@ def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypa
     assert ("set_property", "sub-delay", 0.0) in ipc.commands
 
 
-def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch):
+def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch, make_session):
     """The resync/retry swap re-times the FILE, so it owns timing — drop any persisted mpv sub-delay
     (the reported bug: a resynced cue looked wrong until sub-delay was hand-zeroed)."""
     ipc = FakeIPC([EN.copy(), JP.copy()])
     ipc.props["sub-delay"] = -7.5
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # jp mode
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a: None)
     monkeypatch.setattr(
@@ -676,12 +676,12 @@ def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, m
     ]
 
 
-def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypatch):
+def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypatch, make_session):
     """An explicit picker choice (``force_select``) selects the chosen source NOW even while English is
     on screen — the keep-current background contract is for unattended fetches, not a deliberate pick
     (regression: from English the pick fell through to the background add and left English up)."""
     ipc = FakeIPC([EN.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(
         subtitle_modes.select_initial(ipc)
     )  # English fallback active
@@ -810,12 +810,12 @@ def _select(ipc, sid):
             track["main-selection"] = 0
 
 
-def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path):
+def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path, make_session):
     # Drag-'n'-drop: mpv adds an UNTAGGED external sub ("unknown language") and makes it primary after
     # startup already fell back to English. It must be adopted as the Japanese primary so cues color
     # (not the plain English path), and indexed from the file on disk.
     ipc = FakeIPC([EN.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     assert (
         reader.graph.track_commands.current().language == SECOND_LANG
@@ -851,11 +851,11 @@ def test_looks_japanese_detects_script_by_content(text, expected):
     assert looks_japanese(text) is expected
 
 
-def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path):
+def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path, make_session):
     # Content-based ID: an UNTAGGED English sub (Latin script) the user drops must NOT be miscolored as
     # Japanese — it stays the plain secondary, unlike an untagged Japanese sub.
     ipc = FakeIPC([JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     assert reader.graph.track_commands.current().language == MAIN_LANG
     srt = tmp_path / "dropped.en.srt"
@@ -874,11 +874,11 @@ def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path):
     )  # the Japanese track is not overwritten
 
 
-def test_manual_switch_to_untagged_track_is_adopted_as_japanese():
+def test_manual_switch_to_untagged_track_is_adopted_as_japanese(make_session):
     # The same rule for a manual native track cycle (mpv's `j` key) to an untagged embedded track:
     # no file to index, but the render language flips to Japanese so the cue colors.
     ipc = FakeIPC([EN.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     ipc.tracks.append({"id": 3, "type": "sub", "lang": ""})  # empty tag == untagged
     _select(ipc, 3)
@@ -889,11 +889,11 @@ def test_manual_switch_to_untagged_track_is_adopted_as_japanese():
     assert reader.graph.track_commands.current().jp_sid == 3
 
 
-def test_newly_primary_english_tagged_track_is_secondary_not_japanese():
+def test_newly_primary_english_tagged_track_is_secondary_not_japanese(make_session):
     # The guard against the false wildcard: a real English tag stays the known-language secondary and
     # is NOT adopted as Japanese, even though lang_matches(None, EN_LANGS) would wildcard-match.
     ipc = FakeIPC([JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     assert reader.graph.track_commands.current().language == MAIN_LANG
     ipc.tracks.append({"id": 5, "type": "sub", "lang": "eng"})
@@ -906,9 +906,9 @@ def test_newly_primary_english_tagged_track_is_secondary_not_japanese():
     assert reader.graph.track_commands.current().jp_sid == 2  # the original JP track is untouched
 
 
-def test_subs_turned_off_adopt_no_track():
+def test_subs_turned_off_adopt_no_track(make_session):
     ipc = FakeIPC([EN.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     before = reader.graph.track_commands.current().language
 
@@ -918,11 +918,11 @@ def test_subs_turned_off_adopt_no_track():
     assert reader.graph.track_commands.current().jp_sid is None
 
 
-def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatch):
+def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatch, make_session):
     # The keybind override: force the CURRENT track to Japanese even when it is tagged English (so it
     # would auto-classify as the secondary), letting the user correct a wrong guess from within mpv.
     ipc = FakeIPC([EN.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     srt = tmp_path / "manual.srt"
     srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n岩を砂へ\n", encoding="utf-8")
@@ -942,9 +942,9 @@ def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatc
     assert messages == ["Marked current subtitles as Japanese"]
 
 
-def test_force_current_as_japanese_with_no_track_warns(monkeypatch):
+def test_force_current_as_japanese_with_no_track_warns(monkeypatch, make_session):
     ipc = FakeIPC()
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     messages = []
     monkeypatch.setattr(
         reader.graph.notifications, "show", lambda text, kind="ok": messages.append((text, kind))
@@ -955,9 +955,9 @@ def test_force_current_as_japanese_with_no_track_warns(monkeypatch):
     assert messages == [("No subtitle track to mark", "warn")]
 
 
-def test_announce_names_a_japanese_track(monkeypatch):
+def test_announce_names_a_japanese_track(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     seen = []
     monkeypatch.setattr(reader.graph.notifications, "show", lambda text, *_args: seen.append(text))
 
@@ -966,9 +966,9 @@ def test_announce_names_a_japanese_track(monkeypatch):
     assert seen == ["subtitles: Japanese (2/2)"]
 
 
-def test_announce_passes_through_an_unknown_language(monkeypatch):
+def test_announce_passes_through_an_unknown_language(monkeypatch, make_session):
     ipc = FakeIPC([{"id": 3, "type": "sub", "lang": "ger"}])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     seen = []
     monkeypatch.setattr(reader.graph.notifications, "show", lambda text, *_args: seen.append(text))
 
@@ -981,11 +981,13 @@ def _one_cue_index() -> CueIndex:
     return CueIndex(parse_srt("1\n00:00:01,000 --> 00:00:02,000\n本\n"))
 
 
-def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, monkeypatch):
+def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(
+    tmp_path, monkeypatch, make_session
+):
     """A replace whose rebuild can't resolve the just-added track yet must RETAIN the prior cues,
     not blank them — the transient track-switch window must never drop a good index."""
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     old = _one_cue_index()
     reader.graph.track_commands.navigation.current.sub_index = old
@@ -1003,8 +1005,8 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, m
     )  # cues retained across the unresolved switch
 
 
-def test_load_sub_index_retains_prior_cues_on_parse_failure(tmp_path):
-    reader = build_session(FakeIPC())
+def test_load_sub_index_retains_prior_cues_on_parse_failure(tmp_path, make_session):
+    reader = make_session(FakeIPC())
     old = _one_cue_index()
     reader.graph.track_commands.navigation.current.sub_index = old
 
@@ -1017,11 +1019,13 @@ def test_load_sub_index_retains_prior_cues_on_parse_failure(tmp_path):
     )  # a failed parse never blanks a good index
 
 
-def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_path, monkeypatch):
+def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(
+    tmp_path, monkeypatch, make_session
+):
     """A retime (`replace`) only swaps the JP-primary slot when JP is actually primary; from English
     it routes to the non-disruptive background add, so it can never overwrite the wrong slot."""
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     reader.graph.track_commands.declare(SubtitleLanguageChanged(SECOND_LANG))  # English on screen
     replaced: list = []
@@ -1046,9 +1050,9 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_
     assert reader.graph.track_commands.current().language == SECOND_LANG
 
 
-def test_toggle_from_english_returns_to_japanese(monkeypatch):
+def test_toggle_from_english_returns_to_japanese(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = build_session(ipc)
+    reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # JP active
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
     monkeypatch.setattr(
