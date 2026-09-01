@@ -9,10 +9,10 @@ later behind this same adapter — the walker is already there.)
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from saitenka_card import CardData
 from saitenka_tokenize.japanese import is_kana
 
 from saitenka.panel import Definition, Entry
@@ -163,15 +163,6 @@ def lookup_entry(surface: str, lemma: str, reading: str, pos: str) -> Entry:
 
 def entry_for(token: Token) -> Entry:
     return lookup_entry(token.surface, token.lemma, token.reading, token.pos)
-
-
-@dataclass
-class CardData:
-    expression: str
-    reading: str
-    glossary_html: str
-    idseq: str = ""
-    glosses: tuple[str, ...] = ()  # raw sense strings, for the card preview
 
 
 @lru_cache(maxsize=512)

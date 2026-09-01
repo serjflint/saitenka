@@ -9,13 +9,13 @@ import pytest
 from driver import Driver
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from saitenka_card import MineConfig
 from session_builder import TestSession, build_session
 from util import FakeIPC, await_ready, bare_gateway, keybind_registry, session_gateway
 
 import saitenka.app.session.builder as session_builder_module
 from saitenka.app import bindings, subtitle_adapter
 from saitenka.app import bindings as app_bindings
-from saitenka.app.anki import MineConfig
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget

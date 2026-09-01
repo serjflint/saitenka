@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 
+from saitenka_card import AnimatedClip
+
 from saitenka.app import media
 
 
@@ -135,7 +137,7 @@ def test_animated_screenshot_builds_ffmpeg_over_the_capped_span(monkeypatch):
         "/v.mkv",
         media.Timespan(10, 20),
         "/out.webp",
-        media.AnimatedClip(fps=12, height=480, quality=75, max_secs=4.0),
+        AnimatedClip(fps=12, height=480, quality=75, max_secs=4.0),
     )
     assert out == media.Path("/out.webp")
     cmd = calls["cmd"]
@@ -168,8 +170,7 @@ def test_animated_screenshot_returns_none_without_any_encoder(monkeypatch):
     ran: list = []
     monkeypatch.setattr(media.subprocess, "run", lambda cmd, **_k: ran.append(cmd))
     assert (
-        media.animated_screenshot("/v.mkv", media.Timespan(0, 3), "/o.webp", media.AnimatedClip())
-        is None
+        media.animated_screenshot("/v.mkv", media.Timespan(0, 3), "/o.webp", AnimatedClip()) is None
     )
     assert ran == []  # no encode attempted when no encoder is available → caller keeps the still
 
@@ -179,9 +180,7 @@ def test_animated_screenshot_falls_back_to_gif_when_ffmpeg_lacks_webp(monkeypatc
     monkeypatch.setattr(media, "_ffmpeg_encoder_available", lambda enc: enc == "gif")
     calls: dict = {}
     monkeypatch.setattr(media.subprocess, "run", lambda cmd, **_k: calls.__setitem__("cmd", cmd))
-    out = media.animated_screenshot(
-        "/v.mkv", media.Timespan(1, 3), "/out.webp", media.AnimatedClip()
-    )
+    out = media.animated_screenshot("/v.mkv", media.Timespan(1, 3), "/out.webp", AnimatedClip())
     assert out == media.Path("/out.gif")  # extension swapped to the real (fallback) format
     cmd = calls["cmd"]
     assert "palettegen" in cmd[cmd.index("-vf") + 1]  # GIF uses the palette filtergraph
@@ -192,6 +191,6 @@ def test_animated_screenshot_unknown_format_is_none(monkeypatch):
     monkeypatch.setattr(media, "_ffmpeg_encoder_available", lambda _enc: True)
     # av1/mp4 needs a <video> template, out of scope → no encode, caller falls back to the still
     out = media.animated_screenshot(
-        "/v.mkv", media.Timespan(0, 3), "/o.mp4", media.AnimatedClip(fmt="av1")
+        "/v.mkv", media.Timespan(0, 3), "/o.mp4", AnimatedClip(fmt="av1")
     )
     assert out is None

@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 
+from saitenka_card import MineConfig
+
 import saitenka.app.features.profiles.dependencies as reader_deps
 from saitenka.app import anki as anki_mod
-from saitenka.app.anki import MineConfig
 
 # The conftest fixture patches the module attribute ``anki_reachable``; keep the REAL one so we can
 # exercise its own logic (the SSOT fold onto the client) under a stubbed ``Anki._call``.

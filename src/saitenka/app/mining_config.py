@@ -5,9 +5,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from saitenka.app.anki import MineConfig
+from saitenka_card import AnimatedClip, MineConfig
+
 from saitenka.app.config import WordAudioOptions
-from saitenka.app.media import AnimatedClip
 
 
 def mine_config_from(config: dict) -> MineConfig:

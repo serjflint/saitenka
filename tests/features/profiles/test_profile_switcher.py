@@ -434,7 +434,8 @@ def test_late_dependency_result_cannot_overwrite_selected_profile(request):
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_profile_environment_refuses_out_of_order_dependency_publication(request, monkeypatch):
-    from saitenka.app.anki import MineConfig
+    from saitenka_card import MineConfig
+
     from saitenka.app.bindings import MINE_MSG
     from saitenka.app.features.mining import miner
     from saitenka.app.features.mining.mining_controller import (
@@ -520,7 +521,8 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_invalid_profile_mining_spec_disables_the_old_target(request):
-    from saitenka.app.anki import MineConfig
+    from saitenka_card import MineConfig
+
     from saitenka.app.features.mining.mining_controller import MiningSpec
 
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
@@ -564,7 +566,8 @@ def test_invalid_profile_mining_spec_disables_the_old_target(request):
 
 
 def test_matching_failed_dependency_bundle_clears_the_active_mining_target(request):
-    from saitenka.app.anki import MineConfig
+    from saitenka_card import MineConfig
+
     from saitenka.app.features.mining.mining_controller import SeedStatus
     from saitenka.app.features.profiles.dependencies import DependencyBundle
 

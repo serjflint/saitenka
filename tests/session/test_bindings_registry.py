@@ -169,7 +169,8 @@ def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
 def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypatch):
     """The #244 flagship at the firing level: register while anki=None (attach mode), then press the
     mine key — it must reach the mining command route without re-registering the binding."""
-    from saitenka.app.anki import MineConfig
+    from saitenka_card import MineConfig
+
     from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 
     ipc = FakeIPC()

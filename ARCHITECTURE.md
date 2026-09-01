@@ -89,7 +89,11 @@ internal modules with explicit dependency contracts, not independently published
   lookup path; the app keeps no reader of its own. The headless-Yomitan oracle is repository-only
   test tooling and is excluded from published artifacts.
 - **`../ankiconnect-client/`** — the application-neutral AnkiConnect transport/retry/protocol client.
-  `app/anki.py` retains Saitenka launch policy, telemetry, compatibility exceptions, and note building.
+  `app/anki.py` retains Saitenka launch policy, telemetry, and compatibility exceptions.
+- **`../saitenka-card/`** — what a mined card *is*: the note type's field maps, the `{marker}`
+  template vocabulary, and the note dict itself. Split from `app/anki.py`, which was two things at
+  once — how to reach Anki, and what to send it — so the card's shape needed a socket module to
+  reach. Nothing in it opens one.
 - **`../saitenka-tokenize/`** — per-language segmentation: surface/lemma/reading/POS plus offsets, the
   strategy registry a profile selects from, and the kana/kanji predicates. Dictionary attestation
   reaches it as a callable, so the package ships without a dictionary.
@@ -604,7 +608,7 @@ pushes it into mpv's own OSD surface via `overlay-add` — one surface, no secon
 decision below). Scrolling re-runs Stage 6 for the new offset; a warm frame reuses cached BGRA bands
 (inflating only packed ones), composites, decorates, and uploads without `getmask2`.
 
-### Stage 8 — mine (optional) · `app/features/mining/`, `app/anki.py`
+### Stage 8 — mine (optional) · `app/features/mining/`, `app/anki.py`, `saitenka-card`
 
 One key mines the hovered subtitle token. Clicking a definition group's `mine:<card_index>` link
 selects that exact card, while the add button on a nested scan popup mines its inner token. Each path

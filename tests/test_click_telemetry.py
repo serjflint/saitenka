@@ -96,7 +96,8 @@ def test_mined_store_write_is_spanned(monkeypatch, tmp_path):
     # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
     from types import SimpleNamespace
 
-    from saitenka.app.anki import MineConfig
+    from saitenka_card import MineConfig
+
     from saitenka.app.features.mining import mined_store, miner
 
     spans = record_spans(monkeypatch)

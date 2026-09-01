@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     import threading
 
-    from saitenka.app.anki import Anki, MineConfig
+    from saitenka_card import MineConfig
+
+    from saitenka.app.anki import Anki
     from saitenka.app.config import MiningOptions, ReaderOptions
     from saitenka.app.features.analysis.analysis_controller import AnalysisCommandEndpoint
     from saitenka.app.features.annotation.annotation_controller import CueAnnotationController

@@ -11,10 +11,10 @@ from dataclasses import replace
 
 import pytest
 from driver import Driver
+from saitenka_card import MineConfig
 from session_builder import TestSession, build_session
 from util import FakeIPC, ManualRenderAheadSubmitter
 
-from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import TIP_CLOSE_MSG
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget

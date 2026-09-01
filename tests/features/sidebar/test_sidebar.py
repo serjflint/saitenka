@@ -6,13 +6,13 @@ import pytest
 import util
 from driver import Driver
 from PIL import Image
+from saitenka_card import MineConfig
 from saitenka_subtitles import Cue, CueIndex
 from saitenka_wordstate import Scorer
 from saitenka_wordstate.known import KnownWords
 from session_builder import TestSession, build_session, install_profile_dependencies
 
 from saitenka.app import backlog
-from saitenka.app.anki import MineConfig
 from saitenka.app.backlog import BacklogStore, Capture
 from saitenka.app.bindings import CLICK_MSG
 from saitenka.app.features.analysis.episode_analysis import analyze_cues
