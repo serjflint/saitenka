@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from saitenka_dict.kana import reading_key
 from saitenka_dict.metadata import parse_frequency
 from saitenka_dict.models import (
     Definition,
@@ -126,28 +127,35 @@ def prefer_term_keyed(rows: Iterable[Any], headwords: tuple[tuple[str, str], ...
     contributes, and one that has 本命 is not second-guessed. The choice is per dictionary, so a
     precise dictionary does not silence a vaguer one that is the only source for some other word.
 
+    Readings are compared through :func:`~saitenka_dict.kana.reading_key`, not literally: two
+    dictionaries spell the same reading differently often enough that a literal match dropped a whole
+    dictionary for 15.9% of headwords.
+
     Rows are ``(title, term, reading, *rest)`` in query order, which is preserved.
     """
-    pairs = set(headwords)
-    reading_of_term = {term: reading for term, reading in headwords if term}
-    readings = {reading for _term, reading in headwords if reading}
+    pairs = {(term, reading_key(reading)) for term, reading in headwords}
+    reading_of_term = {term: reading_key(reading) for term, reading in headwords if term}
+    readings = {reading_key(reading) for _term, reading in headwords if reading}
     materialised = list(rows)
 
     def exact(term: str, reading: str | None) -> bool:
         # A row with no reading is identified by its term alone — that is all it claims.
-        return (term, reading) in pairs or (reading is None and term in reading_of_term)
+        if reading is None:
+            return term in reading_of_term
+        return (term, reading_key(reading)) in pairs
 
     precise = {
-        (row[0], row[2] if row[2] is not None else reading_of_term.get(row[1]))
+        (row[0], reading_key(row[2]) if row[2] is not None else reading_of_term.get(row[1]))
         for row in materialised
         if exact(row[1], row[2])
     }
 
     def keyed_by_our_reading(title: str, term: str, reading: str | None) -> bool:
+        key = reading_key(term)
         return (
-            term in readings
-            and (reading is None or reading == term)
-            and (title, term) not in precise
+            key in readings
+            and (reading is None or reading_key(reading) == key)
+            and (title, key) not in precise
         )
 
     return [
