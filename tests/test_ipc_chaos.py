@@ -72,11 +72,21 @@ def test_a_disconnected_result_implies_the_ipc_already_reads_closed():
     ipc._transport = transport
     ipc._start_reader()
     seen: list[bool] = []
+    observed = threading.Event()
     try:
         request = ipc.command_async("get_property", "time-pos")
-        request.future.add_done_callback(lambda _f: seen.append(ipc.disconnected))
+
+        def _observe(_f: object) -> None:
+            seen.append(ipc.disconnected)
+            observed.set()
+
+        request.future.add_done_callback(_observe)
         transport.release.set()
         assert request.future.result(timeout=5.0) == {"error": "disconnected"}
+        # `set_result` notifies the condition inside the lock and invokes callbacks only after
+        # releasing it, so `result()` returning does NOT mean the callback has run: reading `seen`
+        # here caught it empty. Wait for the observation itself, on a deadline.
+        assert observed.wait(5.0), "the done-callback never ran"
         assert seen == [True]
     finally:
         ipc.close()
