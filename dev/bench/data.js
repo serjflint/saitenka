@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788270491505,
+  "lastUpdate": 1788270508982,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -13229,6 +13229,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.062564,
             "range": "3 replicas; min 1.06065; max 1.14386; MAD 0.001918; worst 1.14386",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fdaf3c44db7fb2b71551fae10a7a8c4e240e85e8",
+          "message": "Merge pull request #482 from serjflint/refactor/extract-saitenka-card\n\nrefactor(anki): split the shape of a card out of the module that reaches Anki",
+          "timestamp": "2026-09-01T18:46:44+05:00",
+          "tree_id": "2f2607d1baac9397ab48545e5386cbff914a1830",
+          "url": "https://github.com/serjflint/saitenka/commit/fdaf3c44db7fb2b71551fae10a7a8c4e240e85e8"
+        },
+        "date": 1788270507318,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.343847,
+            "range": "3 replicas; min 6.34333; max 6.38462; MAD 0.000514",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.742574,
+            "range": "3 replicas; min 8.70528; max 10.54; MAD 0.037291; worst 10.54",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.676924,
+            "range": "3 replicas; min 20.5459; max 20.7926; MAD 0.115721",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.8509,
+            "range": "3 replicas; min 20.6668; max 21.8109; MAD 0.184112; worst 21.8109",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.839128,
+            "range": "3 replicas; min 14.021; max 16.0197; MAD 0.818113",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.123361,
+            "range": "3 replicas; min 0.12309; max 0.124151; MAD 0.000271; worst 0.124151",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.636988,
+            "range": "3 replicas; min 43.5317; max 45.4023; MAD 0.765312; worst 45.4023",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.096874,
+            "range": "3 replicas; min 2.8936; max 3.45634; MAD 0.203272; worst 3.45634",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.095876,
+            "range": "3 replicas; min 1.08849; max 1.49401; MAD 0.007383; worst 1.49401",
             "unit": "ms"
           }
         ]
