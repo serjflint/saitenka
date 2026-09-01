@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788250164930,
+  "lastUpdate": 1788251033143,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -12605,6 +12605,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.346514,
             "range": "3 replicas; min 1.1614; max 4.17016; MAD 0.185112; worst 4.17016",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ac40f638257a29944caaeec3e0fd2315c9ea8016",
+          "message": "Merge pull request #475 from serjflint/refactor/retire-dict-meta-sources\n\ntest(dict): pin the kana-keyed term_meta bug, and the oracle for retiring the duplicate readers",
+          "timestamp": "2026-09-01T13:22:23+05:00",
+          "tree_id": "ffe5d9344b687802daba884ceb73ebef69e71a69",
+          "url": "https://github.com/serjflint/saitenka/commit/ac40f638257a29944caaeec3e0fd2315c9ea8016"
+        },
+        "date": 1788251032172,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.430173,
+            "range": "3 replicas; min 6.37721; max 6.44275; MAD 0.012581",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.883738,
+            "range": "3 replicas; min 8.7214; max 8.99158; MAD 0.107845; worst 8.99158",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.704442,
+            "range": "3 replicas; min 18.6013; max 20.5112; MAD 0.103118",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.866587,
+            "range": "3 replicas; min 18.7709; max 20.7316; MAD 0.095687; worst 20.7316",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 11.88593,
+            "range": "3 replicas; min 11.7898; max 14.8716; MAD 0.096152",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.081703,
+            "range": "3 replicas; min 0.081474; max 0.11211; MAD 0.000229; worst 0.11211",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.334835,
+            "range": "3 replicas; min 39.2162; max 46.0482; MAD 1.71337; worst 46.0482",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.697304,
+            "range": "3 replicas; min 2.60907; max 2.95958; MAD 0.08823; worst 2.95958",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.000171,
+            "range": "3 replicas; min 0.973268; max 1.16296; MAD 0.026903; worst 1.16296",
             "unit": "ms"
           }
         ]
