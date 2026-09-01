@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from saitenka.mpvio.gateway import register_observer_set
+from saitenka.app.session.mpv_gateway import register_observer_set
 from saitenka.runtime import events, playback
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackStore
 

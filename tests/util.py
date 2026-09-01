@@ -28,8 +28,8 @@ from PIL import Image
 
 from saitenka import otel_metrics
 from saitenka.app.features.tooltip import tooltip_raster
+from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.model import Theme
-from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest
 from saitenka.panel import Definition, Entry, Freq, panel_rows, render_panel
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome

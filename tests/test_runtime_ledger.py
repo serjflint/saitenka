@@ -108,7 +108,7 @@ def test_an_expiry_reaches_the_gateway_that_holds_the_request() -> None:
 def test_a_cancel_for_an_effect_the_reactor_never_dispatched_is_not_retired() -> None:
     """The same guard `_finish` applies. Retiring is a claim of ownership, and the loser of that
     race never finds out — so a cancel must not be able to retire somebody else's effect."""
-    from saitenka.mpvio.gateway import install_gateway
+    from saitenka.app.session.mpv_gateway import install_gateway
 
     gateway = install_gateway(FakeIPC())
     reactor = install_session_reactor(gateway, startup_hint=False)
