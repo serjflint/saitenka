@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402  # must come after the sys.path setup above
+import session_builder  # noqa: E402  # must come after the sys.path setup above
 
 import saitenka.app.backlog as _backlog  # noqa: E402  # must come after the sys.path setup above
 import saitenka.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
@@ -170,3 +171,39 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     if seed is None or reporter is None:  # `-p no:randomly`, or no terminal to write to
         return
     reporter.write_line(f"randomly-seed: {seed}  (replay with --randomly-seed={seed})")
+
+
+@pytest.fixture
+def make_session():
+    """Build sessions that are closed when the test ends — the sanctioned form for new tests.
+
+    A factory rather than a plain `session` fixture because call sites supply their own ipc /
+    services / options, and several build more than one. A session owns worker threads, SQLite
+    handles, timers and temp artifacts, and a live thread is a GC root: leaving one open keeps its
+    whole graph reachable for the rest of the process (~14.6 MB against ~0.4 MB closed).
+
+    Prefer this to calling `build_session` directly. The autouse sweep below still catches direct
+    calls, but it is a net for the ~330 existing ones, not the ownership story.
+    """
+    built: list[session_builder.TestSession] = []
+
+    def factory(ipc, **kwargs):
+        session = session_builder.build_session(ipc, **kwargs)
+        built.append(session)
+        return session
+
+    yield factory
+    session_builder.drain_and_close(built)
+
+
+@pytest.fixture(autouse=True)
+def close_built_sessions():
+    """Net under `make_session`: close whatever `build_session` handed out directly.
+
+    The suite builds ~330 sessions and closes a minority explicitly, which is what made a worker's
+    RSS climb monotonically through a file instead of returning between tests.
+    `LiveSession.close()` is idempotent, so a test that closes its own — or used `make_session` —
+    is unaffected.
+    """
+    yield
+    session_builder.drain_and_close(session_builder.BUILT_SESSIONS)

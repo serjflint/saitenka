@@ -4,6 +4,7 @@ import threading
 import time
 from dataclasses import replace
 
+import pytest
 from driver import Driver
 from saitenka_tokenize.japanese import Token
 from session_builder import build_session
@@ -178,6 +179,76 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
     assert len(submitted) == 1
     assert reader.graph.tooltip.observation().metadata.terms == ()
     assert reader.graph.tooltip.surface_state().view.state is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "worth_re_asking"),
+    [
+        ("generation", 99, True),  # prefetch queue epoch — the hover's own arrival bumps it
+        ("mined_generation", 99, True),  # the mined set moved; the word did not
+        ("dependency_generation", 99, False),  # different dictionaries, so a different answer
+        ("cue_identity", "another-cue", False),
+        ("index", 7, False),
+        ("job_id", 7, False),
+    ],
+)
+def test_same_target_excuses_the_epochs_and_no_other_field(field, value, worth_re_asking):
+    """Pin every discriminator, not just the one that last moved.
+
+    `same_target` decides whether a stale result means "ask again" or "that was a different word".
+    Widening it is how a wrong tooltip gets shown; narrowing it is how a tooltip goes missing. Both
+    edits are one tuple element, and before this test either could be made with the suite green.
+    """
+    key = HoverMetadataKey(1, 1, 1, "cue", 0, job_id=1)
+
+    assert key.same_target(replace(key, **{field: value})) is worth_re_asking
+
+
+def test_a_hover_survives_the_prefetch_generation_its_own_arrival_bumps():
+    """The prefetch generation is a queue epoch, not the hovered word's identity.
+
+    Engaging — pausing, or the cursor entering the video — is what `update_prefetch` re-keys on, so
+    the first hover after the pointer arrives bumps the very generation its in-flight request was
+    stamped with. Treating that as a different target drops the answer *and* declines to ask again,
+    which is a tooltip that never appears rather than one that appears late. Isolated deliberately:
+    the neighbouring refusal test moves the mined set, the cue and this generation at once, so it
+    passes whichever of the three is doing the work.
+    """
+    submitted = []
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            tooltip_jobs=lambda jobs: replace(
+                jobs, metadata=lambda **kwargs: submitted.append(kwargs) or True
+            ),
+        ),
+    )
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("猫", "猫", "ネコ", "名詞", 0, 1)]
+    )
+    reader.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    Driver(reader).move_to_word(0)
+    original = submitted[0]["request"]
+
+    reader.graph.tooltip_preparation.cancel()  # the engagement flip, as `settle` performs it
+    submitted[0]["on_finished"](
+        EffectFinished(
+            EffectId(1),
+            Owner.INTERACTION,
+            submitted[0]["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=HoverMetadata(
+                original.key,
+                phrase_terms=("猫",),
+                phrase_span=(0, 1),
+                mined=False,
+                group_mined=(),
+            ),
+        )
+    )
+
+    assert [kwargs["request"].key.index for kwargs in submitted] == [0, 0]
 
 
 def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch):

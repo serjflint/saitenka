@@ -118,6 +118,13 @@ def show_nested(ports: TipPorts, panel: PanelPorts, lookup: WordLookup, sb) -> N
 
 
 def apply_nested_metadata(ports: TipPorts, panel: PanelPorts, lookup: WordLookup, result) -> None:
+    """Drops a stale result without re-asking, unlike the hover path's `same_target`.
+
+    Deliberate, not an oversight left behind: a nested popup only opens with a tooltip already up,
+    so `engaged` is already true and the prefetch epoch does not flip underneath it — the
+    self-invalidation that made the hover path re-ask cannot arise here. If a nested popup is ever
+    seen going missing, this is the first line to suspect.
+    """
     key = result.key
     if (
         result.error

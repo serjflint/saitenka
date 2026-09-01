@@ -28,15 +28,27 @@ class HoverMetadataKey:
     job_id: int | None = None
 
     def same_target(self, other: HoverMetadataKey) -> bool:
-        """Same hover, mined set aside — the one difference worth re-requesting for.
+        """Same hover, epochs set aside — the differences worth re-requesting for.
 
-        A result whose mined generation alone is stale answers about the word still hovered, so
-        the fix is another request rather than a dropped tooltip. Named because the comparison
-        used to be two tuple slices around index 2, where which field was being excused was
-        readable only by counting.
+        `mined_generation` and `generation` both date the *answer*, not the question: a result
+        stale in either still concerns the word under the cursor, so the fix is another request
+        rather than a dropped tooltip. What identifies the target is the cue, the index, the job,
+        and `dependency_generation` — replace the dictionaries and it is a different question.
+
+        `generation` is the prefetch queue's epoch, and excusing it is load-bearing rather than
+        tidy: `update_prefetch` re-keys on `(cue text, engaged)`, and engaging is the cursor
+        entering the video — so the first hover after the pointer arrives bumps the epoch its own
+        in-flight request was stamped with. Counting that as a different target dropped the answer
+        and declined to ask again, which is a tooltip that never appears at all.
+
+        The re-ask costs a second identical round trip, because `hover_key` still carries the epoch
+        and so still fails the equality that decides whether to *apply*. Nothing in the resolver
+        reads the epoch, so that field is arguably redundant there too — but removing it widens what
+        may be applied, where excusing it here only widens what may be asked again. Kept as the
+        conservative half; it is one off-thread lookup on the first hover, not per frame.
         """
-        mine = (self.generation, self.dependency_generation, self.cue_identity, self.index)
-        theirs = (other.generation, other.dependency_generation, other.cue_identity, other.index)
+        mine = (self.dependency_generation, self.cue_identity, self.index)
+        theirs = (other.dependency_generation, other.cue_identity, other.index)
         return mine == theirs and self.job_id == other.job_id
 
 

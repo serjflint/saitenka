@@ -182,7 +182,7 @@ class TooltipVisualSettings:
             options.nested_max_frac,
             options.kanji_stroke_order,
             options.band_cache_max,
-            options.raw_band_ceiling_mb * 1024 * 1024,
+            int(options.raw_band_ceiling_mb * 1024 * 1024),
             options.crisp_upscale,
             options.tip_scale,
             backend,

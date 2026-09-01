@@ -122,7 +122,7 @@ class _HeadlessTooltipPreparation:
             style=tooltip_panel.PanelStyle(
                 width=self.scale.width,
                 band_cache_max=options.band_cache_max,
-                raw_band_ceiling=options.raw_band_ceiling_mb * 1024 * 1024,
+                raw_band_ceiling=int(options.raw_band_ceiling_mb * 1024 * 1024),
                 layout_backend=backend,
                 layout_engine=backend_label(backend),
                 add_button=False,

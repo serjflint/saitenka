@@ -297,7 +297,26 @@ noise moves.
 | --- | --- | --- | --- |
 | `tools/perf_gate.py` | p99 pooled across `--loops` | raised by pooling | meets rule 4, not rule 2 — its own docstring records that p99 "resamples 50-75% between back-to-back runs **even pooled**", so what holds it is the +100% tolerance derived from that CV, not the rank |
 | `tools/libass_prototype_benchmark.py` | p99 over 1000 warm samples | 11th worst | conforms |
-| `tools/libass_prototype_benchmark.py` (cold) | p95 over 30 process starts | 2nd worst | below the floor and left there: the 100 ms bound is a smoke bound an order of magnitude above observed cold latency, and reaching the floor would cost ~200 real process starts per CI run |
+| `tools/libass_prototype_benchmark.py` (cold) | p95 over 30 process starts | 2nd worst | below the floor and left there — reaching it would cost ~200 real process starts per CI run — so the bound is set from measured noise instead (300 ms; see below) |
+
+### The cold bound was inside its own noise (2026-09-01)
+
+The row above used to justify the below-floor estimator by calling 100 ms "a smoke bound an order of
+magnitude above observed cold latency". That was wrong, and it is the reason the gate fired.
+
+Measured across 13 archived macOS runs, this estimator spans **31.5-100.6 ms, median 49.7** — so the
+bound sat at 2x the median and *inside the spread of its own estimator*, not an order of magnitude
+above it. It first failed at 100.6 ms, with the same run's warm p99 at 603 us against a 90-385 us
+range: every independent metric inflated together, which is a runner running ~2x slow, not a render
+that regressed.
+
+Rule 4 says a bound comes from an anchor or from measured noise. There is no physical anchor for a
+cold process start, so it comes from the noise: 300 ms is 6x the median and 3x the worst observed,
+which still catches gross breakage while surviving a degraded runner. Re-derive it from the archive
+if that spread moves — do not tighten it toward the typical value, which is what produced this flake.
+
+A below-floor estimator is only as good as the claim excusing it. If a rank is not defensible, the
+number excusing it has to be re-measured, not asserted once and inherited.
 | `tools/native_subtitle_integration_benchmark.py` | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank |
 
 Two of the four do not meet the rank floor, and say so rather than claiming it. The floor is the

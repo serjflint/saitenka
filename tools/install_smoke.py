@@ -41,10 +41,17 @@ ALLOWED_FAILS = {"mpv", "ffmpeg"}
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
     print(f"$ {' '.join(cmd)}", flush=True)
+    # NO_COLOR: uv styles paths even when stdout is a pipe, and the escapes land inside the string.
+    # A caller treating stdout as a path then holds one that cannot exist — loudly in `_resolve_exe`,
+    # silently in `_editable_install_present`, which reports "no editable install" and skips the
+    # restore. Set here rather than per call so the next stdout-parsing caller inherits it.
+    env = {**os.environ, "NO_COLOR": "1", **kw.pop("env", {})}
     # Force UTF-8: `text=True` alone decodes with the platform locale (cp1252 on Windows), which chokes
     # on the CLI's non-ASCII help/doctor output (UnicodeDecodeError → stdout=None). Same trap as the
     # repo's subprocess-utf8-encoding ast-grep rule.
-    return subprocess.run(cmd, encoding="utf-8", errors="replace", capture_output=True, **kw)
+    return subprocess.run(
+        cmd, encoding="utf-8", errors="replace", capture_output=True, env=env, **kw
+    )
 
 
 _REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9._-]+")

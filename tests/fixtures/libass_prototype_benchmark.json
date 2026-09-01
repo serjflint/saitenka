@@ -2,12 +2,12 @@
   "schema": 1,
   "denominator": {
     "case_count": 4,
-    "contract_sha256": "610606e6552a131c44191569bb39ac4729304c677bce0b288a4d526c5f2e8a8b"
+    "contract_sha256": "5393c0b298bae48694cce1fd021206fc1f5af8cf5e786e2fb1516dde5cc515bc"
   },
   "budgets": {
     "warm_samples": 1000,
     "cold_process_starts": 30,
-    "cold_geometry_p95_us": 100000,
+    "cold_geometry_p95_us": 300000,
     "static_render_p99_us": 50000,
     "cadence_fps": 24,
     "cadence_duration_ms": 2000,

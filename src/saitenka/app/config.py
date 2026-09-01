@@ -205,13 +205,15 @@ class TooltipOptions:
     # hit the cache, but a bounded fraction of a worst-case ~87k-px entry (retaining all of that would
     # defeat the O(viewport) memory bound banding exists for). The visible window is always protected
     # regardless of the cap; raise it to widen the warm window (more RAM), lower it to shrink it.
-    raw_band_ceiling_mb: int = (
-        100  # keep a panel's render bands UNCOMPRESSED (skips the one-time zlib
+    raw_band_ceiling_mb: float = (
+        0.1  # keep a panel's render bands UNCOMPRESSED only below this estimated
     )
-    # decompress on the first scroll-reach of a band — measured ~9→4ms off the cold-band frame tail)
-    # UNLESS the panel's estimated uncompressed size exceeds this many MB, when its bands compress so one
-    # pathological entry can't blow the retained-pixel budget (raw is ~10× the zlib size). 0 = always
-    # compress (the pre-1.3 behavior). The visible/warm window is bounded by band_cache_max either way.
+    # size in MB — effectively "always compress", since a real panel clears 0.1 MB immediately.
+    # It was 100, which no entry reaches, so bands were always retained raw for a one-time inflate
+    # saved on first scroll-reach. Compression now costs far less than that trade assumed: zstd
+    # (3.14+) inflates a band in ~0.55ms against zlib's ~1.13 and stores 2.4x smaller, so the ceiling
+    # buys a sub-millisecond win per band in exchange for ~11-27x the retained pixels.
+    # 0 = compress unconditionally. The visible/warm window is bounded by band_cache_max either way.
     # "default" = always-available pure-Python backend; "taffy" = the optional taffylite Rust flexbox
     # engine (needs saitenka[layout-engine]); byte-identical geometry. A missing wheel falls back, logged.
     layout_engine: Literal["default", "taffy"] = field(
