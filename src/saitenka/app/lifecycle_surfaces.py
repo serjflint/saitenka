@@ -5,7 +5,7 @@ from __future__ import annotations
 from threading import RLock
 from typing import TYPE_CHECKING
 
-from saitenka.runtime import EffectError, EffectFinished, EffectOutcome, Owner
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.runtime.surfaces import (
     SurfaceAction,
     SurfaceRuntime,
@@ -22,6 +22,10 @@ if TYPE_CHECKING:
     from saitenka.mpvio.osd import Overlay, PreparedOverlay
 
 _SURFACE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+_SURFACE_TIMEOUT_S = 10.0
+#: Where ids for inline-settled transactions start. They never reach the reactor's sequence, so they
+#: only have to stay clear of it in a log read by a human.
+_INLINE_EFFECT_ID_BASE = 1_000_000
 
 
 class LifecycleSurfaces:
@@ -34,6 +38,7 @@ class LifecycleSurfaces:
         # and a rollback settles by clearing the same slot — a second request from the same thread.
         # The revision fence already orders those two (the clear allocates the newer revision).
         self._request_lock = RLock()
+        self._inline_effect_id = _INLINE_EFFECT_ID_BASE
 
     def present(
         self,
@@ -178,11 +183,43 @@ class LifecycleSurfaces:
             if on_settled is not None:
                 on_settled(committed)
 
-        self._overlay.submit_surface_transaction(
+        self._route(owner, transaction, command, finished)
+
+    def _route(
+        self,
+        owner: Owner,
+        transaction: SurfaceTransaction,
+        command: tuple[object, ...],
+        finished: Callable[[EffectFinished], None],
+    ) -> None:
+        """Hand the command to the correlated-command port, or issue it inline and settle here."""
+        submit = self._overlay.runtime_submit
+        if submit is None:
+            # No port: the command is issued and answered inline, so this layer settles the
+            # transaction with an outcome it observed rather than one it was told.
+            succeeded = self._overlay.apply_surface_command(command)
+        elif submit(
             owner=owner,
             identity=transaction,
             command=command,
+            timeout_s=_SURFACE_TIMEOUT_S,
             on_finished=finished,
+        ):
+            return
+        else:
+            succeeded = False  # the port refused — mpv is gone, and nothing was issued
+        finished(self._inline_completion(owner, transaction, succeeded=succeeded))
+
+    def _inline_completion(
+        self, owner: Owner, transaction: SurfaceTransaction, *, succeeded: bool
+    ) -> EffectFinished:
+        self._inline_effect_id += 1
+        return EffectFinished(
+            EffectId(self._inline_effect_id),
+            owner,
+            transaction,
+            EffectOutcome.SUCCEEDED if succeeded else EffectOutcome.FAILED,
+            error=None if succeeded else EffectError.INVALID_RESULT,
         )
 
     def _fail(
