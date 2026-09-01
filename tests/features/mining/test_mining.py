@@ -1,14 +1,21 @@
 """Mining: card builder, dedup query, sentence bolding, media args, toast (no real Anki add)."""
 
 import pytest
+from saitenka_card import (
+    KNOWN_MARKERS,
+    AnimatedClip,
+    CardContent,
+    MineConfig,
+    bold_word,
+    build_note,
+)
 from saitenka_tokenize.japanese import tokenize
 from session_builder import build_session
 
-from saitenka.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
 from saitenka.app.features.mining import miner
 from saitenka.app.features.preview import miner_ui
 from saitenka.app.lookup import card_for
-from saitenka.app.media import AnimatedClip, Timespan, clip_audio
+from saitenka.app.media import Timespan, clip_audio
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.toast import render_toast
 
@@ -30,8 +37,8 @@ def test_card_data_from_token():
 def test_known_entities_match_entity_values_keys():
     """KNOWN_ENTITIES (what doctor validates a [mine.fields] map against) must stay in lockstep with
     the actual entities build_note writes — else doctor flags a valid key or misses a bogus one."""
-    from saitenka.app.anki import KNOWN_ENTITIES, _entity_values
-    from saitenka.app.lookup import CardData
+    from saitenka_card import KNOWN_ENTITIES, CardData
+    from saitenka_card.note import _entity_values
 
     values = _entity_values(CardData("x", "y", ""), CardContent())
     assert set(values) == set(KNOWN_ENTITIES)
@@ -72,7 +79,7 @@ def test_build_note_writes_idseq_into_the_default_id_field():
     halves. Under the default LAPIS map, a non-empty idseq must land in the real ``ID`` field the Kanji
     Study ``kanjistudy://word?id={{ID}}`` deep-link reads — proven with a constructed idseq (not a live
     jamdict lookup), so it runs regardless of the ``jmdict`` extra."""
-    from saitenka.app.lookup import CardData
+    from saitenka_card import CardData
 
     note = build_note(MineConfig(), CardData("読む", "よむ", "", idseq="1456360"))
     assert note["fields"]["ID"] == "1456360"
@@ -339,7 +346,9 @@ def test_bold_word_escapes_html_in_sentence():
 def test_dedupe_escapes_special_chars_in_query():
     """dedupe must escape * and spaces in the expression to avoid Anki query injection.
     The escaped query must contain \\* (backslash-star), not a bare unescaped *."""
-    from saitenka.app.anki import MineConfig, dedupe
+    from saitenka_card import MineConfig
+
+    from saitenka.app.anki import dedupe
 
     queries = []
 
@@ -499,9 +508,8 @@ def test_capture_media_survives_a_timespan_read_error(monkeypatch):
 def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     """A per-entry ⊕ passes an explicit CardData, so the mined note is that chosen entry (しりぞく),
     not whatever the default dict-first pick would derive for the token."""
+    from saitenka_card import CardData
     from util import FakeIPC
-
-    from saitenka.app.lookup import CardData
 
     ipc = FakeIPC()
     anki = _FakeAnki()

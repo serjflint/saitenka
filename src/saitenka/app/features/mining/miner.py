@@ -20,25 +20,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from saitenka_card import CardContent, bold_word, build_note, strip_field_html
+
 from saitenka import otel_metrics
-from saitenka.app.anki import (
-    AnkiError,
-    CardContent,
-    bold_word,
-    build_note,
-    dedupe,
-    strip_field_html,
-)
+from saitenka.app.anki import AnkiError, dedupe
 from saitenka.app.lookup import card_for
 from saitenka.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from saitenka_card import MineConfig
     from saitenka_tokenize.japanese import Token
     from saitenka_tokenize.registry import Tokenizer
 
-    from saitenka.app.anki import Anki, MineConfig
+    from saitenka.app.anki import Anki
     from saitenka.app.dictionary import DictionarySet
     from saitenka.app.features.mining.mined_store import MinedCardStore
 
@@ -218,7 +214,8 @@ def _markers_for(p: MiningTransaction, tok, card, content: CardContent, *, video
     Shares the ``CardContent`` the note is built from — same sentence/media/freq, no re-derivation."""
     if not p.mine_cfg.card_format:
         return None
-    from saitenka.app.card_markers import MarkerContext, build_markers
+    from saitenka_card import MarkerContext, build_markers
+
     from saitenka.app.lookup import POS_EN
 
     title, _ep = source_meta(video)

@@ -266,7 +266,7 @@ def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch
 def test_composition_threads_grouped_optional_services(request):
     from types import SimpleNamespace
 
-    from saitenka.app.anki import MineConfig
+    from saitenka_card import MineConfig
 
     scorer = SimpleNamespace(score_line=lambda _tokens: [])
     anki = object()

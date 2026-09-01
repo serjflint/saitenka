@@ -1,0 +1,28 @@
+[project]
+name = "saitenka-card"
+version = "0.1.0"
+description = "The shape of a mined flashcard: field maps, {marker} templates, and note construction"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "saitenka-tokenize>=0.1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# Dev-only resolution: saitenka-tokenize is a sibling in this checkout and not on the registry, so
+# without this the package's own test env cannot be built. uv strips `[tool.uv.sources]` from the
+# wheel. `editable` matches the root's entry for the same package — two different URLs for
+# one name is a resolution conflict, not two ways of saying the same thing.
+[tool.uv.sources]
+saitenka-tokenize = { path = "../saitenka-tokenize", editable = true }

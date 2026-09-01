@@ -527,7 +527,7 @@ def check_anki(deck: str, model: str) -> Check:
 def _card_format_marker_problem(card_format: dict) -> str | None:
     """Unknown ``{marker}`` in a ``[mine.card_format]`` template — a marker Saitenka can't fill, so the
     field would render empty. Doesn't need Anki (a pure marker-name check)."""
-    from saitenka.app.card_markers import MARKERS, markers_in
+    from saitenka_card import MARKERS, markers_in
 
     used = {m for tmpl in card_format.values() for m in markers_in(str(tmpl))}
     unknown = sorted(used - MARKERS)
@@ -842,7 +842,8 @@ def check_mine_mapping() -> Check:
     silent adds-fail traps: an unknown logical entity (writes nothing) and the note type's first field
     left unmapped (empty note → rejected). ``info`` when clean (shown by ``--verbose`` / kept in
     ``--json``), ``warn`` when a trap is present."""
-    from saitenka.app.anki import KNOWN_ENTITIES
+    from saitenka_card import KNOWN_ENTITIES
+
     from saitenka.app.mining_config import mine_config_from
 
     raw = load_config().get("mine")
@@ -870,7 +871,7 @@ def check_mine_mapping() -> Check:
 def _mining_targets_id(mc) -> bool:
     """Whether the effective mining config writes the JMdict entry id — either the ``id`` logical entity
     (default ``LAPIS_FIELDS`` maps ``id -> ID``) or an ``{ent-seq}`` marker in a ``[mine.card_format]``."""
-    from saitenka.app.card_markers import markers_in
+    from saitenka_card import markers_in
 
     if mc.card_format:
         return any("ent-seq" in markers_in(str(tmpl)) for tmpl in mc.card_format.values())

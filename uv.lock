@@ -2272,6 +2272,7 @@ dependencies = [
     { name = "psutil" },
     { name = "questionary" },
     { name = "rich" },
+    { name = "saitenka-card" },
     { name = "saitenka-dict" },
     { name = "saitenka-subtitles" },
     { name = "saitenka-tokenize" },
@@ -2404,6 +2405,7 @@ requires-dist = [
     { name = "saitenka", extras = ["subtitle-geometry"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["subtitle-geometry"], marker = "extra == 'subtitle-geometry-bundle'" },
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
+    { name = "saitenka-card", editable = "saitenka-card" },
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "deinflect" },
     { name = "saitenka-dict", editable = "saitenka-dict" },
     { name = "saitenka-subtitles", editable = "saitenka-subtitles" },
@@ -2459,6 +2461,20 @@ test = [
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
+
+[[package]]
+name = "saitenka-card"
+version = "0.1.0"
+source = { editable = "saitenka-card" }
+dependencies = [
+    { name = "saitenka-tokenize" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "saitenka-tokenize", editable = "saitenka-tokenize" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "saitenka-deinflect"

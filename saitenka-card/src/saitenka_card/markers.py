@@ -9,7 +9,7 @@ dictionaries) — markers Saitenka can't yet ground (word ``audio`` (#93), ``pit
 ``sentence-furigana``, ``furigana-plain``) are ``deferred``: out of :data:`MARKERS`, so ``doctor`` flags
 them instead of shipping an empty field.
 
-No import of :mod:`saitenka.app.anki` — that module imports this one for ``build_note``'s template path,
+No import of :mod:`saitenka_card.note` — that module imports this one for ``build_note``'s template path,
 so the cloze markers read the already-bolded ``sentence_html`` (its lone real ``<b>`` is the surface)
 rather than re-bolding here.
 """
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Literal
 
-    from saitenka.app.lookup import CardData
+    from saitenka_card import CardData
 
 log = logging.getLogger(__name__)
 

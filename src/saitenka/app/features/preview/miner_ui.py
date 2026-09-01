@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from PIL import Image
+from saitenka_card import strip_field_html
 
-from saitenka.app.anki import strip_field_html
 from saitenka.app.bindings import TIP_CLOSE_MSG, active_bindings
 from saitenka.app.features.preview.card_preview import PreviewData, render_card_preview
 from saitenka.app.media import audio_duration, play_audio

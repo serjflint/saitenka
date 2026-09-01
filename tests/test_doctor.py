@@ -318,7 +318,7 @@ def test_anki_check_flags_missing_mining_field(monkeypatch):
 
 
 def test_anki_check_ok_when_all_mining_fields_present(monkeypatch):
-    from saitenka.app.anki import LAPIS_FIELDS
+    from saitenka_card import LAPIS_FIELDS
 
     replies = {
         "version": 6,

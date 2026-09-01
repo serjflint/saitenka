@@ -1383,11 +1383,11 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     import tempfile
     from types import SimpleNamespace
 
+    from saitenka_card import MineConfig
     from saitenka_subtitles import Cue, CueIndex
 
     import saitenka.app.features.mining.miner as miner_flow
     from saitenka.app import backlog
-    from saitenka.app.anki import MineConfig
     from saitenka.app.features.mining import mined_store
     from saitenka.app.features.sidebar import sidebar
 

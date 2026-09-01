@@ -51,12 +51,12 @@ if TYPE_CHECKING:
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from saitenka_card import CardData
     from saitenka_deinflect import Deinflection  # noqa: TID251  # GPL chokepoint (type only)
     from saitenka_dict import LookupSource
     from saitenka_tokenize.japanese import Token
 
     from saitenka.app.dictdb import DictionaryDb, DictRow
-    from saitenka.app.lookup import CardData
     from saitenka.panel import Entry
 
 log = logging.getLogger(__name__)

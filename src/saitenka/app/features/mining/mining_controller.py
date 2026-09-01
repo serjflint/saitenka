@@ -20,9 +20,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from PIL.Image import Image as PILImage
+    from saitenka_card import MineConfig
     from saitenka_tokenize.japanese import Token
 
-    from saitenka.app.anki import Anki, MineConfig
+    from saitenka.app.anki import Anki
     from saitenka.app.config import MiningOptions
     from saitenka.app.features.mining.mined_store import MinedCardStore
     from saitenka.app.lifecycle_timers import LifecycleTimers

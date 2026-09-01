@@ -7,8 +7,7 @@ field MAP, not the JP dictionary.
 
 from __future__ import annotations
 
-from saitenka.app.anki import FRENCH_FIELDS, LAPIS_FIELDS, MineConfig, build_note
-from saitenka.app.lookup import CardData
+from saitenka_card import FRENCH_FIELDS, LAPIS_FIELDS, CardData, MineConfig, build_note
 
 
 def test_french_preset_has_no_reading_field():

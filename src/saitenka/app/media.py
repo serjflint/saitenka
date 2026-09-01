@@ -13,6 +13,10 @@ import sys
 from dataclasses import dataclass
 from functools import cache, lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from saitenka_card import AnimatedClip
 
 
 @dataclass
@@ -91,23 +95,6 @@ def clip_audio(
 # card's existing `<img src>` Picture field. Many ffmpeg builds ship WITHOUT libwebp (e.g. Homebrew's
 # ffmpeg 8, the Windows "essentials" build), so GIF is the universal fallback below.
 _WEBP_ENCODERS = ("libwebp_anim", "libwebp")
-
-
-@dataclass
-class AnimatedClip:
-    """Spec for a motion (animated) screenshot: the on/off toggle plus the quality↔storage levers
-    (``height`` is the primary one). Grouped into one object so the mining config and the capture pass a
-    single value instead of six parallel args. ``enabled`` gates the capture at the call site;
-    :func:`animated_screenshot` uses only the encode fields. ``fmt``: ``"webp"`` prefers WebP and falls
-    back to GIF; ``"gif"`` forces GIF (universal); anything else (av1/mp4 — needs a ``<video>`` template)
-    is unsupported and yields no encode."""
-
-    enabled: bool = False
-    height: int = 480
-    fps: int = 12
-    quality: int = 75
-    max_secs: float = 4.0
-    fmt: str = "webp"
 
 
 @cache

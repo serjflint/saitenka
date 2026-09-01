@@ -3,17 +3,17 @@ Also the #193 catalog invariants — one CATALOG feeds MARKERS, build_markers, a
 
 from pathlib import Path
 
-import saitenka.app.card_markers as cm
-from saitenka.app.card_markers import (
+import saitenka_card.markers as cm
+from saitenka_card import (
     CATALOG,
     MARKERS,
+    CardData,
     Marker,
     MarkerContext,
-    anki_furigana,
     build_markers,
     render_card_format,
 )
-from saitenka.app.lookup import CardData
+from saitenka_card.markers import anki_furigana
 
 # A fully-populated mine, reused by the catalog invariants — every shippable marker gets real input.
 _FULL_CARD = CardData(

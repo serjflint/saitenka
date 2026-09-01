@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from saitenka_card import CardData
 from saitenka_dict import (
     AttestationSource,
     KanjiQuery,
@@ -39,7 +40,7 @@ from saitenka.app.dictionary_surface import (
 from saitenka.app.dictionary_surface import (
     to_glob as _to_glob,
 )
-from saitenka.app.lookup import CardData, furigana
+from saitenka.app.lookup import furigana
 from saitenka.fonts import STROKE_ORDER_FONT
 from saitenka.model import PitchAccent
 from saitenka.panel import Definition, Entry, EntryGroup, Freq

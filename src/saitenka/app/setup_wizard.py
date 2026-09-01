@@ -374,7 +374,7 @@ def _prompt_card_kind(current: dict, model: str = "") -> str:
     Saitenka's historical marker; 'audio'/'click'/'none' cover the other Lapis-family templates. A
     non-preset note type has no ``IsXxxCard`` flag field, so writing one would make the add fail —
     default it to 'none'."""
-    from saitenka.app.anki import CARD_KINDS, PRESETS
+    from saitenka_card import CARD_KINDS, PRESETS
 
     default = current.get("card_kind") or ("word-and-sentence" if model in PRESETS else "none")
     return prompt.select("  Card kind?", list(CARD_KINDS), default=default)
@@ -403,7 +403,7 @@ def _prompt_mine_fields(anki, model: str, current: dict) -> dict | None:
     """Map each saitenka entity to one of a NON-preset note type's real fields, so the user never
     hand-writes ``[mine].fields`` (the mis-map that silently blocks every add). ``None`` when a preset
     supplies its own map, or the model's fields can't be read (leave any existing map untouched)."""
-    from saitenka.app.anki import PRESETS
+    from saitenka_card import PRESETS
 
     if model in PRESETS:
         return None

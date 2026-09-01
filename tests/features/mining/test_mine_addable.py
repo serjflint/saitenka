@@ -18,10 +18,9 @@ from __future__ import annotations
 
 from hypothesis import given
 from hypothesis import strategies as st
+from saitenka_card import CardData, build_note
 
 from saitenka.app import doctor as doc
-from saitenka.app.anki import build_note
-from saitenka.app.lookup import CardData
 from saitenka.app.mining_config import mine_config_from
 
 _CARD = CardData(expression="読む", reading="よむ", glossary_html="<ol><li>to read</li></ol>")

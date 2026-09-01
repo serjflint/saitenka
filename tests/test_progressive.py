@@ -9,13 +9,13 @@ import time
 from concurrent.futures import Future
 
 import pytest
+from saitenka_card import MineConfig
 from saitenka_tokenize.japanese import Token
 from session_builder import build_session
 from util import FakeIPC, await_ready, bare_gateway, drain_for, session_gateway
 
 import saitenka.app.features.mining.mined_seed as mined_seed_lane
 from saitenka import otel_metrics
-from saitenka.app.anki import MineConfig
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec, MiningTarget

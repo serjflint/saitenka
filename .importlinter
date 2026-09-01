@@ -1,6 +1,7 @@
 [importlinter]
 root_packages =
     saitenka
+    saitenka_card
     saitenka_subtitles
     saitenka_tokenize
     saitenka_wordstate
@@ -209,3 +210,14 @@ source_modules =
 forbidden_modules =
     saitenka.app
     saitenka.mpvio
+
+[importlinter:contract:card-package-is-independent]
+name = The card package never imports the application it was extracted from
+type = forbidden
+# `app/anki.py` was two things: how to reach Anki, and what to send it. Only the second is about
+# cards, and it was reachable only through a module that opens sockets and launches processes.
+source_modules =
+    saitenka_card
+forbidden_modules =
+    saitenka
+    ankiconnect_client

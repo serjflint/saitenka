@@ -33,6 +33,7 @@ def test_extras_expand_to_the_first_party_packages_the_install_resolves():
     required = _required_names(subtitle_geometry=True)
     assert {
         "ankiconnect-client",
+        "saitenka-card",
         "saitenka-dict",
         "saitenka-subtitles",
         "saitenka-tokenize",
