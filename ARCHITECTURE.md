@@ -40,15 +40,16 @@ internal modules with explicit dependency contracts, not independently published
   because PIL's C extension is not safe across them.
 - **`mpvio/`** — the mpv IPC bridge: JSON-IPC transport (`ipc.py`), mpv/ffmpeg discovery
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
-- **`subtitles/`** — the pure subtitle seam: immutable cues and authored events, lossless ASS semantic
+- **`saitenka-subtitles`** (`saitenka_subtitles`) — the pure subtitle seam: immutable cues and authored events, lossless ASS semantic
   spans and fail-closed token-color rewriting, SRT/ASS/VTT parsing, cue navigation, and provider-neutral
   geometry request/snapshot contracts. `app/subtitle_pipeline.py` owns the generation fence that decides
   whether a result may still be published; `app/subtitle_geometry_job.py` owns the lane queue, lookahead,
   and result cache that reserve against it. Pillow remains the default; the opt-in external-ASS path
   wires `LibassGeometryBackend` while leaving mpv as the visible owner.
-  It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
-  file-loading adapter. The corpus and differential checks therefore exercise the stable surface
-  without constructing a `SessionController`.
+  It has no application, rendering, mpv, or filesystem dependencies — a gate, not a convention, since
+  it is now its own distribution; `app/sub_index.py` is the thin file-loading adapter. The corpus and
+  differential checks therefore exercise the stable surface without constructing a `SessionController`.
+  Measurement is the host's: the geometry backend takes a telemetry sink and defaults to a no-op.
 - **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
   mpv mutation and cross-feature ordering, while `app/features/` packages own feature state and
   policy. Tooltip interaction and tooltip preparation have separate bounded controllers under the
@@ -203,9 +204,9 @@ protocol-shaped class from being mistaken for production swappability.
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
-`render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
-`saitenka-dict`, `ankiconnect-client`, `saitenka-tokenize`, `saitenka-wordstate`, and experimental
-native add-ons are independently published.
+`render/` and `panel/` are internal package boundaries in the Saitenka distribution. `saitenka-dict`,
+`ankiconnect-client`, `saitenka-subtitles`, `saitenka-tokenize`, `saitenka-wordstate`, and
+experimental native add-ons are independently published.
 
 ## Interactive startup and cue annotation
 

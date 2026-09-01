@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 import util
+from saitenka_subtitles import Cue, CueIndex
 from session_builder import TestSession, build_session
 
 from saitenka.app.bindings import ANALYSIS_MSG
@@ -21,7 +22,6 @@ from saitenka.app.features.sidebar import sidebar
 from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.runtime import events
 from saitenka.runtime.help import HelpCommand
-from saitenka.subtitles import Cue, CueIndex
 
 BASELINE_1080 = (1920, 1080)
 FULLSCREEN_HIDPI = (3024, 1898)  # 16" MacBook Pro Retina, fullscreen (hidpi_scale 2.0)

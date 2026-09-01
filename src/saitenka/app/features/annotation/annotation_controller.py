@@ -18,12 +18,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from concurrent.futures import Future
 
+    from saitenka_subtitles import CueIndex
     from saitenka_tokenize.registry import Tokenizer
 
     from saitenka.app import subtitle_intents
     from saitenka.app.scoring import Coloring, TokenStyle
     from saitenka.mpvio.ipc import MpvIPC
-    from saitenka.subtitles import CueIndex
 
 log = logging.getLogger(__name__)
 

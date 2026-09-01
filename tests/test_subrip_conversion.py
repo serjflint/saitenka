@@ -19,9 +19,8 @@ from pathlib import Path
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
-
-from saitenka.subtitles import subrip
-from saitenka.subtitles.model import Cue
+from saitenka_subtitles import subrip
+from saitenka_subtitles.model import Cue
 
 FIXTURE = json.loads(
     (Path(__file__).parent / "fixtures" / "subrip_rows.json").read_text(encoding="utf-8")
@@ -76,7 +75,7 @@ def _seconds(stamp: str) -> float:
 def test_the_predicted_row_is_the_row_mpv_reports(name: str) -> None:
     """Exactly, after canonicalisation — which is the comparison the geometry cache key makes, and
     therefore the only one that decides whether a prefetched cue is used."""
-    from saitenka.subtitles.ass_geometry import canonical_active_ass_rows
+    from saitenka_subtitles.ass_geometry import canonical_active_ass_rows
 
     case = CASES[name]
     recorded, cue = row_of(case)

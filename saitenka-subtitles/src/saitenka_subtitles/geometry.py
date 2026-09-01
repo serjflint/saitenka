@@ -9,7 +9,7 @@ from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from saitenka.subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+    from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
 
 MAX_FRAME_PIXELS = 16_777_216
 MAX_GEOMETRY_TOKENS = 4_096

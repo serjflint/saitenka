@@ -321,7 +321,7 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() 
 
 
 def _probe_request(reader):
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryRequest,
         SubtitleEventId,
         SubtitleFrameId,

@@ -5,8 +5,7 @@ from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
 import pytest
-
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     FontProvider,
     FontSetup,
     GeometryPaletteEntry,
@@ -15,8 +14,8 @@ from saitenka.subtitles import (
     SubtitleFrameId,
     SubtitleTrackId,
 )
-from saitenka.subtitles.geometry import MAX_GEOMETRY_TOKENS
-from saitenka.subtitles.libass_backend import LibassGeometryBackend, extract_token_geometry
+from saitenka_subtitles.geometry import MAX_GEOMETRY_TOKENS
+from saitenka_subtitles.libass_backend import LibassGeometryBackend, extract_token_geometry
 
 
 @dataclass(frozen=True)

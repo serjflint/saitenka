@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from saitenka.subtitles import Cue, CueIndex
+    from saitenka_subtitles import Cue, CueIndex
 
 
 @dataclass(frozen=True, slots=True)

@@ -69,14 +69,14 @@ def native_boxes() -> list[WordBox]:
     different route than Pillow's — its own shaper, its own metrics, its own line breaking — so a
     fixture derived from the legacy boxes would compare the legacy engine against itself.
     """
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryPaletteEntry,
         GeometryRequest,
         SubtitleTrackId,
         TokenAnnotation,
     )
-    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     track = SubtitleTrackId("same-token-oracle")
     prepared = prepare_ass_hit_map_frame(

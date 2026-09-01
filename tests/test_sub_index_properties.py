@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-
-from saitenka.subtitles import Cue, CueIndex, parse_ass, parse_srt
+from saitenka_subtitles import Cue, CueIndex, parse_ass, parse_srt
 
 # Hiragana + katakana only — no `<`, `{`, `\`, or whitespace, so _sanitize/_norm leave text untouched
 # and SRT round-trip is exact.

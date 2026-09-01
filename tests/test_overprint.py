@@ -10,8 +10,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-
-from saitenka.subtitles import overprint
+from saitenka_subtitles import overprint
 
 PAINT = overprint.TokenPaint("猫", 100, 200, "Noto Sans JP", 48.0, 0x00FF80)
 

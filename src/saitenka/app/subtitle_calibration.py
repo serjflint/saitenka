@@ -31,7 +31,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.subtitles import font_names
+from saitenka_subtitles import font_names
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

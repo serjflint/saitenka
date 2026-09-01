@@ -21,14 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 import psutil
-
-from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-from saitenka.app.dictionary import DictionarySet
-from saitenka.app.embedded_subs import resolve_track_fonts
-from saitenka.app.session.factory import LiveSession, SessionInfrastructure, _compose_session
-from saitenka.app.session.routes import install_session_runtime
-from saitenka.panel import Definition, Entry
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     Cue,
     CueIndex,
     GeometryRequest,
@@ -36,8 +29,15 @@ from saitenka.subtitles import (
     TokenAnnotation,
     prepare_ass_hit_map_frame,
 )
-from saitenka.subtitles.geometry import MAX_BITMAP_BYTES
-from saitenka.subtitles.libass_backend import LibassGeometryBackend, extract_token_geometry
+from saitenka_subtitles.geometry import MAX_BITMAP_BYTES
+from saitenka_subtitles.libass_backend import LibassGeometryBackend, extract_token_geometry
+
+from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+from saitenka.app.dictionary import DictionarySet
+from saitenka.app.embedded_subs import resolve_track_fonts
+from saitenka.app.session.factory import LiveSession, SessionInfrastructure, _compose_session
+from saitenka.app.session.routes import install_session_runtime
+from saitenka.panel import Definition, Entry
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

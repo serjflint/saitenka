@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 from live_harness import make_clip_and_sub
+from saitenka_subtitles import RawSubtitleEvent, SubtitleEventId, SubtitleTrackId, decode_ass_event
 
 from saitenka.mpvio.discover import find_mpv
 from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
-from saitenka.subtitles import RawSubtitleEvent, SubtitleEventId, SubtitleTrackId, decode_ass_event
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("SAITENKA_LIVE"),

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     import threading
     from collections.abc import Callable
 
+    from saitenka_subtitles import Cue, CueIndex
     from saitenka_tokenize.registry import Tokenizer
 
     from saitenka.app.config import KeyOptions
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
     from saitenka.app.scoring import Coloring
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.subtitle_slice import SubtitleTrackStore
-    from saitenka.subtitles import Cue, CueIndex
 
 log = logging.getLogger(__name__)
 LANE = "episode-analysis"

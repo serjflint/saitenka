@@ -297,7 +297,7 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
 class _GeometryTelemetry:
     """This module, as the subtitle core's geometry-telemetry port.
 
-    Structural, not declared: `saitenka.subtitles.telemetry` defines the shape and nothing here
+    Structural, not declared: `saitenka_subtitles.telemetry` defines the shape and nothing here
     imports it, so the subtitle core owes this module nothing back. The indirection is not
     ceremony — the histograms below are module globals `configure` reassigns, and a library that
     reads them is bound to this application's telemetry lifecycle.

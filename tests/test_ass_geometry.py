@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import pytest
-
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     SubtitleTrackId,
     TokenAnnotation,
     UnsupportedAssEvent,
@@ -12,12 +11,12 @@ from saitenka.subtitles import (
     prepare_ass_hit_map,
     prepare_ass_hit_map_frame,
 )
-from saitenka.subtitles.ass_geometry import (
+from saitenka_subtitles.ass_geometry import (
     MAX_ACTIVE_EVENTS,
     MAX_ACTIVE_ROW_BYTES,
     MAX_ASS_SOURCE_BYTES,
 )
-from saitenka.subtitles.geometry import MAX_GEOMETRY_TOKENS
+from saitenka_subtitles.geometry import MAX_GEOMETRY_TOKENS
 
 ASS = """[Script Info]
 ScriptType: v4.00+

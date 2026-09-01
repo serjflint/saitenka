@@ -10,6 +10,7 @@ for a real subprocess/socket/filesystem — none touched here; mirrors test_toke
 from __future__ import annotations
 
 import pytest
+from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.japanese import Token
 from saitenka_tokenize.languages import MAIN_LANG, ReaderLanguages
 from saitenka_tokenize.registry import register_tokenizer
@@ -28,7 +29,6 @@ from saitenka.app.session.factory import (
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.events import SubtitleSecondaryLeased
-from saitenka.subtitles import CueIndex, parse_srt
 
 _FR = Profile(name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenizer="latin")
 # A real French profile carries its own slang (resolve_profile derives "fr" from the language) — that is

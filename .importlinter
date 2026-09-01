@@ -1,25 +1,23 @@
 [importlinter]
 root_packages =
     saitenka
+    saitenka_subtitles
     saitenka_tokenize
     saitenka_wordstate
 include_external_packages = True
 exclude_type_checking_imports = True
 
-[importlinter:contract:subtitle-core-independent]
-name = Subtitle core never imports the Saitenka application
+[importlinter:contract:subtitle-package-is-independent]
+name = The subtitle package never imports the application it was extracted from
 type = forbidden
+# Was an enumerated list of app/mpvio/render, which is the weaker claim: it named the edges that
+# existed rather than the ones that must not. The last real edge was libass_backend recording into
+# otel_metrics' module globals, which `configure` rebinds — a library bound to this application's
+# telemetry lifecycle. It takes a sink now, so the whole of `saitenka` can be forbidden.
 source_modules =
-    saitenka.subtitles
+    saitenka_subtitles
 forbidden_modules =
-    saitenka.app
-    saitenka.mpvio
-    saitenka.render
-    # The last edge out, and the one blocking its own distribution: libass_backend recorded into
-    # otel_metrics' module globals, which `configure` rebinds — a library bound to the application's
-    # telemetry lifecycle. It now takes a sink through `subtitles.telemetry`, which otel_metrics
-    # satisfies structurally without importing back.
-    saitenka.otel_metrics
+    saitenka
 
 [importlinter:contract:no-cycles]
 name = No import cycles among Saitenka's top-level packages
@@ -49,7 +47,6 @@ layers =
     saitenka.mpvio
     saitenka.panel
     saitenka.raster
-    saitenka.subtitles
     saitenka.render
     saitenka.draw
     saitenka.sc
@@ -147,8 +144,11 @@ ignore_imports =
 [importlinter:contract:libasslite-boundary]
 name = production code cannot import the experimental libass binding yet
 type = forbidden
+# `saitenka_subtitles` is named too: the one module that would reach for it moved there, and a
+# contract scoped to the package it left would have kept passing while covering nothing.
 source_modules =
     saitenka
+    saitenka_subtitles
 forbidden_modules =
     libasslite
 

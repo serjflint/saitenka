@@ -11,9 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from saitenka_subtitles import font_names
 from util import uuencode
-
-from saitenka.subtitles import font_names
 
 REPO_FONT = Path(__file__).resolve().parents[1] / "src/saitenka/assets/fonts/NotoSans.ttf"
 

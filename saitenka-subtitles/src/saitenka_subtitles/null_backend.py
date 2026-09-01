@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from saitenka.subtitles.geometry import GeometrySnapshot
+from saitenka_subtitles.geometry import GeometrySnapshot
 
 if TYPE_CHECKING:
-    from saitenka.subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.geometry import GeometryRequest
 
 
 class NullGeometryBackend:

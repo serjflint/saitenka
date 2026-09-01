@@ -58,6 +58,7 @@ from saitenka.runtime import Owner, events
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection
 
+    from saitenka_subtitles import CueIndex
     from saitenka_tokenize.registry import Tokenizer
 
     from saitenka.app.config import KeyOptions, TooltipOptions
@@ -90,7 +91,6 @@ if TYPE_CHECKING:
     from saitenka.runtime.hover_pause import PauseClaim
     from saitenka.runtime.jobs import JobSubmitter
     from saitenka.runtime.pulse import PulseState, Repaint
-    from saitenka.subtitles import CueIndex
 
 log = logging.getLogger(__name__)
 

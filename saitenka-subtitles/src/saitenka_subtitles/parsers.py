@@ -7,7 +7,7 @@ from pathlib import PurePath
 
 import pysubs2
 
-from saitenka.subtitles.model import Cue
+from saitenka_subtitles.model import Cue
 
 _ASS_OVERRIDE = re.compile(r"\{[^}]*\}")
 _HTML_TAG = re.compile(r"</?[A-Za-z][^>\n]*>")

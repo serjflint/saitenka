@@ -1041,7 +1041,7 @@ def pinned_font_setup():
     pinned one lacks, and the platform dependence comes straight back for exactly the documents that
     would otherwise expose it.
     """
-    from saitenka.subtitles import FontProvider, FontSetup
+    from saitenka_subtitles import FontProvider, FontSetup
 
     return FontSetup(default_family=PINNED_FAMILY, font_provider=FontProvider.NONE)
 

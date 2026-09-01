@@ -2,6 +2,7 @@
 RSS gauges the telemetry interval sampler reports."""
 
 import util
+from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.japanese import Token
 from saitenka_wordstate import TokenVerdict
 from saitenka_wordstate.known import KnownWords
@@ -13,7 +14,6 @@ from saitenka.app.scoring import TokenStyle
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.panel import Definition, Entry
-from saitenka.subtitles import CueIndex, parse_srt
 
 _SRT = (
     "1\n00:00:01,000 --> 00:00:03,000\n本を読む\n\n"
@@ -316,8 +316,9 @@ def _tok(surface, lemma=None):
 
 
 def test_lookahead_reads_the_cues_after_the_one_on_screen():
+    from saitenka_subtitles import CueIndex
+
     from saitenka.app.features.tooltip.prefetch import upcoming_cue_texts
-    from saitenka.subtitles import CueIndex
 
     index = CueIndex(parse_srt(_srt(["one", "two", "three", "four"])))
 
@@ -325,8 +326,9 @@ def test_lookahead_reads_the_cues_after_the_one_on_screen():
 
 
 def test_lookahead_at_the_last_cue_has_nothing_to_warm():
+    from saitenka_subtitles import CueIndex
+
     from saitenka.app.features.tooltip.prefetch import upcoming_cue_texts
-    from saitenka.subtitles import CueIndex
 
     index = CueIndex(parse_srt(_srt(["one", "two"])))
 
@@ -336,8 +338,9 @@ def test_lookahead_at_the_last_cue_has_nothing_to_warm():
 def test_lookahead_off_the_index_warms_nothing():
     """A cue mpv is showing from a track we never indexed. Warming from index position 0 would
     decode the start of the episode while the user is in the middle of it."""
+    from saitenka_subtitles import CueIndex
+
     from saitenka.app.features.tooltip.prefetch import upcoming_cue_texts
-    from saitenka.subtitles import CueIndex
 
     assert upcoming_cue_texts(None, 2, text="one", preferred=-1) == []
     assert upcoming_cue_texts(CueIndex([]), 2, text="one", preferred=-1) == []

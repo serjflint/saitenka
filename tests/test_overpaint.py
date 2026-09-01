@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from saitenka_subtitles import overpaint
 from util import requires_libass
-
-from saitenka.subtitles import overpaint
 
 
 def solid(width: int, height: int, value: int = 255) -> bytes:
@@ -113,14 +112,14 @@ def test_the_color_lands_on_the_pixels_the_measurement_measured() -> None:
     a family only the subtitle renderer holds is colored exactly as well as any other.
     """
     requires_libass()
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryPaletteEntry,
         GeometryRequest,
         SubtitleEventId,
         SubtitleFrameId,
         SubtitleTrackId,
     )
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     track = SubtitleTrackId("overpaint")
     event = SubtitleEventId(str(track), 1000, 3000, 0, 0)

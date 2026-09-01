@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from saitenka.app.subnav_settle import SettleWindow
 
 if TYPE_CHECKING:
-    from saitenka.subtitles import Cue, CueIndex
+    from saitenka_subtitles import Cue, CueIndex
 
 
 class NavigationState:

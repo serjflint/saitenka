@@ -1,7 +1,7 @@
 """Pure subtitle parsing and cue navigation."""
 
-from saitenka.subtitles import converted, font_names, subrip
-from saitenka.subtitles.ass import (
+from saitenka_subtitles import converted, font_names, subrip
+from saitenka_subtitles.ass import (
     AssColorRewrite,
     AssStyle,
     AssStyleCatalog,
@@ -16,7 +16,7 @@ from saitenka.subtitles.ass import (
     shift_ass_dialogue,
     source_primary_bgr_colors,
 )
-from saitenka.subtitles.ass_geometry import (
+from saitenka_subtitles.ass_geometry import (
     MAX_ASS_SOURCE_BYTES,
     PreparedAssFrame,
     PreparedAssGeometry,
@@ -25,7 +25,7 @@ from saitenka.subtitles.ass_geometry import (
     prepare_ass_hit_map,
     prepare_ass_hit_map_frame,
 )
-from saitenka.subtitles.document import (
+from saitenka_subtitles.document import (
     AnnotatedSubtitleEvent,
     DecodedSubtitleEvent,
     DrawingSpan,
@@ -38,7 +38,7 @@ from saitenka.subtitles.document import (
     SubtitleTrackId,
     TokenAnnotation,
 )
-from saitenka.subtitles.geometry import (
+from saitenka_subtitles.geometry import (
     FontProvider,
     FontSetup,
     GeometryBackend,
@@ -50,10 +50,10 @@ from saitenka.subtitles.geometry import (
     RendererState,
     TokenGeometry,
 )
-from saitenka.subtitles.index import CueIndex
-from saitenka.subtitles.model import Cue
-from saitenka.subtitles.null_backend import NullGeometryBackend
-from saitenka.subtitles.parsers import parse_ass, parse_cues, parse_srt
+from saitenka_subtitles.index import CueIndex
+from saitenka_subtitles.model import Cue
+from saitenka_subtitles.null_backend import NullGeometryBackend
+from saitenka_subtitles.parsers import parse_ass, parse_cues, parse_srt
 
 __all__ = [
     "MAX_ASS_SOURCE_BYTES",

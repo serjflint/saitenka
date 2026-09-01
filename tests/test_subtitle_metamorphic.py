@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from saitenka.subtitles import parse_srt
+from saitenka_subtitles import parse_srt
 
 _SRT = (
     "1\n"

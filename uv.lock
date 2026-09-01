@@ -2270,10 +2270,10 @@ dependencies = [
     { name = "pillow" },
     { name = "platformdirs" },
     { name = "psutil" },
-    { name = "pysubs2" },
     { name = "questionary" },
     { name = "rich" },
     { name = "saitenka-dict" },
+    { name = "saitenka-subtitles" },
     { name = "saitenka-tokenize" },
     { name = "saitenka-wordstate" },
     { name = "stamina" },
@@ -2394,7 +2394,6 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.0" },
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "psutil", specifier = ">=7.2.2" },
-    { name = "pysubs2", specifier = ">=1.8.1" },
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "resvg-py", marker = "extra == 'images'", specifier = "==0.5.0" },
     { name = "rich", specifier = ">=14.0" },
@@ -2407,6 +2406,7 @@ requires-dist = [
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "deinflect" },
     { name = "saitenka-dict", editable = "saitenka-dict" },
+    { name = "saitenka-subtitles", editable = "saitenka-subtitles" },
     { name = "saitenka-tokenize", editable = "saitenka-tokenize" },
     { name = "saitenka-wordstate", editable = "saitenka-wordstate" },
     { name = "stamina", specifier = ">=26.1.0" },
@@ -2482,6 +2482,26 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-timeout", specifier = ">=2.4" },
 ]
+
+[[package]]
+name = "saitenka-subtitles"
+version = "0.1.0"
+source = { editable = "saitenka-subtitles" }
+dependencies = [
+    { name = "fonttools" },
+    { name = "numpy" },
+    { name = "pysubs2" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fonttools", specifier = ">=4.55" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pysubs2", specifier = ">=1.8.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "saitenka-tokenize"

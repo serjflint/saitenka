@@ -40,11 +40,11 @@ CACHE_DIR = Path(__file__).resolve().parents[2] / ".mutation-cache"
 # the add/remove procedure. Keep it pure-core only (glue floods equivalent mutants).
 TARGETS = {
     "subtitle_index": (
-        "src/saitenka/subtitles/index.py",
+        "saitenka-subtitles/src/saitenka_subtitles/index.py",
         "tests/test_sub_index.py tests/test_sub_index_properties.py",
     ),
     "subtitle_parsers": (
-        "src/saitenka/subtitles/parsers.py",
+        "saitenka-subtitles/src/saitenka_subtitles/parsers.py",
         "tests/test_sub_index.py tests/test_sub_index_properties.py tests/test_subtitle_metamorphic.py",
     ),
     "fsrs": (

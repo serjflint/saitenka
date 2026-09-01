@@ -4,6 +4,7 @@ import threading
 from dataclasses import FrozenInstanceError
 
 import pytest
+from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.japanese import Token
 from util import FakeIPC
 
@@ -13,7 +14,6 @@ from saitenka.app.features.annotation.annotation_controller import (
     CueAnnotationController,
 )
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
-from saitenka.subtitles import CueIndex, parse_srt
 
 
 class _Tokenizer:

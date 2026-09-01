@@ -23,16 +23,16 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
-from saitenka.mpvio.discover import find_mpv
-from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     GeometryPaletteEntry,
     GeometryRequest,
     SubtitleTrackId,
     TokenAnnotation,
 )
-from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
+
+from saitenka.mpvio.discover import find_mpv
+from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
 
 pytestmark = [
     pytest.mark.live,
@@ -177,7 +177,7 @@ def ink_bounds(frame: np.ndarray) -> tuple[int, int, int, int]:
 
 def our_boxes(source: bytes, event_row: str, frame: tuple[int, int]) -> list[tuple[int, ...]]:
     """The hit boxes Saitenka would hand the interaction layer for this cue."""
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     track = SubtitleTrackId("pixel-differential")
     prepared = prepare_ass_hit_map_frame(

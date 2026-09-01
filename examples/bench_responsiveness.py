@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from saitenka_subtitles import Cue, CueIndex
 from saitenka_tokenize.japanese import Token, tokenize
 
 from saitenka.app import bindings as app_bindings
@@ -44,7 +45,6 @@ from saitenka.app.session.factory import (
 from saitenka.mpvio.ipc import IPCRequest
 from saitenka.mpvio.osd import to_bgra, to_bgra_array
 from saitenka.panel import Definition, Entry, LazyPanel, panel_rows
-from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
     from saitenka.mpvio.gateway import MpvGateway
@@ -1383,12 +1383,13 @@ def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = No
     import tempfile
     from types import SimpleNamespace
 
+    from saitenka_subtitles import Cue, CueIndex
+
     import saitenka.app.features.mining.miner as miner_flow
     from saitenka.app import backlog
     from saitenka.app.anki import MineConfig
     from saitenka.app.features.mining import mined_store
     from saitenka.app.features.sidebar import sidebar
-    from saitenka.subtitles import Cue, CueIndex
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-clicks-"))
     ipc = FakeIPC()

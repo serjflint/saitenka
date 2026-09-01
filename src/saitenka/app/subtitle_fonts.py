@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saitenka.subtitles import font_names
-from saitenka.subtitles.geometry import FontProvider, FontSetup
+from saitenka_subtitles import font_names
+from saitenka_subtitles.geometry import FontProvider, FontSetup
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping

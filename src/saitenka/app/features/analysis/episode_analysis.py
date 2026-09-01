@@ -10,11 +10,11 @@ from saitenka_dict import FreqDict
 from saitenka_wordstate import SentenceProfile, is_content, sentence_profiles
 
 if TYPE_CHECKING:
+    from saitenka_subtitles import Cue, CueIndex
     from saitenka_tokenize.japanese import Token
     from saitenka_tokenize.registry import Tokenizer
 
     from saitenka.app.scoring import Coloring
-    from saitenka.subtitles import Cue, CueIndex
 
 Distribution = tuple[tuple[str, int], ...]
 

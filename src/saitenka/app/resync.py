@@ -253,7 +253,7 @@ def _alass_ready_source(src: Path, workdir: Path) -> Path:
         return src
     if not _looks_ass(text):
         return src
-    from saitenka.subtitles import parse_ass
+    from saitenka_subtitles import parse_ass
 
     cues = parse_ass(text.lstrip(_BOM))
     if not cues:  # unparseable → let alass try the original and surface its own error
@@ -477,7 +477,7 @@ def _write_srt(path: Path, cues) -> None:
 
 
 def _parse_cues(path: Path):
-    from saitenka.subtitles import parse_ass, parse_srt
+    from saitenka_subtitles import parse_ass, parse_srt
 
     text = path.read_text(encoding="utf-8", errors="replace")
     return parse_ass(text) if path.suffix.lower() == ".ass" or _looks_ass(text) else parse_srt(text)
@@ -504,10 +504,10 @@ def _retimed_document(sub: Path, cues, *, delta: float, boundary: float, workdir
     body its own extension no longer described. Falls back to SRT for a document this cannot
     round-trip, which is visible (geometry declines an `.srt`) rather than silent.
     """
-    from saitenka.subtitles import Cue
+    from saitenka_subtitles import Cue
 
     if sub.suffix.casefold() == ".ass":
-        from saitenka.subtitles import UnsupportedAssEvent, shift_ass_dialogue
+        from saitenka_subtitles import UnsupportedAssEvent, shift_ass_dialogue
 
         try:
             shifted = shift_ass_dialogue(

@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka_subtitles import decoration, font_names, overpaint, overprint
+
 from saitenka import otel_metrics
 from saitenka.app import subtitle_calibration, subtitle_raster
 from saitenka.app.overlay_ids import OverlayId
@@ -38,7 +40,6 @@ from saitenka.runtime.surfaces import (
     SurfaceRuntime,
     SurfaceTransactionOutcome,
 )
-from saitenka.subtitles import decoration, font_names, overpaint, overprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

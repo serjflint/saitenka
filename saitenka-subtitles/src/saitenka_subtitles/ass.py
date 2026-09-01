@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from itertools import pairwise, starmap
 from typing import TYPE_CHECKING
 
-from saitenka.subtitles.document import (
+from saitenka_subtitles.document import (
     AnnotatedSubtitleEvent,
     DecodedSubtitleEvent,
     DrawingSpan,

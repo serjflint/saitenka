@@ -13,20 +13,22 @@ from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from typing import TYPE_CHECKING, NamedTuple
 
+from saitenka_subtitles.geometry import GeometrySnapshot
+
 from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
 from saitenka.runtime import EffectFinished, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, LocalJobLane, configure_lane
-from saitenka.subtitles.geometry import GeometrySnapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from saitenka_subtitles.geometry import GeometryRequest
 
     from saitenka.app.subtitle_pipeline import (
         GeometryPrefetchResolution,
         GeometryReservation,
         SubtitleModeCoordinator,
     )
-    from saitenka.subtitles.geometry import GeometryRequest
 
     GeometryRequestBuilder = Callable[[], GeometryRequest]
 

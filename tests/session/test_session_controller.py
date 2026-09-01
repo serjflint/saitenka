@@ -383,7 +383,7 @@ _NAV_SRT = (
 
 
 def _reader_with_index(monkeypatch):
-    from saitenka.subtitles import CueIndex, parse_srt
+    from saitenka_subtitles import CueIndex, parse_srt
 
     # The shared fake, not this file's local one: the settle-timer gate below asserts on its
     # schedule/cancel ledger, which is the only place "retired exactly once" is observable.
@@ -455,7 +455,7 @@ def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
     # The anchor invariant behind the single hand-picked example: whatever the cue set, current delay,
     # and playhead, the emitted sub-delay makes the nearest displayed cue's effective start coincide
     # with the playhead — the "snap what I'm hearing to now" contract, over the whole input space.
-    from saitenka.subtitles import Cue, CueIndex
+    from saitenka_subtitles import Cue, CueIndex
 
     ipc = FakeIPC()
     r = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
@@ -545,14 +545,15 @@ def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
 
 
 def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
-    from saitenka.app.subtitle_render import NullRenderer as _Inert
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryRequest,
         GeometrySnapshot,
         SubtitleEventId,
         SubtitleFrameId,
         SubtitleTrackId,
     )
+
+    from saitenka.app.subtitle_render import NullRenderer as _Inert
 
     class PublishingRenderer(_Inert):
         """Publishes geometry at `activate`. Holds the SessionController by construction: the cue identity it
@@ -1015,8 +1016,9 @@ def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch)
 
 
 def test_identical_text_navigation_counts_the_landed_cue():
+    from saitenka_subtitles import Cue, CueIndex
+
     from saitenka.app.session_stats import SessionRecorder
-    from saitenka.subtitles import Cue, CueIndex
 
     class Writer:
         def submit(self, _snapshot) -> None:
@@ -1063,7 +1065,7 @@ def test_navigation_hands_a_filtered_episode_back_to_mpv():
     index is the file's. Stepping by index there renders a line mpv never shows and then settles
     somewhere else; mpv's own `sub-seek` cannot land on a cue mpv dropped, so the instant half is
     given up rather than aimed at silence."""
-    from saitenka.subtitles import Cue, CueIndex
+    from saitenka_subtitles import Cue, CueIndex
 
     ipc = FakeIPC()
     ipc.props.update({"sub-start": 1.0, "sub-end": 2.0, "options/sub-filter-regex": ["^SIGN:"]})
@@ -1090,7 +1092,7 @@ def test_navigation_hands_a_filtered_episode_back_to_mpv():
 def test_navigation_stays_instant_without_a_filter():
     """The negative control for the guard above: it costs the feature when it fires, so it must not
     fire on an ordinary session."""
-    from saitenka.subtitles import Cue, CueIndex
+    from saitenka_subtitles import Cue, CueIndex
 
     ipc = FakeIPC()
     ipc.props.update({"sub-start": 1.0, "sub-end": 2.0})
@@ -3600,16 +3602,16 @@ def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, valu
 
 
 def test_property_change_invalidates_subtitle_geometry():
-    from util import FakeIPC as EventIPC
-
-    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryRequest,
         GeometrySnapshot,
         SubtitleEventId,
         SubtitleFrameId,
         SubtitleTrackId,
     )
+    from util import FakeIPC as EventIPC
+
+    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
 
     class Backend:
         def render(self, request: GeometryRequest) -> GeometrySnapshot:

@@ -13,9 +13,10 @@ from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
+
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.subtitle_render import DrawResult, SubtitleTarget
-    from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
 
 
 class CurrentSubtitleRenderer(Protocol):

@@ -7,7 +7,7 @@ from functools import lru_cache
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from saitenka.subtitles.ass import (
+from saitenka_subtitles.ass import (
     AssStyleCatalog,
     UnsupportedAssEvent,
     allocate_token_colors,
@@ -18,7 +18,7 @@ from saitenka.subtitles.ass import (
     serialize_ass_event_line,
     source_primary_bgr_colors,
 )
-from saitenka.subtitles.document import (
+from saitenka_subtitles.document import (
     AnnotatedSubtitleEvent,
     RawSubtitleEvent,
     SubtitleEventId,
@@ -26,12 +26,12 @@ from saitenka.subtitles.document import (
     SubtitleTrackId,
     TokenAnnotation,
 )
-from saitenka.subtitles.geometry import MAX_GEOMETRY_TOKENS, GeometryPaletteEntry
+from saitenka_subtitles.geometry import MAX_GEOMETRY_TOKENS, GeometryPaletteEntry
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from saitenka.subtitles.document import DecodedSubtitleEvent
+    from saitenka_subtitles.document import DecodedSubtitleEvent
 
 MAX_ACTIVE_EVENTS = 64
 MAX_ACTIVE_ROW_BYTES = 1_048_576

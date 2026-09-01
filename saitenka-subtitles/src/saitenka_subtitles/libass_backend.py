@@ -9,14 +9,14 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
-from saitenka.subtitles.geometry import (
+from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
     GeometrySnapshot,
     Rect,
     RendererState,
     TokenGeometry,
 )
-from saitenka.subtitles.telemetry import (
+from saitenka_subtitles.telemetry import (
     EXTRACT_MS,
     RENDER_MS,
     RENDERER_BUILD_MS,
@@ -27,9 +27,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from saitenka.subtitles.document import SubtitleEventId
-    from saitenka.subtitles.geometry import GeometryRequest
-    from saitenka.subtitles.telemetry import GeometryTelemetry
+    from saitenka_subtitles.document import SubtitleEventId
+    from saitenka_subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.telemetry import GeometryTelemetry
 
 
 class ImageLayer(Protocol):

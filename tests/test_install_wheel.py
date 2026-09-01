@@ -119,7 +119,7 @@ def test_wheel_installs_and_assets_load():
             "assert asset('fonts','NotoSansJP.ttf').exists();"
             "assert asset('wordlists','jlpt.zip').exists();"
             "assert asset('saitenka.lua').exists();"
-            "import saitenka.subtitles;"
+            "import saitenka_subtitles;"
             "import libasslite;"
             "assert files('saitenka').joinpath('py.typed').is_file();"
             "pkg=files('saitenka_dict');"

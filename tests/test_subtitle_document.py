@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import pytest
-
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     AnnotatedSubtitleEvent,
     DecodedSubtitleEvent,
     RawSubtitleEvent,
